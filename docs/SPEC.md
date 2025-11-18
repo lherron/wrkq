@@ -34,26 +34,21 @@ Non-goals (for now)
 
 ## 2. Codebase Boundaries
 
-Monorepo layout
+Repo layout
 ```text
-./cli                all CLI code, tests, CI, release config
-  cmd/todo           cobra root and subcommands
-  internal/cli       command wiring, flags, args
-  internal/config    env + .env.local + ~/.config/todo
-  internal/db        SQLite handle, migrations runner (reads ../db/migrations)
-  internal/domain    domain types, validation, etag helpers
-  internal/id        friendly IDs, slug helpers
-  internal/paths     pathspec and glob resolver
-  internal/render    table, json, ndjson, yaml, tsv; porcelain
-  internal/edit      3-way merge for edit/apply
-  internal/attach    attachment path resolution and IO
-  internal/actors    actor resolution (human vs agent), current actor
-  internal/events    event log write/read helpers
-  Makefile, justfile, goreleaser.yml, CI workflows
-
-./db                 canonical DB schema and SQL migrations (SQLite dialect)
-  migrations/
-  schema.sql (optional snapshot)
+cmd/todo           cobra root and subcommands
+internal/cli       command wiring, flags, args
+internal/config    env + .env.local + ~/.config/todo
+internal/db        SQLite handle, migrations runner (reads db/migrations)
+internal/domain    domain types, validation, etag helpers
+internal/id        friendly IDs, slug helpers
+internal/paths     pathspec and glob resolver
+internal/render    table, json, ndjson, yaml, tsv; porcelain
+internal/edit      3-way merge for edit/apply
+internal/attach    attachment path resolution and IO
+internal/actors    actor resolution (human vs agent), current actor
+internal/events    event log write/read helpers
+Justfile, goreleaser.yml, CI workflows
 ```
 
 - All CLI automation (Makefile, Justfile, CI) lives under `./cli`.
