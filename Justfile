@@ -43,32 +43,32 @@ db-reset:
 
 # Build the CLI binary
 cli-build:
-  cd cli && go build -o bin/todo ./cmd/todo
+  go build -o bin/todo ./cmd/todo
 
 # Run the CLI
 cli-run *args:
-  cd cli && go run ./cmd/todo {{args}}
+  go run ./cmd/todo {{args}}
 
 # Run CLI tests
 cli-test:
-  cd cli && go test -v ./...
+  go test -v ./...
 
 # Run CLI tests with coverage
 cli-test-coverage:
-  cd cli && go test -v -coverprofile=coverage.out ./...
-  cd cli && go tool cover -html=coverage.out -o coverage.html
+  go test -v -coverprofile=coverage.out ./...
+  go tool cover -html=coverage.out -o coverage.html
 
 # Install CLI binary to $GOPATH/bin
 cli-install:
-  cd cli && go install ./cmd/todo
+  go install ./cmd/todo
 
 # Format CLI code
 cli-fmt:
-  cd cli && go fmt ./...
+  go fmt ./...
 
 # Lint CLI code
 cli-lint:
-  cd cli && golangci-lint run
+  golangci-lint run
 
 # --- Node.js app tasks (FUTURE) ---
 
@@ -105,13 +105,13 @@ format-write:
 # Lint all code (Go + JS/TS when available)
 lint:
   @echo "Linting Golang code..."
-  cd cli && golangci-lint run || true
+  golangci-lint run || true
   @echo "✓ Golang linting complete"
 
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
-  cd cli && go test -v ./...
+  go test -v ./...
   @echo "✓ Golang tests complete"
 
 # Verify code quality (lint + test)
@@ -126,7 +126,7 @@ pre-commit: cli-fmt lint test
 
 # Clean Go build artifacts
 cli-clean:
-  cd cli && rm -rf bin/ coverage.out coverage.html
+  rm -rf bin/ coverage.out coverage.html
 
 # Clean Node.js build artifacts
 clean-node:

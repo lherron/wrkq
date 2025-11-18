@@ -51,7 +51,6 @@ internal/events    event log write/read helpers
 Justfile, goreleaser.yml, CI workflows
 ```
 
-- All CLI automation (Makefile, Justfile, CI) lives under `./cli`.
 - CLI consumes DB migrations from `../db/migrations`.
 - DB is a single SQLite file on local disk; WAL mode on by default.
 - A future HTTP/JSON service (Go or Node) and browser UI are **consumers** of the same DB + machine contracts; they are not defined here but must be supportable.
