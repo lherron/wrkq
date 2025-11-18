@@ -1,0 +1,250 @@
+# ===== GENERAL =====
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor and IDE files
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.sample
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# ===== NODE.JS / JAVASCRIPT / TYPESCRIPT =====
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.vercel/
+apps/web/dist/
+apps/api/dist/
+packages/*/dist/
+
+# TypeScript
+*.tsbuildinfo
+.tsc/
+
+# Package manager
+package-lock.json
+yarn.lock
+.pnpm-debug.log
+.yarn/
+.pnp.*
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+playwright/.auth/
+*.spec.js.snap
+
+# Tooling caches
+.eslintcache
+.stylelintcache
+.prettiercache
+
+# ===== GOLANG =====
+
+# Binaries
+cli/bin/
+cli/todo
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+cli/coverage.out
+cli/coverage.html
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories (Go modules)
+vendor/
+
+# Air live reload
+tmp/
+
+# ===== DATABASE =====
+
+# SQLite databases (if used for local dev)
+*.db
+*.sqlite
+*.sqlite3
+
+# PostgreSQL
+*.dump
+*.sql.backup
+
+# Database baseline (generated, not committed)
+db/baseline.sql
+
+# Migration working files
+db/migrations/*.tmp
+
+# ===== MACOS / IOS (FUTURE) =====
+
+# Xcode
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
+# CocoaPods
+Pods/
+*.xcworkspace/
+
+# Carthage
+Carthage/Build/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# ===== PYTHON (FUTURE WORKERS) =====
+
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.pyenv/
+
+# Distribution / packaging
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+wheels/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter
+.ipynb_checkpoints
+
+# ===== BUILD / DEPLOYMENT =====
+
+# Vercel
+.vercel/
+.vercel/output/
+
+# Docker
+.dockerignore.generated
+
+# Terraform (if used)
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# ===== PROJECT SPECIFIC =====
+
+# Generated images/assets (if stored locally)
+public/generated/
+attached_assets/
+uploads/
+
+# CLI offline queue (local cache)
+cli/.cache/
+cli/queue.db
+
+# Pre-commit output logs
+precommit-output.log
+prepush-output.log
+
+# Scripts working files
+scripts/*.tmp
+scripts/*.log
+
+# ===== SECURITY =====
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+*.p12
+credentials.json
+service-account.json
+secrets.yaml
+secrets.json
+
+# API keys (double-check these don't leak)
+.api-keys
+.secrets
