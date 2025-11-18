@@ -1,0 +1,769 @@
+# todo CLI - Informal PRD (Go + SQLite)
+
+Filesystem-flavored CLI for managing projects, subprojects, and tasks on a SQLite backend. The tool feels like Unix utilities (`ls`, `cat`, `mv`, `rm`, `tree`, `touch`, `mkdir`) and is pipe-friendly.
+
+The system is a collaboration surface between a human user and multiple coding agents. All actions are attributed to an **actor** (human or agent). No authentication, only attribution.
+
+The CLI is the primary interface, but the data model and machine contracts must also support a future browser UI (likely Node/React) via a simple JSON API layered on top.
+
+This spec is the product source of truth for behavior and UX. It is not a milestone plan.
+
+-------------------------------------------------------------------------------
+
+## 1. Scope and Goals
+
+Goals
+- Familiar Unix verbs and flags.
+- Pipe-first UX: stdout by default, machine formats, NUL separators, stdin support.
+- Deterministic addressing of resources via paths, globs, stable IDs, and normalized slugs.
+- Optimistic concurrency on writes via bigint ETag.
+- Explicit attribution of actions to actors (human + coding agents).
+- Single local SQLite DB file (WAL), suitable for concurrent CLIs and agents.
+- Stable machine interfaces (`--json`, `--ndjson`, `--porcelain`) to enable:
+  - scripting, and
+  - a future browser UI (Node/React) over HTTP/JSON.
+
+Non-goals (for now)
+- Multi-user auth/SSO, teams, shared projects.
+- Named/saved filters and exports (simple `find` is in; richer DSL and `rg` are future).
+- Calendar sync and recurrence engines.
+- FUSE mount.
+- Shipping the browser UI itself (only enabling it via stable contracts).
+
+-------------------------------------------------------------------------------
+
+## 2. Codebase Boundaries
+
+Monorepo layout
+```text
+./cli                all CLI code, tests, CI, release config
+  cmd/todo           cobra root and subcommands
+  internal/cli       command wiring, flags, args
+  internal/config    env + .env.local + ~/.config/todo
+  internal/db        SQLite handle, migrations runner (reads ../db/migrations)
+  internal/domain    domain types, validation, etag helpers
+  internal/id        friendly IDs, slug helpers
+  internal/paths     pathspec and glob resolver
+  internal/render    table, json, ndjson, yaml, tsv; porcelain
+  internal/edit      3-way merge for edit/apply
+  internal/attach    attachment path resolution and IO
+  internal/actors    actor resolution (human vs agent), current actor
+  internal/events    event log write/read helpers
+  Makefile, justfile, goreleaser.yml, CI workflows
+
+./db                 canonical DB schema and SQL migrations (SQLite dialect)
+  migrations/
+  schema.sql (optional snapshot)
+```
+
+- All CLI automation (Makefile, Justfile, CI) lives under `./cli`.
+- CLI consumes DB migrations from `../db/migrations`.
+- DB is a single SQLite file on local disk; WAL mode on by default.
+- A future HTTP/JSON service (Go or Node) and browser UI are **consumers** of the same DB + machine contracts; they are not defined here but must be supportable.
+
+-------------------------------------------------------------------------------
+
+## 3. Terminology
+
+- **Actor**: entity performing actions via the CLI (human user or coding agent).
+- **Actor Role**: `human` | `agent` | `system` (system = migrations, init, repair).
+- **Actor Slug**: filesystem-style identifier for an actor (e.g. `lance`, `agent-codex`).
+- **Project**: top-level container. Can contain subprojects and tasks.
+- **Subproject**: nested container under a project (arbitrary depth).
+- **Task**: actionable item. Appears as a leaf under a project/subproject.
+- **Slug**: normalized, safe segment used in paths, unique among siblings.
+- **Friendly ID**: human-readable stable ID, e.g. `P-00007`, `T-00123`, `A-00001`.
+- **UUID**: canonical database ID.
+- **ETag**: bigint/integer version field for concurrency. Increments on each write.
+- **Attachment**: reference to a file on the host filesystem under a configured `attach_dir`.
+
+### Slug Rules (Global)
+
+Slugs are **normalized and constrained**:
+
+- Always lower-case.
+- Allowed characters: `a-z`, `0-9`, `-`.
+- Must start with `[a-z0-9]`.
+- Regex: `^[a-z0-9][a-z0-9-]*$`
+- Max length: 255 bytes.
+- Unique among siblings within the same container.
+
+No underscores, no spaces, no dots, no `/`, no NUL. Path matching is straightforward because slugs are already canonicalized.
+
+-------------------------------------------------------------------------------
+
+## 4. Information Architecture (user-visible)
+
+### 4.1 Actor
+
+Represents either a human user, coding agent, or system process.
+
+Fields
+- `uuid`
+- `id` (friendly, e.g. `A-00001`)
+- `slug` (fs-safe, normalized; unique)
+- `display_name` (free text, optional)
+- `role` (`human` | `agent` | `system`)
+- `meta` (JSON, optional)
+  - `tool_name`, `tool_version`
+  - `model_name`, `model_version`
+  - `run_id` / `correlation_id`
+- `created_at`, `updated_at`
+
+**Current actor resolution (for all mutating commands):**
+
+1. `--as <actor>` CLI flag  
+   - Accepts actor slug (e.g. `lance`) **or** friendly ID (e.g. `A-00001`).
+2. `TODO_ACTOR_ID` env (friendly ID, e.g. `A-00001`).
+3. `TODO_ACTOR` env (actor slug, e.g. `lance` or `agent-codex`).
+4. `default_actor` in `~/.config/todo/config.yaml` or current context.
+5. Fallback to a seeded default human actor created by `todo init` (e.g. `local-human`).
+
+If resolution fails, mutating commands should exit with a usage error (code 2).
+
+### 4.2 Container (Project / Subproject)
+
+Single table with parent-child relationship.
+
+Fields
+- `uuid`
+- `id` (friendly, `P-xxxxx`)
+- `slug` (fs-safe, normalized; unique among siblings)
+- `title` (optional, defaults to slug)
+- `parent_id` (nullable; null = top-level project)
+- `etag` (bigint)
+- `created_at`, `updated_at`, `archived_at` (nullable)
+- `created_by_actor_id` (FK Actor)
+- `updated_by_actor_id` (FK Actor)
+
+### 4.3 Task
+
+Fields
+- `uuid`
+- `id` (friendly, `T-xxxxx`)
+- `slug` (fs-safe, normalized; unique among siblings within same container)
+- `title` (free text)
+- `project_id` (FK to container)
+- `state` (`open` | `completed` | `archived`)
+- `priority` (1..4, 1 is highest)
+- `start_at` (nullable), `due_at` (nullable)
+- `labels` (JSON array of strings)
+- `body` (Markdown text)
+- `etag` (bigint)
+- `created_at`, `updated_at`, `completed_at` (nullable)
+- `created_by_actor_id` (FK Actor)
+- `updated_by_actor_id` (FK Actor)
+
+### 4.4 Comment
+
+Fields
+- `id`
+- `task_id`
+- `actor_id` (author)
+- `body`
+- `created_at`
+
+### 4.5 Attachment (Filesystem-based)
+
+DB tracks metadata; bytes live under `attach_dir`.
+
+Fields
+- `id`
+- `task_id`
+- `filename` (user-facing name)
+- `relative_path` (relative to `attach_dir`, e.g. `tasks/<task_uuid>/diagram.png`)
+- `mime_type`
+- `size_bytes`
+- `checksum` (optional)
+- `created_at`
+- `created_by_actor_id`
+
+**Attachment path recommendation (chosen approach):**
+
+- Canonical directory: `attach_dir/tasks/<task_uuid>/...`
+- Task moves/slug changes **do not** alter attachment paths.
+- Soft delete:
+  - Attachment metadata remains.
+  - Files remain on disk.
+- Purge:
+  - Attachment metadata removed.
+  - Directory `attach_dir/tasks/<task_uuid>` and its contents are deleted.
+
+### 4.6 Event Log (Canonical Audit Trail)
+
+Append-only event stream for all significant changes.
+
+Fields (conceptual)
+- `id`
+- `timestamp`
+- `actor_id`
+- `resource_type` (`task` | `container` | `attachment` | `actor` | `config` | `system`)
+- `resource_id` (UUID)
+- `event_type` (e.g. `task.created`, `task.updated`, `task.deleted`, `task.moved`)
+- `etag` (resulting etag after change, if applicable)
+- `payload` (JSON diff or structured fields)
+
+`todo log` and `todo watch` are views onto this table.
+
+### 4.7 Constraints Summary
+
+- Slugs: normalized, `[a-z0-9-]`, lower-case, unique among siblings.
+- No sections in the addressing model; only containers (projects/subprojects) and tasks.
+- Tasks live directly under their container.
+
+-------------------------------------------------------------------------------
+
+## 5. Addressing and Pathspecs
+
+Resource references accepted by all commands:
+
+1. **Container paths** (implicit container namespace, no prefix):
+
+   Grammar  
+   ```text
+   project-slug[/subproject-slug[/...[/task-slug]]]
+   ```
+
+   Examples
+   - `portal`
+   - `portal/auth`
+   - `portal/auth/login-ux` (file-like commands treat leaf as task)
+
+2. **IDs**
+   - Friendly: `P-00007`, `T-00123`, `A-00001`
+   - UUIDs: standard UUID format
+
+3. **Typed task selector** (optional): `t:<token>`
+   - `<token>` is a friendly ID, UUID, or container path that resolves to a task.
+
+### Globbing
+
+- Supported patterns: `*`, `?`, `**`. Implemented inside the CLI; users should quote patterns to avoid shell expansion.
+- Examples:
+  - `todo ls 'portal/**/login-*' -type t`
+  - `todo mv 'portal/**/login-*' 'portal/auth' -type t`
+
+### Disambiguation
+
+- File-like commands (`cat`, `stat`, `set`, `apply`, `edit`) treat the final segment as a **task** by default.
+- Directory-like commands (`ls`, `tree`, `find`, `mkdir`) treat the final segment as a **container** by default.
+- Override using `-type p|s|t`.
+
+### Zero Matches
+
+- By default, zero matches cause a non-zero exit (like coreutils).
+- `--nullglob` changes zero matches to a no-op for bulk operations.
+
+-------------------------------------------------------------------------------
+
+## 6. Output, Piping, and Exit Codes
+
+Formats
+- Human defaults:
+  - Pretty table for `ls`.
+  - Markdown for `cat`.
+- Machine formats:
+  - `--json` (array or object)
+  - `--ndjson` (one JSON object per line)
+  - `--yaml`
+  - `--tsv`
+  - `--columns=field,field,...`
+
+Selection and sort
+- `--fields=id,path,type,slug,title,state,priority,labels,due,created_at,updated_at,project,parent,created_by,updated_by,actor,etag`
+- `--sort=due,-priority,updated_at`
+
+Delimiters
+- `-1` one per line
+- `-0` NUL separated (xargs `-0`)
+
+Porcelain
+- `--porcelain` disables ANSI, stabilizes keys/columns, and prints `next_cursor` on stderr where applicable.
+
+Pagination
+- `--limit`, `--cursor` opaque cursor support.
+
+Exit codes
+- `0` success
+- `1` generic error (db, io)
+- `2` usage error (bad flags, args)
+- `3` not found (no matches)
+- `4` conflict (etag mismatch, merge conflict)
+- `5` partial success (with `--continue-on-error`)
+
+-------------------------------------------------------------------------------
+
+## 7. Concurrency, Transactions, and Conflicts
+
+### SQLite Mode
+
+- DB opened in WAL mode.
+- `busy_timeout` and retry policy are configured so multiple agents/CLIs can run concurrently.
+
+### ETag Semantics
+
+- Each mutable row has `etag INTEGER` (bigint semantics).
+- **All mutating commands** operate as:
+
+  1. Begin transaction.
+  2. Read target row(s), including current `etag`.
+  3. If `--if-match <etag>` provided:
+     - If current etag != provided etag, abort with exit code `4`.
+  4. Apply changes.
+  5. Increment `etag` on each affected row.
+  6. Insert corresponding event(s) into the event log.
+  7. Commit transaction.
+
+- `edit` commands do a 3-way merge (base, current, edited). Unresolvable conflicts exit `4`.
+
+-------------------------------------------------------------------------------
+
+## 8. Task Document Format (cat/apply/edit)
+
+Default `todo cat` output for tasks is Markdown with YAML front matter:
+
+```markdown
+---
+id: T-00123
+uuid: 2fa0a6d6-3b0d-4b3b-9fdd-4bb0d5e6a7c1
+project_id: P-00007
+project_uuid: 4e44b1fb-6a3e-4c6d-9d80-0d41e742cda9
+slug: login-ux
+title: Login UX
+state: open
+priority: 1
+start_at: 2025-11-19T00:00:00Z
+due_at: 2025-11-20T15:00:00Z
+labels:
+  - backend
+etag: 47
+created_at: 2025-11-18T10:15:00Z
+updated_at: 2025-11-18T10:20:00Z
+created_by: lance
+updated_by: agent-codex
+---
+
+Problem statement and acceptance criteria...
+```
+
+Options
+- `--no-frontmatter` prints body only.
+- `--raw-body` prints body without front matter boundaries.
+- `--include-comments` appends comments as quoted blocks after the body.
+
+`todo apply` accepts:
+
+- Markdown with front matter.
+- YAML.
+- JSON.
+
+`--body-only` updates only the body without touching metadata.
+
+-------------------------------------------------------------------------------
+
+## 9. Command Spec
+
+### 9.1 Global Behavior
+
+- All subcommands accept pathspecs, friendly IDs, or UUIDs unless stated otherwise.
+- Commands that take lists accept `-` to read newline or NUL-separated items from stdin.
+- Most commands support `--json`, `--ndjson`, `--yaml`, `--tsv`, `--columns=...`, `--porcelain`.
+- Actor selection (for mutating commands):
+  - `--as <actor>` overrides env/config.
+  - Uses actor resolution rules defined above.
+
+---
+
+### 9.2 Initialization
+
+- `todo init [--db <path>] [--actor-slug <slug>] [--actor-name <display>] [--attach-dir <path>]`
+
+Behavior
+- If DB does **not** exist:
+  - Create SQLite DB file.
+  - Enable WAL mode, set pragmas.
+  - Run migrations.
+  - Ensure `attach_dir` exists (from flag, env, or config).
+  - Seed:
+    - A top-level project (e.g. slug `inbox`).
+    - A default human actor:
+      - slug from `--actor-slug` if provided, else `local-human`.
+      - display_name from `--actor-name` if provided.
+    - Optionally a default agent actor (e.g. `agent-default`) for convenience.
+- If DB **does** exist:
+  - Run migrations.
+  - Do not re-seed projects or actors.
+  - Exit 0 with “already initialized” messaging.
+
+Output
+- Human-readable summary by default.
+- `--json` prints DB path, attach_dir, and seeded actor/project IDs.
+
+---
+
+### 9.3 Navigation and Metadata
+
+- `todo ls [PATHSPEC...]`
+  - List containers and tasks.
+  - Flags: `-l`, `-R`, `-a` (include archived),  
+    `--fields`, `--sort`,  
+    `--json|--ndjson|--yaml|--tsv`, `-1`, `-0`,  
+    `-type p|s|t`, `--limit`, `--cursor`, `--porcelain`.
+
+- `todo tree [PATHSPEC...]`
+  - Pretty tree of containers and tasks.
+  - Flags: `-a`, `-L <depth>`, `--fields`, `--porcelain`.
+
+- `todo stat <PATHSPEC|ID...>`
+  - Print metadata only (machine friendly).
+  - Flags: `--json`, `--fields`, `-0`, `--porcelain`.
+
+- `todo ids [PATHSPEC...]`
+  - Print canonical IDs only.
+  - Flags: `-0`, `-type`.
+
+- `todo resolve <QUERY...>`
+  - Resolve fuzzy names to canonical IDs and paths.
+  - Flags: `--json`, `--ids`, `-0`.
+
+---
+
+### 9.4 Content
+
+- `todo cat <PATHSPEC|ID...>`
+  - Print tasks as markdown with front matter (default).
+  - If argument resolves to a **container**, this is a usage error:
+    - Exit code: `2`.
+    - Error message: “cat only supports tasks; got container `<path>`”.
+  - Flags: `--no-frontmatter`, `--raw-body`, `--include-comments`.
+
+- `todo edit <PATHSPEC|ID>`
+  - Open in `$EDITOR`; save triggers 3-way merge and `--if-match` check.
+  - Uses current actor for attribution.
+
+- `todo apply [<PATHSPEC|ID>] [-]`
+  - Apply full task doc from file or stdin.
+  - Flags: `--format=md|yaml|json`, `--body-only`, `--if-match`, `--dry-run`.
+
+- `todo set <PATHSPEC|ID...> key=value [...]`
+  - Mutate task fields quickly:
+    - `state=completed`
+    - `priority=1`
+    - `title="New Title"`
+    - `slug=login-ux` (validated against slug rules)
+  - Flags: `--if-match`, `--dry-run`, `--continue-on-error`, `-type t`.
+
+---
+
+### 9.5 Structure and Lifecycle
+
+- `todo mkdir <PATH...>`
+  - Create projects/subprojects (containers).
+  - Last segment is treated as container slug and normalized.
+  - Flags: `-p` (parents), `--meta key=val`.
+
+- `todo touch <PATH...> [-t "Title"]`
+  - Create tasks at leaf containers.
+  - Last segment becomes task slug, normalized to lower-case `[a-z0-9-]`.
+  - Flags: `--meta key=val`.
+
+- `todo mv <SRC...> <DST>`
+  - Move or rename tasks and containers. Globbing is default.
+  - Rules:
+    - Multiple sources -> DST must be an existing container; sources move into DST.
+    - Single source:
+      - If DST path resolves to existing container: move into container.
+      - If DST does not exist: treat final segment as new slug (rename).
+      - If DST is an existing task: error unless `--overwrite-task`.
+  - Flags: `-type t`, `--if-match`, `--dry-run`, `--yes`, `--nullglob`, `--overwrite-task`.
+
+- `todo cp <SRC...> <DST>`  (optional, but spec’d)
+  - Duplicate tasks (and optionally attachments).
+  - Flags: `-r`, `--with-attachments`, `--shallow`, `--dry-run`, `--yes`.
+
+- `todo rm <PATHSPEC|ID...>`
+  - Archive or hard delete.
+  - Defaults:
+    - Soft delete: set `archived_at`, log event.
+    - Attachments:
+      - Soft delete → attachment metadata and files remain.
+  - Flags:
+    - `-r` (recursive for containers),
+    - `-f`, `--yes`, `--dry-run`, `--nullglob`,
+    - `--purge`:
+      - Hard delete rows.
+      - Delete attachment directory `attach_dir/tasks/<task_uuid>`.
+
+- `todo restore <PATHSPEC|ID...>`
+  - Unarchive archived nodes (containers and tasks).
+
+---
+
+### 9.6 Search and Discovery
+
+- `todo find [PATH...]`
+  - Simple metadata search (present).
+  - Flags:
+    - `-type p|s|t`
+    - `--slug-glob <glob>` (slug-only, uses normalized slug rules)
+    - `--state`
+    - `--due-before`, `--due-after`
+    - `--print0`
+    - `--limit`, `--cursor`, `--porcelain`
+
+- `todo rg <pattern> [PATHSPEC...]` (Future enhancement)
+  - Not required for initial implementation.
+  - Intended behavior (for future compatibility):
+    - Content search across task bodies and optionally comments.
+    - Output (for `--json`):
+      - `task_id`, `path`, `line`, `column`, `snippet`.
+    - Backend may be:
+      - SQLite FTS, or
+      - external `rg` integration over an exported view.
+
+---
+
+### 9.7 History, Diff, Streaming
+
+- `todo log <PATHSPEC|ID>`
+  - Show change history from the event log.
+  - Each entry:
+    - timestamp
+    - actor (slug, friendly ID)
+    - resource_type
+    - event_type
+    - etag
+    - short payload summary
+  - Flags: `--since`, `--until`, `--oneline`, `--patch`.
+
+- `todo diff <A> [B]`
+  - Compare two tasks, or working copy vs DB.
+  - Flags: `--unified=3`, `--json`.
+
+- `todo watch [PATH...]`
+  - Stream change events from the event log.
+  - Flags: `--since <cursor>`, `--ndjson`.
+
+---
+
+### 9.8 Attachments
+
+- `todo attach ls <PATHSPEC|ID>`
+  - List attachments for a task.
+  - Output: `id`, `filename`, `relative_path`, `size_bytes`, `mime_type`.
+
+- `todo attach get <ATTACHMENT-ID> [--as <path>]`
+  - Copy the referenced file from `attach_dir` to the given path or stdout (`-`).
+
+- `todo attach put <PATHSPEC|ID> <FILE|-> --mime <type> [--name <filename>]`
+  - Attach a file to a task.
+  - Implementation:
+    - Use canonical directory `attach_dir/tasks/<task_uuid>/`.
+    - Copy file into that directory.
+    - Record metadata and `relative_path`.
+
+- `todo attach rm <ATTACHMENT-ID...>`
+  - Remove attachment metadata and delete corresponding file.
+  - Does **not** affect the rest of the task.
+
+---
+
+### 9.9 Actor Management
+
+- `todo whoami`
+  - Prints the current actor (slug, friendly id, role) and DB path.
+
+- `todo actors ls`
+  - List all actors.
+  - Flags: `--json`, `--ndjson`, `--fields`, `--porcelain`.
+
+- `todo actor add <slug> [--name <display>] [--role human|agent|system]`
+  - Create a new actor (primarily for registering agents).
+  - Enforce slug normalization rules.
+
+---
+
+### 9.10 Housekeeping & Misc
+
+- `todo doctor`
+  - Checks DB (pragmas, WAL), migrations, config, `attach_dir`, attachment limits.
+  - Prints remediation suggestions.
+
+- `todo version`
+  - Prints version information and build metadata.
+  - `--json` includes:
+    - `version`
+    - `commit`
+    - `build_date`
+    - `machine_interface_version`
+    - list of supported commands and formats.
+
+- `todo completion bash|zsh|fish`
+  - Emits completion scripts.
+
+- `todo config doctor`
+  - Prints effective configuration and source.
+
+-------------------------------------------------------------------------------
+
+## 10. Configuration
+
+Precedence
+1. Flags
+2. Environment variables
+3. `./.env.local` (dotenv)
+4. `~/.config/todo/config.yaml` (YAML)
+
+Env vars
+- `TODO_DB_PATH` (path to SQLite DB file)
+- `TODO_DB_PATH_FILE` (file containing path)
+- `TODO_LOG_LEVEL`
+- `TODO_OUTPUT` (`table|json`)
+- `TODO_PAGER`
+- `TODO_ATTACHMENTS_MAX_MB`
+- `TODO_ATTACH_DIR` (base directory for attachments)
+- `TODO_ACTOR` (actor slug)
+- `TODO_ACTOR_ID` (friendly actor ID, e.g. `A-00001`)
+
+YAML example
+```yaml
+db_path: /home/user/.local/share/todo/todo.db
+attach_dir: /home/user/.local/share/todo/attachments
+attachments_max_mb: 50
+
+default_actor: lance
+contexts:
+  local:
+    db_path: /home/user/.local/share/todo/todo.db
+    default_actor: lance
+  stage:
+    db_path: /home/user/projects/todo-stage.db
+    default_actor: agent-stage
+```
+
+`todo config doctor` shows effective values and their sources.
+
+-------------------------------------------------------------------------------
+
+## 11. Packaging and Installation
+
+- Build static binaries via GoReleaser for linux, macOS, windows (amd64 and arm64).
+- Artifacts: tar/zip, checksums, SBOM, shell completions.
+- Install:
+  - `install.sh` places binary to `~/.local/bin` or `/usr/local/bin` and installs completions.
+  - `install.ps1` optional for Windows.
+- No Homebrew packaging (for now).
+
+-------------------------------------------------------------------------------
+
+## 12. Performance and Reliability
+
+- Listing up to ~5k open tasks under 200 ms p95 on a typical dev machine.
+- NDJSON streams for constant memory pipelines.
+- Opaque cursors for pagination on large sets.
+
+Parallelism knobs
+- `--batch-size` and `-j/--jobs N` for bulk ops.
+- `--ordered` to preserve input order when needed.
+
+SQLite expectations
+- WAL mode enabled.
+- Recommended indices:
+  - containers (`parent_id`, `slug`)
+  - tasks (`project_id`, `slug`)
+  - tasks (`state`, `due_at`)
+  - tasks (`updated_at`)
+- For heavy use, periodic `VACUUM` / `ANALYZE` recommended.
+
+Target scale
+- Designed for a single user + multiple agents, up to ~50–100k tasks total.
+- Beyond that, manual maintenance or archival strategies may be required.
+
+-------------------------------------------------------------------------------
+
+## 13. Safety and Dry Runs
+
+- `--dry-run` prints plans for `mv`, `cp`, `rm`, `set`, `apply`.
+- `--yes` skips confirmation prompts on destructive actions.
+- `--nullglob` turns unmatched patterns into no-ops (default is error).
+- Conflict-safe writes via `--if-match <etag>`.
+- All writes are attributed to a resolved actor; the event log is the canonical audit trail.
+
+-------------------------------------------------------------------------------
+
+## 14. Examples
+
+List, pipe, preview
+```sh
+# Open tasks under portal, print one per line, cat them
+todo ls 'portal/**' -type t -1 | xargs -n1 todo cat | less
+```
+
+Bulk priority change
+```sh
+todo ls 'portal/**' -type t --json \
+| jq -r '.[] | select(.state=="open" and .due <= "2025-12-01") | .id' \
+| xargs -n50 todo set priority=1
+```
+
+Edit via sed as an agent
+```sh
+# Example pipeline; 'rg' here is hypothetical until todo rg is implemented
+todo find 'customer-portal/**' -type t --slug-glob '*oauth*' --json \
+| jq -r '.[].id' \
+| xargs -n1 -I{} sh -c '
+  etag=$(todo stat {} --json | jq -r .etag);
+  todo cat {} --raw-body \
+  | sed "s/2fa/mfa/g" \
+  | todo apply {} - --body-only --if-match "$etag" --as agent-codex
+'
+```
+
+Move with globbing
+```sh
+# Move all login-* tasks into auth subproject
+todo mv 'portal/**/login-*' 'portal/auth' -type t --dry-run
+todo mv 'portal/**/login-*' 'portal/auth' -type t --yes
+```
+
+Initialize DB and actors
+```sh
+todo init --db ~/.local/share/todo/todo.db \
+  --actor-slug lance \
+  --actor-name "Lance (human)" \
+  --attach-dir ~/.local/share/todo/attachments
+
+todo whoami
+todo actors ls
+```
+
+Attachments
+```sh
+todo attach put 'portal/auth/login-ux' ./specs/login-flow.pdf \
+  --mime application/pdf --name "Login Flow Spec"
+
+todo attach ls 'portal/auth/login-ux'
+todo attach get ATT-00012 --as ./out/login-flow.pdf
+```
+
+-------------------------------------------------------------------------------
+
+## 15. Security and Privacy
+
+- Local configuration may include DB paths and actor slugs; support reading DB path from `TODO_DB_PATH_FILE`.
+- Attachments live under `attach_dir`; DB stores only relative paths and metadata.
+- No network calls beyond local SQLite file I/O (and any external tools users explicitly invoke).
+- No telemetry in default build.
+- Actor attribution is for **provenance**, not auth.
+
+-------------------------------------------------------------------------------
+
+## 16. Compatibility Guarantees
+
+- **Machine interfaces**:
+  - `--porcelain`, `--json`, `--ndjson`, `--tsv`, `--columns` field names and order are stable across minor versions.
+  - Existing fields are never removed in a minor version; new fields may be added.
+- **Exit codes** are stable.
+- **Path semantics** and normalized slug rules are stable.
+- **Actor resolution precedence** (`--as`, env, config, default) is stable once defined.
+- `machine_interface_version` (from `todo version --json`) increments only on breaking changes.
