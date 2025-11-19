@@ -62,6 +62,53 @@ cli-test-coverage:
 cli-install:
   go install ./cmd/todo
 
+# Install CLI binary to ~/.local/bin (no sudo required)
+install:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Building todo binary..."
+  go build -o bin/todo ./cmd/todo
+  echo "Installing to ~/.local/bin/todo..."
+  mkdir -p ~/.local/bin
+  cp bin/todo ~/.local/bin/todo
+  chmod +x ~/.local/bin/todo
+  echo "✓ Installed to ~/.local/bin/todo"
+  echo ""
+  if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+    echo "⚠️  Add ~/.local/bin to your PATH:"
+    echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo ""
+  fi
+  echo "✓ Run 'todo --version' to verify"
+
+# Install CLI binary to /usr/local/bin (requires sudo - run manually)
+install-system:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Building todo binary..."
+  go build -o bin/todo ./cmd/todo
+  echo "Installing to /usr/local/bin/todo (requires sudo)..."
+  sudo cp bin/todo /usr/local/bin/todo
+  sudo chmod +x /usr/local/bin/todo
+  echo "✓ Installed to /usr/local/bin/todo"
+  echo "✓ Run 'todo --version' to verify"
+
+# Uninstall CLI binary from ~/.local/bin
+uninstall:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ -f ~/.local/bin/todo ]; then
+    echo "Removing ~/.local/bin/todo..."
+    rm ~/.local/bin/todo
+    echo "✓ Uninstalled from ~/.local/bin/todo"
+  elif [ -f /usr/local/bin/todo ]; then
+    echo "Removing /usr/local/bin/todo (requires sudo)..."
+    sudo rm /usr/local/bin/todo
+    echo "✓ Uninstalled from /usr/local/bin/todo"
+  else
+    echo "todo is not installed"
+  fi
+
 # Format CLI code
 cli-fmt:
   go fmt ./...
@@ -73,7 +120,7 @@ cli-lint:
 # --- Node.js app tasks (FUTURE) ---
 
 # Install dependencies for all Node.js workspaces
-install:
+install-deps:
   pnpm install
 
 # Build all Node.js apps
