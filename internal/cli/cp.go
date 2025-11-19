@@ -1,289 +1,492 @@
 package cli
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/actors"
-	"github.com/lherron/wrkq/internal/attach"
+	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
 var cpCmd = &cobra.Command{
-	Use:   "cp <src>... <dst>",
-	Short: "Copy tasks",
-	Long: `Copy one or more tasks to a destination container.
-
-Creates duplicate tasks with new IDs. Use --with-attachments to also copy attachment files.`,
-	Args: cobra.MinimumNArgs(2),
-	RunE: runCp,
+	Use:   "cp <source>... <destination>",
+	Short: "Copy tasks and containers",
+	Args:  cobra.MinimumNArgs(2),
+	RunE:  runCp,
 }
 
 var (
+	cpDryRun          bool
+	cpJobs            int
+	cpContinueOnError bool
 	cpWithAttachments bool
 	cpShallow         bool
-	cpDryRun          bool
+	cpRecursive       bool
+	cpOverwrite       bool
 	cpYes             bool
+	cpNullglob        bool
+	cpIfMatch         int64
+	cpJSON            bool
+	cpNDJSON          bool
+	cpPorcelain       bool
+	cpOne             bool
+	cpZero            bool
 )
 
 func init() {
 	rootCmd.AddCommand(cpCmd)
+	cpCmd.Flags().BoolVar(&cpDryRun, "dry-run", false, "Show what would be copied")
+	cpCmd.Flags().IntVarP(&cpJobs, "jobs", "j", 1, "Parallel workers")
+	cpCmd.Flags().BoolVar(&cpContinueOnError, "continue-on-error", false, "Continue on errors")
 	cpCmd.Flags().BoolVar(&cpWithAttachments, "with-attachments", false, "Copy attachment files")
-	cpCmd.Flags().BoolVar(&cpShallow, "shallow", false, "Don't copy attachments (default)")
-	cpCmd.Flags().BoolVar(&cpDryRun, "dry-run", false, "Show what would be copied without applying")
+	cpCmd.Flags().BoolVar(&cpShallow, "shallow", false, "Skip attachments entirely")
+	cpCmd.Flags().BoolVarP(&cpRecursive, "recursive", "r", false, "Copy containers recursively")
+	cpCmd.Flags().BoolVar(&cpOverwrite, "overwrite", false, "Overwrite existing tasks")
 	cpCmd.Flags().BoolVar(&cpYes, "yes", false, "Skip confirmation prompts")
+	cpCmd.Flags().BoolVar(&cpNullglob, "nullglob", false, "Zero matches is not an error")
+	cpCmd.Flags().Int64Var(&cpIfMatch, "if-match", 0, "Conditional copy based on source etag")
+	cpCmd.Flags().BoolVar(&cpJSON, "json", false, "Output JSON")
+	cpCmd.Flags().BoolVar(&cpNDJSON, "ndjson", false, "Output NDJSON")
+	cpCmd.Flags().BoolVar(&cpPorcelain, "porcelain", false, "Machine-readable output")
+	cpCmd.Flags().BoolVar(&cpOne, "1", false, "One per line")
+	cpCmd.Flags().BoolVar(&cpZero, "0", false, "NUL-separated output")
+}
+
+type copyResult struct {
+	SourceID      string `json:"source_id"`
+	SourceUUID    string `json:"source_uuid"`
+	DestID        string `json:"dest_id"`
+	DestUUID      string `json:"dest_uuid"`
+	DestPath      string `json:"dest_path"`
+	Attachments   int    `json:"attachments_copied,omitempty"`
+	WithFiles     bool   `json:"with_files,omitempty"`
 }
 
 func runCp(cmd *cobra.Command, args []string) error {
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return err
 	}
 
-	// Override DB path from flag if provided
 	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
 		cfg.DBPath = dbPath
 	}
 
-	// Get actor from --as flag or config
 	actorIdentifier := cmd.Flag("as").Value.String()
 	if actorIdentifier == "" {
 		actorIdentifier = cfg.GetActorID()
 	}
-	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set TODO_ACTOR, TODO_ACTOR_ID, or use --as flag)")
-	}
 
-	// Open database
 	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve actor
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
-
-	// Split sources and destination
-	sources := args[:len(args)-1]
-	dst := args[len(args)-1]
-
-	// Resolve destination container
-	dstContainerUUID, err := resolveContainer(database, dst)
-	if err != nil {
-		return fmt.Errorf("destination must be an existing container: %w", err)
-	}
-
-	// Copy each source task
-	for _, src := range sources {
-		if err := copyTask(cmd, database, cfg, actorUUID, src, dstContainerUUID, dst); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func copyTask(cmd *cobra.Command, database *db.DB, cfg *config.Config, actorUUID, src, dstContainerUUID, dstPath string) error {
-	// Resolve source task
-	srcTaskUUID, srcPath, err := resolveTask(database, src)
-	if err != nil {
-		return fmt.Errorf("source must be a task: %w", err)
-	}
-
-	// Get source task details
-	var slug, title, state, body string
-	var priority int
-	var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
-	var projectUUID string
-
-	err = database.QueryRow(`
-		SELECT slug, title, project_uuid, state, priority,
-		       start_at, due_at, labels, body,
-		       completed_at, archived_at
-		FROM tasks WHERE uuid = ?
-	`, srcTaskUUID).Scan(
-		&slug, &title, &projectUUID, &state, &priority,
-		&startAt, &dueAt, &labels, &body,
-		&completedAt, &archivedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to get source task: %w", err)
-	}
-
-	// Generate new slug if there's a conflict
-	newSlug := slug
-	var existingCount int
-	err = database.QueryRow(`
-		SELECT COUNT(*) FROM tasks WHERE project_uuid = ? AND slug = ?
-	`, dstContainerUUID, slug).Scan(&existingCount)
-	if err != nil {
-		return fmt.Errorf("failed to check slug uniqueness: %w", err)
-	}
-
-	if existingCount > 0 {
-		// Append number to make unique
-		for i := 2; ; i++ {
-			candidateSlug := fmt.Sprintf("%s-%d", slug, i)
-			err = database.QueryRow(`
-				SELECT COUNT(*) FROM tasks WHERE project_uuid = ? AND slug = ?
-			`, dstContainerUUID, candidateSlug).Scan(&existingCount)
-			if err != nil {
-				return fmt.Errorf("failed to check slug uniqueness: %w", err)
-			}
-			if existingCount == 0 {
-				newSlug = candidateSlug
-				break
-			}
-		}
-	}
-
-	// Validate the new slug
-	normalizedSlug, err := paths.NormalizeSlug(newSlug)
-	if err != nil {
-		return fmt.Errorf("invalid slug %q: %w", newSlug, err)
-	}
-
-	if cpDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would copy task %s -> %s/%s\n", srcPath, dstPath, normalizedSlug)
-		return nil
-	}
-
-	// Begin transaction
-	tx, err := database.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Insert new task
-	result, err := tx.Exec(`
-		INSERT INTO tasks (id, slug, title, project_uuid, state, priority,
-		                   start_at, due_at, labels, body,
-		                   created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, normalizedSlug, title, dstContainerUUID, state, priority,
-		startAt, dueAt, labels, body,
-		actorUUID, actorUUID)
-	if err != nil {
-		return fmt.Errorf("failed to create task copy: %w", err)
-	}
-
-	// Get the new task's UUID and ID
-	rowID, _ := result.LastInsertId()
-	var newTaskUUID, newTaskID string
-	err = tx.QueryRow(`
-		SELECT uuid, id FROM tasks WHERE rowid = ?
-	`, rowID).Scan(&newTaskUUID, &newTaskID)
-	if err != nil {
-		return fmt.Errorf("failed to get new task ID: %w", err)
-	}
-
-	// Log creation event
-	eventWriter := events.NewWriter(database.DB)
-	payload := map[string]interface{}{
-		"slug":        normalizedSlug,
-		"title":       title,
-		"state":       state,
-		"copied_from": srcTaskUUID,
-	}
-	payloadJSON, _ := json.Marshal(payload)
-	payloadStr := string(payloadJSON)
-
-	var etag int64 = 1 // New tasks start with etag 1
-	event := &domain.Event{
-		ActorUUID:    &actorUUID,
-		ResourceType: "task",
-		ResourceUUID: &newTaskUUID,
-		EventType:    "task.created",
-		ETag:         &etag,
-		Payload:      &payloadStr,
-	}
-
-	if err := eventWriter.LogEvent(tx, event); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
-	}
-
-	// Copy attachments if requested
-	if cpWithAttachments && !cpShallow {
-		if err := copyAttachments(tx, database, cfg, actorUUID, srcTaskUUID, newTaskUUID); err != nil {
-			return fmt.Errorf("failed to copy attachments: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Copied task: %s -> %s/%s (%s)\n", srcPath, dstPath, normalizedSlug, newTaskID)
-	return nil
-}
-
-func copyAttachments(tx *sql.Tx, database *db.DB, cfg *config.Config, actorUUID, srcTaskUUID, dstTaskUUID string) error {
-	// Query source task's attachments
-	rows, err := tx.Query(`
-		SELECT uuid, filename, relative_path, mime_type, size_bytes, checksum
-		FROM attachments WHERE task_uuid = ?
-	`, srcTaskUUID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer database.Close()
 
-	var copiedCount int
-	for rows.Next() {
-		var srcAttUUID, filename, srcRelPath string
-		var mimeType, checksum sql.NullString
-		var sizeBytes int64
+	resolver := actors.NewResolver(database.DB)
+	actorUUID, err := resolver.Resolve(actorIdentifier)
+	if err != nil {
+		return err
+	}
 
-		err := rows.Scan(&srcAttUUID, &filename, &srcRelPath, &mimeType, &sizeBytes, &checksum)
-		if err != nil {
+	// Validate mutually exclusive flags
+	if cpWithAttachments && cpShallow {
+		return fmt.Errorf("--with-attachments and --shallow are mutually exclusive")
+	}
+
+	sources := args[:len(args)-1]
+	destination := args[len(args)-1]
+
+	// Handle stdin
+	if len(sources) == 1 && sources[0] == "-" {
+		scanner := bufio.NewScanner(cmd.InOrStdin())
+		sources = nil
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" {
+				sources = append(sources, line)
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("failed to read stdin: %w", err)
+		}
+	}
+
+	// Resolve destination container
+	destUUID, err := resolveDestinationContainer(database, destination)
+	if err != nil {
+		if !cpNullglob {
 			return err
 		}
+		return nil
+	}
 
-		// Create new relative path for destination task
-		dstRelPath := attach.RelativePath(dstTaskUUID, filename)
+	// Resolve source tasks
+	var sourceTasks []string
+	for _, src := range sources {
+		taskUUID, _, err := resolveTask(database, src)
+		if err != nil {
+			if !cpNullglob {
+				return err
+			}
+			continue
+		}
+		sourceTasks = append(sourceTasks, taskUUID)
+	}
 
-		// Ensure destination directory exists
-		if err := attach.EnsureTaskDir(cfg.AttachDir, dstTaskUUID); err != nil {
-			return fmt.Errorf("failed to create destination attachment directory: %w", err)
+	if len(sourceTasks) == 0 {
+		if !cpNullglob {
+			return fmt.Errorf("no tasks found to copy")
+		}
+		return nil
+	}
+
+	// Dry run output
+	if cpDryRun {
+		return showCopyPlan(cmd, database, sourceTasks, destUUID)
+	}
+
+	// Confirmation prompt
+	if !cpYes && len(sourceTasks) > 5 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Copy %d tasks? [y/N] ", len(sourceTasks))
+		reader := bufio.NewReader(cmd.InOrStdin())
+		response, _ := reader.ReadString('\n')
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(response)), "y") {
+			return fmt.Errorf("aborted")
+		}
+	}
+
+	// Execute copy operation
+	op := &bulk.Operation{
+		Jobs:            cpJobs,
+		ContinueOnError: cpContinueOnError,
+		ShowProgress:    !cpJSON && !cpNDJSON && !cpPorcelain,
+	}
+
+	var results []copyResult
+	result := op.Execute(sourceTasks, func(taskUUID string) error {
+		res, err := copyTask(database, cfg.AttachDir, actorUUID, taskUUID, destUUID)
+		if err == nil && res != nil {
+			results = append(results, *res)
+		}
+		return err
+	})
+
+	// Output results
+	if cpJSON {
+		return render.RenderJSON(results, false)
+	}
+	if cpNDJSON {
+		// Convert to []interface{} for NDJSON rendering
+		items := make([]interface{}, len(results))
+		for i, r := range results {
+			items[i] = r
+		}
+		return render.RenderNDJSON(items)
+	}
+	if cpPorcelain || cpOne || cpZero {
+		delimiter := "\n"
+		if cpZero {
+			delimiter = "\x00"
+		}
+		for _, r := range results {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s%s", r.DestID, delimiter)
+		}
+		return nil
+	}
+
+	result.PrintSummary(cmd.OutOrStdout())
+
+	if result.Failed > 0 {
+		if cpContinueOnError {
+			os.Exit(5) // Partial success
+		}
+		os.Exit(1)
+	}
+
+	return nil
+}
+
+func resolveDestinationContainer(database *db.DB, dest string) (string, error) {
+	if id.IsFriendlyID(dest) && dest[0] == 'P' {
+		var uuid string
+		err := database.QueryRow("SELECT uuid FROM containers WHERE id = ?", dest).Scan(&uuid)
+		if err == nil {
+			return uuid, nil
+		}
+	}
+
+	segments := paths.SplitPath(dest)
+	var parentUUID *string
+
+	for _, segment := range segments {
+		slug, _ := paths.NormalizeSlug(segment)
+		var uuid string
+
+		if parentUUID == nil {
+			database.QueryRow("SELECT uuid FROM containers WHERE slug = ? AND parent_uuid IS NULL", slug).Scan(&uuid)
+		} else {
+			database.QueryRow("SELECT uuid FROM containers WHERE slug = ? AND parent_uuid = ?", slug, *parentUUID).Scan(&uuid)
 		}
 
-		// Copy the actual file
-		srcAbsPath := attach.AbsolutePath(cfg.AttachDir, srcRelPath)
-		dstAbsPath := attach.AbsolutePath(cfg.AttachDir, dstRelPath)
+		if uuid == "" {
+			return "", fmt.Errorf("container not found: %s", dest)
+		}
+		parentUUID = &uuid
+	}
 
-		newSize, newChecksum, err := attach.CopyFile(srcAbsPath, dstAbsPath)
+	return *parentUUID, nil
+}
+
+func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, destUUID string) error {
+	var totalAttachments int
+	var totalFiles int64
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Would copy %d task(s):\n\n", len(sourceTasks))
+
+	for _, taskUUID := range sourceTasks {
+		var sourceID, slug string
+		err := database.QueryRow("SELECT id, slug FROM tasks WHERE uuid = ?", taskUUID).Scan(&sourceID, &slug)
 		if err != nil {
-			return fmt.Errorf("failed to copy attachment file %s: %w", filename, err)
+			continue
+		}
+
+		var destPath string
+		database.QueryRow("SELECT path FROM container_paths WHERE uuid = ?", destUUID).Scan(&destPath)
+
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s) → %s/%s (new)\n", sourceID, slug, destPath, slug)
+
+		// Count attachments
+		if !cpShallow {
+			var count int
+			var size sql.NullInt64
+			database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
+			if count > 0 {
+				totalAttachments += count
+				if size.Valid {
+					totalFiles += size.Int64
+				}
+			}
+		}
+	}
+
+	if totalAttachments > 0 && !cpShallow {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nAttachments:\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d file(s) (%.1f MB total)\n", totalAttachments, float64(totalFiles)/(1024*1024))
+		if cpWithAttachments {
+			fmt.Fprintf(cmd.OutOrStdout(), "  Files will be copied to new location\n")
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "  Only metadata will be copied (use --with-attachments to copy files)\n")
+		}
+	}
+
+	return nil
+}
+
+func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string) (*copyResult, error) {
+	tx, err := database.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// Check etag if requested
+	if cpIfMatch > 0 {
+		var etag int64
+		err = tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", sourceUUID).Scan(&etag)
+		if err != nil {
+			return nil, err
+		}
+		if etag != cpIfMatch {
+			return nil, fmt.Errorf("etag mismatch: expected %d, got %d", cpIfMatch, etag)
+		}
+	}
+
+	// Fetch source task
+	var sourceID, slug, title, state string
+	var priority int
+	var body, labels *string
+	var startAt, dueAt *string
+
+	err = tx.QueryRow(`
+		SELECT id, slug, title, state, priority, body, labels, start_at, due_at
+		FROM tasks WHERE uuid = ?
+	`, sourceUUID).Scan(&sourceID, &slug, &title, &state, &priority, &body, &labels, &startAt, &dueAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for existing task with same slug in destination
+	var existingUUID string
+	tx.QueryRow("SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ?", destUUID, slug).Scan(&existingUUID)
+
+	if existingUUID != "" && !cpOverwrite {
+		return nil, fmt.Errorf("task with slug '%s' already exists in destination container", slug)
+	}
+
+	var newUUID, newID string
+
+	if cpOverwrite && existingUUID != "" {
+		// Update existing task
+		_, err = tx.Exec(`
+			UPDATE tasks SET title = ?, state = ?, priority = ?, body = ?, labels = ?,
+				start_at = ?, due_at = ?, updated_at = CURRENT_TIMESTAMP,
+				updated_by_actor_uuid = ?, etag = etag + 1
+			WHERE uuid = ?
+		`, title, state, priority, body, labels, startAt, dueAt, actorUUID, existingUUID)
+		if err != nil {
+			return nil, err
+		}
+
+		newUUID = existingUUID
+		tx.QueryRow("SELECT id FROM tasks WHERE uuid = ?", newUUID).Scan(&newID)
+	} else {
+		// Insert new task
+		result, err := tx.Exec(`
+			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, body, labels,
+				start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, slug, title, destUUID, state, priority, body, labels, startAt, dueAt, actorUUID, actorUUID)
+		if err != nil {
+			return nil, err
+		}
+
+		rowID, _ := result.LastInsertId()
+		err = tx.QueryRow("SELECT uuid, id FROM tasks WHERE rowid = ?", rowID).Scan(&newUUID, &newID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Handle attachments
+	var attachmentCount int
+	if !cpShallow {
+		attachmentCount, err = copyAttachments(tx, attachDir, sourceUUID, newUUID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Log event
+	eventWriter := events.NewWriter(database.DB)
+	payloadData := map[string]interface{}{
+		"source_id":   sourceID,
+		"source_uuid": sourceUUID,
+	}
+	if attachmentCount > 0 {
+		payloadData["attachment_count"] = attachmentCount
+		payloadData["with_files"] = cpWithAttachments
+	}
+	payloadJSON, _ := json.Marshal(payloadData)
+	payloadStr := string(payloadJSON)
+
+	if err := eventWriter.LogEvent(tx, &domain.Event{
+		ActorUUID:    &actorUUID,
+		ResourceType: "task",
+		ResourceUUID: &newUUID,
+		EventType:    "task.copied",
+		Payload:      &payloadStr,
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	// Get destination path
+	var destPath string
+	database.QueryRow("SELECT path FROM task_paths WHERE uuid = ?", newUUID).Scan(&destPath)
+
+	return &copyResult{
+		SourceID:    sourceID,
+		SourceUUID:  sourceUUID,
+		DestID:      newID,
+		DestUUID:    newUUID,
+		DestPath:    destPath,
+		Attachments: attachmentCount,
+		WithFiles:   cpWithAttachments,
+	}, nil
+}
+
+func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string) (int, error) {
+	rows, err := tx.Query(`
+		SELECT uuid, filename, relative_path, mime_type, size_bytes, checksum
+		FROM attachments WHERE task_uuid = ?
+	`, sourceTaskUUID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var attUUID, filename, relativePath, mimeType string
+		var sizeBytes int64
+		var checksum sql.NullString
+
+		if err := rows.Scan(&attUUID, &filename, &relativePath, &mimeType, &sizeBytes, &checksum); err != nil {
+			return count, err
+		}
+
+		var newRelativePath string
+		if cpWithAttachments {
+			// Copy file to new location
+			sourcePath := filepath.Join(attachDir, relativePath)
+			newRelativePath = fmt.Sprintf("tasks/%s/%s", destTaskUUID, filename)
+			destPath := filepath.Join(attachDir, newRelativePath)
+
+			// Create destination directory
+			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+				return count, err
+			}
+
+			// Copy file
+			sourceFile, err := os.Open(sourcePath)
+			if err != nil {
+				return count, err
+			}
+			defer sourceFile.Close()
+
+			destFile, err := os.Create(destPath)
+			if err != nil {
+				return count, err
+			}
+			defer destFile.Close()
+
+			if _, err := io.Copy(destFile, sourceFile); err != nil {
+				return count, err
+			}
+		} else {
+			// Keep same relative path (metadata only copy)
+			newRelativePath = relativePath
 		}
 
 		// Insert attachment metadata
 		_, err = tx.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum, created_by_actor_uuid)
-			VALUES ('', ?, ?, ?, ?, ?, ?, ?)
-		`, dstTaskUUID, filename, dstRelPath, mimeType, newSize, newChecksum, actorUUID)
+			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum)
+			VALUES ('', ?, ?, ?, ?, ?, ?)
+		`, destTaskUUID, filename, newRelativePath, mimeType, sizeBytes, checksum)
 		if err != nil {
-			return fmt.Errorf("failed to insert attachment metadata: %w", err)
+			return count, err
 		}
 
-		copiedCount++
+		count++
 	}
 
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	return nil
+	return count, rows.Err()
 }

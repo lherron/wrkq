@@ -761,3 +761,158 @@ wrkq attach get ATT-00012 --as ./out/login-flow.pdf
 - **Path semantics** and normalized slug rules are stable.
 - **Actor resolution precedence** (`--as`, env, config, default) is stable once defined.
 - `machine_interface_version` (from `wrkq version --json`) increments only on breaking changes.
+
+
+
+
+## 17. Branch/PR Sync Commands (New)
+
+These commands formalize the Git‑ops workflow: agents work on ephemeral DB snapshots, export a **bundle** to version control, and on merge the bundle is applied into the authoritative `main` DB with strict `--if-match` guards. They build on the spec’s typed selectors (`t:<token>`), append‑only event log, and attachment directory conventions.  [oai_citation:1‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+### 17.1 `wrkq bundle create`
+
+Create a portable, deterministic bundle of changes suitable to commit in a PR.
+
+**Synopsis**
+```
+wrkq bundle create [--out <dir>] [--actor <slug|A-xxxxx>] [--since <ts>] [--until <ts>] \
+  [--with-attachments] [--no-events] [--json|--porcelain]
+```
+
+**Behavior**
+- Writes a bundle directory (default: `.wrkq/`) containing:
+  - `manifest.json` (includes `machine_interface_version`, build/version info).  [oai_citation:2‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - `events.ndjson` (slice of the canonical audit log for review/debug; optional).  [oai_citation:3‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - `containers.txt` (containers to ensure exist).
+  - `tasks/<path>.md` for each changed task: **exact** `wrkq cat` output plus helper keys `path` and `base_etag`. Unknown keys are ignored by core commands.  [oai_citation:4‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - `attachments/<task_uuid>/*` for changed tasks when `--with-attachments` is set, following `attach_dir/tasks/<task_uuid>/…`.  [oai_citation:5‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Computes `base_etag` per task from the earliest included event for that task to enable `--if-match` on import. (ETag semantics: exit **4** on mismatch.)  [oai_citation:6‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+**Flags**
+- `--out <dir>`: target directory (default `.wrkq/`).
+- `--actor <slug|A-xxxxx>`: filter changes by actor for agent‑specific bundles.  [oai_citation:7‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- `--since/--until`: time window over the event log.  [oai_citation:8‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- `--with-attachments`: include attachment payloads for changed tasks.  [oai_citation:9‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- `--no-events`: omit `events.ndjson` (snapshot‑only bundle).
+
+**Output**
+- Human summary by default; `--json` prints counts and paths.
+
+---
+
+### 17.2 `wrkq bundle apply`
+
+Apply a bundle into the current DB (e.g., `main`) with conflict detection and attachment re‑hydration.
+
+**Synopsis**
+```
+wrkq bundle apply [--from <dir>] [--dry-run] [--continue-on-error] [--json|--porcelain]
+```
+
+**Behavior**
+- Reads `manifest.json` and validates `machine_interface_version` against `wrkq version --json`.  [oai_citation:10‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Ensures containers listed in `containers.txt` exist (`mkdir -p`).  [oai_citation:11‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- For each `tasks/<path>.md`:
+  - Prefer selector `t:<uuid>`; fallback to `t:<path>` if new.  [oai_citation:12‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - If `base_etag` is present, perform `wrkq apply … --if-match <base_etag>`. On mismatch return **4** and show a `wrkq diff` to aid resolution.  [oai_citation:13‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Re‑attach files from `attachments/<task_uuid>/…` via `wrkq attach put`.  [oai_citation:14‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+**Flags**
+- `--from <dir>`: bundle root (default `.wrkq/`).
+- `--dry-run`: prepare and validate without writing.
+- `--continue-on-error`: attempt remaining items after an error.
+
+**Exit codes**
+- `0` success; `4` if any conflicts (ETag mismatch or merge conflict); see global exit codes.  [oai_citation:15‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+---
+
+### 17.3 `wrkq db snapshot`
+
+Produce a **WAL‑safe** snapshot of the current SQLite DB for agents/CI to use as an ephemeral working copy.
+
+**Synopsis**
+```
+wrkq db snapshot --out <path> [--json]
+```
+
+**Behavior**
+- Uses SQLite’s online backup to write a consistent point‑in‑time copy of the DB to `<path>`; no WAL/SHM files required. (Wrkq uses a single local SQLite DB in WAL mode.)  [oai_citation:16‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Prints a small JSON manifest (timestamp, source DB path, `machine_interface_version`) with `--json`.  [oai_citation:17‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- **Does not** copy attachments; agents should use branch‑scoped `WRKQ_ATTACH_DIR` and export needed files in bundles.  [oai_citation:18‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+**Use with env**
+- Agents set `WRKQ_DB_PATH` to the snapshot and `WRKQ_ACTOR` to a branch‑scoped slug to preserve attribution.  [oai_citation:19‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+---
+
+### 17.4 `wrkq apply --base <FILE>` (flag extension)
+
+Enable a 3‑way merge on apply (mirrors `edit` semantics) while still honoring `--if-match`.
+
+**Synopsis**
+```
+wrkq apply [<PATHSPEC|ID>] <FILE|-> --base <FILE> [--if-match <etag>] [--dry-run]
+```
+
+**Behavior**
+- Performs a structured 3‑way merge of front‑matter + body using `internal/edit` machinery (already used by `edit`), then applies. Conflicts exit **4**.  [oai_citation:20‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- If `--if-match` is provided, it is enforced before writing, consistent with global concurrency rules.  [oai_citation:21‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+---
+
+### 17.5 `wrkq bundle replay` (optional / future)
+
+Replay `events.ndjson` from a bundle into the DB (useful when you know `main` hasn’t diverged).
+
+**Synopsis**
+```
+wrkq bundle replay [--from <dir>] [--dry-run] [--strict-etag]
+```
+
+**Behavior**
+- Reapplies events in order; with `--strict-etag`, each event is verified against stored ETags and exits **4** on divergence (leveraging the canonical audit model).  [oai_citation:22‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+---
+
+### 17.6 `wrkq attach path` (helper)
+
+Expose the absolute on‑disk path for an attachment (useful for exporters).  
+
+**Synopsis**
+```
+wrkq attach path <ATTACHMENT-ID|relative_path> [--json|--porcelain]
+```
+
+**Behavior**
+- Resolves to the absolute file under `attach_dir/tasks/<task_uuid>/…` without copying; prints a stable path for tooling. (Attachment layout is already defined and stable.)  [oai_citation:23‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+---
+
+### Notes & Compatibility
+
+- All new commands adhere to existing **addressing** (`t:<token>`) and **exit code** conventions; no breaking changes to machine interfaces.  [oai_citation:24‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)  
+- Bundles intentionally use the **task document** format emitted by `wrkq cat` and consumed by `wrkq apply`, ensuring deterministic round‑trips and reviewability in Git.  [oai_citation:25‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+
+---
+
+### Minimal Examples
+
+```sh
+# Create a PR bundle for the current branch actor, including attachments
+wrkq bundle create --actor agent-feature --with-attachments
+
+# Validate a PR bundle against a copy of main (no writes)
+wrkq bundle apply --from .wrkq --dry-run
+
+# Snapshot the DB for an agent’s ephemeral workspace
+wrkq db snapshot --out /tmp/wrkq.$BRANCH.db
+export WRKQ_DB_PATH=/tmp/wrkq.$BRANCH.db
+export WRKQ_ATTACH_DIR=/tmp/wrkq.$BRANCH.attach
+export WRKQ_ACTOR=agent-$BRANCH
+
+# Apply with a 3-way merge using an explicit base doc
+wrkq apply t:T-00123 new.md --base base.md --if-match 47
+```
+
+All behaviors above are consistent with the spec’s ETag concurrency model, event log guarantees, and attachment paths.  [oai_citation:26‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)

@@ -13,12 +13,15 @@ func TestValidateState(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "open", state: "open", wantErr: false},
+		{name: "in_progress", state: "in_progress", wantErr: false},
 		{name: "completed", state: "completed", wantErr: false},
 		{name: "archived", state: "archived", wantErr: false},
 		{name: "invalid", state: "invalid", wantErr: true},
 		{name: "empty", state: "", wantErr: true},
 		{name: "uppercase", state: "OPEN", wantErr: true},
 		{name: "mixed case", state: "Open", wantErr: true},
+		{name: "uppercase in_progress", state: "IN_PROGRESS", wantErr: true},
+		{name: "mixed case in_progress", state: "In_Progress", wantErr: true},
 	}
 
 	for _, tt := range tests {

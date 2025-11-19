@@ -3,9 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
@@ -27,6 +29,8 @@ var (
 	lsType      string
 	lsOne       bool
 	lsNul       bool
+	lsLimit     int
+	lsCursor    string
 )
 
 func init() {
@@ -39,6 +43,8 @@ func init() {
 	lsCmd.Flags().StringVar(&lsType, "type", "", "Filter by type (p=project, t=task)")
 	lsCmd.Flags().BoolVarP(&lsOne, "one", "1", false, "One entry per line")
 	lsCmd.Flags().BoolVarP(&lsNul, "nul", "0", false, "NUL-separated output")
+	lsCmd.Flags().IntVar(&lsLimit, "limit", 0, "Maximum number of results to return (0 = no limit)")
+	lsCmd.Flags().StringVar(&lsCursor, "cursor", "", "Pagination cursor from previous page")
 }
 
 func runLs(cmd *cobra.Command, args []string) error {
@@ -270,6 +276,48 @@ func runLs(cmd *cobra.Command, args []string) error {
 				}
 				rows.Close()
 			}
+		}
+	}
+
+	// Apply pagination
+	var currentCursor *cursor.Cursor
+	if lsCursor != "" {
+		c, err := cursor.Decode(lsCursor)
+		if err != nil {
+			return fmt.Errorf("invalid cursor: %w", err)
+		}
+		currentCursor = c
+
+		// Filter entries based on cursor (slug-based pagination)
+		// Since we sort by slug, we filter entries where slug > cursor.LastValues[0]
+		var filtered []Entry
+		for _, entry := range entries {
+			if entry.Slug > currentCursor.LastValues[0].(string) ||
+				(entry.Slug == currentCursor.LastValues[0].(string) && entry.ID > currentCursor.LastID) {
+				filtered = append(filtered, entry)
+			}
+		}
+		entries = filtered
+	}
+
+	// Apply limit and generate next cursor
+	var nextCursor *cursor.Cursor
+	if lsLimit > 0 && len(entries) > lsLimit {
+		// Create cursor from the last entry we'll return
+		lastEntry := entries[lsLimit-1]
+		nextCursor, _ = cursor.NewCursor(
+			[]string{"slug"},
+			[]interface{}{lastEntry.Slug},
+			lastEntry.ID,
+		)
+		entries = entries[:lsLimit]
+	}
+
+	// Output next_cursor to stderr in porcelain mode
+	if lsPorcelain && nextCursor != nil {
+		encoded, err := nextCursor.Encode()
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
 		}
 	}
 

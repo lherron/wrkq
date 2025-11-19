@@ -3,10 +3,12 @@ package cli
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
@@ -93,6 +95,49 @@ func runFind(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Apply pagination
+	var currentCursor *cursor.Cursor
+	if findCursor != "" {
+		c, err := cursor.Decode(findCursor)
+		if err != nil {
+			return fmt.Errorf("invalid cursor: %w", err)
+		}
+		currentCursor = c
+
+		// Filter results based on cursor (updated_at DESC, id DESC)
+		var filtered []findResult
+		for _, result := range results {
+			// For tasks, we sort by updated_at; for containers, by path
+			// Simple approach: filter by ID as tie-breaker
+			if result.ID > currentCursor.LastID {
+				filtered = append(filtered, result)
+			}
+		}
+		results = filtered
+	}
+
+	// Apply limit and generate next cursor
+	var nextCursor *cursor.Cursor
+	if findLimit > 0 && len(results) > findLimit {
+		// Create cursor from the last entry we'll return
+		lastEntry := results[findLimit-1]
+		// Use updated_at as sort field for tasks (simplified for now)
+		nextCursor, _ = cursor.NewCursor(
+			[]string{"id"}, // Simplified: just use ID for now
+			[]interface{}{lastEntry.ID},
+			lastEntry.ID,
+		)
+		results = results[:findLimit]
+	}
+
+	// Output next_cursor to stderr in porcelain mode
+	if findPorcelain && nextCursor != nil {
+		encoded, err := nextCursor.Encode()
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
+		}
+	}
+
 	// Render output
 	if findJSON {
 		return render.RenderJSON(results, false)
@@ -157,11 +202,7 @@ func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, error) {
 		results = append(results, containers...)
 	}
 
-	// Apply limit
-	if opts.limit > 0 && len(results) > opts.limit {
-		results = results[:opts.limit]
-	}
-
+	// Don't apply limit here - let caller do it after checking for more results
 	return results, nil
 }
 

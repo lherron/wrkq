@@ -8,9 +8,10 @@ Below is a pragmatic, **MVP‑first milestone plan** that turns your spec into s
 |---|---|---|
 | **M0 — Core CLI + DB** | “Hello, durable world.” | WAL SQLite DB, migrations, actors, containers, tasks, slugs, friendly IDs, pathspecs & globs, ETag concurrency, event log (create/update/delete), core CRUD commands, machine outputs (`--json`, `--ndjson`, `--porcelain`). |
 | **M1 — Editing, History & Search** | “Work with content safely.” | `edit`/`apply` with 3‑way merge + `--if-match`, `log`, `watch`, `diff`, `tree`, `find` filters, sorting/field selection everywhere, perf indices, p95 checks. |
-| **M2 — Attachments, Scale & Packaging** | “Operate at scale; ship binaries.” | Attachment put/get/ls/rm + purge semantics, pagination cursors, bulk‑ops knobs (`--jobs`, `--continue-on-error`), `cp`, `rm --purge`, doctor tools, completions, install scripts, GoReleaser artifacts & SBOM. |
-| **M3 — API‑ready Contracts + Comments** | “Browser‑ready.” | Machine interface v1 freeze, `version --json` contract, comments table + CLI, minimal HTTP/JSON façade spec (Go or Node) aligned to CLI porcelain, doc set for integrators. |
-| **M4 — Stretch (optional)** | “Nice to have.” | SQLite FTS seed for future `rg`, advanced diffs/patches, sample Node server stub & Postman collection, additional diagnostics. |
+| **M2 — Attachments, Scale & Packaging** | "Operate at scale; ship binaries." | Attachment put/get/ls/rm + purge semantics, pagination cursors, bulk‑ops knobs (`--jobs`, `--continue-on-error`), `cp`, `rm --purge`, doctor tools, completions, install scripts, GoReleaser artifacts & SBOM. |
+| **M3 — API‑ready Contracts + Comments** | "Browser‑ready." | Machine interface v1 freeze, `version --json` contract, comments table + CLI, minimal HTTP/JSON façade spec (Go or Node) aligned to CLI porcelain, doc set for integrators. |
+| **M4 — Stretch (optional)** | "Nice to have." | SQLite FTS seed for future `rg`, advanced diffs/patches, sample Node server stub & Postman collection, additional diagnostics. |
+| **M5 — Git-ops & Bundle Commands** | "PR-based agent workflows." | `bundle create/apply`, `db snapshot`, typed selectors (`t:<token>`), `apply --base` for 3‑way merge, attachment bundling, manifest validation, conflict detection on bundle apply, ephemeral DB workflow for agents. |
 
 ---
 
@@ -217,6 +218,116 @@ wrkq version --json | jq .machine_interface_version
 - `wrkq diff --json` emits structured hunks suitable for UI patch views.
 - Minimal Node or Go HTTP server stub implementing the spec (single‑binary dev server).
 - Additional `wrkq doctor` checks (VACUUM/ANALYZE guidance, WAL checkpoints).
+
+---
+
+## M5 — Git-ops & Bundle Commands
+
+### Deliverables
+
+**Internals**
+- `internal/bundle`: bundle creation, manifest generation, task export/import with `base_etag` tracking.
+- `internal/selectors`: typed selector parsing (`t:<token>`) for tasks, accepting UUID, friendly ID, or path.
+- `internal/snapshot`: SQLite online backup API for ephemeral DB creation.
+- Enhanced `internal/edit`: support `--base` flag for 3-way merge in `apply` command.
+
+**CLI surface**
+- `wrkq bundle create [--out <dir>] [--actor <slug|ID>] [--since <ts>] [--until <ts>] [--with-attachments] [--no-events] [--json]`
+  - Creates bundle directory (default `.wrkq/`) with:
+    - `manifest.json` (version, machine_interface_version, metadata)
+    - `events.ndjson` (event log slice for audit trail)
+    - `containers.txt` (container paths to ensure exist)
+    - `tasks/<path>.md` (task documents with `base_etag` for conflict detection)
+    - `attachments/<task_uuid>/*` (attachment files when `--with-attachments`)
+  - Filters by actor and time window.
+  - Computes `base_etag` from earliest event per task.
+
+- `wrkq bundle apply [--from <dir>] [--dry-run] [--continue-on-error] [--json]`
+  - Validates `machine_interface_version` compatibility.
+  - Creates containers from `containers.txt`.
+  - Applies tasks using `t:<uuid>` selector (fallback to `t:<path>` for new tasks).
+  - Honors `base_etag` with `--if-match` semantics; exits `4` on conflict.
+  - Re-attaches files from bundle's `attachments/` directory.
+  - Shows `wrkq diff` output to aid conflict resolution.
+
+- `wrkq db snapshot --out <path> [--json]`
+  - Creates WAL-safe point-in-time DB copy via SQLite online backup.
+  - Emits JSON manifest with timestamp, source path, `machine_interface_version`.
+  - Does not copy attachments (agents use branch-scoped `WRKQ_ATTACH_DIR`).
+
+- `wrkq apply --base <FILE>` (flag enhancement)
+  - Performs 3-way merge (base/current/edited) using `internal/edit` machinery.
+  - Honors `--if-match` for final write.
+  - Exits `4` on unresolvable conflicts.
+
+- `wrkq attach path <ATTACHMENT-ID|relative_path> [--json]` (helper)
+  - Resolves and prints absolute filesystem path for attachment.
+  - Useful for bundle exporters and tooling.
+
+- `wrkq bundle replay [--from <dir>] [--dry-run] [--strict-etag]` (optional/future)
+  - Replays `events.ndjson` in order.
+  - With `--strict-etag`, validates each event's etag and exits `4` on divergence.
+
+**Typed selectors**
+- `t:<token>` syntax for task identification in all commands.
+- `<token>` can be:
+  - Friendly ID (`T-00123`)
+  - UUID
+  - Path (`portal/auth/login-ux`)
+- Extends existing pathspec resolution; backward compatible.
+
+### Acceptance criteria
+- `bundle create --actor agent-foo` produces deterministic bundle with only agent-foo's changes.
+- `bundle apply --dry-run` validates without writes; shows conflicts without failing.
+- `bundle apply` on main DB detects etag conflicts and exits `4` with helpful diff output.
+- `db snapshot` creates standalone DB file usable with `WRKQ_DB_PATH` env.
+- Attachments in bundle round-trip correctly via `bundle create --with-attachments` → `bundle apply`.
+- `manifest.json` version check prevents applying bundles from incompatible CLI versions.
+- `apply --base` successfully merges non-conflicting concurrent edits; exits `4` on conflicts.
+- Typed selector `t:T-00123` resolves identically to `T-00123` in all commands.
+
+### Demo script
+
+```sh
+# Agent workflow: snapshot DB for ephemeral work
+wrkq db snapshot --out /tmp/wrkq.$BRANCH.db
+export WRKQ_DB_PATH=/tmp/wrkq.$BRANCH.db
+export WRKQ_ATTACH_DIR=/tmp/wrkq.$BRANCH.attach
+export WRKQ_ACTOR=agent-$BRANCH
+
+# Agent makes changes
+wrkq touch portal/auth/mfa -t "Add MFA support"
+wrkq set portal/auth/mfa priority=1 state=in_progress
+wrkq edit portal/auth/mfa  # add implementation spec
+
+# Export bundle for PR
+wrkq bundle create --actor agent-$BRANCH --with-attachments --out .wrkq/
+
+# On main branch: validate before merge
+wrkq bundle apply --from .wrkq --dry-run
+
+# After PR review: apply to main DB
+unset WRKQ_DB_PATH  # back to main DB
+wrkq bundle apply --from .wrkq
+
+# Check for conflicts
+echo $?  # 0=success, 4=conflicts detected
+
+# Use typed selectors
+wrkq cat t:T-00123
+wrkq set t:portal/auth/login-ux priority=2
+wrkq apply t:T-00123 new-spec.md --base old-spec.md --if-match 47
+
+# Helper for attachment paths
+wrkq attach path ATT-00005  # prints /path/to/attach_dir/tasks/<uuid>/file.pdf
+```
+
+### Notes
+
+- Bundle format uses existing `wrkq cat` task document format for reviewability and deterministic round-trips.
+- `base_etag` computed from event log enables conflict detection without breaking existing schema.
+- All commands honor existing exit codes, addressing conventions, and machine interface stability guarantees.
+- Attachments use established `attach_dir/tasks/<task_uuid>/` layout; bundle just copies this structure.
 
 ---
 

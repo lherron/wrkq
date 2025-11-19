@@ -9,6 +9,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -58,6 +59,8 @@ var (
 	attachLsJSON      bool
 	attachLsNDJSON    bool
 	attachLsPorcelain bool
+	attachLsLimit     int
+	attachLsCursor    string
 
 	attachPutMime string
 	attachPutName string
@@ -78,6 +81,8 @@ func init() {
 	attachLsCmd.Flags().BoolVar(&attachLsJSON, "json", false, "Output as JSON")
 	attachLsCmd.Flags().BoolVar(&attachLsNDJSON, "ndjson", false, "Output as NDJSON")
 	attachLsCmd.Flags().BoolVar(&attachLsPorcelain, "porcelain", false, "Machine-readable output")
+	attachLsCmd.Flags().IntVar(&attachLsLimit, "limit", 0, "Maximum number of results (0 = no limit)")
+	attachLsCmd.Flags().StringVar(&attachLsCursor, "cursor", "", "Pagination cursor from previous page")
 
 	// attach put flags
 	attachPutCmd.Flags().StringVar(&attachPutMime, "mime", "", "MIME type (auto-detected if not specified)")
@@ -161,6 +166,50 @@ func runAttachLs(cmd *cobra.Command, args []string) error {
 
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("error iterating attachments: %w", err)
+	}
+
+	// Apply pagination
+	var currentCursor *cursor.Cursor
+	if attachLsCursor != "" {
+		c, err := cursor.Decode(attachLsCursor)
+		if err != nil {
+			return fmt.Errorf("invalid cursor: %w", err)
+		}
+		currentCursor = c
+
+		// Filter attachments based on cursor (created_at ASC)
+		var filtered []map[string]interface{}
+		for _, att := range attachments {
+			createdAt := att["created_at"].(string)
+			id := att["id"].(string)
+			// Since we order by created_at ASC, filter for created_at > cursor or (created_at = cursor AND id > lastID)
+			if createdAt > currentCursor.LastValues[0].(string) ||
+				(createdAt == currentCursor.LastValues[0].(string) && id > currentCursor.LastID) {
+				filtered = append(filtered, att)
+			}
+		}
+		attachments = filtered
+	}
+
+	// Apply limit and generate next cursor
+	var nextCursor *cursor.Cursor
+	if attachLsLimit > 0 && len(attachments) > attachLsLimit {
+		// Create cursor from the last entry we'll return
+		lastAtt := attachments[attachLsLimit-1]
+		nextCursor, _ = cursor.NewCursor(
+			[]string{"created_at"},
+			[]interface{}{lastAtt["created_at"].(string)},
+			lastAtt["id"].(string),
+		)
+		attachments = attachments[:attachLsLimit]
+	}
+
+	// Output next_cursor to stderr in porcelain mode
+	if attachLsPorcelain && nextCursor != nil {
+		encoded, err := nextCursor.Encode()
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
+		}
 	}
 
 	// Output

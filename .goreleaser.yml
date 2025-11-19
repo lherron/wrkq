@@ -1,0 +1,145 @@
+# GoReleaser configuration for wrkq
+# https://goreleaser.com
+
+version: 2
+
+project_name: wrkq
+
+before:
+  hooks:
+    # Ensure dependencies are up to date
+    - go mod tidy
+    # Run tests before building
+    - go test ./...
+
+builds:
+  - id: wrkq
+    main: ./cmd/wrkq
+    binary: wrkq
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/lherron/wrkq/internal/cli.Version={{.Version}}
+      - -X github.com/lherron/wrkq/internal/cli.GitCommit={{.Commit}}
+      - -X github.com/lherron/wrkq/internal/cli.BuildDate={{.Date}}
+
+archives:
+  - id: wrkq
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE*
+      - docs/*
+      - completions/*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+  groups:
+    - title: Features
+      regexp: '^feat:'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^fix:'
+      order: 1
+    - title: Others
+      order: 999
+
+# Generate shell completions
+after_build:
+  hooks:
+    - cmd: mkdir -p dist/completions
+    - cmd: "{{ .Path }} completion bash > dist/completions/wrkq.bash"
+    - cmd: "{{ .Path }} completion zsh > dist/completions/_wrkq"
+    - cmd: "{{ .Path }} completion fish > dist/completions/wrkq.fish"
+
+# SBOM generation
+sboms:
+  - id: default
+    artifacts: archive
+    documents:
+      - >-
+        {{ .ProjectName }}_{{ .Version }}_
+        {{- if eq .Os "darwin" }}macOS
+        {{- else }}{{ .Os }}{{ end }}_
+        {{- if eq .Arch "amd64" }}x86_64
+        {{- else if eq .Arch "386" }}i386
+        {{- else }}{{ .Arch }}{{ end }}.sbom.json
+
+# Release configuration
+release:
+  github:
+    owner: lherron
+    name: wrkq
+  prerelease: auto
+  mode: replace
+  header: |
+    ## wrkq {{ .Version }}
+
+    **Full Changelog**: https://github.com/lherron/wrkq/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ### Installation
+
+    #### Quick Install (macOS/Linux)
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/lherron/wrkq/main/install.sh | bash
+    ```
+
+    #### Manual Installation
+    Download the appropriate binary for your platform below, extract it, and place it in your `PATH`.
+  footer: |
+    ---
+    **Full documentation**: https://github.com/lherron/wrkq
+
+    Report issues at https://github.com/lherron/wrkq/issues
+
+# Announce (optional - for future use)
+announce:
+  skip: true
+
+# Signing (optional - for future use)
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - --output-signature
+      - "${artifact}.sig"
+      - --output-certificate
+      - "${artifact}.pem"
+      - "${artifact}"
+    env:
+      - COSIGN_EXPERIMENTAL=1

@@ -8,10 +8,10 @@ import (
 // ValidateState validates a task state
 func ValidateState(state string) error {
 	switch state {
-	case "open", "completed", "archived":
+	case "open", "in_progress", "completed", "archived":
 		return nil
 	default:
-		return fmt.Errorf("invalid state: must be one of: open, completed, archived")
+		return fmt.Errorf("invalid state: must be one of: open, in_progress, completed, archived")
 	}
 }
 

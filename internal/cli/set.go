@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
@@ -25,14 +29,22 @@ Supported keys: state, priority, title, slug, labels, due_at, start_at`,
 }
 
 var (
-	setIfMatch int64
-	setDryRun  bool
+	setIfMatch          int64
+	setDryRun           bool
+	setJobs             int
+	setContinueOnError  bool
+	setBatchSize        int
+	setOrdered          bool
 )
 
 func init() {
 	rootCmd.AddCommand(setCmd)
 	setCmd.Flags().Int64Var(&setIfMatch, "if-match", 0, "Only update if etag matches")
 	setCmd.Flags().BoolVar(&setDryRun, "dry-run", false, "Show what would be changed without applying")
+	setCmd.Flags().IntVarP(&setJobs, "jobs", "j", 1, "Number of parallel workers (0 = auto-detect CPU count)")
+	setCmd.Flags().BoolVar(&setContinueOnError, "continue-on-error", false, "Continue processing on errors")
+	setCmd.Flags().IntVar(&setBatchSize, "batch-size", 1, "Group operations into batches (not yet implemented)")
+	setCmd.Flags().BoolVar(&setOrdered, "ordered", false, "Preserve input order (disables parallelism)")
 }
 
 func runSet(cmd *cobra.Command, args []string) error {
@@ -53,7 +65,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 		actorIdentifier = cfg.GetActorID()
 	}
 	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set TODO_ACTOR, TODO_ACTOR_ID, or use --as flag)")
+		return fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
 	}
 
 	// Open database
@@ -81,6 +93,15 @@ func runSet(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Check for stdin input (single "-" as task ref)
+	if len(taskRefs) == 1 && taskRefs[0] == "-" {
+		stdinRefs, err := readLinesFromStdin(cmd.InOrStdin())
+		if err != nil {
+			return fmt.Errorf("failed to read from stdin: %w", err)
+		}
+		taskRefs = stdinRefs
+	}
+
 	if len(taskRefs) == 0 {
 		return fmt.Errorf("no tasks specified")
 	}
@@ -89,11 +110,69 @@ func runSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse updates
+	fields, err := parseSetUpdates(updates)
+	if err != nil {
+		return err
+	}
+
+	// Dry run handling
+	if setDryRun {
+		for _, ref := range taskRefs {
+			fmt.Fprintf(cmd.OutOrStdout(), "Would update task %s: %+v\n", ref, fields)
+		}
+		return nil
+	}
+
+	// Execute bulk operation
+	op := &bulk.Operation{
+		Jobs:            setJobs,
+		ContinueOnError: setContinueOnError,
+		Ordered:         setOrdered,
+		ShowProgress:    true,
+	}
+
+	result := op.Execute(taskRefs, func(ref string) error {
+		taskUUID, _, err := resolveTask(database, ref)
+		if err != nil {
+			return err
+		}
+
+		return updateTask(database, actorUUID, taskUUID, fields, setIfMatch)
+	})
+
+	// Print summary
+	result.PrintSummary(cmd.OutOrStdout())
+
+	// Exit with appropriate code
+	os.Exit(result.ExitCode())
+	return nil
+}
+
+func readLinesFromStdin(r io.Reader) ([]string, error) {
+	var lines []string
+	scanner := bufio.NewScanner(r)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return lines, nil
+}
+
+func parseSetUpdates(updates []string) (map[string]interface{}, error) {
 	fields := make(map[string]interface{})
+
 	for _, update := range updates {
 		parts := strings.SplitN(update, "=", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("invalid update: %s", update)
+			return nil, fmt.Errorf("invalid update: %s", update)
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
@@ -106,16 +185,16 @@ func runSet(cmd *cobra.Command, args []string) error {
 		switch key {
 		case "state":
 			if err := domain.ValidateState(value); err != nil {
-				return err
+				return nil, err
 			}
 			fields["state"] = value
 		case "priority":
 			p, err := strconv.Atoi(value)
 			if err != nil {
-				return fmt.Errorf("invalid priority: %s", value)
+				return nil, fmt.Errorf("invalid priority: %s", value)
 			}
 			if err := domain.ValidatePriority(p); err != nil {
-				return err
+				return nil, err
 			}
 			fields["priority"] = p
 		case "title":
@@ -123,43 +202,24 @@ func runSet(cmd *cobra.Command, args []string) error {
 		case "slug":
 			normalized, err := paths.NormalizeSlug(value)
 			if err != nil {
-				return fmt.Errorf("invalid slug: %w", err)
+				return nil, fmt.Errorf("invalid slug: %w", err)
 			}
 			fields["slug"] = normalized
 		case "labels":
 			// Parse as JSON array
 			var labels []string
 			if err := json.Unmarshal([]byte(value), &labels); err != nil {
-				return fmt.Errorf("invalid labels JSON: %w", err)
+				return nil, fmt.Errorf("invalid labels JSON: %w", err)
 			}
 			fields["labels"] = value
 		case "due_at", "start_at":
 			fields[key] = value
 		default:
-			return fmt.Errorf("unsupported field: %s", key)
+			return nil, fmt.Errorf("unsupported field: %s", key)
 		}
 	}
 
-	// Update each task
-	for _, ref := range taskRefs {
-		taskUUID, _, err := resolveTask(database, ref)
-		if err != nil {
-			return err
-		}
-
-		if setDryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "Would update task %s: %+v\n", ref, fields)
-			continue
-		}
-
-		if err := updateTask(database, actorUUID, taskUUID, fields, setIfMatch); err != nil {
-			return fmt.Errorf("failed to update task %s: %w", ref, err)
-		}
-
-		fmt.Fprintf(cmd.OutOrStdout(), "Updated task: %s\n", ref)
-	}
-
-	return nil
+	return fields, nil
 }
 
 func updateTask(database *db.DB, actorUUID, taskUUID string, fields map[string]interface{}, ifMatch int64) error {

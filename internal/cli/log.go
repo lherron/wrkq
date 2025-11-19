@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
@@ -30,12 +31,14 @@ Examples:
 }
 
 var (
-	logSince    string
-	logUntil    string
-	logOneline  bool
-	logPatch    bool
-	logJSON     bool
-	logLimit    int
+	logSince     string
+	logUntil     string
+	logOneline   bool
+	logPatch     bool
+	logJSON      bool
+	logLimit     int
+	logCursor    string
+	logPorcelain bool
 )
 
 func init() {
@@ -47,6 +50,8 @@ func init() {
 	logCmd.Flags().BoolVar(&logPatch, "patch", false, "Show detailed payload changes")
 	logCmd.Flags().BoolVar(&logJSON, "json", false, "Output as JSON")
 	logCmd.Flags().IntVar(&logLimit, "limit", 50, "Limit number of events (0 = unlimited)")
+	logCmd.Flags().StringVar(&logCursor, "cursor", "", "Pagination cursor from previous page")
+	logCmd.Flags().BoolVar(&logPorcelain, "porcelain", false, "Machine-readable output with cursor on stderr")
 }
 
 func runLog(cmd *cobra.Command, args []string) error {
@@ -76,12 +81,57 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 	// Query event log
 	events, err := queryEventLog(database, resourceUUID, resourceType, logOptions{
-		since: logSince,
-		until: logUntil,
-		limit: logLimit,
+		since:  logSince,
+		until:  logUntil,
+		limit:  logLimit,
+		cursor: logCursor,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to query event log: %w", err)
+	}
+
+	// Apply pagination
+	var currentCursor *cursor.Cursor
+	if logCursor != "" {
+		c, err := cursor.Decode(logCursor)
+		if err != nil {
+			return fmt.Errorf("invalid cursor: %w", err)
+		}
+		currentCursor = c
+
+		// Filter events based on cursor (id DESC)
+		var filtered []logEvent
+		var lastID int64
+		fmt.Sscanf(currentCursor.LastID, "%d", &lastID)
+
+		for _, event := range events {
+			// Since we order by id DESC, filter for id < lastID
+			if event.ID < lastID {
+				filtered = append(filtered, event)
+			}
+		}
+		events = filtered
+	}
+
+	// Generate next cursor if there are more results
+	var nextCursor *cursor.Cursor
+	if logLimit > 0 && len(events) > logLimit {
+		// Create cursor from the last entry we'll return
+		lastEvent := events[logLimit-1]
+		nextCursor, _ = cursor.NewCursor(
+			[]string{"id"},
+			[]interface{}{lastEvent.ID},
+			fmt.Sprintf("%d", lastEvent.ID),
+		)
+		events = events[:logLimit]
+	}
+
+	// Output next_cursor to stderr in porcelain mode
+	if logPorcelain && nextCursor != nil {
+		encoded, err := nextCursor.Encode()
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
+		}
 	}
 
 	// Render output
@@ -97,9 +147,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 }
 
 type logOptions struct {
-	since string
-	until string
-	limit int
+	since  string
+	until  string
+	limit  int
+	cursor string
 }
 
 type logEvent struct {
