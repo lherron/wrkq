@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/lherron/todo/internal/db"
+	"github.com/lherron/wrkq/internal/db"
 )
 
 // TempDB creates a temporary SQLite database for testing

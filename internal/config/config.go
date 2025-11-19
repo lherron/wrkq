@@ -23,7 +23,7 @@ type Config struct {
 // Load loads configuration from multiple sources with precedence:
 // 1. Environment variables
 // 2. ./.env.local (dotenv)
-// 3. ~/.config/todo/config.yaml (YAML)
+// 3. ~/.config/wrkq/config.yaml (YAML)
 func Load() (*Config, error) {
 	cfg := &Config{
 		AttachmentsMaxMB: 50,
@@ -34,28 +34,28 @@ func Load() (*Config, error) {
 	// Load .env.local if it exists
 	_ = godotenv.Load(".env.local")
 
-	// Load ~/.config/todo/config.yaml if it exists
+	// Load ~/.config/wrkq/config.yaml if it exists
 	if err := loadYAMLConfig(cfg); err != nil {
 		// YAML config is optional, so we don't fail if it doesn't exist
 	}
 
 	// Override with environment variables
-	if dbPath := getEnvOrFile("TODO_DB_PATH", "TODO_DB_PATH_FILE"); dbPath != "" {
+	if dbPath := getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE"); dbPath != "" {
 		cfg.DBPath = dbPath
 	}
-	if attachDir := os.Getenv("TODO_ATTACH_DIR"); attachDir != "" {
+	if attachDir := os.Getenv("WRKQ_ATTACH_DIR"); attachDir != "" {
 		cfg.AttachDir = attachDir
 	}
-	if logLevel := os.Getenv("TODO_LOG_LEVEL"); logLevel != "" {
+	if logLevel := os.Getenv("WRKQ_LOG_LEVEL"); logLevel != "" {
 		cfg.LogLevel = logLevel
 	}
-	if output := os.Getenv("TODO_OUTPUT"); output != "" {
+	if output := os.Getenv("WRKQ_OUTPUT"); output != "" {
 		cfg.Output = output
 	}
-	if pager := os.Getenv("TODO_PAGER"); pager != "" {
+	if pager := os.Getenv("WRKQ_PAGER"); pager != "" {
 		cfg.Pager = pager
 	}
-	if defaultActor := os.Getenv("TODO_ACTOR"); defaultActor != "" {
+	if defaultActor := os.Getenv("WRKQ_ACTOR"); defaultActor != "" {
 		cfg.DefaultActor = defaultActor
 	}
 
@@ -65,7 +65,7 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get home directory: %w", err)
 		}
-		cfg.DBPath = filepath.Join(homeDir, ".local", "share", "todo", "todo.db")
+		cfg.DBPath = filepath.Join(homeDir, ".local", "share", "wrkq", "wrkq.db")
 	}
 
 	if cfg.AttachDir == "" {
@@ -73,20 +73,20 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get home directory: %w", err)
 		}
-		cfg.AttachDir = filepath.Join(homeDir, ".local", "share", "todo", "attachments")
+		cfg.AttachDir = filepath.Join(homeDir, ".local", "share", "wrkq", "attachments")
 	}
 
 	return cfg, nil
 }
 
-// loadYAMLConfig loads configuration from ~/.config/todo/config.yaml
+// loadYAMLConfig loads configuration from ~/.config/wrkq/config.yaml
 func loadYAMLConfig(cfg *Config) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 
-	configPath := filepath.Join(homeDir, ".config", "todo", "config.yaml")
+	configPath := filepath.Join(homeDir, ".config", "wrkq", "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -113,12 +113,12 @@ func getEnvOrFile(envVar, fileVar string) string {
 }
 
 // GetActorID returns the current actor ID from environment or config
-// Priority: TODO_ACTOR_ID > TODO_ACTOR > config.default_actor
+// Priority: WRKQ_ACTOR_ID > WRKQ_ACTOR > config.default_actor
 func (c *Config) GetActorID() string {
-	if actorID := os.Getenv("TODO_ACTOR_ID"); actorID != "" {
+	if actorID := os.Getenv("WRKQ_ACTOR_ID"); actorID != "" {
 		return actorID
 	}
-	if actor := os.Getenv("TODO_ACTOR"); actor != "" {
+	if actor := os.Getenv("WRKQ_ACTOR"); actor != "" {
 		return actor
 	}
 	return c.DefaultActor

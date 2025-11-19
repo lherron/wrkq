@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lherron/todo/internal/cli"
+	"github.com/lherron/wrkq/internal/cli"
 )
 
 func main() {

@@ -41,18 +41,18 @@ Below is a pragmatic, **MVP‑first milestone plan** that turns your spec into s
 - `internal/render`: table, JSON, NDJSON, YAML, TSV; `--columns`, `--porcelain` (stable keys, no ANSI), `-1`/`-0`.
 
 **CLI surface**
-- `todo init` (creates DB, WAL, runs migrations, seeds `inbox`, default actors; respects `--db`, `--actor-slug`, `--actor-name`, `--attach-dir`).
-- `todo whoami`, `todo actors ls`, `todo actor add`.
+- `wrkq init` (creates DB, WAL, runs migrations, seeds `inbox`, default actors; respects `--db`, `--actor-slug`, `--actor-name`, `--attach-dir`).
+- `wrkq whoami`, `wrkq actors ls`, `wrkq actor add`.
 - Navigation/metadata:
-  - `todo ls`, `todo stat`, `todo ids`, `todo resolve`.
+  - `wrkq ls`, `wrkq stat`, `wrkq ids`, `wrkq resolve`.
 - Structure & lifecycle:
-  - `todo mkdir`, `todo touch -t`, `todo mv`, `todo rm` (soft delete), `todo restore`.
+  - `wrkq mkdir`, `wrkq touch -t`, `wrkq mv`, `wrkq rm` (soft delete), `wrkq restore`.
 - Content read:
-  - `todo cat` (task only; container → usage error `2`).
+  - `wrkq cat` (task only; container → usage error `2`).
 - Mutations:
-  - `todo set key=value [...]` (state, priority, title, slug, labels, dates).
+  - `wrkq set key=value [...]` (state, priority, title, slug, labels, dates).
 - Plumbing:
-  - `todo version` (basic), `todo completion`, minimal `todo config doctor` stub that prints effective config.
+  - `wrkq version` (basic), `wrkq completion`, minimal `wrkq config doctor` stub that prints effective config.
 - Exit codes: `0,1,2,3,4,5` implemented and covered by tests where applicable.
 
 **Concurrency & audit**
@@ -65,8 +65,8 @@ Below is a pragmatic, **MVP‑first milestone plan** that turns your spec into s
 - Concurrency smoke: two writers, ETag conflict returns `4`.
 
 ### Acceptance criteria
-- Fresh repo: `todo init` → DB file exists, WAL active, `inbox` project seeded, default actors present.
-- `ls 'portal/**' -type t -1 | xargs -n1 todo cat` yields deterministic Markdown with front matter.
+- Fresh repo: `wrkq init` → DB file exists, WAL active, `inbox` project seeded, default actors present.
+- `ls 'portal/**' -type t -1 | xargs -n1 wrkq cat` yields deterministic Markdown with front matter.
 - `cat` on a container exits `2` with message “cat only supports tasks; got container …”.
 - ETag mismatch reliably returns `4` without partial writes.
 - `--json`, `--ndjson`, `--porcelain`, `-0` behave across `ls`, `stat`, `ids`, `resolve`.
@@ -74,16 +74,16 @@ Below is a pragmatic, **MVP‑first milestone plan** that turns your spec into s
 
 ### Demo script (happy path)
 ```sh
-todo init --db ~/.local/share/todo/todo.db --actor-slug lance --actor-name "Lance (human)"
-todo whoami
-todo mkdir portal/auth -p
-todo touch 'portal/auth/login-ux' -t "Login UX"
-todo ls 'portal/**' -type t --columns=id,path,slug,title -1
-todo set 'portal/auth/login-ux' priority=1 labels='["backend"]'
-todo cat 'portal/auth/login-ux'
-todo mv 'portal/auth/login-ux' 'portal/auth/login-experience' -type t
-todo rm 'portal/auth/login-experience' --yes
-todo restore 'portal/auth/login-experience'
+wrkq init --db ~/.local/share/wrkq/wrkq.db --actor-slug lance --actor-name "Lance (human)"
+wrkq whoami
+wrkq mkdir portal/auth -p
+wrkq touch 'portal/auth/login-ux' -t "Login UX"
+wrkq ls 'portal/**' -type t --columns=id,path,slug,title -1
+wrkq set 'portal/auth/login-ux' priority=1 labels='["backend"]'
+wrkq cat 'portal/auth/login-ux'
+wrkq mv 'portal/auth/login-ux' 'portal/auth/login-experience' -type t
+wrkq rm 'portal/auth/login-experience' --yes
+wrkq restore 'portal/auth/login-experience'
 ```
 
 ---
@@ -100,13 +100,13 @@ todo restore 'portal/auth/login-experience'
 - `internal/render` enhancements: `--sort`, richer `--fields` across commands.
 
 **CLI surface**
-- `todo edit <task>`: opens `$EDITOR`, applies on save via 3‑way merge; writes event with patch summary.
-- `todo apply [<task>] [-]`: accepts md/yaml/json; `--body-only`, `--format`, `--dry-run`, `--if-match`.
-- `todo log <path|id>`: oneline & detailed; `--since`, `--until`, `--oneline`, `--patch`.
-- `todo watch [PATH...] --since <cursor> --ndjson`: streams events.
-- `todo diff <A> [B]`: unified or JSON diff; supports task vs DB.
-- `todo tree [PATH...] -L <depth>`.
-- `todo find [PATH...]` with `-type`, `--slug-glob`, `--state`, `--due-before/after`, `--limit`, `--cursor`.
+- `wrkq edit <task>`: opens `$EDITOR`, applies on save via 3‑way merge; writes event with patch summary.
+- `wrkq apply [<task>] [-]`: accepts md/yaml/json; `--body-only`, `--format`, `--dry-run`, `--if-match`.
+- `wrkq log <path|id>`: oneline & detailed; `--since`, `--until`, `--oneline`, `--patch`.
+- `wrkq watch [PATH...] --since <cursor> --ndjson`: streams events.
+- `wrkq diff <A> [B]`: unified or JSON diff; supports task vs DB.
+- `wrkq tree [PATH...] -L <depth>`.
+- `wrkq find [PATH...]` with `-type`, `--slug-glob`, `--state`, `--due-before/after`, `--limit`, `--cursor`.
 
 **Performance**
 - Verify and document indices; micro-benchmarks for `find` and `ls` sorts.
@@ -119,11 +119,11 @@ todo restore 'portal/auth/login-experience'
 
 ### Demo script
 ```sh
-todo find 'portal/**' -type t --state open --slug-glob 'login-*' --json
-todo edit 'portal/auth/login-ux'   # make a change
-todo log 'portal/auth/login-ux' --oneline
-todo diff 'portal/auth/login-ux' --unified=3
-todo watch --since 0 --ndjson | head -n5
+wrkq find 'portal/**' -type t --state open --slug-glob 'login-*' --json
+wrkq edit 'portal/auth/login-ux'   # make a change
+wrkq log 'portal/auth/login-ux' --oneline
+wrkq diff 'portal/auth/login-ux' --unified=3
+wrkq watch --since 0 --ndjson | head -n5
 ```
 
 ---
@@ -140,17 +140,17 @@ todo watch --since 0 --ndjson | head -n5
 - Pagination/cursors: Opaque `--cursor` support on `ls`, `find`, `log`, `attachments ls`; `--limit`.
 
 **CLI surface**
-- `todo attach ls <task>`
-- `todo attach get <ATT-ID> [--as PATH|-]`
-- `todo attach put <task> <FILE|-> --mime <type> [--name <filename>]`
-- `todo attach rm <ATT-ID...>` (metadata + delete file; respects `--yes`).
-- `todo rm --purge` (hard delete rows + delete `attach_dir/tasks/<task_uuid>`).
-- `todo cp <SRC...> <DST>` with `--with-attachments|--shallow`.
+- `wrkq attach ls <task>`
+- `wrkq attach get <ATT-ID> [--as PATH|-]`
+- `wrkq attach put <task> <FILE|-> --mime <type> [--name <filename>]`
+- `wrkq attach rm <ATT-ID...>` (metadata + delete file; respects `--yes`).
+- `wrkq rm --purge` (hard delete rows + delete `attach_dir/tasks/<task_uuid>`).
+- `wrkq cp <SRC...> <DST>` with `--with-attachments|--shallow`.
 - Bulk & ops:
   - `--jobs N`, `--batch-size`, `--ordered`, `--continue-on-error`.
 - Housekeeping & packaging:
-  - `todo doctor` (pragmas, WAL, indices, attach_dir checks, attachment size limits).
-  - `todo version --json` (add `commit`, `build_date`, `machine_interface_version`, supported formats/commands).
+  - `wrkq doctor` (pragmas, WAL, indices, attach_dir checks, attachment size limits).
+  - `wrkq version --json` (add `commit`, `build_date`, `machine_interface_version`, supported formats/commands).
   - `install.sh`, completions for bash/zsh/fish.
   - GoReleaser config: darwin/linux/windows, amd64/arm64, checksums + SBOM.
 
@@ -162,16 +162,16 @@ todo watch --since 0 --ndjson | head -n5
 
 ### Demo script
 ```sh
-todo attach put 'portal/auth/login-ux' ./specs/login-flow.pdf --mime application/pdf --name "Login Flow Spec"
-todo attach ls 'portal/auth/login-ux' --json
-todo attach get ATT-00001 --as ./out/login-flow.pdf
-todo rm 'portal/auth/login-ux' --yes
-todo rm 'portal/auth/login-ux' --purge --yes
+wrkq attach put 'portal/auth/login-ux' ./specs/login-flow.pdf --mime application/pdf --name "Login Flow Spec"
+wrkq attach ls 'portal/auth/login-ux' --json
+wrkq attach get ATT-00001 --as ./out/login-flow.pdf
+wrkq rm 'portal/auth/login-ux' --yes
+wrkq rm 'portal/auth/login-ux' --purge --yes
 ```
 
 ---
 
-## M3 — API‑ready Contracts + Comments
+## M3 — DEFERRED, DO NOT IMPLEMENT YET:API‑ready Contracts + Comments
 
 ### Deliverables
 
@@ -189,9 +189,9 @@ todo rm 'portal/auth/login-ux' --purge --yes
   - Request/response examples (JSON + NDJSON for streams), pagination cursors, ETag via `If-Match`.
 
 **CLI surface**
-- `todo comment add <task> -` (stdin) or `--body`
-- `todo comment ls <task> --json|--ndjson`
-- `todo comment rm <comment-id> --yes`
+- `wrkq comment add <task> -` (stdin) or `--body`
+- `wrkq comment ls <task> --json|--ndjson`
+- `wrkq comment rm <comment-id> --yes`
 
 **Docs**
 - “Browser UI enablers” guide: mapping CLI porcelain ↔ HTTP JSON; streaming (`watch`) over SSE or chunked NDJSON.
@@ -203,20 +203,20 @@ todo rm 'portal/auth/login-ux' --purge --yes
 
 ### Demo script
 ```sh
-echo "We should add MFA to login." | todo comment add 'portal/auth/login-ux' -
-todo comment ls 'portal/auth/login-ux' --ndjson
-todo cat 'portal/auth/login-ux' --include-comments
-todo version --json | jq .machine_interface_version
+echo "We should add MFA to login." | wrkq comment add 'portal/auth/login-ux' -
+wrkq comment ls 'portal/auth/login-ux' --ndjson
+wrkq cat 'portal/auth/login-ux' --include-comments
+wrkq version --json | jq .machine_interface_version
 ```
 
 ---
 
 ## M4 — Stretch (optional)
 
-- SQLite FTS virtual table for tasks/comments bodies; scaffold `todo rg` (hidden/experimental).
-- `todo diff --json` emits structured hunks suitable for UI patch views.
+- SQLite FTS virtual table for tasks/comments bodies; scaffold `wrkq rg` (hidden/experimental).
+- `wrkq diff --json` emits structured hunks suitable for UI patch views.
 - Minimal Node or Go HTTP server stub implementing the spec (single‑binary dev server).
-- Additional `todo doctor` checks (VACUUM/ANALYZE guidance, WAL checkpoints).
+- Additional `wrkq doctor` checks (VACUUM/ANALYZE guidance, WAL checkpoints).
 
 ---
 
@@ -245,7 +245,7 @@ todo version --json | jq .machine_interface_version
 
 ## “Definition of Done” (overall)
 
-- `todo version --json` exposes `machine_interface_version: 1`.
+- `wrkq version --json` exposes `machine_interface_version: 1`.
 - All commands listed for a milestone have:
   - Stable `--porcelain` shape + documented fields.
   - `--json`/`--ndjson` parity where applicable.

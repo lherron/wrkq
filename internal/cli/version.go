@@ -47,7 +47,7 @@ func runVersion(cmd *cobra.Command, args []string) error {
 		return encoder.Encode(output)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "todo version %s\n", Version)
+	fmt.Fprintf(cmd.OutOrStdout(), "wrkq version %s\n", Version)
 	fmt.Fprintf(cmd.OutOrStdout(), "  commit: %s\n", GitCommit)
 	fmt.Fprintf(cmd.OutOrStdout(), "  built:  %s\n", BuildDate)
 

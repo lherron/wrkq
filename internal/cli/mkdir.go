@@ -3,12 +3,12 @@ package cli
 import (
 	"fmt"
 
-	"github.com/lherron/todo/internal/actors"
-	"github.com/lherron/todo/internal/config"
-	"github.com/lherron/todo/internal/db"
-	"github.com/lherron/todo/internal/domain"
-	"github.com/lherron/todo/internal/events"
-	"github.com/lherron/todo/internal/paths"
+	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/spf13/cobra"
 )
 

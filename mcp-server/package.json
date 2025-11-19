@@ -1,0 +1,22 @@
+{
+  "name": "wrkq-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for wrkq task management",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wrkq-mcp-server": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

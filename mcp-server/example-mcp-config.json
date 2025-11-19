@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "wrkq": {
+      "command": "node",
+      "args": ["/absolute/path/to/wrkq/mcp-server/dist/index.js"],
+      "env": {
+        "WRKQ_DB_PATH": "/path/to/your/wrkq.db",
+        "WRKQ_ACTOR": "claude-assistant"
+      }
+    }
+  }
+}

@@ -43,11 +43,11 @@ db-reset:
 
 # Build the CLI binary
 cli-build:
-  go build -o bin/todo ./cmd/todo
+  go build -o bin/wrkq ./cmd/wrkq
 
 # Run the CLI
 cli-run *args:
-  go run ./cmd/todo {{args}}
+  go run ./cmd/wrkq {{args}}
 
 # Run CLI tests
 cli-test:
@@ -60,53 +60,53 @@ cli-test-coverage:
 
 # Install CLI binary to $GOPATH/bin
 cli-install:
-  go install ./cmd/todo
+  go install ./cmd/wrkq
 
 # Install CLI binary to ~/.local/bin (no sudo required)
 install:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building todo binary..."
-  go build -o bin/todo ./cmd/todo
-  echo "Installing to ~/.local/bin/todo..."
+  echo "Building wrkq binary..."
+  go build -o bin/wrkq ./cmd/wrkq
+  echo "Installing to ~/.local/bin/wrkq..."
   mkdir -p ~/.local/bin
-  cp bin/todo ~/.local/bin/todo
-  chmod +x ~/.local/bin/todo
-  echo "✓ Installed to ~/.local/bin/todo"
+  cp bin/wrkq ~/.local/bin/wrkq
+  chmod +x ~/.local/bin/wrkq
+  echo "✓ Installed to ~/.local/bin/wrkq"
   echo ""
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "⚠️  Add ~/.local/bin to your PATH:"
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
   fi
-  echo "✓ Run 'todo --version' to verify"
+  echo "✓ Run 'wrkq --version' to verify"
 
 # Install CLI binary to /usr/local/bin (requires sudo - run manually)
 install-system:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building todo binary..."
-  go build -o bin/todo ./cmd/todo
-  echo "Installing to /usr/local/bin/todo (requires sudo)..."
-  sudo cp bin/todo /usr/local/bin/todo
-  sudo chmod +x /usr/local/bin/todo
-  echo "✓ Installed to /usr/local/bin/todo"
-  echo "✓ Run 'todo --version' to verify"
+  echo "Building wrkq binary..."
+  go build -o bin/wrkq ./cmd/wrkq
+  echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
+  sudo cp bin/wrkq /usr/local/bin/wrkq
+  sudo chmod +x /usr/local/bin/wrkq
+  echo "✓ Installed to /usr/local/bin/wrkq"
+  echo "✓ Run 'wrkq --version' to verify"
 
 # Uninstall CLI binary from ~/.local/bin
 uninstall:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [ -f ~/.local/bin/todo ]; then
-    echo "Removing ~/.local/bin/todo..."
-    rm ~/.local/bin/todo
-    echo "✓ Uninstalled from ~/.local/bin/todo"
-  elif [ -f /usr/local/bin/todo ]; then
-    echo "Removing /usr/local/bin/todo (requires sudo)..."
-    sudo rm /usr/local/bin/todo
-    echo "✓ Uninstalled from /usr/local/bin/todo"
+  if [ -f ~/.local/bin/wrkq ]; then
+    echo "Removing ~/.local/bin/wrkq..."
+    rm ~/.local/bin/wrkq
+    echo "✓ Uninstalled from ~/.local/bin/wrkq"
+  elif [ -f /usr/local/bin/wrkq ]; then
+    echo "Removing /usr/local/bin/wrkq (requires sudo)..."
+    sudo rm /usr/local/bin/wrkq
+    echo "✓ Uninstalled from /usr/local/bin/wrkq"
   else
-    echo "todo is not installed"
+    echo "wrkq is not installed"
   fi
 
 # Format CLI code
@@ -129,7 +129,7 @@ build:
 
 # Run development servers (web + api)
 dev:
-  pnpm --parallel --filter @todo/web --filter @todo/api dev
+  pnpm --parallel --filter @wrkq/web --filter @wrkq/api dev
 
 # Type check all TypeScript code
 check:

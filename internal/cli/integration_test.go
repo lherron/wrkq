@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lherron/todo/internal/db"
+	"github.com/lherron/wrkq/internal/db"
 )
 
 // setupTestEnv creates a test database and returns it with cleanup

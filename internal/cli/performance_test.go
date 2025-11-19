@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lherron/todo/internal/db"
+	"github.com/lherron/wrkq/internal/db"
 )
 
 // TestPerformance_List5kTasks tests that listing 5000 tasks completes under 200ms p95

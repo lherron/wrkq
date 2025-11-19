@@ -51,7 +51,7 @@ Views
 > Drop this file under `./db/migrations/0001_init.sql`. Your migrator can run it inside a single transaction. It’s idempotent on re‑apply.
 
 ```sql
--- 0001_init.sql — todo CLI (Go + SQLite)
+-- 0001_init.sql — wrkq CLI (Go + SQLite)
 -- Canonical schema. Apply inside one transaction.
 
 -- -----------------------------
@@ -415,7 +415,7 @@ SELECT t.uuid,
 
 ---
 
-## Suggested `todo init` SQL (executed by the CLI)
+## Suggested `wrkq init` SQL (executed by the CLI)
 
 After connecting:
 

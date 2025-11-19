@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lherron/todo/internal/domain"
+	"github.com/lherron/wrkq/internal/domain"
 )
 
 // TestConcurrentWrites tests that concurrent writes detect ETag conflicts

@@ -14,6 +14,7 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+.mcp.json
 *.swp
 *.swo
 *~
@@ -86,7 +87,7 @@ playwright/.auth/
 
 # Binaries
 cli/bin/
-cli/todo
+cli/wrkq
 *.exe
 *.exe~
 *.dll

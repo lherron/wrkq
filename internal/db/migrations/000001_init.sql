@@ -1,4 +1,4 @@
--- 0001_init.sql — todo CLI (Go + SQLite)
+-- 0001_init.sql — wrkq CLI (Go + SQLite)
 -- Canonical schema. Apply inside one transaction.
 
 -- -----------------------------

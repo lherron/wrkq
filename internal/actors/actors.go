@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lherron/todo/internal/domain"
-	"github.com/lherron/todo/internal/id"
+	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/id"
 )
 
 // parseTime parses a timestamp string into time.Time

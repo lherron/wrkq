@@ -1,4 +1,4 @@
-# todo CLI - Informal PRD (Go + SQLite)
+# wrkq CLI - Informal PRD (Go + SQLite)
 
 Filesystem-flavored CLI for managing projects, subprojects, and tasks on a SQLite backend. The tool feels like Unix utilities (`ls`, `cat`, `mv`, `rm`, `tree`, `touch`, `mkdir`) and is pipe-friendly.
 
@@ -36,7 +36,7 @@ Non-goals (for now)
 
 Repo layout
 ```text
-cmd/todo           cobra root and subcommands
+cmd/wrkq           cobra root and subcommands
 internal/cli       command wiring, flags, args
 internal/config    env + .env.local + ~/.config/todo
 internal/db        SQLite handle, migrations runner (reads db/migrations)
@@ -108,10 +108,10 @@ Fields
 
 1. `--as <actor>` CLI flag  
    - Accepts actor slug (e.g. `lance`) **or** friendly ID (e.g. `A-00001`).
-2. `TODO_ACTOR_ID` env (friendly ID, e.g. `A-00001`).
-3. `TODO_ACTOR` env (actor slug, e.g. `lance` or `agent-codex`).
-4. `default_actor` in `~/.config/todo/config.yaml` or current context.
-5. Fallback to a seeded default human actor created by `todo init` (e.g. `local-human`).
+2. `WRKQ_ACTOR_ID` env (friendly ID, e.g. `A-00001`).
+3. `WRKQ_ACTOR` env (actor slug, e.g. `lance` or `agent-codex`).
+4. `default_actor` in `~/.config/wrkq/config.yaml` or current context.
+5. Fallback to a seeded default human actor created by `wrkq init` (e.g. `local-human`).
 
 If resolution fails, mutating commands should exit with a usage error (code 2).
 
@@ -197,7 +197,7 @@ Fields (conceptual)
 - `etag` (resulting etag after change, if applicable)
 - `payload` (JSON diff or structured fields)
 
-`todo log` and `todo watch` are views onto this table.
+`wrkq log` and `wrkq watch` are views onto this table.
 
 ### 4.7 Constraints Summary
 
@@ -234,8 +234,8 @@ Resource references accepted by all commands:
 
 - Supported patterns: `*`, `?`, `**`. Implemented inside the CLI; users should quote patterns to avoid shell expansion.
 - Examples:
-  - `todo ls 'portal/**/login-*' -type t`
-  - `todo mv 'portal/**/login-*' 'portal/auth' -type t`
+  - `wrkq ls 'portal/**/login-*' -type t`
+  - `wrkq mv 'portal/**/login-*' 'portal/auth' -type t`
 
 ### Disambiguation
 
@@ -314,7 +314,7 @@ Exit codes
 
 ## 8. Task Document Format (cat/apply/edit)
 
-Default `todo cat` output for tasks is Markdown with YAML front matter:
+Default `wrkq cat` output for tasks is Markdown with YAML front matter:
 
 ```markdown
 ---
@@ -345,7 +345,7 @@ Options
 - `--raw-body` prints body without front matter boundaries.
 - `--include-comments` appends comments as quoted blocks after the body.
 
-`todo apply` accepts:
+`wrkq apply` accepts:
 
 - Markdown with front matter.
 - YAML.
@@ -370,7 +370,7 @@ Options
 
 ### 9.2 Initialization
 
-- `todo init [--db <path>] [--actor-slug <slug>] [--actor-name <display>] [--attach-dir <path>]`
+- `wrkq init [--db <path>] [--actor-slug <slug>] [--actor-name <display>] [--attach-dir <path>]`
 
 Behavior
 - If DB does **not** exist:
@@ -397,26 +397,26 @@ Output
 
 ### 9.3 Navigation and Metadata
 
-- `todo ls [PATHSPEC...]`
+- `wrkq ls [PATHSPEC...]`
   - List containers and tasks.
   - Flags: `-l`, `-R`, `-a` (include archived),  
     `--fields`, `--sort`,  
     `--json|--ndjson|--yaml|--tsv`, `-1`, `-0`,  
     `-type p|s|t`, `--limit`, `--cursor`, `--porcelain`.
 
-- `todo tree [PATHSPEC...]`
+- `wrkq tree [PATHSPEC...]`
   - Pretty tree of containers and tasks.
   - Flags: `-a`, `-L <depth>`, `--fields`, `--porcelain`.
 
-- `todo stat <PATHSPEC|ID...>`
+- `wrkq stat <PATHSPEC|ID...>`
   - Print metadata only (machine friendly).
   - Flags: `--json`, `--fields`, `-0`, `--porcelain`.
 
-- `todo ids [PATHSPEC...]`
+- `wrkq ids [PATHSPEC...]`
   - Print canonical IDs only.
   - Flags: `-0`, `-type`.
 
-- `todo resolve <QUERY...>`
+- `wrkq resolve <QUERY...>`
   - Resolve fuzzy names to canonical IDs and paths.
   - Flags: `--json`, `--ids`, `-0`.
 
@@ -424,22 +424,22 @@ Output
 
 ### 9.4 Content
 
-- `todo cat <PATHSPEC|ID...>`
+- `wrkq cat <PATHSPEC|ID...>`
   - Print tasks as markdown with front matter (default).
   - If argument resolves to a **container**, this is a usage error:
     - Exit code: `2`.
     - Error message: “cat only supports tasks; got container `<path>`”.
   - Flags: `--no-frontmatter`, `--raw-body`, `--include-comments`.
 
-- `todo edit <PATHSPEC|ID>`
+- `wrkq edit <PATHSPEC|ID>`
   - Open in `$EDITOR`; save triggers 3-way merge and `--if-match` check.
   - Uses current actor for attribution.
 
-- `todo apply [<PATHSPEC|ID>] [-]`
+- `wrkq apply [<PATHSPEC|ID>] [-]`
   - Apply full task doc from file or stdin.
   - Flags: `--format=md|yaml|json`, `--body-only`, `--if-match`, `--dry-run`.
 
-- `todo set <PATHSPEC|ID...> key=value [...]`
+- `wrkq set <PATHSPEC|ID...> key=value [...]`
   - Mutate task fields quickly:
     - `state=completed`
     - `priority=1`
@@ -451,17 +451,17 @@ Output
 
 ### 9.5 Structure and Lifecycle
 
-- `todo mkdir <PATH...>`
+- `wrkq mkdir <PATH...>`
   - Create projects/subprojects (containers).
   - Last segment is treated as container slug and normalized.
   - Flags: `-p` (parents), `--meta key=val`.
 
-- `todo touch <PATH...> [-t "Title"]`
+- `wrkq touch <PATH...> [-t "Title"]`
   - Create tasks at leaf containers.
   - Last segment becomes task slug, normalized to lower-case `[a-z0-9-]`.
   - Flags: `--meta key=val`.
 
-- `todo mv <SRC...> <DST>`
+- `wrkq mv <SRC...> <DST>`
   - Move or rename tasks and containers. Globbing is default.
   - Rules:
     - Multiple sources -> DST must be an existing container; sources move into DST.
@@ -471,11 +471,11 @@ Output
       - If DST is an existing task: error unless `--overwrite-task`.
   - Flags: `-type t`, `--if-match`, `--dry-run`, `--yes`, `--nullglob`, `--overwrite-task`.
 
-- `todo cp <SRC...> <DST>`  (optional, but spec’d)
+- `wrkq cp <SRC...> <DST>`  (optional, but spec’d)
   - Duplicate tasks (and optionally attachments).
   - Flags: `-r`, `--with-attachments`, `--shallow`, `--dry-run`, `--yes`.
 
-- `todo rm <PATHSPEC|ID...>`
+- `wrkq rm <PATHSPEC|ID...>`
   - Archive or hard delete.
   - Defaults:
     - Soft delete: set `archived_at`, log event.
@@ -488,14 +488,14 @@ Output
       - Hard delete rows.
       - Delete attachment directory `attach_dir/tasks/<task_uuid>`.
 
-- `todo restore <PATHSPEC|ID...>`
+- `wrkq restore <PATHSPEC|ID...>`
   - Unarchive archived nodes (containers and tasks).
 
 ---
 
 ### 9.6 Search and Discovery
 
-- `todo find [PATH...]`
+- `wrkq find [PATH...]`
   - Simple metadata search (present).
   - Flags:
     - `-type p|s|t`
@@ -505,7 +505,7 @@ Output
     - `--print0`
     - `--limit`, `--cursor`, `--porcelain`
 
-- `todo rg <pattern> [PATHSPEC...]` (Future enhancement)
+- `wrkq rg <pattern> [PATHSPEC...]` (Future enhancement)
   - Not required for initial implementation.
   - Intended behavior (for future compatibility):
     - Content search across task bodies and optionally comments.
@@ -519,7 +519,7 @@ Output
 
 ### 9.7 History, Diff, Streaming
 
-- `todo log <PATHSPEC|ID>`
+- `wrkq log <PATHSPEC|ID>`
   - Show change history from the event log.
   - Each entry:
     - timestamp
@@ -530,11 +530,11 @@ Output
     - short payload summary
   - Flags: `--since`, `--until`, `--oneline`, `--patch`.
 
-- `todo diff <A> [B]`
+- `wrkq diff <A> [B]`
   - Compare two tasks, or working copy vs DB.
   - Flags: `--unified=3`, `--json`.
 
-- `todo watch [PATH...]`
+- `wrkq watch [PATH...]`
   - Stream change events from the event log.
   - Flags: `--since <cursor>`, `--ndjson`.
 
@@ -542,21 +542,21 @@ Output
 
 ### 9.8 Attachments
 
-- `todo attach ls <PATHSPEC|ID>`
+- `wrkq attach ls <PATHSPEC|ID>`
   - List attachments for a task.
   - Output: `id`, `filename`, `relative_path`, `size_bytes`, `mime_type`.
 
-- `todo attach get <ATTACHMENT-ID> [--as <path>]`
+- `wrkq attach get <ATTACHMENT-ID> [--as <path>]`
   - Copy the referenced file from `attach_dir` to the given path or stdout (`-`).
 
-- `todo attach put <PATHSPEC|ID> <FILE|-> --mime <type> [--name <filename>]`
+- `wrkq attach put <PATHSPEC|ID> <FILE|-> --mime <type> [--name <filename>]`
   - Attach a file to a task.
   - Implementation:
     - Use canonical directory `attach_dir/tasks/<task_uuid>/`.
     - Copy file into that directory.
     - Record metadata and `relative_path`.
 
-- `todo attach rm <ATTACHMENT-ID...>`
+- `wrkq attach rm <ATTACHMENT-ID...>`
   - Remove attachment metadata and delete corresponding file.
   - Does **not** affect the rest of the task.
 
@@ -564,14 +564,14 @@ Output
 
 ### 9.9 Actor Management
 
-- `todo whoami`
+- `wrkq whoami`
   - Prints the current actor (slug, friendly id, role) and DB path.
 
-- `todo actors ls`
+- `wrkq actors ls`
   - List all actors.
   - Flags: `--json`, `--ndjson`, `--fields`, `--porcelain`.
 
-- `todo actor add <slug> [--name <display>] [--role human|agent|system]`
+- `wrkq actor add <slug> [--name <display>] [--role human|agent|system]`
   - Create a new actor (primarily for registering agents).
   - Enforce slug normalization rules.
 
@@ -579,11 +579,11 @@ Output
 
 ### 9.10 Housekeeping & Misc
 
-- `todo doctor`
+- `wrkq doctor`
   - Checks DB (pragmas, WAL), migrations, config, `attach_dir`, attachment limits.
   - Prints remediation suggestions.
 
-- `todo version`
+- `wrkq version`
   - Prints version information and build metadata.
   - `--json` includes:
     - `version`
@@ -592,10 +592,10 @@ Output
     - `machine_interface_version`
     - list of supported commands and formats.
 
-- `todo completion bash|zsh|fish`
+- `wrkq completion bash|zsh|fish`
   - Emits completion scripts.
 
-- `todo config doctor`
+- `wrkq config doctor`
   - Prints effective configuration and source.
 
 -------------------------------------------------------------------------------
@@ -606,36 +606,36 @@ Precedence
 1. Flags
 2. Environment variables
 3. `./.env.local` (dotenv)
-4. `~/.config/todo/config.yaml` (YAML)
+4. `~/.config/wrkq/config.yaml` (YAML)
 
 Env vars
-- `TODO_DB_PATH` (path to SQLite DB file)
-- `TODO_DB_PATH_FILE` (file containing path)
-- `TODO_LOG_LEVEL`
-- `TODO_OUTPUT` (`table|json`)
-- `TODO_PAGER`
-- `TODO_ATTACHMENTS_MAX_MB`
-- `TODO_ATTACH_DIR` (base directory for attachments)
-- `TODO_ACTOR` (actor slug)
-- `TODO_ACTOR_ID` (friendly actor ID, e.g. `A-00001`)
+- `WRKQ_DB_PATH` (path to SQLite DB file)
+- `WRKQ_DB_PATH_FILE` (file containing path)
+- `WRKQ_LOG_LEVEL`
+- `WRKQ_OUTPUT` (`table|json`)
+- `WRKQ_PAGER`
+- `WRKQ_ATTACHMENTS_MAX_MB`
+- `WRKQ_ATTACH_DIR` (base directory for attachments)
+- `WRKQ_ACTOR` (actor slug)
+- `WRKQ_ACTOR_ID` (friendly actor ID, e.g. `A-00001`)
 
 YAML example
 ```yaml
-db_path: /home/user/.local/share/todo/todo.db
-attach_dir: /home/user/.local/share/todo/attachments
+db_path: /home/user/.local/share/wrkq/wrkq.db
+attach_dir: /home/user/.local/share/wrkq/attachments
 attachments_max_mb: 50
 
 default_actor: lance
 contexts:
   local:
-    db_path: /home/user/.local/share/todo/todo.db
+    db_path: /home/user/.local/share/wrkq/wrkq.db
     default_actor: lance
   stage:
     db_path: /home/user/projects/todo-stage.db
     default_actor: agent-stage
 ```
 
-`todo config doctor` shows effective values and their sources.
+`wrkq config doctor` shows effective values and their sources.
 
 -------------------------------------------------------------------------------
 
@@ -690,61 +690,61 @@ Target scale
 List, pipe, preview
 ```sh
 # Open tasks under portal, print one per line, cat them
-todo ls 'portal/**' -type t -1 | xargs -n1 todo cat | less
+wrkq ls 'portal/**' -type t -1 | xargs -n1 wrkq cat | less
 ```
 
 Bulk priority change
 ```sh
-todo ls 'portal/**' -type t --json \
+wrkq ls 'portal/**' -type t --json \
 | jq -r '.[] | select(.state=="open" and .due <= "2025-12-01") | .id' \
-| xargs -n50 todo set priority=1
+| xargs -n50 wrkq set priority=1
 ```
 
 Edit via sed as an agent
 ```sh
-# Example pipeline; 'rg' here is hypothetical until todo rg is implemented
-todo find 'customer-portal/**' -type t --slug-glob '*oauth*' --json \
+# Example pipeline; 'rg' here is hypothetical until wrkq rg is implemented
+wrkq find 'customer-portal/**' -type t --slug-glob '*oauth*' --json \
 | jq -r '.[].id' \
 | xargs -n1 -I{} sh -c '
-  etag=$(todo stat {} --json | jq -r .etag);
-  todo cat {} --raw-body \
+  etag=$(wrkq stat {} --json | jq -r .etag);
+  wrkq cat {} --raw-body \
   | sed "s/2fa/mfa/g" \
-  | todo apply {} - --body-only --if-match "$etag" --as agent-codex
+  | wrkq apply {} - --body-only --if-match "$etag" --as agent-codex
 '
 ```
 
 Move with globbing
 ```sh
 # Move all login-* tasks into auth subproject
-todo mv 'portal/**/login-*' 'portal/auth' -type t --dry-run
-todo mv 'portal/**/login-*' 'portal/auth' -type t --yes
+wrkq mv 'portal/**/login-*' 'portal/auth' -type t --dry-run
+wrkq mv 'portal/**/login-*' 'portal/auth' -type t --yes
 ```
 
 Initialize DB and actors
 ```sh
-todo init --db ~/.local/share/todo/todo.db \
+wrkq init --db ~/.local/share/wrkq/wrkq.db \
   --actor-slug lance \
   --actor-name "Lance (human)" \
-  --attach-dir ~/.local/share/todo/attachments
+  --attach-dir ~/.local/share/wrkq/attachments
 
-todo whoami
-todo actors ls
+wrkq whoami
+wrkq actors ls
 ```
 
 Attachments
 ```sh
-todo attach put 'portal/auth/login-ux' ./specs/login-flow.pdf \
+wrkq attach put 'portal/auth/login-ux' ./specs/login-flow.pdf \
   --mime application/pdf --name "Login Flow Spec"
 
-todo attach ls 'portal/auth/login-ux'
-todo attach get ATT-00012 --as ./out/login-flow.pdf
+wrkq attach ls 'portal/auth/login-ux'
+wrkq attach get ATT-00012 --as ./out/login-flow.pdf
 ```
 
 -------------------------------------------------------------------------------
 
 ## 15. Security and Privacy
 
-- Local configuration may include DB paths and actor slugs; support reading DB path from `TODO_DB_PATH_FILE`.
+- Local configuration may include DB paths and actor slugs; support reading DB path from `WRKQ_DB_PATH_FILE`.
 - Attachments live under `attach_dir`; DB stores only relative paths and metadata.
 - No network calls beyond local SQLite file I/O (and any external tools users explicitly invoke).
 - No telemetry in default build.
@@ -760,4 +760,4 @@ todo attach get ATT-00012 --as ./out/login-flow.pdf
 - **Exit codes** are stable.
 - **Path semantics** and normalized slug rules are stable.
 - **Actor resolution precedence** (`--as`, env, config, default) is stable once defined.
-- `machine_interface_version` (from `todo version --json`) increments only on breaking changes.
+- `machine_interface_version` (from `wrkq version --json`) increments only on breaking changes.

@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lherron/todo/internal/actors"
-	"github.com/lherron/todo/internal/config"
-	"github.com/lherron/todo/internal/db"
-	"github.com/lherron/todo/internal/paths"
+	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/spf13/cobra"
 )
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize the todo database and configuration",
+	Short: "Initialize the wrkq database and configuration",
 	Long: `Initialize creates the SQLite database, runs migrations, creates the
 attachment directory, and seeds a default actor and inbox project.`,
 	RunE: runInit,

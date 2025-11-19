@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lherron/todo/internal/domain"
+	"github.com/lherron/wrkq/internal/domain"
 )
 
 // Writer handles writing events to the event log

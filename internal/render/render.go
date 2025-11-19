@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -168,4 +169,82 @@ func (r *Renderer) renderTableSeparator(widths []int) {
 		}
 	}
 	fmt.Fprintln(r.writer)
+}
+
+// Package-level helper functions for simple rendering
+
+// RenderJSON renders data as pretty JSON to stdout
+func RenderJSON(data interface{}, compact bool) error {
+	encoder := json.NewEncoder(os.Stdout)
+	if !compact {
+		encoder.SetIndent("", "  ")
+	}
+	return encoder.Encode(data)
+}
+
+// RenderNDJSON renders items as newline-delimited JSON to stdout
+func RenderNDJSON(items interface{}) error {
+	encoder := json.NewEncoder(os.Stdout)
+
+	// Handle slice types
+	switch v := items.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if err := encoder.Encode(item); err != nil {
+				return err
+			}
+		}
+	default:
+		// Try to encode as a single item
+		return encoder.Encode(items)
+	}
+
+	return nil
+}
+
+// RenderNulSeparated renders items with NUL separators
+func RenderNulSeparated(items interface{}) error {
+	// Extract path or ID from items
+	type pathProvider interface {
+		GetPath() string
+	}
+
+	switch v := items.(type) {
+	case []interface{}:
+		for _, item := range v {
+			// Try to get path from item
+			if pp, ok := item.(pathProvider); ok {
+				fmt.Print(pp.GetPath())
+			} else {
+				// Fall back to JSON representation
+				b, _ := json.Marshal(item)
+				fmt.Print(string(b))
+			}
+			fmt.Print("\x00")
+		}
+	default:
+		b, err := json.Marshal(items)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(b))
+		fmt.Print("\x00")
+	}
+
+	return nil
+}
+
+// Extractor for getting field from struct
+type fieldExtractor func(interface{}) string
+
+// RenderTable renders a slice of structs as a table
+func RenderTable(items interface{}, porcelain bool) error {
+	// This is a generic table renderer
+	// For now, use JSON as fallback
+	b, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(b))
+	return nil
 }

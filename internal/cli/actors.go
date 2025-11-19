@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lherron/todo/internal/actors"
-	"github.com/lherron/todo/internal/config"
-	"github.com/lherron/todo/internal/db"
-	"github.com/lherron/todo/internal/paths"
-	"github.com/lherron/todo/internal/render"
+	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
