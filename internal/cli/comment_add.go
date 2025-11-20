@@ -18,12 +18,13 @@ import (
 )
 
 var commentAddCmd = &cobra.Command{
-	Use:   "add <task> [file|-]",
+	Use:   "add <task> [comment-text]",
 	Short: "Add a comment to a task",
 	Long: `Add a new comment to a task.
 Comment text can come from:
   - The -m/--message flag
-  - A file path
+  - A positional argument (comment text)
+  - A file path (use -f/--file)
   - stdin (use '-')
 
 Comments are immutable and attributed to the current actor.`,
@@ -33,6 +34,7 @@ Comments are immutable and attributed to the current actor.`,
 
 var (
 	commentAddMessage  string
+	commentAddFile     string
 	commentAddMeta     string
 	commentAddIfMatch  int64
 	commentAddDryRun   bool
@@ -43,6 +45,7 @@ func init() {
 	commentCmd.AddCommand(commentAddCmd)
 
 	commentAddCmd.Flags().StringVarP(&commentAddMessage, "message", "m", "", "Comment text")
+	commentAddCmd.Flags().StringVarP(&commentAddFile, "file", "f", "", "Read comment from file")
 	commentAddCmd.Flags().StringVar(&commentAddMeta, "meta", "", "JSON metadata for agents/tools")
 	commentAddCmd.Flags().Int64Var(&commentAddIfMatch, "if-match", 0, "Only add if task etag matches (0 = skip check)")
 	commentAddCmd.Flags().BoolVar(&commentAddDryRun, "dry-run", false, "Preview without writing")
@@ -50,6 +53,16 @@ func init() {
 }
 
 func runCommentAdd(cmd *cobra.Command, args []string) error {
+	// Reset flag values after execution to prevent test contamination
+	defer func() {
+		commentAddMessage = ""
+		commentAddFile = ""
+		commentAddMeta = ""
+		commentAddIfMatch = 0
+		commentAddDryRun = false
+		commentAddAsActor = ""
+	}()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -77,12 +90,42 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Get comment body
+	// Get comment body - check for conflicting sources
+	// Read flag values directly from command to avoid stale package-level values
+	message, _ := cmd.Flags().GetString("message")
+	file, _ := cmd.Flags().GetString("file")
+
+	sourceCount := 0
+	if message != "" {
+		sourceCount++
+	}
+	if file != "" {
+		sourceCount++
+	}
+	if len(args) == 2 {
+		sourceCount++
+	}
+	if sourceCount > 1 {
+		return fmt.Errorf("only one comment source allowed: use -m, -f, positional argument, or stdin ('-')")
+	}
+
+	// Update package variables with fresh values
+	commentAddMessage = message
+	commentAddFile = file
+
 	var body string
 	if commentAddMessage != "" {
+		// Use -m flag
 		body = commentAddMessage
+	} else if commentAddFile != "" {
+		// Read from file specified by -f flag
+		data, err := os.ReadFile(commentAddFile)
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", commentAddFile, err)
+		}
+		body = string(data)
 	} else if len(args) == 2 {
-		// Read from file or stdin
+		// Second positional argument
 		source := args[1]
 		if source == "-" {
 			// Read from stdin
@@ -92,15 +135,11 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 			}
 			body = string(data)
 		} else {
-			// Read from file
-			data, err := os.ReadFile(source)
-			if err != nil {
-				return fmt.Errorf("failed to read file %s: %w", source, err)
-			}
-			body = string(data)
+			// Treat as comment text directly
+			body = source
 		}
 	} else {
-		return fmt.Errorf("comment body required: use -m, provide a file, or use stdin with '-'")
+		return fmt.Errorf("comment body required: use -m, -f, provide comment text, or use stdin with '-'")
 	}
 
 	// Validate body

@@ -14,11 +14,13 @@ var treeCmd = &cobra.Command{
 	Short: "Display containers and tasks in a tree structure",
 	Long: `Display containers and tasks in a hierarchical tree structure.
 
+By default, completed and archived items are hidden. Use --all to show them.
+
 Examples:
-  todo tree                    # Show tree from root
+  todo tree                    # Show tree from root (hide completed/archived)
   todo tree portal             # Show tree under portal
   todo tree -L 2               # Limit depth to 2 levels
-  todo tree -a                 # Include archived items
+  todo tree -a                 # Include completed and archived items
 `,
 	RunE: runTree,
 }
@@ -34,7 +36,7 @@ func init() {
 	rootCmd.AddCommand(treeCmd)
 
 	treeCmd.Flags().IntVarP(&treeDepth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived items")
+	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include completed and archived items")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
 }
@@ -195,7 +197,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		taskArgs = append(taskArgs, *parentUUID)
 
 		if !includeArchived {
-			taskQuery += ` AND archived_at IS NULL`
+			taskQuery += ` AND archived_at IS NULL AND state != 'completed'`
 		}
 
 		taskQuery += ` ORDER BY slug`

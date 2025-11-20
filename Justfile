@@ -41,13 +41,26 @@ db-reset:
 
 # --- CLI tasks (Golang) ---
 
-# Build the CLI binary
+# Build both CLI binaries (wrkq and wrkqadm)
 cli-build:
   go build -o bin/wrkq ./cmd/wrkq
+  go build -o bin/wrkqadm ./cmd/wrkqadm
 
-# Run the CLI
+# Build wrkq binary only
+wrkq-build:
+  go build -o bin/wrkq ./cmd/wrkq
+
+# Build wrkqadm binary only
+wrkqadm-build:
+  go build -o bin/wrkqadm ./cmd/wrkqadm
+
+# Run the wrkq CLI
 cli-run *args:
   go run ./cmd/wrkq {{args}}
+
+# Run the wrkqadm CLI
+wrkqadm-run *args:
+  go run ./cmd/wrkqadm {{args}}
 
 # Run CLI tests
 cli-test:
@@ -62,24 +75,28 @@ cli-test-coverage:
 cli-install:
   go install ./cmd/wrkq
 
-# Install CLI binary to ~/.local/bin (no sudo required)
+# Install both CLI binaries to ~/.local/bin (no sudo required)
 install:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building wrkq binary..."
+  echo "Building wrkq and wrkqadm binaries..."
   go build -o bin/wrkq ./cmd/wrkq
-  echo "Installing to ~/.local/bin/wrkq..."
+  go build -o bin/wrkqadm ./cmd/wrkqadm
+  echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   cp bin/wrkq ~/.local/bin/wrkq
+  cp bin/wrkqadm ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkq
+  chmod +x ~/.local/bin/wrkqadm
   echo "✓ Installed to ~/.local/bin/wrkq"
+  echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo ""
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "⚠️  Add ~/.local/bin to your PATH:"
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
   fi
-  echo "✓ Run 'wrkq --version' to verify"
+  echo "✓ Run 'wrkq version' and 'wrkqadm version' to verify"
 
 # Install CLI binary to /usr/local/bin (requires sudo - run manually)
 install-system:
@@ -93,20 +110,37 @@ install-system:
   echo "✓ Installed to /usr/local/bin/wrkq"
   echo "✓ Run 'wrkq --version' to verify"
 
-# Uninstall CLI binary from ~/.local/bin
+# Uninstall both CLI binaries from ~/.local/bin
 uninstall:
   #!/usr/bin/env bash
   set -euo pipefail
+  UNINSTALLED=0
   if [ -f ~/.local/bin/wrkq ]; then
     echo "Removing ~/.local/bin/wrkq..."
     rm ~/.local/bin/wrkq
-    echo "✓ Uninstalled from ~/.local/bin/wrkq"
-  elif [ -f /usr/local/bin/wrkq ]; then
+    echo "✓ Uninstalled wrkq from ~/.local/bin"
+    UNINSTALLED=1
+  fi
+  if [ -f ~/.local/bin/wrkqadm ]; then
+    echo "Removing ~/.local/bin/wrkqadm..."
+    rm ~/.local/bin/wrkqadm
+    echo "✓ Uninstalled wrkqadm from ~/.local/bin"
+    UNINSTALLED=1
+  fi
+  if [ -f /usr/local/bin/wrkq ]; then
     echo "Removing /usr/local/bin/wrkq (requires sudo)..."
     sudo rm /usr/local/bin/wrkq
-    echo "✓ Uninstalled from /usr/local/bin/wrkq"
-  else
-    echo "wrkq is not installed"
+    echo "✓ Uninstalled wrkq from /usr/local/bin"
+    UNINSTALLED=1
+  fi
+  if [ -f /usr/local/bin/wrkqadm ]; then
+    echo "Removing /usr/local/bin/wrkqadm (requires sudo)..."
+    sudo rm /usr/local/bin/wrkqadm
+    echo "✓ Uninstalled wrkqadm from /usr/local/bin"
+    UNINSTALLED=1
+  fi
+  if [ $UNINSTALLED -eq 0 ]; then
+    echo "wrkq and wrkqadm are not installed"
   fi
 
 # Format CLI code

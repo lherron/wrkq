@@ -12,51 +12,51 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var actorsCmd = &cobra.Command{
+var actorsAdmCmd = &cobra.Command{
 	Use:   "actors",
 	Short: "Manage actors (users and agents)",
-	Long:  `Commands for listing and managing actors in the system.`,
+	Long:  `Administrative commands for listing and managing actors in the system. These operations should not be exposed to agents.`,
 }
 
-var actorsLsCmd = &cobra.Command{
+var actorsAdmLsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List all actors",
 	Long:  `Lists all actors (users and agents) in the system.`,
-	RunE:  runActorsList,
+	RunE:  runActorsAdmList,
 }
 
-var actorAddCmd = &cobra.Command{
+var actorAdmAddCmd = &cobra.Command{
 	Use:   "add <slug>",
 	Short: "Create a new actor",
 	Long:  `Creates a new actor with the given slug. The slug will be normalized to lowercase [a-z0-9-].`,
 	Args:  cobra.ExactArgs(1),
-	RunE:  runActorAdd,
+	RunE:  runActorAdmAdd,
 }
 
 var (
-	actorsLsJSON      bool
-	actorsLsNDJSON    bool
-	actorsLsPorcelain bool
-	actorAddName      string
-	actorAddRole      string
+	actorsAdmLsJSON      bool
+	actorsAdmLsNDJSON    bool
+	actorsAdmLsPorcelain bool
+	actorAdmAddName      string
+	actorAdmAddRole      string
 )
 
 func init() {
-	rootCmd.AddCommand(actorsCmd)
-	actorsCmd.AddCommand(actorsLsCmd)
-	actorsCmd.AddCommand(actorAddCmd)
+	rootAdmCmd.AddCommand(actorsAdmCmd)
+	actorsAdmCmd.AddCommand(actorsAdmLsCmd)
+	actorsAdmCmd.AddCommand(actorAdmAddCmd)
 
 	// actors ls flags
-	actorsLsCmd.Flags().BoolVar(&actorsLsJSON, "json", false, "Output as JSON")
-	actorsLsCmd.Flags().BoolVar(&actorsLsNDJSON, "ndjson", false, "Output as newline-delimited JSON")
-	actorsLsCmd.Flags().BoolVar(&actorsLsPorcelain, "porcelain", false, "Machine-readable output")
+	actorsAdmLsCmd.Flags().BoolVar(&actorsAdmLsJSON, "json", false, "Output as JSON")
+	actorsAdmLsCmd.Flags().BoolVar(&actorsAdmLsNDJSON, "ndjson", false, "Output as newline-delimited JSON")
+	actorsAdmLsCmd.Flags().BoolVar(&actorsAdmLsPorcelain, "porcelain", false, "Machine-readable output")
 
 	// actor add flags
-	actorAddCmd.Flags().StringVar(&actorAddName, "name", "", "Display name for the actor")
-	actorAddCmd.Flags().StringVar(&actorAddRole, "role", "human", "Actor role (human, agent, system)")
+	actorAdmAddCmd.Flags().StringVar(&actorAdmAddName, "name", "", "Display name for the actor")
+	actorAdmAddCmd.Flags().StringVar(&actorAdmAddRole, "role", "human", "Actor role (human, agent, system)")
 }
 
-func runActorsList(cmd *cobra.Command, args []string) error {
+func runActorsAdmList(cmd *cobra.Command, args []string) error {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -83,15 +83,15 @@ func runActorsList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Render output
-	if actorsLsJSON {
+	if actorsAdmLsJSON {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
-		if !actorsLsPorcelain {
+		if !actorsAdmLsPorcelain {
 			encoder.SetIndent("", "  ")
 		}
 		return encoder.Encode(actorList)
 	}
 
-	if actorsLsNDJSON {
+	if actorsAdmLsNDJSON {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		for _, actor := range actorList {
 			if err := encoder.Encode(actor); err != nil {
@@ -119,13 +119,13 @@ func runActorsList(cmd *cobra.Command, args []string) error {
 
 	r := render.NewRenderer(cmd.OutOrStdout(), render.Options{
 		Format:    render.FormatTable,
-		Porcelain: actorsLsPorcelain,
+		Porcelain: actorsAdmLsPorcelain,
 	})
 
 	return r.RenderTable(headers, rows)
 }
 
-func runActorAdd(cmd *cobra.Command, args []string) error {
+func runActorAdmAdd(cmd *cobra.Command, args []string) error {
 	slug := args[0]
 
 	// Normalize slug
@@ -135,7 +135,7 @@ func runActorAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate role
-	if actorAddRole != "human" && actorAddRole != "agent" && actorAddRole != "system" {
+	if actorAdmAddRole != "human" && actorAdmAddRole != "agent" && actorAdmAddRole != "system" {
 		return fmt.Errorf("invalid role: must be one of: human, agent, system")
 	}
 
@@ -159,7 +159,7 @@ func runActorAdd(cmd *cobra.Command, args []string) error {
 
 	// Create actor
 	resolver := actors.NewResolver(database.DB)
-	actor, err := resolver.Create(normalizedSlug, actorAddName, actorAddRole)
+	actor, err := resolver.Create(normalizedSlug, actorAdmAddName, actorAdmAddRole)
 	if err != nil {
 		return fmt.Errorf("failed to create actor: %w", err)
 	}

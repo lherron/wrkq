@@ -86,8 +86,10 @@ CREATE TABLE containers_new (
   updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT
 );
 
--- Step 9: Copy data from old table
-INSERT INTO containers_new SELECT * FROM containers;
+-- Step 9: Copy data from old table - EXPLICITLY MAP COLUMNS
+INSERT INTO containers_new (uuid, id, parent_uuid, slug, title, description, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
+SELECT uuid, id, parent_uuid, slug, COALESCE(title, slug), '', etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid
+FROM containers;
 
 -- Step 10: Drop old table
 DROP TABLE containers;

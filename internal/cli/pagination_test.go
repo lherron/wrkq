@@ -34,8 +34,8 @@ func TestPaginationIntegration(t *testing.T) {
 	}
 
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, id, slug, parent_uuid, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('container-uuid-1', 'P-00001', 'test-project', NULL, 1, datetime('now'), datetime('now'), 'actor-uuid-1', 'actor-uuid-1')
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('container-uuid-1', 'P-00001', 'test-project', 'Test Project', NULL, 1, datetime('now'), datetime('now'), 'actor-uuid-1', 'actor-uuid-1')
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create container: %v", err)

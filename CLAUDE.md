@@ -1,7 +1,8 @@
 # CLAUDE.md
 
+
 ## Temp files
-Temporary files in Bash tool calls should use /tmp/claude NOT /tmp
+Temporary files in Bash tool calls should use ./tmp (from project root) NOT /tmp
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -15,24 +16,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build
-just cli-build              # Build to ./bin/wrkq
-just install               # Install to ~/.local/bin/wrkq
+just cli-build              # Build wrkq to ./bin/wrkq
+just wrkqadm-build          # Build wrkqadm to ./bin/wrkqadm
+just install                # Install both binaries to ~/.local/bin/
 
 # Development
-just cli-run <args>        # Run without building (go run)
-just cli-fmt               # Format Go code
-just cli-lint              # Lint with golangci-lint
+just cli-run <args>         # Run wrkq without building (go run)
+just cli-fmt                # Format Go code
+just cli-lint               # Lint with golangci-lint
 
 # Testing
-just cli-test              # Run all tests
-just smoke                 # Quick smoke test (build + test)
-./test/smoke-m1.sh        # M1 feature smoke tests
+just cli-test               # Run all tests
+just smoke                  # Quick smoke test (build + test)
+./test/smoke-m1.sh          # M1 feature smoke tests
+./test/smoke-wrkqadm.sh     # wrkqadm smoke tests
 
 # Single test
 go test -v -run TestSomething ./internal/cli
 
 # Test with coverage
-just cli-test-coverage     # Generates coverage.html
+just cli-test-coverage      # Generates coverage.html
 ```
 
 ## Environment Configuration
@@ -230,6 +233,9 @@ See `M0-SUMMARY.md` and `M1-SUMMARY.md` for detailed implementation notes.
 ## Dogfooding: Using `wrkq` for its own development
 
 **This project uses itself for development tracking.** All M2+ development is tracked in the `wrkq` CLI itself, not TODO.md.
+Mark tasks as in_progress when you start a task and done when you complete it.
+When completing a task, add a wrkq comment.
+When you use the TodoWrite tool, reference the wrkq ID when one exists
 
 ### Updating Tasks via MCP
 
@@ -254,6 +260,8 @@ mcp__wrkq__wrkq_task_write(taskId="T-00024", taskBody="...")
 
 ### Initial Setup
 
+
+
 If the `todo/` project structure doesn't exist yet, run the migration:
 
 ```bash
@@ -270,10 +278,13 @@ This creates:
 
 **See what's next:**
 ```bash
-wrkq tree wrkq                           # Big picture
+wrkq tree wrkq                           # Big picture (hides completed/archived by default)
+wrkq tree wrkq --all                     # Show all tasks including completed/archived
 wrkq find --state open                   # All open tasks
 wrkq find 'wrkq/m2/**' --state open      # M2 tasks only
 ```
+
+**Note:** `wrkq tree` hides completed and archived items by default to keep the view focused on active work. Use the `--all` flag to see everything.
 
 **Start working on a task:**
 ```bash

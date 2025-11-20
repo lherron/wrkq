@@ -32,13 +32,34 @@ Non-goals (for now)
 
 -------------------------------------------------------------------------------
 
-## 2. Codebase Boundaries
+## 2. Binary Architecture
+
+The system ships as **two complementary binaries**:
+
+- **`wrkq`** - Agent + human collaboration surface
+  - Task/container/comment CRUD
+  - Content editing and search
+  - History and streaming
+  - Bundle creation (for PRs)
+  - Designed to be safe for agents to use in ephemeral environments
+
+- **`wrkqadm`** - Administrative + infrastructure surface
+  - Database lifecycle (init, snapshot)
+  - Actor management (create, list)
+  - Bundle application (merge PRs)
+  - Health checks and config introspection
+  - Operations that should NOT be exposed to agents
+
+This separation ensures agents get a focused, safe API while admins retain full control over database lifecycle and infrastructure concerns. See `WRKQADM.md` for detailed rationale.
+
+## 3. Codebase Boundaries
 
 Repo layout
 ```text
-cmd/wrkq           cobra root and subcommands
-internal/cli       command wiring, flags, args
-internal/config    env + .env.local + ~/.config/todo
+cmd/wrkq           wrkq binary - agent/collaboration commands
+cmd/wrkqadm        wrkqadm binary - admin/infra commands
+internal/cli       shared command implementations
+internal/config    env + .env.local + ~/.config/wrkq
 internal/db        SQLite handle, migrations runner (reads db/migrations)
 internal/domain    domain types, validation, etag helpers
 internal/id        friendly IDs, slug helpers
@@ -48,16 +69,17 @@ internal/edit      3-way merge for edit/apply
 internal/attach    attachment path resolution and IO
 internal/actors    actor resolution (human vs agent), current actor
 internal/events    event log write/read helpers
+internal/bundle    bundle create/apply logic (shared)
 Justfile, goreleaser.yml, CI workflows
 ```
 
-- CLI consumes DB migrations from `../db/migrations`.
+- Both CLIs consume DB migrations from `../db/migrations`.
 - DB is a single SQLite file on local disk; WAL mode on by default.
 - A future HTTP/JSON service (Go or Node) and browser UI are **consumers** of the same DB + machine contracts; they are not defined here but must be supportable.
 
 -------------------------------------------------------------------------------
 
-## 3. Terminology
+## 4. Terminology
 
 - **Actor**: entity performing actions via the CLI (human user or coding agent).
 - **Actor Role**: `human` | `agent` | `system` (system = migrations, init, repair).
@@ -86,9 +108,9 @@ No underscores, no spaces, no dots, no `/`, no NUL. Path matching is straightfor
 
 -------------------------------------------------------------------------------
 
-## 4. Information Architecture (user-visible)
+## 5. Information Architecture (user-visible)
 
-### 4.1 Actor
+### 5.1 Actor
 
 Represents either a human user, coding agent, or system process.
 
@@ -115,7 +137,7 @@ Fields
 
 If resolution fails, mutating commands should exit with a usage error (code 2).
 
-### 4.2 Container (Project / Subproject)
+### 5.2 Container (Project / Subproject)
 
 Single table with parent-child relationship.
 
@@ -130,7 +152,7 @@ Fields
 - `created_by_actor_id` (FK Actor)
 - `updated_by_actor_id` (FK Actor)
 
-### 4.3 Task
+### 5.3 Task
 
 Fields
 - `uuid`
@@ -148,7 +170,7 @@ Fields
 - `created_by_actor_id` (FK Actor)
 - `updated_by_actor_id` (FK Actor)
 
-### 4.4 Comment
+### 5.4 Comment
 
 Represents an immutable (append‑only) note attached to a task, authored by a human or agent actor.
 
@@ -198,7 +220,7 @@ Event log integration
     - `actor_id`
     - For `comment.deleted` / `comment.purged`, flags indicating soft vs hard delete.
 
-### 4.5 Attachment (Filesystem-based)
+### 5.5 Attachment (Filesystem-based)
 
 DB tracks metadata; bytes live under `attach_dir`.
 
@@ -224,7 +246,7 @@ Fields
   - Attachment metadata removed.
   - Directory `attach_dir/tasks/<task_uuid>` and its contents are deleted.
 
-### 4.6 Event Log (Canonical Audit Trail)
+### 5.6 Event Log (Canonical Audit Trail)
 
 Append-only event stream for all significant changes.
 
@@ -240,7 +262,7 @@ Fields (conceptual)
 
 `wrkq log` and `wrkq watch` are views onto this table.
 
-### 4.7 Constraints Summary
+### 5.7 Constraints Summary
 
 - Slugs: normalized, `[a-z0-9-]`, lower-case, unique among siblings.
 - No sections in the addressing model; only containers (projects/subprojects) and tasks.
@@ -248,7 +270,7 @@ Fields (conceptual)
 
 -------------------------------------------------------------------------------
 
-## 5. Addressing and Pathspecs
+## 6. Addressing and Pathspecs
 
 Resource references accepted by all commands:
 
@@ -295,7 +317,7 @@ Resource references accepted by all commands:
 
 -------------------------------------------------------------------------------
 
-## 6. Output, Piping, and Exit Codes
+## 7. Output, Piping, and Exit Codes
 
 Formats
 - Human defaults:
@@ -332,7 +354,7 @@ Exit codes
 
 -------------------------------------------------------------------------------
 
-## 7. Concurrency, Transactions, and Conflicts
+## 8. Concurrency, Transactions, and Conflicts
 
 ### SQLite Mode
 
@@ -357,7 +379,7 @@ Exit codes
 
 -------------------------------------------------------------------------------
 
-## 8. Task Document Format (cat/apply/edit)
+## 9. Task Document Format (cat/apply/edit)
 
 Default `wrkq cat` output for tasks is Markdown with YAML front matter:
 
@@ -453,9 +475,9 @@ Rules
 
 -------------------------------------------------------------------------------
 
-## 9. Command Spec
+## 10. Command Spec
 
-### 9.1 Global Behavior
+### 10.1 Global Behavior
 
 - All subcommands accept pathspecs, friendly IDs, or UUIDs unless stated otherwise.
 - Commands that take lists accept `-` to read newline or NUL-separated items from stdin.
@@ -466,9 +488,9 @@ Rules
 
 ---
 
-### 9.2 Initialization
+### 10.2 Initialization (wrkqadm)
 
-- `wrkq init [--db <path>] [--actor-slug <slug>] [--actor-name <display>] [--attach-dir <path>]`
+- `wrkqadm init [--db <path>] [--actor-slug <slug>] [--actor-name <display>] [--attach-dir <path>]`
 
 Behavior
 - If DB does **not** exist:
@@ -493,7 +515,7 @@ Output
 
 ---
 
-### 9.3 Navigation and Metadata
+### 10.3 Navigation and Metadata (wrkq)
 
 - `wrkq ls [PATHSPEC...]`
   - List containers and tasks.
@@ -520,7 +542,7 @@ Output
 
 ---
 
-### 9.4 Content
+### 10.4 Content (wrkq)
 
 - `wrkq cat <PATHSPEC|ID...>`
   - Print tasks as markdown with front matter (default).
@@ -547,7 +569,7 @@ Output
 
 ---
 
-### 9.5 Structure and Lifecycle
+### 10.5 Structure and Lifecycle (wrkq)
 
 - `wrkq mkdir <PATH...>`
   - Create projects/subprojects (containers).
@@ -591,7 +613,7 @@ Output
 
 ---
 
-### 9.6 Search and Discovery
+### 10.6 Search and Discovery (wrkq)
 
 - `wrkq find [PATH...]`
   - Simple metadata search (present).
@@ -615,7 +637,7 @@ Output
 
 ---
 
-### 9.7 History, Diff, Streaming
+### 10.7 History, Diff, Streaming (wrkq)
 
 - `wrkq log <PATHSPEC|ID>`
   - Show change history from the event log.
@@ -638,7 +660,7 @@ Output
 
 ---
 
-### 9.8 Attachments
+### 10.8 Attachments (wrkq)
 
 - `wrkq attach ls <PATHSPEC|ID>`
   - List attachments for a task.
@@ -660,27 +682,27 @@ Output
 
 ---
 
-### 9.9 Actor Management
+### 10.9 Actor Management (mixed)
 
+**wrkq commands** (agent-safe):
 - `wrkq whoami`
   - Prints the current actor (slug, friendly id, role) and DB path.
+  - Agents need to know their own identity.
 
-- `wrkq actors ls`
+**wrkqadm commands** (admin-only):
+- `wrkqadm actors ls`
   - List all actors.
   - Flags: `--json`, `--ndjson`, `--fields`, `--porcelain`.
 
-- `wrkq actor add <slug> [--name <display>] [--role human|agent|system]`
+- `wrkqadm actor add <slug> [--name <display>] [--role human|agent|system]`
   - Create a new actor (primarily for registering agents).
   - Enforce slug normalization rules.
 
 ---
 
-### 9.10 Housekeeping & Misc
+### 10.10 Housekeeping & Misc (mixed)
 
-- `wrkq doctor`
-  - Checks DB (pragmas, WAL), migrations, config, `attach_dir`, attachment limits.
-  - Prints remediation suggestions.
-
+**wrkq commands** (agent-safe):
 - `wrkq version`
   - Prints version information and build metadata.
   - `--json` includes:
@@ -693,11 +715,16 @@ Output
 - `wrkq completion bash|zsh|fish`
   - Emits completion scripts.
 
-- `wrkq config doctor`
+**wrkqadm commands** (admin-only):
+- `wrkqadm doctor`
+  - Checks DB (pragmas, WAL), migrations, config, `attach_dir`, attachment limits.
+  - Prints remediation suggestions.
+
+- `wrkqadm config doctor`
   - Prints effective configuration and source.
 
 
-### 9.11 Comments
+### 10.11 Comments (wrkq)
 
 Commands for listing, creating, inspecting, and removing comments on tasks. Comments are immutable in v1; removal is modeled via soft‑ or hard‑delete.
 
@@ -746,7 +773,7 @@ All mutating commands use normal actor resolution (`--as`, env, config) and writ
 
 -------------------------------------------------------------------------------
 
-## 10. Configuration
+## 11. Configuration
 
 Precedence
 1. Flags
@@ -781,22 +808,22 @@ contexts:
     default_actor: agent-stage
 ```
 
-`wrkq config doctor` shows effective values and their sources.
+`wrkqadm config doctor` shows effective values and their sources.
 
 -------------------------------------------------------------------------------
 
-## 11. Packaging and Installation
+## 12. Packaging and Installation
 
-- Build static binaries via GoReleaser for linux, macOS, windows (amd64 and arm64).
-- Artifacts: tar/zip, checksums, SBOM, shell completions.
+- Build **two** static binaries via GoReleaser: `wrkq` and `wrkqadm` for linux, macOS, windows (amd64 and arm64).
+- Artifacts: tar/zip, checksums, SBOM, shell completions for both binaries.
 - Install:
-  - `install.sh` places binary to `~/.local/bin` or `/usr/local/bin` and installs completions.
+  - `install.sh` places both binaries to `~/.local/bin` or `/usr/local/bin` and installs completions.
   - `install.ps1` optional for Windows.
 - No Homebrew packaging (for now).
 
 -------------------------------------------------------------------------------
 
-## 12. Performance and Reliability
+## 13. Performance and Reliability
 
 - Listing up to ~5k open tasks under 200 ms p95 on a typical dev machine.
 - NDJSON streams for constant memory pipelines.
@@ -821,7 +848,7 @@ Target scale
 
 -------------------------------------------------------------------------------
 
-## 13. Safety and Dry Runs
+## 14. Safety and Dry Runs
 
 - `--dry-run` prints plans for `mv`, `cp`, `rm`, `set`, `apply`.
 - `--yes` skips confirmation prompts on destructive actions.
@@ -831,7 +858,7 @@ Target scale
 
 -------------------------------------------------------------------------------
 
-## 14. Examples
+## 15. Examples
 
 List, pipe, preview
 ```sh
@@ -868,13 +895,13 @@ wrkq mv 'portal/**/login-*' 'portal/auth' -type t --yes
 
 Initialize DB and actors
 ```sh
-wrkq init --db ~/.local/share/wrkq/wrkq.db \
+wrkqadm init --db ~/.local/share/wrkq/wrkq.db \
   --actor-slug lance \
   --actor-name "Lance (human)" \
   --attach-dir ~/.local/share/wrkq/attachments
 
 wrkq whoami
-wrkq actors ls
+wrkqadm actors ls
 ```
 
 Attachments
@@ -888,7 +915,7 @@ wrkq attach get ATT-00012 --as ./out/login-flow.pdf
 
 -------------------------------------------------------------------------------
 
-## 15. Security and Privacy
+## 16. Security and Privacy
 
 - Local configuration may include DB paths and actor slugs; support reading DB path from `WRKQ_DB_PATH_FILE`.
 - Attachments live under `attach_dir`; DB stores only relative paths and metadata.
@@ -898,7 +925,7 @@ wrkq attach get ATT-00012 --as ./out/login-flow.pdf
 
 -------------------------------------------------------------------------------
 
-## 16. Compatibility Guarantees
+## 17. Compatibility Guarantees
 
 - **Machine interfaces**:
   - `--porcelain`, `--json`, `--ndjson`, `--tsv`, `--columns` field names and order are stable across minor versions.
@@ -911,11 +938,15 @@ wrkq attach get ATT-00012 --as ./out/login-flow.pdf
 
 
 
-## 17. Branch/PR Sync Commands (New)
+## 18. Branch/PR Sync Commands
 
-These commands formalize the Git‑ops workflow: agents work on ephemeral DB snapshots, export a **bundle** to version control, and on merge the bundle is applied into the authoritative `main` DB with strict `--if-match` guards. They build on the spec’s typed selectors (`t:<token>`), append‑only event log, and attachment directory conventions.  [oai_citation:1‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+These commands formalize the Git‑ops workflow: agents work on ephemeral DB snapshots, export a **bundle** to version control, and on merge the bundle is applied into the authoritative `main` DB with strict `--if-match` guards. They build on the spec's typed selectors (`t:<token>`), append‑only event log, and attachment directory conventions.
 
-### 17.1 `wrkq bundle create`
+Commands are split between binaries based on their operational role:
+- **wrkq**: `bundle create` (agents create bundles from their ephemeral DBs)
+- **wrkqadm**: `bundle apply`, `db snapshot`, `attach path` (admin operations on canonical DB)
+
+### 18.1 `wrkq bundle create` (wrkq)
 
 Create a portable, deterministic bundle of changes suitable to commit in a PR.
 
@@ -946,7 +977,7 @@ wrkq bundle create [--out <dir>] [--actor <slug|A-xxxxx>] [--since <ts>] [--unti
 
 ---
 
-### 17.2 `wrkq bundle apply`
+### 18.2 `wrkqadm bundle apply` (wrkqadm)
 
 Apply a bundle into the current DB (e.g., `main`) with conflict detection and attachment re‑hydration.
 
@@ -973,13 +1004,13 @@ wrkq bundle apply [--from <dir>] [--dry-run] [--continue-on-error] [--json|--por
 
 ---
 
-### 17.3 `wrkq db snapshot`
+### 18.3 `wrkqadm db snapshot` (wrkqadm)
 
 Produce a **WAL‑safe** snapshot of the current SQLite DB for agents/CI to use as an ephemeral working copy.
 
 **Synopsis**
 ```
-wrkq db snapshot --out <path> [--json]
+wrkqadm db snapshot --out <path> [--json]
 ```
 
 **Behavior**
@@ -992,7 +1023,7 @@ wrkq db snapshot --out <path> [--json]
 
 ---
 
-### 17.4 `wrkq apply --base <FILE>` (flag extension)
+### 18.4 `wrkq apply --base <FILE>` (flag extension, wrkq)
 
 Enable a 3‑way merge on apply (mirrors `edit` semantics) while still honoring `--if-match`.
 
@@ -1007,13 +1038,13 @@ wrkq apply [<PATHSPEC|ID>] <FILE|-> --base <FILE> [--if-match <etag>] [--dry-run
 
 ---
 
-### 17.5 `wrkq bundle replay` (optional / future)
+### 18.5 `wrkqadm bundle replay` (optional / future, wrkqadm)
 
-Replay `events.ndjson` from a bundle into the DB (useful when you know `main` hasn’t diverged).
+Replay `events.ndjson` from a bundle into the DB (useful when you know `main` hasn't diverged).
 
 **Synopsis**
 ```
-wrkq bundle replay [--from <dir>] [--dry-run] [--strict-etag]
+wrkqadm bundle replay [--from <dir>] [--dry-run] [--strict-etag]
 ```
 
 **Behavior**
@@ -1021,13 +1052,13 @@ wrkq bundle replay [--from <dir>] [--dry-run] [--strict-etag]
 
 ---
 
-### 17.6 `wrkq attach path` (helper)
+### 18.6 `wrkqadm attach path` (helper, wrkqadm)
 
-Expose the absolute on‑disk path for an attachment (useful for exporters).  
+Expose the absolute on‑disk path for an attachment (useful for exporters).
 
 **Synopsis**
 ```
-wrkq attach path <ATTACHMENT-ID|relative_path> [--json|--porcelain]
+wrkqadm attach path <ATTACHMENT-ID|relative_path> [--json|--porcelain]
 ```
 
 **Behavior**
@@ -1049,10 +1080,10 @@ wrkq attach path <ATTACHMENT-ID|relative_path> [--json|--porcelain]
 wrkq bundle create --actor agent-feature --with-attachments
 
 # Validate a PR bundle against a copy of main (no writes)
-wrkq bundle apply --from .wrkq --dry-run
+wrkqadm bundle apply --from .wrkq --dry-run
 
-# Snapshot the DB for an agent’s ephemeral workspace
-wrkq db snapshot --out /tmp/wrkq.$BRANCH.db
+# Snapshot the DB for an agent's ephemeral workspace
+wrkqadm db snapshot --out /tmp/wrkq.$BRANCH.db
 export WRKQ_DB_PATH=/tmp/wrkq.$BRANCH.db
 export WRKQ_ATTACH_DIR=/tmp/wrkq.$BRANCH.attach
 export WRKQ_ACTOR=agent-$BRANCH

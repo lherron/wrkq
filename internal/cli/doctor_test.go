@@ -21,7 +21,7 @@ func TestDoctorDatabaseFileChecks(t *testing.T) {
 		database.Migrate()
 		database.Close()
 
-		results := checkDatabaseFile(dbPath)
+		results := checkDatabaseFileAdm(dbPath)
 
 		// Should have 2 checks: exists and permissions
 		if len(results) != 2 {
@@ -37,7 +37,7 @@ func TestDoctorDatabaseFileChecks(t *testing.T) {
 	})
 
 	t.Run("missing database file reports error", func(t *testing.T) {
-		results := checkDatabaseFile("/nonexistent/path/db.db")
+		results := checkDatabaseFileAdm("/nonexistent/path/db.db")
 
 		if len(results) == 0 {
 			t.Fatal("Expected at least one check result")
@@ -70,7 +70,7 @@ func TestDoctorDatabaseFileChecks(t *testing.T) {
 		os.Chmod(dbPath, 0444)
 		defer os.Chmod(dbPath, 0644) // Cleanup
 
-		results := checkDatabaseFile(dbPath)
+		results := checkDatabaseFileAdm(dbPath)
 
 		// Should report permission error
 		foundPermError := false
@@ -100,7 +100,7 @@ func TestDoctorDatabasePragmaChecks(t *testing.T) {
 	database.Migrate()
 
 	t.Run("WAL mode enabled passes check", func(t *testing.T) {
-		results := checkDatabasePragmas(database)
+		results := checkDatabasePragmasAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -118,7 +118,7 @@ func TestDoctorDatabasePragmaChecks(t *testing.T) {
 	})
 
 	t.Run("foreign keys enabled passes check", func(t *testing.T) {
-		results := checkDatabasePragmas(database)
+		results := checkDatabasePragmasAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -136,7 +136,7 @@ func TestDoctorDatabasePragmaChecks(t *testing.T) {
 	})
 
 	t.Run("integrity check passes on healthy database", func(t *testing.T) {
-		results := checkDatabasePragmas(database)
+		results := checkDatabasePragmasAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -167,7 +167,7 @@ func TestDoctorSchemaChecks(t *testing.T) {
 	database.Migrate()
 
 	t.Run("all required tables present", func(t *testing.T) {
-		results := checkSchema(database)
+		results := checkSchemaAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -192,7 +192,7 @@ func TestDoctorSchemaChecks(t *testing.T) {
 		defer db2.Close()
 
 		// Don't run migrations - empty database
-		results := checkSchema(db2)
+		results := checkSchemaAdm(db2)
 
 		found := false
 		for _, result := range results {
@@ -239,7 +239,7 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 			VALUES (?, 'task1', 'Task 1', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
-		results := checkDataIntegrity(database)
+		results := checkDataIntegrityAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -264,10 +264,10 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 		// Create task with invalid project_uuid
 		database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('orphan-task-uuid', 'T-00002', 'orphan', 'Orphaned', 'nonexistent-uuid', 'open', 2, ?, ?, 1)
+			VALUES ('orphan-task-uuid', 'orphan', 'Orphaned', 'nonexistent-uuid', 'open', 2, ?, ?, 1)
 		`, actorUUID, actorUUID)
 
-		results := checkDataIntegrity(database)
+		results := checkDataIntegrityAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -296,7 +296,7 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 			VALUES (?, 'file.txt', 'tasks/task-with-att/file.txt', 'text/plain', 100)
 		`, taskUUID)
 
-		results := checkDataIntegrity(database)
+		results := checkDataIntegrityAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -324,7 +324,7 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 			VALUES ('nonexistent-task', 'orphan.txt', 'tasks/orphan/file.txt', 'text/plain', 50)
 		`)
 
-		results := checkDataIntegrity(database)
+		results := checkDataIntegrityAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -349,14 +349,14 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 		// Create two tasks with same slug in same container
 		database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('dup-task-1-uuid', 'T-00004', 'duplicate', 'Dup 1', ?, 'open', 2, ?, ?, 1)
+			VALUES ('dup-task-1-uuid', 'duplicate', 'Dup 1', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
 		database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('dup-task-2-uuid', 'T-00005', 'duplicate', 'Dup 2', ?, 'open', 2, ?, ?, 1)
+			VALUES ('dup-task-2-uuid', 'duplicate', 'Dup 2', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
 
-		results := checkDataIntegrity(database)
+		results := checkDataIntegrityAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -374,7 +374,7 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	})
 
 	t.Run("no duplicate slugs in healthy database", func(t *testing.T) {
-		results := checkDataIntegrity(database)
+		results := checkDataIntegrityAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -407,7 +407,7 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	database.Migrate()
 
 	t.Run("attachment directory exists check", func(t *testing.T) {
-		results := checkAttachments(database, attachDir)
+		results := checkAttachmentsAdm(database, attachDir)
 
 		found := false
 		for _, result := range results {
@@ -425,7 +425,7 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	})
 
 	t.Run("missing attachment directory reports error", func(t *testing.T) {
-		results := checkAttachments(database, "/nonexistent/attachments")
+		results := checkAttachmentsAdm(database, "/nonexistent/attachments")
 
 		found := false
 		for _, result := range results {
@@ -464,7 +464,7 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 			VALUES (?, 'file.txt', 'tasks/task/file.txt', 'text/plain', 1024)
 		`, taskUUID)
 
-		results := checkAttachments(database, attachDir)
+		results := checkAttachmentsAdm(database, attachDir)
 
 		found := false
 		for _, result := range results {
@@ -488,7 +488,7 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 		orphanDir := filepath.Join(tasksDir, "orphaned-uuid-123")
 		os.MkdirAll(orphanDir, 0755)
 
-		results := checkAttachments(database, attachDir)
+		results := checkAttachmentsAdm(database, attachDir)
 
 		found := false
 		for _, result := range results {
@@ -513,7 +513,7 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 		cleanDir := filepath.Join(tmpDir, "clean-attachments")
 		os.MkdirAll(cleanDir, 0755)
 
-		results := checkAttachments(database, cleanDir)
+		results := checkAttachmentsAdm(database, cleanDir)
 
 		found := false
 		for _, result := range results {
@@ -570,7 +570,7 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 	}
 
 	t.Run("task counts reported correctly", func(t *testing.T) {
-		results := checkPerformance(database)
+		results := checkPerformanceAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -589,7 +589,7 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 	})
 
 	t.Run("container count reported", func(t *testing.T) {
-		results := checkPerformance(database)
+		results := checkPerformanceAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -607,7 +607,7 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 	})
 
 	t.Run("database size reported", func(t *testing.T) {
-		results := checkPerformance(database)
+		results := checkPerformanceAdm(database)
 
 		found := false
 		for _, result := range results {
@@ -640,19 +640,19 @@ func TestDoctorReportGeneration(t *testing.T) {
 	database.Migrate()
 
 	t.Run("report structure is valid", func(t *testing.T) {
-		report := &doctorReport{
+		report := &doctorReportAdm{
 			Version:       "0.2.0",
 			DBPath:        dbPath,
-			Checks:        []checkResult{},
+			Checks:        []checkResultAdm{},
 			OverallStatus: "ok",
 		}
 
-		report.Checks = append(report.Checks, checkDatabaseFile(dbPath)...)
-		report.Checks = append(report.Checks, checkDatabasePragmas(database)...)
-		report.Checks = append(report.Checks, checkSchema(database)...)
-		report.Checks = append(report.Checks, checkDataIntegrity(database)...)
-		report.Checks = append(report.Checks, checkAttachments(database, attachDir)...)
-		report.Checks = append(report.Checks, checkPerformance(database)...)
+		report.Checks = append(report.Checks, checkDatabaseFileAdm(dbPath)...)
+		report.Checks = append(report.Checks, checkDatabasePragmasAdm(database)...)
+		report.Checks = append(report.Checks, checkSchemaAdm(database)...)
+		report.Checks = append(report.Checks, checkDataIntegrityAdm(database)...)
+		report.Checks = append(report.Checks, checkAttachmentsAdm(database, attachDir)...)
+		report.Checks = append(report.Checks, checkPerformanceAdm(database)...)
 
 		if report.Version == "" {
 			t.Error("Report version should be set")

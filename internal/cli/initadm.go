@@ -11,29 +11,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var initCmd = &cobra.Command{
+var initAdmCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the wrkq database and configuration",
 	Long: `Initialize creates the SQLite database, runs migrations, creates the
-attachment directory, and seeds a default actor and inbox project.`,
-	RunE: runInit,
+attachment directory, and seeds a default actor and inbox project.
+
+This is an administrative command and should not be exposed to agents.`,
+	RunE: runInitAdm,
 }
 
 var (
-	initActorSlug string
-	initActorName string
-	initAttachDir string
+	initAdmActorSlug string
+	initAdmActorName string
+	initAdmAttachDir string
 )
 
 func init() {
-	rootCmd.AddCommand(initCmd)
+	rootAdmCmd.AddCommand(initAdmCmd)
 
-	initCmd.Flags().StringVar(&initActorSlug, "actor-slug", "local-human", "Slug for the default human actor")
-	initCmd.Flags().StringVar(&initActorName, "actor-name", "Local Human", "Display name for the default human actor")
-	initCmd.Flags().StringVar(&initAttachDir, "attach-dir", "", "Directory for attachments")
+	initAdmCmd.Flags().StringVar(&initAdmActorSlug, "actor-slug", "local-human", "Slug for the default human actor")
+	initAdmCmd.Flags().StringVar(&initAdmActorName, "actor-name", "Local Human", "Display name for the default human actor")
+	initAdmCmd.Flags().StringVar(&initAdmAttachDir, "attach-dir", "", "Directory for attachments")
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
+func runInitAdm(cmd *cobra.Command, args []string) error {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -46,8 +48,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Override attach dir from flag if provided
-	if initAttachDir != "" {
-		cfg.AttachDir = initAttachDir
+	if initAdmAttachDir != "" {
+		cfg.AttachDir = initAdmAttachDir
 	}
 
 	// Check if database already exists
@@ -75,13 +77,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Seed data only if this is a new database
 	if !dbExists {
-		if err := seedDatabase(database, initActorSlug, initActorName); err != nil {
+		if err := seedDatabaseAdm(database, initAdmActorSlug, initAdmActorName); err != nil {
 			return exitError(1, fmt.Errorf("failed to seed database: %w", err))
 		}
 
 		fmt.Printf("✓ Initialized new database at %s\n", cfg.DBPath)
 		fmt.Printf("✓ Created attachments directory at %s\n", cfg.AttachDir)
-		fmt.Printf("✓ Seeded default actor: %s\n", initActorSlug)
+		fmt.Printf("✓ Seeded default actor: %s\n", initAdmActorSlug)
 		fmt.Printf("✓ Seeded inbox project\n")
 	} else {
 		fmt.Printf("✓ Database already initialized at %s\n", cfg.DBPath)
@@ -91,7 +93,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func seedDatabase(database *db.DB, actorSlug, actorName string) error {
+func seedDatabaseAdm(database *db.DB, actorSlug, actorName string) error {
 	// Normalize actor slug
 	normalizedSlug, err := paths.NormalizeSlug(actorSlug)
 	if err != nil {
@@ -122,10 +124,4 @@ func seedDatabase(database *db.DB, actorSlug, actorName string) error {
 	}
 
 	return nil
-}
-
-// exitError returns an error that will cause the CLI to exit with the given code
-func exitError(code int, err error) error {
-	// For now, just return the error. We'll enhance this with proper exit codes later
-	return err
 }

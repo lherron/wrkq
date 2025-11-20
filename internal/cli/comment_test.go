@@ -514,3 +514,124 @@ func TestCommentSequenceIncrement(t *testing.T) {
 		}
 	}
 }
+
+func TestCommentAdd_PositionalArg(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task body', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Set environment variables
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+	defer os.Unsetenv("WRKQ_DB_PATH")
+	defer os.Unsetenv("WRKQ_ACTOR")
+
+	// Test adding a comment via positional argument (new default behavior)
+	cmd := rootCmd
+	cmd.SetArgs([]string{"comment", "add", "T-00001", "This is a comment via positional arg"})
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Command failed: %v\nOutput: %s", err, out.String())
+	}
+
+	// Verify comment was created
+	var count int
+	err = database.QueryRow("SELECT COUNT(*) FROM comments WHERE task_uuid = 'task-uuid-1'").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to query comments: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("Expected 1 comment, got %d", count)
+	}
+
+	// Verify comment content
+	var body string
+	err = database.QueryRow("SELECT body FROM comments WHERE task_uuid = 'task-uuid-1'").Scan(&body)
+	if err != nil {
+		t.Fatalf("Failed to query comment body: %v", err)
+	}
+
+	if body != "This is a comment via positional arg" {
+		t.Errorf("Expected comment body 'This is a comment via positional arg', got %q", body)
+	}
+}
+
+func TestCommentAdd_FileFlag(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task body', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Create a temporary file with comment text
+	tmpfile, err := os.CreateTemp("", "comment-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	commentText := "This is a comment from a file"
+	if _, err := tmpfile.Write([]byte(commentText)); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatalf("Failed to close temp file: %v", err)
+	}
+
+	// Set environment variables
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+	defer os.Unsetenv("WRKQ_DB_PATH")
+	defer os.Unsetenv("WRKQ_ACTOR")
+
+	// Test adding a comment via -f flag
+	cmd := rootCmd
+	cmd.SetArgs([]string{"comment", "add", "T-00001", "-f", tmpfile.Name()})
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Command failed: %v\nOutput: %s", err, out.String())
+	}
+
+	// Verify comment was created
+	var count int
+	err = database.QueryRow("SELECT COUNT(*) FROM comments WHERE task_uuid = 'task-uuid-1'").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to query comments: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("Expected 1 comment, got %d", count)
+	}
+
+	// Verify comment content
+	var body string
+	err = database.QueryRow("SELECT body FROM comments WHERE task_uuid = 'task-uuid-1'").Scan(&body)
+	if err != nil {
+		t.Fatalf("Failed to query comment body: %v", err)
+	}
+
+	if body != commentText {
+		t.Errorf("Expected comment body %q, got %q", commentText, body)
+	}
+}

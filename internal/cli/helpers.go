@@ -9,6 +9,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// exitError returns an error that will cause the CLI to exit with the given code
+func exitError(code int, err error) error {
+	// For now, just return the error. We'll enhance this with proper exit codes later
+	return err
+}
+
 // resolveCurrentActor resolves the current actor UUID and friendly ID
 // from --as flag, environment variables, or config.
 func resolveCurrentActor(database *db.DB, cfg *config.Config, cmd *cobra.Command) (uuid, friendlyID string, err error) {
