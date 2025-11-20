@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,36 +29,41 @@ func TestCpCommand(t *testing.T) {
 
 	// Create test actor
 	actorUUID := "test-actor-uuid"
-	_, err = database.Exec(`INSERT INTO actors (uuid, id, slug, display_name, role) VALUES (?, 'A-00001', 'test-actor', 'Test Actor', 'human')`, actorUUID)
+	_, err = database.Exec(`
+		INSERT INTO actors (uuid, slug, display_name, role)
+		VALUES (?, 'test-actor', 'Test Actor', 'human')
+	`, actorUUID)
 	if err != nil {
 		t.Fatalf("Failed to create actor: %v", err)
 	}
-	database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test-actor'`, actorUUID)
 
 	// Create test container
 	containerUUID := "test-container-uuid"
-	_, err = database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'test-project', 'Test Project', ?, ?)`, actorUUID, actorUUID)
+	_, err = database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'test-project', 'Test Project', ?, ?, 1)
+	`, containerUUID, actorUUID, actorUUID)
 	if err != nil {
 		t.Fatalf("Failed to create container: %v", err)
 	}
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'test-project'`, containerUUID)
 
 	// Create destination container
 	destUUID := "dest-container-uuid"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00002', 'dest', 'Destination', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'dest'`, destUUID)
+	database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'dest', 'Destination', ?, ?, 1)
+	`, destUUID, actorUUID, actorUUID)
 
 	t.Run("copy single task creates new UUID", func(t *testing.T) {
 		// Create source task
 		sourceUUID := "source-task-uuid"
 		_, err := database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00001', 'source-task', 'Source Task', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'source-task', 'Source Task', ?, 'open', 2, ?, ?, 1)
+		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 		if err != nil {
 			t.Fatalf("Failed to create source task: %v", err)
 		}
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'source-task'`, sourceUUID)
 
 		// Copy task
 		result, err := copyTask(database, attachDir, actorUUID, sourceUUID, destUUID)
@@ -101,15 +107,14 @@ func TestCpCommand(t *testing.T) {
 		// Create task with attachments
 		taskUUID := "task-with-attachments"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00002', 'task-att', 'Task with Attachments', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task-att'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task-att', 'Task with Attachments', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment metadata
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'test.txt', 'tasks/task-with-attachments/test.txt', 'text/plain', 100)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'test.txt', 'tasks/task-with-attachments/test.txt', 'text/plain', 100)
 		`, taskUUID)
 
 		// Copy without --with-attachments flag (metadata only)
@@ -127,11 +132,12 @@ func TestCpCommand(t *testing.T) {
 			t.Errorf("Expected 1 attachment in destination, got %d", attCount)
 		}
 
-		// Verify metadata only (same relative path)
-		var relativePath string
-		database.QueryRow(`SELECT relative_path FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&relativePath)
-		if relativePath != "tasks/task-with-attachments/test.txt" {
-			t.Errorf("Expected same relative path for metadata-only copy, got %s", relativePath)
+		// Verify new relative path generated for destination task
+		var relativePath, filename string
+		database.QueryRow(`SELECT relative_path, filename FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&relativePath, &filename)
+		expectedPath := fmt.Sprintf("tasks/%s/%s", result.DestUUID, filename)
+		if relativePath != expectedPath {
+			t.Errorf("Expected new relative path %s, got %s", expectedPath, relativePath)
 		}
 	})
 
@@ -139,14 +145,13 @@ func TestCpCommand(t *testing.T) {
 		// Create task with attachments
 		taskUUID := "task-shallow"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00003', 'task-shallow', 'Shallow Task', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task-shallow'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task-shallow', 'Shallow Task', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'file.pdf', 'tasks/task-shallow/file.pdf', 'application/pdf', 500)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'file.pdf', 'tasks/task-shallow/file.pdf', 'application/pdf', 500)
 		`, taskUUID)
 
 		// Copy with --shallow
@@ -171,18 +176,16 @@ func TestCpCommand(t *testing.T) {
 		// Create source task
 		sourceUUID := "source-overwrite"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, body, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00004', 'overwrite-source', 'Source Version', ?, 'open', 1, 'Original body', ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'overwrite-source'`, sourceUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, body, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'overwrite-source', 'Source Version', ?, 'open', 1, 'Original body', ?, ?, 1)
+		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		// Create existing task in destination with same slug
 		existingUUID := "existing-task"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, body, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00005', 'overwrite-source', 'Existing Version', ?, 'completed', 3, 'Old body', ?, ?)
-		`, destUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE id = 'T-00005'`, existingUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, body, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'overwrite-source', 'Existing Version', ?, 'completed', 3, 'Old body', ?, ?, 1)
+		`, existingUUID, destUUID, actorUUID, actorUUID)
 
 		// Try copy without --overwrite (should fail)
 		cpOverwrite = false
@@ -203,9 +206,11 @@ func TestCpCommand(t *testing.T) {
 			t.Errorf("Expected existing UUID %s, got %s", existingUUID, result.DestUUID)
 		}
 
-		// Verify friendly ID preserved
-		if result.DestID != "T-00005" {
-			t.Errorf("Expected existing ID T-00005, got %s", result.DestID)
+		// Verify friendly ID preserved (query for actual ID)
+		var existingID string
+		database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", existingUUID).Scan(&existingID)
+		if result.DestID != existingID {
+			t.Errorf("Expected existing ID %s, got %s", existingID, result.DestID)
 		}
 
 		// Verify content updated
@@ -230,10 +235,9 @@ func TestCpCommand(t *testing.T) {
 		// Create completed task with completed_at timestamp
 		sourceUUID := "completed-task"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, completed_at, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00006', 'completed', 'Completed Task', ?, 'completed', 2, '2025-01-01T00:00:00Z', ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'completed'`, sourceUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, completed_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'completed', 'Completed Task', ?, 'completed', 2, '2025-01-01T00:00:00Z', ?, ?, 1)
+		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		// Copy task
 		result, err := copyTask(database, attachDir, actorUUID, sourceUUID, destUUID)
@@ -255,10 +259,9 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy preserves labels and dates", func(t *testing.T) {
 		sourceUUID := "task-with-metadata"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, labels, start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00007', 'metadata', 'Task with Metadata', ?, 'open', 2, 'bug,urgent', '2025-01-15T00:00:00Z', '2025-01-20T00:00:00Z', ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'metadata'`, sourceUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, labels, start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'metadata', 'Task with Metadata', ?, 'open', 2, 'bug,urgent', '2025-01-15T00:00:00Z', '2025-01-20T00:00:00Z', ?, ?, 1)
+		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		result, err := copyTask(database, attachDir, actorUUID, sourceUUID, destUUID)
 		if err != nil {
@@ -282,10 +285,9 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy with etag check", func(t *testing.T) {
 		sourceUUID := "etag-task"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00008', 'etag-task', 'ETag Task', ?, 'open', 2, 5, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'etag-task'`, sourceUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES (?, 'etag-task', 'ETag Task', ?, 'open', 2, 5, ?, ?)
+		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		// Try copy with wrong etag
 		cpIfMatch = 3
@@ -322,24 +324,29 @@ func TestCpCommandEventLogging(t *testing.T) {
 
 	// Create actor and containers
 	actorUUID := "test-actor"
-	database.Exec(`INSERT INTO actors (id, slug, display_name, role) VALUES ('A-00001', 'test', 'Test', 'human')`)
-	database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test'`, actorUUID)
+	database.Exec(`
+		INSERT INTO actors (uuid, slug, display_name, role)
+		VALUES (?, 'test', 'Test', 'human')
+	`, actorUUID)
 
 	containerUUID := "source-container"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'src', 'Source', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'src'`, containerUUID)
+	database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'src', 'Source', ?, ?, 1)
+	`, containerUUID, actorUUID, actorUUID)
 
 	destUUID := "dest-container"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00002', 'dst', 'Dest', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'dst'`, destUUID)
+	database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'dst', 'Dest', ?, ?, 1)
+	`, destUUID, actorUUID, actorUUID)
 
 	// Create source task
 	sourceUUID := "source-task"
 	database.Exec(`
-		INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('T-00001', 'task', 'Task', ?, 'open', 2, ?, ?)
-	`, containerUUID, actorUUID, actorUUID)
-	database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task'`, sourceUUID)
+		INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'task', 'Task', ?, 'open', 2, ?, ?, 1)
+	`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 	// Copy task
 	result, err := copyTask(database, attachDir, actorUUID, sourceUUID, destUUID)

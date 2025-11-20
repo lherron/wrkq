@@ -145,6 +145,78 @@ func (w *Writer) LogContainerDeleted(tx *sql.Tx, actorUUID string, containerUUID
 	return w.LogEvent(tx, event)
 }
 
+// LogCommentCreated logs a comment creation event
+func (w *Writer) LogCommentCreated(tx *sql.Tx, actorUUID string, comment *domain.Comment) error {
+	payload, err := json.Marshal(map[string]interface{}{
+		"task_id":    comment.TaskUUID,
+		"comment_id": comment.ID,
+		"actor_id":   comment.ActorUUID,
+	})
+	if err != nil {
+		return err
+	}
+
+	payloadStr := string(payload)
+	event := &domain.Event{
+		ActorUUID:    &actorUUID,
+		ResourceType: "comment",
+		ResourceUUID: &comment.UUID,
+		EventType:    "comment.created",
+		ETag:         &comment.ETag,
+		Payload:      &payloadStr,
+	}
+
+	return w.LogEvent(tx, event)
+}
+
+// LogCommentDeleted logs a comment soft-delete event
+func (w *Writer) LogCommentDeleted(tx *sql.Tx, actorUUID string, comment *domain.Comment) error {
+	payload, err := json.Marshal(map[string]interface{}{
+		"task_id":              comment.TaskUUID,
+		"comment_id":           comment.ID,
+		"deleted_by_actor_id":  actorUUID,
+		"soft_delete":          true,
+	})
+	if err != nil {
+		return err
+	}
+
+	payloadStr := string(payload)
+	event := &domain.Event{
+		ActorUUID:    &actorUUID,
+		ResourceType: "comment",
+		ResourceUUID: &comment.UUID,
+		EventType:    "comment.deleted",
+		ETag:         &comment.ETag,
+		Payload:      &payloadStr,
+	}
+
+	return w.LogEvent(tx, event)
+}
+
+// LogCommentPurged logs a comment hard-delete event
+func (w *Writer) LogCommentPurged(tx *sql.Tx, actorUUID string, commentUUID string, commentID string, taskUUID string) error {
+	payload, err := json.Marshal(map[string]interface{}{
+		"task_id":    taskUUID,
+		"comment_id": commentID,
+		"hard_delete": true,
+	})
+	if err != nil {
+		return err
+	}
+
+	payloadStr := string(payload)
+	event := &domain.Event{
+		ActorUUID:    &actorUUID,
+		ResourceType: "comment",
+		ResourceUUID: &commentUUID,
+		EventType:    "comment.purged",
+		Payload:      &payloadStr,
+	}
+
+	return w.LogEvent(tx, event)
+}
+
 // getExecutor returns the appropriate executor (tx or db)
 func (w *Writer) getExecutor(tx *sql.Tx) interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)

@@ -171,45 +171,83 @@ wrkq rm 'portal/auth/login-ux' --purge --yes
 ```
 
 ---
+## M3 – Comments & Collaboration
 
-## M3 — DEFERRED, DO NOT IMPLEMENT YET:API‑ready Contracts + Comments
+Goal: ship comments as a first-class, machine-friendly collaboration channel between humans and coding agents, wired into the event log and surfaced via dedicated CLI commands.
 
-### Deliverables
+### Scope
 
-**Schema**
-- `0004_comments.sql`: `comments(id, task_id, actor_id, body, created_at)`.
+- Comments are append-only notes attached to a task.
+- Each comment is a first-class resource with:
+  - UUID and friendly ID (`C-xxxxx`).
+  - Actor attribution (`actor_id`, `actor_slug`, role).
+  - Markdown `body` and optional JSON `meta` for agents/tools.
+  - ETag/versioning and soft-delete (`deleted_at`, `deleted_by_actor_id`).
+- Event log and CLI surfaces are updated so agents never have to scrape human-oriented output.
 
-**Contracts & docs**
-- **Machine Interface v1 freeze**:
-  - `--porcelain` columns/keys stable and enumerated.
-  - Field dictionaries per command documented (names, types, nullability).
-  - Exit codes documented and unchanged across minors.
-- **HTTP/JSON façade spec** (not the server itself, but ready to consume):
-  - Endpoints mirroring CLI porcelain (e.g., `/v1/tasks/:id`, `/v1/containers/:id`, `/v1/find`, `/v1/events/stream`).
-  - Auth: none (local only), but **actor attribution required** via header `X-Todo-Actor` (slug or friendly ID).
-  - Request/response examples (JSON + NDJSON for streams), pagination cursors, ETag via `If-Match`.
+### Tasks
 
-**CLI surface**
-- `wrkq comment add <task> -` (stdin) or `--body`
-- `wrkq comment ls <task> --json|--ndjson`
-- `wrkq comment rm <comment-id> --yes`
+1. **DB schema & migrations**
+   - Add a `comments` table with fields:
+     - `uuid`, `id` (friendly `C-xxxxx`), `task_id`, `actor_id`, `body`, `meta` (JSON), `etag`, `created_at`, `updated_at` (nullable), `deleted_at` (nullable), `deleted_by_actor_id` (nullable).
+   - Add appropriate indexes (at minimum):
+     - `(task_id, created_at)` for listing comments on a task.
+     - `(actor_id, created_at)` for future tooling.
+   - Wire migrations into the existing migrations runner.
 
-**Docs**
-- “Browser UI enablers” guide: mapping CLI porcelain ↔ HTTP JSON; streaming (`watch`) over SSE or chunked NDJSON.
-- Postman/Insomnia collection with sample calls (optional if no server stub).
+2. **Domain model & ID generation**
+   - Add a `Comment` domain type in `internal/domain` with validation helpers.
+   - Extend `internal/id` to generate friendly comment IDs (`C-xxxxx`).
+   - Ensure comment `meta` follows the same JSON handling patterns as actor `meta`.
 
-### Acceptance criteria
-- Comments append‑only; appear in `cat --include-comments` (from spec).
-- HTTP/JSON spec aligns 1:1 with CLI fields and supports ETag semantics & cursors.
+3. **Event log integration**
+   - Extend the event log schema/enums:
+     - Add `comment` to `resource_type`.
+     - Add events: `comment.created`, `comment.deleted`, `comment.purged`.
+   - Ensure all comment mutations emit events via `internal/events` with payload fields:
+     - `task_id`, `comment_id` (friendly ID), `actor_id`, and soft-/hard-delete flags.
+   - Update `wrkq log` / `wrkq watch` to support `resource_type=comment` filters.
 
-### Demo script
-```sh
-echo "We should add MFA to login." | wrkq comment add 'portal/auth/login-ux' -
-wrkq comment ls 'portal/auth/login-ux' --ndjson
-wrkq cat 'portal/auth/login-ux' --include-comments
-wrkq version --json | jq .machine_interface_version
-```
+4. **CLI: comment commands**
+   - Implement `wrkq comment ls <TASK-PATH|t:<id>...>`:
+     - Resolve container paths and `t:<token>` to tasks.
+     - List comments ordered by `created_at` ascending.
+     - Support `--json|--ndjson|--yaml|--tsv`, `--fields`, `--include-deleted`, `--limit`, `--cursor`, `--porcelain`, `--sort=created_at`, `--reverse`.
+   - Implement `wrkq comment add <TASK-PATH|t:<id>> [FILE|-]`:
+     - Accept comment text via `-m/--message`, file argument, or stdin when `-` is used.
+     - Support `--meta <json>`, `--if-match <task-etag>`, `--as <actor>`, `--dry-run`.
+     - Return the new comment ID and metadata; JSON shape matches the spec.
+   - Implement `wrkq comment cat <COMMENT-ID|c:<token>...>`:
+     - Resolve friendly ID, UUID, or `c:<token>`.
+     - Default human output: header line (ID, timestamp, actor, task) + body.
+     - Support `--json|--ndjson` and `--raw` (body only).
+   - Implement `wrkq comment rm <COMMENT-ID|c:<token>...>`:
+     - Default to soft-delete: set `deleted_at`, `deleted_by_actor_id`, increment `etag`, emit `comment.deleted`.
+     - `--purge` for hard-delete and `comment.purged` events.
+     - Support `--yes`, `--dry-run`, `--if-match <etag>`.
 
+5. **CLI: `wrkq cat --include-comments`**
+   - Update `wrkq cat` task rendering to:
+     - When `--include-comments` is set, query non-deleted comments for the task ordered by `created_at`.
+     - Append the comments block after the task body as specified in the spec:
+       - Separator `---` and sentinel `<!-- wrkq-comments: do not edit below -->`.
+       - One `>`-quoted block per comment with header:
+         - `> [<comment-id>] [<ISO8601 timestamp>] <actor-slug> (<actor-role>)`.
+   - Ensure `wrkq apply` explicitly ignores this comments block (no parsing/writes back to DB).
+
+6. **Machine contracts & tests**
+   - Add integration tests covering:
+     - Creating, listing, and soft-deleting comments via CLI.
+     - JSON / NDJSON shapes for `wrkq comment ls/add/cat/rm` and their stability.
+     - Event log entries for `comment.created` and `comment.deleted`.
+     - `wrkq cat --include-comments` layout (smoke tests, not strict parsing tests).
+   - Update docs/help (`wrkq help comment`, SPEC.md references) to match the implemented behavior.
+
+7. **Agent usage examples (docs only)**
+   - Document recommended patterns for agents:
+     - Emitting progress and summary comments with `--meta` (`run_id`, `kind`, etc.).
+     - Polling comments via `wrkq comment ls --ndjson` instead of scraping `wrkq cat`.
+     - Using `t:<token>` and `c:<token>` selectors for stable addressing.
 ---
 
 ## M4 — Stretch (optional)

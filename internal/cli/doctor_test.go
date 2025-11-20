@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -220,20 +221,23 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 
 	// Create test data
 	actorUUID := "test-actor"
-	database.Exec(`INSERT INTO actors (id, slug, display_name, role) VALUES ('A-00001', 'test', 'Test', 'human')`)
-	database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test'`, actorUUID)
+	database.Exec(`
+		INSERT INTO actors (uuid, slug, display_name, role)
+		VALUES (?, 'test', 'Test', 'human')
+	`, actorUUID)
 
 	containerUUID := "test-container"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'proj', 'Project', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'proj'`, containerUUID)
+	database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'proj', 'Project', ?, ?, 1)
+	`, containerUUID, actorUUID, actorUUID)
 
 	t.Run("no orphaned tasks in healthy database", func(t *testing.T) {
 		taskUUID := "valid-task"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00001', 'task1', 'Task 1', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task1'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task1', 'Task 1', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		results := checkDataIntegrity(database)
 
@@ -253,10 +257,14 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	})
 
 	t.Run("orphaned tasks detected", func(t *testing.T) {
+		// Temporarily disable foreign keys to create orphaned task
+		database.Exec("PRAGMA foreign_keys = OFF")
+		defer database.Exec("PRAGMA foreign_keys = ON")
+
 		// Create task with invalid project_uuid
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00002', 'orphan', 'Orphaned', 'nonexistent-uuid', 'open', 2, ?, ?)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('orphan-task-uuid', 'T-00002', 'orphan', 'Orphaned', 'nonexistent-uuid', 'open', 2, ?, ?, 1)
 		`, actorUUID, actorUUID)
 
 		results := checkDataIntegrity(database)
@@ -279,14 +287,13 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	t.Run("no orphaned attachments in healthy database", func(t *testing.T) {
 		taskUUID := "task-with-att"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00003', 'task-att', 'Task Att', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task-att'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task-att', 'Task Att', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'file.txt', 'tasks/task-with-att/file.txt', 'text/plain', 100)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'file.txt', 'tasks/task-with-att/file.txt', 'text/plain', 100)
 		`, taskUUID)
 
 		results := checkDataIntegrity(database)
@@ -307,10 +314,14 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	})
 
 	t.Run("orphaned attachments detected", func(t *testing.T) {
+		// Temporarily disable foreign keys to create orphaned attachment
+		database.Exec("PRAGMA foreign_keys = OFF")
+		defer database.Exec("PRAGMA foreign_keys = ON")
+
 		// Create attachment with invalid task_uuid
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', 'nonexistent-task', 'orphan.txt', 'tasks/orphan/file.txt', 'text/plain', 50)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES ('nonexistent-task', 'orphan.txt', 'tasks/orphan/file.txt', 'text/plain', 50)
 		`)
 
 		results := checkDataIntegrity(database)
@@ -331,14 +342,18 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	})
 
 	t.Run("duplicate slugs detected", func(t *testing.T) {
+		// Drop unique index to allow duplicate slugs
+		database.Exec("DROP INDEX IF EXISTS tasks_unique_slug_in_container")
+		defer database.Exec("CREATE UNIQUE INDEX tasks_unique_slug_in_container ON tasks(project_uuid, slug)")
+
 		// Create two tasks with same slug in same container
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00004', 'duplicate', 'Dup 1', ?, 'open', 2, ?, ?)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('dup-task-1-uuid', 'T-00004', 'duplicate', 'Dup 1', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00005', 'duplicate', 'Dup 2', ?, 'open', 2, ?, ?)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('dup-task-2-uuid', 'T-00005', 'duplicate', 'Dup 2', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
 
 		results := checkDataIntegrity(database)
@@ -427,23 +442,26 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	t.Run("attachment count and size reported", func(t *testing.T) {
 		// Create test data
 		actorUUID := "test-actor"
-		database.Exec(`INSERT INTO actors (id, slug, name, type) VALUES ('A-00001', 'test', 'Test', 'human')`)
-		database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test'`, actorUUID)
+		database.Exec(`
+			INSERT INTO actors (uuid, slug, display_name, role)
+			VALUES (?, 'test', 'Test', 'human')
+		`, actorUUID)
 
 		containerUUID := "test-container"
-		database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'proj', 'Project', ?, ?)`, actorUUID, actorUUID)
-		database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'proj'`, containerUUID)
+		database.Exec(`
+			INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'proj', 'Project', ?, ?, 1)
+		`, containerUUID, actorUUID, actorUUID)
 
 		taskUUID := "task-with-att"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00001', 'task', 'Task', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task', 'Task', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'file.txt', 'tasks/task/file.txt', 'text/plain', 1024)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'file.txt', 'tasks/task/file.txt', 'text/plain', 1024)
 		`, taskUUID)
 
 		results := checkAttachments(database, attachDir)
@@ -527,12 +545,16 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 
 	// Create test data
 	actorUUID := "test-actor"
-	database.Exec(`INSERT INTO actors (id, slug, display_name, role) VALUES ('A-00001', 'test', 'Test', 'human')`)
-	database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test'`, actorUUID)
+	database.Exec(`
+		INSERT INTO actors (uuid, slug, display_name, role)
+		VALUES (?, 'test', 'Test', 'human')
+	`, actorUUID)
 
 	containerUUID := "test-container"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'proj', 'Project', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'proj'`, containerUUID)
+	database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'proj', 'Project', ?, ?, 1)
+	`, containerUUID, actorUUID, actorUUID)
 
 	// Add some tasks
 	for i := 0; i < 10; i++ {
@@ -540,10 +562,11 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 		if i < 3 {
 			state = "archived"
 		}
+		taskUUID := fmt.Sprintf("task-%d-uuid", i)
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES (?, ?, ?, ?, ?, 2, ?, ?)
-		`, "T-"+string(rune('0'+i)), "task-"+string(rune('0'+i)), "Task "+string(rune('0'+i)), containerUUID, state, actorUUID, actorUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, ?, ?, ?, ?, ?, 2, ?, ?, 1)
+		`, taskUUID, "T-"+string(rune('0'+i)), "task-"+string(rune('0'+i)), "Task "+string(rune('0'+i)), containerUUID, state, actorUUID, actorUUID)
 	}
 
 	t.Run("task counts reported correctly", func(t *testing.T) {

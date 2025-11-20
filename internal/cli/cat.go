@@ -20,12 +20,14 @@ If the argument resolves to a container, exits with error code 2.`,
 }
 
 var (
-	catNoFrontmatter bool
+	catNoFrontmatter    bool
+	catIncludeComments  bool
 )
 
 func init() {
 	rootCmd.AddCommand(catCmd)
 	catCmd.Flags().BoolVar(&catNoFrontmatter, "no-frontmatter", false, "Print body only without front matter")
+	catCmd.Flags().BoolVar(&catIncludeComments, "include-comments", false, "Include comments in output (read-only)")
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
@@ -128,6 +130,71 @@ func runCat(cmd *cobra.Command, args []string) error {
 
 		// Print body
 		fmt.Fprintln(cmd.OutOrStdout(), body)
+
+		// Include comments if requested
+		if catIncludeComments {
+			// Query non-deleted comments for this task
+			rows, err := database.Query(`
+				SELECT c.id, c.created_at, c.body, a.slug as actor_slug, a.role as actor_role
+				FROM comments c
+				LEFT JOIN actors a ON c.actor_uuid = a.uuid
+				WHERE c.task_uuid = ? AND c.deleted_at IS NULL
+				ORDER BY c.created_at ASC
+			`, taskUUID)
+			if err != nil {
+				return fmt.Errorf("failed to query comments: %w", err)
+			}
+
+			var comments []struct {
+				ID        string
+				CreatedAt string
+				Body      string
+				ActorSlug string
+				ActorRole string
+			}
+
+			for rows.Next() {
+				var comment struct {
+					ID        string
+					CreatedAt string
+					Body      string
+					ActorSlug string
+					ActorRole string
+				}
+				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &comment.ActorSlug, &comment.ActorRole); err != nil {
+					rows.Close()
+					return fmt.Errorf("failed to scan comment: %w", err)
+				}
+				comments = append(comments, comment)
+			}
+			rows.Close()
+
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("error iterating comments: %w", err)
+			}
+
+			// Only print comments section if there are comments
+			if len(comments) > 0 {
+				fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout(), "<!-- wrkq-comments: do not edit below -->")
+				fmt.Fprintln(cmd.OutOrStdout())
+
+				for _, comment := range comments {
+					// Print header line
+					fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
+						comment.ID, comment.CreatedAt, comment.ActorSlug, comment.ActorRole)
+
+					// Print body lines with > prefix
+					bodyLines := strings.Split(comment.Body, "\n")
+					for _, line := range bodyLines {
+						fmt.Fprintf(cmd.OutOrStdout(), "> %s\n", line)
+					}
+					fmt.Fprintln(cmd.OutOrStdout())
+				}
+			}
+		}
 	}
 
 	return nil

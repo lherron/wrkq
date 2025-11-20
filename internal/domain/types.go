@@ -56,12 +56,17 @@ type Task struct {
 
 // Comment represents a comment on a task
 type Comment struct {
-	UUID       string    `json:"uuid" db:"uuid"`
-	ID         string    `json:"id" db:"id"`
-	TaskUUID   string    `json:"task_uuid" db:"task_uuid"`
-	ActorUUID  string    `json:"actor_uuid" db:"actor_uuid"`
-	Body       string    `json:"body" db:"body"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UUID               string     `json:"uuid" db:"uuid"`
+	ID                 string     `json:"id" db:"id"`
+	TaskUUID           string     `json:"task_uuid" db:"task_uuid"`
+	ActorUUID          string     `json:"actor_uuid" db:"actor_uuid"`
+	Body               string     `json:"body" db:"body"`
+	Meta               *string    `json:"meta,omitempty" db:"meta"` // JSON optional metadata for agents/tools
+	ETag               int64      `json:"etag" db:"etag"`
+	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt          *time.Time `json:"updated_at,omitempty" db:"updated_at"` // nullable; reserved for future editable comments
+	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"` // nullable; soft delete timestamp
+	DeletedByActorUUID *string    `json:"deleted_by_actor_uuid,omitempty" db:"deleted_by_actor_uuid"` // nullable; actor who soft-deleted
 }
 
 // Attachment represents a file attachment
@@ -113,5 +118,31 @@ func (t *Task) SetLabels(labels []string) error {
 	}
 	s := string(data)
 	t.Labels = &s
+	return nil
+}
+
+// GetMeta parses the meta JSON into a map
+func (c *Comment) GetMeta() (map[string]interface{}, error) {
+	if c.Meta == nil || *c.Meta == "" {
+		return map[string]interface{}{}, nil
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(*c.Meta), &meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
+// SetMeta sets the meta from a map
+func (c *Comment) SetMeta(meta map[string]interface{}) error {
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	s := string(data)
+	c.Meta = &s
 	return nil
 }

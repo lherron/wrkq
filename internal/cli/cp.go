@@ -355,11 +355,11 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 		newUUID = existingUUID
 		tx.QueryRow("SELECT id FROM tasks WHERE uuid = ?", newUUID).Scan(&newID)
 	} else {
-		// Insert new task
+		// Insert new task (omit id and uuid to let triggers generate them)
 		result, err := tx.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, body, labels,
+			INSERT INTO tasks (slug, title, project_uuid, state, priority, body, labels,
 				start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, slug, title, destUUID, state, priority, body, labels, startAt, dueAt, actorUUID, actorUUID)
 		if err != nil {
 			return nil, err
@@ -443,11 +443,12 @@ func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string)
 			return count, err
 		}
 
-		var newRelativePath string
+		// Always generate new relative path for destination task
+		newRelativePath := fmt.Sprintf("tasks/%s/%s", destTaskUUID, filename)
+
 		if cpWithAttachments {
 			// Copy file to new location
 			sourcePath := filepath.Join(attachDir, relativePath)
-			newRelativePath = fmt.Sprintf("tasks/%s/%s", destTaskUUID, filename)
 			destPath := filepath.Join(attachDir, newRelativePath)
 
 			// Create destination directory
@@ -471,10 +472,8 @@ func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string)
 			if _, err := io.Copy(destFile, sourceFile); err != nil {
 				return count, err
 			}
-		} else {
-			// Keep same relative path (metadata only copy)
-			newRelativePath = relativePath
 		}
+		// If not copying files, just insert metadata with new relative_path
 
 		// Insert attachment metadata
 		_, err = tx.Exec(`

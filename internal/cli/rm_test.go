@@ -24,21 +24,30 @@ func TestRmPurge(t *testing.T) {
 
 	// Create test actor
 	actorUUID := "test-actor-uuid"
-	database.Exec(`INSERT INTO actors (uuid, id, slug, display_name, role) VALUES (?, 'A-00001', 'test-actor', 'Test Actor', 'human')`, actorUUID)
-	database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test-actor'`, actorUUID)
+	_, err = database.Exec(`
+		INSERT INTO actors (uuid, slug, display_name, role)
+		VALUES (?, 'test-actor', 'Test Actor', 'human')
+	`, actorUUID)
+	if err != nil {
+		t.Fatalf("Failed to create actor: %v", err)
+	}
 
 	// Create test container
 	containerUUID := "test-container-uuid"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'test-project', 'Test Project', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'test-project'`, containerUUID)
+	_, err = database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'test-project', 'Test Project', ?, ?, 1)
+	`, containerUUID, actorUUID, actorUUID)
+	if err != nil {
+		t.Fatalf("Failed to create container: %v", err)
+	}
 
 	t.Run("purge deletes task from database", func(t *testing.T) {
 		taskUUID := "purge-test-1"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00001', 'purge-1', 'Purge Test 1', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'purge-1'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'purge-1', 'Purge Test 1', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Verify task exists
 		var count int
@@ -49,7 +58,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task
 		rmPurge = true
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err = removeTask(database, attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task: %v", err)
 		}
@@ -66,10 +75,9 @@ func TestRmPurge(t *testing.T) {
 	t.Run("soft delete archives task without removing", func(t *testing.T) {
 		taskUUID := "archive-test"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00002', 'archive-1', 'Archive Test', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'archive-1'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'archive-1', 'Archive Test', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Soft delete (default)
 		rmPurge = false
@@ -102,17 +110,22 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("purge deletes attachment metadata", func(t *testing.T) {
 		taskUUID := "task-with-attachments"
-		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00003', 'task-att', 'Task with Attachments', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task-att'`, taskUUID)
+		_, err := database.Exec(`
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task-att', 'Task with Attachments', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
+		if err != nil {
+			t.Fatalf("Failed to insert task: %v", err)
+		}
 
 		// Add attachment metadata
-		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'test.txt', 'tasks/task-with-attachments/test.txt', 'text/plain', 100)
+		_, err = database.Exec(`
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'test.txt', 'tasks/task-with-attachments/test.txt', 'text/plain', 100)
 		`, taskUUID)
+		if err != nil {
+			t.Fatalf("Failed to insert attachment: %v", err)
+		}
 
 		// Verify attachment exists
 		var attCount int
@@ -123,7 +136,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task
 		rmPurge = true
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err = removeTask(database, attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task with attachments: %v", err)
 		}
@@ -140,10 +153,9 @@ func TestRmPurge(t *testing.T) {
 	t.Run("purge deletes attachment files from filesystem", func(t *testing.T) {
 		taskUUID := "task-with-files"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00004', 'task-files', 'Task with Files', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task-files'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task-files', 'Task with Files', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Create attachment file
 		taskDir := filepath.Join(attachDir, "tasks", taskUUID)
@@ -154,8 +166,8 @@ func TestRmPurge(t *testing.T) {
 		// Add attachment metadata
 		relativePath := "tasks/" + taskUUID + "/test.txt"
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'test.txt', ?, 'text/plain', 12)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'test.txt', ?, 'text/plain', 12)
 		`, taskUUID, relativePath)
 
 		// Verify file exists
@@ -194,16 +206,15 @@ func TestRmPurge(t *testing.T) {
 	t.Run("purge handles missing files gracefully", func(t *testing.T) {
 		taskUUID := "task-missing-files"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00005', 'task-missing', 'Task Missing Files', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'task-missing'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'task-missing', 'Task Missing Files', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment metadata but don't create file
 		relativePath := "tasks/" + taskUUID + "/missing.txt"
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'missing.txt', ?, 'text/plain', 100)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'missing.txt', ?, 'text/plain', 100)
 		`, taskUUID, relativePath)
 
 		// Purge should succeed even though file doesn't exist
@@ -226,14 +237,13 @@ func TestRmPurge(t *testing.T) {
 	t.Run("purge logs event before deletion", func(t *testing.T) {
 		taskUUID := "event-test"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00006', 'event-task', 'Event Test', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'event-task'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'event-task', 'Event Test', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Purge task
 		rmPurge = true
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err = removeTask(database, attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task: %v", err)
 		}
@@ -262,10 +272,9 @@ func TestRmPurge(t *testing.T) {
 	t.Run("soft delete logs task.updated event", func(t *testing.T) {
 		taskUUID := "soft-delete-event"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00007', 'soft-event', 'Soft Delete Event', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'soft-event'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'soft-event', 'Soft Delete Event', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Soft delete
 		rmPurge = false
@@ -289,10 +298,9 @@ func TestRmPurge(t *testing.T) {
 	t.Run("purge increments etag before deletion", func(t *testing.T) {
 		taskUUID := "etag-purge"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00008', 'etag-purge', 'ETag Purge', ?, 'open', 2, 3, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'etag-purge'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES (?, 'etag-purge', 'ETag Purge', ?, 'open', 2, 3, ?, ?)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Get initial etag
 		var initialEtag int
@@ -321,10 +329,9 @@ func TestRmPurge(t *testing.T) {
 	t.Run("soft delete increments etag", func(t *testing.T) {
 		taskUUID := "etag-archive"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00009', 'etag-archive', 'ETag Archive', ?, 'open', 2, 5, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'etag-archive'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES (?, 'etag-archive', 'ETag Archive', ?, 'open', 2, 5, ?, ?)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Soft delete
 		rmPurge = false
@@ -344,10 +351,9 @@ func TestRmPurge(t *testing.T) {
 	t.Run("result contains correct metadata", func(t *testing.T) {
 		taskUUID := "result-test"
 		database.Exec(`
-			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('T-00010', 'result-task', 'Result Test', ?, 'open', 2, ?, ?)
-		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'result-task'`, taskUUID)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'result-task', 'Result Test', ?, 'open', 2, ?, ?, 1)
+		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment
 		taskDir := filepath.Join(attachDir, "tasks", taskUUID)
@@ -358,8 +364,8 @@ func TestRmPurge(t *testing.T) {
 
 		relativePath := "tasks/" + taskUUID + "/data.bin"
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, 'data.bin', ?, 'application/octet-stream', 1024)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, 'data.bin', ?, 'application/octet-stream', 1024)
 		`, taskUUID, relativePath)
 
 		// Purge
@@ -408,19 +414,22 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 	database.Migrate()
 
 	actorUUID := "test-actor"
-	database.Exec(`INSERT INTO actors (id, slug, display_name, role) VALUES ('A-00001', 'test', 'Test', 'human')`)
-	database.Exec(`UPDATE actors SET uuid = ? WHERE slug = 'test'`, actorUUID)
+	database.Exec(`
+		INSERT INTO actors (uuid, slug, display_name, role)
+		VALUES (?, 'test', 'Test', 'human')
+	`, actorUUID)
 
 	containerUUID := "test-container"
-	database.Exec(`INSERT INTO containers (id, slug, name, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('P-00001', 'proj', 'Project', ?, ?)`, actorUUID, actorUUID)
-	database.Exec(`UPDATE containers SET uuid = ? WHERE slug = 'proj'`, containerUUID)
+	database.Exec(`
+		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'proj', 'Project', ?, ?, 1)
+	`, containerUUID, actorUUID, actorUUID)
 
 	taskUUID := "multi-attach-task"
 	database.Exec(`
-		INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('T-00001', 'multi', 'Multi Attachments', ?, 'open', 2, ?, ?)
-	`, containerUUID, actorUUID, actorUUID)
-	database.Exec(`UPDATE tasks SET uuid = ? WHERE slug = 'multi'`, taskUUID)
+		INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'multi', 'Multi Attachments', ?, 'open', 2, ?, ?, 1)
+	`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 	// Create multiple attachment files
 	taskDir := filepath.Join(attachDir, "tasks", taskUUID)
@@ -444,8 +453,8 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 
 		relativePath := "tasks/" + taskUUID + "/" + f.name
 		database.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('', ?, ?, ?, 'application/octet-stream', ?)
+			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+			VALUES (?, ?, ?, 'application/octet-stream', ?)
 		`, taskUUID, f.name, relativePath, f.size)
 	}
 
