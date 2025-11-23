@@ -116,13 +116,13 @@ class WrkqMCPServer {
       await writeFile(tempFilePath, taskDescription, "utf8");
 
       // Call wrkq apply command to update the task
-      // The apply command syntax: wrkq apply <taskId> <file> --body-only --format md
+      // The apply command syntax: wrkq apply <taskId> <file> [--format md]
+      // By default, wrkq apply updates only the description (body)
       // Using --format md allows plain markdown without front matter
       const { stdout, stderr } = await execFileAsync("wrkq", [
         "apply",
         taskId,
         tempFilePath,
-        "--body-only",
         "--format",
         "md",
       ]);
