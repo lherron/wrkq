@@ -16,7 +16,7 @@ func TestConcurrentWrites_ETagConflict(t *testing.T) {
 	// Create a test task
 	taskUUID := "00000000-0000-0000-0000-000000000003"
 	_, err := database.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`, taskUUID)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestConcurrentReads(t *testing.T) {
 		taskTitle := fmt.Sprintf("Task %d", i)
 
 		_, err := database.Exec(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`, taskUUID, taskID, taskSlug, taskTitle)
 		if err != nil {
@@ -206,7 +206,7 @@ func TestConcurrentWritesToDifferentTasks(t *testing.T) {
 		taskTitle := fmt.Sprintf("Task %d", i)
 
 		_, err := database.Exec(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`, taskUUID, taskID, taskSlug, taskTitle)
 		if err != nil {

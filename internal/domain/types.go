@@ -44,7 +44,7 @@ type Task struct {
 	StartAt            *time.Time `json:"start_at,omitempty" db:"start_at"`
 	DueAt              *time.Time `json:"due_at,omitempty" db:"due_at"`
 	Labels             *string    `json:"labels,omitempty" db:"labels"` // JSON array
-	Body               string     `json:"body" db:"body"`
+	Description        string     `json:"description" db:"description"`
 	ETag               int64      `json:"etag" db:"etag"`
 	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`

@@ -20,7 +20,7 @@ const TEMP_DIR = "/tmp/claude";
 
 interface WrkqTaskWriteArgs {
   taskId: string;
-  taskBody: string;
+  taskDescription: string;
 }
 
 /**
@@ -62,9 +62,9 @@ class WrkqMCPServer {
       return {
         tools: [
           {
-            name: "wrkq_task_write",
+            name: "wrkq_update_description",
             description:
-              "Update a wrkq task's body content. Takes a task ID (friendly ID like T-00001, UUID, or path) and new body content. Uses wrkq CLI's apply command to update the task.",
+              "Update a wrkq task's description content. Takes a task ID (friendly ID like T-00001, UUID, or path) and new description content. Uses wrkq CLI's apply command to update the task.",
             inputSchema: {
               type: "object",
               properties: {
@@ -73,12 +73,12 @@ class WrkqMCPServer {
                   description:
                     "Task identifier: friendly ID (T-00001), UUID, or path (project/task-slug)",
                 },
-                taskBody: {
+                taskDescription: {
                   type: "string",
-                  description: "New body content for the task (markdown supported)",
+                  description: "New description content for the task (markdown supported)",
                 },
               },
-              required: ["taskId", "taskBody"],
+              required: ["taskId", "taskDescription"],
             },
           } as Tool,
         ],
@@ -87,7 +87,7 @@ class WrkqMCPServer {
 
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      if (request.params.name === "wrkq_task_write") {
+      if (request.params.name === "wrkq_update_description") {
         const args = request.params.arguments as unknown as WrkqTaskWriteArgs;
         return await this.handleTaskWrite(args);
       }
@@ -97,14 +97,14 @@ class WrkqMCPServer {
   }
 
   private async handleTaskWrite(args: WrkqTaskWriteArgs) {
-    const { taskId, taskBody } = args;
+    const { taskId, taskDescription } = args;
 
     if (!taskId || typeof taskId !== "string") {
       throw new Error("taskId is required and must be a string");
     }
 
-    if (!taskBody || typeof taskBody !== "string") {
-      throw new Error("taskBody is required and must be a string");
+    if (!taskDescription || typeof taskDescription !== "string") {
+      throw new Error("taskDescription is required and must be a string");
     }
 
     // Generate unique temp file name
@@ -112,8 +112,8 @@ class WrkqMCPServer {
     const tempFilePath = join(TEMP_DIR, tempFileName);
 
     try {
-      // Write task body to temp file
-      await writeFile(tempFilePath, taskBody, "utf8");
+      // Write task description to temp file
+      await writeFile(tempFilePath, taskDescription, "utf8");
 
       // Call wrkq apply command to update the task
       // The apply command syntax: wrkq apply <taskId> <file> --body-only --format md

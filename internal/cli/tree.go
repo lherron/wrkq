@@ -6,6 +6,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +22,7 @@ Examples:
   todo tree portal             # Show tree under portal
   todo tree -L 2               # Limit depth to 2 levels
   todo tree -a                 # Include completed and archived items
+  todo tree --json             # Output as JSON
 `,
 	RunE: runTree,
 }
@@ -30,6 +32,7 @@ var (
 	treeIncludeArchived bool
 	treeFields      string
 	treePorcelain   bool
+	treeJSON        bool
 )
 
 func init() {
@@ -39,6 +42,7 @@ func init() {
 	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include completed and archived items")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
+	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
 }
 
 func runTree(cmd *cobra.Command, args []string) error {
@@ -67,25 +71,38 @@ func runTree(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build and display tree
-	return displayTree(database, rootPath, treeDepth, treeIncludeArchived, treePorcelain)
+	return displayTree(database, rootPath, treeDepth, treeIncludeArchived, treePorcelain, treeJSON)
 }
 
 type treeNode struct {
-	Type       string // "container" or "task"
-	ID         string
-	Slug       string
-	Title      string
-	State      string // for tasks
-	UUID       string
-	IsArchived bool
-	Children   []*treeNode
+	Type       string      `json:"type"`       // "container" or "task"
+	ID         string      `json:"id"`
+	Slug       string      `json:"slug"`
+	Title      string      `json:"title"`
+	State      string      `json:"state,omitempty"` // for tasks
+	UUID       string      `json:"uuid"`
+	IsArchived bool        `json:"is_archived"`
+	Children   []*treeNode `json:"children,omitempty"`
 }
 
-func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, porcelain bool) error {
+func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, porcelain bool, jsonOutput bool) error {
 	// Build tree structure
 	root, err := buildTree(database, rootPath, maxDepth, includeArchived, 0)
 	if err != nil {
 		return err
+	}
+
+	// Handle JSON output
+	if jsonOutput {
+		// Create a wrapper structure with metadata
+		output := map[string]interface{}{
+			"path":     rootPath,
+			"children": root.Children,
+		}
+		if rootPath == "" {
+			output["path"] = "."
+		}
+		return render.RenderJSON(output, false)
 	}
 
 	// Print tree

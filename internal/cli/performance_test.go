@@ -147,7 +147,7 @@ func TestPerformance_CreateTask(t *testing.T) {
 		taskSlug := fmt.Sprintf("task-%d", i)
 
 		_, err := database.Exec(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`, taskUUID, taskID, taskSlug, "Task "+string(rune(i)))
 		if err != nil {
@@ -312,7 +312,7 @@ func BenchmarkCreateTask(b *testing.B) {
 		taskSlug := fmt.Sprintf("bench-task-%d", i)
 
 		_, err := database.Exec(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`, taskUUID, taskID, taskSlug, "Benchmark Task")
 		if err != nil {
@@ -371,7 +371,7 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 		}
 
 		stmt, err := tx.Prepare(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', ?, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`)
 		if err != nil {
@@ -446,7 +446,7 @@ func setupBenchPerfEnv(b *testing.B, numTasks int) (*sql.DB, string) {
 	if numTasks > 0 {
 		tx, _ := database.Begin()
 		stmt, _ := tx.Prepare(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`)
 

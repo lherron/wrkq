@@ -299,7 +299,7 @@ func applyTaskDocument(cmd *cobra.Command, cfg *config.Config, task *bundle.Task
 	// Write task document to temp file (use original content if available, otherwise just body)
 	content := task.OriginalContent
 	if content == "" {
-		content = task.Body
+		content = task.Description
 	}
 	if _, err := tmpFile.WriteString(content); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)

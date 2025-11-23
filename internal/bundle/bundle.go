@@ -30,7 +30,7 @@ type TaskDocument struct {
 	Path            string `yaml:"path"`
 	BaseEtag        int    `yaml:"base_etag,omitempty"`
 	UUID            string `yaml:"uuid,omitempty"`
-	Body            string // The actual task content (everything after frontmatter)
+	Description     string // The actual task content (everything after frontmatter)
 	OriginalContent string // The full original document including frontmatter
 }
 
@@ -150,19 +150,19 @@ func ParseTaskDocument(content string) (*TaskDocument, error) {
 		OriginalContent: content,
 	}
 
-	// Split into frontmatter and body
+	// Split into frontmatter and description
 	parts := strings.SplitN(content, "---", 3)
 	if len(parts) < 3 {
-		// No frontmatter, entire content is body
-		task.Body = content
+		// No frontmatter, entire content is description
+		task.Description = content
 		return task, nil
 	}
 
 	// parts[0] is empty (before first ---)
 	// parts[1] is the frontmatter
-	// parts[2] is the body
+	// parts[2] is the description
 	frontmatter := parts[1]
-	task.Body = strings.TrimSpace(parts[2])
+	task.Description = strings.TrimSpace(parts[2])
 
 	// Parse frontmatter for metadata we care about
 	lines := strings.Split(frontmatter, "\n")

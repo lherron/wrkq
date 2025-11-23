@@ -176,15 +176,15 @@ func TestCpCommand(t *testing.T) {
 		// Create source task
 		sourceUUID := "source-overwrite"
 		database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, body, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'overwrite-source', 'Source Version', ?, 'open', 1, 'Original body', ?, ?, 1)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, description, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'overwrite-source', 'Source Version', ?, 'open', 1, 'Original description', ?, ?, 1)
 		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		// Create existing task in destination with same slug
 		existingUUID := "existing-task"
 		database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, body, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'overwrite-source', 'Existing Version', ?, 'completed', 3, 'Old body', ?, ?, 1)
+			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, description, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'overwrite-source', 'Existing Version', ?, 'completed', 3, 'Old description', ?, ?, 1)
 		`, existingUUID, destUUID, actorUUID, actorUUID)
 
 		// Try copy without --overwrite (should fail)
@@ -214,17 +214,17 @@ func TestCpCommand(t *testing.T) {
 		}
 
 		// Verify content updated
-		var title, body string
+		var title, description string
 		var priority int
-		database.QueryRow(`SELECT title, priority, body FROM tasks WHERE uuid = ?`, existingUUID).Scan(&title, &priority, &body)
+		database.QueryRow(`SELECT title, priority, description FROM tasks WHERE uuid = ?`, existingUUID).Scan(&title, &priority, &description)
 		if title != "Source Version" {
 			t.Errorf("Expected updated title 'Source Version', got '%s'", title)
 		}
 		if priority != 1 {
 			t.Errorf("Expected updated priority 1, got %d", priority)
 		}
-		if body != "Original body" {
-			t.Errorf("Expected updated body, got '%s'", body)
+		if description != "Original description" {
+			t.Errorf("Expected updated description, got '%s'", description)
 		}
 
 		// Reset flag

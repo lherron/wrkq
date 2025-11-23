@@ -14,11 +14,11 @@ type MergeResult struct {
 
 // TaskDocument represents a task with all editable fields
 type TaskDocument struct {
-	Title    string
-	State    string
-	Priority int
-	DueAt    string
-	Body     string
+	Title       string
+	State       string
+	Priority    int
+	DueAt       string
+	Description string
 }
 
 // Merge3Way performs a 3-way merge of task documents
@@ -65,11 +65,11 @@ func Merge3Way(base, current, edited *TaskDocument) *MergeResult {
 		result,
 	)
 
-	// Merge body (line-by-line)
-	result.Merged.Body = mergeBody(
-		base.Body,
-		current.Body,
-		edited.Body,
+	// Merge description (line-by-line)
+	result.Merged.Description = mergeBody(
+		base.Description,
+		current.Description,
+		edited.Description,
 		result,
 	)
 
@@ -109,7 +109,7 @@ func mergeField(name, base, current, edited string, result *MergeResult) string 
 	return edited
 }
 
-// mergeBody performs line-by-line 3-way merge on body text
+// mergeBody performs line-by-line 3-way merge on description text
 func mergeBody(base, current, edited string, result *MergeResult) string {
 	// Simple line-by-line comparison
 	baseLines := strings.Split(base, "\n")
@@ -139,11 +139,11 @@ func mergeBody(base, current, edited string, result *MergeResult) string {
 	// Complex diff - for now, mark as conflict and return edited with markers
 	result.HasConflict = true
 	result.Conflicts = append(result.Conflicts, fmt.Sprintf(
-		"Body has conflicting changes:\n  Base lines: %d\n  Current lines: %d\n  Edited lines: %d",
+		"Description has conflicting changes:\n  Base lines: %d\n  Current lines: %d\n  Edited lines: %d",
 		len(baseLines), len(currentLines), len(editedLines),
 	))
 
-	// Return body with conflict markers
+	// Return description with conflict markers
 	var merged strings.Builder
 	merged.WriteString("<<<<<<< CURRENT (in database)\n")
 	merged.WriteString(current)

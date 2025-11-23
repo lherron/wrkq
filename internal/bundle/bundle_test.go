@@ -137,8 +137,8 @@ This is the task body.
 		t.Errorf("Expected base_etag 42, got %d", task.BaseEtag)
 	}
 
-	if task.Body != "# Task Title\n\nThis is the task body." {
-		t.Errorf("Unexpected body: %s", task.Body)
+	if task.Description != "# Task Title\n\nThis is the task body." {
+		t.Errorf("Unexpected description: %s", task.Description)
 	}
 }
 
@@ -153,8 +153,8 @@ This is the task body without frontmatter.
 		t.Fatalf("ParseTaskDocument failed: %v", err)
 	}
 
-	if task.Body != content {
-		t.Errorf("Expected entire content as body")
+	if task.Description != content {
+		t.Errorf("Expected entire content as description")
 	}
 }
 

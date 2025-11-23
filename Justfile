@@ -42,38 +42,22 @@ db-reset:
 # --- CLI tasks (Golang) ---
 
 # Build both CLI binaries (wrkq and wrkqadm)
-cli-build:
+build:
   go build -o bin/wrkq ./cmd/wrkq
-  go build -o bin/wrkqadm ./cmd/wrkqadm
-
-# Build wrkq binary only
-wrkq-build:
-  go build -o bin/wrkq ./cmd/wrkq
-
-# Build wrkqadm binary only
-wrkqadm-build:
   go build -o bin/wrkqadm ./cmd/wrkqadm
 
 # Run the wrkq CLI
-cli-run *args:
+run *args:
   go run ./cmd/wrkq {{args}}
 
 # Run the wrkqadm CLI
 wrkqadm-run *args:
   go run ./cmd/wrkqadm {{args}}
 
-# Run CLI tests
-cli-test:
-  go test -v ./...
-
 # Run CLI tests with coverage
-cli-test-coverage:
+test-coverage:
   go test -v -coverprofile=coverage.out ./...
   go tool cover -html=coverage.out -o coverage.html
-
-# Install CLI binary to $GOPATH/bin
-cli-install:
-  go install ./cmd/wrkq
 
 # Install both CLI binaries to ~/.local/bin (no sudo required)
 install:
@@ -144,49 +128,13 @@ uninstall:
   fi
 
 # Format CLI code
-cli-fmt:
+fmt:
   go fmt ./...
-
-# Lint CLI code
-cli-lint:
-  golangci-lint run
-
-# --- Node.js app tasks (FUTURE) ---
-
-# Install dependencies for all Node.js workspaces
-install-deps:
-  pnpm install
-
-# Build all Node.js apps
-build:
-  pnpm -r build
-
-# Run development servers (web + api)
-dev:
-  pnpm --parallel --filter @wrkq/web --filter @wrkq/api dev
-
-# Type check all TypeScript code
-check:
-  pnpm -r run typecheck
-
-# Lint all JavaScript/TypeScript code
-lint-js:
-  pnpm -r run lint
-
-# Format all code
-format:
-  pnpm -r run format
-
-# Format and write changes
-format-write:
-  pnpm -r run format:write
-
-# --- Quality gates ---
 
 # Lint all code (Go + JS/TS when available)
 lint:
   @echo "Linting Golang code..."
-  golangci-lint run || true
+  golangci-lint run
   @echo "✓ Golang linting complete"
 
 # Run all tests (Go + Node.js when available)
@@ -200,39 +148,19 @@ verify: lint test
   @echo "✓ All checks passed"
 
 # Run pre-commit checks
-pre-commit: cli-fmt lint test
+pre-commit: fmt lint test
   @echo "✓ Pre-commit checks passed"
 
 # --- Clean tasks ---
 
 # Clean Go build artifacts
-cli-clean:
+clean:
   rm -rf bin/ coverage.out coverage.html
-
-# Clean Node.js build artifacts
-clean-node:
-  rm -rf apps/web/dist apps/api/dist packages/*/dist node_modules apps/*/node_modules packages/*/node_modules
-
-# Clean all build artifacts
-clean: cli-clean
-  @echo "✓ Clean complete"
-
-# --- Development helpers ---
 
 # Show project structure
 tree:
   tree -I 'node_modules|dist|bin|coverage*|.git' -L 3
 
 # Run quick smoke test (build + basic tests)
-smoke: cli-build cli-test
+smoke: build test
   @echo "✓ Smoke test passed"
-
-# --- Platform-specific tasks ---
-
-# Build macOS app (FUTURE)
-macos-build:
-  @echo "macOS app build not yet implemented"
-
-# Build iOS app (FUTURE)
-ios-build:
-  @echo "iOS app build not yet implemented"

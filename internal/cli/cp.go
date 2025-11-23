@@ -320,13 +320,13 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	// Fetch source task
 	var sourceID, slug, title, state string
 	var priority int
-	var body, labels *string
+	var description, labels *string
 	var startAt, dueAt *string
 
 	err = tx.QueryRow(`
-		SELECT id, slug, title, state, priority, body, labels, start_at, due_at
+		SELECT id, slug, title, state, priority, description, labels, start_at, due_at
 		FROM tasks WHERE uuid = ?
-	`, sourceUUID).Scan(&sourceID, &slug, &title, &state, &priority, &body, &labels, &startAt, &dueAt)
+	`, sourceUUID).Scan(&sourceID, &slug, &title, &state, &priority, &description, &labels, &startAt, &dueAt)
 	if err != nil {
 		return nil, err
 	}
@@ -344,11 +344,11 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	if cpOverwrite && existingUUID != "" {
 		// Update existing task
 		_, err = tx.Exec(`
-			UPDATE tasks SET title = ?, state = ?, priority = ?, body = ?, labels = ?,
+			UPDATE tasks SET title = ?, state = ?, priority = ?, description = ?, labels = ?,
 				start_at = ?, due_at = ?, updated_at = CURRENT_TIMESTAMP,
 				updated_by_actor_uuid = ?, etag = etag + 1
 			WHERE uuid = ?
-		`, title, state, priority, body, labels, startAt, dueAt, actorUUID, existingUUID)
+		`, title, state, priority, description, labels, startAt, dueAt, actorUUID, existingUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -358,10 +358,10 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	} else {
 		// Insert new task (omit id and uuid to let triggers generate them)
 		result, err := tx.Exec(`
-			INSERT INTO tasks (slug, title, project_uuid, state, priority, body, labels,
+			INSERT INTO tasks (slug, title, project_uuid, state, priority, description, labels,
 				start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, slug, title, destUUID, state, priority, body, labels, startAt, dueAt, actorUUID, actorUUID)
+		`, slug, title, destUUID, state, priority, description, labels, startAt, dueAt, actorUUID, actorUUID)
 		if err != nil {
 			return nil, err
 		}

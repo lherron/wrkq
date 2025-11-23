@@ -70,7 +70,7 @@ func TestListCommand_JSON(t *testing.T) {
 
 	// Create a test task
 	_, err := database.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
@@ -146,7 +146,7 @@ func TestListCommand_NDJSON(t *testing.T) {
 
 	for _, task := range tasks {
 		_, err := database.Exec(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`, "uuid-"+task.id, task.id, task.slug, task.title)
 		if err != nil {
@@ -203,18 +203,18 @@ func TestCatCommand_Markdown(t *testing.T) {
 
 	// Create a test task with labels
 	_, err := database.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, labels, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 1, 'This is the task body.', '["backend","urgent"]', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, labels, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 1, 'This is the task description.', '["backend","urgent"]', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create test task: %v", err)
 	}
 
 	// Query the task
-	var title, body, labels string
+	var title, description, labels string
 	var priority int
-	err = database.QueryRow(`SELECT title, priority, labels, body FROM tasks WHERE id = ?`, "T-00001").
-		Scan(&title, &priority, &labels, &body)
+	err = database.QueryRow(`SELECT title, priority, labels, description FROM tasks WHERE id = ?`, "T-00001").
+		Scan(&title, &priority, &labels, &description)
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestStatCommand_Porcelain(t *testing.T) {
 
 	// Create a test task
 	_, err := database.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, '', '2025-01-01 10:00:00', '2025-01-01 11:00:00', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 5)
 	`)
 	if err != nil {
@@ -290,7 +290,7 @@ func TestNullSeparatedOutput(t *testing.T) {
 	// Create multiple test tasks
 	for i := 1; i <= 3; i++ {
 		_, err := database.Exec(`
-			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`, "uuid-"+string(rune(i)), "T-0000"+string(rune('0'+i)), "task-"+string(rune('0'+i)), "Task "+string(rune('0'+i)))
 		if err != nil {
@@ -358,8 +358,8 @@ func TestGoldenFiles_JSONOutput(t *testing.T) {
 
 	// Create a deterministic task
 	_, err := database.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, body, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task body', '2025-01-01T10:00:00Z', '2025-01-01T10:00:00Z', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task description', '2025-01-01T10:00:00Z', '2025-01-01T10:00:00Z', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create test task: %v", err)

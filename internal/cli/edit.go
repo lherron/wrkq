@@ -135,11 +135,11 @@ func runEdit(cmd *cobra.Command, args []string) error {
 
 	// Apply merged changes
 	updates := applyUpdates{
-		Title:    &mergeResult.Merged.Title,
-		State:    &mergeResult.Merged.State,
-		Priority: &mergeResult.Merged.Priority,
-		DueAt:    stringPtr(mergeResult.Merged.DueAt),
-		Body:     &mergeResult.Merged.Body,
+		Title:       &mergeResult.Merged.Title,
+		State:       &mergeResult.Merged.State,
+		Priority:    &mergeResult.Merged.Priority,
+		DueAt:       stringPtr(mergeResult.Merged.DueAt),
+		Description: &mergeResult.Merged.Description,
 	}
 
 	err = applyTaskUpdates(database, taskUUID, updates, false)
@@ -166,8 +166,8 @@ func createTempFile(task *taskData) (string, error) {
 	}
 	content.WriteString("---\n\n")
 
-	if task.Body != nil {
-		content.WriteString(*task.Body)
+	if task.Description != nil {
+		content.WriteString(*task.Description)
 	}
 
 	// Create temp file
@@ -191,11 +191,11 @@ func createTempFile(task *taskData) (string, error) {
 }
 
 type parsedTask struct {
-	Title    string  `yaml:"title"`
-	State    string  `yaml:"state"`
-	Priority *int    `yaml:"priority,omitempty"`
-	DueAt    *string `yaml:"due_at,omitempty"`
-	Body     string
+	Title       string  `yaml:"title"`
+	State       string  `yaml:"state"`
+	Priority    *int    `yaml:"priority,omitempty"`
+	DueAt       *string `yaml:"due_at,omitempty"`
+	Description string
 }
 
 func parseTaskDocument(content []byte) (*parsedTask, error) {
@@ -216,7 +216,7 @@ func parseTaskDocument(content []byte) (*parsedTask, error) {
 		return nil, fmt.Errorf("failed to parse front matter: %w", err)
 	}
 
-	task.Body = strings.TrimSpace(parts[1])
+	task.Description = strings.TrimSpace(parts[1])
 	return &task, nil
 }
 
@@ -236,8 +236,8 @@ func taskDataToDocument(task *taskData) *edit.TaskDocument {
 		doc.DueAt = *task.DueAt
 	}
 
-	if task.Body != nil {
-		doc.Body = *task.Body
+	if task.Description != nil {
+		doc.Description = *task.Description
 	}
 
 	return doc
@@ -245,9 +245,9 @@ func taskDataToDocument(task *taskData) *edit.TaskDocument {
 
 func taskDocumentFromParsed(parsed *parsedTask, base *taskData) *edit.TaskDocument {
 	doc := &edit.TaskDocument{
-		Title: parsed.Title,
-		State: parsed.State,
-		Body:  parsed.Body,
+		Title:       parsed.Title,
+		State:       parsed.State,
+		Description: parsed.Description,
 	}
 
 	if parsed.Priority != nil {

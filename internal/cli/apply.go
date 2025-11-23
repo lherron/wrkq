@@ -145,7 +145,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if applyDryRun {
 		fmt.Printf("Would update task %s (%s)\n", friendlyID, taskUUID)
 		if applyBodyOnly {
-			fmt.Printf("  body: %s\n", stringOrNil(updates.Body))
+			fmt.Printf("  description: %s\n", stringOrNil(updates.Description))
 		} else {
 			if updates.Title != nil {
 				fmt.Printf("  title: %s\n", *updates.Title)
@@ -159,8 +159,8 @@ func runApply(cmd *cobra.Command, args []string) error {
 			if updates.DueAt != nil {
 				fmt.Printf("  due_at: %s\n", *updates.DueAt)
 			}
-			if updates.Body != nil {
-				fmt.Printf("  body: %s\n", *updates.Body)
+			if updates.Description != nil {
+				fmt.Printf("  description: %s\n", *updates.Description)
 			}
 		}
 		return nil
@@ -171,11 +171,11 @@ func runApply(cmd *cobra.Command, args []string) error {
 }
 
 type applyUpdates struct {
-	Title    *string `json:"title,omitempty" yaml:"title,omitempty"`
-	State    *string `json:"state,omitempty" yaml:"state,omitempty"`
-	Priority *int    `json:"priority,omitempty" yaml:"priority,omitempty"`
-	DueAt    *string `json:"due_at,omitempty" yaml:"due_at,omitempty"`
-	Body     *string `json:"body,omitempty" yaml:"body,omitempty"`
+	Title       *string `json:"title,omitempty" yaml:"title,omitempty"`
+	State       *string `json:"state,omitempty" yaml:"state,omitempty"`
+	Priority    *int    `json:"priority,omitempty" yaml:"priority,omitempty"`
+	DueAt       *string `json:"due_at,omitempty" yaml:"due_at,omitempty"`
+	Description *string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 func detectFormat(data []byte) string {
@@ -206,10 +206,10 @@ func parseYAML(data []byte, updates *applyUpdates) error {
 func parseMarkdown(data []byte, updates *applyUpdates) error {
 	text := string(data)
 
-	// Split front matter and body
+	// Split front matter and description
 	if !strings.HasPrefix(text, "---\n") {
-		// No front matter, treat entire content as body
-		updates.Body = &text
+		// No front matter, treat entire content as description
+		updates.Description = &text
 		return nil
 	}
 
@@ -219,7 +219,7 @@ func parseMarkdown(data []byte, updates *applyUpdates) error {
 	}
 
 	frontMatter := parts[0]
-	body := strings.TrimSpace(parts[1])
+	description := strings.TrimSpace(parts[1])
 
 	// Parse front matter as YAML
 	err := yaml.Unmarshal([]byte(frontMatter), updates)
@@ -227,9 +227,9 @@ func parseMarkdown(data []byte, updates *applyUpdates) error {
 		return fmt.Errorf("failed to parse front matter: %w", err)
 	}
 
-	// Set body
-	if body != "" {
-		updates.Body = &body
+	// Set description
+	if description != "" {
+		updates.Description = &description
 	}
 
 	return nil
@@ -241,12 +241,12 @@ func applyTaskUpdates(database *db.DB, taskUUID string, updates applyUpdates, bo
 	var args []interface{}
 
 	if bodyOnly {
-		// Only update body
-		if updates.Body != nil {
-			setClauses = append(setClauses, "body = ?")
-			args = append(args, *updates.Body)
+		// Only update description
+		if updates.Description != nil {
+			setClauses = append(setClauses, "description = ?")
+			args = append(args, *updates.Description)
 		} else {
-			return fmt.Errorf("no body provided in --body-only mode")
+			return fmt.Errorf("no description provided in --body-only mode")
 		}
 	} else {
 		// Update all provided fields
@@ -266,9 +266,9 @@ func applyTaskUpdates(database *db.DB, taskUUID string, updates applyUpdates, bo
 			setClauses = append(setClauses, "due_at = ?")
 			args = append(args, *updates.DueAt)
 		}
-		if updates.Body != nil {
-			setClauses = append(setClauses, "body = ?")
-			args = append(args, *updates.Body)
+		if updates.Description != nil {
+			setClauses = append(setClauses, "description = ?")
+			args = append(args, *updates.Description)
 		}
 	}
 
@@ -342,11 +342,11 @@ func runApplyWithMerge(cmd *cobra.Command, database *db.DB, taskUUID string, fri
 
 	// Convert merged result back to applyUpdates
 	mergedUpdates := applyUpdates{
-		Title:    &mergeResult.Merged.Title,
-		State:    &mergeResult.Merged.State,
-		Priority: &mergeResult.Merged.Priority,
-		DueAt:    stringPtr(mergeResult.Merged.DueAt),
-		Body:     &mergeResult.Merged.Body,
+		Title:       &mergeResult.Merged.Title,
+		State:       &mergeResult.Merged.State,
+		Priority:    &mergeResult.Merged.Priority,
+		DueAt:       stringPtr(mergeResult.Merged.DueAt),
+		Description: &mergeResult.Merged.Description,
 	}
 
 	// Apply merged updates
@@ -358,7 +358,7 @@ func runApplyWithMerge(cmd *cobra.Command, database *db.DB, taskUUID string, fri
 		if mergedUpdates.DueAt != nil {
 			fmt.Printf("  due_at: %s\n", *mergedUpdates.DueAt)
 		}
-		fmt.Printf("  body: %s\n", *mergedUpdates.Body)
+		fmt.Printf("  description: %s\n", *mergedUpdates.Description)
 		return nil
 	}
 
@@ -406,11 +406,11 @@ func applyUpdatesToTaskDocument(updates applyUpdates, fallback *taskData) *edit.
 		doc.DueAt = *fallback.DueAt
 	}
 
-	// Body
-	if updates.Body != nil {
-		doc.Body = *updates.Body
-	} else if fallback.Body != nil {
-		doc.Body = *fallback.Body
+	// Description
+	if updates.Description != nil {
+		doc.Description = *updates.Description
+	} else if fallback.Description != nil {
+		doc.Description = *fallback.Description
 	}
 
 	return doc
