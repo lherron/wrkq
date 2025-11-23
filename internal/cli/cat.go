@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,20 +15,27 @@ var catCmd = &cobra.Command{
 	Use:   "cat <path|id>...",
 	Short: "Print tasks as markdown",
 	Long: `Prints one or more tasks as markdown with YAML front matter.
+Comments are included by default. Use --exclude-comments to omit them.
 If the argument resolves to a container, exits with error code 2.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runCat,
 }
 
 var (
-	catNoFrontmatter    bool
-	catIncludeComments  bool
+	catNoFrontmatter   bool
+	catExcludeComments bool
+	catJSON            bool
+	catNDJSON          bool
+	catPorcelain       bool
 )
 
 func init() {
 	rootCmd.AddCommand(catCmd)
 	catCmd.Flags().BoolVar(&catNoFrontmatter, "no-frontmatter", false, "Print body only without front matter")
-	catCmd.Flags().BoolVar(&catIncludeComments, "include-comments", false, "Include comments in output (read-only)")
+	catCmd.Flags().BoolVar(&catExcludeComments, "exclude-comments", false, "Exclude comments from output")
+	catCmd.Flags().BoolVar(&catJSON, "json", false, "Output as JSON")
+	catCmd.Flags().BoolVar(&catNDJSON, "ndjson", false, "Output as newline-delimited JSON")
+	catCmd.Flags().BoolVar(&catPorcelain, "porcelain", false, "Machine-readable output")
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
@@ -49,12 +57,43 @@ func runCat(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
-	// Process each argument
-	for i, arg := range args {
-		if i > 0 {
-			fmt.Fprintln(cmd.OutOrStdout())
-		}
+	// Define structs for JSON output
+	type Comment struct {
+		ID        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		Body      string `json:"body"`
+		ActorSlug string `json:"actor_slug"`
+		ActorRole string `json:"actor_role"`
+	}
 
+	type Task struct {
+		ID          string     `json:"id"`
+		UUID        string     `json:"uuid"`
+		ProjectID   string     `json:"project_id"`
+		ProjectUUID string     `json:"project_uuid"`
+		Slug        string     `json:"slug"`
+		Title       string     `json:"title"`
+		State       string     `json:"state"`
+		Priority    int        `json:"priority"`
+		StartAt     *string    `json:"start_at,omitempty"`
+		DueAt       *string    `json:"due_at,omitempty"`
+		Labels      *string    `json:"labels,omitempty"`
+		Description string     `json:"description"`
+		Etag        int64      `json:"etag"`
+		CreatedAt   string     `json:"created_at"`
+		UpdatedAt   string     `json:"updated_at"`
+		CompletedAt *string    `json:"completed_at,omitempty"`
+		ArchivedAt  *string    `json:"archived_at,omitempty"`
+		CreatedBy   string     `json:"created_by"`
+		UpdatedBy   string     `json:"updated_by"`
+		Comments    []Comment  `json:"comments,omitempty"`
+	}
+
+	var tasks []Task
+	taskCount := 0
+
+	// Process each argument
+	for _, arg := range args {
 		taskUUID, _, err := selectors.ResolveTask(database, arg)
 		if err != nil {
 			return err
@@ -93,46 +132,30 @@ func runCat(cmd *cobra.Command, args []string) error {
 		var projectID string
 		database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
-		if !catNoFrontmatter {
-			// Print YAML front matter
-			fmt.Fprintln(cmd.OutOrStdout(), "---")
-			fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", id)
-			fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", taskUUID)
-			fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", projectID)
-			fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", projectUUID)
-			fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", slug)
-			fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", title)
-			fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", state)
-			fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", priority)
-			if startAt != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *startAt)
-			}
-			if dueAt != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "due_at: %s\n", *dueAt)
-			}
-			if labels != nil && *labels != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *labels)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", etag)
-			fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", createdAt)
-			fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", updatedAt)
-			if completedAt != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "completed_at: %s\n", *completedAt)
-			}
-			if archivedAt != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *archivedAt)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", createdBySlug)
-			fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", updatedBySlug)
-			fmt.Fprintln(cmd.OutOrStdout(), "---")
-			fmt.Fprintln(cmd.OutOrStdout())
+		task := Task{
+			ID:          id,
+			UUID:        taskUUID,
+			ProjectID:   projectID,
+			ProjectUUID: projectUUID,
+			Slug:        slug,
+			Title:       title,
+			State:       state,
+			Priority:    priority,
+			StartAt:     startAt,
+			DueAt:       dueAt,
+			Labels:      labels,
+			Description: description,
+			Etag:        etag,
+			CreatedAt:   createdAt,
+			UpdatedAt:   updatedAt,
+			CompletedAt: completedAt,
+			ArchivedAt:  archivedAt,
+			CreatedBy:   createdBySlug,
+			UpdatedBy:   updatedBySlug,
 		}
 
-		// Print description
-		fmt.Fprintln(cmd.OutOrStdout(), description)
-
-		// Include comments if requested
-		if catIncludeComments {
+		// Include comments by default (unless excluded)
+		if !catExcludeComments {
 			// Query non-deleted comments for this task
 			rows, err := database.Query(`
 				SELECT c.id, c.created_at, c.body, a.slug as actor_slug, a.role as actor_role
@@ -145,22 +168,9 @@ func runCat(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to query comments: %w", err)
 			}
 
-			var comments []struct {
-				ID        string
-				CreatedAt string
-				Body      string
-				ActorSlug string
-				ActorRole string
-			}
-
+			var comments []Comment
 			for rows.Next() {
-				var comment struct {
-					ID        string
-					CreatedAt string
-					Body      string
-					ActorSlug string
-					ActorRole string
-				}
+				var comment Comment
 				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &comment.ActorSlug, &comment.ActorRole); err != nil {
 					rows.Close()
 					return fmt.Errorf("failed to scan comment: %w", err)
@@ -173,15 +183,68 @@ func runCat(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("error iterating comments: %w", err)
 			}
 
-			// Only print comments section if there are comments
 			if len(comments) > 0 {
+				task.Comments = comments
+			}
+		}
+
+		// For JSON output, collect tasks
+		if catJSON || catNDJSON {
+			tasks = append(tasks, task)
+		} else {
+			// Original markdown output
+			if taskCount > 0 {
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
+			taskCount++
+
+			if !catNoFrontmatter {
+				// Print YAML front matter
+				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
+				fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
+				fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
+				fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", task.Slug)
+				fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
+				fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
+				fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", task.Priority)
+				if task.StartAt != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
+				}
+				if task.DueAt != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "due_at: %s\n", *task.DueAt)
+				}
+				if task.Labels != nil && *task.Labels != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
+				fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)
+				fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", task.UpdatedAt)
+				if task.CompletedAt != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "completed_at: %s\n", *task.CompletedAt)
+				}
+				if task.ArchivedAt != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
+				fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
+				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
+
+			// Print description
+			fmt.Fprintln(cmd.OutOrStdout(), task.Description)
+
+			// Print comments unless excluded
+			if !catExcludeComments && len(task.Comments) > 0 {
 				fmt.Fprintln(cmd.OutOrStdout())
 				fmt.Fprintln(cmd.OutOrStdout(), "---")
 				fmt.Fprintln(cmd.OutOrStdout())
 				fmt.Fprintln(cmd.OutOrStdout(), "<!-- wrkq-comments: do not edit below -->")
 				fmt.Fprintln(cmd.OutOrStdout())
 
-				for _, comment := range comments {
+				for _, comment := range task.Comments {
 					// Print header line
 					fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
 						comment.ID, comment.CreatedAt, comment.ActorSlug, comment.ActorRole)
@@ -195,6 +258,25 @@ func runCat(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+	}
+
+	// Output JSON if requested
+	if catJSON {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		if !catPorcelain {
+			encoder.SetIndent("", "  ")
+		}
+		return encoder.Encode(tasks)
+	}
+
+	if catNDJSON {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		for _, task := range tasks {
+			if err := encoder.Encode(task); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	return nil

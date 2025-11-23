@@ -16,18 +16,26 @@ var touchCmd = &cobra.Command{
 	Use:   "touch <path>...",
 	Short: "Create tasks",
 	Long: `Creates one or more tasks at the specified paths.
-The last segment of each path becomes the task slug (normalized to lowercase [a-z0-9-]).`,
+The last segment of each path becomes the task slug (normalized to lowercase [a-z0-9-]).
+
+Examples:
+  wrkq touch myproject/feature/task-name -t "Task Title"
+  wrkq touch myproject/feature/task-name -d "Task description"
+  wrkq touch myproject/feature/task-name -t "Title" -d @description.md
+  echo "Description from stdin" | wrkq touch inbox/new-task -d -`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runTouch,
 }
 
 var (
-	touchTitle string
+	touchTitle       string
+	touchDescription string
 )
 
 func init() {
 	rootCmd.AddCommand(touchCmd)
 	touchCmd.Flags().StringVarP(&touchTitle, "title", "t", "", "Title for the task (defaults to slug)")
+	touchCmd.Flags().StringVarP(&touchDescription, "description", "d", "", "Description for the task (use @file.md for file or - for stdin)")
 }
 
 func runTouch(cmd *cobra.Command, args []string) error {
@@ -65,9 +73,18 @@ func runTouch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve actor: %w", err)
 	}
 
+	// Process description if provided
+	var description string
+	if touchDescription != "" {
+		description, err = readDescriptionValue(touchDescription)
+		if err != nil {
+			return fmt.Errorf("failed to read description: %w", err)
+		}
+	}
+
 	// Create each task
 	for _, path := range args {
-		if err := createTask(database, actorUUID, path, touchTitle); err != nil {
+		if err := createTask(database, actorUUID, path, touchTitle, description); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s\n", path)
@@ -76,7 +93,7 @@ func runTouch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createTask(database *db.DB, actorUUID, path, title string) error {
+func createTask(database *db.DB, actorUUID, path, title, description string) error {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		return fmt.Errorf("invalid path: %s", path)
@@ -138,9 +155,9 @@ func createTask(database *db.DB, actorUUID, path, title string) error {
 	defer tx.Rollback()
 
 	result, err := tx.Exec(`
-		INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('', ?, ?, ?, 'open', 3, ?, ?)
-	`, normalizedSlug, title, projectUUID, actorUUID, actorUUID)
+		INSERT INTO tasks (id, slug, title, description, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('', ?, ?, ?, ?, 'open', 3, ?, ?)
+	`, normalizedSlug, title, description, projectUUID, actorUUID, actorUUID)
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}

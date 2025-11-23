@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/actors"
@@ -21,11 +20,24 @@ import (
 )
 
 var setCmd = &cobra.Command{
-	Use:   "set <path|id>... key=value [key=value...]",
+	Use:   "set <path|id>... [flags]",
 	Short: "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported keys: state, priority, title, slug, labels, due_at, start_at`,
-	Args: cobra.MinimumNArgs(2),
+Supported fields: state, priority, title, slug, labels, due_at, start_at, description
+
+Description can be set from:
+  - String: --description "text"
+  - File: --description @file.md
+  - Stdin: --description - (or use -d flag)
+
+Examples:
+  wrkq set T-00001 --state in_progress
+  wrkq set T-00001 --description "New description"
+  wrkq set T-00001 --description @notes.md
+  wrkq set T-00001 -d "New description"
+  echo "New description" | wrkq set T-00001 -d -
+  wrkq set T-00001 --state in_progress --priority 1 --title "New Title"`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: runSet,
 }
 
@@ -36,6 +48,14 @@ var (
 	setContinueOnError  bool
 	setBatchSize        int
 	setOrdered          bool
+	setDescription      string
+	setState            string
+	setPriority         int
+	setTitle            string
+	setSlug             string
+	setLabels           string
+	setDueAt            string
+	setStartAt          string
 )
 
 func init() {
@@ -46,6 +66,14 @@ func init() {
 	setCmd.Flags().BoolVar(&setContinueOnError, "continue-on-error", false, "Continue processing on errors")
 	setCmd.Flags().IntVar(&setBatchSize, "batch-size", 1, "Group operations into batches (not yet implemented)")
 	setCmd.Flags().BoolVar(&setOrdered, "ordered", false, "Preserve input order (disables parallelism)")
+	setCmd.Flags().StringVarP(&setDescription, "description", "d", "", "Update task description (use @file.md for file or - for stdin)")
+	setCmd.Flags().StringVar(&setState, "state", "", "Update task state (open, in_progress, completed, blocked, cancelled)")
+	setCmd.Flags().IntVar(&setPriority, "priority", 0, "Update task priority (1-4)")
+	setCmd.Flags().StringVar(&setTitle, "title", "", "Update task title")
+	setCmd.Flags().StringVar(&setSlug, "slug", "", "Update task slug")
+	setCmd.Flags().StringVar(&setLabels, "labels", "", "Update task labels (JSON array)")
+	setCmd.Flags().StringVar(&setDueAt, "due-at", "", "Update task due date")
+	setCmd.Flags().StringVar(&setStartAt, "start-at", "", "Update task start date")
 }
 
 func runSet(cmd *cobra.Command, args []string) error {
@@ -83,16 +111,8 @@ func runSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve actor: %w", err)
 	}
 
-	// Separate task paths/IDs from key=value pairs
-	var taskRefs []string
-	var updates []string
-	for _, arg := range args {
-		if strings.Contains(arg, "=") {
-			updates = append(updates, arg)
-		} else {
-			taskRefs = append(taskRefs, arg)
-		}
-	}
+	// All args are task refs now (no more key=value parsing)
+	taskRefs := args
 
 	// Check for stdin input (single "-" as task ref)
 	if len(taskRefs) == 1 && taskRefs[0] == "-" {
@@ -106,14 +126,15 @@ func runSet(cmd *cobra.Command, args []string) error {
 	if len(taskRefs) == 0 {
 		return fmt.Errorf("no tasks specified")
 	}
-	if len(updates) == 0 {
-		return fmt.Errorf("no updates specified")
-	}
 
-	// Parse updates
-	fields, err := parseSetUpdates(updates)
+	// Build fields map from flags
+	fields, err := buildFieldsFromFlags()
 	if err != nil {
 		return err
+	}
+
+	if len(fields) == 0 {
+		return fmt.Errorf("no updates specified")
 	}
 
 	// Dry run handling
@@ -167,57 +188,66 @@ func readLinesFromStdin(r io.Reader) ([]string, error) {
 	return lines, nil
 }
 
-func parseSetUpdates(updates []string) (map[string]interface{}, error) {
+func buildFieldsFromFlags() (map[string]interface{}, error) {
 	fields := make(map[string]interface{})
 
-	for _, update := range updates {
-		parts := strings.SplitN(update, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid update: %s", update)
+	// Handle state
+	if setState != "" {
+		if err := domain.ValidateState(setState); err != nil {
+			return nil, err
 		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
+		fields["state"] = setState
+	}
 
-		// Unquote if quoted
-		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1 : len(value)-1]
+	// Handle priority
+	if setPriority > 0 {
+		if err := domain.ValidatePriority(setPriority); err != nil {
+			return nil, err
 		}
+		fields["priority"] = setPriority
+	}
 
-		switch key {
-		case "state":
-			if err := domain.ValidateState(value); err != nil {
-				return nil, err
-			}
-			fields["state"] = value
-		case "priority":
-			p, err := strconv.Atoi(value)
-			if err != nil {
-				return nil, fmt.Errorf("invalid priority: %s", value)
-			}
-			if err := domain.ValidatePriority(p); err != nil {
-				return nil, err
-			}
-			fields["priority"] = p
-		case "title":
-			fields["title"] = value
-		case "slug":
-			normalized, err := paths.NormalizeSlug(value)
-			if err != nil {
-				return nil, fmt.Errorf("invalid slug: %w", err)
-			}
-			fields["slug"] = normalized
-		case "labels":
-			// Parse as JSON array
-			var labels []string
-			if err := json.Unmarshal([]byte(value), &labels); err != nil {
-				return nil, fmt.Errorf("invalid labels JSON: %w", err)
-			}
-			fields["labels"] = value
-		case "due_at", "start_at":
-			fields[key] = value
-		default:
-			return nil, fmt.Errorf("unsupported field: %s", key)
+	// Handle title
+	if setTitle != "" {
+		fields["title"] = setTitle
+	}
+
+	// Handle slug
+	if setSlug != "" {
+		normalized, err := paths.NormalizeSlug(setSlug)
+		if err != nil {
+			return nil, fmt.Errorf("invalid slug: %w", err)
 		}
+		fields["slug"] = normalized
+	}
+
+	// Handle labels
+	if setLabels != "" {
+		// Parse as JSON array
+		var labels []string
+		if err := json.Unmarshal([]byte(setLabels), &labels); err != nil {
+			return nil, fmt.Errorf("invalid labels JSON: %w", err)
+		}
+		fields["labels"] = setLabels
+	}
+
+	// Handle due_at
+	if setDueAt != "" {
+		fields["due_at"] = setDueAt
+	}
+
+	// Handle start_at
+	if setStartAt != "" {
+		fields["start_at"] = setStartAt
+	}
+
+	// Handle description
+	if setDescription != "" {
+		descValue, err := readDescriptionValue(setDescription)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read description: %w", err)
+		}
+		fields["description"] = descValue
 	}
 
 	return fields, nil

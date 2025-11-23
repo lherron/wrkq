@@ -412,9 +412,9 @@ func TestCatWithIncludeComments(t *testing.T) {
 	defer os.Unsetenv("WRKQ_DB_PATH")
 	defer os.Unsetenv("WRKQ_ACTOR")
 
-	// Test cat with --include-comments
+	// Test cat with comments included by default
 	cmd := rootCmd
-	cmd.SetArgs([]string{"cat", "T-00001", "--include-comments"})
+	cmd.SetArgs([]string{"cat", "T-00001"})
 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -456,6 +456,39 @@ func TestCatWithIncludeComments(t *testing.T) {
 	// Verify comments are formatted with > prefix (blockquote)
 	if !strings.Contains(output, "> [C-00001]") {
 		t.Errorf("Output should contain blockquote-formatted comment header")
+	}
+
+	// Test cat with --exclude-comments
+	cmd = rootCmd
+	cmd.SetArgs([]string{"cat", "T-00001", "--exclude-comments"})
+
+	var out2 bytes.Buffer
+	cmd.SetOut(&out2)
+	cmd.SetErr(&out2)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Command failed: %v", err)
+	}
+
+	output2 := out2.String()
+
+	// Verify output contains task body
+	if !strings.Contains(output2, "Task body content") {
+		t.Errorf("Output should contain task body")
+	}
+
+	// Verify output does NOT contain comments section marker
+	if strings.Contains(output2, "<!-- wrkq-comments: do not edit below -->") {
+		t.Errorf("Output should NOT contain comments section marker with --exclude-comments")
+	}
+
+	// Verify output does NOT contain comments
+	if strings.Contains(output2, "C-00001") {
+		t.Errorf("Output should NOT contain first comment ID with --exclude-comments")
+	}
+
+	if strings.Contains(output2, "C-00002") {
+		t.Errorf("Output should NOT contain second comment ID with --exclude-comments")
 	}
 }
 

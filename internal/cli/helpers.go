@@ -2,6 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/config"
@@ -42,4 +45,35 @@ func resolveCurrentActor(database *db.DB, cfg *config.Config, cmd *cobra.Command
 	}
 
 	return actorUUID, actorID, nil
+}
+
+// readDescriptionValue reads description from string, file (@file.md), or stdin (-)
+func readDescriptionValue(value string) (string, error) {
+	// Handle stdin
+	if value == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("failed to read from stdin: %w", err)
+		}
+		if len(data) == 0 {
+			return "", fmt.Errorf("stdin is empty")
+		}
+		return string(data), nil
+	}
+
+	// Handle file (starts with @)
+	if strings.HasPrefix(value, "@") {
+		filename := strings.TrimPrefix(value, "@")
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return "", fmt.Errorf("failed to read file %s: %w", filename, err)
+		}
+		if len(data) == 0 {
+			return "", fmt.Errorf("file %s is empty", filename)
+		}
+		return string(data), nil
+	}
+
+	// Handle string literal
+	return value, nil
 }

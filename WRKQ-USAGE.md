@@ -1,7 +1,33 @@
-# wrkq CLI - Agent Usage Guide
-Quick reference for the most important wrkq commands when managing tasks.
+<task_tracking_rules>
+# wrkq Task Management CLI
 
-## Task Management Best Practices
+## Task Lifecycle
+1. **Before starting a task**: Set task to `in_progress`
+   ```bash
+   wrkq set T-00001 --state in_progress
+   ```
+
+2. **During work on a task**: Add progress comments for significant milestones
+   ```bash
+   wrkq comment add T-00001 -m "Implemented core logic in cmd/apply.go"
+   wrkq comment add T-00001 -m "Added test coverage, 3 edge cases found"
+   ```
+
+3. **Before completing a task**: Add final summary comment
+   ```bash
+   wrkq comment add T-00001 -m "Completed. Added apply cmd with 3-way merge support. Updated docs. All tests passing."
+   wrkq set T-00001 --state completed
+   ```
+
+## TodoWrite tasks
+Update the wrkq task **before** using the TodoWrite tool. When using the TodoWrite tool, include the wrkq task id in parenthesis whenever possible.
+
+### Naming Conventions
+1. **Use a top-level container for your project (e.g. `myproject`).**
+2. **Use subdirectories for major features. (e.g. `api-authentication`)**
+3. **Use short, descriptive slugs for tasks. (e.g. `login-auth-flow`, `logout-auth-flow`)**
+
+One-off tasks should be created/tracked in the **inbox** container.
 
 ### Agent Feature Requests
 Coding agents should log any requests for new features or improvements to the task repository in **inbox/agent-feature-requests**.  (Create the container if it doesn't exist.)
@@ -13,67 +39,35 @@ Example:  If Claude Code tries to run **wrkq tree --json** and that flag isn't i
   # Then use wrkq tool to add a comment to the feature request
   ```
 
-### TodoWrite tasks
-When using the TodoWrite tool, include the wrkq task id in parenthesis if possible.
+## Managing Containers
+```bash
+# Create a container
+wrkq mkdir myproject
 
-### Task Repository Naming Conventions
-1. **Use a top-level container for your project (e.g. `myproject`).**
-2. **Use subdirectories for major features. (e.g. `api-authentication`)**
-3. **Use short, descriptive slugs for tasks. (e.g. `login-auth-flow`, `logout-auth-flow`)**
+# Create a subcontainer with parents
+wrkq mkdir -p myproject/api-feature
 
-One-off tasks should be created/tracked in the **inbox** container.
-
-### Task Lifecycle
-1. **Before starting**: Set task to `in_progress`
-   ```bash
-   wrkq set T-00001 state=in_progress
-   ```
-
-2. **During work**: Add progress comments for significant milestones
-   ```bash
-   wrkq comment add T-00001 -m "Implemented core logic in cmd/apply.go"
-   wrkq comment add T-00001 -m "Added test coverage, 3 edge cases found"
-   ```
-
-3. **Before completing**: Add final summary comment
-   ```bash
-   wrkq comment add T-00001 -m "Completed. Added apply cmd with 3-way merge support. Updated docs. All tests passing."
-   wrkq set T-00001 state=completed
-   ```
-
-### When to Comment
-- ✅ Key implementation decisions
-- ✅ Blockers encountered and resolved
-- ✅ Final summary before closing
-
-### Task Hygiene
-- Always set `state=in_progress` when you start
-- Don't leave tasks `in_progress` when done
-- Use `state=blocked` if waiting on something
-
-
+# Remove an empty container
+wrkq rmdir myproject
+```
 
 ## Finding Tasks
 ```bash
 # Find all open tasks
 wrkq find --state open --json
-
-# Find tasks in specific path
 wrkq find 'myproject/api-feature/**' --state open
-
-# Find by slug pattern
 wrkq find --slug-glob 'login-*'
-
-# Tree view (hides completed/archived by default)
-wrkq tree
-wrkq tree --all --json          # Show all including completed
+wrkq tree myproject --json
+wrkq tree --json         # Show all tasks including completed
 ```
 
 ## Reading Tasks
-
 ```bash
-# Show task details as markdown
+# Show task details as markdown with metadata as frontmatter (includes comments by default)
 wrkq cat T-00001
+
+# Output as JSON (includes comments by default)
+wrkq cat T-00001 --json
 
 # List tasks in a path
 wrkq ls myproject/api-feature --json
@@ -82,10 +76,8 @@ wrkq ls myproject/api-feature --json
 ## Creating Tasks
 
 ```bash
-# Create a task
-wrkq touch myproject/api-feature/feature-name -t "Feature title"
-
-# Task slug auto-normalized to lowercase a-z0-9-
+# Create with title and description
+wrkq touch myproject/feature/task-slug -t "Title" -d "Description"
 ```
 
 
@@ -93,56 +85,38 @@ wrkq touch myproject/api-feature/feature-name -t "Feature title"
 
 ```bash
 # Delete a task
-wrkq rm myproject/api-feature/feature-name
+wrkq rm myproject/api-feature/feature-slug
 
 # Delete a task and all its attachments (interactive if --yes is not provided)
-wrkq rm myproject/api-feature/feature-name --purge --yes
+wrkq rm myproject/api-feature/feature-slug --purge --yes
 ```
 
 ## Updating Tasks
 
-### Task Metadata (Quick Updates)
+### Task Metadata and Description (wrkq set)
 ```bash
 # Set task state/priority/fields (quick updates)
-wrkq set T-00001 state=in_progress
-wrkq set T-00001 state=completed priority=1
-wrkq set T-00001 title="New title" due_at=2025-12-01
+wrkq set T-00001 --state in_progress
+wrkq set T-00001 --title "New title" --due-at 2025-12-01
+wrkq set T-00001 --description "New description text"
 
 # Supported states: open, in_progress, completed, blocked, cancelled
 # Priority: 1-4
-```
+# Supported fields: state, priority, title, slug, labels, due_at, start_at, description
 
-### Task Description (wrkq apply)
-```bash
-# Update description only (default behavior)
-echo "Updated task description" | wrkq apply T-00001 -
-wrkq apply T-00001 description.md
 
-# Update with metadata (requires --with-metadata)
-wrkq apply T-00001 full-task.md --with-metadata
+# Update multiple fields at once
+wrkq set T-00001 --state in_progress --priority 1 --description "Starting work"
 
-# Use wrkq set for metadata-only updates instead
-wrkq set T-00001 state=in_progress priority=1 title="New Title"
-```
-
-### Task Description (MCP Tool - Claude Code Only)
-**IMPORTANT**: In Claude Code, use the MCP tool to update task descriptions:
-
-```
-# Preferred method for Claude Code agents
-mcp__wrkq__wrkq_update_description(taskId="T-00001", taskDescription="Updated task description...")
-
-# Accepts: friendly IDs (T-00001), UUIDs, or paths (project/task-slug)
+# Conditional update (only if etag matches)
+wrkq set T-00001 --description "New text" --if-match 5
 ```
 
 ## Comments
 
 ```bash
 # Add progress comment
-wrkq comment add T-00001 -m "Starting implementation"
-
-# Add with structured metadata for agents
-wrkq comment add T-00001 -m "Analysis complete" --meta '{"findings":3}'
+wrkq comment add T-00001 -m "Starting implementation at 10:00am"
 ```
 
 ## History
@@ -160,18 +134,4 @@ Most commands support:
 - `--ndjson` - Newline-delimited JSON (best for parsing)
 - `--porcelain` - Stable machine-readable
 
-## Common Workflow
-
-```bash
-# 1. Find next task
-wrkq find --state open --json | jq -r '.[0].id'
-
-# 2. Start work
-wrkq set T-00001 state=in_progress
-
-# 3. Add progress comment
-wrkq comment add T-00001 -m "Implemented core logic"
-
-# 4. Complete
-wrkq set T-00001 state=completed
-```
+</task_tracking_rules>
