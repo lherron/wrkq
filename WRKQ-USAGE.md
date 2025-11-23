@@ -3,11 +3,25 @@ Quick reference for the most important wrkq commands when managing tasks.
 
 ## Task Management Best Practices
 
-### Task Repository Conventions
+### Agent Feature Requests
+Coding agents should log any requests for new features or improvements to the task repository in **inbox/agent-feature-requests**.  (Create the container if it doesn't exist.)
+
+Example:  If Claude Code tries to run **wrkq tree --json** and that flag isn't implemented, file a feature request to have it added in future.  Be sure to add a description of the feature request and the reason why it's needed.
+  ```bash
+  wrkq touch inbox/agent-feature-requests/workq-tree-json-flag -t "Add --json flag to wrkq tree command"
+
+  # Then use wrkq tool to add a comment to the feature request
+  ```
+
+### TodoWrite tasks
+When using the TodoWrite tool, include the wrkq task id in parenthesis if possible.
+
+### Task Repository Naming Conventions
 1. **Use a top-level container for your project (e.g. `myproject`).**
 2. **Use subdirectories for major features. (e.g. `api-authentication`)**
 3. **Use short, descriptive slugs for tasks. (e.g. `login-auth-flow`, `logout-auth-flow`)**
 
+One-off tasks should be created/tracked in the **inbox** container.
 
 ### Task Lifecycle
 1. **Before starting**: Set task to `in_progress`
@@ -87,7 +101,7 @@ wrkq rm myproject/api-feature/feature-name --purge --yes
 
 ## Updating Tasks
 
-### Task Metadata (CLI)
+### Task Metadata (Quick Updates)
 ```bash
 # Set task state/priority/fields (quick updates)
 wrkq set T-00001 state=in_progress
@@ -96,6 +110,19 @@ wrkq set T-00001 title="New title" due_at=2025-12-01
 
 # Supported states: open, in_progress, completed, blocked, cancelled
 # Priority: 1-4
+```
+
+### Task Description (wrkq apply)
+```bash
+# Update description only (default behavior)
+echo "Updated task description" | wrkq apply T-00001 -
+wrkq apply T-00001 description.md
+
+# Update with metadata (requires --with-metadata)
+wrkq apply T-00001 full-task.md --with-metadata
+
+# Use wrkq set for metadata-only updates instead
+wrkq set T-00001 state=in_progress priority=1 title="New Title"
 ```
 
 ### Task Description (MCP Tool - Claude Code Only)

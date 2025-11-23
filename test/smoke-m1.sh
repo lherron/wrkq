@@ -20,14 +20,15 @@ export WRKQ_ACTOR="test-human"
 # Build the CLI
 echo -e "${YELLOW}Building CLI...${NC}"
 cd "$(dirname "$0")/.."
-just cli-build
+just build
 
 WRKQ_BIN="./bin/wrkq"
+WRKQADM_BIN="./bin/wrkqadm"
 
 # Clean up and initialize
 echo -e "${YELLOW}Initializing test database...${NC}"
-rm -f "$TODO_DB_PATH"
-$WRKQ_BIN init --actor-slug test-human --actor-name "Test User" > /dev/null
+rm -f "$WRKQ_DB_PATH"
+$WRKQADM_BIN init --actor-slug test-human --actor-name "Test User" > /dev/null
 
 # Helper function to run a test
 run_test() {
@@ -118,17 +119,21 @@ run_test "diff: JSON output" \
     "$WRKQ_BIN diff T-00001 T-00002 --json"
 
 # Test apply command
-run_test "apply: JSON stdin" \
-    "echo '{\"title\": \"Updated via apply\"}' | $WRKQ_BIN apply T-00003 -"
+run_test "apply: JSON stdin with metadata" \
+    "echo '{\"title\": \"Updated via apply\"}' | $WRKQ_BIN apply T-00003 - --with-metadata"
 
-run_test "apply: dry-run" \
-    "echo '{\"title\": \"Dry run test\"}' | $WRKQ_BIN apply T-00003 - --dry-run"
+run_test "apply: dry-run with metadata" \
+    "echo '{\"title\": \"Dry run test\"}' | $WRKQ_BIN apply T-00003 - --dry-run --with-metadata"
 
 run_test "apply: etag check (should fail)" \
-    "echo '{\"title\": \"Should fail\"}' | $WRKQ_BIN apply T-00003 - --if-match 999" \
+    "echo '{\"title\": \"Should fail\"}' | $WRKQ_BIN apply T-00003 - --if-match 999 --with-metadata" \
     1
 
-# Test apply with markdown file
+# Test apply with description only (default behavior)
+run_test "apply: description only (default)" \
+    "echo 'This is just a description update' | $WRKQ_BIN apply T-00003 -"
+
+# Test apply with markdown file containing metadata
 cat > /tmp/test-apply.md << 'EOF'
 ---
 title: Applied from markdown
@@ -138,10 +143,22 @@ priority: 2
 This is the task body.
 EOF
 
-run_test "apply: markdown file" \
-    "$WRKQ_BIN apply T-00003 /tmp/test-apply.md"
+run_test "apply: markdown file with metadata" \
+    "$WRKQ_BIN apply T-00003 /tmp/test-apply.md --with-metadata"
 
 rm /tmp/test-apply.md
+
+# Test apply with plain markdown (description only)
+cat > /tmp/test-desc.md << 'EOF'
+This is a plain markdown description.
+
+It has multiple paragraphs.
+EOF
+
+run_test "apply: plain markdown (description only)" \
+    "$WRKQ_BIN apply T-00003 /tmp/test-desc.md"
+
+rm /tmp/test-desc.md
 
 # Test edit command with mock editor
 cat > /tmp/test-editor.sh << 'EOF'
@@ -170,7 +187,7 @@ echo -e "  ${RED}Failed: $TESTS_FAILED${NC}"
 # Cleanup
 echo ""
 echo -e "${YELLOW}Cleaning up...${NC}"
-rm -f "$TODO_DB_PATH"
+rm -f "$WRKQ_DB_PATH"
 
 if [ $TESTS_FAILED -eq 0 ]; then
     echo -e "${GREEN}All tests passed!${NC}"

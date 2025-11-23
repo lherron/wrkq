@@ -428,3 +428,190 @@ func queryToMaps(t *testing.T, db *sql.DB, query string, args ...interface{}) []
 
 	return results
 }
+
+// TestApplyCommand_EmptyInput tests that empty input is rejected
+func TestApplyCommand_EmptyInput(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Original description', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Try to apply empty input
+	tmpFile := filepath.Join(t.TempDir(), "empty.txt")
+	if err := os.WriteFile(tmpFile, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create empty file: %v", err)
+	}
+
+	// Save original values
+	origDBPath := os.Getenv("WRKQ_DB_PATH")
+	origActor := os.Getenv("WRKQ_ACTOR")
+	defer func() {
+		os.Setenv("WRKQ_DB_PATH", origDBPath)
+		os.Setenv("WRKQ_ACTOR", origActor)
+	}()
+
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+
+	// Execute apply command programmatically
+	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	if err == nil {
+		t.Fatal("Expected error for empty input, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("Expected error about empty input, got: %v", err)
+	}
+}
+
+// TestApplyCommand_InvalidJSON tests that invalid JSON is properly detected
+func TestApplyCommand_InvalidJSON(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Original description', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Try to apply invalid JSON
+	tmpFile := filepath.Join(t.TempDir(), "invalid.json")
+	if err := os.WriteFile(tmpFile, []byte("{not valid json}"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Save original values
+	origDBPath := os.Getenv("WRKQ_DB_PATH")
+	origActor := os.Getenv("WRKQ_ACTOR")
+	defer func() {
+		os.Setenv("WRKQ_DB_PATH", origDBPath)
+		os.Setenv("WRKQ_ACTOR", origActor)
+	}()
+
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+
+	// Execute apply command
+	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	if err == nil {
+		t.Fatal("Expected error for invalid JSON, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("Expected error about JSON, got: %v", err)
+	}
+}
+
+// TestApplyCommand_ValidMarkdown tests successful markdown application
+func TestApplyCommand_ValidMarkdown(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Original description', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Create markdown file
+	tmpFile := filepath.Join(t.TempDir(), "description.md")
+	newDescription := "This is the new description\n\nWith multiple lines"
+	if err := os.WriteFile(tmpFile, []byte(newDescription), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Save original values
+	origDBPath := os.Getenv("WRKQ_DB_PATH")
+	origActor := os.Getenv("WRKQ_ACTOR")
+	defer func() {
+		os.Setenv("WRKQ_DB_PATH", origDBPath)
+		os.Setenv("WRKQ_ACTOR", origActor)
+	}()
+
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+
+	// Execute apply command
+	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	if err != nil {
+		t.Fatalf("Apply command failed: %v", err)
+	}
+
+	// Verify description was updated
+	var description string
+	err = database.QueryRow(`SELECT description FROM tasks WHERE id = ?`, "T-00001").Scan(&description)
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+
+	if description != newDescription {
+		t.Errorf("Description not updated correctly.\nExpected: %q\nGot: %q", newDescription, description)
+	}
+}
+
+// TestApplyCommand_EtagMismatch tests etag validation
+func TestApplyCommand_EtagMismatch(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task with etag 1
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000003', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Original description', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Create markdown file
+	tmpFile := filepath.Join(t.TempDir(), "description.md")
+	if err := os.WriteFile(tmpFile, []byte("New description"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Save original values
+	origDBPath := os.Getenv("WRKQ_DB_PATH")
+	origActor := os.Getenv("WRKQ_ACTOR")
+	defer func() {
+		os.Setenv("WRKQ_DB_PATH", origDBPath)
+		os.Setenv("WRKQ_ACTOR", origActor)
+	}()
+
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+
+	// Set wrong etag
+	applyIfMatch = 99
+
+	// Execute apply command
+	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	if err == nil {
+		t.Fatal("Expected error for etag mismatch, got nil")
+	}
+
+	// Check error message contains helpful information
+	errStr := err.Error()
+	if !strings.Contains(errStr, "etag mismatch") {
+		t.Errorf("Expected 'etag mismatch' in error, got: %v", err)
+	}
+	if !strings.Contains(errStr, "expected etag 99") {
+		t.Errorf("Expected error to show expected etag 99, got: %v", err)
+	}
+	if !strings.Contains(errStr, "current etag 1") {
+		t.Errorf("Expected error to show current etag 1, got: %v", err)
+	}
+
+	// Reset for other tests
+	applyIfMatch = 0
+}
+

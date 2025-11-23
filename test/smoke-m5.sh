@@ -13,8 +13,7 @@ echo
 # Build both binaries
 echo "Building binaries..."
 cd "$PROJECT_ROOT"
-just cli-build
-just wrkqadm-build
+just build
 echo "✓ Binaries built"
 echo
 
@@ -150,7 +149,7 @@ priority: 1
 $TASK_BODY
 EOF
 
-WRKQ_DB_PATH="$TEST_DB_AGENT" WRKQ_ACTOR="agent-test" $WRKQ apply portal/auth/implementation "$TASK_FILE"
+WRKQ_DB_PATH="$TEST_DB_AGENT" WRKQ_ACTOR="agent-test" $WRKQ apply portal/auth/implementation "$TASK_FILE" --with-metadata
 rm -f "$TASK_FILE"
 echo "  ✓ Task with body created"
 

@@ -469,7 +469,7 @@ func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions) (int, erro
 
 // exportTask exports a single task in wrkq cat format
 func exportTask(db *sql.DB, taskUUID string) (string, error) {
-	var id, slug, title, state, body string
+	var id, slug, title, state, description string
 	var priority int
 	var startAt, dueAt, labels, completedAt, archivedAt *string
 	var createdAt, updatedAt string
@@ -478,13 +478,13 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 
 	err := db.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
-		       start_at, due_at, labels, body, etag,
+		       start_at, due_at, labels, description, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &state, &priority,
-		&startAt, &dueAt, &labels, &body, &etag,
+		&startAt, &dueAt, &labels, &description, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&createdByUUID, &updatedByUUID,
 	)
@@ -534,7 +534,7 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 	sb.WriteString(fmt.Sprintf("created_by: %s\n", createdBySlug))
 	sb.WriteString(fmt.Sprintf("updated_by: %s\n", updatedBySlug))
 	sb.WriteString("---\n\n")
-	sb.WriteString(body)
+	sb.WriteString(description)
 
 	return sb.String(), nil
 }

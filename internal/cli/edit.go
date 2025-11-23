@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/edit"
+	"github.com/lherron/wrkq/internal/parse"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -134,7 +135,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Apply merged changes
-	updates := applyUpdates{
+	updates := &parse.TaskUpdate{
 		Title:       &mergeResult.Merged.Title,
 		State:       &mergeResult.Merged.State,
 		Priority:    &mergeResult.Merged.Priority,

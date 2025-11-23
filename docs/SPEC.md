@@ -467,11 +467,12 @@ Rules
 
 `wrkq apply` accepts:
 
-- Markdown with front matter.
-- YAML.
-- JSON.
+- Plain markdown (description-only, default behavior).
+- Markdown with YAML front matter (requires `--with-metadata` to update metadata fields).
+- YAML (requires `--with-metadata`).
+- JSON (requires `--with-metadata`).
 
-`--body-only` updates only the body without touching metadata.
+By default, `wrkq apply` updates **only the description field**. To also update metadata fields (title, state, priority, due_at), use `--with-metadata`. For quick metadata-only updates, use `wrkq set` instead.
 
 -------------------------------------------------------------------------------
 
@@ -555,9 +556,12 @@ Output
   - Open in `$EDITOR`; save triggers 3-way merge and `--if-match` check.
   - Uses current actor for attribution.
 
-- `wrkq apply [<PATHSPEC|ID>] [-]`
-  - Apply full task doc from file or stdin.
-  - Flags: `--format=md|yaml|json`, `--body-only`, `--if-match`, `--dry-run`.
+- `wrkq apply <PATHSPEC|ID> <FILE|->`
+  - Update task description from file or stdin.
+  - By default, updates only the description field (body).
+  - Use `--with-metadata` to also update title, state, priority, and due_at fields.
+  - Flags: `--format=md|yaml|json`, `--with-metadata`, `--if-match`, `--dry-run`.
+  - For quick metadata-only updates, prefer `wrkq set`.
 
 - `wrkq set <PATHSPEC|ID...> key=value [...]`
   - Mutate task fields quickly:
@@ -875,14 +879,14 @@ wrkq ls 'portal/**' -type t --json \
 
 Edit via sed as an agent
 ```sh
-# Example pipeline; 'rg' here is hypothetical until wrkq rg is implemented
+# Example pipeline: update task descriptions with sed
 wrkq find 'customer-portal/**' -type t --slug-glob '*oauth*' --json \
 | jq -r '.[].id' \
 | xargs -n1 -I{} sh -c '
   etag=$(wrkq stat {} --json | jq -r .etag);
   wrkq cat {} --raw-body \
   | sed "s/2fa/mfa/g" \
-  | wrkq apply {} - --body-only --if-match "$etag" --as agent-codex
+  | wrkq apply {} - --if-match "$etag" --as agent-codex
 '
 ```
 
@@ -1023,18 +1027,20 @@ wrkqadm db snapshot --out <path> [--json]
 
 ---
 
-### 18.4 `wrkq apply --base <FILE>` (flag extension, wrkq)
+### 18.4 3-Way Merge (wrkq edit)
 
-Enable a 3‑way merge on apply (mirrors `edit` semantics) while still honoring `--if-match`.
+**Note:** The `--base` flag for `wrkq apply` has been removed. For 3-way merge functionality, use `wrkq edit` instead.
 
 **Synopsis**
 ```
-wrkq apply [<PATHSPEC|ID>] <FILE|-> --base <FILE> [--if-match <etag>] [--dry-run]
+wrkq edit <PATHSPEC|ID> [--if-match <etag>]
 ```
 
 **Behavior**
-- Performs a structured 3‑way merge of front‑matter + body using `internal/edit` machinery (already used by `edit`), then applies. Conflicts exit **4**.  [oai_citation:20‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- If `--if-match` is provided, it is enforced before writing, consistent with global concurrency rules.  [oai_citation:21‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Opens task in `$EDITOR` with full 3-way merge support using `internal/edit` machinery.
+- On save, performs structured merge of front-matter + body.
+- Conflicts exit **4** with clear diff output for resolution.
+- Use `wrkq apply` for programmatic/piped description updates without merge.
 
 ---
 
@@ -1088,8 +1094,14 @@ export WRKQ_DB_PATH=/tmp/wrkq.$BRANCH.db
 export WRKQ_ATTACH_DIR=/tmp/wrkq.$BRANCH.attach
 export WRKQ_ACTOR=agent-$BRANCH
 
-# Apply with a 3-way merge using an explicit base doc
-wrkq apply t:T-00123 new.md --base base.md --if-match 47
+# Update task description (default: description only)
+echo "Updated implementation notes" | wrkq apply t:T-00123 -
+
+# Update task with metadata from file
+wrkq apply t:T-00123 task-update.md --with-metadata --if-match 47
+
+# For interactive editing with 3-way merge, use edit instead
+wrkq edit t:T-00123
 ```
 
 All behaviors above are consistent with the spec’s ETag concurrency model, event log guarantees, and attachment paths.  [oai_citation:26‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)

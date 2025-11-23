@@ -15,31 +15,32 @@ var treeCmd = &cobra.Command{
 	Short: "Display containers and tasks in a tree structure",
 	Long: `Display containers and tasks in a hierarchical tree structure.
 
-By default, completed and archived items are hidden. Use --all to show them.
+By default, all items including completed and archived are shown. When all tasks
+in a container are completed/archived, they are collapsed and an "(All done)"
+indicator is shown on the container.
 
 Examples:
-  todo tree                    # Show tree from root (hide completed/archived)
-  todo tree portal             # Show tree under portal
-  todo tree -L 2               # Limit depth to 2 levels
-  todo tree -a                 # Include completed and archived items
-  todo tree --json             # Output as JSON
+  wrkq tree                    # Show tree from root
+  wrkq tree portal             # Show tree under portal
+  wrkq tree -L 2               # Limit depth to 2 levels
+  wrkq tree --json             # Output as JSON
 `,
 	RunE: runTree,
 }
 
 var (
-	treeDepth       int
+	treeDepth           int
 	treeIncludeArchived bool
-	treeFields      string
-	treePorcelain   bool
-	treeJSON        bool
+	treeFields          string
+	treePorcelain       bool
+	treeJSON            bool
 )
 
 func init() {
 	rootCmd.AddCommand(treeCmd)
 
 	treeCmd.Flags().IntVarP(&treeDepth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include completed and archived items")
+	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", true, "Include completed and archived items (default true)")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
 	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
@@ -75,14 +76,15 @@ func runTree(cmd *cobra.Command, args []string) error {
 }
 
 type treeNode struct {
-	Type       string      `json:"type"`       // "container" or "task"
-	ID         string      `json:"id"`
-	Slug       string      `json:"slug"`
-	Title      string      `json:"title"`
-	State      string      `json:"state,omitempty"` // for tasks
-	UUID       string      `json:"uuid"`
-	IsArchived bool        `json:"is_archived"`
-	Children   []*treeNode `json:"children,omitempty"`
+	Type              string      `json:"type"`       // "container" or "task"
+	ID                string      `json:"id"`
+	Slug              string      `json:"slug"`
+	Title             string      `json:"title"`
+	State             string      `json:"state,omitempty"` // for tasks
+	UUID              string      `json:"uuid"`
+	IsArchived        bool        `json:"is_archived"`
+	AllTasksCompleted bool        `json:"all_tasks_completed,omitempty"` // for containers
+	Children          []*treeNode `json:"children,omitempty"`
 }
 
 func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, porcelain bool, jsonOutput bool) error {
@@ -190,8 +192,9 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 			return nil, err
 		}
 
-		// Merge child's children into node
+		// Merge child's children and metadata into node
 		node.Children = child.Children
+		node.AllTasksCompleted = child.AllTasksCompleted
 
 		root.Children = append(root.Children, &node)
 	}
@@ -213,16 +216,17 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		taskQuery += `project_uuid = ?`
 		taskArgs = append(taskArgs, *parentUUID)
 
-		if !includeArchived {
-			taskQuery += ` AND archived_at IS NULL AND state != 'completed'`
-		}
-
+		// Always query all tasks to check if all are completed
 		taskQuery += ` ORDER BY slug`
 
 		taskRows, err := database.Query(taskQuery, taskArgs...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query tasks: %w", err)
 		}
+
+		var tasks []*treeNode
+		totalTasks := 0
+		closedTasks := 0
 
 		for taskRows.Next() {
 			var node treeNode
@@ -238,9 +242,49 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 			node.IsArchived = archivedAt != nil
 			node.Children = make([]*treeNode, 0)
 
-			root.Children = append(root.Children, &node)
+			totalTasks++
+			isClosed := node.IsArchived || node.State == "completed"
+			if isClosed {
+				closedTasks++
+			}
+
+			// Only add to tasks slice if we should include it based on includeArchived flag
+			if includeArchived || !isClosed {
+				tasks = append(tasks, &node)
+			}
 		}
 		taskRows.Close()
+
+		// Recursively check if all children (containers + tasks) are "done"
+		// A container is "all done" if:
+		// 1. All direct tasks are completed/archived (or no direct tasks)
+		// 2. All child containers have AllTasksCompleted = true (or no child containers)
+		// This means empty containers are considered "all done"
+
+		allDirectTasksClosed := totalTasks == 0 || (totalTasks > 0 && closedTasks == totalTasks)
+		allChildContainersDone := true
+
+		// Check child containers
+		for _, child := range root.Children {
+			if child.Type == "container" {
+				// If any child container isn't all done, this container isn't all done
+				if !child.AllTasksCompleted {
+					allChildContainersDone = false
+					break
+				}
+			}
+		}
+
+		// Set AllTasksCompleted: true if all tasks (if any) are closed and all child containers are done
+		root.AllTasksCompleted = allDirectTasksClosed && allChildContainersDone
+
+		// If all tasks are completed (and all child containers are done), don't add tasks to the tree
+		// Otherwise, add the tasks we collected
+		if !root.AllTasksCompleted || totalTasks == 0 {
+			for _, task := range tasks {
+				root.Children = append(root.Children, task)
+			}
+		}
 	}
 
 	return root, nil
@@ -313,6 +357,9 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 			parts = append(parts, fmt.Sprintf("(%s)", node.Title))
 		}
 		parts = append(parts, fmt.Sprintf("[%s]", node.ID))
+		if node.AllTasksCompleted {
+			parts = append(parts, "\033[32m(All done)\033[0m") // Green "All done"
+		}
 	}
 
 	if node.IsArchived {
