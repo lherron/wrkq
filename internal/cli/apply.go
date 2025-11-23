@@ -9,6 +9,8 @@ import (
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/edit"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -29,16 +31,18 @@ Examples:
   todo cat T-00001 | sed 's/foo/bar/' | todo apply T-00001 -
   todo apply T-00001 --body-only    # Update only body
   todo apply T-00001 --if-match 5   # Conditional update
+  todo apply T-00001 new.md --base old.md --if-match 47  # 3-way merge
 `,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runApply,
 }
 
 var (
-	applyFormat  string
+	applyFormat   string
 	applyBodyOnly bool
 	applyIfMatch  int64
 	applyDryRun   bool
+	applyBase     string
 )
 
 func init() {
@@ -48,6 +52,7 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyBodyOnly, "body-only", false, "Update only body without touching metadata")
 	applyCmd.Flags().Int64Var(&applyIfMatch, "if-match", 0, "Only apply if etag matches (0 = no check)")
 	applyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false, "Show what would be changed without applying")
+	applyCmd.Flags().StringVar(&applyBase, "base", "", "Base document for 3-way merge (enables merge mode)")
 }
 
 func runApply(cmd *cobra.Command, args []string) error {
@@ -71,7 +76,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	// Resolve task
 	taskID := args[0]
-	taskUUID, friendlyID, err := resolveTask(database, taskID)
+	taskUUID, friendlyID, err := selectors.ResolveTask(database, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve task: %w", err)
 	}
@@ -131,7 +136,12 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("etag mismatch: expected %d, got %d", applyIfMatch, currentTask.ETag)
 	}
 
-	// Apply updates
+	// If --base flag is provided, perform 3-way merge
+	if applyBase != "" {
+		return runApplyWithMerge(cmd, database, taskUUID, friendlyID, updates, currentTask, data)
+	}
+
+	// Apply updates (non-merge mode)
 	if applyDryRun {
 		fmt.Printf("Would update task %s (%s)\n", friendlyID, taskUUID)
 		if applyBodyOnly {
@@ -288,4 +298,120 @@ func stringOrNil(s *string) string {
 		return "(nil)"
 	}
 	return *s
+}
+
+// runApplyWithMerge performs a 3-way merge when --base is specified
+func runApplyWithMerge(cmd *cobra.Command, database *db.DB, taskUUID string, friendlyID string, editedUpdates applyUpdates, currentTask *taskData, editedData []byte) error {
+	// Read base document from file
+	baseData, err := os.ReadFile(applyBase)
+	if err != nil {
+		return fmt.Errorf("failed to read base file: %w", err)
+	}
+
+	// Parse base document
+	var baseUpdates applyUpdates
+	baseFormat := detectFormat(baseData)
+	switch baseFormat {
+	case "json":
+		err = parseJSON(baseData, &baseUpdates)
+	case "yaml", "yml":
+		err = parseYAML(baseData, &baseUpdates)
+	case "md", "markdown":
+		err = parseMarkdown(baseData, &baseUpdates)
+	default:
+		return fmt.Errorf("unsupported base format: %s", baseFormat)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to parse base document: %w", err)
+	}
+
+	// Convert to edit.TaskDocument for merge
+	baseDoc := applyUpdatesToTaskDocument(baseUpdates, currentTask)
+	currentDoc := taskDataToDocument(currentTask)
+	editedDoc := applyUpdatesToTaskDocument(editedUpdates, currentTask)
+
+	// Perform 3-way merge
+	mergeResult := edit.Merge3Way(baseDoc, currentDoc, editedDoc)
+
+	// Check for conflicts
+	if mergeResult.HasConflict {
+		fmt.Fprintf(os.Stderr, "%s", mergeResult.FormatConflicts())
+		os.Exit(4) // Conflict exit code
+	}
+
+	// Convert merged result back to applyUpdates
+	mergedUpdates := applyUpdates{
+		Title:    &mergeResult.Merged.Title,
+		State:    &mergeResult.Merged.State,
+		Priority: &mergeResult.Merged.Priority,
+		DueAt:    stringPtr(mergeResult.Merged.DueAt),
+		Body:     &mergeResult.Merged.Body,
+	}
+
+	// Apply merged updates
+	if applyDryRun {
+		fmt.Printf("Would update task %s (%s) after 3-way merge\n", friendlyID, taskUUID)
+		fmt.Printf("  title: %s\n", *mergedUpdates.Title)
+		fmt.Printf("  state: %s\n", *mergedUpdates.State)
+		fmt.Printf("  priority: %d\n", *mergedUpdates.Priority)
+		if mergedUpdates.DueAt != nil {
+			fmt.Printf("  due_at: %s\n", *mergedUpdates.DueAt)
+		}
+		fmt.Printf("  body: %s\n", *mergedUpdates.Body)
+		return nil
+	}
+
+	err = applyTaskUpdates(database, taskUUID, mergedUpdates, false)
+	if err != nil {
+		return fmt.Errorf("failed to apply merged updates: %w", err)
+	}
+
+	fmt.Printf("Updated task %s (3-way merge successful)\n", friendlyID)
+	return nil
+}
+
+// applyUpdatesToTaskDocument converts applyUpdates to edit.TaskDocument
+// Uses fallback values from currentTask if fields are not set
+func applyUpdatesToTaskDocument(updates applyUpdates, fallback *taskData) *edit.TaskDocument {
+	doc := &edit.TaskDocument{}
+
+	// Title
+	if updates.Title != nil {
+		doc.Title = *updates.Title
+	} else {
+		doc.Title = fallback.Title
+	}
+
+	// State
+	if updates.State != nil {
+		doc.State = *updates.State
+	} else {
+		doc.State = fallback.State
+	}
+
+	// Priority
+	if updates.Priority != nil {
+		doc.Priority = *updates.Priority
+	} else if fallback.Priority != nil {
+		doc.Priority = *fallback.Priority
+	} else {
+		doc.Priority = 3 // default
+	}
+
+	// DueAt
+	if updates.DueAt != nil {
+		doc.DueAt = *updates.DueAt
+	} else if fallback.DueAt != nil {
+		doc.DueAt = *fallback.DueAt
+	}
+
+	// Body
+	if updates.Body != nil {
+		doc.Body = *updates.Body
+	} else if fallback.Body != nil {
+		doc.Body = *fallback.Body
+	}
+
+	return doc
 }

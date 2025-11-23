@@ -319,17 +319,17 @@ func applyTaskDocument(cmd *cobra.Command, cfg *config.Config, task *bundle.Task
 		env = append(env, "WRKQ_ACTOR="+actorIdentifier)
 	}
 
-	// Determine selector: prefer UUID, fallback to path
+	// Determine selector: prefer typed UUID selector for stability across renames
 	// For tasks without UUID, we need to create them first
 	selector := ""
 	needsCreation := false
 
 	if task.UUID != "" {
-		// Try UUID-based selector first
+		// Use typed UUID selector for stable addressing
 		selector = "t:" + task.UUID
 	} else if task.Path != "" {
-		// No UUID, use path and mark that we need to create it
-		selector = task.Path
+		// No UUID, use typed path selector and mark that we need to create it
+		selector = "t:" + task.Path
 		needsCreation = true
 	} else {
 		return fmt.Errorf("task has no UUID or path")

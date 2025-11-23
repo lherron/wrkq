@@ -14,6 +14,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -85,7 +86,7 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve task
-	taskUUID, taskID, err := resolveTask(database, taskRef)
+	taskUUID, taskID, err := selectors.ResolveTask(database, taskRef)
 	if err != nil {
 		return err
 	}

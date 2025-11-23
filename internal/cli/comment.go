@@ -9,6 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -87,7 +88,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		}
 
 		// Resolve task
-		taskUUID, taskID, err := resolveTask(database, taskRef)
+		taskUUID, taskID, err := selectors.ResolveTask(database, taskRef)
 		if err != nil {
 			return fmt.Errorf("failed to resolve task %s: %w", taskArg, err)
 		}

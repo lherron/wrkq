@@ -16,6 +16,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -118,7 +119,7 @@ func runRm(cmd *cobra.Command, args []string) error {
 	// Resolve all tasks
 	var taskUUIDs []string
 	for _, arg := range args {
-		taskUUID, _, err := resolveTask(database, arg)
+		taskUUID, _, err := selectors.ResolveTask(database, arg)
 		if err != nil {
 			if !rmNullglob {
 				return fmt.Errorf("task not found: %s", arg)

@@ -6,7 +6,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -64,7 +64,7 @@ func runStat(cmd *cobra.Command, args []string) error {
 
 	for _, arg := range args {
 		// Try to resolve as task first
-		taskUUID, _, err := resolveTask(database, arg)
+		taskUUID, _, err := selectors.ResolveTask(database, arg)
 		if err == nil {
 			// It's a task
 			var id, slug, title, state string
@@ -93,7 +93,7 @@ func runStat(cmd *cobra.Command, args []string) error {
 		}
 
 		// Try as container
-		containerUUID, err := resolveContainer(database, arg)
+		containerUUID, _, err := selectors.ResolveContainer(database, arg)
 		if err != nil {
 			return fmt.Errorf("path not found: %s", arg)
 		}
@@ -152,56 +152,4 @@ func runStat(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func resolveContainer(database *db.DB, arg string) (string, error) {
-	// Try as friendly ID
-	if arg[0] == 'P' && arg[1] == '-' {
-		var uuid string
-		err := database.QueryRow("SELECT uuid FROM containers WHERE id = ?", arg).Scan(&uuid)
-		if err == nil {
-			return uuid, nil
-		}
-	}
-
-	// Try as UUID
-	if len(arg) == 36 {
-		var uuid string
-		err := database.QueryRow("SELECT uuid FROM containers WHERE uuid = ?", arg).Scan(&uuid)
-		if err == nil {
-			return uuid, nil
-		}
-	}
-
-	// Try as path
-	segments := paths.SplitPath(arg)
-	if len(segments) == 0 {
-		return "", fmt.Errorf("invalid path")
-	}
-
-	var parentUUID *string
-	for _, segment := range segments {
-		slug, err := paths.NormalizeSlug(segment)
-		if err != nil {
-			return "", err
-		}
-
-		query := `SELECT uuid FROM containers WHERE slug = ? AND `
-		args := []interface{}{slug}
-		if parentUUID == nil {
-			query += `parent_uuid IS NULL`
-		} else {
-			query += `parent_uuid = ?`
-			args = append(args, *parentUUID)
-		}
-
-		var uuid string
-		err = database.QueryRow(query, args...).Scan(&uuid)
-		if err != nil {
-			return "", fmt.Errorf("container not found")
-		}
-		parentUUID = &uuid
-	}
-
-	return *parentUUID, nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -89,7 +90,7 @@ func runMv(cmd *cobra.Command, args []string) error {
 
 	// If multiple sources, destination must be an existing container
 	if len(sources) > 1 {
-		dstContainerUUID, err := resolveContainer(database, dst)
+		dstContainerUUID, _, err := selectors.ResolveContainer(database, dst)
 		if err != nil {
 			return fmt.Errorf("destination must be an existing container for multiple sources: %w", err)
 		}
@@ -106,7 +107,7 @@ func runMv(cmd *cobra.Command, args []string) error {
 	src := sources[0]
 
 	// Try to resolve destination as container first
-	dstContainerUUID, dstErr := resolveContainer(database, dst)
+	dstContainerUUID, _, dstErr := selectors.ResolveContainer(database, dst)
 	if dstErr == nil {
 		// Destination is an existing container - move into it
 		return moveToContainer(cmd, database, actorUUID, src, dstContainerUUID, dst)
@@ -114,13 +115,13 @@ func runMv(cmd *cobra.Command, args []string) error {
 
 	// Destination doesn't exist as container - could be rename
 	// Check if source is a task or container
-	srcTaskUUID, _, taskErr := resolveTask(database, src)
+	srcTaskUUID, _, taskErr := selectors.ResolveTask(database, src)
 	if taskErr == nil {
 		// Source is a task - rename or move to new parent
 		return renameOrMoveTask(cmd, database, actorUUID, srcTaskUUID, src, dst)
 	}
 
-	srcContainerUUID, containerErr := resolveContainer(database, src)
+	srcContainerUUID, _, containerErr := selectors.ResolveContainer(database, src)
 	if containerErr == nil {
 		// Source is a container - rename or move to new parent
 		return renameOrMoveContainer(cmd, database, actorUUID, srcContainerUUID, src, dst)
@@ -131,7 +132,7 @@ func runMv(cmd *cobra.Command, args []string) error {
 
 func moveToContainer(cmd *cobra.Command, database *db.DB, actorUUID, src, dstContainerUUID, dstPath string) error {
 	// Try as task first
-	srcTaskUUID, srcPath, taskErr := resolveTask(database, src)
+	srcTaskUUID, srcPath, taskErr := selectors.ResolveTask(database, src)
 	if taskErr == nil {
 		if mvDryRun {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would move task %s -> %s\n", srcPath, dstPath)
@@ -195,7 +196,7 @@ func moveToContainer(cmd *cobra.Command, database *db.DB, actorUUID, src, dstCon
 	}
 
 	// Try as container
-	srcContainerUUID, containerErr := resolveContainer(database, src)
+	srcContainerUUID, _, containerErr := selectors.ResolveContainer(database, src)
 	if containerErr == nil {
 		if mvDryRun {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would move container %s -> %s\n", src, dstPath)

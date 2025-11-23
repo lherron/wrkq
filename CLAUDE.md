@@ -55,6 +55,32 @@ WRKQ_ACTOR=local-human
 
 This avoids needing `--db` flags in every command during development.
 
+## Database Initialization
+
+To create a new database, use the `wrkqadm init` command:
+
+```bash
+# Initialize a new database
+wrkqadm init
+
+# Or with specific path
+wrkqadm --db /path/to/new.db init
+```
+
+The `init` command:
+- Creates the database file
+- Runs all migrations from `internal/db/migrations/`
+- Sets up the required tables and indexes
+
+**Note:** `wrkq` commands automatically open the database but do NOT run migrations. Only `wrkqadm init` initializes a new database and runs migrations.
+
+## CLI Tools
+
+The project has two CLI tools:
+
+1. **`wrkq`**: Main user-facing CLI for daily operations (`ls`, `cat`, `mkdir`, `touch`, `set`, `edit`, etc.)
+2. **`wrkqadm`**: Admin CLI for database initialization, maintenance, and administrative tasks (`init`, `actors`, `config`, `bundle apply`, etc.)
+
 ## Architecture
 
 ### Database Layer (`internal/db`)

@@ -19,6 +19,7 @@ import (
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -138,7 +139,7 @@ func runCp(cmd *cobra.Command, args []string) error {
 	// Resolve source tasks
 	var sourceTasks []string
 	for _, src := range sources {
-		taskUUID, _, err := resolveTask(database, src)
+		taskUUID, _, err := selectors.ResolveTask(database, src)
 		if err != nil {
 			if !cpNullglob {
 				return err

@@ -7,6 +7,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +57,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	defer database.Close()
 
 	// Resolve first task
-	uuidA, _, err := resolveTask(database, args[0])
+	uuidA, _, err := selectors.ResolveTask(database, args[0])
 	if err != nil {
 		return fmt.Errorf("failed to resolve task A: %w", err)
 	}
@@ -72,7 +73,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve second task
-	uuidB, _, err := resolveTask(database, args[1])
+	uuidB, _, err := selectors.ResolveTask(database, args[1])
 	if err != nil {
 		return fmt.Errorf("failed to resolve task B: %w", err)
 	}

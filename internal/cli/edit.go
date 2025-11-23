@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/edit"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -63,7 +64,7 @@ func runEdit(cmd *cobra.Command, args []string) error {
 
 	// Resolve task
 	taskID := args[0]
-	taskUUID, friendlyID, err := resolveTask(database, taskID)
+	taskUUID, friendlyID, err := selectors.ResolveTask(database, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve task: %w", err)
 	}

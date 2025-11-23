@@ -14,6 +14,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -112,7 +113,7 @@ func runAttachLs(cmd *cobra.Command, args []string) error {
 	defer database.Close()
 
 	// Resolve task
-	taskUUID, _, err := resolveTask(database, args[0])
+	taskUUID, _, err := selectors.ResolveTask(database, args[0])
 	if err != nil {
 		return err
 	}
@@ -268,7 +269,7 @@ func runAttachPut(cmd *cobra.Command, args []string) error {
 	defer database.Close()
 
 	// Resolve task
-	taskUUID, taskID, err := resolveTask(database, args[0])
+	taskUUID, taskID, err := selectors.ResolveTask(database, args[0])
 	if err != nil {
 		return err
 	}

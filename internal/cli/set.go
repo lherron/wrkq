@@ -16,6 +16,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -132,7 +133,7 @@ func runSet(cmd *cobra.Command, args []string) error {
 	}
 
 	result := op.Execute(taskRefs, func(ref string) error {
-		taskUUID, _, err := resolveTask(database, ref)
+		taskUUID, _, err := selectors.ResolveTask(database, ref)
 		if err != nil {
 			return err
 		}
