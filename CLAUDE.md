@@ -16,6 +16,8 @@ This separation ensures agents get a focused, safe API while admins retain full 
 
 ## WRKQ Usage Reference
 
+** ALWAYS USE WRKQ TO TRACK YOUR TASK **
+
 @WRKQ-USAGE.md
 
 ## Development Commands
