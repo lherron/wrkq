@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	_ "embed"
 	"fmt"
 	"os"
@@ -49,44 +48,18 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 		return exitError(1, fmt.Errorf("failed to load config: %w", err))
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-
-	// Prompt for database path if not provided via flag
+	// Use database path from flag or default to .wrkq/wrkq.db
 	dbPathFlag := cmd.Flag("db").Value.String()
-	if dbPathFlag == "" {
-		defaultDBPath := ".wrkq/wrkq.db"
-		fmt.Printf("Database path [%s]: ", defaultDBPath)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return exitError(1, fmt.Errorf("failed to read input: %w", err))
-		}
-		input = strings.TrimSpace(input)
-		if input == "" {
-			cfg.DBPath = defaultDBPath
-		} else {
-			cfg.DBPath = input
-		}
-	} else {
+	if dbPathFlag != "" {
 		cfg.DBPath = dbPathFlag
+	} else {
+		cfg.DBPath = ".wrkq/wrkq.db"
 	}
 
-	// Prompt for actor slug if not provided via flag
+	// Use actor slug from flag or default
 	actorSlugToUse := initAdmActorSlug
-	if cmd.Flag("actor-slug").Changed {
-		actorSlugToUse = initAdmActorSlug
-	} else {
-		defaultActorSlug := "claude-code-agent"
-		fmt.Printf("Actor slug [%s]: ", defaultActorSlug)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return exitError(1, fmt.Errorf("failed to read input: %w", err))
-		}
-		input = strings.TrimSpace(input)
-		if input == "" {
-			actorSlugToUse = defaultActorSlug
-		} else {
-			actorSlugToUse = input
-		}
+	if !cmd.Flag("actor-slug").Changed {
+		actorSlugToUse = "claude-code-agent"
 	}
 
 	// Override attach dir from flag if provided
@@ -133,25 +106,36 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 		fmt.Printf("✓ Created attachments directory at %s\n", cfg.AttachDir)
 		fmt.Printf("✓ Seeded default actor: %s\n", actorSlugToUse)
 		fmt.Printf("✓ Seeded inbox project\n")
-
-		// Update .env.local if needed
-		if err := updateEnvLocal(cfg.DBPath, actorSlugToUse); err != nil {
-			// Don't fail the command, just warn
-			fmt.Fprintf(os.Stderr, "Warning: failed to update .env.local: %v\n", err)
-		}
-
-		// Write WRKQ-USAGE.md to project directory
-		if err := writeWrkqUsage(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to write WRKQ-USAGE.md: %v\n", err)
-		}
-
-		// Update CLAUDE.md with @WRKQ-USAGE.md reference
-		if err := updateClaudeMd(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to update CLAUDE.md: %v\n", err)
-		}
 	} else {
 		fmt.Printf("✓ Database already initialized at %s\n", cfg.DBPath)
 		fmt.Printf("✓ Migrations applied\n")
+	}
+
+	// Update project files (runs on both new and existing databases)
+	// Update .env or .env.local if needed
+	if err := updateEnvLocal(cfg.DBPath, actorSlugToUse); err != nil {
+		// Don't fail the command, just warn
+		fmt.Fprintf(os.Stderr, "Warning: failed to update env file: %v\n", err)
+	}
+
+	// Write WRKQ-USAGE.md to project directory (overwrites if exists)
+	if err := writeWrkqUsage(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to write WRKQ-USAGE.md: %v\n", err)
+	}
+
+	// Update CLAUDE.md with @WRKQ-USAGE.md reference
+	if err := updateClaudeMd(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to update CLAUDE.md: %v\n", err)
+	}
+
+	// Update AGENTS.md with @WRKQ-USAGE.md reference if it exists
+	if err := updateAgentsMd(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to update AGENTS.md: %v\n", err)
+	}
+
+	// Update .gitignore to exclude wrkq database
+	if err := updateGitignore(cfg.DBPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to update .gitignore: %v\n", err)
 	}
 
 	return nil
@@ -190,11 +174,16 @@ func seedDatabaseAdm(database *db.DB, actorSlug, actorName string) error {
 	return nil
 }
 
-// updateEnvLocal checks .env.local and adds WRKQ_DB_PATH and WRKQ_ACTOR if missing
+// updateEnvLocal checks .env or .env.local and adds WRKQ_DB_PATH and WRKQ_ACTOR if missing
+// Prefers .env if it exists, otherwise uses .env.local
 func updateEnvLocal(dbPath, actorSlug string) error {
+	// Check if .env exists, prefer it over .env.local
 	envPath := ".env.local"
+	if _, err := os.Stat(".env"); err == nil {
+		envPath = ".env"
+	}
 
-	// Read existing .env.local content if it exists
+	// Read existing env file content if it exists
 	existingContent := ""
 	hasDBPath := false
 	hasActor := false
@@ -248,26 +237,31 @@ func updateEnvLocal(dbPath, actorSlug string) error {
 		}
 	}
 
-	fmt.Printf("✓ Updated .env.local with configuration\n")
+	fmt.Printf("✓ Updated %s with configuration\n", envPath)
 	return nil
 }
 
 // writeWrkqUsage writes WRKQ-USAGE.md to the project directory
+// If the file already exists, it is overwritten with the latest embedded content
 func writeWrkqUsage() error {
 	usagePath := "WRKQ-USAGE.md"
 
-	// Check if file already exists
+	// Check if file already exists for logging purposes
+	exists := false
 	if _, err := os.Stat(usagePath); err == nil {
-		// File exists, don't overwrite
-		return nil
+		exists = true
 	}
 
-	// Write the embedded content
+	// Write the embedded content (always overwrite to ensure latest version)
 	if err := os.WriteFile(usagePath, []byte(wrkqUsageContent), 0644); err != nil {
 		return fmt.Errorf("failed to write WRKQ-USAGE.md: %w", err)
 	}
 
-	fmt.Printf("✓ Created WRKQ-USAGE.md\n")
+	if exists {
+		fmt.Printf("✓ Updated WRKQ-USAGE.md\n")
+	} else {
+		fmt.Printf("✓ Created WRKQ-USAGE.md\n")
+	}
 	return nil
 }
 
@@ -347,5 +341,118 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 	}
 
 	fmt.Printf("✓ Updated CLAUDE.md with @WRKQ-USAGE.md reference\n")
+	return nil
+}
+
+// updateAgentsMd adds @WRKQ-USAGE.md reference to AGENTS.md if it exists and doesn't already have it
+func updateAgentsMd() error {
+	agentsPath := "AGENTS.md"
+
+	// Check if AGENTS.md exists - if not, do nothing (don't create it)
+	if _, err := os.Stat(agentsPath); os.IsNotExist(err) {
+		return nil
+	}
+
+	// Read existing AGENTS.md
+	data, err := os.ReadFile(agentsPath)
+	if err != nil {
+		return fmt.Errorf("failed to read AGENTS.md: %w", err)
+	}
+	content := string(data)
+
+	// Check if @WRKQ-USAGE.md already exists
+	if strings.Contains(content, "@WRKQ-USAGE.md") {
+		return nil
+	}
+
+	// Find where to insert the reference
+	// Look for the first "# " heading
+	lines := strings.Split(content, "\n")
+	insertIndex := -1
+
+	for i, line := range lines {
+		if strings.HasPrefix(line, "# ") {
+			// Found the main heading, insert after it and any following blank lines
+			insertIndex = i + 1
+			for insertIndex < len(lines) && strings.TrimSpace(lines[insertIndex]) == "" {
+				insertIndex++
+			}
+			break
+		}
+	}
+
+	if insertIndex == -1 {
+		// No heading found, insert at the beginning
+		insertIndex = 0
+	}
+
+	// Build the new content
+	var newLines []string
+	newLines = append(newLines, lines[:insertIndex]...)
+	newLines = append(newLines, "")
+	newLines = append(newLines, "## WRKQ Usage Reference")
+	newLines = append(newLines, "")
+	newLines = append(newLines, "** ALWAYS USE WRKQ TO TRACK YOUR TASK **")
+	newLines = append(newLines, "")
+	newLines = append(newLines, "@WRKQ-USAGE.md")
+	newLines = append(newLines, "")
+	newLines = append(newLines, lines[insertIndex:]...)
+
+	// Write the updated content
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(agentsPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to update AGENTS.md: %w", err)
+	}
+
+	fmt.Printf("✓ Updated AGENTS.md with @WRKQ-USAGE.md reference\n")
+	return nil
+}
+
+// updateGitignore adds the database path to .gitignore if not already present
+func updateGitignore(dbPath string) error {
+	gitignorePath := ".gitignore"
+
+	// Read existing .gitignore content if it exists
+	existingContent := ""
+	if data, err := os.ReadFile(gitignorePath); err == nil {
+		existingContent = string(data)
+	}
+
+	// Check if the database path is already in .gitignore
+	lines := strings.Split(existingContent, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == dbPath {
+			// Already present
+			return nil
+		}
+	}
+
+	// Open file for appending (create if doesn't exist)
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open .gitignore: %w", err)
+	}
+	defer f.Close()
+
+	// If file existed and has content, ensure we start on a new line
+	if existingContent != "" && !strings.HasSuffix(existingContent, "\n") {
+		if _, err := f.WriteString("\n"); err != nil {
+			return fmt.Errorf("failed to write newline: %w", err)
+		}
+	}
+
+	// Add a comment and the database path
+	toWrite := ""
+	if existingContent == "" || !strings.Contains(existingContent, "# wrkq") {
+		toWrite = "# wrkq database\n"
+	}
+	toWrite += dbPath + "\n"
+
+	if _, err := f.WriteString(toWrite); err != nil {
+		return fmt.Errorf("failed to write to .gitignore: %w", err)
+	}
+
+	fmt.Printf("✓ Added %s to .gitignore\n", dbPath)
 	return nil
 }
