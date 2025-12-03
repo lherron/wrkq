@@ -7,8 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/edit"
 	"github.com/lherron/wrkq/internal/parse"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -26,12 +25,12 @@ updates that may have occurred in the database. If there are conflicts that
 cannot be automatically resolved, the command exits with code 4.
 
 Examples:
-  todo edit T-00001            # Edit task in $EDITOR
-  todo edit portal/auth/login  # Edit by path
-  todo edit T-00001 --if-match 5  # Only edit if etag matches
+  wrkq edit T-00001            # Edit task in $EDITOR
+  wrkq edit portal/auth/login  # Edit by path
+  wrkq edit T-00001 --if-match 5  # Only edit if etag matches
 `,
 	Args: cobra.ExactArgs(1),
-	RunE: runEdit,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runEdit),
 }
 
 var (
@@ -44,24 +43,8 @@ func init() {
 	editCmd.Flags().Int64Var(&editIfMatch, "if-match", 0, "Only edit if etag matches (0 = no check)")
 }
 
-func runEdit(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runEdit(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Resolve task
 	taskID := args[0]
@@ -172,7 +155,7 @@ func createTempFile(task *taskData) (string, error) {
 	}
 
 	// Create temp file
-	tmpfile, err := ioutil.TempFile("", "todo-edit-*.md")
+	tmpfile, err := ioutil.TempFile("", "wrkq-edit-*.md")
 	if err != nil {
 		return "", err
 	}

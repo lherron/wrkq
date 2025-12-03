@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/snapshot"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +31,7 @@ deterministic format suitable for diffing and version control.
 
 Canonicalization ensures byte-for-byte identical output for the same
 database state (sorted keys, no insignificant whitespace, sorted arrays).`,
-	RunE: runStateExport,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateExport),
 }
 
 var (
@@ -65,25 +64,8 @@ func init() {
 	stateVerifyCmd.Flags().BoolVar(&stateVerifyJSON, "json", false, "Output result as JSON")
 }
 
-func runStateExport(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return exitError(1, fmt.Errorf("failed to load config: %w", err))
-	}
-
-	// Override DB path from flag if provided
-	dbPathFlag := cmd.Flag("db").Value.String()
-	if dbPathFlag != "" {
-		cfg.DBPath = dbPathFlag
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return exitError(1, fmt.Errorf("failed to open database: %w", err))
-	}
-	defer database.Close()
+func runStateExport(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Export snapshot
 	opts := snapshot.ExportOptions{
@@ -127,7 +109,7 @@ By default, import requires the database to be essentially empty (only
 seeded defaults). Use --force to truncate existing data before import.
 
 Use --dry-run to validate the snapshot without writing to the database.`,
-	RunE: runStateImport,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateImport),
 }
 
 var (
@@ -138,25 +120,8 @@ var (
 	stateImportJSON    bool
 )
 
-func runStateImport(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return exitError(1, fmt.Errorf("failed to load config: %w", err))
-	}
-
-	// Override DB path from flag if provided
-	dbPathFlag := cmd.Flag("db").Value.String()
-	if dbPathFlag != "" {
-		cfg.DBPath = dbPathFlag
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return exitError(1, fmt.Errorf("failed to open database: %w", err))
-	}
-	defer database.Close()
+func runStateImport(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Import snapshot
 	opts := snapshot.ImportOptions{
@@ -209,32 +174,14 @@ var stateVerifyCmd = &cobra.Command{
 If the snapshot is not byte-identical after canonicalization, verification
 fails with exit code 4.`,
 	Args: cobra.ExactArgs(1),
-	RunE: runStateVerify,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateVerify),
 }
 
 var stateVerifyJSON bool
 
-func runStateVerify(cmd *cobra.Command, args []string) error {
+func runStateVerify(app *appctx.App, cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
-
-	// Load configuration (needed for potential DB operations)
-	cfg, err := config.Load()
-	if err != nil {
-		return exitError(1, fmt.Errorf("failed to load config: %w", err))
-	}
-
-	// Override DB path from flag if provided
-	dbPathFlag := cmd.Flag("db").Value.String()
-	if dbPathFlag != "" {
-		cfg.DBPath = dbPathFlag
-	}
-
-	// Open database (for potential future use in verify)
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return exitError(1, fmt.Errorf("failed to open database: %w", err))
-	}
-	defer database.Close()
+	database := app.DB
 
 	// Verify snapshot
 	result, err := snapshot.Verify(database.DB, inputPath)

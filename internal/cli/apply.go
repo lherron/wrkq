@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/parse"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -38,7 +38,7 @@ Examples:
   wrkq apply T-00001 - --if-match 5              # Conditional update
 `,
 	Args: cobra.ExactArgs(2),
-	RunE: runApply,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runApply),
 }
 
 var (
@@ -57,24 +57,8 @@ func init() {
 	applyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false, "Show what would be changed without applying")
 }
 
-func runApply(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Resolve task
 	taskID := args[0]

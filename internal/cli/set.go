@@ -8,9 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/bulk"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -38,7 +37,7 @@ Examples:
   echo "New description" | wrkq set T-00001 -d -
   wrkq set T-00001 --state in_progress --priority 1 --title "New Title"`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runSet,
+	RunE: appctx.WithApp(appctx.WithActor(), runSet),
 }
 
 var (
@@ -76,40 +75,9 @@ func init() {
 	setCmd.Flags().StringVar(&setStartAt, "start-at", "", "Update task start date")
 }
 
-func runSet(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Get actor from --as flag or config
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve actor
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// All args are task refs now (no more key=value parsing)
 	taskRefs := args

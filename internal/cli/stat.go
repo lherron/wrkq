@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
@@ -15,7 +14,7 @@ var statCmd = &cobra.Command{
 	Short: "Print metadata for tasks or containers",
 	Long:  `Displays metadata (machine-friendly) for one or more tasks or containers.`,
 	Args:  cobra.MinimumNArgs(1),
-	RunE:  runStat,
+	RunE:  appctx.WithApp(appctx.DefaultOptions(), runStat),
 }
 
 var (
@@ -29,24 +28,8 @@ func init() {
 	statCmd.Flags().BoolVarP(&statNul, "nul", "0", false, "NUL-separated output")
 }
 
-func runStat(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runStat(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	type Metadata struct {
 		Type     string                 `json:"type"`

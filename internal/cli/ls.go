@@ -6,9 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/cursor"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
@@ -18,7 +17,7 @@ var lsCmd = &cobra.Command{
 	Use:   "ls [path...]",
 	Short: "List containers and tasks",
 	Long:  `Lists containers (projects/subprojects) and tasks at the specified paths.`,
-	RunE:  runLs,
+	RunE:  appctx.WithApp(appctx.DefaultOptions(), runLs),
 }
 
 var (
@@ -47,24 +46,8 @@ func init() {
 	lsCmd.Flags().StringVar(&lsCursor, "cursor", "", "Pagination cursor from previous page")
 }
 
-func runLs(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// If no paths specified, list root
 	if len(args) == 0 {

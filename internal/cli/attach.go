@@ -8,9 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/lherron/wrkq/internal/attach"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/cursor"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/render"
@@ -28,7 +27,7 @@ var attachLsCmd = &cobra.Command{
 	Use:   "ls <task>",
 	Short: "List attachments for a task",
 	Args:  cobra.ExactArgs(1),
-	RunE:  runAttachLs,
+	RunE:  appctx.WithApp(appctx.DefaultOptions(), runAttachLs),
 }
 
 var attachPutCmd = &cobra.Command{
@@ -37,7 +36,7 @@ var attachPutCmd = &cobra.Command{
 	Long: `Attach a file to a task. Use '-' to read from stdin.
 Files are stored in attach_dir/tasks/<task_uuid>/ and survive task moves/renames.`,
 	Args: cobra.ExactArgs(2),
-	RunE: runAttachPut,
+	RunE: appctx.WithApp(appctx.WithActor(), runAttachPut),
 }
 
 var attachGetCmd = &cobra.Command{
@@ -45,7 +44,7 @@ var attachGetCmd = &cobra.Command{
 	Short: "Get an attachment file",
 	Long:  `Copy an attachment file to stdout or a specified path.`,
 	Args:  cobra.ExactArgs(1),
-	RunE:  runAttachGet,
+	RunE:  appctx.WithApp(appctx.DefaultOptions(), runAttachGet),
 }
 
 var attachRmCmd = &cobra.Command{
@@ -53,7 +52,7 @@ var attachRmCmd = &cobra.Command{
 	Short: "Remove attachment(s)",
 	Long:  `Remove attachment metadata and delete the file from disk.`,
 	Args:  cobra.MinimumNArgs(1),
-	RunE:  runAttachRm,
+	RunE:  appctx.WithApp(appctx.WithActor(), runAttachRm),
 }
 
 var (
@@ -96,21 +95,8 @@ func init() {
 	attachRmCmd.Flags().BoolVar(&attachRmYes, "yes", false, "Skip confirmation")
 }
 
-func runAttachLs(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Resolve task
 	taskUUID, _, err := selectors.ResolveTask(database, args[0])
@@ -252,21 +238,10 @@ func runAttachLs(cmd *cobra.Command, args []string) error {
 	return renderer.RenderTable(headers, rows_data)
 }
 
-func runAttachPut(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
+	cfg := app.Config
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// Resolve task
 	taskUUID, taskID, err := selectors.ResolveTask(database, args[0])
@@ -336,12 +311,6 @@ func runAttachPut(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Resolve current actor
-	actorUUID, _, err := resolveCurrentActor(database, cfg, cmd)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
-
 	// Insert attachment metadata
 	tx, err := database.Begin()
 	if err != nil {
@@ -402,27 +371,15 @@ func runAttachPut(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runAttachGet(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runAttachGet(app *appctx.App, cmd *cobra.Command, args []string) error {
+	cfg := app.Config
+	database := app.DB
 
 	attachmentRef := args[0]
 
 	// Resolve attachment (ID or UUID)
 	var attachUUID, relativePath, filename string
-	err = database.QueryRow(`
+	err := database.QueryRow(`
 		SELECT uuid, relative_path, filename FROM attachments
 		WHERE id = ? OR uuid = ?
 	`, attachmentRef, attachmentRef).Scan(&attachUUID, &relativePath, &filename)
@@ -454,32 +411,15 @@ func runAttachGet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runAttachRm(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve current actor
-	actorUUID, _, err := resolveCurrentActor(database, cfg, cmd)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
+	cfg := app.Config
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	for _, attachmentRef := range args {
 		// Resolve attachment
 		var attachUUID, attachID, relativePath, filename string
-		err = database.QueryRow(`
+		err := database.QueryRow(`
 			SELECT uuid, id, relative_path, filename FROM attachments
 			WHERE id = ? OR uuid = ?
 		`, attachmentRef, attachmentRef).Scan(&attachUUID, &attachID, &relativePath, &filename)

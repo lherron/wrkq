@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/actors"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -30,7 +29,7 @@ Examples:
   wrkq touch inbox/bug-fix --labels '["bug","urgent"]' --due-at 2025-12-01
   echo "Description from stdin" | wrkq touch inbox/new-task -d -`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runTouch,
+	RunE: appctx.WithApp(appctx.WithActor(), runTouch),
 }
 
 var (
@@ -54,40 +53,9 @@ func init() {
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
 }
 
-func runTouch(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Get actor from --as flag or config
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set TODO_ACTOR, TODO_ACTOR_ID, or use --as flag)")
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve actor
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// Validate state
 	if touchState != "" {
@@ -114,6 +82,7 @@ func runTouch(cmd *cobra.Command, args []string) error {
 	// Process description if provided
 	var description string
 	if touchDescription != "" {
+		var err error
 		description, err = readDescriptionValue(touchDescription)
 		if err != nil {
 			return fmt.Errorf("failed to read description: %w", err)
@@ -215,7 +184,7 @@ func createTask(database *db.DB, actorUUID, path string, params *createTaskParam
 		// Task at root - find "inbox" or any root container
 		err := database.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID)
 		if err != nil {
-			return fmt.Errorf("no root container found (create a project first with 'todo mkdir')")
+			return fmt.Errorf("no root container found (create a project first with 'wrkq mkdir')")
 		}
 	}
 

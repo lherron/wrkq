@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
@@ -30,7 +29,7 @@ Comment text can come from:
 
 Comments are immutable and attributed to the current actor.`,
 	Args: cobra.RangeArgs(1, 2),
-	RunE: runCommentAdd,
+	RunE: appctx.WithApp(appctx.WithActor(), runCommentAdd),
 }
 
 var (
@@ -53,7 +52,10 @@ func init() {
 	commentAddCmd.Flags().StringVar(&commentAddAsActor, "as", "", "Actor slug or ID")
 }
 
-func runCommentAdd(cmd *cobra.Command, args []string) error {
+func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
+
 	// Reset flag values after execution to prevent test contamination
 	defer func() {
 		commentAddMessage = ""
@@ -63,21 +65,6 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 		commentAddDryRun = false
 		commentAddAsActor = ""
 	}()
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
 
 	// Remove t: prefix if present
 	taskRef := args[0]
@@ -160,15 +147,9 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 		metaStr = &commentAddMeta
 	}
 
-	// Resolve current actor
-	actorUUID, actorSlug, err := resolveCurrentActor(database, cfg, cmd)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
-
 	if commentAddDryRun {
 		fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would add comment to task %s:\n", taskID)
-		fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", actorSlug)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", app.ActorID)
 		fmt.Fprintf(cmd.OutOrStdout(), "  Body: %s\n", body)
 		if metaStr != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "  Meta: %s\n", *metaStr)
@@ -257,7 +238,7 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 		"id":         commentID,
 		"uuid":       commentUUID,
 		"task_id":    taskID,
-		"actor_slug": actorSlug,
+		"actor_id":   app.ActorID,
 		"created_at": comment.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		"etag":       comment.ETag,
 	}

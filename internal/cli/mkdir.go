@@ -3,8 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/actors"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -18,7 +17,7 @@ var mkdirCmd = &cobra.Command{
 	Long: `Creates one or more projects or subprojects (containers).
 The last segment of each path is treated as a container slug and normalized to lowercase [a-z0-9-].`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runMkdir,
+	RunE: appctx.WithApp(appctx.WithActor(), runMkdir),
 }
 
 var (
@@ -30,40 +29,9 @@ func init() {
 	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "Create parent containers as needed")
 }
 
-func runMkdir(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Get actor from --as flag or config
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set TODO_ACTOR, TODO_ACTOR_ID, or use --as flag)")
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve actor
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// Create each path
 	for _, path := range args {

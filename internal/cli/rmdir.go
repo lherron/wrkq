@@ -3,8 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/actors"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -22,7 +21,7 @@ Use --force to remove non-empty containers (recursively deletes all contents).
 
 WARNING: --force permanently deletes containers, tasks, and attachments. This CANNOT be undone!`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runRmdir,
+	RunE: appctx.WithApp(appctx.WithActor(), runRmdir),
 }
 
 var (
@@ -36,35 +35,9 @@ func init() {
 	rmdirCmd.Flags().BoolVar(&rmdirYes, "yes", false, "Skip confirmation prompts")
 }
 
-func runRmdir(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runRmdir(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// Process each path
 	for _, path := range args {

@@ -10,9 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/bulk"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -27,7 +26,7 @@ var cpCmd = &cobra.Command{
 	Use:   "cp <source>... <destination>",
 	Short: "Copy tasks and containers",
 	Args:  cobra.MinimumNArgs(2),
-	RunE:  runCp,
+	RunE:  appctx.WithApp(appctx.WithActor(), runCp),
 }
 
 var (
@@ -77,32 +76,10 @@ type copyResult struct {
 	WithFiles     bool   `json:"with_files,omitempty"`
 }
 
-func runCp(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return err
-	}
-	defer database.Close()
-
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return err
-	}
+func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
+	cfg := app.Config
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// Validate mutually exclusive flags
 	if cpWithAttachments && cpShallow {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 )
 
@@ -56,9 +58,23 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 	return database, dbPath
 }
 
+// createTestApp creates an appctx.App for testing with the given database
+func createTestApp(t *testing.T, database *db.DB, dbPath string) *appctx.App {
+	t.Helper()
+	cfg := &config.Config{
+		DBPath: dbPath,
+	}
+	return &appctx.App{
+		Config:    cfg,
+		DB:        database,
+		ActorUUID: "00000000-0000-0000-0000-000000000001", // test-user from setupTestEnv
+		ActorID:   "A-00001",
+	}
+}
+
 func TestInitCommand(t *testing.T) {
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "todo.db")
+	dbPath := filepath.Join(tmpDir, "wrkq.db")
 
 	// Note: This test would require refactoring the init command to be testable
 	// For now, we'll focus on testing commands that read from an existing DB
@@ -448,19 +464,11 @@ func TestApplyCommand_EmptyInput(t *testing.T) {
 		t.Fatalf("Failed to create empty file: %v", err)
 	}
 
-	// Save original values
-	origDBPath := os.Getenv("WRKQ_DB_PATH")
-	origActor := os.Getenv("WRKQ_ACTOR")
-	defer func() {
-		os.Setenv("WRKQ_DB_PATH", origDBPath)
-		os.Setenv("WRKQ_ACTOR", origActor)
-	}()
-
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
+	// Create test app context
+	app := createTestApp(t, database, dbPath)
 
 	// Execute apply command programmatically
-	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	err = runApply(app, applyCmd, []string{"T-00001", tmpFile})
 	if err == nil {
 		t.Fatal("Expected error for empty input, got nil")
 	}
@@ -489,19 +497,11 @@ func TestApplyCommand_InvalidJSON(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Save original values
-	origDBPath := os.Getenv("WRKQ_DB_PATH")
-	origActor := os.Getenv("WRKQ_ACTOR")
-	defer func() {
-		os.Setenv("WRKQ_DB_PATH", origDBPath)
-		os.Setenv("WRKQ_ACTOR", origActor)
-	}()
-
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
+	// Create test app context
+	app := createTestApp(t, database, dbPath)
 
 	// Execute apply command
-	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	err = runApply(app, applyCmd, []string{"T-00001", tmpFile})
 	if err == nil {
 		t.Fatal("Expected error for invalid JSON, got nil")
 	}
@@ -531,19 +531,11 @@ func TestApplyCommand_ValidMarkdown(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Save original values
-	origDBPath := os.Getenv("WRKQ_DB_PATH")
-	origActor := os.Getenv("WRKQ_ACTOR")
-	defer func() {
-		os.Setenv("WRKQ_DB_PATH", origDBPath)
-		os.Setenv("WRKQ_ACTOR", origActor)
-	}()
-
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
+	// Create test app context
+	app := createTestApp(t, database, dbPath)
 
 	// Execute apply command
-	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	err = runApply(app, applyCmd, []string{"T-00001", tmpFile})
 	if err != nil {
 		t.Fatalf("Apply command failed: %v", err)
 	}
@@ -579,22 +571,14 @@ func TestApplyCommand_EtagMismatch(t *testing.T) {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// Save original values
-	origDBPath := os.Getenv("WRKQ_DB_PATH")
-	origActor := os.Getenv("WRKQ_ACTOR")
-	defer func() {
-		os.Setenv("WRKQ_DB_PATH", origDBPath)
-		os.Setenv("WRKQ_ACTOR", origActor)
-	}()
-
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
+	// Create test app context
+	app := createTestApp(t, database, dbPath)
 
 	// Set wrong etag
 	applyIfMatch = 99
 
 	// Execute apply command
-	err = runApply(applyCmd, []string{"T-00001", tmpFile})
+	err = runApply(app, applyCmd, []string{"T-00001", tmpFile})
 	if err == nil {
 		t.Fatal("Expected error for etag mismatch, got nil")
 	}

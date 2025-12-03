@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +18,7 @@ var commentCatCmd = &cobra.Command{
 By default, prints a header line (ID, timestamp, actor, task) and body for each comment.
 Use c:<token> for typed comment selector (c:C-00012, c:uuid, etc).`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runCommentCat,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runCommentCat),
 }
 
 var (
@@ -36,21 +35,8 @@ func init() {
 	commentCatCmd.Flags().BoolVar(&commentCatRaw, "raw", false, "Body only, separated by ---")
 }
 
-func runCommentCat(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	var comments []map[string]interface{}
 

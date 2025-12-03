@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +17,7 @@ var catCmd = &cobra.Command{
 Comments are included by default. Use --exclude-comments to omit them.
 If the argument resolves to a container, exits with error code 2.`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runCat,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runCat),
 }
 
 var (
@@ -38,24 +37,8 @@ func init() {
 	catCmd.Flags().BoolVar(&catPorcelain, "porcelain", false, "Machine-readable output")
 }
 
-func runCat(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Define structs for JSON output
 	type Comment struct {

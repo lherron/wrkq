@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/actors"
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -27,7 +26,7 @@ Rules:
   - If DST does not exist: treat final segment as new slug (rename).
   - If DST is an existing task: error unless --overwrite-task.`,
 	Args: cobra.MinimumNArgs(2),
-	RunE: runMv,
+	RunE: appctx.WithApp(appctx.WithActor(), runMv),
 }
 
 var (
@@ -49,40 +48,9 @@ func init() {
 	mvCmd.Flags().BoolVar(&mvOverwriteTask, "overwrite-task", false, "Allow overwriting existing tasks")
 }
 
-func runMv(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Get actor from --as flag or config
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-	if actorIdentifier == "" {
-		return fmt.Errorf("no actor configured (set TODO_ACTOR, TODO_ACTOR_ID, or use --as flag)")
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve actor
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	// Split sources and destination
 	sources := args[:len(args)-1]

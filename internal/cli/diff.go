@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
@@ -17,12 +17,12 @@ var diffCmd = &cobra.Command{
 	Long: `Compare two tasks or task versions and display differences.
 
 Examples:
-  todo diff T-00001 T-00002      # Compare two tasks
-  todo diff T-00001              # Compare task with working copy (future)
-  todo diff T-00001 --json       # Output differences as JSON
+  wrkq diff T-00001 T-00002      # Compare two tasks
+  wrkq diff T-00001              # Compare task with working copy (future)
+  wrkq diff T-00001 --json       # Output differences as JSON
 `,
 	Args: cobra.RangeArgs(1, 2),
-	RunE: runDiff,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runDiff),
 }
 
 var (
@@ -37,24 +37,8 @@ func init() {
 	diffCmd.Flags().BoolVar(&diffJSON, "json", false, "Output as JSON")
 }
 
-func runDiff(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runDiff(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Resolve first task
 	uuidA, _, err := selectors.ResolveTask(database, args[0])

@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/actors"
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
@@ -22,7 +21,7 @@ var actorsAdmLsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List all actors",
 	Long:  `Lists all actors (users and agents) in the system.`,
-	RunE:  runActorsAdmList,
+	RunE:  appctx.WithApp(appctx.DefaultOptions(), runActorsAdmList),
 }
 
 var actorAdmAddCmd = &cobra.Command{
@@ -30,7 +29,7 @@ var actorAdmAddCmd = &cobra.Command{
 	Short: "Create a new actor",
 	Long:  `Creates a new actor with the given slug. The slug will be normalized to lowercase [a-z0-9-].`,
 	Args:  cobra.ExactArgs(1),
-	RunE:  runActorAdmAdd,
+	RunE:  appctx.WithApp(appctx.DefaultOptions(), runActorAdmAdd),
 }
 
 var (
@@ -56,24 +55,8 @@ func init() {
 	actorAdmAddCmd.Flags().StringVar(&actorAdmAddRole, "role", "human", "Actor role (human, agent, system)")
 }
 
-func runActorsAdmList(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runActorsAdmList(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// List actors
 	resolver := actors.NewResolver(database.DB)
@@ -125,8 +108,9 @@ func runActorsAdmList(cmd *cobra.Command, args []string) error {
 	return r.RenderTable(headers, rows)
 }
 
-func runActorAdmAdd(cmd *cobra.Command, args []string) error {
+func runActorAdmAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	slug := args[0]
+	database := app.DB
 
 	// Normalize slug
 	normalizedSlug, err := paths.NormalizeSlug(slug)
@@ -138,24 +122,6 @@ func runActorAdmAdd(cmd *cobra.Command, args []string) error {
 	if actorAdmAddRole != "human" && actorAdmAddRole != "agent" && actorAdmAddRole != "system" {
 		return fmt.Errorf("invalid role: must be one of: human, agent, system")
 	}
-
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
 
 	// Create actor
 	resolver := actors.NewResolver(database.DB)

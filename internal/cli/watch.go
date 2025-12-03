@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/spf13/cobra"
 )
@@ -18,12 +18,12 @@ var watchCmd = &cobra.Command{
 	Long: `Stream change events from the event log in real-time.
 
 Examples:
-  todo watch                     # Watch all events
-  todo watch --since 100         # Watch from event ID 100
-  todo watch --ndjson            # Output as NDJSON
-  todo watch portal/**           # Watch events under portal (future)
+  wrkq watch                     # Watch all events
+  wrkq watch --since 100         # Watch from event ID 100
+  wrkq watch --ndjson            # Output as NDJSON
+  wrkq watch portal/**           # Watch events under portal (future)
 `,
-	RunE: runWatch,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runWatch),
 }
 
 var (
@@ -40,24 +40,8 @@ func init() {
 	watchCmd.Flags().BoolVarP(&watchFollow, "follow", "f", true, "Follow new events (default true)")
 }
 
-func runWatch(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runWatch(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Watch events
 	return watchEvents(database, watchSince, watchNDJSON, watchFollow)

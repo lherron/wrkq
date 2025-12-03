@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/id"
@@ -21,13 +21,13 @@ var logCmd = &cobra.Command{
 	Long: `Show change history from the event log.
 
 Examples:
-  todo log T-00001                     # Show history for task
-  todo log portal/auth/login-ux        # Show history by path
-  todo log P-00001 --since 2025-11-01  # Show recent changes
-  todo log T-00001 --oneline           # Compact format
+  wrkq log T-00001                     # Show history for task
+  wrkq log portal/auth/login-ux        # Show history by path
+  wrkq log P-00001 --since 2025-11-01  # Show recent changes
+  wrkq log T-00001 --oneline           # Compact format
 `,
 	Args: cobra.ExactArgs(1),
-	RunE: runLog,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runLog),
 }
 
 var (
@@ -54,24 +54,8 @@ func init() {
 	logCmd.Flags().BoolVar(&logPorcelain, "porcelain", false, "Machine-readable output with cursor on stderr")
 }
 
-func runLog(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runLog(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Resolve target resource
 	resourceUUID, resourceType, err := resolveResource(database, args[0])

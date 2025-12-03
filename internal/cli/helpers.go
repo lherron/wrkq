@@ -20,6 +20,8 @@ func exitError(code int, err error) error {
 
 // resolveCurrentActor resolves the current actor UUID and friendly ID
 // from --as flag, environment variables, or config.
+//
+// Deprecated: Use appctx.Bootstrap with WithActor() options instead.
 func resolveCurrentActor(database *db.DB, cfg *config.Config, cmd *cobra.Command) (uuid, friendlyID string, err error) {
 	// Get actor from --as flag or config
 	actorIdentifier := cmd.Flag("as").Value.String()
@@ -27,7 +29,7 @@ func resolveCurrentActor(database *db.DB, cfg *config.Config, cmd *cobra.Command
 		actorIdentifier = cfg.GetActorID()
 	}
 	if actorIdentifier == "" {
-		return "", "", fmt.Errorf("no actor configured (set TODO_ACTOR, TODO_ACTOR_ID, or use --as flag)")
+		return "", "", fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
 	}
 
 	// Resolve actor UUID

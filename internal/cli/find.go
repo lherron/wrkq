@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
@@ -21,14 +21,14 @@ var findCmd = &cobra.Command{
 	Long: `Search for tasks and containers using metadata filters.
 
 Examples:
-  todo find                                    # Find all non-archived items
-  todo find portal/**                          # Find items under portal
-  todo find -type t --state open              # Find open tasks
-  todo find --slug-glob 'login-*'              # Find items with slug matching pattern
-  todo find --due-before 2025-12-01            # Find tasks due before date
-  todo find --state open --due-after 2025-11-01 --json
+  wrkq find                                    # Find all non-archived items
+  wrkq find portal/**                          # Find items under portal
+  wrkq find -type t --state open              # Find open tasks
+  wrkq find --slug-glob 'login-*'              # Find items with slug matching pattern
+  wrkq find --due-before 2025-12-01            # Find tasks due before date
+  wrkq find --state open --due-after 2025-11-01 --json
 `,
-	RunE: runFind,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runFind),
 }
 
 var (
@@ -61,24 +61,8 @@ func init() {
 	findCmd.Flags().BoolVarP(&findPrint0, "print0", "0", false, "NUL-separated output")
 }
 
-func runFind(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Build query based on filters
 	results, err := executeFindQuery(database, findOptions{

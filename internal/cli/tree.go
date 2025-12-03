@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
@@ -25,7 +25,7 @@ Examples:
   wrkq tree -L 2               # Limit depth to 2 levels
   wrkq tree --json             # Output as JSON
 `,
-	RunE: runTree,
+	RunE: appctx.WithApp(appctx.DefaultOptions(), runTree),
 }
 
 var (
@@ -46,24 +46,8 @@ func init() {
 	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
 }
 
-func runTree(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	// Open database
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
+func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
 
 	// Determine root path
 	rootPath := ""

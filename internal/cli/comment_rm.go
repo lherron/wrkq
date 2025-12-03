@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
@@ -21,7 +20,7 @@ Use --purge for hard delete (removes from database entirely).
 
 Use c:<token> for typed comment selector (c:C-00012, c:uuid, etc).`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runCommentRm,
+	RunE: appctx.WithApp(appctx.WithActor(), runCommentRm),
 }
 
 var (
@@ -40,27 +39,9 @@ func init() {
 	commentRmCmd.Flags().Int64Var(&commentRmIfMatch, "if-match", 0, "Only delete if comment etag matches (0 = skip check)")
 }
 
-func runCommentRm(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
-	}
-
-	database, err := db.Open(cfg.DBPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer database.Close()
-
-	// Resolve current actor
-	actorUUID, _, err := resolveCurrentActor(database, cfg, cmd)
-	if err != nil {
-		return fmt.Errorf("failed to resolve actor: %w", err)
-	}
+func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
+	database := app.DB
+	actorUUID := app.ActorUUID
 
 	for _, commentRef := range args {
 		// Remove c: prefix if present
