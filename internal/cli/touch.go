@@ -5,10 +5,9 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -89,20 +88,60 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Create task parameters
-	params := &createTaskParams{
-		title:       touchTitle,
-		description: description,
-		state:       touchState,
-		priority:    touchPriority,
-		labels:      touchLabels,
-		dueAt:       touchDueAt,
-		startAt:     touchStartAt,
-	}
+	// Create store
+	s := store.New(database)
 
 	// Create each task
 	for _, path := range args {
-		if err := createTask(database, actorUUID, path, params); err != nil {
+		// Use shared resolver to get parent container and normalized slug
+		parentUUID, normalizedSlug, _, err := selectors.ResolveParentContainer(database, path)
+		if err != nil {
+			return err
+		}
+
+		// Default title to slug if not provided
+		title := touchTitle
+		if title == "" {
+			title = normalizedSlug
+		}
+
+		// Default state to "open" if not provided
+		state := touchState
+		if state == "" {
+			state = "open"
+		}
+
+		// Default priority to 3 if not provided
+		priority := touchPriority
+		if priority == 0 {
+			priority = 3
+		}
+
+		// Determine project UUID
+		var projectUUID string
+		if parentUUID != nil {
+			projectUUID = *parentUUID
+		} else {
+			// Task at root - find "inbox" or any root container
+			err := database.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID)
+			if err != nil {
+				return fmt.Errorf("no root container found (create a project first with 'wrkq mkdir')")
+			}
+		}
+
+		// Create the task using the store
+		_, err = s.Tasks.Create(actorUUID, store.CreateParams{
+			Slug:        normalizedSlug,
+			Title:       title,
+			Description: description,
+			ProjectUUID: projectUUID,
+			State:       state,
+			Priority:    priority,
+			Labels:      touchLabels,
+			DueAt:       touchDueAt,
+			StartAt:     touchStartAt,
+		})
+		if err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s\n", path)
@@ -111,141 +150,3 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-type createTaskParams struct {
-	title       string
-	description string
-	state       string
-	priority    int
-	labels      string
-	dueAt       string
-	startAt     string
-}
-
-func createTask(database *db.DB, actorUUID, path string, params *createTaskParams) error {
-	segments := paths.SplitPath(path)
-	if len(segments) == 0 {
-		return fmt.Errorf("invalid path: %s", path)
-	}
-
-	// Last segment is the task slug
-	taskSlug := segments[len(segments)-1]
-	normalizedSlug, err := paths.NormalizeSlug(taskSlug)
-	if err != nil {
-		return fmt.Errorf("invalid task slug %q: %w", taskSlug, err)
-	}
-
-	// Default title to slug if not provided
-	title := params.title
-	if title == "" {
-		title = normalizedSlug
-	}
-
-	// Default state to "open" if not provided
-	state := params.state
-	if state == "" {
-		state = "open"
-	}
-
-	// Default priority to 3 if not provided
-	priority := params.priority
-	if priority == 0 {
-		priority = 3
-	}
-
-	// Find parent container
-	var projectUUID string
-	if len(segments) > 1 {
-		// Navigate to parent container
-		var parentUUID *string
-		for i, segment := range segments[:len(segments)-1] {
-			slug, err := paths.NormalizeSlug(segment)
-			if err != nil {
-				return fmt.Errorf("invalid slug %q: %w", segment, err)
-			}
-
-			query := `SELECT uuid FROM containers WHERE slug = ? AND `
-			args := []interface{}{slug}
-			if parentUUID == nil {
-				query += `parent_uuid IS NULL`
-			} else {
-				query += `parent_uuid = ?`
-				args = append(args, *parentUUID)
-			}
-
-			var uuid string
-			err = database.QueryRow(query, args...).Scan(&uuid)
-			if err != nil {
-				return fmt.Errorf("parent container not found: %s", paths.JoinPath(segments[:i+1]...))
-			}
-			parentUUID = &uuid
-		}
-		projectUUID = *parentUUID
-	} else {
-		// Task at root - find "inbox" or any root container
-		err := database.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID)
-		if err != nil {
-			return fmt.Errorf("no root container found (create a project first with 'wrkq mkdir')")
-		}
-	}
-
-	// Create task
-	tx, err := database.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Build INSERT statement with optional fields
-	query := `
-		INSERT INTO tasks (
-			id, slug, title, description, project_uuid, state, priority,
-			labels, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	result, err := tx.Exec(query,
-		"",                    // id (auto-generated)
-		normalizedSlug,        // slug
-		title,                 // title
-		params.description,    // description
-		projectUUID,           // project_uuid
-		state,                 // state
-		priority,              // priority
-		params.labels,         // labels (can be empty string or JSON)
-		params.dueAt,          // due_at (can be empty string)
-		params.startAt,        // start_at (can be empty string)
-		actorUUID,             // created_by_actor_uuid
-		actorUUID,             // updated_by_actor_uuid
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create task: %w", err)
-	}
-
-	// Get the UUID of the created task
-	rowID, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get last insert ID: %w", err)
-	}
-
-	var uuid string
-	err = tx.QueryRow("SELECT uuid FROM tasks WHERE rowid = ?", rowID).Scan(&uuid)
-	if err != nil {
-		return fmt.Errorf("failed to get task UUID: %w", err)
-	}
-
-	// Log event
-	eventWriter := events.NewWriter(database.DB)
-	payload := fmt.Sprintf(`{"slug":"%s","title":"%s","state":"%s","priority":%d}`, normalizedSlug, title, state, priority)
-	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
-		ResourceType: "task",
-		ResourceUUID: &uuid,
-		EventType:    "task.created",
-		Payload:      &payload,
-	}); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
-	}
-
-	return tx.Commit()
-}

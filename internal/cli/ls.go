@@ -8,8 +8,8 @@ import (
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/cursor"
-	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -63,18 +63,47 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		State string `json:"state,omitempty"`
 	}
 
+	// Build cursor pagination
+	pag, err := cursor.Apply(lsCursor, cursor.ApplyOptions{
+		SortFields: []string{"slug"},
+		Descending: []bool{false}, // ASC
+		IDField:    "id",
+		Limit:      lsLimit,
+	})
+	if err != nil {
+		return err
+	}
+
 	var entries []Entry
+	var hasMore bool
 
 	for _, path := range args {
 		if path == "" {
-			// List root containers
+			// List root containers with SQL-based pagination
 			if lsType == "" || lsType == "p" {
-				rows, err := database.Query(`
+				query := `
 					SELECT uuid, id, slug, title
 					FROM containers
 					WHERE parent_uuid IS NULL
-					ORDER BY slug
-				`)
+				`
+				queryArgs := []interface{}{}
+
+				// Add cursor WHERE clause if present
+				if pag.WhereClause != "" {
+					query += " AND " + pag.WhereClause
+					queryArgs = append(queryArgs, pag.Params...)
+				}
+
+				// Add ORDER BY
+				query += " " + pag.OrderByClause
+
+				// Add LIMIT
+				if pag.LimitClause != "" {
+					query += " " + pag.LimitClause
+					queryArgs = append(queryArgs, *pag.LimitParam)
+				}
+
+				rows, err := database.Query(query, queryArgs...)
 				if err != nil {
 					return fmt.Errorf("failed to query containers: %w", err)
 				}
@@ -104,91 +133,64 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Resolve path to container or task
-		segments := paths.SplitPath(path)
-		if len(segments) == 0 {
-			continue
-		}
+		// Try to resolve as container first using shared helper
+		containerUUID, _, err := selectors.WalkContainerPath(database, path)
+		foundContainer := err == nil
 
-		// Find the container/task
-		var parentUUID *string
-		var foundContainer bool
-		var containerUUID string
+		// If not found as container, try as task
+		if !foundContainer {
+			taskUUID, taskID, taskErr := selectors.ResolveTaskByPath(database, path)
+			if taskErr != nil {
+				// Neither container nor task found
+				return fmt.Errorf("path not found: %s", path)
+			}
 
-		for i, segment := range segments {
-			slug, err := paths.NormalizeSlug(segment)
+			// Found as task - list this single task (no pagination needed)
+			var slug, title, state string
+			err = database.QueryRow(`
+				SELECT slug, title, state FROM tasks WHERE uuid = ?
+			`, taskUUID).Scan(&slug, &title, &state)
 			if err != nil {
-				return fmt.Errorf("invalid slug %q: %w", segment, err)
+				return fmt.Errorf("failed to get task: %w", err)
 			}
 
-			// Try to find as container
-			query := `SELECT uuid FROM containers WHERE slug = ? AND `
-			args := []interface{}{slug}
-			if parentUUID == nil {
-				query += `parent_uuid IS NULL`
-			} else {
-				query += `parent_uuid = ?`
-				args = append(args, *parentUUID)
-			}
-
-			var uuid string
-			err = database.QueryRow(query, args...).Scan(&uuid)
-			if err == nil {
-				foundContainer = true
-				containerUUID = uuid
-				parentUUID = &uuid
-				continue
-			}
-
-			// If last segment and not found as container, try as task
-			if i == len(segments)-1 {
-				if parentUUID == nil {
-					return fmt.Errorf("path not found: %s", path)
-				}
-
-				var taskUUID string
-				err = database.QueryRow(`
-					SELECT uuid FROM tasks WHERE slug = ? AND project_uuid = ?
-				`, slug, *parentUUID).Scan(&taskUUID)
-				if err != nil {
-					return fmt.Errorf("path not found: %s", path)
-				}
-
-				// Found as task - list this single task
-				var id, title, state string
-				err = database.QueryRow(`
-					SELECT id, slug, title, state FROM tasks WHERE uuid = ?
-				`, taskUUID).Scan(&id, &slug, &title, &state)
-				if err != nil {
-					return fmt.Errorf("failed to get task: %w", err)
-				}
-
-				entries = append(entries, Entry{
-					Type:  "task",
-					ID:    id,
-					Slug:  slug,
-					Title: title,
-					Path:  path,
-					State: state,
-				})
-
-				foundContainer = false
-				break
-			}
-
-			return fmt.Errorf("path not found: %s", paths.JoinPath(segments[:i+1]...))
+			entries = append(entries, Entry{
+				Type:  "task",
+				ID:    taskID,
+				Slug:  slug,
+				Title: title,
+				Path:  path,
+				State: state,
+			})
 		}
 
-		// If we found a container, list its children
+		// If we found a container, list its children with SQL-based pagination
 		if foundContainer {
 			// List child containers
 			if lsType == "" || lsType == "p" {
-				rows, err := database.Query(`
+				query := `
 					SELECT uuid, id, slug, title
 					FROM containers
 					WHERE parent_uuid = ?
-					ORDER BY slug
-				`, containerUUID)
+				`
+				queryArgs := []interface{}{containerUUID}
+
+				// Add cursor WHERE clause if present
+				if pag.WhereClause != "" {
+					query += " AND " + pag.WhereClause
+					queryArgs = append(queryArgs, pag.Params...)
+				}
+
+				// Add ORDER BY
+				query += " " + pag.OrderByClause
+
+				// Add LIMIT
+				if pag.LimitClause != "" {
+					query += " " + pag.LimitClause
+					queryArgs = append(queryArgs, *pag.LimitParam)
+				}
+
+				rows, err := database.Query(query, queryArgs...)
 				if err != nil {
 					return fmt.Errorf("failed to query containers: %w", err)
 				}
@@ -225,12 +227,29 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 			// List tasks
 			if lsType == "" || lsType == "t" {
-				rows, err := database.Query(`
+				query := `
 					SELECT id, slug, title, state
 					FROM tasks
 					WHERE project_uuid = ?
-					ORDER BY slug
-				`, containerUUID)
+				`
+				queryArgs := []interface{}{containerUUID}
+
+				// Add cursor WHERE clause if present
+				if pag.WhereClause != "" {
+					query += " AND " + pag.WhereClause
+					queryArgs = append(queryArgs, pag.Params...)
+				}
+
+				// Add ORDER BY
+				query += " " + pag.OrderByClause
+
+				// Add LIMIT
+				if pag.LimitClause != "" {
+					query += " " + pag.LimitClause
+					queryArgs = append(queryArgs, *pag.LimitParam)
+				}
+
+				rows, err := database.Query(query, queryArgs...)
 				if err != nil {
 					return fmt.Errorf("failed to query tasks: %w", err)
 				}
@@ -262,46 +281,26 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Apply pagination
-	var currentCursor *cursor.Cursor
-	if lsCursor != "" {
-		c, err := cursor.Decode(lsCursor)
-		if err != nil {
-			return fmt.Errorf("invalid cursor: %w", err)
-		}
-		currentCursor = c
-
-		// Filter entries based on cursor (slug-based pagination)
-		// Since we sort by slug, we filter entries where slug > cursor.LastValues[0]
-		var filtered []Entry
-		for _, entry := range entries {
-			if entry.Slug > currentCursor.LastValues[0].(string) ||
-				(entry.Slug == currentCursor.LastValues[0].(string) && entry.ID > currentCursor.LastID) {
-				filtered = append(filtered, entry)
-			}
-		}
-		entries = filtered
+	// Check if there are more results (we requested limit+1)
+	if lsLimit > 0 && len(entries) > lsLimit {
+		hasMore = true
+		entries = entries[:lsLimit]
 	}
 
-	// Apply limit and generate next cursor
-	var nextCursor *cursor.Cursor
-	if lsLimit > 0 && len(entries) > lsLimit {
-		// Create cursor from the last entry we'll return
-		lastEntry := entries[lsLimit-1]
-		nextCursor, _ = cursor.NewCursor(
+	// Generate next cursor if there are more results
+	var nextCursorStr string
+	if hasMore && len(entries) > 0 {
+		lastEntry := entries[len(entries)-1]
+		nextCursorStr, _ = cursor.BuildNextCursor(
 			[]string{"slug"},
 			[]interface{}{lastEntry.Slug},
 			lastEntry.ID,
 		)
-		entries = entries[:lsLimit]
 	}
 
 	// Output next_cursor to stderr in porcelain mode
-	if lsPorcelain && nextCursor != nil {
-		encoded, err := nextCursor.Encode()
-		if err == nil {
-			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
-		}
+	if lsPorcelain && nextCursorStr != "" {
+		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Render output
@@ -341,14 +340,14 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Table output
 	headers := []string{"Type", "ID", "Slug", "Title", "State"}
-	var rows [][]string
+	var rowsData [][]string
 	for _, entry := range entries {
 		typeStr := "project"
 		if entry.Type == "task" {
 			typeStr = "task"
 		}
 
-		rows = append(rows, []string{
+		rowsData = append(rowsData, []string{
 			typeStr,
 			entry.ID,
 			entry.Slug,
@@ -362,5 +361,5 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		Porcelain: lsPorcelain,
 	})
 
-	return r.RenderTable(headers, rows)
+	return r.RenderTable(headers, rowsData)
 }

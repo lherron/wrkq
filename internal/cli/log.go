@@ -63,8 +63,8 @@ func runLog(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve resource: %w", err)
 	}
 
-	// Query event log
-	events, err := queryEventLog(database, resourceUUID, resourceType, logOptions{
+	// Query event log with SQL-based pagination
+	events, hasMore, err := queryEventLog(database, resourceUUID, resourceType, logOptions{
 		since:  logSince,
 		until:  logUntil,
 		limit:  logLimit,
@@ -74,48 +74,20 @@ func runLog(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to query event log: %w", err)
 	}
 
-	// Apply pagination
-	var currentCursor *cursor.Cursor
-	if logCursor != "" {
-		c, err := cursor.Decode(logCursor)
-		if err != nil {
-			return fmt.Errorf("invalid cursor: %w", err)
-		}
-		currentCursor = c
-
-		// Filter events based on cursor (id DESC)
-		var filtered []logEvent
-		var lastID int64
-		fmt.Sscanf(currentCursor.LastID, "%d", &lastID)
-
-		for _, event := range events {
-			// Since we order by id DESC, filter for id < lastID
-			if event.ID < lastID {
-				filtered = append(filtered, event)
-			}
-		}
-		events = filtered
-	}
-
 	// Generate next cursor if there are more results
-	var nextCursor *cursor.Cursor
-	if logLimit > 0 && len(events) > logLimit {
-		// Create cursor from the last entry we'll return
-		lastEvent := events[logLimit-1]
-		nextCursor, _ = cursor.NewCursor(
+	var nextCursorStr string
+	if hasMore && len(events) > 0 {
+		lastEvent := events[len(events)-1]
+		nextCursorStr, _ = cursor.BuildNextCursor(
 			[]string{"id"},
 			[]interface{}{lastEvent.ID},
 			fmt.Sprintf("%d", lastEvent.ID),
 		)
-		events = events[:logLimit]
 	}
 
 	// Output next_cursor to stderr in porcelain mode
-	if logPorcelain && nextCursor != nil {
-		encoded, err := nextCursor.Encode()
-		if err == nil {
-			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
-		}
+	if logPorcelain && nextCursorStr != "" {
+		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Render output
@@ -211,7 +183,20 @@ func resolveResource(database *db.DB, target string) (string, string, error) {
 	return "", "", fmt.Errorf("path resolution not yet implemented: %s", target)
 }
 
-func queryEventLog(database *db.DB, resourceUUID string, resourceType string, opts logOptions) ([]logEvent, error) {
+func queryEventLog(database *db.DB, resourceUUID string, resourceType string, opts logOptions) ([]logEvent, bool, error) {
+	// Build cursor pagination
+	// SortFields are logical names stored in cursor, SQLFields are table-qualified
+	pag, err := cursor.Apply(opts.cursor, cursor.ApplyOptions{
+		SortFields: []string{"id"},
+		SQLFields:  []string{"e.id"},
+		Descending: []bool{true},
+		IDField:    "e.id",
+		Limit:      opts.limit,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
 	query := `
 		SELECT e.id, e.timestamp, e.actor_uuid, e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
 		       a.slug as actor_slug, a.id as actor_id
@@ -225,7 +210,7 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 	if opts.since != "" {
 		sinceTime, err := parseTimeFilter(opts.since)
 		if err != nil {
-			return nil, fmt.Errorf("invalid --since value: %w", err)
+			return nil, false, fmt.Errorf("invalid --since value: %w", err)
 		}
 		query += " AND e.timestamp >= ?"
 		args = append(args, sinceTime.Format(time.RFC3339))
@@ -234,22 +219,30 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 	if opts.until != "" {
 		untilTime, err := parseTimeFilter(opts.until)
 		if err != nil {
-			return nil, fmt.Errorf("invalid --until value: %w", err)
+			return nil, false, fmt.Errorf("invalid --until value: %w", err)
 		}
 		query += " AND e.timestamp <= ?"
 		args = append(args, untilTime.Format(time.RFC3339))
 	}
 
-	query += " ORDER BY e.id DESC"
+	// Add cursor WHERE clause if present
+	if pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		args = append(args, pag.Params...)
+	}
 
-	if opts.limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, opts.limit)
+	// Add ORDER BY
+	query += " " + pag.OrderByClause
+
+	// Add LIMIT
+	if pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		args = append(args, *pag.LimitParam)
 	}
 
 	rows, err := database.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
+		return nil, false, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -272,7 +265,7 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 			&actorID,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
+			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
 
 		// Parse timestamp
@@ -291,7 +284,18 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 		events = append(events, e)
 	}
 
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+
+	// Check if there are more results (we requested limit+1)
+	hasMore := false
+	if opts.limit > 0 && len(events) > opts.limit {
+		hasMore = true
+		events = events[:opts.limit]
+	}
+
+	return events, hasMore, nil
 }
 
 func parseTimeFilter(value string) (time.Time, error) {

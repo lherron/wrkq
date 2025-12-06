@@ -808,7 +808,7 @@ contexts:
     db_path: /home/user/.local/share/wrkq/wrkq.db
     default_actor: lance
   stage:
-    db_path: /home/user/projects/todo-stage.db
+    db_path: /home/user/projects/wrkq-stage.db
     default_actor: agent-stage
 ```
 

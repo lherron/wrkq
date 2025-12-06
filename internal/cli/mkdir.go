@@ -4,10 +4,9 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
-	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -33,9 +32,12 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
 
+	// Create store
+	s := store.New(database)
+
 	// Create each path
 	for _, path := range args {
-		if err := createContainer(database, actorUUID, path, mkdirParents); err != nil {
+		if err := createContainer(s, actorUUID, path, mkdirParents); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", path)
@@ -44,7 +46,7 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createContainer(database *db.DB, actorUUID, path string, createParents bool) error {
+func createContainer(s *store.Store, actorUUID, path string, createParents bool) error {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		return fmt.Errorf("invalid path: %s", path)
@@ -60,158 +62,37 @@ func createContainer(database *db.DB, actorUUID, path string, createParents bool
 				return fmt.Errorf("invalid slug %q: %w", segment, err)
 			}
 
-			// Check if container exists
-			var existingUUID string
-			query := `SELECT uuid FROM containers WHERE slug = ? AND `
-			args := []interface{}{slug}
-			if parentUUID == nil {
-				query += `parent_uuid IS NULL`
-			} else {
-				query += `parent_uuid = ?`
-				args = append(args, *parentUUID)
-			}
-
-			err = database.QueryRow(query, args...).Scan(&existingUUID)
-			if err == nil {
-				// Container already exists
+			// Check if container exists using shared helper
+			if existingUUID, _, exists := selectors.LookupContainerSegment(s.DB(), slug, parentUUID); exists {
 				parentUUID = &existingUUID
 				continue
 			}
 
-			// Create container
-			tx, err := database.Begin()
-			if err != nil {
-				return fmt.Errorf("failed to begin transaction: %w", err)
-			}
-			defer tx.Rollback()
-
-			result, err := tx.Exec(`
-				INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES ('', ?, ?, ?, ?, ?)
-			`, slug, slug, parentUUID, actorUUID, actorUUID)
+			// Create container using store
+			result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
+				Slug:       slug,
+				ParentUUID: parentUUID,
+			})
 			if err != nil {
 				return fmt.Errorf("failed to create container %q: %w", slug, err)
 			}
 
-			// Get the UUID of the created container
-			rowID, err := result.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("failed to get last insert ID: %w", err)
-			}
-
-			var uuid string
-			err = tx.QueryRow("SELECT uuid FROM containers WHERE rowid = ?", rowID).Scan(&uuid)
-			if err != nil {
-				return fmt.Errorf("failed to get container UUID: %w", err)
-			}
-
-			// Log event
-			eventWriter := events.NewWriter(database.DB)
-			payload := fmt.Sprintf(`{"slug":"%s","parent_path":"%s"}`, slug, path)
-			if err := eventWriter.LogEvent(tx, &domain.Event{
-				ActorUUID:    &actorUUID,
-				ResourceType: "container",
-				ResourceUUID: &uuid,
-				EventType:    "container.created",
-				Payload:      &payload,
-			}); err != nil {
-				return fmt.Errorf("failed to log event: %w", err)
-			}
-
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("failed to commit transaction: %w", err)
-			}
-
-			parentUUID = &uuid
+			parentUUID = &result.UUID
 		}
 		return nil
 	}
 
-	// Without -p flag, only create the last segment if parent exists
-	if len(segments) > 1 {
-		// Find parent
-		var parentUUID *string
-		for i, segment := range segments[:len(segments)-1] {
-			slug, err := paths.NormalizeSlug(segment)
-			if err != nil {
-				return fmt.Errorf("invalid slug %q: %w", segment, err)
-			}
-
-			query := `SELECT uuid FROM containers WHERE slug = ? AND `
-			args := []interface{}{slug}
-			if parentUUID == nil {
-				query += `parent_uuid IS NULL`
-			} else {
-				query += `parent_uuid = ?`
-				args = append(args, *parentUUID)
-			}
-
-			var uuid string
-			err = database.QueryRow(query, args...).Scan(&uuid)
-			if err != nil {
-				return fmt.Errorf("parent container not found: %s (use -p to create parents)", paths.JoinPath(segments[:i+1]...))
-			}
-			parentUUID = &uuid
-		}
-
-		// Create final segment
-		slug, err := paths.NormalizeSlug(segments[len(segments)-1])
-		if err != nil {
-			return fmt.Errorf("invalid slug %q: %w", segments[len(segments)-1], err)
-		}
-
-		return createSingleContainer(database, actorUUID, slug, parentUUID)
-	}
-
-	// Single segment, create at root
-	slug, err := paths.NormalizeSlug(segments[0])
+	// Without -p flag, use ResolveParentContainer to find parent and get normalized slug
+	parentUUID, slug, _, err := selectors.ResolveParentContainer(s.DB(), path)
 	if err != nil {
-		return fmt.Errorf("invalid slug %q: %w", segments[0], err)
+		// Wrap error to suggest -p flag
+		return fmt.Errorf("%w (use -p to create parents)", err)
 	}
 
-	return createSingleContainer(database, actorUUID, slug, nil)
-}
-
-func createSingleContainer(database *db.DB, actorUUID, slug string, parentUUID *string) error {
-	tx, err := database.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	result, err := tx.Exec(`
-		INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('', ?, ?, ?, ?, ?)
-	`, slug, slug, parentUUID, actorUUID, actorUUID)
-	if err != nil {
-		return fmt.Errorf("failed to create container: %w", err)
-	}
-
-	// Get the UUID
-	rowID, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get last insert ID: %w", err)
-	}
-
-	var uuid string
-	err = tx.QueryRow("SELECT uuid FROM containers WHERE rowid = ?", rowID).Scan(&uuid)
-	if err != nil {
-		return fmt.Errorf("failed to get container UUID: %w", err)
-	}
-
-	// Log event
-	eventWriter := events.NewWriter(database.DB)
-	payload := fmt.Sprintf(`{"slug":"%s"}`, slug)
-	payloadStr := payload
-	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
-		ResourceType: "container",
-		ResourceUUID: &uuid,
-		EventType:    "container.created",
-		Payload:      &payloadStr,
-	}); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
-	}
-
-	return tx.Commit()
+	// Create container using store
+	_, err = s.Containers.Create(actorUUID, store.ContainerCreateParams{
+		Slug:       slug,
+		ParentUUID: parentUUID,
+	})
+	return err
 }

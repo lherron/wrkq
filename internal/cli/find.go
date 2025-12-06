@@ -64,8 +64,8 @@ func init() {
 func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
-	// Build query based on filters
-	results, err := executeFindQuery(database, findOptions{
+	// Build query based on filters with SQL-based pagination
+	results, hasMore, err := executeFindQuery(database, findOptions{
 		paths:      args,
 		typeFilter: findType,
 		slugGlob:   findSlugGlob,
@@ -79,47 +79,36 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Apply pagination
-	var currentCursor *cursor.Cursor
-	if findCursor != "" {
-		c, err := cursor.Decode(findCursor)
-		if err != nil {
-			return fmt.Errorf("invalid cursor: %w", err)
+	// Generate next cursor if there are more results
+	var nextCursorStr string
+	if hasMore && len(results) > 0 {
+		lastEntry := results[len(results)-1]
+		// Use appropriate sort field based on type filter
+		if findType == "t" {
+			nextCursorStr, _ = cursor.BuildNextCursor(
+				[]string{"updated_at"},
+				[]interface{}{lastEntry.UpdatedAt},
+				lastEntry.ID,
+			)
+		} else if findType == "p" {
+			nextCursorStr, _ = cursor.BuildNextCursor(
+				[]string{"path"},
+				[]interface{}{lastEntry.Path},
+				lastEntry.ID,
+			)
+		} else {
+			// Mixed results - use ID as sort field
+			nextCursorStr, _ = cursor.BuildNextCursor(
+				[]string{"id"},
+				[]interface{}{lastEntry.ID},
+				lastEntry.ID,
+			)
 		}
-		currentCursor = c
-
-		// Filter results based on cursor (updated_at DESC, id DESC)
-		var filtered []findResult
-		for _, result := range results {
-			// For tasks, we sort by updated_at; for containers, by path
-			// Simple approach: filter by ID as tie-breaker
-			if result.ID > currentCursor.LastID {
-				filtered = append(filtered, result)
-			}
-		}
-		results = filtered
-	}
-
-	// Apply limit and generate next cursor
-	var nextCursor *cursor.Cursor
-	if findLimit > 0 && len(results) > findLimit {
-		// Create cursor from the last entry we'll return
-		lastEntry := results[findLimit-1]
-		// Use updated_at as sort field for tasks (simplified for now)
-		nextCursor, _ = cursor.NewCursor(
-			[]string{"id"}, // Simplified: just use ID for now
-			[]interface{}{lastEntry.ID},
-			lastEntry.ID,
-		)
-		results = results[:findLimit]
 	}
 
 	// Output next_cursor to stderr in porcelain mode
-	if findPorcelain && nextCursor != nil {
-		encoded, err := nextCursor.Encode()
-		if err == nil {
-			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
-		}
+	if findPorcelain && nextCursorStr != "" {
+		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Render output
@@ -149,51 +138,86 @@ type findOptions struct {
 }
 
 type findResult struct {
-	Type     string  `json:"type"`      // "task" or "container"
-	UUID     string  `json:"uuid"`
-	ID       string  `json:"id"`
-	Slug     string  `json:"slug"`
-	Title    string  `json:"title"`
-	Path     string  `json:"path"`
-	State    *string `json:"state,omitempty"`    // tasks only
-	Priority *int    `json:"priority,omitempty"` // tasks only
-	DueAt    *string `json:"due_at,omitempty"`   // tasks only
-	ETag     int64   `json:"etag"`
+	Type      string  `json:"type"`      // "task" or "container"
+	UUID      string  `json:"uuid"`
+	ID        string  `json:"id"`
+	Slug      string  `json:"slug"`
+	Title     string  `json:"title"`
+	Path      string  `json:"path"`
+	State     *string `json:"state,omitempty"`      // tasks only
+	Priority  *int    `json:"priority,omitempty"`   // tasks only
+	DueAt     *string `json:"due_at,omitempty"`     // tasks only
+	UpdatedAt string  `json:"updated_at,omitempty"` // for cursor pagination
+	ETag      int64   `json:"etag"`
 }
 
-func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, error) {
+func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, bool, error) {
 	var results []findResult
 
 	// Determine what to search
 	searchTasks := opts.typeFilter == "" || opts.typeFilter == "t"
 	searchContainers := opts.typeFilter == "" || opts.typeFilter == "p"
+	searchBoth := searchTasks && searchContainers
+
+	var hasMore bool
 
 	// Search tasks
 	if searchTasks {
-		tasks, err := findTasks(database, opts)
+		tasks, taskHasMore, err := findTasks(database, opts, searchBoth)
 		if err != nil {
-			return nil, fmt.Errorf("finding tasks: %w", err)
+			return nil, false, fmt.Errorf("finding tasks: %w", err)
 		}
 		results = append(results, tasks...)
+		if !searchBoth {
+			hasMore = taskHasMore
+		}
 	}
 
 	// Search containers
 	if searchContainers {
-		containers, err := findContainers(database, opts)
+		containers, containerHasMore, err := findContainers(database, opts, searchBoth)
 		if err != nil {
-			return nil, fmt.Errorf("finding containers: %w", err)
+			return nil, false, fmt.Errorf("finding containers: %w", err)
 		}
 		results = append(results, containers...)
+		if !searchBoth {
+			hasMore = containerHasMore
+		}
 	}
 
-	// Don't apply limit here - let caller do it after checking for more results
-	return results, nil
+	// If searching both types, apply in-memory pagination
+	if searchBoth && opts.limit > 0 {
+		// For mixed results, sort by ID for consistent pagination
+		// (keeping original order since queries already returned ordered results)
+		if len(results) > opts.limit {
+			hasMore = true
+			results = results[:opts.limit]
+		}
+	}
+
+	return results, hasMore, nil
 }
 
-func findTasks(database *db.DB, opts findOptions) ([]findResult, error) {
+func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findResult, bool, error) {
+	// Build cursor pagination (only if not mixing with containers)
+	var pag *cursor.ApplyResult
+	var err error
+	if !skipPagination {
+		pag, err = cursor.Apply(opts.cursor, cursor.ApplyOptions{
+			SortFields: []string{"updated_at"},
+			SQLFields:  []string{"t.updated_at"},
+			Descending: []bool{true},
+			IDField:    "t.id",
+			Limit:      opts.limit,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
 	query := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.due_at, t.etag,
-		       cp.path || '/' || t.slug AS path
+		       cp.path || '/' || t.slug AS path, t.updated_at
 		FROM tasks t
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
 		WHERE 1=1
@@ -213,7 +237,7 @@ func findTasks(database *db.DB, opts findOptions) ([]findResult, error) {
 	if opts.dueBefore != "" {
 		dueBeforeTime, err := time.Parse("2006-01-02", opts.dueBefore)
 		if err != nil {
-			return nil, fmt.Errorf("invalid due-before date: %w", err)
+			return nil, false, fmt.Errorf("invalid due-before date: %w", err)
 		}
 		query += " AND t.due_at IS NOT NULL AND t.due_at < ?"
 		args = append(args, dueBeforeTime.Format(time.RFC3339))
@@ -222,7 +246,7 @@ func findTasks(database *db.DB, opts findOptions) ([]findResult, error) {
 	if opts.dueAfter != "" {
 		dueAfterTime, err := time.Parse("2006-01-02", opts.dueAfter)
 		if err != nil {
-			return nil, fmt.Errorf("invalid due-after date: %w", err)
+			return nil, false, fmt.Errorf("invalid due-after date: %w", err)
 		}
 		query += " AND t.due_at IS NOT NULL AND t.due_at > ?"
 		args = append(args, dueAfterTime.Format(time.RFC3339))
@@ -256,11 +280,28 @@ func findTasks(database *db.DB, opts findOptions) ([]findResult, error) {
 		}
 	}
 
-	query += " ORDER BY t.updated_at DESC"
+	// Add cursor WHERE clause if present
+	if pag != nil && pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		args = append(args, pag.Params...)
+	}
+
+	// Add ORDER BY
+	if pag != nil {
+		query += " " + pag.OrderByClause
+	} else {
+		query += " ORDER BY t.updated_at DESC"
+	}
+
+	// Add LIMIT
+	if pag != nil && pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		args = append(args, *pag.LimitParam)
+	}
 
 	rows, err := database.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
+		return nil, false, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -270,9 +311,9 @@ func findTasks(database *db.DB, opts findOptions) ([]findResult, error) {
 		var state, dueAt sql.NullString
 		var priority sql.NullInt64
 
-		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &dueAt, &r.ETag, &r.Path)
+		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &dueAt, &r.ETag, &r.Path, &r.UpdatedAt)
 		if err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
+			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
 
 		r.Type = "task"
@@ -290,10 +331,37 @@ func findTasks(database *db.DB, opts findOptions) ([]findResult, error) {
 		results = append(results, r)
 	}
 
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+
+	// Check if there are more results (we requested limit+1)
+	hasMore := false
+	if !skipPagination && opts.limit > 0 && len(results) > opts.limit {
+		hasMore = true
+		results = results[:opts.limit]
+	}
+
+	return results, hasMore, nil
 }
 
-func findContainers(database *db.DB, opts findOptions) ([]findResult, error) {
+func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]findResult, bool, error) {
+	// Build cursor pagination (only if not mixing with tasks)
+	var pag *cursor.ApplyResult
+	var err error
+	if !skipPagination {
+		pag, err = cursor.Apply(opts.cursor, cursor.ApplyOptions{
+			SortFields: []string{"path"},
+			SQLFields:  []string{"cp.path"},
+			Descending: []bool{false}, // ASC
+			IDField:    "c.id",
+			Limit:      opts.limit,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
 	query := `
 		SELECT c.uuid, c.id, c.slug, COALESCE(c.title, c.slug) as title, c.etag,
 		       cp.path
@@ -328,11 +396,28 @@ func findContainers(database *db.DB, opts findOptions) ([]findResult, error) {
 		}
 	}
 
-	query += " ORDER BY cp.path"
+	// Add cursor WHERE clause if present
+	if pag != nil && pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		args = append(args, pag.Params...)
+	}
+
+	// Add ORDER BY
+	if pag != nil {
+		query += " " + pag.OrderByClause
+	} else {
+		query += " ORDER BY cp.path"
+	}
+
+	// Add LIMIT
+	if pag != nil && pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		args = append(args, *pag.LimitParam)
+	}
 
 	rows, err := database.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
+		return nil, false, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -342,12 +427,23 @@ func findContainers(database *db.DB, opts findOptions) ([]findResult, error) {
 
 		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &r.ETag, &r.Path)
 		if err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
+			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
 
 		r.Type = "container"
 		results = append(results, r)
 	}
 
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+
+	// Check if there are more results (we requested limit+1)
+	hasMore := false
+	if !skipPagination && opts.limit > 0 && len(results) > opts.limit {
+		hasMore = true
+		results = results[:opts.limit]
+	}
+
+	return results, hasMore, nil
 }

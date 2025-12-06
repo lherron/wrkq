@@ -1,4 +1,7 @@
 # ===== GENERAL =====
+.wrkq/wrkq.db
+.wrkq/wrkq.db-wal
+.wrkq/wrkq.db-shm
 bin/
 tmp/
 .playwright-mcp/

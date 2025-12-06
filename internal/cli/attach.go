@@ -104,15 +104,44 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Query attachments
-	rows, err := database.Query(`
+	// Build cursor pagination
+	pag, err := cursor.Apply(attachLsCursor, cursor.ApplyOptions{
+		SortFields: []string{"created_at"},
+		SQLFields:  []string{"a.created_at"},
+		Descending: []bool{false}, // ASC
+		IDField:    "a.id",
+		Limit:      attachLsLimit,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Query attachments with SQL-based pagination
+	query := `
 		SELECT a.uuid, a.id, a.filename, a.relative_path, a.mime_type, a.size_bytes,
 		       a.checksum, a.created_at, ac.slug as created_by
 		FROM attachments a
 		LEFT JOIN actors ac ON a.created_by_actor_uuid = ac.uuid
 		WHERE a.task_uuid = ?
-		ORDER BY a.created_at ASC
-	`, taskUUID)
+	`
+	queryArgs := []interface{}{taskUUID}
+
+	// Add cursor WHERE clause if present
+	if pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		queryArgs = append(queryArgs, pag.Params...)
+	}
+
+	// Add ORDER BY
+	query += " " + pag.OrderByClause
+
+	// Add LIMIT
+	if pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		queryArgs = append(queryArgs, *pag.LimitParam)
+	}
+
+	rows, err := database.Query(query, queryArgs...)
 	if err != nil {
 		return fmt.Errorf("failed to query attachments: %w", err)
 	}
@@ -155,48 +184,27 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error iterating attachments: %w", err)
 	}
 
-	// Apply pagination
-	var currentCursor *cursor.Cursor
-	if attachLsCursor != "" {
-		c, err := cursor.Decode(attachLsCursor)
-		if err != nil {
-			return fmt.Errorf("invalid cursor: %w", err)
-		}
-		currentCursor = c
-
-		// Filter attachments based on cursor (created_at ASC)
-		var filtered []map[string]interface{}
-		for _, att := range attachments {
-			createdAt := att["created_at"].(string)
-			id := att["id"].(string)
-			// Since we order by created_at ASC, filter for created_at > cursor or (created_at = cursor AND id > lastID)
-			if createdAt > currentCursor.LastValues[0].(string) ||
-				(createdAt == currentCursor.LastValues[0].(string) && id > currentCursor.LastID) {
-				filtered = append(filtered, att)
-			}
-		}
-		attachments = filtered
+	// Check if there are more results (we requested limit+1)
+	hasMore := false
+	if attachLsLimit > 0 && len(attachments) > attachLsLimit {
+		hasMore = true
+		attachments = attachments[:attachLsLimit]
 	}
 
-	// Apply limit and generate next cursor
-	var nextCursor *cursor.Cursor
-	if attachLsLimit > 0 && len(attachments) > attachLsLimit {
-		// Create cursor from the last entry we'll return
-		lastAtt := attachments[attachLsLimit-1]
-		nextCursor, _ = cursor.NewCursor(
+	// Generate next cursor if there are more results
+	var nextCursorStr string
+	if hasMore && len(attachments) > 0 {
+		lastAtt := attachments[len(attachments)-1]
+		nextCursorStr, _ = cursor.BuildNextCursor(
 			[]string{"created_at"},
 			[]interface{}{lastAtt["created_at"].(string)},
 			lastAtt["id"].(string),
 		)
-		attachments = attachments[:attachLsLimit]
 	}
 
 	// Output next_cursor to stderr in porcelain mode
-	if attachLsPorcelain && nextCursor != nil {
-		encoded, err := nextCursor.Encode()
-		if err == nil {
-			fmt.Fprintf(os.Stderr, "next_cursor=%s\n", encoded)
-		}
+	if attachLsPorcelain && nextCursorStr != "" {
+		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Output

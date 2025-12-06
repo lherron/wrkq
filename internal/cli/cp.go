@@ -15,8 +15,6 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/id"
-	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
@@ -200,34 +198,12 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 func resolveDestinationContainer(database *db.DB, dest string) (string, error) {
-	if id.IsFriendlyID(dest) && dest[0] == 'P' {
-		var uuid string
-		err := database.QueryRow("SELECT uuid FROM containers WHERE id = ?", dest).Scan(&uuid)
-		if err == nil {
-			return uuid, nil
-		}
+	// Use shared resolver for container resolution (handles friendly IDs, UUIDs, and paths)
+	uuid, _, err := selectors.ResolveContainer(database, dest)
+	if err != nil {
+		return "", err
 	}
-
-	segments := paths.SplitPath(dest)
-	var parentUUID *string
-
-	for _, segment := range segments {
-		slug, _ := paths.NormalizeSlug(segment)
-		var uuid string
-
-		if parentUUID == nil {
-			database.QueryRow("SELECT uuid FROM containers WHERE slug = ? AND parent_uuid IS NULL", slug).Scan(&uuid)
-		} else {
-			database.QueryRow("SELECT uuid FROM containers WHERE slug = ? AND parent_uuid = ?", slug, *parentUUID).Scan(&uuid)
-		}
-
-		if uuid == "" {
-			return "", fmt.Errorf("container not found: %s", dest)
-		}
-		parentUUID = &uuid
-	}
-
-	return *parentUUID, nil
+	return uuid, nil
 }
 
 func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, destUUID string) error {

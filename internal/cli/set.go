@@ -10,11 +10,10 @@ import (
 
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -113,6 +112,9 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Create store
+	s := store.New(database)
+
 	// Execute bulk operation
 	op := &bulk.Operation{
 		Jobs:            setJobs,
@@ -127,7 +129,8 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		return updateTask(database, actorUUID, taskUUID, fields, setIfMatch)
+		_, err = s.Tasks.UpdateFields(actorUUID, taskUUID, fields, setIfMatch)
+		return err
 	})
 
 	// Print summary
@@ -221,64 +224,3 @@ func buildFieldsFromFlags() (map[string]interface{}, error) {
 	return fields, nil
 }
 
-func updateTask(database *db.DB, actorUUID, taskUUID string, fields map[string]interface{}, ifMatch int64) error {
-	tx, err := database.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Get current etag
-	var currentETag int64
-	err = tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag)
-	if err != nil {
-		return fmt.Errorf("failed to get current etag: %w", err)
-	}
-
-	// Check etag if --if-match was provided
-	if ifMatch > 0 && currentETag != ifMatch {
-		return &domain.ETagMismatchError{Expected: ifMatch, Actual: currentETag}
-	}
-
-	// Build UPDATE query
-	var setClauses []string
-	var args []interface{}
-
-	for key, value := range fields {
-		setClauses = append(setClauses, fmt.Sprintf("%s = ?", key))
-		args = append(args, value)
-	}
-
-	// Increment etag
-	setClauses = append(setClauses, "etag = etag + 1")
-	setClauses = append(setClauses, "updated_by_actor_uuid = ?")
-	args = append(args, actorUUID)
-
-	// Add WHERE clause
-	args = append(args, taskUUID)
-
-	query := fmt.Sprintf("UPDATE tasks SET %s WHERE uuid = ?", strings.Join(setClauses, ", "))
-	_, err = tx.Exec(query, args...)
-	if err != nil {
-		return fmt.Errorf("failed to update task: %w", err)
-	}
-
-	// Log event
-	eventWriter := events.NewWriter(database.DB)
-	changes, _ := json.Marshal(fields)
-	changesStr := string(changes)
-	newETag := currentETag + 1
-
-	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
-		ResourceType: "task",
-		ResourceUUID: &taskUUID,
-		EventType:    "task.updated",
-		ETag:         &newETag,
-		Payload:      &changesStr,
-	}); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
-	}
-
-	return tx.Commit()
-}

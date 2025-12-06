@@ -1,16 +1,13 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
-	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +49,9 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
 
+	// Create store
+	s := store.New(database)
+
 	// Split sources and destination
 	sources := args[:len(args)-1]
 	dst := args[len(args)-1]
@@ -64,7 +64,7 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		for _, src := range sources {
-			if err := moveToContainer(cmd, database, actorUUID, src, dstContainerUUID, dst); err != nil {
+			if err := moveToContainer(cmd, s, actorUUID, src, dstContainerUUID, dst); err != nil {
 				return err
 			}
 		}
@@ -78,7 +78,7 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	dstContainerUUID, _, dstErr := selectors.ResolveContainer(database, dst)
 	if dstErr == nil {
 		// Destination is an existing container - move into it
-		return moveToContainer(cmd, database, actorUUID, src, dstContainerUUID, dst)
+		return moveToContainer(cmd, s, actorUUID, src, dstContainerUUID, dst)
 	}
 
 	// Destination doesn't exist as container - could be rename
@@ -86,77 +86,31 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	srcTaskUUID, _, taskErr := selectors.ResolveTask(database, src)
 	if taskErr == nil {
 		// Source is a task - rename or move to new parent
-		return renameOrMoveTask(cmd, database, actorUUID, srcTaskUUID, src, dst)
+		return renameOrMoveTask(cmd, s, actorUUID, srcTaskUUID, src, dst)
 	}
 
 	srcContainerUUID, _, containerErr := selectors.ResolveContainer(database, src)
 	if containerErr == nil {
 		// Source is a container - rename or move to new parent
-		return renameOrMoveContainer(cmd, database, actorUUID, srcContainerUUID, src, dst)
+		return renameOrMoveContainer(cmd, s, actorUUID, srcContainerUUID, src, dst)
 	}
 
 	return fmt.Errorf("source not found: %s", src)
 }
 
-func moveToContainer(cmd *cobra.Command, database *db.DB, actorUUID, src, dstContainerUUID, dstPath string) error {
+func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstContainerUUID, dstPath string) error {
 	// Try as task first
-	srcTaskUUID, srcPath, taskErr := selectors.ResolveTask(database, src)
+	srcTaskUUID, srcPath, taskErr := selectors.ResolveTask(s.DB(), src)
 	if taskErr == nil {
 		if mvDryRun {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would move task %s -> %s\n", srcPath, dstPath)
 			return nil
 		}
 
-		// Move task to destination container
-		tx, err := database.Begin()
+		// Move task to destination container using store
+		_, err := s.Tasks.Move(actorUUID, srcTaskUUID, dstContainerUUID, mvIfMatch)
 		if err != nil {
-			return fmt.Errorf("failed to begin transaction: %w", err)
-		}
-		defer tx.Rollback()
-
-		// Check etag if --if-match was provided
-		if mvIfMatch > 0 {
-			var currentETag int64
-			err = tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", srcTaskUUID).Scan(&currentETag)
-			if err != nil {
-				return fmt.Errorf("failed to get current etag: %w", err)
-			}
-			if currentETag != mvIfMatch {
-				return &domain.ETagMismatchError{Expected: mvIfMatch, Actual: currentETag}
-			}
-		}
-
-		// Update task's project_uuid
-		_, err = tx.Exec(`
-			UPDATE tasks
-			SET project_uuid = ?,
-			    etag = etag + 1,
-			    updated_by_actor_uuid = ?
-			WHERE uuid = ?
-		`, dstContainerUUID, actorUUID, srcTaskUUID)
-		if err != nil {
-			return fmt.Errorf("failed to move task: %w", err)
-		}
-
-		// Log event
-		eventWriter := events.NewWriter(database.DB)
-		payload := fmt.Sprintf(`{"from":"%s","to":"%s","to_container_uuid":"%s"}`, srcPath, dstPath, dstContainerUUID)
-		var newETag int64
-		tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", srcTaskUUID).Scan(&newETag)
-
-		if err := eventWriter.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
-			ResourceType: "task",
-			ResourceUUID: &srcTaskUUID,
-			EventType:    "task.moved",
-			ETag:         &newETag,
-			Payload:      &payload,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit: %w", err)
+			return err
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Moved task: %s -> %s\n", srcPath, dstPath)
@@ -164,63 +118,17 @@ func moveToContainer(cmd *cobra.Command, database *db.DB, actorUUID, src, dstCon
 	}
 
 	// Try as container
-	srcContainerUUID, _, containerErr := selectors.ResolveContainer(database, src)
+	srcContainerUUID, _, containerErr := selectors.ResolveContainer(s.DB(), src)
 	if containerErr == nil {
 		if mvDryRun {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would move container %s -> %s\n", src, dstPath)
 			return nil
 		}
 
-		// Move container to destination container
-		tx, err := database.Begin()
+		// Move container to destination container using store
+		_, err := s.Containers.Move(actorUUID, srcContainerUUID, &dstContainerUUID, mvIfMatch)
 		if err != nil {
-			return fmt.Errorf("failed to begin transaction: %w", err)
-		}
-		defer tx.Rollback()
-
-		// Check etag if --if-match was provided
-		if mvIfMatch > 0 {
-			var currentETag int64
-			err = tx.QueryRow("SELECT etag FROM containers WHERE uuid = ?", srcContainerUUID).Scan(&currentETag)
-			if err != nil {
-				return fmt.Errorf("failed to get current etag: %w", err)
-			}
-			if currentETag != mvIfMatch {
-				return &domain.ETagMismatchError{Expected: mvIfMatch, Actual: currentETag}
-			}
-		}
-
-		// Update container's parent_uuid
-		_, err = tx.Exec(`
-			UPDATE containers
-			SET parent_uuid = ?,
-			    etag = etag + 1,
-			    updated_by_actor_uuid = ?
-			WHERE uuid = ?
-		`, dstContainerUUID, actorUUID, srcContainerUUID)
-		if err != nil {
-			return fmt.Errorf("failed to move container: %w", err)
-		}
-
-		// Log event
-		eventWriter := events.NewWriter(database.DB)
-		payload := fmt.Sprintf(`{"from":"%s","to":"%s","to_container_uuid":"%s"}`, src, dstPath, dstContainerUUID)
-		var newETag int64
-		tx.QueryRow("SELECT etag FROM containers WHERE uuid = ?", srcContainerUUID).Scan(&newETag)
-
-		if err := eventWriter.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
-			ResourceType: "container",
-			ResourceUUID: &srcContainerUUID,
-			EventType:    "container.moved",
-			ETag:         &newETag,
-			Payload:      &payload,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit: %w", err)
+			return err
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Moved container: %s -> %s\n", src, dstPath)
@@ -230,56 +138,27 @@ func moveToContainer(cmd *cobra.Command, database *db.DB, actorUUID, src, dstCon
 	return fmt.Errorf("source not found: %s", src)
 }
 
-func renameOrMoveTask(cmd *cobra.Command, database *db.DB, actorUUID, srcTaskUUID, srcPath, dstPath string) error {
-	// Parse destination path
-	dstSegments := paths.SplitPath(dstPath)
-	if len(dstSegments) == 0 {
-		return fmt.Errorf("invalid destination path: %s", dstPath)
-	}
+func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID, srcPath, dstPath string) error {
+	database := s.DB()
 
-	// Determine if we're moving to a new parent or just renaming
-	var newParentUUID *string
-	var newSlug string
-
-	if len(dstSegments) > 1 {
-		// Navigate to parent container
-		for i, segment := range dstSegments[:len(dstSegments)-1] {
-			slug, err := paths.NormalizeSlug(segment)
-			if err != nil {
-				return fmt.Errorf("invalid slug %q: %w", segment, err)
-			}
-
-			query := `SELECT uuid FROM containers WHERE slug = ? AND `
-			args := []interface{}{slug}
-			if newParentUUID == nil {
-				query += `parent_uuid IS NULL`
-			} else {
-				query += `parent_uuid = ?`
-				args = append(args, *newParentUUID)
-			}
-
-			var uuid string
-			err = database.QueryRow(query, args...).Scan(&uuid)
-			if err != nil {
-				return fmt.Errorf("destination container not found: %s", paths.JoinPath(dstSegments[:i+1]...))
-			}
-			newParentUUID = &uuid
-		}
-		newSlug = dstSegments[len(dstSegments)-1]
-	} else {
-		// Just renaming within the same parent
-		// Get current parent
-		err := database.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", srcTaskUUID).Scan(&newParentUUID)
-		if err != nil {
-			return fmt.Errorf("failed to get current parent: %w", err)
-		}
-		newSlug = dstSegments[0]
-	}
-
-	// Normalize new slug
-	normalizedSlug, err := paths.NormalizeSlug(newSlug)
+	// Use shared resolver to determine destination parent and slug
+	newParentUUID, normalizedSlug, _, err := selectors.ResolveParentContainer(database, dstPath)
 	if err != nil {
-		return fmt.Errorf("invalid destination slug %q: %w", newSlug, err)
+		// If parent container not found, check if it's a single segment (rename in place)
+		dstSegments := paths.SplitPath(dstPath)
+		if len(dstSegments) == 1 {
+			// Just renaming within the same parent - get current parent
+			err := database.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", srcTaskUUID).Scan(&newParentUUID)
+			if err != nil {
+				return fmt.Errorf("failed to get current parent: %w", err)
+			}
+			normalizedSlug, err = paths.NormalizeSlug(dstSegments[0])
+			if err != nil {
+				return fmt.Errorf("invalid destination slug %q: %w", dstSegments[0], err)
+			}
+		} else {
+			return err
+		}
 	}
 
 	// Check if destination already exists
@@ -296,7 +175,7 @@ func renameOrMoveTask(cmd *cobra.Command, database *db.DB, actorUUID, srcTaskUUI
 		if mvDryRun {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would overwrite task at %s\n", dstPath)
 		} else {
-			_, err := database.Exec("DELETE FROM tasks WHERE uuid = ?", existingTaskUUID)
+			_, err := s.Tasks.Purge(actorUUID, existingTaskUUID, 0)
 			if err != nil {
 				return fmt.Errorf("failed to delete existing task: %w", err)
 			}
@@ -308,120 +187,43 @@ func renameOrMoveTask(cmd *cobra.Command, database *db.DB, actorUUID, srcTaskUUI
 		return nil
 	}
 
-	// Perform the move/rename
-	tx, err := database.Begin()
+	// Perform the move/rename using store's UpdateFields
+	fields := map[string]interface{}{
+		"slug":         normalizedSlug,
+		"project_uuid": *newParentUUID,
+	}
+	_, err = s.Tasks.UpdateFields(actorUUID, srcTaskUUID, fields, mvIfMatch)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Check etag if --if-match was provided
-	if mvIfMatch > 0 {
-		var currentETag int64
-		err = tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", srcTaskUUID).Scan(&currentETag)
-		if err != nil {
-			return fmt.Errorf("failed to get current etag: %w", err)
-		}
-		if currentETag != mvIfMatch {
-			return &domain.ETagMismatchError{Expected: mvIfMatch, Actual: currentETag}
-		}
-	}
-
-	_, err = tx.Exec(`
-		UPDATE tasks
-		SET slug = ?,
-		    project_uuid = ?,
-		    etag = etag + 1,
-		    updated_by_actor_uuid = ?
-		WHERE uuid = ?
-	`, normalizedSlug, *newParentUUID, actorUUID, srcTaskUUID)
-	if err != nil {
-		return fmt.Errorf("failed to rename/move task: %w", err)
-	}
-
-	// Log event
-	eventWriter := events.NewWriter(database.DB)
-	changes := map[string]interface{}{
-		"from":     srcPath,
-		"to":       dstPath,
-		"new_slug": normalizedSlug,
-	}
-	changesJSON, _ := json.Marshal(changes)
-	payload := string(changesJSON)
-	var newETag int64
-	tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", srcTaskUUID).Scan(&newETag)
-
-	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
-		ResourceType: "task",
-		ResourceUUID: &srcTaskUUID,
-		EventType:    "task.moved",
-		ETag:         &newETag,
-		Payload:      &payload,
-	}); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
+		return err
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed task: %s -> %s\n", srcPath, dstPath)
 	return nil
 }
 
-func renameOrMoveContainer(cmd *cobra.Command, database *db.DB, actorUUID, srcContainerUUID, srcPath, dstPath string) error {
-	// Parse destination path
-	dstSegments := paths.SplitPath(dstPath)
-	if len(dstSegments) == 0 {
-		return fmt.Errorf("invalid destination path: %s", dstPath)
-	}
+func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, actorUUID, srcContainerUUID, srcPath, dstPath string) error {
+	database := s.DB()
 
-	// Determine if we're moving to a new parent or just renaming
-	var newParentUUID *string
-	var newSlug string
-
-	if len(dstSegments) > 1 {
-		// Navigate to parent container
-		for i, segment := range dstSegments[:len(dstSegments)-1] {
-			slug, err := paths.NormalizeSlug(segment)
-			if err != nil {
-				return fmt.Errorf("invalid slug %q: %w", segment, err)
-			}
-
-			query := `SELECT uuid FROM containers WHERE slug = ? AND `
-			args := []interface{}{slug}
-			if newParentUUID == nil {
-				query += `parent_uuid IS NULL`
-			} else {
-				query += `parent_uuid = ?`
-				args = append(args, *newParentUUID)
-			}
-
-			var uuid string
-			err = database.QueryRow(query, args...).Scan(&uuid)
-			if err != nil {
-				return fmt.Errorf("destination container not found: %s", paths.JoinPath(dstSegments[:i+1]...))
-			}
-			newParentUUID = &uuid
-		}
-		newSlug = dstSegments[len(dstSegments)-1]
-	} else {
-		// Just renaming within the same parent
-		// Get current parent (may be NULL for root containers)
-		var parentUUID *string
-		err := database.QueryRow("SELECT parent_uuid FROM containers WHERE uuid = ?", srcContainerUUID).Scan(&parentUUID)
-		if err != nil && !strings.Contains(err.Error(), "null") {
-			return fmt.Errorf("failed to get current parent: %w", err)
-		}
-		newParentUUID = parentUUID
-		newSlug = dstSegments[0]
-	}
-
-	// Normalize new slug
-	normalizedSlug, err := paths.NormalizeSlug(newSlug)
+	// Use shared resolver to determine destination parent and slug
+	newParentUUID, normalizedSlug, _, err := selectors.ResolveParentContainer(database, dstPath)
 	if err != nil {
-		return fmt.Errorf("invalid destination slug %q: %w", newSlug, err)
+		// If parent container not found, check if it's a single segment (rename in place)
+		dstSegments := paths.SplitPath(dstPath)
+		if len(dstSegments) == 1 {
+			// Just renaming within the same parent - get current parent (may be NULL for root containers)
+			var parentUUID *string
+			queryErr := database.QueryRow("SELECT parent_uuid FROM containers WHERE uuid = ?", srcContainerUUID).Scan(&parentUUID)
+			if queryErr != nil && !strings.Contains(queryErr.Error(), "null") {
+				return fmt.Errorf("failed to get current parent: %w", queryErr)
+			}
+			newParentUUID = parentUUID
+			normalizedSlug, err = paths.NormalizeSlug(dstSegments[0])
+			if err != nil {
+				return fmt.Errorf("invalid destination slug %q: %w", dstSegments[0], err)
+			}
+		} else {
+			return err
+		}
 	}
 
 	// Check if destination already exists
@@ -446,62 +248,14 @@ func renameOrMoveContainer(cmd *cobra.Command, database *db.DB, actorUUID, srcCo
 		return nil
 	}
 
-	// Perform the move/rename
-	tx, err := database.Begin()
+	// Perform the move/rename using store's UpdateFields
+	fields := map[string]interface{}{
+		"slug":        normalizedSlug,
+		"parent_uuid": newParentUUID,
+	}
+	_, err = s.Containers.UpdateFields(actorUUID, srcContainerUUID, fields, mvIfMatch)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Check etag if --if-match was provided
-	if mvIfMatch > 0 {
-		var currentETag int64
-		err = tx.QueryRow("SELECT etag FROM containers WHERE uuid = ?", srcContainerUUID).Scan(&currentETag)
-		if err != nil {
-			return fmt.Errorf("failed to get current etag: %w", err)
-		}
-		if currentETag != mvIfMatch {
-			return &domain.ETagMismatchError{Expected: mvIfMatch, Actual: currentETag}
-		}
-	}
-
-	_, err = tx.Exec(`
-		UPDATE containers
-		SET slug = ?,
-		    parent_uuid = ?,
-		    etag = etag + 1,
-		    updated_by_actor_uuid = ?
-		WHERE uuid = ?
-	`, normalizedSlug, newParentUUID, actorUUID, srcContainerUUID)
-	if err != nil {
-		return fmt.Errorf("failed to rename/move container: %w", err)
-	}
-
-	// Log event
-	eventWriter := events.NewWriter(database.DB)
-	changes := map[string]interface{}{
-		"from":     srcPath,
-		"to":       dstPath,
-		"new_slug": normalizedSlug,
-	}
-	changesJSON, _ := json.Marshal(changes)
-	payload := string(changesJSON)
-	var newETag int64
-	tx.QueryRow("SELECT etag FROM containers WHERE uuid = ?", srcContainerUUID).Scan(&newETag)
-
-	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
-		ResourceType: "container",
-		ResourceUUID: &srcContainerUUID,
-		EventType:    "container.moved",
-		ETag:         &newETag,
-		Payload:      &payload,
-	}); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
+		return err
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed container: %s -> %s\n", srcPath, dstPath)

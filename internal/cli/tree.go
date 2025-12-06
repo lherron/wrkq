@@ -7,6 +7,7 @@ import (
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -15,12 +16,14 @@ var treeCmd = &cobra.Command{
 	Short: "Display containers and tasks in a tree structure",
 	Long: `Display containers and tasks in a hierarchical tree structure.
 
-By default, all items including completed and archived are shown. When all tasks
-in a container are completed/archived, they are collapsed and an "(All done)"
-indicator is shown on the container.
+By default, archived items are hidden. Use -a/--all to include them.
+When all tasks in a container are completed/archived, they are collapsed
+and an "(All done)" indicator is shown on the container.
 
 Examples:
-  wrkq tree                    # Show tree from root
+  wrkq tree                    # Show tree (excluding archived)
+  wrkq tree --open             # Show only open tasks
+  wrkq tree -a                 # Include archived items
   wrkq tree portal             # Show tree under portal
   wrkq tree -L 2               # Limit depth to 2 levels
   wrkq tree --json             # Output as JSON
@@ -31,6 +34,7 @@ Examples:
 var (
 	treeDepth           int
 	treeIncludeArchived bool
+	treeOpenOnly        bool
 	treeFields          string
 	treePorcelain       bool
 	treeJSON            bool
@@ -40,7 +44,8 @@ func init() {
 	rootCmd.AddCommand(treeCmd)
 
 	treeCmd.Flags().IntVarP(&treeDepth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", true, "Include completed and archived items (default true)")
+	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived items")
+	treeCmd.Flags().BoolVar(&treeOpenOnly, "open", false, "Show only active tasks (open, in_progress, blocked)")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
 	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
@@ -56,7 +61,7 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Build and display tree
-	return displayTree(database, rootPath, treeDepth, treeIncludeArchived, treePorcelain, treeJSON)
+	return displayTree(database, rootPath, treeDepth, treeIncludeArchived, treeOpenOnly, treePorcelain, treeJSON)
 }
 
 type treeNode struct {
@@ -71,9 +76,9 @@ type treeNode struct {
 	Children          []*treeNode `json:"children,omitempty"`
 }
 
-func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, porcelain bool, jsonOutput bool) error {
+func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, openOnly bool, porcelain bool, jsonOutput bool) error {
 	// Build tree structure
-	root, err := buildTree(database, rootPath, maxDepth, includeArchived, 0)
+	root, err := buildTree(database, rootPath, maxDepth, includeArchived, openOnly, 0)
 	if err != nil {
 		return err
 	}
@@ -102,7 +107,7 @@ func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived
 	return nil
 }
 
-func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool, currentDepth int) (*treeNode, error) {
+func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool, openOnly bool, currentDepth int) (*treeNode, error) {
 	root := &treeNode{
 		Type:     "container",
 		Slug:     path,
@@ -114,11 +119,10 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		return root, nil
 	}
 
-	// Determine parent UUID
+	// Determine parent UUID using shared resolver
 	var parentUUID *string
 	if path != "" {
-		// Resolve path to container UUID
-		uuid, err := resolveContainerPath(database, path)
+		uuid, _, err := selectors.WalkContainerPath(database, path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve path %q: %w", path, err)
 		}
@@ -170,7 +174,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		}
 		childPath += node.Slug
 
-		child, err := buildTree(database, childPath, maxDepth, includeArchived, currentDepth+1)
+		child, err := buildTree(database, childPath, maxDepth, includeArchived, openOnly, currentDepth+1)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -232,8 +236,16 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 				closedTasks++
 			}
 
-			// Only add to tasks slice if we should include it based on includeArchived flag
-			if includeArchived || !isClosed {
+			// Determine if task should be shown based on filters
+			showTask := true
+			if !includeArchived && node.IsArchived {
+				showTask = false
+			}
+			if openOnly && node.State != "open" && node.State != "in_progress" && node.State != "blocked" {
+				showTask = false
+			}
+
+			if showTask {
 				tasks = append(tasks, &node)
 			}
 		}
@@ -353,37 +365,3 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 	return strings.Join(parts, " ")
 }
 
-func resolveContainerPath(database *db.DB, path string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("empty path")
-	}
-
-	segments := strings.Split(path, "/")
-	var parentUUID *string
-
-	for _, segment := range segments {
-		query := `SELECT uuid FROM containers WHERE slug = ? AND `
-		args := []interface{}{segment}
-
-		if parentUUID == nil {
-			query += `parent_uuid IS NULL`
-		} else {
-			query += `parent_uuid = ?`
-			args = append(args, *parentUUID)
-		}
-
-		var uuid string
-		err := database.QueryRow(query, args...).Scan(&uuid)
-		if err != nil {
-			return "", fmt.Errorf("segment %q not found: %w", segment, err)
-		}
-
-		parentUUID = &uuid
-	}
-
-	if parentUUID == nil {
-		return "", fmt.Errorf("failed to resolve path")
-	}
-
-	return *parentUUID, nil
-}

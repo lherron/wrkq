@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,10 +11,9 @@ import (
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -75,6 +73,9 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
 
+	// Create store
+	s := store.New(database)
+
 	// Handle stdin
 	if len(args) == 1 && args[0] == "-" {
 		scanner := bufio.NewScanner(cmd.InOrStdin())
@@ -131,7 +132,7 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	var results []rmResult
 	result := op.Execute(taskUUIDs, func(taskUUID string) error {
-		res, err := removeTask(database, cfg.AttachDir, actorUUID, taskUUID)
+		res, err := removeTask(s, cfg.AttachDir, actorUUID, taskUUID)
 		if err == nil && res != nil {
 			results = append(results, *res)
 		}
@@ -266,120 +267,55 @@ func confirmPurge(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error
 	return nil
 }
 
-func removeTask(database *db.DB, attachDir, actorUUID, taskUUID string) (*rmResult, error) {
-	tx, err := database.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
+func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResult, error) {
 	// Get task info
-	var id, slug string
-	err = tx.QueryRow(`
-		SELECT t.id, t.slug
-		FROM tasks t
-		WHERE t.uuid = ?
-	`, taskUUID).Scan(&id, &slug)
+	task, err := s.Tasks.GetByUUID(taskUUID)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
 	}
 
-	displayPath := slug
-
 	result := &rmResult{
-		ID:     id,
+		ID:     task.ID,
 		UUID:   taskUUID,
-		Slug:   slug,
-		Path:   displayPath,
+		Slug:   task.Slug,
+		Path:   task.Slug,
 		Purged: rmPurge,
 	}
 
 	if rmPurge {
-		// Delete attachment files first
-		rows, err := tx.Query("SELECT relative_path, size_bytes FROM attachments WHERE task_uuid = ?", taskUUID)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var relativePath string
-				var sizeBytes int64
-				if err := rows.Scan(&relativePath, &sizeBytes); err != nil {
-					continue
-				}
+		// Get attachment info BEFORE purging (for file cleanup)
+		attachments, err := s.Tasks.GetAttachments(taskUUID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get attachments: %w", err)
+		}
 
-				// Delete file
-				filePath := filepath.Join(attachDir, relativePath)
-				if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
-					// Log warning but continue
-					fmt.Fprintf(os.Stderr, "Warning: failed to delete file %s: %v\n", filePath, err)
-				}
+		// Purge task from database (handles event logging)
+		purgeResult, err := s.Tasks.Purge(actorUUID, taskUUID, 0)
+		if err != nil {
+			return nil, err
+		}
 
-				result.AttachmentsDeleted++
-				result.BytesFreed += sizeBytes
+		result.AttachmentsDeleted = purgeResult.AttachmentsDeleted
+		result.BytesFreed = purgeResult.BytesFreed
+
+		// Delete attachment files AFTER successful DB purge
+		for _, a := range attachments {
+			filePath := filepath.Join(attachDir, a.RelativePath)
+			if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+				// Log warning but continue
+				fmt.Fprintf(os.Stderr, "Warning: failed to delete file %s: %v\n", filePath, err)
 			}
 		}
 
 		// Delete task directory
 		taskDir := filepath.Join(attachDir, "tasks", taskUUID)
 		os.RemoveAll(taskDir) // Ignore errors, directory might not exist
-
-		// Log event before deletion
-		eventWriter := events.NewWriter(database.DB)
-		payloadData := map[string]interface{}{
-			"slug":  slug,
-			"purged_by": actorUUID,
-		}
-		if result.AttachmentsDeleted > 0 {
-			payloadData["attachment_count"] = result.AttachmentsDeleted
-			payloadData["bytes_freed"] = result.BytesFreed
-		}
-		payloadJSON, _ := json.Marshal(payloadData)
-		payloadStr := string(payloadJSON)
-
-		if err := eventWriter.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
-			ResourceType: "task",
-			ResourceUUID: &taskUUID,
-			EventType:    "task.purged",
-			Payload:      &payloadStr,
-		}); err != nil {
-			return nil, fmt.Errorf("failed to log event: %w", err)
-		}
-
-		// Hard delete (CASCADE will delete attachments metadata)
-		_, err = tx.Exec("DELETE FROM tasks WHERE uuid = ?", taskUUID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to delete task: %w", err)
-		}
 	} else {
-		// Soft delete (archive)
-		_, err = tx.Exec(`
-			UPDATE tasks
-			SET state = 'archived',
-			    archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-			    updated_by_actor_uuid = ?,
-			    etag = etag + 1
-			WHERE uuid = ?
-		`, actorUUID, taskUUID)
+		// Archive task (soft delete)
+		_, err := s.Tasks.Archive(actorUUID, taskUUID, 0)
 		if err != nil {
-			return nil, fmt.Errorf("failed to archive task: %w", err)
+			return nil, err
 		}
-
-		// Log event
-		eventWriter := events.NewWriter(database.DB)
-		payload := `{"action":"archived"}`
-		if err := eventWriter.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
-			ResourceType: "task",
-			ResourceUUID: &taskUUID,
-			EventType:    "task.updated",
-			Payload:      &payload,
-		}); err != nil {
-			return nil, fmt.Errorf("failed to log event: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 
 	return result, nil

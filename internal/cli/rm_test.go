@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 func TestRmPurge(t *testing.T) {
@@ -58,7 +59,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task
 		rmPurge = true
-		_, err = removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err = removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task: %v", err)
 		}
@@ -81,7 +82,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Soft delete (default)
 		rmPurge = false
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to archive task: %v", err)
 		}
@@ -136,7 +137,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task
 		rmPurge = true
-		_, err = removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err = removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task with attachments: %v", err)
 		}
@@ -177,7 +178,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task
 		rmPurge = true
-		result, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		result, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task: %v", err)
 		}
@@ -219,7 +220,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge should succeed even though file doesn't exist
 		rmPurge = true
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Errorf("Purge should succeed with missing files: %v", err)
 		}
@@ -243,7 +244,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task
 		rmPurge = true
-		_, err = removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err = removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task: %v", err)
 		}
@@ -278,20 +279,20 @@ func TestRmPurge(t *testing.T) {
 
 		// Soft delete
 		rmPurge = false
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to soft delete task: %v", err)
 		}
 
-		// Verify event logged
+		// Verify event logged (store uses task.archived for archive operations)
 		var eventCount int
 		database.QueryRow(`
 			SELECT COUNT(*) FROM event_log
-			WHERE resource_type = 'task' AND resource_uuid = ? AND event_type = 'task.updated'
+			WHERE resource_type = 'task' AND resource_uuid = ? AND event_type = 'task.archived'
 		`, taskUUID).Scan(&eventCount)
 
 		if eventCount < 1 {
-			t.Errorf("Expected at least 1 task.updated event, got %d", eventCount)
+			t.Errorf("Expected at least 1 task.archived event, got %d", eventCount)
 		}
 	})
 
@@ -311,7 +312,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge task (this should work and delete the task)
 		rmPurge = true
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge task: %v", err)
 		}
@@ -335,7 +336,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Soft delete
 		rmPurge = false
-		_, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		_, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to archive task: %v", err)
 		}
@@ -370,7 +371,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Purge
 		rmPurge = true
-		result, err := removeTask(database, attachDir, actorUUID, taskUUID)
+		result, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 		if err != nil {
 			t.Fatalf("Failed to purge: %v", err)
 		}
@@ -460,7 +461,7 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 
 	// Purge task
 	rmPurge = true
-	result, err := removeTask(database, attachDir, actorUUID, taskUUID)
+	result, err := removeTask(store.New(database), attachDir, actorUUID, taskUUID)
 	if err != nil {
 		t.Fatalf("Failed to purge task with multiple attachments: %v", err)
 	}

@@ -77,6 +77,25 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
+	// Determine sort field and direction
+	sortField := commentLsSort
+	if sortField == "" {
+		sortField = "created_at"
+	}
+	descending := commentLsReverse
+
+	// Build cursor pagination
+	pag, err := cursor.Apply(commentLsCursor, cursor.ApplyOptions{
+		SortFields: []string{sortField},
+		SQLFields:  []string{"c." + sortField},
+		Descending: []bool{descending},
+		IDField:    "c.id",
+		Limit:      commentLsLimit,
+	})
+	if err != nil {
+		return err
+	}
+
 	var allComments []map[string]interface{}
 
 	// For each task argument, resolve and list comments
@@ -93,7 +112,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to resolve task %s: %w", taskArg, err)
 		}
 
-		// Query comments
+		// Query comments with SQL-based pagination
 		query := `
 			SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
 			       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
@@ -104,23 +123,28 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 			LEFT JOIN tasks t ON c.task_uuid = t.uuid
 			WHERE c.task_uuid = ?
 		`
+		queryArgs := []interface{}{taskUUID}
 
 		if !commentLsIncludeDeleted {
 			query += " AND c.deleted_at IS NULL"
 		}
 
-		// Add sorting
-		sortField := commentLsSort
-		if sortField == "" {
-			sortField = "created_at"
+		// Add cursor WHERE clause if present
+		if pag.WhereClause != "" {
+			query += " AND " + pag.WhereClause
+			queryArgs = append(queryArgs, pag.Params...)
 		}
-		order := "ASC"
-		if commentLsReverse {
-			order = "DESC"
-		}
-		query += fmt.Sprintf(" ORDER BY c.%s %s", sortField, order)
 
-		rows, err := database.Query(query, taskUUID)
+		// Add ORDER BY
+		query += " " + pag.OrderByClause
+
+		// Add LIMIT
+		if pag.LimitClause != "" {
+			query += " " + pag.LimitClause
+			queryArgs = append(queryArgs, *pag.LimitParam)
+		}
+
+		rows, err := database.Query(query, queryArgs...)
 		if err != nil {
 			return fmt.Errorf("failed to query comments for task %s: %w", taskID, err)
 		}
@@ -174,45 +198,27 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Apply pagination
-	var nextCursor *cursor.Cursor
-	if commentLsCursor != "" {
-		c, err := cursor.Decode(commentLsCursor)
-		if err != nil {
-			return fmt.Errorf("invalid cursor: %w", err)
-		}
-
-		// Filter based on cursor
-		var filtered []map[string]interface{}
-		for _, comment := range allComments {
-			sortValue := comment[commentLsSort].(string)
-			id := comment["id"].(string)
-
-			if sortValue > c.LastValues[0].(string) ||
-				(sortValue == c.LastValues[0].(string) && id > c.LastID) {
-				filtered = append(filtered, comment)
-			}
-		}
-		allComments = filtered
-	}
-
-	// Apply limit and generate next cursor
+	// Check if there are more results (we requested limit+1)
+	hasMore := false
 	if commentLsLimit > 0 && len(allComments) > commentLsLimit {
-		lastComment := allComments[commentLsLimit-1]
-		nextCursor, _ = cursor.NewCursor(
-			[]string{commentLsSort},
-			[]interface{}{lastComment[commentLsSort].(string)},
-			lastComment["id"].(string),
-		)
+		hasMore = true
 		allComments = allComments[:commentLsLimit]
 	}
 
+	// Generate next cursor if there are more results
+	var nextCursorStr string
+	if hasMore && len(allComments) > 0 {
+		lastComment := allComments[len(allComments)-1]
+		nextCursorStr, _ = cursor.BuildNextCursor(
+			[]string{sortField},
+			[]interface{}{lastComment[sortField].(string)},
+			lastComment["id"].(string),
+		)
+	}
+
 	// Output next_cursor to stderr in porcelain mode
-	if commentLsPorcelain && nextCursor != nil {
-		encoded, err := nextCursor.Encode()
-		if err == nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", encoded)
-		}
+	if commentLsPorcelain && nextCursorStr != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Output

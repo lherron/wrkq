@@ -6,17 +6,20 @@
 - Proposal: Add `internal/cli/appctx` with a shared initializer that loads config (honoring `--db`), opens the DB once, resolves actor (when needed), and injects a small `App` struct into command handlers (`withApp(run func(ctx *App, cmd *cobra.Command, args []string) error)`). Close DB in a centralized `PostRun`. This removes boilerplate and aligns error handling/exit codes.
 - **Status**: `internal/cli/appctx` created with `App`, `Options`, `Bootstrap()`, `WithApp()`. Error messages fixed to use `WRKQ_ACTOR`/`WRKQ_ACTOR_ID`. Sample commands (`cat.go`, `touch.go`) migrated. Remaining commands can be migrated incrementally.
 
-2) Path/selector reuse for containers and tasks  
-- Problem: Container/task traversal is reimplemented in `mkdir.go`, `touch.go`, `ls.go`, `tree.go`, `mv.go`, `cp.go`, etc., while `selectors.ResolveTask` already exists. Slug normalization (`paths.NormalizeSlug`) is scattered (16+ sites) with slightly different error messages.  
+2) Path/selector reuse for containers and tasks ✅
+- Problem: Container/task traversal is reimplemented in `mkdir.go`, `touch.go`, `ls.go`, `tree.go`, `mv.go`, `cp.go`, etc., while `selectors.ResolveTask` already exists. Slug normalization (`paths.NormalizeSlug`) is scattered (16+ sites) with slightly different error messages.
 - Proposal: Extend `internal/selectors` (or a new `paths/resolver`) with `ResolveContainerPath`/`ResolveTaskPath` that walk the hierarchy once (optionally create parents for mkdir/touch). Have all commands call these helpers instead of rolling SQL, so slug rules and errors stay consistent.
+- **Status**: Added shared helpers to `internal/selectors`: `WalkContainerPath`, `ResolveParentContainer`, `WalkContainerSegment`, `LookupContainerSegment`, `ResolveTaskByPath`. Migrated `mkdir.go`, `touch.go`, `ls.go`, `tree.go`, `mv.go`, `cp.go` to use new helpers. Error messages now consistent.
 
-3) Store/service layer with baked-in events and etags  
-- Problem: Raw SQL lives in CLI files (e.g., `set.go` builds `UPDATE` strings, `touch.go` and `mkdir.go` assemble inserts, `attach.go` writes attachments) and each site separately increments `etag` and crafts event payload JSON. Behavior drift is likely and transactions are verbose.  
+3) Store/service layer with baked-in events and etags ✅
+- Problem: Raw SQL lives in CLI files (e.g., `set.go` builds `UPDATE` strings, `touch.go` and `mkdir.go` assemble inserts, `attach.go` writes attachments) and each site separately increments `etag` and crafts event payload JSON. Behavior drift is likely and transactions are verbose.
 - Proposal: Introduce `internal/store` with submodules (`Tasks`, `Containers`, `Attachments`, `Comments`) that expose typed methods: `Create`, `UpdateFields`, `Move`, `List`, etc., all handling etag bumps, timestamps, and event writes internally. Commands then call store methods, shrinking run functions and making changes auditable in one place.
+- **Status**: Created `internal/store` with `TaskStore` and `ContainerStore`. TaskStore has: Create, UpdateFields, Move, Archive, Purge, GetAttachments, GetByUUID. ContainerStore has: Create, UpdateFields, Move, Archive, Delete, GetByUUID, LookupBySlugAndParent. Migrated touch.go, set.go, mkdir.go, rm.go, mv.go to use store methods. Comments/Attachments stores can be added incrementally.
 
-4) Cursor pagination helper wired into SQL  
-- Problem: `ls`, `attach ls`, `comment ls`, `log`, and `find` decode cursors but still fetch all rows and slice in memory; `cursor.BuildWhereClause` is tested yet unused. Large datasets will degrade quickly.  
+4) Cursor pagination helper wired into SQL ✅
+- Problem: `ls`, `attach ls`, `comment ls`, `log`, and `find` decode cursors but still fetch all rows and slice in memory; `cursor.BuildWhereClause` is tested yet unused. Large datasets will degrade quickly.
 - Proposal: Add a small helper (`cursor.Apply(query, c, limit, orderBy, descending)`) that injects the `WHERE` from `BuildWhereClause`, appends `ORDER BY`/`LIMIT`, and returns the next cursor. Replace the ad-hoc filtering blocks to make pagination consistent and cheap.
+- **Status**: Added `cursor.Apply()` helper with `ApplyOptions` (SortFields, SQLFields, Descending, IDField, Limit) and `ApplyResult` (WhereClause, Params, OrderByClause, LimitClause). Added `BuildNextCursor()` helper. Migrated `ls.go`, `find.go`, `comment.go`, `attach.go`, `log.go` to use SQL-based pagination. All commands now use cursor WHERE clause in SQL instead of in-memory filtering.
 
 ## Medium-priority cleanups
 5) Shared admin vs user command wiring  
