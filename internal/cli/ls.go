@@ -61,6 +61,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		Title string `json:"title,omitempty"`
 		Path  string `json:"path"`
 		State string `json:"state,omitempty"`
+		Kind  string `json:"kind,omitempty"`
 	}
 
 	// Build cursor pagination
@@ -146,10 +147,10 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 
 			// Found as task - list this single task (no pagination needed)
-			var slug, title, state string
+			var slug, title, state, kind string
 			err = database.QueryRow(`
-				SELECT slug, title, state FROM tasks WHERE uuid = ?
-			`, taskUUID).Scan(&slug, &title, &state)
+				SELECT slug, title, state, kind FROM tasks WHERE uuid = ?
+			`, taskUUID).Scan(&slug, &title, &state, &kind)
 			if err != nil {
 				return fmt.Errorf("failed to get task: %w", err)
 			}
@@ -161,6 +162,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				Title: title,
 				Path:  path,
 				State: state,
+				Kind:  kind,
 			})
 		}
 
@@ -228,7 +230,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// List tasks
 			if lsType == "" || lsType == "t" {
 				query := `
-					SELECT id, slug, title, state
+					SELECT id, slug, title, state, kind
 					FROM tasks
 					WHERE project_uuid = ?
 				`
@@ -255,8 +257,8 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 
 				for rows.Next() {
-					var id, slug, title, state string
-					if err := rows.Scan(&id, &slug, &title, &state); err != nil {
+					var id, slug, title, state, kind string
+					if err := rows.Scan(&id, &slug, &title, &state, &kind); err != nil {
 						rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
@@ -274,6 +276,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						Title: title,
 						Path:  taskPath,
 						State: state,
+						Kind:  kind,
 					})
 				}
 				rows.Close()
@@ -339,7 +342,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Table output
-	headers := []string{"Type", "ID", "Slug", "Title", "State"}
+	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind"}
 	var rowsData [][]string
 	for _, entry := range entries {
 		typeStr := "project"
@@ -353,6 +356,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			entry.Slug,
 			entry.Title,
 			entry.State,
+			entry.Kind,
 		})
 	}
 

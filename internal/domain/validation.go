@@ -8,10 +8,10 @@ import (
 // ValidateState validates a task state
 func ValidateState(state string) error {
 	switch state {
-	case "open", "in_progress", "completed", "archived":
+	case "open", "in_progress", "completed", "blocked", "cancelled", "archived":
 		return nil
 	default:
-		return fmt.Errorf("invalid state: must be one of: open, in_progress, completed, archived")
+		return fmt.Errorf("invalid state: must be one of: open, in_progress, completed, blocked, cancelled, archived")
 	}
 }
 
@@ -36,10 +36,50 @@ func ValidateActorRole(role string) error {
 // ValidateResourceType validates an event resource type
 func ValidateResourceType(resourceType string) error {
 	switch resourceType {
-	case "task", "container", "attachment", "actor", "config", "system":
+	case "task", "container", "attachment", "actor", "config", "system", "section", "task_relation":
 		return nil
 	default:
-		return fmt.Errorf("invalid resource type: must be one of: task, container, attachment, actor, config, system")
+		return fmt.Errorf("invalid resource type: must be one of: task, container, attachment, actor, config, system, section, task_relation")
+	}
+}
+
+// ValidateContainerKind validates a container kind
+func ValidateContainerKind(kind string) error {
+	switch kind {
+	case "project", "feature", "area", "misc":
+		return nil
+	default:
+		return fmt.Errorf("invalid container kind: must be one of: project, feature, area, misc")
+	}
+}
+
+// ValidateTaskKind validates a task kind
+func ValidateTaskKind(kind string) error {
+	switch kind {
+	case "task", "subtask", "spike", "bug", "chore":
+		return nil
+	default:
+		return fmt.Errorf("invalid task kind: must be one of: task, subtask, spike, bug, chore")
+	}
+}
+
+// ValidateSectionRole validates a section role
+func ValidateSectionRole(role string) error {
+	switch role {
+	case "backlog", "ready", "active", "review", "done":
+		return nil
+	default:
+		return fmt.Errorf("invalid section role: must be one of: backlog, ready, active, review, done")
+	}
+}
+
+// ValidateTaskRelationKind validates a task relation kind
+func ValidateTaskRelationKind(kind string) error {
+	switch kind {
+	case "blocks", "relates_to", "duplicates":
+		return nil
+	default:
+		return fmt.Errorf("invalid task relation kind: must be one of: blocks, relates_to, duplicates")
 	}
 }
 

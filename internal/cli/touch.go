@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -36,6 +37,9 @@ var (
 	touchDescription string
 	touchState       string
 	touchPriority    int
+	touchKind        string
+	touchParentTask  string
+	touchAssignee    string
 	touchLabels      string
 	touchDueAt       string
 	touchStartAt     string
@@ -47,6 +51,9 @@ func init() {
 	touchCmd.Flags().StringVarP(&touchDescription, "description", "d", "", "Description for the task (use @file.md for file or - for stdin)")
 	touchCmd.Flags().StringVar(&touchState, "state", "open", "Initial task state (open, in_progress, completed, blocked, cancelled)")
 	touchCmd.Flags().IntVar(&touchPriority, "priority", 3, "Initial task priority (1-4)")
+	touchCmd.Flags().StringVar(&touchKind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
+	touchCmd.Flags().StringVar(&touchParentTask, "parent-task", "", "Parent task ID or path (for subtasks)")
+	touchCmd.Flags().StringVar(&touchAssignee, "assignee", "", "Assignee actor slug or ID")
 	touchCmd.Flags().StringVar(&touchLabels, "labels", "", "Initial task labels (JSON array)")
 	touchCmd.Flags().StringVar(&touchDueAt, "due-at", "", "Initial task due date")
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
@@ -70,12 +77,40 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate kind if provided
+	if touchKind != "" {
+		if err := domain.ValidateTaskKind(touchKind); err != nil {
+			return err
+		}
+	}
+
 	// Validate labels if provided
 	if touchLabels != "" {
 		var labels []string
 		if err := json.Unmarshal([]byte(touchLabels), &labels); err != nil {
 			return fmt.Errorf("invalid labels JSON: %w", err)
 		}
+	}
+
+	// Resolve parent task if provided
+	var parentTaskUUID *string
+	if touchParentTask != "" {
+		uuid, _, err := selectors.ResolveTask(database, touchParentTask)
+		if err != nil {
+			return fmt.Errorf("failed to resolve parent task: %w", err)
+		}
+		parentTaskUUID = &uuid
+	}
+
+	// Resolve assignee if provided
+	var assigneeActorUUID *string
+	if touchAssignee != "" {
+		resolver := actors.NewResolver(database.DB)
+		uuid, err := resolver.Resolve(touchAssignee)
+		if err != nil {
+			return fmt.Errorf("failed to resolve assignee: %w", err)
+		}
+		assigneeActorUUID = &uuid
 	}
 
 	// Process description if provided
@@ -131,15 +166,18 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Create the task using the store
 		_, err = s.Tasks.Create(actorUUID, store.CreateParams{
-			Slug:        normalizedSlug,
-			Title:       title,
-			Description: description,
-			ProjectUUID: projectUUID,
-			State:       state,
-			Priority:    priority,
-			Labels:      touchLabels,
-			DueAt:       touchDueAt,
-			StartAt:     touchStartAt,
+			Slug:              normalizedSlug,
+			Title:             title,
+			Description:       description,
+			ProjectUUID:       projectUUID,
+			State:             state,
+			Priority:          priority,
+			Kind:              touchKind,
+			ParentTaskUUID:    parentTaskUUID,
+			AssigneeActorUUID: assigneeActorUUID,
+			Labels:            touchLabels,
+			DueAt:             touchDueAt,
+			StartAt:           touchStartAt,
 		})
 		if err != nil {
 			return err

@@ -106,6 +106,18 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to open database: %w", err)
 		}
+
+		// Check for pending migrations
+		_, pending, err := database.MigrationStatus()
+		if err != nil {
+			database.Close()
+			return nil, fmt.Errorf("failed to check migration status: %w", err)
+		}
+		if len(pending) > 0 {
+			database.Close()
+			return nil, fmt.Errorf("database requires migration: %d pending migration(s). Run 'wrkqadm migrate' to update", len(pending))
+		}
+
 		app.DB = database
 	}
 

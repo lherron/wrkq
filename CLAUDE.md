@@ -88,7 +88,10 @@ Contains all command implementations for both binaries:
 
 #### `internal/db/`
 - **`db.go`** - SQLite connection wrapper, migration runner
+- **`migrations/*.sql`** - SQL migration files (embedded at compile time)
 - Migrations are embedded from `internal/db/migrations/*.sql` using `//go:embed`
+- Migration tracking: `schema_migrations` table records applied migrations by filename
+- Key methods: `Migrate()`, `MigrateWithInfo()`, `MigrationStatus()`
 - Database setup:
   - WAL mode enabled
   - Foreign keys enforced
@@ -232,8 +235,16 @@ Most commands support:
 
 ### Adding a Migration
 1. Create new file in `internal/db/migrations/` with sequential number: `000007_description.sql`
-2. Migrations are auto-embedded and run in order
-3. Track applied migrations in `schema_migrations` table
+2. Migrations are auto-embedded via `//go:embed` and shipped with the binaries
+3. Applied migrations are tracked in the `schema_migrations` table (version + applied_at timestamp)
+4. Run `wrkqadm migrate` to apply pending migrations, or use `wrkqadm init` which runs migrations automatically
+
+### Database Versioning
+- Migrations use the `schema_migrations` table (not SQLite's `pragma user_version`)
+- Each migration file (e.g., `000001_baseline.sql`) is recorded by filename when applied
+- Check migration status: `wrkqadm migrate --status`
+- Preview pending migrations: `wrkqadm migrate --dry-run`
+- Apply migrations: `wrkqadm migrate` (idempotent, safe to run multiple times)
 
 ## Important Notes
 

@@ -8,8 +8,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -21,7 +23,7 @@ var setCmd = &cobra.Command{
 	Use:   "set <path|id>... [flags]",
 	Short: "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, due_at, start_at, description
+Supported fields: state, priority, title, slug, labels, due_at, start_at, description, kind, assignee
 
 Description can be set from:
   - String: --description "text"
@@ -34,26 +36,30 @@ Examples:
   wrkq set T-00001 --description @notes.md
   wrkq set T-00001 -d "New description"
   echo "New description" | wrkq set T-00001 -d -
-  wrkq set T-00001 --state in_progress --priority 1 --title "New Title"`,
+  wrkq set T-00001 --state in_progress --priority 1 --title "New Title"
+  wrkq set T-00001 --kind bug
+  wrkq set T-00001 --assignee agent-claude`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: appctx.WithApp(appctx.WithActor(), runSet),
 }
 
 var (
-	setIfMatch          int64
-	setDryRun           bool
-	setJobs             int
-	setContinueOnError  bool
-	setBatchSize        int
-	setOrdered          bool
-	setDescription      string
-	setState            string
-	setPriority         int
-	setTitle            string
-	setSlug             string
-	setLabels           string
-	setDueAt            string
-	setStartAt          string
+	setIfMatch         int64
+	setDryRun          bool
+	setJobs            int
+	setContinueOnError bool
+	setBatchSize       int
+	setOrdered         bool
+	setDescription     string
+	setState           string
+	setPriority        int
+	setTitle           string
+	setSlug            string
+	setLabels          string
+	setDueAt           string
+	setStartAt         string
+	setKind            string
+	setAssignee        string
 )
 
 func init() {
@@ -72,6 +78,8 @@ func init() {
 	setCmd.Flags().StringVar(&setLabels, "labels", "", "Update task labels (JSON array)")
 	setCmd.Flags().StringVar(&setDueAt, "due-at", "", "Update task due date")
 	setCmd.Flags().StringVar(&setStartAt, "start-at", "", "Update task start date")
+	setCmd.Flags().StringVar(&setKind, "kind", "", "Update task kind (task, subtask, spike, bug, chore)")
+	setCmd.Flags().StringVar(&setAssignee, "assignee", "", "Update task assignee (actor slug or ID)")
 }
 
 func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -95,7 +103,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Build fields map from flags
-	fields, err := buildFieldsFromFlags()
+	fields, err := buildFieldsFromFlags(database)
 	if err != nil {
 		return err
 	}
@@ -159,7 +167,7 @@ func readLinesFromStdin(r io.Reader) ([]string, error) {
 	return lines, nil
 }
 
-func buildFieldsFromFlags() (map[string]interface{}, error) {
+func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 	fields := make(map[string]interface{})
 
 	// Handle state
@@ -219,6 +227,25 @@ func buildFieldsFromFlags() (map[string]interface{}, error) {
 			return nil, fmt.Errorf("failed to read description: %w", err)
 		}
 		fields["description"] = descValue
+	}
+
+	// Handle kind
+	if setKind != "" {
+		if err := domain.ValidateTaskKind(setKind); err != nil {
+			return nil, err
+		}
+		fields["kind"] = setKind
+	}
+
+	// Handle assignee
+	if setAssignee != "" {
+		// db.DB embeds *sql.DB, so we can access it directly
+		resolver := actors.NewResolver(database.DB)
+		actorUUID, err := resolver.Resolve(setAssignee)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve assignee: %w", err)
+		}
+		fields["assignee_actor_uuid"] = actorUUID
 	}
 
 	return fields, nil

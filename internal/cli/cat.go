@@ -49,27 +49,44 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ActorRole string `json:"actor_role"`
 	}
 
+	type Relation struct {
+		Direction   string `json:"direction"` // "outgoing" or "incoming"
+		Kind        string `json:"kind"`      // "blocks", "relates_to", "duplicates"
+		TaskID      string `json:"task_id"`
+		TaskUUID    string `json:"task_uuid"`
+		TaskSlug    string `json:"task_slug"`
+		TaskTitle   string `json:"task_title"`
+		CreatedAt   string `json:"created_at"`
+		CreatedByID string `json:"created_by_id"`
+	}
+
 	type Task struct {
-		ID          string     `json:"id"`
-		UUID        string     `json:"uuid"`
-		ProjectID   string     `json:"project_id"`
-		ProjectUUID string     `json:"project_uuid"`
-		Slug        string     `json:"slug"`
-		Title       string     `json:"title"`
-		State       string     `json:"state"`
-		Priority    int        `json:"priority"`
-		StartAt     *string    `json:"start_at,omitempty"`
-		DueAt       *string    `json:"due_at,omitempty"`
-		Labels      *string    `json:"labels,omitempty"`
-		Description string     `json:"description"`
-		Etag        int64      `json:"etag"`
-		CreatedAt   string     `json:"created_at"`
-		UpdatedAt   string     `json:"updated_at"`
-		CompletedAt *string    `json:"completed_at,omitempty"`
-		ArchivedAt  *string    `json:"archived_at,omitempty"`
-		CreatedBy   string     `json:"created_by"`
-		UpdatedBy   string     `json:"updated_by"`
-		Comments    []Comment  `json:"comments,omitempty"`
+		ID             string    `json:"id"`
+		UUID           string    `json:"uuid"`
+		ProjectID      string    `json:"project_id"`
+		ProjectUUID    string    `json:"project_uuid"`
+		Slug           string    `json:"slug"`
+		Title          string    `json:"title"`
+		State          string    `json:"state"`
+		Priority       int       `json:"priority"`
+		Kind           string    `json:"kind"`
+		ParentTaskID   *string   `json:"parent_task_id,omitempty"`
+		ParentTaskUUID *string   `json:"parent_task_uuid,omitempty"`
+		AssigneeSlug   *string   `json:"assignee,omitempty"`
+		AssigneeUUID   *string   `json:"assignee_uuid,omitempty"`
+		StartAt        *string   `json:"start_at,omitempty"`
+		DueAt          *string   `json:"due_at,omitempty"`
+		Labels         *string   `json:"labels,omitempty"`
+		Description    string    `json:"description"`
+		Etag           int64     `json:"etag"`
+		CreatedAt      string    `json:"created_at"`
+		UpdatedAt      string    `json:"updated_at"`
+		CompletedAt    *string   `json:"completed_at,omitempty"`
+		ArchivedAt     *string   `json:"archived_at,omitempty"`
+		CreatedBy      string     `json:"created_by"`
+		UpdatedBy      string     `json:"updated_by"`
+		Comments       []Comment  `json:"comments,omitempty"`
+		Relations      []Relation `json:"relations,omitempty"`
 	}
 
 	var tasks []Task
@@ -83,21 +100,24 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		// Get task details
-		var id, slug, title, state, description string
+		var id, slug, title, state, description, kind string
 		var priority int
 		var startAt, dueAt, labels, completedAt, archivedAt *string
+		var parentTaskUUID, assigneeActorUUID *string
 		var createdAt, updatedAt string
 		var etag int64
 		var projectUUID, createdByUUID, updatedByUUID string
 
 		err = database.QueryRow(`
 			SELECT id, slug, title, project_uuid, state, priority,
+			       kind, parent_task_uuid, assignee_actor_uuid,
 			       start_at, due_at, labels, description, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       created_by_actor_uuid, updated_by_actor_uuid
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
 			&id, &slug, &title, &projectUUID, &state, &priority,
+			&kind, &parentTaskUUID, &assigneeActorUUID,
 			&startAt, &dueAt, &labels, &description, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&createdByUUID, &updatedByUUID,
@@ -115,26 +135,49 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var projectID string
 		database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
+		// Get parent task ID if parent exists
+		var parentTaskID *string
+		if parentTaskUUID != nil {
+			var ptID string
+			if err := database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", *parentTaskUUID).Scan(&ptID); err == nil {
+				parentTaskID = &ptID
+			}
+		}
+
+		// Get assignee slug if assignee exists
+		var assigneeSlug *string
+		if assigneeActorUUID != nil {
+			var aSlug string
+			if err := database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *assigneeActorUUID).Scan(&aSlug); err == nil {
+				assigneeSlug = &aSlug
+			}
+		}
+
 		task := Task{
-			ID:          id,
-			UUID:        taskUUID,
-			ProjectID:   projectID,
-			ProjectUUID: projectUUID,
-			Slug:        slug,
-			Title:       title,
-			State:       state,
-			Priority:    priority,
-			StartAt:     startAt,
-			DueAt:       dueAt,
-			Labels:      labels,
-			Description: description,
-			Etag:        etag,
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
-			CompletedAt: completedAt,
-			ArchivedAt:  archivedAt,
-			CreatedBy:   createdBySlug,
-			UpdatedBy:   updatedBySlug,
+			ID:             id,
+			UUID:           taskUUID,
+			ProjectID:      projectID,
+			ProjectUUID:    projectUUID,
+			Slug:           slug,
+			Title:          title,
+			State:          state,
+			Priority:       priority,
+			Kind:           kind,
+			ParentTaskID:   parentTaskID,
+			ParentTaskUUID: parentTaskUUID,
+			AssigneeSlug:   assigneeSlug,
+			AssigneeUUID:   assigneeActorUUID,
+			StartAt:        startAt,
+			DueAt:          dueAt,
+			Labels:         labels,
+			Description:    description,
+			Etag:           etag,
+			CreatedAt:      createdAt,
+			UpdatedAt:      updatedAt,
+			CompletedAt:    completedAt,
+			ArchivedAt:     archivedAt,
+			CreatedBy:      createdBySlug,
+			UpdatedBy:      updatedBySlug,
 		}
 
 		// Include comments by default (unless excluded)
@@ -171,6 +214,65 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Query relations for this task
+		var relations []Relation
+
+		// Get outgoing relations (this task -> other tasks)
+		outgoingRows, err := database.Query(`
+			SELECT r.kind, r.created_at,
+			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
+			       a.id AS created_by_id
+			FROM task_relations r
+			JOIN tasks t ON r.to_task_uuid = t.uuid
+			JOIN actors a ON r.created_by_actor_uuid = a.uuid
+			WHERE r.from_task_uuid = ?
+			ORDER BY r.kind, t.id
+		`, taskUUID)
+		if err != nil {
+			return fmt.Errorf("failed to query outgoing relations: %w", err)
+		}
+
+		for outgoingRows.Next() {
+			var rel Relation
+			if err := outgoingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
+				outgoingRows.Close()
+				return fmt.Errorf("failed to scan relation: %w", err)
+			}
+			rel.Direction = "outgoing"
+			relations = append(relations, rel)
+		}
+		outgoingRows.Close()
+
+		// Get incoming relations (other tasks -> this task)
+		incomingRows, err := database.Query(`
+			SELECT r.kind, r.created_at,
+			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
+			       a.id AS created_by_id
+			FROM task_relations r
+			JOIN tasks t ON r.from_task_uuid = t.uuid
+			JOIN actors a ON r.created_by_actor_uuid = a.uuid
+			WHERE r.to_task_uuid = ?
+			ORDER BY r.kind, t.id
+		`, taskUUID)
+		if err != nil {
+			return fmt.Errorf("failed to query incoming relations: %w", err)
+		}
+
+		for incomingRows.Next() {
+			var rel Relation
+			if err := incomingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
+				incomingRows.Close()
+				return fmt.Errorf("failed to scan relation: %w", err)
+			}
+			rel.Direction = "incoming"
+			relations = append(relations, rel)
+		}
+		incomingRows.Close()
+
+		if len(relations) > 0 {
+			task.Relations = relations
+		}
+
 		// For JSON output, collect tasks
 		if catJSON || catNDJSON {
 			tasks = append(tasks, task)
@@ -192,6 +294,19 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
 				fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
 				fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", task.Priority)
+				fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", task.Kind)
+				if task.ParentTaskID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "parent_task_id: %s\n", *task.ParentTaskID)
+				}
+				if task.ParentTaskUUID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "parent_task_uuid: %s\n", *task.ParentTaskUUID)
+				}
+				if task.AssigneeSlug != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "assignee: %s\n", *task.AssigneeSlug)
+				}
+				if task.AssigneeUUID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
+				}
 				if task.StartAt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
 				}

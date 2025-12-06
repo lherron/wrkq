@@ -46,10 +46,13 @@ func TestBootstrap_WithDB(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	// Initialize test database
+	// Initialize test database with migrations
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
+	}
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
 	}
 	database.Close()
 
@@ -83,16 +86,22 @@ func TestBootstrap_DBFlagOverride(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 	overridePath := filepath.Join(tmpDir, "override.db")
 
-	// Initialize both databases
+	// Initialize both databases with migrations
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
+	}
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
 	}
 	database.Close()
 
 	database2, err := db.Open(overridePath)
 	if err != nil {
 		t.Fatalf("Failed to open override database: %v", err)
+	}
+	if err := database2.Migrate(); err != nil {
+		t.Fatalf("Failed to run migrations on override: %v", err)
 	}
 	database2.Close()
 

@@ -17,15 +17,18 @@ type TaskStore struct {
 
 // CreateParams contains parameters for creating a new task.
 type CreateParams struct {
-	Slug        string
-	Title       string
-	Description string
-	ProjectUUID string
-	State       string
-	Priority    int
-	Labels      string // JSON array
-	DueAt       string
-	StartAt     string
+	Slug              string
+	Title             string
+	Description       string
+	ProjectUUID       string
+	State             string
+	Priority          int
+	Kind              string  // task, subtask, spike, bug, chore - defaults to "task"
+	ParentTaskUUID    *string // for subtasks
+	AssigneeActorUUID *string // task assignment
+	Labels            string  // JSON array
+	DueAt             string
+	StartAt           string
 }
 
 // CreateResult contains the result of task creation.
@@ -39,28 +42,38 @@ type CreateResult struct {
 func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResult, error) {
 	var result *CreateResult
 
+	// Default kind to "task" if not provided
+	kind := params.Kind
+	if kind == "" {
+		kind = "task"
+	}
+
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		query := `
 			INSERT INTO tasks (
-				id, slug, title, description, project_uuid, state, priority,
-				labels, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
+				id, slug, title, description, project_uuid, state, priority, kind,
+				parent_task_uuid, assignee_actor_uuid, labels, due_at, start_at,
+				created_by_actor_uuid, updated_by_actor_uuid
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 
 		res, err := tx.Exec(query,
-			"",                  // id (auto-generated)
-			params.Slug,         // slug
-			params.Title,        // title
-			params.Description,  // description
-			params.ProjectUUID,  // project_uuid
-			params.State,        // state
-			params.Priority,     // priority
-			params.Labels,       // labels (can be empty string or JSON)
-			params.DueAt,        // due_at (can be empty string)
-			params.StartAt,      // start_at (can be empty string)
-			actorUUID,           // created_by_actor_uuid
-			actorUUID,           // updated_by_actor_uuid
+			"",                       // id (auto-generated)
+			params.Slug,              // slug
+			params.Title,             // title
+			params.Description,       // description
+			params.ProjectUUID,       // project_uuid
+			params.State,             // state
+			params.Priority,          // priority
+			kind,                     // kind
+			params.ParentTaskUUID,    // parent_task_uuid
+			params.AssigneeActorUUID, // assignee_actor_uuid
+			params.Labels,            // labels (can be empty string or JSON)
+			params.DueAt,             // due_at (can be empty string)
+			params.StartAt,           // start_at (can be empty string)
+			actorUUID,                // created_by_actor_uuid
+			actorUUID,                // updated_by_actor_uuid
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create task: %w", err)
@@ -85,6 +98,13 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			"title":    params.Title,
 			"state":    params.State,
 			"priority": params.Priority,
+			"kind":     kind,
+		}
+		if params.ParentTaskUUID != nil {
+			payload["parent_task_uuid"] = *params.ParentTaskUUID
+		}
+		if params.AssigneeActorUUID != nil {
+			payload["assignee_actor_uuid"] = *params.AssigneeActorUUID
 		}
 		if params.Labels != "" {
 			payload["labels"] = params.Labels

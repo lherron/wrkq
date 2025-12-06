@@ -20,6 +20,7 @@ type ContainerCreateParams struct {
 	Slug       string
 	Title      string // defaults to Slug if empty
 	ParentUUID *string
+	Kind       string // project, feature, area, misc - defaults to "project"
 }
 
 // ContainerCreateResult contains the result of container creation.
@@ -39,11 +40,17 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 		title = params.Slug
 	}
 
+	// Default kind to "project" if not provided
+	kind := params.Kind
+	if kind == "" {
+		kind = "project"
+	}
+
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		res, err := tx.Exec(`
-			INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('', ?, ?, ?, ?, ?)
-		`, params.Slug, title, params.ParentUUID, actorUUID, actorUUID)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES ('', ?, ?, ?, ?, ?, ?)
+		`, params.Slug, title, params.ParentUUID, kind, actorUUID, actorUUID)
 		if err != nil {
 			return fmt.Errorf("failed to create container: %w", err)
 		}
@@ -65,6 +72,7 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 		payload := map[string]interface{}{
 			"slug":  params.Slug,
 			"title": title,
+			"kind":  kind,
 		}
 		if params.ParentUUID != nil {
 			payload["parent_uuid"] = *params.ParentUUID
@@ -357,15 +365,16 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 	// Use string intermediates for time fields since SQLite stores times as strings
 	var createdAt, updatedAt string
 	var archivedAt *string
+	var kind string
 
 	err := cs.store.db.QueryRow(`
-		SELECT uuid, id, slug, title, parent_uuid, etag,
+		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, etag,
 			   created_at, updated_at, archived_at,
 			   created_by_actor_uuid, updated_by_actor_uuid
 		FROM containers WHERE uuid = ?
 	`, uuid).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &container.ETag,
+		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&container.CreatedByActorUUID, &container.UpdatedByActorUUID,
 	)
@@ -375,6 +384,7 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 		}
 		return nil, fmt.Errorf("failed to get container: %w", err)
 	}
+	container.Kind = domain.ContainerKind(kind)
 	return container, nil
 }
 
@@ -384,12 +394,13 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 	// Use string intermediates for time fields
 	var createdAt, updatedAt string
 	var archivedAt *string
+	var kind string
 	var query string
 	var args []interface{}
 
 	if parentUUID == nil {
 		query = `
-			SELECT uuid, id, slug, title, parent_uuid, etag,
+			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_actor_uuid, updated_by_actor_uuid
 			FROM containers WHERE slug = ? AND parent_uuid IS NULL
@@ -397,7 +408,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		args = []interface{}{slug}
 	} else {
 		query = `
-			SELECT uuid, id, slug, title, parent_uuid, etag,
+			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_actor_uuid, updated_by_actor_uuid
 			FROM containers WHERE slug = ? AND parent_uuid = ?
@@ -407,7 +418,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 
 	err := cs.store.db.QueryRow(query, args...).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &container.ETag,
+		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&container.CreatedByActorUUID, &container.UpdatedByActorUUID,
 	)
@@ -417,5 +428,6 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		}
 		return nil, fmt.Errorf("failed to lookup container: %w", err)
 	}
+	container.Kind = domain.ContainerKind(kind)
 	return container, nil
 }

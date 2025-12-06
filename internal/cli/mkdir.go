@@ -21,23 +21,35 @@ The last segment of each path is treated as a container slug and normalized to l
 
 var (
 	mkdirParents bool
+	mkdirKind    string
 )
 
 func init() {
 	rootCmd.AddCommand(mkdirCmd)
 	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "Create parent containers as needed")
+	mkdirCmd.Flags().StringVar(&mkdirKind, "kind", "", "Container kind: project, feature, area, misc (default: project)")
 }
 
 func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
 
+	// Validate kind if provided
+	if mkdirKind != "" {
+		switch mkdirKind {
+		case "project", "feature", "area", "misc":
+			// valid
+		default:
+			return fmt.Errorf("invalid --kind: must be project, feature, area, or misc")
+		}
+	}
+
 	// Create store
 	s := store.New(database)
 
 	// Create each path
 	for _, path := range args {
-		if err := createContainer(s, actorUUID, path, mkdirParents); err != nil {
+		if err := createContainer(s, actorUUID, path, mkdirParents, mkdirKind); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", path)
@@ -46,7 +58,7 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createContainer(s *store.Store, actorUUID, path string, createParents bool) error {
+func createContainer(s *store.Store, actorUUID, path string, createParents bool, kind string) error {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		return fmt.Errorf("invalid path: %s", path)
@@ -55,7 +67,7 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool)
 	// If parents flag is set, create all segments
 	if createParents {
 		var parentUUID *string
-		for _, segment := range segments {
+		for i, segment := range segments {
 			// Normalize slug
 			slug, err := paths.NormalizeSlug(segment)
 			if err != nil {
@@ -68,10 +80,19 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool)
 				continue
 			}
 
+			// Determine kind for this segment:
+			// - Use provided kind only for the final segment
+			// - Use "project" for intermediate segments
+			segmentKind := "project"
+			if i == len(segments)-1 && kind != "" {
+				segmentKind = kind
+			}
+
 			// Create container using store
 			result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 				Slug:       slug,
 				ParentUUID: parentUUID,
+				Kind:       segmentKind,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create container %q: %w", slug, err)
@@ -93,6 +114,7 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool)
 	_, err = s.Containers.Create(actorUUID, store.ContainerCreateParams{
 		Slug:       slug,
 		ParentUUID: parentUUID,
+		Kind:       kind,
 	})
 	return err
 }
