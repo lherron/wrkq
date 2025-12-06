@@ -281,3 +281,5 @@ secrets.json
 # API keys (double-check these don't leak)
 .api-keys
 .secrets
+# wrkq database
+/tmp/test-init-actors.db

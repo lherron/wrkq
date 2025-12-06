@@ -28,16 +28,20 @@ This is an administrative command and should not be exposed to agents.`,
 }
 
 var (
-	initAdmActorSlug string
-	initAdmActorName string
-	initAdmAttachDir string
+	initAdmHumanSlug  string
+	initAdmHumanName  string
+	initAdmAgentSlug  string
+	initAdmAgentName  string
+	initAdmAttachDir  string
 )
 
 func init() {
 	rootAdmCmd.AddCommand(initAdmCmd)
 
-	initAdmCmd.Flags().StringVar(&initAdmActorSlug, "actor-slug", "local-human", "Slug for the default human actor")
-	initAdmCmd.Flags().StringVar(&initAdmActorName, "actor-name", "Local Human", "Display name for the default human actor")
+	initAdmCmd.Flags().StringVar(&initAdmHumanSlug, "human-slug", "local-human", "Slug for the default human actor")
+	initAdmCmd.Flags().StringVar(&initAdmHumanName, "human-name", "Local Human", "Display name for the default human actor")
+	initAdmCmd.Flags().StringVar(&initAdmAgentSlug, "agent-slug", "claude-code-agent", "Slug for the default agent actor")
+	initAdmCmd.Flags().StringVar(&initAdmAgentName, "agent-name", "Claude Code Agent", "Display name for the default agent actor")
 	initAdmCmd.Flags().StringVar(&initAdmAttachDir, "attach-dir", "", "Directory for attachments")
 }
 
@@ -54,12 +58,6 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 		cfg.DBPath = dbPathFlag
 	} else {
 		cfg.DBPath = ".wrkq/wrkq.db"
-	}
-
-	// Use actor slug from flag or default
-	actorSlugToUse := initAdmActorSlug
-	if !cmd.Flag("actor-slug").Changed {
-		actorSlugToUse = "claude-code-agent"
 	}
 
 	// Override attach dir from flag if provided
@@ -98,13 +96,14 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 
 	// Seed data only if this is a new database
 	if !dbExists {
-		if err := seedDatabaseAdm(database, actorSlugToUse, initAdmActorName); err != nil {
+		if err := seedDatabaseAdm(database, initAdmHumanSlug, initAdmHumanName, initAdmAgentSlug, initAdmAgentName); err != nil {
 			return exitError(1, fmt.Errorf("failed to seed database: %w", err))
 		}
 
 		fmt.Printf("✓ Initialized new database at %s\n", cfg.DBPath)
 		fmt.Printf("✓ Created attachments directory at %s\n", cfg.AttachDir)
-		fmt.Printf("✓ Seeded default actor: %s\n", actorSlugToUse)
+		fmt.Printf("✓ Seeded human actor: %s (%s)\n", initAdmHumanSlug, initAdmHumanName)
+		fmt.Printf("✓ Seeded agent actor: %s (%s)\n", initAdmAgentSlug, initAdmAgentName)
 		fmt.Printf("✓ Seeded inbox project\n")
 	} else {
 		fmt.Printf("✓ Database already initialized at %s\n", cfg.DBPath)
@@ -112,8 +111,8 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 	}
 
 	// Update project files (runs on both new and existing databases)
-	// Update .env or .env.local if needed
-	if err := updateEnvLocal(cfg.DBPath, actorSlugToUse); err != nil {
+	// Update .env or .env.local if needed (use human actor as default for WRKQ_ACTOR)
+	if err := updateEnvLocal(cfg.DBPath, initAdmHumanSlug); err != nil {
 		// Don't fail the command, just warn
 		fmt.Fprintf(os.Stderr, "Warning: failed to update env file: %v\n", err)
 	}
@@ -141,18 +140,27 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func seedDatabaseAdm(database *db.DB, actorSlug, actorName string) error {
-	// Normalize actor slug
-	normalizedSlug, err := paths.NormalizeSlug(actorSlug)
+func seedDatabaseAdm(database *db.DB, humanSlug, humanName, agentSlug, agentName string) error {
+	resolver := actors.NewResolver(database.DB)
+
+	// Normalize and create human actor
+	normalizedHumanSlug, err := paths.NormalizeSlug(humanSlug)
 	if err != nil {
-		return fmt.Errorf("invalid actor slug: %w", err)
+		return fmt.Errorf("invalid human actor slug: %w", err)
+	}
+	humanActor, err := resolver.Create(normalizedHumanSlug, humanName, "human")
+	if err != nil {
+		return fmt.Errorf("failed to create human actor: %w", err)
 	}
 
-	// Create default human actor
-	resolver := actors.NewResolver(database.DB)
-	actor, err := resolver.Create(normalizedSlug, actorName, "human")
+	// Normalize and create agent actor
+	normalizedAgentSlug, err := paths.NormalizeSlug(agentSlug)
 	if err != nil {
-		return fmt.Errorf("failed to create default actor: %w", err)
+		return fmt.Errorf("invalid agent actor slug: %w", err)
+	}
+	_, err = resolver.Create(normalizedAgentSlug, agentName, "agent")
+	if err != nil {
+		return fmt.Errorf("failed to create agent actor: %w", err)
 	}
 
 	// Normalize inbox slug
@@ -161,12 +169,12 @@ func seedDatabaseAdm(database *db.DB, actorSlug, actorName string) error {
 		return fmt.Errorf("failed to normalize inbox slug: %w", err)
 	}
 
-	// Create inbox project
+	// Create inbox project (use human actor as creator)
 	title := "Inbox"
 	_, err = database.Exec(`
 		INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
 		VALUES ('', ?, ?, NULL, ?, ?)
-	`, inboxSlug, title, actor.UUID, actor.UUID)
+	`, inboxSlug, title, humanActor.UUID, humanActor.UUID)
 	if err != nil {
 		return fmt.Errorf("failed to create inbox project: %w", err)
 	}

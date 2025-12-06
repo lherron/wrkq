@@ -76,10 +76,8 @@ wrkq ls myproject/api-feature --json
 ## Creating Tasks
 
 ```bash
-# Create with title and multi-line description
-wrkq touch myproject/feature/task-slug --state open --priority 2 \
-  -t "New Task" \
-  -d $'First line of description\nSecond line with more context'
+# Create with title and description
+wrkq touch myproject/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
 ```
 
 
@@ -100,16 +98,15 @@ wrkq rm myproject/api-feature/feature-slug --purge --yes
 # Set task state/priority/fields (quick updates)
 wrkq set T-00001 --state in_progress
 wrkq set T-00001 --title "New title" --due-at 2025-12-01
-wrkq set T-00001 -d $'New description text\nSecond line for extra detail'
+wrkq set T-00001 --description "New description text"
 
 # Supported states: open, in_progress, completed, blocked, cancelled
 # Priority: 1-4
 # Supported fields: state, priority, title, slug, labels, due_at, start_at, description
 
 
-# Update multiple fields at once (multi-line description)
-wrkq set T-00001 --state in_progress --priority 1 \
-  -d $'Starting work\nNeed review by EOD'
+# Update multiple fields at once
+wrkq set T-00001 --state in_progress --priority 1 --description "Starting work"
 
 # Conditional update (only if etag matches)
 wrkq set T-00001 --description "New text" --if-match 5
@@ -136,43 +133,5 @@ Most commands support:
 - `--json` - Pretty JSON
 - `--ndjson` - Newline-delimited JSON (best for parsing)
 - `--porcelain` - Stable machine-readable
-
-## Administrative Commands (wrkqadm)
-
-These commands manage database lifecycle and patch workflows.
-
-### Initialize Database
-```bash
-# Initialize wrkq in current project (creates .wrkq/wrkq.db)
-wrkqadm init
-```
-
-### State Snapshots
-```bash
-# Export current DB state to canonical snapshot
-wrkqadm state export --out .wrkq/state.json
-
-# Verify snapshot round-trip determinism
-wrkqadm state verify .wrkq/state.json
-```
-
-### Patch Workflow
-```bash
-# Create patch from main to current branch
-wrkqadm patch create \
-  --from main:.wrkq/state.json \
-  --to .wrkq/state.json \
-  --out .wrkq/patches/feature-slug.json
-
-# Validate patch
-wrkqadm patch validate --patch .wrkq/patches/feature-slug.json --base main:.wrkq/state.json
-
-# Apply patch (use --dry-run first)
-wrkqadm patch apply --patch .wrkq/patches/feature-slug.json --dry-run
-wrkqadm patch apply --patch .wrkq/patches/feature-slug.json
-
-# Summarize patch for PR description
-wrkqadm patch summarize --patch .wrkq/patches/feature-slug.json --format markdown
-```
 
 </task_tracking_rules>
