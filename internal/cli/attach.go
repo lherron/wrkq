@@ -147,7 +147,7 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 	defer rows.Close()
 
-	var attachments []map[string]interface{}
+	attachments := []map[string]interface{}{}
 	for rows.Next() {
 		var uuid, id, filename, relativePath, createdAt string
 		var mimeType, checksum, createdBy sql.NullString

@@ -58,7 +58,7 @@ func init() {
 
 	findCmd.Flags().StringVarP(&findType, "type", "", "", "Filter by type: t (task), p (project/container)")
 	findCmd.Flags().StringVar(&findSlugGlob, "slug-glob", "", "Filter by slug glob pattern (e.g. 'login-*')")
-	findCmd.Flags().StringVar(&findState, "state", "", "Filter by state: open, in_progress, completed, blocked, cancelled, archived")
+	findCmd.Flags().StringVar(&findState, "state", "", "Filter by state: draft, open, in_progress, completed, blocked, cancelled, archived")
 	findCmd.Flags().StringVar(&findDueBefore, "due-before", "", "Filter tasks due before date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findDueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findKind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
@@ -193,7 +193,7 @@ type findResult struct {
 }
 
 func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, bool, error) {
-	var results []findResult
+	results := []findResult{}
 
 	// Determine what to search
 	searchTasks := opts.typeFilter == "" || opts.typeFilter == "t"
@@ -365,7 +365,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	}
 	defer rows.Close()
 
-	var results []findResult
+	results := []findResult{}
 	for rows.Next() {
 		var r findResult
 		var state, kind, assigneeUUID, parentTaskUUID, dueAt sql.NullString
@@ -499,7 +499,7 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 	}
 	defer rows.Close()
 
-	var results []findResult
+	results := []findResult{}
 	for rows.Next() {
 		var r findResult
 

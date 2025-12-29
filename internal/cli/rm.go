@@ -130,7 +130,7 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ShowProgress:    !rmJSON && !rmNDJSON && !rmPorcelain,
 	}
 
-	var results []rmResult
+	results := []rmResult{}
 	result := op.Execute(taskUUIDs, func(taskUUID string) error {
 		res, err := removeTask(s, cfg.AttachDir, actorUUID, taskUUID)
 		if err == nil && res != nil {

@@ -283,3 +283,4 @@ secrets.json
 .secrets
 # wrkq database
 /tmp/test-init-actors.db
+/Users/lherron/projects/evaitools/.wrkq/wrkq.db

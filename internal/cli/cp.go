@@ -153,7 +153,7 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ShowProgress:    !cpJSON && !cpNDJSON && !cpPorcelain,
 	}
 
-	var results []copyResult
+	results := []copyResult{}
 	result := op.Execute(sourceTasks, func(taskUUID string) error {
 		res, err := copyTask(database, cfg.AttachDir, actorUUID, taskUUID, destUUID)
 		if err == nil && res != nil {

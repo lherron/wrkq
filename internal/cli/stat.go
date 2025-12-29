@@ -43,7 +43,7 @@ func runStat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		Extra    map[string]interface{} `json:"extra,omitempty"`
 	}
 
-	var results []Metadata
+	results := []Metadata{}
 
 	for _, arg := range args {
 		// Try to resolve as task first

@@ -96,7 +96,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var allComments []map[string]interface{}
+	allComments := []map[string]interface{}{}
 
 	// For each task argument, resolve and list comments
 	for _, taskArg := range args {

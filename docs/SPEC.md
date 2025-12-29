@@ -50,7 +50,7 @@ The system ships as **two complementary binaries**:
   - Health checks and config introspection
   - Operations that should NOT be exposed to agents
 
-This separation ensures agents get a focused, safe API while admins retain full control over database lifecycle and infrastructure concerns. See `WRKQADM.md` for detailed rationale.
+This separation ensures agents get a focused, safe API while admins retain full control over database lifecycle and infrastructure concerns. See `ARCHITECTURE.md` for detailed rationale.
 
 ## 3. Codebase Boundaries
 
@@ -146,11 +146,20 @@ Fields
 - `id` (friendly, `P-xxxxx`)
 - `slug` (fs-safe, normalized; unique among siblings)
 - `title` (optional, defaults to slug)
-- `parent_id` (nullable; null = top-level project)
+- `parent_uuid` (nullable; null = top-level project)
+- `kind` (`project` | `feature` | `area` | `misc`)
+- `section_uuid` (nullable; FK to Section, for kanban assignment)
+- `sort_index` (integer; ordering within parent)
 - `etag` (bigint)
 - `created_at`, `updated_at`, `archived_at` (nullable)
-- `created_by_actor_id` (FK Actor)
-- `updated_by_actor_id` (FK Actor)
+- `created_by_actor_uuid` (FK Actor)
+- `updated_by_actor_uuid` (FK Actor)
+
+Container Kinds
+- `project`: Top-level organizational boundary (default)
+- `feature`: Deliverable capability within a project
+- `area`: Cross-cutting concern that spans features
+- `misc`: Catch-all for uncategorized items
 
 ### 5.3 Task
 
@@ -159,16 +168,43 @@ Fields
 - `id` (friendly, `T-xxxxx`)
 - `slug` (fs-safe, normalized; unique among siblings within same container)
 - `title` (free text)
-- `project_id` (FK to container)
-- `state` (`open` | `completed` | `archived`)
-- `priority` (1..4, 1 is highest)
+- `project_uuid` (FK to container)
+- `state` (`draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled`)
+- `priority` (1..4, 1 is highest; default 3)
+- `kind` (`task` | `subtask` | `spike` | `bug` | `chore`)
+- `parent_task_uuid` (nullable; FK to parent Task for subtasks)
+- `assignee_actor_uuid` (nullable; FK to Actor)
 - `start_at` (nullable), `due_at` (nullable)
 - `labels` (JSON array of strings)
-- `body` (Markdown text)
+- `description` (Markdown text)
 - `etag` (bigint)
-- `created_at`, `updated_at`, `completed_at` (nullable)
-- `created_by_actor_id` (FK Actor)
-- `updated_by_actor_id` (FK Actor)
+- `created_at`, `updated_at`, `completed_at` (nullable), `archived_at` (nullable)
+- `created_by_actor_uuid` (FK Actor)
+- `updated_by_actor_uuid` (FK Actor)
+
+Task States
+- `draft`: Early-stage idea or concept, not yet ready to work on
+- `open`: Not started (default)
+- `in_progress`: Currently being worked on
+- `completed`: Done, meets acceptance criteria
+- `blocked`: Cannot continue due to external dependency
+- `cancelled`: Will not be done
+
+Lifecycle flow: `draft` → `open` → `in_progress` → `completed`/`blocked`/`cancelled`
+
+Note: Archiving is handled via `archived_at` timestamp, not as a workflow state.
+
+Task Kinds
+- `task`: Standard actionable work item (default)
+- `subtask`: Child of another task; cannot have its own subtasks (max depth 1)
+- `spike`: Time-boxed investigation to reduce uncertainty
+- `bug`: Defect that needs fixing
+- `chore`: Maintenance work that doesn't add features
+
+Subtask Rules
+- Subtasks are linked via `parent_task_uuid`
+- Maximum nesting depth is 1 (subtasks cannot have subtasks)
+- Subtasks share the context of their parent task
 
 ### 5.4 Comment
 
@@ -207,7 +243,7 @@ Invariants
 
 Event log integration
 
-- All comment changes write to the canonical event log (see 4.6):
+- All comment changes write to the canonical event log (see 5.8):
   - `resource_type`: `comment`
   - `resource_id`: comment `uuid`
   - Event types:
@@ -246,7 +282,55 @@ Fields
   - Attachment metadata removed.
   - Directory `attach_dir/tasks/<task_uuid>` and its contents are deleted.
 
-### 5.6 Event Log (Canonical Audit Trail)
+### 5.6 Task Relations
+
+Tasks can relate to each other beyond the container hierarchy. Relations are stored in a separate table and support dependency tracking and informational links.
+
+Fields
+- `from_task_uuid` (FK Task)
+- `to_task_uuid` (FK Task)
+- `kind` (`blocks` | `relates_to` | `duplicates`)
+- `meta` (JSON, optional)
+- `created_at`
+- `created_by_actor_uuid` (FK Actor)
+
+Relation Kinds
+- `blocks`: Task A blocks Task B (B cannot start until A is complete)
+- `relates_to`: Informational link between related tasks (no dependency)
+- `duplicates`: Task A is a duplicate of Task B (typically close the duplicate)
+
+Invariants
+- No self-references (a task cannot relate to itself)
+- Relations are directional (A blocks B is different from B blocks A)
+- All relation changes write to the event log
+
+### 5.7 Section (Kanban Column)
+
+> **Note**: Sections are defined in the schema but CLI commands are not yet implemented.
+
+Sections represent workflow stages for visualizing work in kanban-style boards.
+
+Fields
+- `uuid`
+- `id` (friendly, `S-xxxxx`)
+- `project_uuid` (FK Container; sections belong to a project)
+- `slug` (fs-safe, normalized; unique within project)
+- `title` (display name)
+- `order_index` (integer; ordering within project)
+- `role` (`backlog` | `ready` | `active` | `review` | `done`)
+- `is_default` (boolean; one default section per project)
+- `wip_limit` (nullable; Work In Progress limit)
+- `meta` (JSON, optional)
+- `created_at`, `updated_at`, `archived_at` (nullable)
+
+Section Roles
+- `backlog`: Not yet prioritized
+- `ready`: Prioritized and ready to start
+- `active`: Currently being worked on
+- `review`: Awaiting review or approval
+- `done`: Completed
+
+### 5.8 Event Log (Canonical Audit Trail)
 
 Append-only event stream for all significant changes.
 
@@ -254,19 +338,20 @@ Fields (conceptual)
 - `id`
 - `timestamp`
 - `actor_id`
-- `resource_type` (`task` | `container` | `attachment` | `comment` | `actor` | `config` | `system`)
-- `resource_id` (UUID)
-- `event_type` (e.g. `task.created`, `task.updated`, `task.deleted`, `task.moved`)
+- `resource_type` (`task` | `container` | `attachment` | `comment` | `actor` | `config` | `system` | `section` | `task_relation`)
+- `resource_uuid` (UUID)
+- `event_type` (e.g. `task.created`, `task.updated`, `task.deleted`, `task.moved`, `task.relation`)
 - `etag` (resulting etag after change, if applicable)
 - `payload` (JSON diff or structured fields)
 
 `wrkq log` and `wrkq watch` are views onto this table.
 
-### 5.7 Constraints Summary
+### 5.9 Constraints Summary
 
 - Slugs: normalized, `[a-z0-9-]`, lower-case, unique among siblings.
-- No sections in the addressing model; only containers (projects/subprojects) and tasks.
-- Tasks live directly under their container.
+- Containers form a hierarchy (parent_uuid); tasks live under containers.
+- Subtasks have max depth of 1 (subtasks cannot have subtasks).
+- Task relations cannot be self-referential.
 
 -------------------------------------------------------------------------------
 
@@ -563,13 +648,19 @@ Output
   - Flags: `--format=md|yaml|json`, `--with-metadata`, `--if-match`, `--dry-run`.
   - For quick metadata-only updates, prefer `wrkq set`.
 
-- `wrkq set <PATHSPEC|ID...> key=value [...]`
-  - Mutate task fields quickly:
-    - `state=completed`
-    - `priority=1`
-    - `title="New Title"`
-    - `slug=login-ux` (validated against slug rules)
-  - Flags: `--if-match`, `--dry-run`, `--continue-on-error`, `-type t`.
+- `wrkq set <PATHSPEC|ID...> [--field value ...]`
+  - Update task fields quickly.
+  - Supported fields:
+    - `--state <state>` (open, in_progress, completed, blocked, cancelled)
+    - `--priority <1-4>`
+    - `--title <text>`
+    - `--slug <slug>` (validated against slug rules)
+    - `--description <text|@file|->`
+    - `--kind <kind>` (task, subtask, spike, bug, chore)
+    - `--assignee <actor>`
+    - `--labels <json-array>`
+    - `--start-at`, `--due-at` (dates)
+  - Flags: `--if-match`, `--dry-run`, `--continue-on-error`, `-type t`, `-j <jobs>`.
 
 ---
 
@@ -578,12 +669,26 @@ Output
 - `wrkq mkdir <PATH...>`
   - Create projects/subprojects (containers).
   - Last segment is treated as container slug and normalized.
-  - Flags: `-p` (parents), `--meta key=val`.
+  - Flags:
+    - `-p` (create parents as needed)
+    - `--kind <kind>` (project, feature, area, misc; default: project)
+    - `--title <text>` (display title)
+    - `--meta key=val`
 
 - `wrkq touch <PATH...> [-t "Title"]`
   - Create tasks at leaf containers.
   - Last segment becomes task slug, normalized to lower-case `[a-z0-9-]`.
-  - Flags: `--meta key=val`.
+  - Flags:
+    - `-t, --title <text>` (task title)
+    - `-d, --description <text|@file|->` (task description)
+    - `--state <state>` (default: open)
+    - `--priority <1-4>` (default: 3)
+    - `--kind <kind>` (task, subtask, spike, bug, chore; default: task)
+    - `--parent-task <id>` (for subtasks)
+    - `--assignee <actor>` (assign to actor)
+    - `--labels <json-array>` (e.g., '["backend", "urgent"]')
+    - `--start-at`, `--due-at` (dates)
+    - `--meta key=val`
 
 - `wrkq mv <SRC...> <DST>`
   - Move or rename tasks and containers. Globbing is default.
@@ -620,13 +725,16 @@ Output
 ### 10.6 Search and Discovery (wrkq)
 
 - `wrkq find [PATH...]`
-  - Simple metadata search (present).
+  - Metadata search across tasks and containers.
   - Flags:
-    - `-type p|s|t`
-    - `--slug-glob <glob>` (slug-only, uses normalized slug rules)
-    - `--state`
-    - `--due-before`, `--due-after`
-    - `--print0`
+    - `-type p|t` (filter by type: project/container or task)
+    - `--slug-glob <glob>` (slug pattern matching)
+    - `--state <state>` (open, in_progress, completed, blocked, cancelled)
+    - `--kind <kind>` (task, subtask, spike, bug, chore)
+    - `--assignee <actor>` (filter by assignee)
+    - `--parent-task <id>` (filter subtasks of a parent)
+    - `--due-before`, `--due-after` (date filters)
+    - `--json|--ndjson`, `--print0`
     - `--limit`, `--cursor`, `--porcelain`
 
 - `wrkq rg <pattern> [PATHSPEC...]` (Future enhancement)
@@ -774,6 +882,32 @@ All mutating commands use normal actor resolution (`--as`, env, config) and writ
     - `--purge`
     - `--if-match <etag>`
   - Soft‑deleted comments are hidden from `wrkq comment ls` unless `--include-deleted` is set, and from `wrkq cat --include-comments`.
+
+### 10.12 Task Relations (wrkq)
+
+Commands for managing dependencies and informational links between tasks.
+
+- `wrkq relation add <FROM-TASK> <KIND> <TO-TASK>`
+  - Create a relation between two tasks.
+  - `KIND` is one of: `blocks`, `relates_to`, `duplicates`
+  - Example: `wrkq relation add T-00001 blocks T-00002`
+  - Flags:
+    - `--as <actor>` (override actor resolution)
+    - `--json` (output created relation as JSON)
+
+- `wrkq relation rm <FROM-TASK> <KIND> <TO-TASK>`
+  - Remove a relation between two tasks.
+  - Flags:
+    - `--yes` (skip confirmation)
+    - `--as <actor>`
+
+- `wrkq relation ls <TASK-PATH|t:<id>>`
+  - List relations for a task.
+  - By default, shows both incoming and outgoing relations.
+  - Flags:
+    - `--json|--ndjson`
+    - `--direction=outgoing|incoming|both` (default: both)
+    - `--kind=blocks|relates_to|duplicates` (filter by relation kind)
 
 -------------------------------------------------------------------------------
 
@@ -962,18 +1096,18 @@ wrkq bundle create [--out <dir>] [--actor <slug|A-xxxxx>] [--since <ts>] [--unti
 
 **Behavior**
 - Writes a bundle directory (default: `.wrkq/`) containing:
-  - `manifest.json` (includes `machine_interface_version`, build/version info).  [oai_citation:2‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-  - `events.ndjson` (slice of the canonical audit log for review/debug; optional).  [oai_citation:3‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - `manifest.json` (includes `machine_interface_version`, build/version info).
+  - `events.ndjson` (slice of the canonical audit log for review/debug; optional).
   - `containers.txt` (containers to ensure exist).
-  - `tasks/<path>.md` for each changed task: **exact** `wrkq cat` output plus helper keys `path` and `base_etag`. Unknown keys are ignored by core commands.  [oai_citation:4‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-  - `attachments/<task_uuid>/*` for changed tasks when `--with-attachments` is set, following `attach_dir/tasks/<task_uuid>/…`.  [oai_citation:5‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- Computes `base_etag` per task from the earliest included event for that task to enable `--if-match` on import. (ETag semantics: exit **4** on mismatch.)  [oai_citation:6‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - `tasks/<path>.md` for each changed task: **exact** `wrkq cat` output plus helper keys `path` and `base_etag`. Unknown keys are ignored by core commands.
+  - `attachments/<task_uuid>/*` for changed tasks when `--with-attachments` is set, following `attach_dir/tasks/<task_uuid>/…`.
+- Computes `base_etag` per task from the earliest included event for that task to enable `--if-match` on import. (ETag semantics: exit **4** on mismatch.)
 
 **Flags**
 - `--out <dir>`: target directory (default `.wrkq/`).
-- `--actor <slug|A-xxxxx>`: filter changes by actor for agent‑specific bundles.  [oai_citation:7‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- `--since/--until`: time window over the event log.  [oai_citation:8‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- `--with-attachments`: include attachment payloads for changed tasks.  [oai_citation:9‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- `--actor <slug|A-xxxxx>`: filter changes by actor for agent‑specific bundles.
+- `--since/--until`: time window over the event log.
+- `--with-attachments`: include attachment payloads for changed tasks.
 - `--no-events`: omit `events.ndjson` (snapshot‑only bundle).
 
 **Output**
@@ -991,12 +1125,12 @@ wrkq bundle apply [--from <dir>] [--dry-run] [--continue-on-error] [--json|--por
 ```
 
 **Behavior**
-- Reads `manifest.json` and validates `machine_interface_version` against `wrkq version --json`.  [oai_citation:10‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- Ensures containers listed in `containers.txt` exist (`mkdir -p`).  [oai_citation:11‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Reads `manifest.json` and validates `machine_interface_version` against `wrkq version --json`.
+- Ensures containers listed in `containers.txt` exist (`mkdir -p`).
 - For each `tasks/<path>.md`:
-  - Prefer selector `t:<uuid>`; fallback to `t:<path>` if new.  [oai_citation:12‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-  - If `base_etag` is present, perform `wrkq apply … --if-match <base_etag>`. On mismatch return **4** and show a `wrkq diff` to aid resolution.  [oai_citation:13‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- Re‑attach files from `attachments/<task_uuid>/…` via `wrkq attach put`.  [oai_citation:14‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+  - Prefer selector `t:<uuid>`; fallback to `t:<path>` if new.
+  - If `base_etag` is present, perform `wrkq apply … --if-match <base_etag>`. On mismatch return **4** and show a `wrkq diff` to aid resolution.
+- Re‑attach files from `attachments/<task_uuid>/…` via `wrkq attach put`.
 
 **Flags**
 - `--from <dir>`: bundle root (default `.wrkq/`).
@@ -1004,7 +1138,7 @@ wrkq bundle apply [--from <dir>] [--dry-run] [--continue-on-error] [--json|--por
 - `--continue-on-error`: attempt remaining items after an error.
 
 **Exit codes**
-- `0` success; `4` if any conflicts (ETag mismatch or merge conflict); see global exit codes.  [oai_citation:15‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- `0` success; `4` if any conflicts (ETag mismatch or merge conflict); see global exit codes.
 
 ---
 
@@ -1018,12 +1152,12 @@ wrkqadm db snapshot --out <path> [--json]
 ```
 
 **Behavior**
-- Uses SQLite’s online backup to write a consistent point‑in‑time copy of the DB to `<path>`; no WAL/SHM files required. (Wrkq uses a single local SQLite DB in WAL mode.)  [oai_citation:16‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- Prints a small JSON manifest (timestamp, source DB path, `machine_interface_version`) with `--json`.  [oai_citation:17‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
-- **Does not** copy attachments; agents should use branch‑scoped `WRKQ_ATTACH_DIR` and export needed files in bundles.  [oai_citation:18‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Uses SQLite’s online backup to write a consistent point‑in‑time copy of the DB to `<path>`; no WAL/SHM files required. (Wrkq uses a single local SQLite DB in WAL mode.)
+- Prints a small JSON manifest (timestamp, source DB path, `machine_interface_version`) with `--json`.
+- **Does not** copy attachments; agents should use branch‑scoped `WRKQ_ATTACH_DIR` and export needed files in bundles.
 
 **Use with env**
-- Agents set `WRKQ_DB_PATH` to the snapshot and `WRKQ_ACTOR` to a branch‑scoped slug to preserve attribution.  [oai_citation:19‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Agents set `WRKQ_DB_PATH` to the snapshot and `WRKQ_ACTOR` to a branch‑scoped slug to preserve attribution.
 
 ---
 
@@ -1054,7 +1188,7 @@ wrkqadm bundle replay [--from <dir>] [--dry-run] [--strict-etag]
 ```
 
 **Behavior**
-- Reapplies events in order; with `--strict-etag`, each event is verified against stored ETags and exits **4** on divergence (leveraging the canonical audit model).  [oai_citation:22‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Reapplies events in order; with `--strict-etag`, each event is verified against stored ETags and exits **4** on divergence (leveraging the canonical audit model).
 
 ---
 
@@ -1068,14 +1202,14 @@ wrkqadm attach path <ATTACHMENT-ID|relative_path> [--json|--porcelain]
 ```
 
 **Behavior**
-- Resolves to the absolute file under `attach_dir/tasks/<task_uuid>/…` without copying; prints a stable path for tooling. (Attachment layout is already defined and stable.)  [oai_citation:23‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- Resolves to the absolute file under `attach_dir/tasks/<task_uuid>/…` without copying; prints a stable path for tooling. (Attachment layout is already defined and stable.)
 
 ---
 
 ### Notes & Compatibility
 
-- All new commands adhere to existing **addressing** (`t:<token>`) and **exit code** conventions; no breaking changes to machine interfaces.  [oai_citation:24‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)  
-- Bundles intentionally use the **task document** format emitted by `wrkq cat` and consumed by `wrkq apply`, ensuring deterministic round‑trips and reviewability in Git.  [oai_citation:25‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+- All new commands adhere to existing **addressing** (`t:<token>`) and **exit code** conventions; no breaking changes to machine interfaces.  
+- Bundles intentionally use the **task document** format emitted by `wrkq cat` and consumed by `wrkq apply`, ensuring deterministic round‑trips and reviewability in Git.
 
 ---
 
@@ -1104,4 +1238,4 @@ wrkq apply t:T-00123 task-update.md --with-metadata --if-match 47
 wrkq edit t:T-00123
 ```
 
-All behaviors above are consistent with the spec’s ETag concurrency model, event log guarantees, and attachment paths.  [oai_citation:26‡SPEC.md](sediment://file_000000000494720ca24c13c2ec0a827c)
+All behaviors above are consistent with the spec’s ETag concurrency model, event log guarantees, and attachment paths.

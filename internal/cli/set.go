@@ -71,7 +71,7 @@ func init() {
 	setCmd.Flags().IntVar(&setBatchSize, "batch-size", 1, "Group operations into batches (not yet implemented)")
 	setCmd.Flags().BoolVar(&setOrdered, "ordered", false, "Preserve input order (disables parallelism)")
 	setCmd.Flags().StringVarP(&setDescription, "description", "d", "", "Update task description (use @file.md for file or - for stdin)")
-	setCmd.Flags().StringVar(&setState, "state", "", "Update task state (open, in_progress, completed, blocked, cancelled)")
+	setCmd.Flags().StringVar(&setState, "state", "", "Update task state (draft, open, in_progress, completed, blocked, cancelled)")
 	setCmd.Flags().IntVar(&setPriority, "priority", 0, "Update task priority (1-4)")
 	setCmd.Flags().StringVar(&setTitle, "title", "", "Update task title")
 	setCmd.Flags().StringVar(&setSlug, "slug", "", "Update task slug")
