@@ -33,12 +33,12 @@ Comments are immutable and attributed to the current actor.`,
 }
 
 var (
-	commentAddMessage  string
-	commentAddFile     string
-	commentAddMeta     string
-	commentAddIfMatch  int64
-	commentAddDryRun   bool
-	commentAddAsActor  string
+	commentAddMessage string
+	commentAddFile    string
+	commentAddMeta    string
+	commentAddIfMatch int64
+	commentAddDryRun  bool
+	commentAddAsActor string
 )
 
 func init() {
@@ -71,6 +71,7 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if strings.HasPrefix(taskRef, "t:") {
 		taskRef = taskRef[2:]
 	}
+	taskRef = applyProjectRootToSelector(app.Config, taskRef, false)
 
 	// Resolve task
 	taskUUID, taskID, err := selectors.ResolveTask(database, taskRef)
@@ -176,15 +177,16 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get next comment sequence number
+	// Get next comment ID by calculating from MAX(id)+1
+	// This is self-healing: even if comment_sequences gets out of sync (e.g., from
+	// restore or snapshot import), we'll generate the correct next ID.
 	var nextSeq int
-	err = tx.QueryRow("SELECT value FROM comment_sequences WHERE name = 'next_comment'").Scan(&nextSeq)
+	err = tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments").Scan(&nextSeq)
 	if err != nil {
-		return fmt.Errorf("failed to get comment sequence: %w", err)
+		return fmt.Errorf("failed to calculate next comment ID: %w", err)
 	}
-	nextSeq++
 
-	// Update sequence
+	// Update sequence table to stay in sync (for consistency, though we don't rely on it)
 	_, err = tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", nextSeq)
 	if err != nil {
 		return fmt.Errorf("failed to update comment sequence: %w", err)
@@ -268,7 +270,7 @@ func parseTimestamp(s string) (time.Time, error) {
 		time.RFC3339,
 		"2006-01-02T15:04:05Z",
 		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05",  // SQLite datetime() format
+		"2006-01-02 15:04:05", // SQLite datetime() format
 	}
 
 	for _, format := range formats {

@@ -15,6 +15,7 @@ type Config struct {
 	AttachDir        string `yaml:"attach_dir"`
 	AttachmentsMaxMB int    `yaml:"attachments_max_mb"`
 	DefaultActor     string `yaml:"default_actor"`
+	ProjectRoot      string `yaml:"project_root"`
 	LogLevel         string `yaml:"log_level"`
 	Output           string `yaml:"output"`
 	Pager            string `yaml:"pager"`
@@ -57,6 +58,9 @@ func Load() (*Config, error) {
 	}
 	if defaultActor := os.Getenv("WRKQ_ACTOR"); defaultActor != "" {
 		cfg.DefaultActor = defaultActor
+	}
+	if projectRoot := os.Getenv("WRKQ_PROJECT_ROOT"); projectRoot != "" {
+		cfg.ProjectRoot = projectRoot
 	}
 
 	// Set defaults if not configured

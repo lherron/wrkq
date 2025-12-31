@@ -58,7 +58,7 @@ func init() {
 
 	findCmd.Flags().StringVarP(&findType, "type", "", "", "Filter by type: t (task), p (project/container)")
 	findCmd.Flags().StringVar(&findSlugGlob, "slug-glob", "", "Filter by slug glob pattern (e.g. 'login-*')")
-	findCmd.Flags().StringVar(&findState, "state", "", "Filter by state: draft, open, in_progress, completed, blocked, cancelled, archived")
+	findCmd.Flags().StringVar(&findState, "state", "", "Filter by state: draft, open, in_progress, completed, blocked, cancelled, archived, deleted, or 'all' for everything")
 	findCmd.Flags().StringVar(&findDueBefore, "due-before", "", "Filter tasks due before date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findDueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findKind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
@@ -74,6 +74,7 @@ func init() {
 
 func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
+	args = applyProjectRootToPaths(app.Config, args, true)
 
 	// Resolve assignee to UUID if provided
 	var assigneeUUID string
@@ -89,7 +90,8 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Resolve parent task to UUID if provided
 	var parentTaskUUID string
 	if findParentTask != "" {
-		uuid, _, err := selectors.ResolveTask(database, findParentTask)
+		parentRef := applyProjectRootToSelector(app.Config, findParentTask, false)
+		uuid, _, err := selectors.ResolveTask(database, parentRef)
 		if err != nil {
 			return fmt.Errorf("failed to resolve parent task: %w", err)
 		}
@@ -176,20 +178,20 @@ type findOptions struct {
 }
 
 type findResult struct {
-	Type           string  `json:"type"`                        // "task" or "container"
-	UUID           string  `json:"uuid"`
-	ID             string  `json:"id"`
-	Slug           string  `json:"slug"`
-	Title          string  `json:"title"`
-	Path           string  `json:"path"`
-	State          *string `json:"state,omitempty"`             // tasks only
-	Priority       *int    `json:"priority,omitempty"`          // tasks only
-	Kind           *string `json:"kind,omitempty"`              // tasks only
-	Assignee       *string `json:"assignee,omitempty"`          // tasks only (actor slug)
-	ParentTaskID   *string `json:"parent_task_id,omitempty"`    // subtasks only
-	DueAt          *string `json:"due_at,omitempty"`            // tasks only
-	UpdatedAt      string  `json:"updated_at,omitempty"`        // for cursor pagination
-	ETag           int64   `json:"etag"`
+	Type         string  `json:"type"` // "task" or "container"
+	UUID         string  `json:"uuid"`
+	ID           string  `json:"id"`
+	Slug         string  `json:"slug"`
+	Title        string  `json:"title"`
+	Path         string  `json:"path"`
+	State        *string `json:"state,omitempty"`          // tasks only
+	Priority     *int    `json:"priority,omitempty"`       // tasks only
+	Kind         *string `json:"kind,omitempty"`           // tasks only
+	Assignee     *string `json:"assignee,omitempty"`       // tasks only (actor slug)
+	ParentTaskID *string `json:"parent_task_id,omitempty"` // subtasks only
+	DueAt        *string `json:"due_at,omitempty"`         // tasks only
+	UpdatedAt    string  `json:"updated_at,omitempty"`     // for cursor pagination
+	ETag         int64   `json:"etag"`
 }
 
 func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, bool, error) {
@@ -266,13 +268,15 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	`
 	args := []interface{}{}
 
-	// Filter by state (default: exclude archived)
-	if opts.state != "" {
+	// Filter by state (default: exclude archived and deleted)
+	if opts.state == "all" {
+		// Include all states (no filter)
+	} else if opts.state != "" {
 		query += " AND t.state = ?"
 		args = append(args, opts.state)
 	} else {
-		// Default: exclude archived
-		query += " AND t.state != 'archived'"
+		// Default: exclude archived and deleted
+		query += " AND t.state NOT IN ('archived', 'deleted')"
 	}
 
 	// Filter by kind

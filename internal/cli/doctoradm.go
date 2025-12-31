@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
@@ -74,6 +75,7 @@ func runDoctorAdm(cmd *cobra.Command, args []string) error {
 		report.Checks = append(report.Checks, checkDatabasePragmasAdm(database)...)
 		report.Checks = append(report.Checks, checkSchemaAdm(database)...)
 		report.Checks = append(report.Checks, checkDataIntegrityAdm(database)...)
+		report.Checks = append(report.Checks, checkSequenceDriftAdm(database)...)
 		report.Checks = append(report.Checks, checkAttachmentsAdm(database, cfg.AttachDir)...)
 		report.Checks = append(report.Checks, checkPerformanceAdm(database)...)
 	} else {
@@ -326,6 +328,43 @@ func checkDataIntegrityAdm(database *db.DB) []checkResultAdm {
 	return results
 }
 
+func checkSequenceDriftAdm(database *db.DB) []checkResultAdm {
+	var results []checkResultAdm
+
+	drifts, err := db.SequenceDrifts(database, db.DefaultSequenceSpecs())
+	if err != nil {
+		results = append(results, checkResultAdm{
+			Name:    "sequence_drift",
+			Status:  "error",
+			Message: fmt.Sprintf("Failed to check sqlite_sequence drift: %v", err),
+		})
+		return results
+	}
+
+	if len(drifts) == 0 {
+		results = append(results, checkResultAdm{
+			Name:    "sequence_drift",
+			Status:  "ok",
+			Message: "All sqlite_sequence values are in sync",
+		})
+		return results
+	}
+
+	details := make([]string, 0, len(drifts))
+	for _, drift := range drifts {
+		details = append(details, fmt.Sprintf("%s (table %s): sqlite_sequence=%d, max_id=%d", drift.SeqTable, drift.EntityTable, drift.SeqValue, drift.MaxID))
+	}
+
+	results = append(results, checkResultAdm{
+		Name:    "sequence_drift",
+		Status:  "error",
+		Message: fmt.Sprintf("Detected sqlite_sequence drift (%d table(s))", len(drifts)),
+		Details: details,
+	})
+
+	return results
+}
+
 func checkAttachmentsAdm(database *db.DB, attachDir string) []checkResultAdm {
 	var results []checkResultAdm
 
@@ -440,9 +479,20 @@ func checkPerformanceAdm(database *db.DB) []checkResultAdm {
 }
 
 func applyFixesAdm(database *db.DB, report *doctorReportAdm) {
-	// For now, just report that --fix is not yet implemented
-	fmt.Println("\n--fix flag is not yet fully implemented")
-	fmt.Println("Future version will auto-repair safe issues")
+	var outputs []string
+
+	if drifts, err := db.FixSequenceDrifts(database, db.DefaultSequenceSpecs()); err != nil {
+		outputs = append(outputs, fmt.Sprintf("Sequence repair failed: %v", err))
+	} else if len(drifts) > 0 {
+		outputs = append(outputs, fmt.Sprintf("Fixed sqlite_sequence drift for %d table(s)", len(drifts)))
+	} else {
+		outputs = append(outputs, "No sqlite_sequence drift detected")
+	}
+
+	if len(outputs) > 0 {
+		fmt.Fprintln(os.Stdout, "\n--fix results")
+		fmt.Fprintln(os.Stdout, strings.Join(outputs, "\n"))
+	}
 }
 
 func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
@@ -455,6 +505,7 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 		"Database Health": {},
 		"Schema":          {},
 		"Data Integrity":  {},
+		"Sequences":       {},
 		"Attachments":     {},
 		"Performance":     {},
 	}
@@ -469,6 +520,8 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 			categories["Schema"] = append(categories["Schema"], check)
 		case "orphaned_tasks", "orphaned_attachments", "duplicate_slugs":
 			categories["Data Integrity"] = append(categories["Data Integrity"], check)
+		case "sequence_drift":
+			categories["Sequences"] = append(categories["Sequences"], check)
 		case "attach_dir_exists", "attachments_count", "orphaned_files":
 			categories["Attachments"] = append(categories["Attachments"], check)
 		case "task_counts", "container_count", "database_size":
@@ -477,7 +530,7 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 	}
 
 	// Print each category
-	for _, category := range []string{"Database File", "Database Health", "Schema", "Data Integrity", "Attachments", "Performance"} {
+	for _, category := range []string{"Database File", "Database Health", "Schema", "Data Integrity", "Sequences", "Attachments", "Performance"} {
 		checks := categories[category]
 		if len(checks) == 0 {
 			continue

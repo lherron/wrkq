@@ -17,6 +17,7 @@ type TaskStore struct {
 
 // CreateParams contains parameters for creating a new task.
 type CreateParams struct {
+	UUID              string  // optional: force specific UUID instead of auto-generating
 	Slug              string
 	Title             string
 	Description       string
@@ -49,32 +50,67 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 	}
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		query := `
-			INSERT INTO tasks (
-				id, slug, title, description, project_uuid, state, priority, kind,
-				parent_task_uuid, assignee_actor_uuid, labels, due_at, start_at,
-				created_by_actor_uuid, updated_by_actor_uuid
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`
+		var query string
+		var args []interface{}
 
-		res, err := tx.Exec(query,
-			"",                       // id (auto-generated)
-			params.Slug,              // slug
-			params.Title,             // title
-			params.Description,       // description
-			params.ProjectUUID,       // project_uuid
-			params.State,             // state
-			params.Priority,          // priority
-			kind,                     // kind
-			params.ParentTaskUUID,    // parent_task_uuid
-			params.AssigneeActorUUID, // assignee_actor_uuid
-			params.Labels,            // labels (can be empty string or JSON)
-			params.DueAt,             // due_at (can be empty string)
-			params.StartAt,           // start_at (can be empty string)
-			actorUUID,                // created_by_actor_uuid
-			actorUUID,                // updated_by_actor_uuid
-		)
+		if params.UUID != "" {
+			// Force specific UUID
+			query = `
+				INSERT INTO tasks (
+					uuid, id, slug, title, description, project_uuid, state, priority, kind,
+					parent_task_uuid, assignee_actor_uuid, labels, due_at, start_at,
+					created_by_actor_uuid, updated_by_actor_uuid
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`
+			args = []interface{}{
+				params.UUID,              // uuid (forced)
+				"",                       // id (auto-generated)
+				params.Slug,              // slug
+				params.Title,             // title
+				params.Description,       // description
+				params.ProjectUUID,       // project_uuid
+				params.State,             // state
+				params.Priority,          // priority
+				kind,                     // kind
+				params.ParentTaskUUID,    // parent_task_uuid
+				params.AssigneeActorUUID, // assignee_actor_uuid
+				params.Labels,            // labels (can be empty string or JSON)
+				params.DueAt,             // due_at (can be empty string)
+				params.StartAt,           // start_at (can be empty string)
+				actorUUID,                // created_by_actor_uuid
+				actorUUID,                // updated_by_actor_uuid
+			}
+		} else {
+			// Auto-generate UUID
+			query = `
+				INSERT INTO tasks (
+					id, slug, title, description, project_uuid, state, priority, kind,
+					parent_task_uuid, assignee_actor_uuid, labels, due_at, start_at,
+					created_by_actor_uuid, updated_by_actor_uuid
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`
+			args = []interface{}{
+				"",                       // id (auto-generated)
+				params.Slug,              // slug
+				params.Title,             // title
+				params.Description,       // description
+				params.ProjectUUID,       // project_uuid
+				params.State,             // state
+				params.Priority,          // priority
+				kind,                     // kind
+				params.ParentTaskUUID,    // parent_task_uuid
+				params.AssigneeActorUUID, // assignee_actor_uuid
+				params.Labels,            // labels (can be empty string or JSON)
+				params.DueAt,             // due_at (can be empty string)
+				params.StartAt,           // start_at (can be empty string)
+				actorUUID,                // created_by_actor_uuid
+				actorUUID,                // updated_by_actor_uuid
+			}
+		}
+
+		res, err := tx.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("failed to create task: %w", err)
 		}
@@ -186,6 +222,13 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 		_, err = tx.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("failed to update task: %w", err)
+		}
+
+		// Cascade delete subtasks if state is being set to 'deleted'
+		if newState, ok := fields["state"]; ok && newState == "deleted" {
+			if err := cascadeDeleteSubtasks(tx, ew, actorUUID, taskUUID); err != nil {
+				return fmt.Errorf("failed to cascade delete subtasks: %w", err)
+			}
 		}
 
 		// Log event with structured payload
@@ -479,4 +522,60 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.Labels = labels
 
 	return task, nil
+}
+
+// cascadeDeleteSubtasks deletes all subtasks when a parent task is deleted.
+// This is called within a transaction when a task's state is set to 'deleted'.
+func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskUUID string) error {
+	// Find all subtasks (not already deleted)
+	rows, err := tx.Query(`
+		SELECT uuid FROM tasks
+		WHERE parent_task_uuid = ? AND state != 'deleted'
+	`, parentTaskUUID)
+	if err != nil {
+		return fmt.Errorf("failed to query subtasks: %w", err)
+	}
+	defer rows.Close()
+
+	var subtaskUUIDs []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return fmt.Errorf("failed to scan subtask: %w", err)
+		}
+		subtaskUUIDs = append(subtaskUUIDs, uuid)
+	}
+	rows.Close()
+
+	// Delete each subtask
+	for _, subtaskUUID := range subtaskUUIDs {
+		_, err := tx.Exec(`
+			UPDATE tasks
+			SET state = 'deleted',
+			    updated_by_actor_uuid = ?
+			WHERE uuid = ?
+		`, actorUUID, subtaskUUID)
+		if err != nil {
+			return fmt.Errorf("failed to delete subtask %s: %w", subtaskUUID, err)
+		}
+
+		// Log event
+		payload := `{"action":"cascade_deleted","parent_deleted":true}`
+		if err := ew.LogEvent(tx, &domain.Event{
+			ActorUUID:    &actorUUID,
+			ResourceType: "task",
+			ResourceUUID: &subtaskUUID,
+			EventType:    "task.deleted",
+			Payload:      &payload,
+		}); err != nil {
+			return fmt.Errorf("failed to log event: %w", err)
+		}
+
+		// Recursively delete nested subtasks
+		if err := cascadeDeleteSubtasks(tx, ew, actorUUID, subtaskUUID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

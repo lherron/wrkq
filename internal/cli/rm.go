@@ -44,13 +44,13 @@ var (
 )
 
 type rmResult struct {
-	ID                string `json:"id"`
-	UUID              string `json:"uuid"`
-	Slug              string `json:"slug"`
-	Path              string `json:"path"`
-	Purged            bool   `json:"purged"`
+	ID                 string `json:"id"`
+	UUID               string `json:"uuid"`
+	Slug               string `json:"slug"`
+	Path               string `json:"path"`
+	Purged             bool   `json:"purged"`
 	AttachmentsDeleted int    `json:"attachments_deleted,omitempty"`
-	BytesFreed        int64  `json:"bytes_freed,omitempty"`
+	BytesFreed         int64  `json:"bytes_freed,omitempty"`
 }
 
 func init() {
@@ -89,6 +89,10 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("failed to read stdin: %w", err)
 		}
+	}
+
+	for i, arg := range args {
+		args[i] = applyProjectRootToSelector(app.Config, arg, false)
 	}
 
 	// Resolve all tasks
@@ -320,4 +324,3 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 
 	return result, nil
 }
-

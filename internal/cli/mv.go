@@ -53,8 +53,11 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	s := store.New(database)
 
 	// Split sources and destination
-	sources := args[:len(args)-1]
-	dst := args[len(args)-1]
+	sources := make([]string, 0, len(args)-1)
+	for _, src := range args[:len(args)-1] {
+		sources = append(sources, applyProjectRootToSelector(app.Config, src, false))
+	}
+	dst := applyProjectRootToSelector(app.Config, args[len(args)-1], false)
 
 	// If multiple sources, destination must be an existing container
 	if len(sources) > 1 {

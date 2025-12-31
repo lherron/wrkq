@@ -61,7 +61,7 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
 	// Resolve task
-	taskID := args[0]
+	taskID := applyProjectRootToSelector(app.Config, args[0], false)
 	taskUUID, friendlyID, err := selectors.ResolveTask(database, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve task: %w", err)

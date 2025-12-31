@@ -21,15 +21,16 @@ var lsCmd = &cobra.Command{
 }
 
 var (
-	lsJSON      bool
-	lsNDJSON    bool
-	lsPorcelain bool
-	lsRecursive bool
-	lsType      string
-	lsOne       bool
-	lsNul       bool
-	lsLimit     int
-	lsCursor    string
+	lsJSON          bool
+	lsNDJSON        bool
+	lsPorcelain     bool
+	lsRecursive     bool
+	lsType          string
+	lsOne           bool
+	lsNul           bool
+	lsLimit         int
+	lsCursor        string
+	lsIncludeHidden bool
 )
 
 func init() {
@@ -44,14 +45,15 @@ func init() {
 	lsCmd.Flags().BoolVarP(&lsNul, "nul", "0", false, "NUL-separated output")
 	lsCmd.Flags().IntVar(&lsLimit, "limit", 0, "Maximum number of results to return (0 = no limit)")
 	lsCmd.Flags().StringVar(&lsCursor, "cursor", "", "Pagination cursor from previous page")
+	lsCmd.Flags().BoolVarP(&lsIncludeHidden, "all", "a", false, "Include archived and deleted items")
 }
 
 func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
-	// If no paths specified, list root
-	if len(args) == 0 {
-		args = []string{""}
+	paths := applyProjectRootToPaths(app.Config, args, true)
+	if len(paths) == 0 {
+		paths = []string{""}
 	}
 
 	type Entry struct {
@@ -78,7 +80,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var entries []Entry
 	var hasMore bool
 
-	for _, path := range args {
+	for _, path := range paths {
 		if path == "" {
 			// List root containers with SQL-based pagination
 			if lsType == "" || lsType == "p" {
@@ -235,6 +237,11 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 					WHERE project_uuid = ?
 				`
 				queryArgs := []interface{}{containerUUID}
+
+				// Filter out archived and deleted by default
+				if !lsIncludeHidden {
+					query += ` AND state NOT IN ('archived', 'deleted')`
+				}
 
 				// Add cursor WHERE clause if present
 				if pag.WhereClause != "" {

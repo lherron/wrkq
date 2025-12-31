@@ -76,8 +76,10 @@ func TestTaskStore_Create(t *testing.T) {
 	if result.ID == "" {
 		t.Error("expected ID to be set")
 	}
-	if result.ETag != 1 {
-		t.Errorf("expected etag 1, got %d", result.ETag)
+	// ETag is 2 because: INSERT sets etag=1, then tasks_ai_friendly trigger runs
+	// to set the ID, which triggers tasks_au_etag to increment etag to 2
+	if result.ETag != 2 {
+		t.Errorf("expected etag 2, got %d", result.ETag)
 	}
 
 	// Verify task was created
@@ -127,8 +129,9 @@ func TestTaskStore_UpdateFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateFields failed: %v", err)
 	}
-	if newETag != 2 {
-		t.Errorf("expected etag 2, got %d", newETag)
+	// After create (etag=2) + update = etag 3
+	if newETag != 3 {
+		t.Errorf("expected etag 3, got %d", newETag)
 	}
 
 	// Verify update
@@ -195,8 +198,9 @@ func TestTaskStore_Move(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Move failed: %v", err)
 	}
-	if newETag != 2 {
-		t.Errorf("expected etag 2, got %d", newETag)
+	// After create (etag=2) + move = etag 3
+	if newETag != 3 {
+		t.Errorf("expected etag 3, got %d", newETag)
 	}
 
 	// Verify move
@@ -224,8 +228,9 @@ func TestTaskStore_Archive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Archive failed: %v", err)
 	}
-	if result.ETag != 2 {
-		t.Errorf("expected etag 2, got %d", result.ETag)
+	// After create (etag=2) + archive = etag 3
+	if result.ETag != 3 {
+		t.Errorf("expected etag 3, got %d", result.ETag)
 	}
 
 	// Verify archive

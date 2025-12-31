@@ -7,6 +7,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	dbsync "github.com/lherron/wrkq/internal/db"
 )
 
 // Import loads a snapshot file and hydrates the database.
@@ -85,6 +87,11 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 
 	if err := importComments(tx, &snap); err != nil {
 		return nil, fmt.Errorf("failed to import comments: %w", err)
+	}
+
+	// Ensure sqlite_sequence matches max friendly IDs after import.
+	if _, err := dbsync.FixSequenceDrifts(tx, dbsync.DefaultSequenceSpecs()); err != nil {
+		return nil, fmt.Errorf("failed to sync sqlite_sequence: %w", err)
 	}
 
 	// Commit transaction
@@ -468,6 +475,18 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 			deletedAt, deletedBy); err != nil {
 			return fmt.Errorf("failed to import comment %s: %w", uuid, err)
 		}
+	}
+
+	// Update comment_sequences to stay in sync with MAX(id)
+	// This prevents UNIQUE constraint violations on subsequent comment add operations
+	var maxSeq int
+	err = tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) FROM comments").Scan(&maxSeq)
+	if err != nil {
+		return fmt.Errorf("failed to get max comment ID: %w", err)
+	}
+	_, err = tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", maxSeq)
+	if err != nil {
+		return fmt.Errorf("failed to update comment sequence: %w", err)
 	}
 
 	return nil

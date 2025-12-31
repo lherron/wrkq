@@ -94,7 +94,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Process each argument
 	for _, arg := range args {
-		taskUUID, _, err := selectors.ResolveTask(database, arg)
+		taskUUID, _, err := selectors.ResolveTask(database, applyProjectRootToSelector(app.Config, arg, false))
 		if err != nil {
 			return err
 		}

@@ -102,6 +102,10 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no tasks specified")
 	}
 
+	for i, ref := range taskRefs {
+		taskRefs[i] = applyProjectRootToSelector(app.Config, ref, false)
+	}
+
 	// Build fields map from flags
 	fields, err := buildFieldsFromFlags(database)
 	if err != nil {
@@ -250,4 +254,3 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 
 	return fields, nil
 }
-

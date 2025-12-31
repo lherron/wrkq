@@ -7,22 +7,29 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Manifest represents the bundle manifest.json structure
 type Manifest struct {
-	MachineInterfaceVersion int    `json:"machine_interface_version"`
-	Version                 string `json:"version,omitempty"`
-	Commit                  string `json:"commit,omitempty"`
-	BuildDate               string `json:"build_date,omitempty"`
-	Timestamp               string `json:"timestamp"`
-	Actor                   string `json:"actor,omitempty"`
-	Since                   string `json:"since,omitempty"`
-	Until                   string `json:"until,omitempty"`
-	WithAttachments         bool   `json:"with_attachments"`
-	WithEvents              bool   `json:"with_events"`
+	MachineInterfaceVersion int      `json:"machine_interface_version"`
+	Version                 string   `json:"version,omitempty"`
+	Commit                  string   `json:"commit,omitempty"`
+	BuildDate               string   `json:"build_date,omitempty"`
+	Timestamp               string   `json:"timestamp"`
+	Actor                   string   `json:"actor,omitempty"`
+	Since                   string   `json:"since,omitempty"`
+	Until                   string   `json:"until,omitempty"`
+	SinceCursor             string   `json:"since_cursor,omitempty"`
+	Project                 string   `json:"project,omitempty"`
+	ProjectUUID             string   `json:"project_uuid,omitempty"`
+	PathPrefixes            []string `json:"path_prefixes,omitempty"`
+	WithAttachments         bool     `json:"with_attachments"`
+	WithEvents              bool     `json:"with_events"`
+	IncludeRefs             bool     `json:"include_refs,omitempty"`
+	RefCount                int      `json:"ref_count,omitempty"`
 }
 
 // TaskDocument represents a task document from the bundle with metadata
@@ -40,6 +47,7 @@ type Bundle struct {
 	Manifest   *Manifest
 	Containers []string
 	Tasks      []*TaskDocument
+	Refs       []*TaskDocument
 }
 
 // LoadManifest reads and validates the bundle manifest
@@ -144,6 +152,56 @@ func LoadTasks(bundleDir string) ([]*TaskDocument, error) {
 	return tasks, nil
 }
 
+// LoadRefs reads all reference task stubs from the refs/ directory
+func LoadRefs(bundleDir string) ([]*TaskDocument, error) {
+	refsDir := filepath.Join(bundleDir, "refs")
+
+	// refs directory is optional
+	if _, err := os.Stat(refsDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	var refs []*TaskDocument
+
+	err := filepath.Walk(refsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read %s: %w", path, err)
+		}
+
+		ref, err := ParseTaskDocument(string(data))
+		if err != nil {
+			return fmt.Errorf("failed to parse %s: %w", path, err)
+		}
+
+		relPath, err := filepath.Rel(refsDir, path)
+		if err != nil {
+			return err
+		}
+		ref.Path = strings.TrimSuffix(relPath, ".md")
+
+		refs = append(refs, ref)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return refs, nil
+}
+
 // ParseTaskDocument parses a task document and extracts metadata from frontmatter
 func ParseTaskDocument(content string) (*TaskDocument, error) {
 	task := &TaskDocument{
@@ -209,11 +267,17 @@ func Load(bundleDir string) (*Bundle, error) {
 		return nil, err
 	}
 
+	refs, err := LoadRefs(bundleDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Bundle{
 		Dir:        bundleDir,
 		Manifest:   manifest,
 		Containers: containers,
 		Tasks:      tasks,
+		Refs:       refs,
 	}, nil
 }
 
@@ -224,6 +288,15 @@ type CreateOptions struct {
 	// Time window
 	Since string
 	Until string
+	// Cursor-based export (event:<id> or ts:<rfc3339>)
+	SinceCursor string
+	// Project scope
+	ProjectUUID string
+	ProjectPath string
+	// Path prefix filters (absolute paths)
+	PathPrefixes []string
+	// Include refs/ stubs
+	IncludeRefs bool
 	// Include attachments
 	WithAttachments bool
 	// Include event log
@@ -238,10 +311,10 @@ type CreateOptions struct {
 
 // TaskExport represents a task to be exported
 type TaskExport struct {
-	UUID      string
-	Path      string
-	BaseEtag  int
-	Content   string // Full cat output including frontmatter
+	UUID     string
+	Path     string
+	BaseEtag int
+	Content  string // Full cat output including frontmatter
 }
 
 // Create creates a new bundle from database content
@@ -254,6 +327,32 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 	tasksDir := filepath.Join(opts.OutputDir, "tasks")
 	if err := os.MkdirAll(tasksDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create tasks directory: %w", err)
+	}
+
+	// Parse since cursor (event:<id> or ts:<rfc3339>) or RFC3339 timestamp
+	rawSince := opts.SinceCursor
+	if rawSince == "" {
+		rawSince = opts.Since
+	}
+	sinceEventID, sinceTimestamp, sinceCursor, err := parseSinceFilter(rawSince)
+	if err != nil {
+		return nil, err
+	}
+	if sinceCursor != "" {
+		opts.SinceCursor = sinceCursor
+	}
+	if sinceTimestamp != "" {
+		opts.Since = sinceTimestamp
+	} else if sinceCursor != "" {
+		opts.Since = ""
+	}
+
+	// Determine effective path prefixes
+	var pathPrefixes []string
+	if len(opts.PathPrefixes) > 0 {
+		pathPrefixes = append(pathPrefixes, opts.PathPrefixes...)
+	} else if opts.ProjectPath != "" {
+		pathPrefixes = append(pathPrefixes, opts.ProjectPath)
 	}
 
 	// Build query to find tasks modified by actor/time window
@@ -272,14 +371,30 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		args = append(args, opts.Actor, opts.Actor)
 	}
 
-	// Filter by time window
-	if opts.Since != "" {
-		query += ` AND e.timestamp >= ?`
-		args = append(args, opts.Since)
+	// Filter by cursor or time window
+	if sinceEventID != nil {
+		query += ` AND e.id > ?`
+		args = append(args, *sinceEventID)
 	}
+	if sinceTimestamp != "" {
+		query += ` AND e.timestamp >= ?`
+		args = append(args, sinceTimestamp)
+	}
+
+	// Filter by time window
 	if opts.Until != "" {
 		query += ` AND e.timestamp <= ?`
 		args = append(args, opts.Until)
+	}
+
+	// Filter by path prefix
+	if len(pathPrefixes) > 0 {
+		var conditions []string
+		for _, prefix := range pathPrefixes {
+			conditions = append(conditions, "(cp.path = ? OR cp.path LIKE ? || '/%')")
+			args = append(args, prefix, prefix)
+		}
+		query += " AND (" + strings.Join(conditions, " OR ") + ")"
 	}
 
 	query += ` ORDER BY container_path, t.slug`
@@ -303,7 +418,7 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		}
 
 		// Compute base_etag (earliest etag from the filtered event log)
-		baseEtag, err := computeBaseEtag(db, taskUUID, opts)
+		baseEtag, err := computeBaseEtag(db, taskUUID, opts, sinceEventID, sinceTimestamp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compute base_etag for task %s: %w", taskUUID, err)
 		}
@@ -356,6 +471,16 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		return nil, fmt.Errorf("error iterating tasks: %w", err)
 	}
 
+	// Export refs/ stubs if requested
+	var refs []*TaskDocument
+	if opts.IncludeRefs {
+		var err error
+		refs, err = exportRefs(db, opts.OutputDir, tasks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to export refs: %w", err)
+		}
+	}
+
 	// Write containers.txt (sorted to ensure parent-before-child order)
 	var containers []string
 	for container := range containerMap {
@@ -397,8 +522,14 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		Actor:                   opts.Actor,
 		Since:                   opts.Since,
 		Until:                   opts.Until,
+		SinceCursor:             opts.SinceCursor,
+		Project:                 opts.ProjectPath,
+		ProjectUUID:             opts.ProjectUUID,
+		PathPrefixes:            pathPrefixes,
 		WithAttachments:         opts.WithAttachments,
 		WithEvents:              opts.WithEvents,
+		IncludeRefs:             opts.IncludeRefs,
+		RefCount:                len(refs),
 	}
 
 	manifestPath := filepath.Join(opts.OutputDir, "manifest.json")
@@ -415,11 +546,12 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		Manifest:   manifest,
 		Containers: containers,
 		Tasks:      convertTaskExportsToTaskDocuments(tasks),
+		Refs:       refs,
 	}, nil
 }
 
 // computeBaseEtag computes the base etag for a task based on the earliest event in the filtered set
-func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions) (int, error) {
+func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions, sinceEventID *int64, sinceTimestamp string) (int, error) {
 	// Query the earliest event for this task before any changes in the filtered window
 	// This gives us the etag the task had when the filtered changes started
 	query := `
@@ -435,9 +567,13 @@ func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions) (int, erro
 		query += ` AND actor_uuid IN (SELECT uuid FROM actors WHERE uuid = ? OR slug = ?)`
 		args = append(args, opts.Actor, opts.Actor)
 	}
-	if opts.Since != "" {
+	if sinceEventID != nil {
+		query += ` AND id > ?`
+		args = append(args, *sinceEventID)
+	}
+	if sinceTimestamp != "" {
 		query += ` AND timestamp >= ?`
-		args = append(args, opts.Since)
+		args = append(args, sinceTimestamp)
 	}
 	if opts.Until != "" {
 		query += ` AND timestamp <= ?`
@@ -629,6 +765,15 @@ func exportAttachments(db *sql.DB, bundleDir string, tasks []*TaskExport) error 
 
 // exportEvents exports the event log as NDJSON
 func exportEvents(db *sql.DB, bundleDir string, opts CreateOptions) error {
+	rawSince := opts.SinceCursor
+	if rawSince == "" {
+		rawSince = opts.Since
+	}
+	sinceEventID, sinceTimestamp, _, err := parseSinceFilter(rawSince)
+	if err != nil {
+		return err
+	}
+
 	query := `
 		SELECT id, timestamp, actor_uuid, resource_type, resource_uuid,
 		       event_type, etag, payload
@@ -642,9 +787,13 @@ func exportEvents(db *sql.DB, bundleDir string, opts CreateOptions) error {
 		query += ` AND actor_uuid IN (SELECT uuid FROM actors WHERE uuid = ? OR slug = ?)`
 		args = append(args, opts.Actor, opts.Actor)
 	}
-	if opts.Since != "" {
+	if sinceEventID != nil {
+		query += ` AND id > ?`
+		args = append(args, *sinceEventID)
+	}
+	if sinceTimestamp != "" {
 		query += ` AND timestamp >= ?`
-		args = append(args, opts.Since)
+		args = append(args, sinceTimestamp)
 	}
 	if opts.Until != "" {
 		query += ` AND timestamp <= ?`
@@ -670,14 +819,14 @@ func exportEvents(db *sql.DB, bundleDir string, opts CreateOptions) error {
 
 	for rows.Next() {
 		var event struct {
-			ID           int             `json:"id"`
-			Timestamp    string          `json:"timestamp"`
-			ActorUUID    *string         `json:"actor_uuid"`
-			ResourceType string          `json:"resource_type"`
-			ResourceUUID string          `json:"resource_uuid"`
-			EventType    string          `json:"event_type"`
-			Etag         *int            `json:"etag"`
-			Payload      *string         `json:"payload,omitempty"`
+			ID           int     `json:"id"`
+			Timestamp    string  `json:"timestamp"`
+			ActorUUID    *string `json:"actor_uuid"`
+			ResourceType string  `json:"resource_type"`
+			ResourceUUID string  `json:"resource_uuid"`
+			EventType    string  `json:"event_type"`
+			Etag         *int    `json:"etag"`
+			Payload      *string `json:"payload,omitempty"`
 		}
 
 		if err := rows.Scan(&event.ID, &event.Timestamp, &event.ActorUUID,
@@ -760,4 +909,207 @@ func quoteYAMLIfNeeded(s string) string {
 	}
 
 	return s
+}
+
+func parseSinceFilter(raw string) (*int64, string, string, error) {
+	if raw == "" {
+		return nil, "", "", nil
+	}
+
+	if strings.HasPrefix(raw, "event:") {
+		value := strings.TrimPrefix(raw, "event:")
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("invalid since cursor %q: %w", raw, err)
+		}
+		return &id, "", raw, nil
+	}
+
+	if strings.HasPrefix(raw, "ts:") {
+		value := strings.TrimPrefix(raw, "ts:")
+		if _, err := time.Parse(time.RFC3339, value); err != nil {
+			return nil, "", "", fmt.Errorf("invalid since cursor %q: %w", raw, err)
+		}
+		return nil, value, raw, nil
+	}
+
+	// Treat as RFC3339 timestamp
+	if _, err := time.Parse(time.RFC3339, raw); err != nil {
+		return nil, "", "", fmt.Errorf("invalid since timestamp %q: %w", raw, err)
+	}
+
+	return nil, raw, "", nil
+}
+
+func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocument, error) {
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+
+	included := make(map[string]bool, len(tasks))
+	var uuids []string
+	for _, task := range tasks {
+		if task.UUID == "" {
+			continue
+		}
+		included[task.UUID] = true
+		uuids = append(uuids, task.UUID)
+	}
+	if len(uuids) == 0 {
+		return nil, nil
+	}
+
+	refUUIDs := make(map[string]bool)
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(uuids)), ",")
+
+	// Relations: outgoing
+	queryOut := fmt.Sprintf(`SELECT DISTINCT to_task_uuid FROM task_relations WHERE from_task_uuid IN (%s)`, placeholders)
+	rows, err := db.Query(queryOut, stringSliceToInterface(uuids)...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query relation refs: %w", err)
+	}
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if !included[uuid] {
+			refUUIDs[uuid] = true
+		}
+	}
+	rows.Close()
+
+	// Relations: incoming
+	queryIn := fmt.Sprintf(`SELECT DISTINCT from_task_uuid FROM task_relations WHERE to_task_uuid IN (%s)`, placeholders)
+	rows, err = db.Query(queryIn, stringSliceToInterface(uuids)...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query relation refs: %w", err)
+	}
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if !included[uuid] {
+			refUUIDs[uuid] = true
+		}
+	}
+	rows.Close()
+
+	// Parent task refs
+	queryParent := fmt.Sprintf(`SELECT DISTINCT parent_task_uuid FROM tasks WHERE uuid IN (%s) AND parent_task_uuid IS NOT NULL`, placeholders)
+	rows, err = db.Query(queryParent, stringSliceToInterface(uuids)...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query parent refs: %w", err)
+	}
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if !included[uuid] {
+			refUUIDs[uuid] = true
+		}
+	}
+	rows.Close()
+
+	if len(refUUIDs) == 0 {
+		return nil, nil
+	}
+
+	refsDir := filepath.Join(bundleDir, "refs")
+	if err := os.MkdirAll(refsDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create refs directory: %w", err)
+	}
+
+	var refs []*TaskDocument
+	for uuid := range refUUIDs {
+		content, refPath, err := exportRefStub(db, uuid)
+		if err != nil {
+			return nil, err
+		}
+		if refPath == "" {
+			refPath = uuid
+		}
+
+		refFilePath := filepath.Join(refsDir, refPath+".md")
+		refFileDir := filepath.Dir(refFilePath)
+		if err := os.MkdirAll(refFileDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create ref directory: %w", err)
+		}
+		if err := os.WriteFile(refFilePath, []byte(content), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write ref file: %w", err)
+		}
+
+		refs = append(refs, &TaskDocument{
+			Path:            refPath,
+			UUID:            uuid,
+			OriginalContent: content,
+		})
+	}
+
+	return refs, nil
+}
+
+func exportRefStub(db *sql.DB, taskUUID string) (string, string, error) {
+	var (
+		id            string
+		slug          string
+		title         string
+		state         string
+		priority      int
+		projectUUID   string
+		containerPath string
+		projectID     string
+	)
+
+	err := db.QueryRow(`
+		SELECT t.id, t.slug, t.title, t.state, t.priority, t.project_uuid,
+		       cp.path
+		FROM tasks t
+		LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+		WHERE t.uuid = ?
+	`, taskUUID).Scan(&id, &slug, &title, &state, &priority, &projectUUID, &containerPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load ref task %s: %w", taskUUID, err)
+	}
+
+	_ = db.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
+
+	path := slug
+	if containerPath != "" {
+		path = containerPath + "/" + slug
+	}
+
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	if id != "" {
+		sb.WriteString(fmt.Sprintf("id: %s\n", id))
+	}
+	sb.WriteString(fmt.Sprintf("uuid: %s\n", taskUUID))
+	if projectID != "" {
+		sb.WriteString(fmt.Sprintf("project_id: %s\n", projectID))
+	}
+	sb.WriteString(fmt.Sprintf("project_uuid: %s\n", projectUUID))
+	sb.WriteString(fmt.Sprintf("slug: %s\n", slug))
+	sb.WriteString(fmt.Sprintf("title: %s\n", quoteYAMLIfNeeded(title)))
+	sb.WriteString(fmt.Sprintf("state: %s\n", state))
+	sb.WriteString(fmt.Sprintf("priority: %d\n", priority))
+	sb.WriteString(fmt.Sprintf("path: %s\n", path))
+	sb.WriteString("ref: true\n")
+	sb.WriteString("---\n")
+
+	return sb.String(), path, nil
+}
+
+func stringSliceToInterface(values []string) []interface{} {
+	args := make([]interface{}, len(values))
+	for i, v := range values {
+		args[i] = v
+	}
+	return args
 }

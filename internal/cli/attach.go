@@ -99,7 +99,8 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
 	// Resolve task
-	taskUUID, _, err := selectors.ResolveTask(database, args[0])
+	taskRef := applyProjectRootToSelector(app.Config, args[0], false)
+	taskUUID, _, err := selectors.ResolveTask(database, taskRef)
 	if err != nil {
 		return err
 	}
@@ -252,7 +253,8 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	actorUUID := app.ActorUUID
 
 	// Resolve task
-	taskUUID, taskID, err := selectors.ResolveTask(database, args[0])
+	taskRef := applyProjectRootToSelector(app.Config, args[0], false)
+	taskUUID, taskID, err := selectors.ResolveTask(database, taskRef)
 	if err != nil {
 		return err
 	}

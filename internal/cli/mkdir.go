@@ -33,6 +33,7 @@ func init() {
 func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
+	args = applyProjectRootToPaths(app.Config, args, false)
 
 	// Validate kind if provided
 	if mkdirKind != "" {

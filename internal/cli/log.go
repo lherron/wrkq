@@ -58,7 +58,8 @@ func runLog(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
 	// Resolve target resource
-	resourceUUID, resourceType, err := resolveResource(database, args[0])
+	target := applyProjectRootToSelector(app.Config, args[0], false)
+	resourceUUID, resourceType, err := resolveResource(database, target)
 	if err != nil {
 		return fmt.Errorf("failed to resolve resource: %w", err)
 	}

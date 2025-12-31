@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +15,12 @@ import (
 	"github.com/lherron/wrkq/internal/bundle"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/paths"
+	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var bundleAdmCmd = &cobra.Command{
@@ -33,21 +40,37 @@ etag checking, and re-hydrates attachments. Exit code 4 on conflicts.`,
 }
 
 var (
-	bundleApplyFrom         string
-	bundleApplyDryRun       bool
-	bundleApplyContinue     bool
-	bundleApplyJSON         bool
-	bundleApplyPorcelain    bool
+	bundleApplyFrom      string
+	bundleApplyDryRun    bool
+	bundleApplyContinue  bool
+	bundleApplyJSON      bool
+	bundleApplyPorcelain bool
 )
 
 type applyResult struct {
-	Success         bool     `json:"success"`
-	ContainersAdded int      `json:"containers_added"`
-	TasksApplied    int      `json:"tasks_applied"`
-	TasksFailed     int      `json:"tasks_failed"`
-	AttachmentsAdded int     `json:"attachments_added"`
-	Conflicts       []string `json:"conflicts,omitempty"`
-	Errors          []string `json:"errors,omitempty"`
+	Success          bool            `json:"success"`
+	ContainersAdded  int             `json:"containers_added"`
+	TasksApplied     int             `json:"tasks_applied"`
+	TasksFailed      int             `json:"tasks_failed"`
+	AttachmentsAdded int             `json:"attachments_added"`
+	Conflicts        []applyConflict `json:"conflicts,omitempty"`
+	Errors           []string        `json:"errors,omitempty"`
+}
+
+type applyConflict struct {
+	Path            string                      `json:"path"`
+	UUID            string                      `json:"uuid,omitempty"`
+	Reason          string                      `json:"reason"`
+	ExpectedETag    int64                       `json:"expected_etag,omitempty"`
+	ActualETag      int64                       `json:"actual_etag,omitempty"`
+	FieldChanges    map[string]applyFieldChange `json:"field_changes,omitempty"`
+	DescriptionDiff string                      `json:"description_diff,omitempty"`
+	Message         string                      `json:"message,omitempty"`
+}
+
+type applyFieldChange struct {
+	Current  interface{} `json:"current,omitempty"`
+	Incoming interface{} `json:"incoming,omitempty"`
 }
 
 func init() {
@@ -109,66 +132,94 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 
 	// Resolve actor for container creation
 	// Bundle apply should attribute changes to the actor who applied the bundle
-	var actorUUID string
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
-	}
-	if actorIdentifier != "" {
-		resolver := actors.NewResolver(database.DB)
-		actorUUID, err = resolver.Resolve(actorIdentifier)
-		if err != nil {
-			return fmt.Errorf("failed to resolve actor: %w", err)
-		}
-	} else {
-		return fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
+	actorUUID, err := resolveBundleActor(database, cmd, cfg)
+	if err != nil {
+		return err
 	}
 
-	// Step 1: Ensure all containers exist (mkdir -p pattern)
-	if !bundleApplyDryRun {
+	if bundleApplyContinue {
+		// Non-transactional apply (partial mode)
 		for _, containerPath := range b.Containers {
-			if err := ensureContainer(database, actorUUID, containerPath); err != nil {
-				if !bundleApplyContinue {
-					return fmt.Errorf("failed to create container %s: %w", containerPath, err)
-				}
+			created, err := ensureContainer(database, actorUUID, containerPath, bundleApplyDryRun)
+			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", containerPath, err))
 				result.Success = false
-			} else {
+				continue
+			}
+			if created {
 				result.ContainersAdded++
 			}
 		}
-	} else {
-		result.ContainersAdded = len(b.Containers)
-	}
 
-	// Step 2: Apply each task document
-	for _, task := range b.Tasks {
-		if err := applyTaskDocument(cmd, cfg, task, bundleApplyDryRun); err != nil {
-			result.TasksFailed++
-			result.Success = false
-
-			// Check if it's a conflict (etag mismatch)
-			if isConflictError(err) {
-				result.Conflicts = append(result.Conflicts, task.Path)
+		for _, task := range b.Tasks {
+			if err := applyTaskDocumentWithDB(database, actorUUID, task, bundleApplyDryRun); err != nil {
+				result.TasksFailed++
+				result.Success = false
+				if conflict := conflictFromError(err); conflict != nil {
+					result.Conflicts = append(result.Conflicts, *conflict)
+				} else {
+					result.Errors = append(result.Errors, fmt.Sprintf("task %s: %v", task.Path, err))
+				}
+				continue
 			} else {
-				result.Errors = append(result.Errors, fmt.Sprintf("task %s: %v", task.Path, err))
+				result.TasksApplied++
 			}
+		}
+	} else {
+		// Transactional apply (all-or-nothing)
+		tx, err := database.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer tx.Rollback()
 
-			if !bundleApplyContinue {
+		ew := events.NewWriter(database.DB)
+
+		for _, containerPath := range b.Containers {
+			created, err := ensureContainerTx(tx, ew, actorUUID, containerPath, bundleApplyDryRun)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", containerPath, err))
+				result.Success = false
 				if bundleApplyJSON {
 					encoder := json.NewEncoder(cmd.OutOrStdout())
 					encoder.SetIndent("", "  ")
-					encoder.Encode(result)
+					_ = encoder.Encode(result)
+				}
+				return fmt.Errorf("failed to create container %s: %w", containerPath, err)
+			}
+			if created {
+				result.ContainersAdded++
+			}
+		}
+
+		for _, task := range b.Tasks {
+			if err := applyTaskDocumentTx(tx, ew, actorUUID, task, bundleApplyDryRun); err != nil {
+				result.TasksFailed++
+				result.Success = false
+				if conflict := conflictFromError(err); conflict != nil {
+					result.Conflicts = append(result.Conflicts, *conflict)
+				} else {
+					result.Errors = append(result.Errors, fmt.Sprintf("task %s: %v", task.Path, err))
+				}
+				if bundleApplyJSON {
+					encoder := json.NewEncoder(cmd.OutOrStdout())
+					encoder.SetIndent("", "  ")
+					_ = encoder.Encode(result)
 				}
 				return fmt.Errorf("failed to apply task %s: %w", task.Path, err)
 			}
-		} else {
 			result.TasksApplied++
+		}
+
+		if !bundleApplyDryRun {
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("failed to commit bundle apply: %w", err)
+			}
 		}
 	}
 
 	// Step 3: Re-attach files from attachments/<task_uuid>/
-	if !bundleApplyDryRun && b.Manifest.WithAttachments {
+	if !bundleApplyDryRun && b.Manifest.WithAttachments && result.Success {
 		attachmentsDir := filepath.Join(b.Dir, "attachments")
 		if _, err := os.Stat(attachmentsDir); err == nil {
 			attached, err := reattachFiles(cmd, cfg, attachmentsDir)
@@ -213,8 +264,11 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 
 	if len(result.Conflicts) > 0 {
 		fmt.Fprintf(cmd.OutOrStderr(), "\nConflicts detected:\n")
-		for _, path := range result.Conflicts {
-			fmt.Fprintf(cmd.OutOrStderr(), "  - %s\n", path)
+		for _, conflict := range result.Conflicts {
+			fmt.Fprintf(cmd.OutOrStderr(), "  - %s (%s)\n", conflict.Path, conflict.Reason)
+		}
+		if !bundleApplyJSON {
+			os.Exit(4)
 		}
 		return fmt.Errorf("conflicts detected, use 'wrkq diff' to resolve")
 	}
@@ -237,21 +291,40 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 }
 
 // ensureContainer creates a container hierarchy if it doesn't exist (mkdir -p)
-func ensureContainer(database *db.DB, actorUUID string, path string) error {
-	// Split path into segments
-	segments := strings.Split(path, "/")
+func ensureContainer(database *db.DB, actorUUID string, path string, dryRun bool) (bool, error) {
+	tx, err := database.Begin()
+	if err != nil {
+		return false, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
 
+	created, err := ensureContainerTx(tx, events.NewWriter(database.DB), actorUUID, path, dryRun)
+	if err != nil {
+		return false, err
+	}
+
+	if dryRun {
+		return created, nil
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit container creation: %w", err)
+	}
+
+	return created, nil
+}
+
+func ensureContainerTx(tx *sql.Tx, ew *events.Writer, actorUUID string, path string, dryRun bool) (bool, error) {
+	segments := paths.SplitPath(path)
 	var parentUUID *string
-	currentPath := ""
+	createdAny := false
 
-	for _, slug := range segments {
-		if currentPath != "" {
-			currentPath += "/"
+	for _, segment := range segments {
+		slug, err := paths.NormalizeSlug(segment)
+		if err != nil {
+			return createdAny, fmt.Errorf("invalid container slug %q: %w", segment, err)
 		}
-		currentPath += slug
 
-		// Check if container exists
-		var uuid string
 		query := `
 			SELECT uuid FROM containers
 			WHERE slug = ? AND (
@@ -259,145 +332,724 @@ func ensureContainer(database *db.DB, actorUUID string, path string) error {
 				(parent_uuid = ?)
 			)
 		`
-		err := database.QueryRow(query, slug, parentUUID, parentUUID).Scan(&uuid)
 
+		var uuid string
+		err = tx.QueryRow(query, slug, parentUUID, parentUUID).Scan(&uuid)
 		if err != nil {
-			// Container doesn't exist, create it
-			// Generate UUID
-			newUUID := generateUUID()
-
-			// Generate title from slug (capitalize first letter)
-			title := strings.ToUpper(slug[:1]) + slug[1:]
-
-			insertQuery := `
-				INSERT INTO containers (uuid, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?)
-			`
-			_, err = database.Exec(insertQuery, newUUID, slug, title, parentUUID, actorUUID, actorUUID)
-			if err != nil {
-				return fmt.Errorf("failed to create container %s: %w", currentPath, err)
+			if !errors.Is(err, sql.ErrNoRows) {
+				return createdAny, fmt.Errorf("failed to query container %s: %w", slug, err)
 			}
-			uuid = newUUID
+
+			createdAny = true
+			if dryRun {
+				newUUID := generateUUID()
+				parentUUID = &newUUID
+				continue
+			}
+
+			title := strings.ToUpper(slug[:1]) + slug[1:]
+			res, err := tx.Exec(`
+				INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+				VALUES ('', ?, ?, ?, 'project', ?, ?)
+			`, slug, title, parentUUID, actorUUID, actorUUID)
+			if err != nil {
+				return createdAny, fmt.Errorf("failed to create container %s: %w", slug, err)
+			}
+
+			rowID, err := res.LastInsertId()
+			if err != nil {
+				return createdAny, fmt.Errorf("failed to get container row id: %w", err)
+			}
+
+			var etag int64
+			if err := tx.QueryRow("SELECT uuid, etag FROM containers WHERE rowid = ?", rowID).Scan(&uuid, &etag); err != nil {
+				return createdAny, fmt.Errorf("failed to fetch created container: %w", err)
+			}
+
+			payload, _ := json.Marshal(map[string]interface{}{
+				"slug":  slug,
+				"title": title,
+				"kind":  "project",
+			})
+			payloadStr := string(payload)
+
+			if err := ew.LogEvent(tx, &domain.Event{
+				ActorUUID:    &actorUUID,
+				ResourceType: "container",
+				ResourceUUID: &uuid,
+				EventType:    "container.created",
+				ETag:         &etag,
+				Payload:      &payloadStr,
+			}); err != nil {
+				return createdAny, fmt.Errorf("failed to log container event: %w", err)
+			}
 		}
 
-		// Update parent for next iteration
 		parentUUID = &uuid
+	}
+
+	return createdAny, nil
+}
+
+func resolveBundleActor(database *db.DB, cmd *cobra.Command, cfg *config.Config) (string, error) {
+	actorIdentifier := cmd.Flag("as").Value.String()
+	if actorIdentifier == "" {
+		actorIdentifier = cfg.GetActorID()
+	}
+	if actorIdentifier == "" {
+		return "", fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
+	}
+
+	resolver := actors.NewResolver(database.DB)
+	actorUUID, err := resolver.Resolve(actorIdentifier)
+	if err == nil {
+		return actorUUID, nil
+	}
+
+	normalized, normErr := paths.NormalizeSlug(actorIdentifier)
+	if normErr != nil {
+		return "", fmt.Errorf("failed to resolve actor: %w", err)
+	}
+
+	actor, createErr := resolver.Create(normalized, "", "agent")
+	if createErr != nil {
+		return "", fmt.Errorf("failed to resolve actor: %w", err)
+	}
+
+	return actor.UUID, nil
+}
+
+type bundleTaskUpdate struct {
+	Title       *string
+	State       *string
+	Priority    *int
+	DueAt       *string
+	StartAt     *string
+	Labels      *string
+	Description *string
+}
+
+type bundleTaskCurrent struct {
+	UUID        string
+	ID          string
+	Slug        string
+	Title       string
+	Description string
+	State       string
+	Priority    int
+	DueAt       *string
+	StartAt     *string
+	Labels      *string
+	ETag        int64
+	ProjectUUID string
+}
+
+func applyTaskDocumentWithDB(database *db.DB, actorUUID string, task *bundle.TaskDocument, dryRun bool) error {
+	tx, err := database.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := applyTaskDocumentTx(tx, events.NewWriter(database.DB), actorUUID, task, dryRun); err != nil {
+		return err
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit task apply: %w", err)
 	}
 
 	return nil
 }
 
-// applyTaskDocument applies a single task document using wrkq apply
-func applyTaskDocument(cmd *cobra.Command, cfg *config.Config, task *bundle.TaskDocument, dryRun bool) error {
-	// Create temporary file with task content
-	tmpFile, err := os.CreateTemp("", "wrkq-bundle-*.md")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	// Write task document to temp file (use original content if available, otherwise just body)
+func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.TaskDocument, dryRun bool) error {
 	content := task.OriginalContent
 	if content == "" {
 		content = task.Description
 	}
-	if _, err := tmpFile.WriteString(content); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	tmpFile.Close()
 
-	if dryRun {
-		// For dry-run, just validate the document can be read
-		return nil
+	update, err := parseBundleTaskContent(content)
+	if err != nil {
+		return err
 	}
 
-	// Prepare environment for wrkq commands
-	env := os.Environ()
-	env = append(env, "WRKQ_DB_PATH="+cfg.DBPath)
-	actorIdentifier := cfg.GetActorID()
-	if actorIdentifier != "" {
-		env = append(env, "WRKQ_ACTOR="+actorIdentifier)
+	if update.State != nil {
+		if err := domain.ValidateState(*update.State); err != nil {
+			return err
+		}
+	}
+	if update.Priority != nil {
+		if err := domain.ValidatePriority(*update.Priority); err != nil {
+			return err
+		}
 	}
 
-	// Determine selector: prefer typed UUID selector for stability across renames
-	// For tasks without UUID, we need to create them first
-	selector := ""
-	needsCreation := false
+	var current *bundleTaskCurrent
+	var taskUUID string
 
-	if task.UUID != "" {
-		// Use typed UUID selector for stable addressing
-		selector = "t:" + task.UUID
-	} else if task.Path != "" {
-		// No UUID, use typed path selector and mark that we need to create it
-		selector = "t:" + task.Path
-		needsCreation = true
-	} else {
+	switch {
+	case task.UUID != "":
+		taskUUID = task.UUID
+		current, err = fetchTaskCurrentTx(tx, taskUUID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			if task.Path != "" {
+				existingUUID, _, err := resolveTaskByPathTx(tx, task.Path)
+				if err == nil && existingUUID != "" {
+					conflict := buildConflictDetail(task, nil, update, "uuid_mismatch", int64(task.BaseEtag), 0)
+					return &conflictError{detail: conflict}
+				}
+			}
+			return createTaskTx(tx, ew, actorUUID, task, update, dryRun)
+		}
+	case task.Path != "":
+		taskUUID, _, err = resolveTaskByPathTx(tx, task.Path)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return createTaskTx(tx, ew, actorUUID, task, update, dryRun)
+		}
+		current, err = fetchTaskCurrentTx(tx, taskUUID)
+		if err != nil {
+			return err
+		}
+	default:
 		return fmt.Errorf("task has no UUID or path")
 	}
 
-	// Create task if needed (for tasks without UUID)
-	if needsCreation {
-		touchCmd := exec.Command("wrkq", "touch", task.Path)
-		touchCmd.Env = env
-
-		output, err := touchCmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("wrkq touch failed: %w\nOutput: %s", err, output)
-		}
+	if current == nil {
+		return fmt.Errorf("failed to resolve task %s", task.Path)
 	}
 
-	args := []string{"apply", selector, tmpFile.Name()}
-
-	// Add --if-match if base_etag is present AND task was not just created
-	// (newly created tasks start with etag=1, so we shouldn't check base_etag)
-	if task.BaseEtag > 0 && !needsCreation {
-		args = append(args, "--if-match", fmt.Sprintf("%d", task.BaseEtag))
+	if task.BaseEtag > 0 && current.ETag != int64(task.BaseEtag) {
+		conflict := buildConflictDetail(task, current, update, "etag_mismatch", int64(task.BaseEtag), current.ETag)
+		return &conflictError{detail: conflict}
 	}
 
-	// Execute wrkq apply
-	applyCmd := exec.Command("wrkq", args...)
-	applyCmd.Env = env
+	return updateTaskTx(tx, ew, actorUUID, current, update, dryRun)
+}
 
-	output, err := applyCmd.CombinedOutput()
+func parseBundleTaskContent(content string) (*bundleTaskUpdate, error) {
+	update := &bundleTaskUpdate{}
+	frontmatter, body, err := splitFrontmatter(content)
 	if err != nil {
-		// Check exit code for conflict (4)
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 4 {
-				return &conflictError{
-					taskPath: task.Path,
-					message:  string(output),
+		return nil, err
+	}
+
+	if frontmatter != "" {
+		var fm map[string]interface{}
+		if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
+			return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+		}
+
+		if v, ok := fm["title"].(string); ok && v != "" {
+			update.Title = &v
+		}
+		if v, ok := fm["state"].(string); ok && v != "" {
+			update.State = &v
+		}
+		if v, ok := fm["priority"]; ok {
+			if p, ok := coerceInt(v); ok {
+				update.Priority = &p
+			}
+		}
+		if v, ok := fm["due_at"].(string); ok && v != "" {
+			update.DueAt = &v
+		}
+		if v, ok := fm["start_at"].(string); ok && v != "" {
+			update.StartAt = &v
+		}
+		if v, ok := fm["labels"]; ok {
+			switch labels := v.(type) {
+			case string:
+				if labels != "" {
+					update.Labels = &labels
+				}
+			case []interface{}:
+				if data, err := json.Marshal(labels); err == nil {
+					labelStr := string(data)
+					update.Labels = &labelStr
 				}
 			}
 		}
-
-		// If UUID-based selector failed with "task not found", fall back to path-based application
-		if task.UUID != "" && task.Path != "" && strings.Contains(string(output), "task not found") {
-			// Try to create task using touch with the path
-			touchCmd := exec.Command("wrkq", "touch", task.Path)
-			touchCmd.Env = env
-
-			touchOutput, touchErr := touchCmd.CombinedOutput()
-			// Ignore UNIQUE constraint errors - it means task already exists at that path
-			if touchErr != nil && !strings.Contains(string(touchOutput), "UNIQUE constraint") {
-				return fmt.Errorf("wrkq touch failed after UUID fallback: %w\nOutput: %s", touchErr, touchOutput)
-			}
-
-			// Retry apply with path-based selector WITHOUT --if-match (task was just created)
-			retryArgs := []string{"apply", task.Path, tmpFile.Name()}
-			retryCmd := exec.Command("wrkq", retryArgs...)
-			retryCmd.Env = env
-
-			retryOutput, retryErr := retryCmd.CombinedOutput()
-			if retryErr != nil {
-				return fmt.Errorf("wrkq apply failed after fallback: %w\nOutput: %s", retryErr, retryOutput)
-			}
-
-			return nil
-		}
-
-		return fmt.Errorf("wrkq apply failed: %w\nOutput: %s", err, output)
 	}
 
+	body = strings.TrimSpace(body)
+	if body != "" {
+		update.Description = &body
+	}
+
+	return update, nil
+}
+
+func splitFrontmatter(content string) (string, string, error) {
+	if !strings.HasPrefix(content, "---\n") {
+		return "", content, nil
+	}
+
+	parts := strings.SplitN(content[4:], "\n---\n", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid frontmatter format")
+	}
+
+	return parts[0], parts[1], nil
+}
+
+func coerceInt(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}
+
+func fetchTaskCurrentTx(tx *sql.Tx, taskUUID string) (*bundleTaskCurrent, error) {
+	var current bundleTaskCurrent
+	var dueAt, startAt, labels sql.NullString
+
+	err := tx.QueryRow(`
+		SELECT uuid, id, slug, title, description, state, priority, due_at, start_at, labels, etag, project_uuid
+		FROM tasks WHERE uuid = ?
+	`, taskUUID).Scan(
+		&current.UUID, &current.ID, &current.Slug, &current.Title, &current.Description, &current.State,
+		&current.Priority, &dueAt, &startAt, &labels, &current.ETag, &current.ProjectUUID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if dueAt.Valid {
+		current.DueAt = &dueAt.String
+	}
+	if startAt.Valid {
+		current.StartAt = &startAt.String
+	}
+	if labels.Valid {
+		current.Labels = &labels.String
+	}
+
+	return &current, nil
+}
+
+func resolveTaskByPathTx(tx *sql.Tx, path string) (string, string, error) {
+	segments := paths.SplitPath(path)
+	if len(segments) == 0 {
+		return "", "", fmt.Errorf("invalid path: empty")
+	}
+
+	var parentUUID *string
+	if len(segments) > 1 {
+		parentPath := paths.JoinPath(segments[:len(segments)-1]...)
+		uuid, err := walkContainerPathTx(tx, parentPath)
+		if err != nil {
+			return "", "", err
+		}
+		parentUUID = &uuid
+	}
+
+	normalizedSlug, err := paths.NormalizeSlug(segments[len(segments)-1])
+	if err != nil {
+		return "", "", fmt.Errorf("invalid task slug %q: %w", segments[len(segments)-1], err)
+	}
+
+	var taskUUID, taskID string
+	if parentUUID == nil {
+		err = tx.QueryRow(`
+			SELECT uuid, id FROM tasks WHERE slug = ? AND project_uuid IN (
+				SELECT uuid FROM containers WHERE parent_uuid IS NULL
+			) LIMIT 1
+		`, normalizedSlug).Scan(&taskUUID, &taskID)
+	} else {
+		err = tx.QueryRow(`
+			SELECT uuid, id FROM tasks WHERE slug = ? AND project_uuid = ?
+		`, normalizedSlug, *parentUUID).Scan(&taskUUID, &taskID)
+	}
+	if err != nil {
+		return "", "", err
+	}
+
+	return taskUUID, taskID, nil
+}
+
+func walkContainerPathTx(tx *sql.Tx, path string) (string, error) {
+	segments := paths.SplitPath(path)
+	if len(segments) == 0 {
+		return "", fmt.Errorf("invalid path: empty")
+	}
+
+	var currentUUID *string
+	for _, segment := range segments {
+		slug, err := paths.NormalizeSlug(segment)
+		if err != nil {
+			return "", fmt.Errorf("invalid slug %q: %w", segment, err)
+		}
+
+		query := `SELECT uuid FROM containers WHERE slug = ? AND `
+		args := []interface{}{slug}
+		if currentUUID == nil {
+			query += `parent_uuid IS NULL`
+		} else {
+			query += `parent_uuid = ?`
+			args = append(args, *currentUUID)
+		}
+
+		var uuid string
+		if err := tx.QueryRow(query, args...).Scan(&uuid); err != nil {
+			return "", err
+		}
+		currentUUID = &uuid
+	}
+
+	return *currentUUID, nil
+}
+
+func resolveParentContainerTx(tx *sql.Tx, path string) (*string, string, error) {
+	segments := paths.SplitPath(path)
+	if len(segments) == 0 {
+		return nil, "", fmt.Errorf("invalid path: empty")
+	}
+
+	slug, err := paths.NormalizeSlug(segments[len(segments)-1])
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid slug %q: %w", segments[len(segments)-1], err)
+	}
+
+	if len(segments) == 1 {
+		return nil, slug, nil
+	}
+
+	parentPath := paths.JoinPath(segments[:len(segments)-1]...)
+	parentUUID, err := walkContainerPathTx(tx, parentPath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return &parentUUID, slug, nil
+}
+
+func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.TaskDocument, update *bundleTaskUpdate, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	parentUUID, slug, err := resolveParentContainerTx(tx, task.Path)
+	if err != nil {
+		return err
+	}
+
+	projectUUID := ""
+	if parentUUID != nil {
+		projectUUID = *parentUUID
+	} else {
+		if err := tx.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID); err != nil {
+			return fmt.Errorf("no root container found for %s", task.Path)
+		}
+	}
+
+	title := slug
+	if update.Title != nil && *update.Title != "" {
+		title = *update.Title
+	}
+
+	state := "open"
+	if update.State != nil && *update.State != "" {
+		state = *update.State
+	}
+
+	priority := 3
+	if update.Priority != nil && *update.Priority > 0 {
+		priority = *update.Priority
+	}
+
+	description := ""
+	if update.Description != nil {
+		description = *update.Description
+	}
+
+	labels := interface{}(nil)
+	if update.Labels != nil {
+		labels = *update.Labels
+	}
+
+	dueAt := interface{}(nil)
+	if update.DueAt != nil {
+		dueAt = *update.DueAt
+	}
+
+	startAt := interface{}(nil)
+	if update.StartAt != nil {
+		startAt = *update.StartAt
+	}
+
+	var (
+		res    sql.Result
+		errIns error
+	)
+
+	if task.UUID != "" {
+		res, errIns = tx.Exec(`
+			INSERT INTO tasks (
+				uuid, id, slug, title, description, project_uuid, state, priority, kind,
+				labels, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
+			) VALUES (?, '', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?)
+		`, task.UUID, slug, title, description, projectUUID, state, priority, labels, dueAt, startAt, actorUUID, actorUUID)
+	} else {
+		res, errIns = tx.Exec(`
+			INSERT INTO tasks (
+				id, slug, title, description, project_uuid, state, priority, kind,
+				labels, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
+			) VALUES ('', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?)
+		`, slug, title, description, projectUUID, state, priority, labels, dueAt, startAt, actorUUID, actorUUID)
+	}
+	if errIns != nil {
+		return fmt.Errorf("failed to create task %s: %w", task.Path, errIns)
+	}
+
+	rowID, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to get task row id: %w", err)
+	}
+
+	var uuid, id string
+	var etag int64
+	if err := tx.QueryRow("SELECT uuid, id, etag FROM tasks WHERE rowid = ?", rowID).Scan(&uuid, &id, &etag); err != nil {
+		return fmt.Errorf("failed to fetch created task: %w", err)
+	}
+
+	payload := map[string]interface{}{
+		"slug":     slug,
+		"title":    title,
+		"state":    state,
+		"priority": priority,
+		"kind":     "task",
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	payloadStr := string(payloadJSON)
+
+	if err := ew.LogEvent(tx, &domain.Event{
+		ActorUUID:    &actorUUID,
+		ResourceType: "task",
+		ResourceUUID: &uuid,
+		EventType:    "task.created",
+		ETag:         &etag,
+		Payload:      &payloadStr,
+	}); err != nil {
+		return fmt.Errorf("failed to log task.created: %w", err)
+	}
+
+	_ = id
+	return nil
+}
+
+func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bundleTaskCurrent, update *bundleTaskUpdate, dryRun bool) error {
+	fields := map[string]interface{}{}
+
+	if update.Title != nil {
+		fields["title"] = *update.Title
+	}
+	if update.State != nil {
+		fields["state"] = *update.State
+	}
+	if update.Priority != nil {
+		fields["priority"] = *update.Priority
+	}
+	if update.DueAt != nil {
+		fields["due_at"] = *update.DueAt
+	}
+	if update.StartAt != nil {
+		fields["start_at"] = *update.StartAt
+	}
+	if update.Labels != nil {
+		fields["labels"] = *update.Labels
+	}
+	if update.Description != nil {
+		fields["description"] = *update.Description
+	}
+
+	if len(fields) == 0 {
+		return nil
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	var setClauses []string
+	var args []interface{}
+	for key, value := range fields {
+		setClauses = append(setClauses, fmt.Sprintf("%s = ?", key))
+		args = append(args, value)
+	}
+
+	setClauses = append(setClauses, "etag = etag + 1")
+	setClauses = append(setClauses, "updated_by_actor_uuid = ?")
+	args = append(args, actorUUID)
+	args = append(args, current.UUID)
+
+	query := fmt.Sprintf("UPDATE tasks SET %s WHERE uuid = ?", strings.Join(setClauses, ", "))
+	if _, err := tx.Exec(query, args...); err != nil {
+		return fmt.Errorf("failed to update task %s: %w", current.UUID, err)
+	}
+
+	newETag := current.ETag + 1
+	payloadJSON, _ := json.Marshal(fields)
+	payloadStr := string(payloadJSON)
+
+	if err := ew.LogEvent(tx, &domain.Event{
+		ActorUUID:    &actorUUID,
+		ResourceType: "task",
+		ResourceUUID: &current.UUID,
+		EventType:    "task.updated",
+		ETag:         &newETag,
+		Payload:      &payloadStr,
+	}); err != nil {
+		return fmt.Errorf("failed to log task.updated: %w", err)
+	}
+
+	if update.State != nil && *update.State == "deleted" {
+		if err := cascadeDeleteSubtasksTx(tx, ew, actorUUID, current.UUID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskUUID string) error {
+	rows, err := tx.Query(`
+		SELECT uuid FROM tasks
+		WHERE parent_task_uuid = ? AND state != 'deleted'
+	`, parentTaskUUID)
+	if err != nil {
+		return fmt.Errorf("failed to query subtasks: %w", err)
+	}
+	defer rows.Close()
+
+	var subtaskUUIDs []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return fmt.Errorf("failed to scan subtask: %w", err)
+		}
+		subtaskUUIDs = append(subtaskUUIDs, uuid)
+	}
+
+	for _, subtaskUUID := range subtaskUUIDs {
+		if _, err := tx.Exec(`
+			UPDATE tasks
+			SET state = 'deleted',
+			    updated_by_actor_uuid = ?
+			WHERE uuid = ?
+		`, actorUUID, subtaskUUID); err != nil {
+			return fmt.Errorf("failed to delete subtask %s: %w", subtaskUUID, err)
+		}
+
+		payload := `{"action":"cascade_deleted","parent_deleted":true}`
+		if err := ew.LogEvent(tx, &domain.Event{
+			ActorUUID:    &actorUUID,
+			ResourceType: "task",
+			ResourceUUID: &subtaskUUID,
+			EventType:    "task.deleted",
+			Payload:      &payload,
+		}); err != nil {
+			return fmt.Errorf("failed to log subtask delete: %w", err)
+		}
+
+		if err := cascadeDeleteSubtasksTx(tx, ew, actorUUID, subtaskUUID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func buildConflictDetail(task *bundle.TaskDocument, current *bundleTaskCurrent, update *bundleTaskUpdate, reason string, expectedETag int64, actualETag int64) applyConflict {
+	conflict := applyConflict{
+		Path:         task.Path,
+		UUID:         task.UUID,
+		Reason:       reason,
+		ExpectedETag: expectedETag,
+		ActualETag:   actualETag,
+	}
+
+	if current == nil || update == nil {
+		return conflict
+	}
+
+	if conflict.UUID == "" {
+		conflict.UUID = current.UUID
+	}
+
+	changes := map[string]applyFieldChange{}
+
+	if update.Title != nil && current.Title != *update.Title {
+		changes["title"] = applyFieldChange{Current: current.Title, Incoming: *update.Title}
+	}
+	if update.State != nil && current.State != *update.State {
+		changes["state"] = applyFieldChange{Current: current.State, Incoming: *update.State}
+	}
+	if update.Priority != nil && current.Priority != *update.Priority {
+		changes["priority"] = applyFieldChange{Current: current.Priority, Incoming: *update.Priority}
+	}
+	if update.DueAt != nil && (current.DueAt == nil || *current.DueAt != *update.DueAt) {
+		currentVal := ""
+		if current.DueAt != nil {
+			currentVal = *current.DueAt
+		}
+		changes["due_at"] = applyFieldChange{Current: currentVal, Incoming: *update.DueAt}
+	}
+	if update.StartAt != nil && (current.StartAt == nil || *current.StartAt != *update.StartAt) {
+		currentVal := ""
+		if current.StartAt != nil {
+			currentVal = *current.StartAt
+		}
+		changes["start_at"] = applyFieldChange{Current: currentVal, Incoming: *update.StartAt}
+	}
+	if update.Labels != nil && (current.Labels == nil || *current.Labels != *update.Labels) {
+		currentVal := ""
+		if current.Labels != nil {
+			currentVal = *current.Labels
+		}
+		changes["labels"] = applyFieldChange{Current: currentVal, Incoming: *update.Labels}
+	}
+
+	if update.Description != nil && current.Description != *update.Description {
+		diff := difflib.UnifiedDiff{
+			A:        difflib.SplitLines(current.Description),
+			B:        difflib.SplitLines(*update.Description),
+			FromFile: "current",
+			ToFile:   "incoming",
+			Context:  3,
+		}
+		if diffText, err := difflib.GetUnifiedDiffString(diff); err == nil {
+			conflict.DescriptionDiff = diffText
+		}
+	}
+
+	if len(changes) > 0 {
+		conflict.FieldChanges = changes
+	}
+
+	return conflict
+}
+
+func conflictFromError(err error) *applyConflict {
+	var conflictErr *conflictError
+	if errors.As(err, &conflictErr) {
+		return &conflictErr.detail
+	}
 	return nil
 }
 
@@ -456,17 +1108,14 @@ func reattachFiles(cmd *cobra.Command, cfg *config.Config, attachmentsDir string
 
 // conflictError represents an etag mismatch or merge conflict
 type conflictError struct {
-	taskPath string
-	message  string
+	detail applyConflict
 }
 
 func (e *conflictError) Error() string {
-	return fmt.Sprintf("conflict in task %s: %s", e.taskPath, e.message)
-}
-
-func isConflictError(err error) bool {
-	_, ok := err.(*conflictError)
-	return ok
+	if e.detail.Message != "" {
+		return e.detail.Message
+	}
+	return fmt.Sprintf("conflict in task %s (%s)", e.detail.Path, e.detail.Reason)
 }
 
 // generateUUID generates a UUID v4

@@ -131,6 +131,23 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 		Note:   attachDirNote,
 	}
 
+	// Check project root
+	projectRootSource := "config file"
+	if os.Getenv("WRKQ_PROJECT_ROOT") != "" {
+		projectRootSource = "environment variable WRKQ_PROJECT_ROOT"
+	}
+
+	projectRootValue := cfg.ProjectRoot
+	if projectRootValue == "" {
+		projectRootValue = "(not set)"
+	}
+
+	report.Config["project_root"] = configValue{
+		Value:  projectRootValue,
+		Source: projectRootSource,
+		Valid:  true,
+	}
+
 	// Check actor
 	actorSource := "default"
 	actorValue := cfg.GetActorID()
@@ -213,6 +230,12 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["attach_dir"].Note)
 	}
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	fmt.Fprintln(cmd.OutOrStdout(), "Project Root:")
+	fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_PROJECT_ROOT: %s\n", report.Config["project_root"].Value)
+	fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["project_root"].Source)
+	fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Loaded")
 	fmt.Fprintln(cmd.OutOrStdout())
 
 	fmt.Fprintln(cmd.OutOrStdout(), "Actor:")

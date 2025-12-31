@@ -92,6 +92,8 @@ func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	fromRef := args[0]
 	kind := args[1]
 	toRef := args[2]
+	fromRef = applyProjectRootToSelector(app.Config, fromRef, false)
+	toRef = applyProjectRootToSelector(app.Config, toRef, false)
 
 	// Validate kind
 	if err := domain.ValidateTaskRelationKind(kind); err != nil {
@@ -134,6 +136,8 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	fromRef := args[0]
 	kind := args[1]
 	toRef := args[2]
+	fromRef = applyProjectRootToSelector(app.Config, fromRef, false)
+	toRef = applyProjectRootToSelector(app.Config, toRef, false)
 
 	// Validate kind
 	if err := domain.ValidateTaskRelationKind(kind); err != nil {
@@ -171,20 +175,21 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 type Relation struct {
-	Direction    string `json:"direction"` // "outgoing" or "incoming"
-	Kind         string `json:"kind"`
-	TaskID       string `json:"task_id"`
-	TaskUUID     string `json:"task_uuid"`
-	TaskSlug     string `json:"task_slug"`
-	TaskTitle    string `json:"task_title"`
-	CreatedAt    string `json:"created_at"`
-	CreatedByID  string `json:"created_by_id"`
+	Direction   string `json:"direction"` // "outgoing" or "incoming"
+	Kind        string `json:"kind"`
+	TaskID      string `json:"task_id"`
+	TaskUUID    string `json:"task_uuid"`
+	TaskSlug    string `json:"task_slug"`
+	TaskTitle   string `json:"task_title"`
+	CreatedAt   string `json:"created_at"`
+	CreatedByID string `json:"created_by_id"`
 }
 
 func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
 	taskRef := args[0]
+	taskRef = applyProjectRootToSelector(app.Config, taskRef, false)
 
 	// Resolve task
 	taskUUID, _, err := selectors.ResolveTask(database, taskRef)

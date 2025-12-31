@@ -30,17 +30,17 @@ By default, only non-deleted comments are shown, ordered by created_at ascending
 }
 
 var (
-	commentLsJSON          bool
-	commentLsNDJSON        bool
-	commentLsYAML          bool
-	commentLsTSV           bool
-	commentLsPorcelain     bool
+	commentLsJSON           bool
+	commentLsNDJSON         bool
+	commentLsYAML           bool
+	commentLsTSV            bool
+	commentLsPorcelain      bool
 	commentLsIncludeDeleted bool
-	commentLsLimit         int
-	commentLsCursor        string
-	commentLsFields        string
-	commentLsSort          string
-	commentLsReverse       bool
+	commentLsLimit          int
+	commentLsCursor         string
+	commentLsFields         string
+	commentLsSort           string
+	commentLsReverse        bool
 )
 
 func init() {
@@ -105,6 +105,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		if strings.HasPrefix(taskRef, "t:") {
 			taskRef = taskRef[2:]
 		}
+		taskRef = applyProjectRootToSelector(cfg, taskRef, false)
 
 		// Resolve task
 		taskUUID, taskID, err := selectors.ResolveTask(database, taskRef)
@@ -164,16 +165,16 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 			}
 
 			comment := map[string]interface{}{
-				"uuid":        uuid,
-				"id":          id,
-				"task_uuid":   taskUUID,
-				"task_id":     taskIDStr,
-				"actor_uuid":  actorUUID,
-				"actor_slug":  actorSlug,
-				"actor_role":  actorRole,
-				"body":        body,
-				"etag":        etag,
-				"created_at":  createdAt,
+				"uuid":       uuid,
+				"id":         id,
+				"task_uuid":  taskUUID,
+				"task_id":    taskIDStr,
+				"actor_uuid": actorUUID,
+				"actor_slug": actorSlug,
+				"actor_role": actorRole,
+				"body":       body,
+				"etag":       etag,
+				"created_at": createdAt,
 			}
 
 			if meta.Valid && meta.String != "" {

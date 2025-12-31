@@ -526,6 +526,7 @@ wrkqadm migrate --dry-run
 | Variable | Description |
 |----------|-------------|
 | `WRKQ_DB_PATH` | Path to SQLite database |
+| `WRKQ_PROJECT_ROOT` | Default project root path for CLI commands (auto-prefixes paths) |
 | `WRKQ_ACTOR` | Default actor slug |
 | `WRKQ_ACTOR_ID` | Default actor friendly ID |
 
@@ -537,6 +538,7 @@ wrkqadm migrate --dry-run
 db_path: /path/to/wrkq.db
 default_actor: my-actor
 attach_dir: /path/to/attachments
+project_root: my-project
 ```
 
 ### Global Flags

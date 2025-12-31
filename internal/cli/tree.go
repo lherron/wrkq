@@ -16,7 +16,7 @@ var treeCmd = &cobra.Command{
 	Short: "Display containers and tasks in a tree structure",
 	Long: `Display containers and tasks in a hierarchical tree structure.
 
-By default, archived items are hidden. Use -a/--all to include them.
+By default, archived and deleted items are hidden. Use -a/--all to include them.
 When all tasks in a container are completed/archived, they are collapsed
 and an "(All done)" indicator is shown on the container.
 
@@ -44,7 +44,7 @@ func init() {
 	rootCmd.AddCommand(treeCmd)
 
 	treeCmd.Flags().IntVarP(&treeDepth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived items")
+	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived and deleted items")
 	treeCmd.Flags().BoolVar(&treeOpenOnly, "open", false, "Show only active tasks (open, in_progress, blocked)")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
@@ -57,7 +57,9 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Determine root path
 	rootPath := ""
 	if len(args) > 0 {
-		rootPath = args[0]
+		rootPath = applyProjectRootToPath(app.Config, args[0], false)
+	} else {
+		rootPath = applyProjectRootToPath(app.Config, "", true)
 	}
 
 	// Build and display tree
@@ -65,13 +67,14 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 type treeNode struct {
-	Type              string      `json:"type"`       // "container" or "task"
+	Type              string      `json:"type"` // "container" or "task"
 	ID                string      `json:"id"`
 	Slug              string      `json:"slug"`
 	Title             string      `json:"title"`
 	State             string      `json:"state,omitempty"` // for tasks
 	UUID              string      `json:"uuid"`
 	IsArchived        bool        `json:"is_archived"`
+	IsDeleted         bool        `json:"is_deleted"`
 	AllTasksCompleted bool        `json:"all_tasks_completed,omitempty"` // for containers
 	Children          []*treeNode `json:"children,omitempty"`
 }
@@ -191,7 +194,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 	// Query tasks at this level
 	if parentUUID != nil || path == "" {
 		taskQuery := `
-			SELECT uuid, id, slug, title, state, archived_at
+			SELECT uuid, id, slug, title, state, archived_at, deleted_at
 			FROM tasks
 			WHERE `
 		var taskArgs []interface{}
@@ -218,9 +221,9 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 		for taskRows.Next() {
 			var node treeNode
-			var archivedAt *string
+			var archivedAt, deletedAt *string
 
-			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt)
+			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt, &deletedAt)
 			if err != nil {
 				taskRows.Close()
 				return nil, fmt.Errorf("failed to scan task: %w", err)
@@ -228,17 +231,18 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 			node.Type = "task"
 			node.IsArchived = archivedAt != nil
+			node.IsDeleted = deletedAt != nil
 			node.Children = make([]*treeNode, 0)
 
 			totalTasks++
-			isClosed := node.IsArchived || node.State == "completed"
+			isClosed := node.IsArchived || node.IsDeleted || node.State == "completed"
 			if isClosed {
 				closedTasks++
 			}
 
 			// Determine if task should be shown based on filters
 			showTask := true
-			if !includeArchived && node.IsArchived {
+			if !includeArchived && (node.IsArchived || node.IsDeleted) {
 				showTask = false
 			}
 			if openOnly && node.State != "open" && node.State != "in_progress" && node.State != "blocked" {
@@ -364,4 +368,3 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 
 	return strings.Join(parts, " ")
 }
-

@@ -298,9 +298,10 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("purge increments etag before deletion", func(t *testing.T) {
 		taskUUID := "etag-purge"
+		// Include explicit id to avoid tasks_ai_friendly trigger
 		database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES (?, 'etag-purge', 'ETag Purge', ?, 'open', 2, 3, ?, ?)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES (?, 'T-99991', 'etag-purge', 'ETag Purge', ?, 'open', 2, 3, ?, ?)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Get initial etag
@@ -329,9 +330,10 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("soft delete increments etag", func(t *testing.T) {
 		taskUUID := "etag-archive"
+		// Include explicit id to avoid tasks_ai_friendly trigger (which would cause extra etag increment)
 		database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES (?, 'etag-archive', 'ETag Archive', ?, 'open', 2, 5, ?, ?)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES (?, 'T-99990', 'etag-archive', 'ETag Archive', ?, 'open', 2, 5, ?, ?)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Soft delete
@@ -341,7 +343,8 @@ func TestRmPurge(t *testing.T) {
 			t.Fatalf("Failed to archive task: %v", err)
 		}
 
-		// Verify etag incremented
+		// Verify etag incremented (5 -> 6 from store's explicit increment, then trigger adds another -> 7)
+		// Note: The trigger fires and does etag = OLD.etag + 1, but this uses pre-UPDATE value
 		var newEtag int
 		database.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&newEtag)
 		if newEtag != 6 {
@@ -351,9 +354,10 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("result contains correct metadata", func(t *testing.T) {
 		taskUUID := "result-test"
+		// Include explicit id to avoid tasks_ai_friendly trigger
 		database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'result-task', 'Result Test', ?, 'open', 2, ?, ?, 1)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'T-00010', 'result-task', 'Result Test', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment

@@ -668,3 +668,113 @@ func TestCommentAdd_FileFlag(t *testing.T) {
 		t.Errorf("Expected comment body %q, got %q", commentText, body)
 	}
 }
+
+// TestCommentSequenceDesync reproduces the bug where comment_sequences gets out of sync
+// when comments are inserted via restore (which uses MAX(id)+1) without updating the sequence table.
+// This causes subsequent comment add operations to fail with UNIQUE constraint violation.
+func TestCommentSequenceDesync(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create a test task
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task body', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	// Set environment variables
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+	defer os.Unsetenv("WRKQ_DB_PATH")
+	defer os.Unsetenv("WRKQ_ACTOR")
+
+	// Step 1: Add a comment via CLI (uses sequence, sets it to 1)
+	cmd := rootCmd
+	cmd.SetArgs([]string{"comment", "add", "T-00001", "-m", "First comment via CLI"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Failed to add first comment: %v\nOutput: %s", err, out.String())
+	}
+
+	// Verify C-00001 was created
+	var id1 string
+	err = database.QueryRow("SELECT id FROM comments WHERE body = 'First comment via CLI'").Scan(&id1)
+	if err != nil {
+		t.Fatalf("Failed to query first comment: %v", err)
+	}
+	if id1 != "C-00001" {
+		t.Fatalf("Expected first comment to be C-00001, got %s", id1)
+	}
+
+	// Step 2: Simulate what restore.go does - insert comment using MAX(id)+1 WITHOUT updating sequence
+	// This is the bug: restore.go calculates the next ID but doesn't update comment_sequences
+	var nextSeq int
+	err = database.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments").Scan(&nextSeq)
+	if err != nil {
+		t.Fatalf("Failed to calculate next sequence: %v", err)
+	}
+	// nextSeq should be 2 (MAX(1) + 1)
+
+	// Insert comment with C-00002 directly (simulating restore.go behavior)
+	_, err = database.Exec(`
+		INSERT INTO comments (uuid, id, task_uuid, actor_uuid, body, etag, created_at)
+		VALUES ('comment-uuid-restore', 'C-00002', 'task-uuid-1', '00000000-0000-0000-0000-000000000001', 'Comment from restore', 1, datetime('now'))
+	`)
+	if err != nil {
+		t.Fatalf("Failed to insert restore comment: %v", err)
+	}
+
+	// NOTE: We deliberately DO NOT update comment_sequences here - this is the bug!
+	// The sequence table still has value=1, but we now have C-00001 and C-00002 in the database.
+
+	// Verify sequence is still at 1 (out of sync)
+	var seqValue int
+	err = database.QueryRow("SELECT value FROM comment_sequences WHERE name = 'next_comment'").Scan(&seqValue)
+	if err != nil {
+		t.Fatalf("Failed to query sequence: %v", err)
+	}
+	if seqValue != 1 {
+		t.Fatalf("Expected sequence to be 1 (out of sync), got %d", seqValue)
+	}
+
+	// Step 3: Try to add another comment via CLI - this should work but currently fails
+	// comment_add.go will read sequence=1, increment to 2, try to create C-00002, COLLISION!
+	cmd = rootCmd
+	cmd.SetArgs([]string{"comment", "add", "T-00001", "-m", "Third comment via CLI"})
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	err = cmd.Execute()
+	if err != nil {
+		// This is the bug! The command fails with UNIQUE constraint violation
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			t.Errorf("BUG REPRODUCED: comment add failed with UNIQUE constraint - sequence desync detected: %v", err)
+		} else {
+			t.Fatalf("Unexpected error: %v\nOutput: %s", err, out.String())
+		}
+	}
+
+	// If we get here, the fix is working - verify the comment was created with C-00003
+	var id3 string
+	err = database.QueryRow("SELECT id FROM comments WHERE body = 'Third comment via CLI'").Scan(&id3)
+	if err != nil {
+		t.Fatalf("Failed to query third comment: %v", err)
+	}
+	if id3 != "C-00003" {
+		t.Errorf("Expected third comment to be C-00003, got %s", id3)
+	}
+
+	// Verify we have 3 comments total
+	var count int
+	err = database.QueryRow("SELECT COUNT(*) FROM comments").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count comments: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("Expected 3 comments, got %d", count)
+	}
+}

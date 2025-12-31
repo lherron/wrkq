@@ -43,6 +43,7 @@ var (
 	touchLabels      string
 	touchDueAt       string
 	touchStartAt     string
+	touchForceUUID   string
 )
 
 func init() {
@@ -57,11 +58,13 @@ func init() {
 	touchCmd.Flags().StringVar(&touchLabels, "labels", "", "Initial task labels (JSON array)")
 	touchCmd.Flags().StringVar(&touchDueAt, "due-at", "", "Initial task due date")
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
+	touchCmd.Flags().StringVar(&touchForceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
 }
 
 func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
+	args = applyProjectRootToPaths(app.Config, args, false)
 
 	// Validate state
 	if touchState != "" {
@@ -92,10 +95,22 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate force-uuid if provided
+	if touchForceUUID != "" {
+		if err := domain.ValidateUUID(touchForceUUID); err != nil {
+			return err
+		}
+		// force-uuid only works when creating a single task
+		if len(args) > 1 {
+			return fmt.Errorf("--force-uuid can only be used when creating a single task")
+		}
+	}
+
 	// Resolve parent task if provided
 	var parentTaskUUID *string
 	if touchParentTask != "" {
-		uuid, _, err := selectors.ResolveTask(database, touchParentTask)
+		parentRef := applyProjectRootToSelector(app.Config, touchParentTask, false)
+		uuid, _, err := selectors.ResolveTask(database, parentRef)
 		if err != nil {
 			return fmt.Errorf("failed to resolve parent task: %w", err)
 		}
@@ -166,6 +181,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Create the task using the store
 		_, err = s.Tasks.Create(actorUUID, store.CreateParams{
+			UUID:              touchForceUUID,
 			Slug:              normalizedSlug,
 			Title:             title,
 			Description:       description,
@@ -187,4 +203,3 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-

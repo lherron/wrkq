@@ -284,9 +284,10 @@ func TestCpCommand(t *testing.T) {
 
 	t.Run("copy with etag check", func(t *testing.T) {
 		sourceUUID := "etag-task"
+		// Include explicit id to avoid tasks_ai_friendly trigger
 		database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES (?, 'etag-task', 'ETag Task', ?, 'open', 2, 5, ?, ?)
+			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
+			VALUES (?, 'T-99992', 'etag-task', 'ETag Task', ?, 'open', 2, 5, ?, ?)
 		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		// Try copy with wrong etag

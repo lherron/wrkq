@@ -83,7 +83,7 @@ type Task struct {
 	Slug               string     `json:"slug" db:"slug"`
 	Title              string     `json:"title" db:"title"`
 	ProjectUUID        string     `json:"project_uuid" db:"project_uuid"`
-	State              string     `json:"state" db:"state"` // draft, open, in_progress, completed, blocked, cancelled, archived
+	State              string     `json:"state" db:"state"` // draft, open, in_progress, completed, blocked, cancelled, archived, deleted
 	Priority           int        `json:"priority" db:"priority"` // 1-4, 1 is highest
 	Kind               TaskKind   `json:"kind" db:"kind"` // task, subtask, spike, bug, chore
 	ParentTaskUUID     *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
@@ -97,6 +97,7 @@ type Task struct {
 	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 	ArchivedAt         *time.Time `json:"archived_at,omitempty" db:"archived_at"`
+	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
 	CreatedByActorUUID string     `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
 	UpdatedByActorUUID string     `json:"updated_by_actor_uuid" db:"updated_by_actor_uuid"`
 }

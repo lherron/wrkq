@@ -30,6 +30,9 @@ func init() {
 
 func runStat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
+	for i, arg := range args {
+		args[i] = applyProjectRootToSelector(app.Config, arg, false)
+	}
 
 	type Metadata struct {
 		Type     string                 `json:"type"`

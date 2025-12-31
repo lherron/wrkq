@@ -12,6 +12,7 @@ import (
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/spf13/cobra"
 )
 
 // setupTestEnv creates a test database and returns it with cleanup
@@ -211,6 +212,76 @@ func TestListCommand_NDJSON(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &obj); err != nil {
 			t.Errorf("Line %d is not valid JSON: %v", i, err)
 		}
+	}
+}
+
+func TestCheckInboxProjectRoot(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Root project container "demo"
+	_, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'demo', 'Demo', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed demo project: %v", err)
+	}
+
+	// Child inbox under demo
+	_, err = database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000011', 'P-00003', 'inbox', 'Inbox', '00000000-0000-0000-0000-000000000010', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed demo inbox: %v", err)
+	}
+
+	// Task in root inbox
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000020', 'T-00001', 'root-task', 'Root Task', '00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create root inbox task: %v", err)
+	}
+
+	// Task in demo/inbox
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000021', 'T-00002', 'demo-task', 'Demo Task', '00000000-0000-0000-0000-000000000011', 'open', 1, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create demo inbox task: %v", err)
+	}
+
+	app := createTestApp(t, database, dbPath)
+	app.Config.ProjectRoot = "demo"
+
+	buf := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	checkInboxJSON = true
+	defer func() { checkInboxJSON = false }()
+
+	if err := runCheckInbox(app, cmd, nil); err != nil {
+		t.Fatalf("runCheckInbox failed: %v", err)
+	}
+
+	var results []inboxTask
+	if err := json.Unmarshal(buf.Bytes(), &results); err != nil {
+		t.Fatalf("Failed to parse JSON output: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(results))
+	}
+	if results[0].Slug != "demo-task" {
+		t.Fatalf("Expected demo-task, got %s", results[0].Slug)
+	}
+	if results[0].Path != "demo/inbox/demo-task" {
+		t.Fatalf("Expected path demo/inbox/demo-task, got %s", results[0].Path)
 	}
 }
 
@@ -598,4 +669,3 @@ func TestApplyCommand_EtagMismatch(t *testing.T) {
 	// Reset for other tests
 	applyIfMatch = 0
 }
-

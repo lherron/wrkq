@@ -41,10 +41,11 @@ db-reset:
 
 # --- CLI tasks (Golang) ---
 
-# Build both CLI binaries (wrkq and wrkqadm)
+# Build CLI binaries (wrkq, wrkqadm, wrkqd)
 build:
   go build -o bin/wrkq ./cmd/wrkq
   go build -o bin/wrkqadm ./cmd/wrkqadm
+  go build -o bin/wrkqd ./cmd/wrkqd
 
 # Run the wrkq CLI
 run *args:
@@ -59,42 +60,60 @@ test-coverage:
   go test -v -coverprofile=coverage.out ./...
   go tool cover -html=coverage.out -o coverage.html
 
-# Install both CLI binaries to ~/.local/bin (no sudo required)
+# Install CLI binaries to ~/.local/bin (no sudo required)
 install:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building wrkq and wrkqadm binaries..."
+  echo "Building wrkq, wrkqadm, and wrkqd binaries..."
   go build -o bin/wrkq ./cmd/wrkq
   go build -o bin/wrkqadm ./cmd/wrkqadm
+  go build -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
+  # Remove old binaries first to avoid crashes when overwriting running binaries
+  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkqadm ~/.local/bin/wrkqd
   cp bin/wrkq ~/.local/bin/wrkq
   cp bin/wrkqadm ~/.local/bin/wrkqadm
+  cp bin/wrkqd ~/.local/bin/wrkqd
   chmod +x ~/.local/bin/wrkq
   chmod +x ~/.local/bin/wrkqadm
+  chmod +x ~/.local/bin/wrkqd
   echo "✓ Installed to ~/.local/bin/wrkq"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
+  echo "✓ Installed to ~/.local/bin/wrkqd"
   echo ""
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "⚠️  Add ~/.local/bin to your PATH:"
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
   fi
-  echo "✓ Run 'wrkq version' and 'wrkqadm version' to verify"
+  echo "✓ Run 'wrkq version', 'wrkqadm version', and 'wrkqd --help' to verify"
 
-# Install CLI binary to /usr/local/bin (requires sudo - run manually)
+# Install CLI binaries to /usr/local/bin (requires sudo - run manually)
 install-system:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building wrkq binary..."
+  echo "Building wrkq binaries..."
   go build -o bin/wrkq ./cmd/wrkq
+  go build -o bin/wrkqadm ./cmd/wrkqadm
+  go build -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
+  # Remove old binary first to avoid crashes when overwriting running binaries
+  sudo rm -f /usr/local/bin/wrkq
+  sudo rm -f /usr/local/bin/wrkqadm
+  sudo rm -f /usr/local/bin/wrkqd
   sudo cp bin/wrkq /usr/local/bin/wrkq
+  sudo cp bin/wrkqadm /usr/local/bin/wrkqadm
+  sudo cp bin/wrkqd /usr/local/bin/wrkqd
   sudo chmod +x /usr/local/bin/wrkq
+  sudo chmod +x /usr/local/bin/wrkqadm
+  sudo chmod +x /usr/local/bin/wrkqd
   echo "✓ Installed to /usr/local/bin/wrkq"
+  echo "✓ Installed to /usr/local/bin/wrkqadm"
+  echo "✓ Installed to /usr/local/bin/wrkqd"
   echo "✓ Run 'wrkq --version' to verify"
 
-# Uninstall both CLI binaries from ~/.local/bin
+# Uninstall CLI binaries from ~/.local/bin
 uninstall:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -111,6 +130,12 @@ uninstall:
     echo "✓ Uninstalled wrkqadm from ~/.local/bin"
     UNINSTALLED=1
   fi
+  if [ -f ~/.local/bin/wrkqd ]; then
+    echo "Removing ~/.local/bin/wrkqd..."
+    rm ~/.local/bin/wrkqd
+    echo "✓ Uninstalled wrkqd from ~/.local/bin"
+    UNINSTALLED=1
+  fi
   if [ -f /usr/local/bin/wrkq ]; then
     echo "Removing /usr/local/bin/wrkq (requires sudo)..."
     sudo rm /usr/local/bin/wrkq
@@ -121,6 +146,12 @@ uninstall:
     echo "Removing /usr/local/bin/wrkqadm (requires sudo)..."
     sudo rm /usr/local/bin/wrkqadm
     echo "✓ Uninstalled wrkqadm from /usr/local/bin"
+    UNINSTALLED=1
+  fi
+  if [ -f /usr/local/bin/wrkqd ]; then
+    echo "Removing /usr/local/bin/wrkqd (requires sudo)..."
+    sudo rm /usr/local/bin/wrkqd
+    echo "✓ Uninstalled wrkqd from /usr/local/bin"
     UNINSTALLED=1
   fi
   if [ $UNINSTALLED -eq 0 ]; then
@@ -161,6 +192,8 @@ clean:
 tree:
   tree -I 'node_modules|dist|bin|coverage*|.git' -L 3
 
-# Run quick smoke test (build + basic tests)
-smoke: build test
+# Run quick smoke test (build + wrkqd + merge smoke scripts)
+smoke: build
+  test/smoke-wrkqd.sh
+  test/smoke-mergeadm.sh
   @echo "✓ Smoke test passed"

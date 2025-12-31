@@ -65,13 +65,13 @@ func init() {
 }
 
 type copyResult struct {
-	SourceID      string `json:"source_id"`
-	SourceUUID    string `json:"source_uuid"`
-	DestID        string `json:"dest_id"`
-	DestUUID      string `json:"dest_uuid"`
-	DestPath      string `json:"dest_path"`
-	Attachments   int    `json:"attachments_copied,omitempty"`
-	WithFiles     bool   `json:"with_files,omitempty"`
+	SourceID    string `json:"source_id"`
+	SourceUUID  string `json:"source_uuid"`
+	DestID      string `json:"dest_id"`
+	DestUUID    string `json:"dest_uuid"`
+	DestPath    string `json:"dest_path"`
+	Attachments int    `json:"attachments_copied,omitempty"`
+	WithFiles   bool   `json:"with_files,omitempty"`
 }
 
 func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -101,6 +101,11 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to read stdin: %w", err)
 		}
 	}
+
+	for i, src := range sources {
+		sources[i] = applyProjectRootToSelector(app.Config, src, false)
+	}
+	destination = applyProjectRootToSelector(app.Config, destination, false)
 
 	// Resolve destination container
 	destUUID, err := resolveDestinationContainer(database, destination)

@@ -2,16 +2,28 @@ package domain
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
+
+// UUIDv4Regex validates lowercase UUIDv4 format
+var UUIDv4Regex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// ValidateUUID validates a UUID v4 format (lowercase with hyphens)
+func ValidateUUID(uuid string) error {
+	if !UUIDv4Regex.MatchString(uuid) {
+		return fmt.Errorf("invalid UUID: must be lowercase UUIDv4 format (e.g., 550e8400-e29b-41d4-a716-446655440000)")
+	}
+	return nil
+}
 
 // ValidateState validates a task state
 func ValidateState(state string) error {
 	switch state {
-	case "draft", "open", "in_progress", "completed", "blocked", "cancelled", "archived":
+	case "draft", "open", "in_progress", "completed", "blocked", "cancelled", "archived", "deleted":
 		return nil
 	default:
-		return fmt.Errorf("invalid state: must be one of: draft, open, in_progress, completed, blocked, cancelled, archived")
+		return fmt.Errorf("invalid state: must be one of: draft, open, in_progress, completed, blocked, cancelled, archived, deleted")
 	}
 }
 

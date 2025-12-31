@@ -41,7 +41,8 @@ func runDiff(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
 	// Resolve first task
-	uuidA, _, err := selectors.ResolveTask(database, args[0])
+	refA := applyProjectRootToSelector(app.Config, args[0], false)
+	uuidA, _, err := selectors.ResolveTask(database, refA)
 	if err != nil {
 		return fmt.Errorf("failed to resolve task A: %w", err)
 	}
@@ -57,7 +58,8 @@ func runDiff(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve second task
-	uuidB, _, err := selectors.ResolveTask(database, args[1])
+	refB := applyProjectRootToSelector(app.Config, args[1], false)
+	uuidB, _, err := selectors.ResolveTask(database, refB)
 	if err != nil {
 		return fmt.Errorf("failed to resolve task B: %w", err)
 	}
