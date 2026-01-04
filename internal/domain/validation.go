@@ -75,6 +75,26 @@ func ValidateTaskKind(kind string) error {
 	}
 }
 
+// ValidateResolution validates a task resolution
+func ValidateResolution(resolution string) error {
+	switch resolution {
+	case "done", "wont_do", "duplicate", "needs_info":
+		return nil
+	default:
+		return fmt.Errorf("invalid resolution: must be one of: done, wont_do, duplicate, needs_info")
+	}
+}
+
+// ValidateRunStatus validates an async run status
+func ValidateRunStatus(status string) error {
+	switch status {
+	case "queued", "running", "completed", "failed", "cancelled", "timed_out":
+		return nil
+	default:
+		return fmt.Errorf("invalid run_status: must be one of: queued, running, completed, failed, cancelled, timed_out")
+	}
+}
+
 // ValidateSectionRole validates a section role
 func ValidateSectionRole(role string) error {
 	switch role {

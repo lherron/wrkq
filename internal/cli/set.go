@@ -20,10 +20,11 @@ import (
 )
 
 var setCmd = &cobra.Command{
-	Use:   "set <path|id>... [flags]",
-	Short: "Mutate task fields",
+	Use:     "set <path|id>... [flags]",
+	Aliases: []string{"edit"},
+	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, due_at, start_at, description, kind, assignee
+Supported fields: state, priority, title, slug, labels, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
 
 Description can be set from:
   - String: --description "text"
@@ -38,7 +39,8 @@ Examples:
   echo "New description" | wrkq set T-00001 -d -
   wrkq set T-00001 --state in_progress --priority 1 --title "New Title"
   wrkq set T-00001 --kind bug
-  wrkq set T-00001 --assignee agent-claude`,
+  wrkq set T-00001 --assignee agent-claude
+  wrkq set T-00001 --cp-run-id run123 --run-status queued`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: appctx.WithApp(appctx.WithActor(), runSet),
 }
@@ -60,6 +62,14 @@ var (
 	setStartAt         string
 	setKind            string
 	setAssignee        string
+	setRequestedBy     string
+	setAssignedProject string
+	setResolution      string
+	setCPProjectID     string
+	setCPRunID         string
+	setCPSessionID     string
+	setSDKSessionID    string
+	setRunStatus       string
 )
 
 func init() {
@@ -80,6 +90,14 @@ func init() {
 	setCmd.Flags().StringVar(&setStartAt, "start-at", "", "Update task start date")
 	setCmd.Flags().StringVar(&setKind, "kind", "", "Update task kind (task, subtask, spike, bug, chore)")
 	setCmd.Flags().StringVar(&setAssignee, "assignee", "", "Update task assignee (actor slug or ID)")
+	setCmd.Flags().StringVar(&setRequestedBy, "requested-by", "", "Update requester project ID")
+	setCmd.Flags().StringVar(&setAssignedProject, "assigned-project", "", "Update assignee project ID")
+	setCmd.Flags().StringVar(&setResolution, "resolution", "", "Update task resolution (done, wont_do, duplicate, needs_info)")
+	setCmd.Flags().StringVar(&setCPProjectID, "cp-project-id", "", "Update CP project ID (async run linkage)")
+	setCmd.Flags().StringVar(&setCPRunID, "cp-run-id", "", "Update CP run ID (async run linkage)")
+	setCmd.Flags().StringVar(&setCPSessionID, "cp-session-id", "", "Update CP session ID (async run linkage)")
+	setCmd.Flags().StringVar(&setSDKSessionID, "sdk-session-id", "", "Update SDK session ID (async run linkage)")
+	setCmd.Flags().StringVar(&setRunStatus, "run-status", "", "Update async run status (queued, running, completed, failed, cancelled, timed_out)")
 }
 
 func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -250,6 +268,52 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 			return nil, fmt.Errorf("failed to resolve assignee: %w", err)
 		}
 		fields["assignee_actor_uuid"] = actorUUID
+	}
+
+	// Handle requested_by_project_id
+	if setRequestedBy != "" {
+		fields["requested_by_project_id"] = setRequestedBy
+	}
+
+	// Handle assigned_project_id
+	if setAssignedProject != "" {
+		fields["assigned_project_id"] = setAssignedProject
+	}
+
+	// Handle resolution
+	if setResolution != "" {
+		if err := domain.ValidateResolution(setResolution); err != nil {
+			return nil, err
+		}
+		fields["resolution"] = setResolution
+	}
+
+	// Handle CP project ID
+	if setCPProjectID != "" {
+		fields["cp_project_id"] = setCPProjectID
+	}
+
+	// Handle CP run ID
+	if setCPRunID != "" {
+		fields["cp_run_id"] = setCPRunID
+	}
+
+	// Handle CP session ID
+	if setCPSessionID != "" {
+		fields["cp_session_id"] = setCPSessionID
+	}
+
+	// Handle SDK session ID
+	if setSDKSessionID != "" {
+		fields["sdk_session_id"] = setSDKSessionID
+	}
+
+	// Handle run status
+	if setRunStatus != "" {
+		if err := domain.ValidateRunStatus(setRunStatus); err != nil {
+			return nil, err
+		}
+		fields["run_status"] = setRunStatus
 	}
 
 	return fields, nil

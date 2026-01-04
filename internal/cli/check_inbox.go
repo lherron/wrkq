@@ -14,10 +14,12 @@ import (
 var checkInboxCmd = &cobra.Command{
 	Use:   "check-inbox",
 	Short: "List open tasks in the inbox",
-	Long: `List all tasks in the inbox container that are in the open state.
+	Long: `List all tasks in the inbox container that are in the open state, plus
+tasks requested by the current project that are awaiting acknowledgment.
 
 This is a convenience command equivalent to:
   wrkq find inbox/** --type t --state open
+  wrkq find --requested-by <project> --ack-pending
 
 If WRKQ_PROJECT_ROOT is set, the inbox path is scoped to that project.
 
@@ -44,17 +46,21 @@ func init() {
 }
 
 type inboxTask struct {
-	Type     string  `json:"type"`
-	UUID     string  `json:"uuid"`
-	ID       string  `json:"id"`
-	Slug     string  `json:"slug"`
-	Title    string  `json:"title"`
-	Path     string  `json:"path"`
-	State    *string `json:"state,omitempty"`
-	Priority *int    `json:"priority,omitempty"`
-	Kind     *string `json:"kind,omitempty"`
-	DueAt    *string `json:"due_at,omitempty"`
-	ETag     int64   `json:"etag"`
+	Type                 string  `json:"type"`
+	UUID                 string  `json:"uuid"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Title                string  `json:"title"`
+	Path                 string  `json:"path"`
+	State                *string `json:"state,omitempty"`
+	Priority             *int    `json:"priority,omitempty"`
+	Kind                 *string `json:"kind,omitempty"`
+	DueAt                *string `json:"due_at,omitempty"`
+	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
+	Resolution           *string `json:"resolution,omitempty"`
+	ETag                 int64   `json:"etag"`
 }
 
 func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -66,6 +72,7 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Query for open tasks in the inbox container
 	query := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.kind, t.due_at, t.etag,
+		       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
 		       cp.path || '/' || t.slug AS path
 		FROM tasks t
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
@@ -84,9 +91,11 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 	for rows.Next() {
 		var r inboxTask
 		var state, kind, dueAt sql.NullString
+		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var priority sql.NullInt64
 
-		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &kind, &dueAt, &r.ETag, &r.Path)
+		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &kind, &dueAt, &r.ETag,
+			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &r.Path)
 		if err != nil {
 			return fmt.Errorf("scan failed: %w", err)
 		}
@@ -105,12 +114,91 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if dueAt.Valid {
 			r.DueAt = &dueAt.String
 		}
+		if requestedBy.Valid {
+			r.RequestedByProjectID = &requestedBy.String
+		}
+		if assignedProject.Valid {
+			r.AssignedProjectID = &assignedProject.String
+		}
+		if acknowledgedAt.Valid {
+			r.AcknowledgedAt = &acknowledgedAt.String
+		}
+		if resolution.Valid {
+			r.Resolution = &resolution.String
+		}
 
 		results = append(results, r)
 	}
 
 	if err := rows.Err(); err != nil {
 		return err
+	}
+
+	projectID := normalizeProjectRoot(app.Config)
+	if projectID != "" {
+		ackQuery := `
+			SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.kind, t.due_at, t.etag,
+			       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
+			       cp.path || '/' || t.slug AS path
+			FROM tasks t
+			JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+			WHERE t.requested_by_project_id = ?
+			  AND t.state IN ('completed', 'cancelled')
+			  AND t.acknowledged_at IS NULL
+			ORDER BY t.updated_at DESC
+		`
+
+		ackRows, err := database.Query(ackQuery, projectID)
+		if err != nil {
+			return fmt.Errorf("ack query failed: %w", err)
+		}
+		defer ackRows.Close()
+
+		for ackRows.Next() {
+			var r inboxTask
+			var state, kind, dueAt sql.NullString
+			var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
+			var priority sql.NullInt64
+
+			err := ackRows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &kind, &dueAt, &r.ETag,
+				&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &r.Path)
+			if err != nil {
+				return fmt.Errorf("ack scan failed: %w", err)
+			}
+
+			r.Type = "task"
+			if state.Valid {
+				r.State = &state.String
+			}
+			if priority.Valid {
+				p := int(priority.Int64)
+				r.Priority = &p
+			}
+			if kind.Valid {
+				r.Kind = &kind.String
+			}
+			if dueAt.Valid {
+				r.DueAt = &dueAt.String
+			}
+			if requestedBy.Valid {
+				r.RequestedByProjectID = &requestedBy.String
+			}
+			if assignedProject.Valid {
+				r.AssignedProjectID = &assignedProject.String
+			}
+			if acknowledgedAt.Valid {
+				r.AcknowledgedAt = &acknowledgedAt.String
+			}
+			if resolution.Valid {
+				r.Resolution = &resolution.String
+			}
+
+			results = append(results, r)
+		}
+
+		if err := ackRows.Err(); err != nil {
+			return err
+		}
 	}
 
 	// Render output
@@ -130,7 +218,7 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Table output
-	headers := []string{"ID", "Slug", "Title", "Priority", "Kind"}
+	headers := []string{"ID", "Slug", "Title", "State", "Priority", "Kind"}
 	var rowsData [][]string
 	for _, entry := range results {
 		priority := ""
@@ -141,10 +229,15 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if entry.Kind != nil {
 			kind = *entry.Kind
 		}
+		state := ""
+		if entry.State != nil {
+			state = *entry.State
+		}
 		rowsData = append(rowsData, []string{
 			entry.ID,
 			entry.Slug,
 			entry.Title,
+			state,
 			priority,
 			kind,
 		})

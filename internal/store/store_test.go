@@ -59,12 +59,15 @@ func TestTaskStore_Create(t *testing.T) {
 	s := New(database)
 
 	result, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "test-task",
-		Title:       "Test Task",
-		Description: "A test task",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    2,
+		Slug:                 "test-task",
+		Title:                "Test Task",
+		Description:          "A test task",
+		ProjectUUID:          containerUUID,
+		State:                "open",
+		Priority:             2,
+		RequestedByProjectID: strPtr("agent-spaces"),
+		AssignedProjectID:    strPtr("rex"),
+		Resolution:           strPtr("done"),
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -92,6 +95,15 @@ func TestTaskStore_Create(t *testing.T) {
 	}
 	if task.Title != "Test Task" {
 		t.Errorf("expected title 'Test Task', got %q", task.Title)
+	}
+	if task.RequestedByProjectID == nil || *task.RequestedByProjectID != "agent-spaces" {
+		t.Errorf("expected requested_by_project_id 'agent-spaces', got %v", task.RequestedByProjectID)
+	}
+	if task.AssignedProjectID == nil || *task.AssignedProjectID != "rex" {
+		t.Errorf("expected assigned_project_id 'rex', got %v", task.AssignedProjectID)
+	}
+	if task.Resolution == nil || *task.Resolution != "done" {
+		t.Errorf("expected resolution 'done', got %v", task.Resolution)
 	}
 
 	// Verify event was logged
@@ -254,6 +266,10 @@ func TestTaskStore_Archive(t *testing.T) {
 	}
 }
 
+func strPtr(value string) *string {
+	return &value
+}
+
 func TestTaskStore_Purge(t *testing.T) {
 	database := setupTestDB(t)
 	actorUUID := setupTestActor(t, database)
@@ -311,6 +327,27 @@ func TestContainerStore_Create(t *testing.T) {
 	container, _ := s.Containers.GetByUUID(result.UUID)
 	if container.Slug != "new-project" {
 		t.Errorf("expected slug 'new-project', got %q", container.Slug)
+	}
+}
+
+func TestContainerStore_Create_DefaultInboxTitle(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	s := New(database)
+
+	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{
+		Slug: "inbox",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	container, err := s.Containers.GetByUUID(result.UUID)
+	if err != nil {
+		t.Fatalf("GetByUUID failed: %v", err)
+	}
+	if container.Title == nil || *container.Title != "Inbox" {
+		t.Errorf("expected title 'Inbox', got %v", container.Title)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/webhooks"
 	"github.com/spf13/cobra"
 )
 
@@ -184,6 +185,8 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to restore task: %w", err)
 	}
 
+	webhooks.DispatchTask(database, taskUUID)
+
 	// Cascade restore subtasks
 	if err := cascadeRestoreSubtasks(database, actorUUID, taskUUID, targetState); err != nil {
 		return fmt.Errorf("failed to restore subtasks: %w", err)
@@ -337,6 +340,8 @@ func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetSt
 		if err := restoreTaskWithOptions(database, opts); err != nil {
 			return fmt.Errorf("failed to restore subtask %s: %w", subtaskUUID, err)
 		}
+
+		webhooks.DispatchTask(database, subtaskUUID)
 
 		// Recursively restore nested subtasks
 		if err := cascadeRestoreSubtasks(database, actorUUID, subtaskUUID, targetState); err != nil {

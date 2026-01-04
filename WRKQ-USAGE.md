@@ -1,54 +1,88 @@
 <task_tracking_rules>
-# wrkq Cross-Agent Task Coordination
+# wrkq Task Management CLI
 
-## Purpose
-wrkq is the shared, offline task ledger. Control-plane (CP) is the system of record and serves
-cross-project APIs. Use wrkq to coordinate work between agents/projects with minimal context.
+## Project-scoped usage
+There is a WRKQ_PROJECT_ROOT in .env.local that scopes wrkq requests to only the current project.  If you need to see OTHER projects, run wrkq with WRKQ_PROJECT_ROOT= to change wrkq scope to true root.
 
-## Canonical DB + Project Root Rules
-- **Canonical DB**: set `WRKQ_DB_PATH` to the shared DB (ex: `~/.rex/projects-wrkq.db`).
-- **Project root scoping**: set `WRKQ_PROJECT_ROOT` for CLI usage in a given project.
-  - Paths are **project-relative** (do not include the projectId in slugs).
-  - CP uses project-relative paths in `/admin/tasks` responses.
-- **CLI loads `.env.local`** in the current working directory; run wrkq from the project root you intend.
+## Task Lifecycle
+1. **Before starting implementing a task**: Set task to `in_progress`
+   ```bash
+   wrkq set T-00001 --state in_progress
+   ```
 
-## Cross-Project Handoff Workflow
-1. **Create** task in `inbox/` for the target project.
-2. **Annotate** with a short context comment (intent, links, assumptions).
-3. **Start work**: set `in_progress` when an agent begins.
-4. **Finish**: add a final summary comment and set `completed`.
+2. **Before completing a task**: Add final summary comment
+   ```bash
+   wrkq comment add T-00001 -m "Completed. Added apply cmd with 3-way merge support. Updated docs. All tests passing."
+   wrkq set T-00001 --state completed
+   ```
 
-## Minimal CLI Cheat Sheet
+### Naming Conventions
+One-off tasks should be created/tracked in the **inbox** container.
+
+## Finding Tasks
 ```bash
-# See what needs attention
-wrkq check-inbox
+wrkq find --state open --json
+wrkq find 'myproject/api-feature/**' --state open
+wrkq find --slug-glob 'login-*'
+wrkq tree myproject --json
+wrkq tree --json         # Show all tasks including completed
+```
 
-# Create a task
-wrkq touch inbox/<slug> -t "Title" -d "Short description"
-
-# Comment on progress or handoff context
-wrkq comment add T-00001 -m "Context or update"
-
-# Update state
-wrkq set T-00001 --state in_progress
-wrkq set T-00001 --state completed
-
-# Read task details + comments
+## Reading Tasks
+```bash
+# Show task details as markdown with metadata as frontmatter (includes comments by default)
 wrkq cat T-00001
+
+# Output as JSON (includes comments by default)
+wrkq cat T-00001 --json
+
+# List tasks in a path
+wrkq ls myproject/api-feature --json
 ```
 
-## Troubleshooting (Cross-Comms)
-- **Task not visible in another project**:
-  - Confirm `WRKQ_DB_PATH` points to the canonical DB.
-  - Confirm `WRKQ_PROJECT_ROOT` is set for the target project.
-  - Ensure CP is running and using the same canonical DB.
-- **Containers tree empty in UI**:
-  - Hit `/admin/tasks/containers/tree` once; CP will auto-seed project roots/inboxes.
+## Creating Tasks
 
-## Agent Feature Requests
-Log CLI gaps in `inbox/agent-feature-requests`.
-Example:
 ```bash
-wrkq touch inbox/agent-feature-requests/<slug> -t "Feature request title" -d "Why it matters"
+# Create with title and description
+wrkq touch myproject/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
+# Create and emit JSON for scripting
+wrkq touch myproject/feature/task-slug -t "New Task" -d "Description" --json
 ```
+
+
+## Updating Tasks
+
+```bash
+# Set task state/priority/fields (quick updates)
+wrkq set T-00001 --state in_progress
+wrkq set T-00001 --title "New title"
+wrkq set T-00001 --description "New description text"
+wrkq set T-00001 --state in_progress --priority 1 --description "Starting work"
+
+# Supported states: draft, open, in_progress, completed, blocked, cancelled, archived, deleted
+# Priority: 1-4 (1 is highest)
+# Supported fields: state, priority, title, slug, labels, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+# Kind: task, subtask, spike, bug, chore
+# Resolution: done, wont_do, duplicate, needs_info
+# Run status: queued, running, completed, failed, cancelled, timed_out
+```
+
+## Comments
+```bash
+wrkq comment add T-00001 -m "Starting implementation at 10:00am"
+```
+
+## History
+```bash
+# Show task history
+wrkq log T-00001 --oneline
+wrkq log T-00001 --patch      # Show detailed changes
+```
+
+## Output Formats
+Most commands support:
+- `--json` - Pretty JSON
+- `--ndjson` - Newline-delimited JSON (best for parsing)
+- `--porcelain` - Stable machine-readable
+
 </task_tracking_rules>

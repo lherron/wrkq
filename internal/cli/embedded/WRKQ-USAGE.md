@@ -78,6 +78,8 @@ wrkq ls myproject/api-feature --json
 ```bash
 # Create with title and description
 wrkq touch myproject/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
+# Create and emit JSON for scripting
+wrkq touch myproject/feature/task-slug -t "New Task" -d "Description" --json
 ```
 
 

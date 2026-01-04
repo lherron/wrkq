@@ -37,7 +37,7 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 	// Default title to slug if not provided
 	title := params.Title
 	if title == "" {
-		title = params.Slug
+		title = defaultContainerTitle(params.Slug)
 	}
 
 	// Default kind to "project" if not provided
@@ -104,6 +104,13 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 	})
 
 	return result, err
+}
+
+func defaultContainerTitle(slug string) string {
+	if slug == "inbox" {
+		return "Inbox"
+	}
+	return slug
 }
 
 // UpdateFields updates specified fields on a container and logs a container.updated event.
@@ -368,13 +375,13 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 	var kind string
 
 	err := cs.store.db.QueryRow(`
-		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, etag,
+		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 			   created_at, updated_at, archived_at,
 			   created_by_actor_uuid, updated_by_actor_uuid
 		FROM containers WHERE uuid = ?
 	`, uuid).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.ETag,
+		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&container.CreatedByActorUUID, &container.UpdatedByActorUUID,
 	)
@@ -400,7 +407,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 
 	if parentUUID == nil {
 		query = `
-			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, etag,
+			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_actor_uuid, updated_by_actor_uuid
 			FROM containers WHERE slug = ? AND parent_uuid IS NULL
@@ -408,7 +415,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		args = []interface{}{slug}
 	} else {
 		query = `
-			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, etag,
+			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_actor_uuid, updated_by_actor_uuid
 			FROM containers WHERE slug = ? AND parent_uuid = ?
@@ -418,7 +425,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 
 	err := cs.store.db.QueryRow(query, args...).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.ETag,
+		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&container.CreatedByActorUUID, &container.UpdatedByActorUUID,
 	)

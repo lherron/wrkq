@@ -43,6 +43,7 @@ db-reset:
 
 # Build CLI binaries (wrkq, wrkqadm, wrkqd)
 build:
+  echo "Building wrkq, wrkqadm, and wrkqd binaries..."
   go build -o bin/wrkq ./cmd/wrkq
   go build -o bin/wrkqadm ./cmd/wrkqadm
   go build -o bin/wrkqd ./cmd/wrkqd
@@ -61,13 +62,9 @@ test-coverage:
   go tool cover -html=coverage.out -o coverage.html
 
 # Install CLI binaries to ~/.local/bin (no sudo required)
-install:
+install: build
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building wrkq, wrkqadm, and wrkqd binaries..."
-  go build -o bin/wrkq ./cmd/wrkq
-  go build -o bin/wrkqadm ./cmd/wrkqadm
-  go build -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries

@@ -256,7 +256,8 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 
 func exportTasks(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, slug, title, project_uuid, state, priority,
+		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id,
+		       assigned_project_id, acknowledged_at, resolution, state, priority,
 		       start_at, due_at, labels, description, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
@@ -273,11 +274,13 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var uuid, id, slug, title, projectUUID, state, createdAt, updatedAt string
 		var description string
 		var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
+		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var createdBy, updatedBy string
 		var priority int
 		var etag int64
 
-		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &state, &priority,
+		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &requestedBy,
+			&assignedProject, &acknowledgedAt, &resolution, &state, &priority,
 			&startAt, &dueAt, &labels, &description, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&createdBy, &updatedBy); err != nil {
@@ -298,6 +301,18 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 			UpdatedBy:   updatedBy,
 		}
 
+		if requestedBy.Valid {
+			entry.RequestedByProjectID = requestedBy.String
+		}
+		if assignedProject.Valid {
+			entry.AssignedProjectID = assignedProject.String
+		}
+		if acknowledgedAt.Valid {
+			entry.AcknowledgedAt = acknowledgedAt.String
+		}
+		if resolution.Valid {
+			entry.Resolution = resolution.String
+		}
 		if description != "" {
 			entry.Description = description
 		}

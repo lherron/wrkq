@@ -355,16 +355,21 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority,
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, requested_by_project_id,
+		                   assigned_project_id, acknowledged_at, resolution, state, priority,
 		                   start_at, due_at, labels, description, etag,
 		                   created_at, updated_at, completed_at, archived_at,
 		                   created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
 			slug = excluded.slug,
 			title = excluded.title,
 			project_uuid = excluded.project_uuid,
+			requested_by_project_id = excluded.requested_by_project_id,
+			assigned_project_id = excluded.assigned_project_id,
+			acknowledged_at = excluded.acknowledged_at,
+			resolution = excluded.resolution,
 			state = excluded.state,
 			priority = excluded.priority,
 			start_at = excluded.start_at,
@@ -388,6 +393,19 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		task := snap.Tasks[uuid]
 
 		var startAt, dueAt, labels, completedAt, archivedAt interface{}
+		var requestedBy, assignedProject, acknowledgedAt, resolution interface{}
+		if task.RequestedByProjectID != "" {
+			requestedBy = task.RequestedByProjectID
+		}
+		if task.AssignedProjectID != "" {
+			assignedProject = task.AssignedProjectID
+		}
+		if task.AcknowledgedAt != "" {
+			acknowledgedAt = task.AcknowledgedAt
+		}
+		if task.Resolution != "" {
+			resolution = task.Resolution
+		}
 		if task.StartAt != "" {
 			startAt = task.StartAt
 		}
@@ -415,7 +433,8 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		}
 
 		if _, err := stmt.Exec(uuid, task.ID, task.Slug, task.Title, task.ProjectUUID,
-			task.State, task.Priority, startAt, dueAt, labels, description, task.ETag,
+			requestedBy, assignedProject, acknowledgedAt, resolution, task.State, task.Priority,
+			startAt, dueAt, labels, description, task.ETag,
 			task.CreatedAt, task.UpdatedAt, completedAt, archivedAt,
 			task.CreatedBy, task.UpdatedBy); err != nil {
 			return fmt.Errorf("failed to import task %s: %w", uuid, err)

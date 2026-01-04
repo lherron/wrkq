@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/parse"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/webhooks"
 	"github.com/spf13/cobra"
 )
 
@@ -242,6 +243,8 @@ func applyTaskUpdates(database *db.DB, taskUUID string, updates *parse.TaskUpdat
 	if err != nil {
 		return fmt.Errorf("failed to update task: %w", err)
 	}
+
+	webhooks.DispatchTask(database, taskUUID)
 
 	fmt.Printf("Updated task %s\n", taskUUID)
 	return nil

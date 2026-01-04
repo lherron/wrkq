@@ -14,6 +14,7 @@ import (
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/webhooks"
 	"github.com/spf13/cobra"
 )
 
@@ -234,6 +235,8 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	webhooks.DispatchTask(database, taskUUID)
 
 	// Output success
 	output := map[string]interface{}{

@@ -11,8 +11,9 @@ import (
 )
 
 var catCmd = &cobra.Command{
-	Use:   "cat <path|id>...",
-	Short: "Print tasks as markdown",
+	Use:     "cat <path|id>...",
+	Aliases: []string{"show"},
+	Short:   "Print tasks as markdown",
 	Long: `Prints one or more tasks as markdown with YAML front matter.
 Comments are included by default. Use --exclude-comments to omit them.
 If the argument resolves to a container, exits with error code 2.`,
@@ -61,32 +62,41 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	type Task struct {
-		ID             string    `json:"id"`
-		UUID           string    `json:"uuid"`
-		ProjectID      string    `json:"project_id"`
-		ProjectUUID    string    `json:"project_uuid"`
-		Slug           string    `json:"slug"`
-		Title          string    `json:"title"`
-		State          string    `json:"state"`
-		Priority       int       `json:"priority"`
-		Kind           string    `json:"kind"`
-		ParentTaskID   *string   `json:"parent_task_id,omitempty"`
-		ParentTaskUUID *string   `json:"parent_task_uuid,omitempty"`
-		AssigneeSlug   *string   `json:"assignee,omitempty"`
-		AssigneeUUID   *string   `json:"assignee_uuid,omitempty"`
-		StartAt        *string   `json:"start_at,omitempty"`
-		DueAt          *string   `json:"due_at,omitempty"`
-		Labels         *string   `json:"labels,omitempty"`
-		Description    string    `json:"description"`
-		Etag           int64     `json:"etag"`
-		CreatedAt      string    `json:"created_at"`
-		UpdatedAt      string    `json:"updated_at"`
-		CompletedAt    *string   `json:"completed_at,omitempty"`
-		ArchivedAt     *string   `json:"archived_at,omitempty"`
-		CreatedBy      string     `json:"created_by"`
-		UpdatedBy      string     `json:"updated_by"`
-		Comments       []Comment  `json:"comments,omitempty"`
-		Relations      []Relation `json:"relations,omitempty"`
+		ID                   string     `json:"id"`
+		UUID                 string     `json:"uuid"`
+		ProjectID            string     `json:"project_id"`
+		ProjectUUID          string     `json:"project_uuid"`
+		RequestedByProjectID *string    `json:"requested_by_project_id,omitempty"`
+		AssignedProjectID    *string    `json:"assigned_project_id,omitempty"`
+		Slug                 string     `json:"slug"`
+		Title                string     `json:"title"`
+		State                string     `json:"state"`
+		Priority             int        `json:"priority"`
+		Kind                 string     `json:"kind"`
+		ParentTaskID         *string    `json:"parent_task_id,omitempty"`
+		ParentTaskUUID       *string    `json:"parent_task_uuid,omitempty"`
+		AssigneeSlug         *string    `json:"assignee,omitempty"`
+		AssigneeUUID         *string    `json:"assignee_uuid,omitempty"`
+		StartAt              *string    `json:"start_at,omitempty"`
+		DueAt                *string    `json:"due_at,omitempty"`
+		Labels               *string    `json:"labels,omitempty"`
+		Description          string     `json:"description"`
+		AcknowledgedAt       *string    `json:"acknowledged_at,omitempty"`
+		Resolution           *string    `json:"resolution,omitempty"`
+		CPProjectID          *string    `json:"cp_project_id,omitempty"`
+		CPRunID              *string    `json:"cp_run_id,omitempty"`
+		CPSessionID          *string    `json:"cp_session_id,omitempty"`
+		SDKSessionID         *string    `json:"sdk_session_id,omitempty"`
+		RunStatus            *string    `json:"run_status,omitempty"`
+		Etag                 int64      `json:"etag"`
+		CreatedAt            string     `json:"created_at"`
+		UpdatedAt            string     `json:"updated_at"`
+		CompletedAt          *string    `json:"completed_at,omitempty"`
+		ArchivedAt           *string    `json:"archived_at,omitempty"`
+		CreatedBy            string     `json:"created_by"`
+		UpdatedBy            string     `json:"updated_by"`
+		Comments             []Comment  `json:"comments,omitempty"`
+		Relations            []Relation `json:"relations,omitempty"`
 	}
 
 	var tasks []Task
@@ -103,23 +113,30 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var id, slug, title, state, description, kind string
 		var priority int
 		var startAt, dueAt, labels, completedAt, archivedAt *string
+		var requestedBy, assignedProject, acknowledgedAt, resolution *string
+		var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 		var parentTaskUUID, assigneeActorUUID *string
 		var createdAt, updatedAt string
 		var etag int64
 		var projectUUID, createdByUUID, updatedByUUID string
 
 		err = database.QueryRow(`
-			SELECT id, slug, title, project_uuid, state, priority,
+			SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
+			       state, priority,
 			       kind, parent_task_uuid, assignee_actor_uuid,
 			       start_at, due_at, labels, description, etag,
 			       created_at, updated_at, completed_at, archived_at,
+			       acknowledged_at, resolution,
+			       cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
 			       created_by_actor_uuid, updated_by_actor_uuid
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
-			&id, &slug, &title, &projectUUID, &state, &priority,
+			&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
 			&kind, &parentTaskUUID, &assigneeActorUUID,
 			&startAt, &dueAt, &labels, &description, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
+			&acknowledgedAt, &resolution,
+			&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
 			&createdByUUID, &updatedByUUID,
 		)
 		if err != nil {
@@ -154,30 +171,39 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		task := Task{
-			ID:             id,
-			UUID:           taskUUID,
-			ProjectID:      projectID,
-			ProjectUUID:    projectUUID,
-			Slug:           slug,
-			Title:          title,
-			State:          state,
-			Priority:       priority,
-			Kind:           kind,
-			ParentTaskID:   parentTaskID,
-			ParentTaskUUID: parentTaskUUID,
-			AssigneeSlug:   assigneeSlug,
-			AssigneeUUID:   assigneeActorUUID,
-			StartAt:        startAt,
-			DueAt:          dueAt,
-			Labels:         labels,
-			Description:    description,
-			Etag:           etag,
-			CreatedAt:      createdAt,
-			UpdatedAt:      updatedAt,
-			CompletedAt:    completedAt,
-			ArchivedAt:     archivedAt,
-			CreatedBy:      createdBySlug,
-			UpdatedBy:      updatedBySlug,
+			ID:                   id,
+			UUID:                 taskUUID,
+			ProjectID:            projectID,
+			ProjectUUID:          projectUUID,
+			RequestedByProjectID: requestedBy,
+			AssignedProjectID:    assignedProject,
+			Slug:                 slug,
+			Title:                title,
+			State:                state,
+			Priority:             priority,
+			Kind:                 kind,
+			ParentTaskID:         parentTaskID,
+			ParentTaskUUID:       parentTaskUUID,
+			AssigneeSlug:         assigneeSlug,
+			AssigneeUUID:         assigneeActorUUID,
+			StartAt:              startAt,
+			DueAt:                dueAt,
+			Labels:               labels,
+			Description:          description,
+			AcknowledgedAt:       acknowledgedAt,
+			Resolution:           resolution,
+			CPProjectID:          cpProjectID,
+			CPRunID:              cpRunID,
+			CPSessionID:          cpSessionID,
+			SDKSessionID:         sdkSessionID,
+			RunStatus:            runStatus,
+			Etag:                 etag,
+			CreatedAt:            createdAt,
+			UpdatedAt:            updatedAt,
+			CompletedAt:          completedAt,
+			ArchivedAt:           archivedAt,
+			CreatedBy:            createdBySlug,
+			UpdatedBy:            updatedBySlug,
 		}
 
 		// Include comments by default (unless excluded)
@@ -290,6 +316,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
 				fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
 				fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
+				if task.RequestedByProjectID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "requested_by_project_id: %s\n", *task.RequestedByProjectID)
+				}
+				if task.AssignedProjectID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "assigned_project_id: %s\n", *task.AssignedProjectID)
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", task.Slug)
 				fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
 				fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
@@ -315,6 +347,27 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				if task.Labels != nil && *task.Labels != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
+				}
+				if task.AcknowledgedAt != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
+				}
+				if task.Resolution != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "resolution: %s\n", *task.Resolution)
+				}
+				if task.CPProjectID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
+				}
+				if task.CPRunID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
+				}
+				if task.CPSessionID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_session_id: %s\n", *task.CPSessionID)
+				}
+				if task.SDKSessionID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "sdk_session_id: %s\n", *task.SDKSessionID)
+				}
+				if task.RunStatus != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
 				fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)

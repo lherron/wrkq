@@ -231,8 +231,14 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 	result := make(orderedMap, 0, 16)
 
 	// Fields in lexicographic order
+	if t.AcknowledgedAt != "" {
+		result = append(result, keyValue{"acknowledged_at", t.AcknowledgedAt})
+	}
 	if t.ArchivedAt != "" {
 		result = append(result, keyValue{"archived_at", t.ArchivedAt})
+	}
+	if t.AssignedProjectID != "" {
+		result = append(result, keyValue{"assigned_project_id", t.AssignedProjectID})
 	}
 	if t.CompletedAt != "" {
 		result = append(result, keyValue{"completed_at", t.CompletedAt})
@@ -256,6 +262,12 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 	}
 	result = append(result, keyValue{"priority", t.Priority})
 	result = append(result, keyValue{"project_uuid", t.ProjectUUID})
+	if t.RequestedByProjectID != "" {
+		result = append(result, keyValue{"requested_by_project_id", t.RequestedByProjectID})
+	}
+	if t.Resolution != "" {
+		result = append(result, keyValue{"resolution", t.Resolution})
+	}
 	result = append(result, keyValue{"slug", t.Slug})
 	if t.StartAt != "" {
 		result = append(result, keyValue{"start_at", t.StartAt})

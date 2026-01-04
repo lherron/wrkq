@@ -97,6 +97,34 @@ func TestValidateActorRole(t *testing.T) {
 	}
 }
 
+func TestValidateResolution(t *testing.T) {
+	tests := []struct {
+		name       string
+		resolution string
+		wantErr    bool
+	}{
+		{name: "done", resolution: "done", wantErr: false},
+		{name: "wont_do", resolution: "wont_do", wantErr: false},
+		{name: "duplicate", resolution: "duplicate", wantErr: false},
+		{name: "needs_info", resolution: "needs_info", wantErr: false},
+		{name: "invalid", resolution: "invalid", wantErr: true},
+		{name: "empty", resolution: "", wantErr: true},
+		{name: "uppercase", resolution: "DONE", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateResolution(tt.resolution)
+			if tt.wantErr && err == nil {
+				t.Error("ValidateResolution() expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ValidateResolution() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateResourceType(t *testing.T) {
 	tests := []struct {
 		name    string

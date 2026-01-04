@@ -26,6 +26,16 @@ const (
 	TaskKindChore   TaskKind = "chore"
 )
 
+// TaskResolution represents the resolution of a completed task
+type TaskResolution string
+
+const (
+	TaskResolutionDone      TaskResolution = "done"
+	TaskResolutionWontDo    TaskResolution = "wont_do"
+	TaskResolutionDuplicate TaskResolution = "duplicate"
+	TaskResolutionNeedsInfo TaskResolution = "needs_info"
+)
+
 // SectionRole represents the semantic role of a section in the kanban workflow
 type SectionRole string
 
@@ -41,8 +51,8 @@ const (
 type TaskRelationKind string
 
 const (
-	TaskRelationBlocks    TaskRelationKind = "blocks"
-	TaskRelationRelatesTo TaskRelationKind = "relates_to"
+	TaskRelationBlocks     TaskRelationKind = "blocks"
+	TaskRelationRelatesTo  TaskRelationKind = "relates_to"
 	TaskRelationDuplicates TaskRelationKind = "duplicates"
 )
 
@@ -52,7 +62,7 @@ type Actor struct {
 	ID          string    `json:"id" db:"id"`
 	Slug        string    `json:"slug" db:"slug"`
 	DisplayName *string   `json:"display_name,omitempty" db:"display_name"`
-	Role        string    `json:"role" db:"role"` // human, agent, system
+	Role        string    `json:"role" db:"role"`           // human, agent, system
 	Meta        *string   `json:"meta,omitempty" db:"meta"` // JSON
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
@@ -68,6 +78,7 @@ type Container struct {
 	Kind               ContainerKind `json:"kind" db:"kind"`
 	SectionUUID        *string       `json:"section_uuid,omitempty" db:"section_uuid"`
 	SortIndex          int           `json:"sort_index" db:"sort_index"`
+	WebhookURLs        *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
 	ETag               int64         `json:"etag" db:"etag"`
 	CreatedAt          time.Time     `json:"created_at" db:"created_at"`
 	UpdatedAt          time.Time     `json:"updated_at" db:"updated_at"`
@@ -78,28 +89,37 @@ type Container struct {
 
 // Task represents a task
 type Task struct {
-	UUID               string     `json:"uuid" db:"uuid"`
-	ID                 string     `json:"id" db:"id"`
-	Slug               string     `json:"slug" db:"slug"`
-	Title              string     `json:"title" db:"title"`
-	ProjectUUID        string     `json:"project_uuid" db:"project_uuid"`
-	State              string     `json:"state" db:"state"` // draft, open, in_progress, completed, blocked, cancelled, archived, deleted
-	Priority           int        `json:"priority" db:"priority"` // 1-4, 1 is highest
-	Kind               TaskKind   `json:"kind" db:"kind"` // task, subtask, spike, bug, chore
-	ParentTaskUUID     *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
-	AssigneeActorUUID  *string    `json:"assignee_actor_uuid,omitempty" db:"assignee_actor_uuid"`
-	StartAt            *time.Time `json:"start_at,omitempty" db:"start_at"`
-	DueAt              *time.Time `json:"due_at,omitempty" db:"due_at"`
-	Labels             *string    `json:"labels,omitempty" db:"labels"` // JSON array
-	Description        string     `json:"description" db:"description"`
-	ETag               int64      `json:"etag" db:"etag"`
-	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-	ArchivedAt         *time.Time `json:"archived_at,omitempty" db:"archived_at"`
-	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
-	CreatedByActorUUID string     `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
-	UpdatedByActorUUID string     `json:"updated_by_actor_uuid" db:"updated_by_actor_uuid"`
+	UUID                 string     `json:"uuid" db:"uuid"`
+	ID                   string     `json:"id" db:"id"`
+	Slug                 string     `json:"slug" db:"slug"`
+	Title                string     `json:"title" db:"title"`
+	ProjectUUID          string     `json:"project_uuid" db:"project_uuid"`
+	RequestedByProjectID *string    `json:"requested_by_project_id,omitempty" db:"requested_by_project_id"`
+	AssignedProjectID    *string    `json:"assigned_project_id,omitempty" db:"assigned_project_id"`
+	State                string     `json:"state" db:"state"`       // draft, open, in_progress, completed, blocked, cancelled, archived, deleted
+	Priority             int        `json:"priority" db:"priority"` // 1-4, 1 is highest
+	Kind                 TaskKind   `json:"kind" db:"kind"`         // task, subtask, spike, bug, chore
+	ParentTaskUUID       *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
+	AssigneeActorUUID    *string    `json:"assignee_actor_uuid,omitempty" db:"assignee_actor_uuid"`
+	AcknowledgedAt       *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
+	Resolution           *string    `json:"resolution,omitempty" db:"resolution"`
+	CPProjectID          *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
+	CPRunID              *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
+	CPSessionID          *string    `json:"cp_session_id,omitempty" db:"cp_session_id"`
+	SDKSessionID         *string    `json:"sdk_session_id,omitempty" db:"sdk_session_id"`
+	RunStatus            *string    `json:"run_status,omitempty" db:"run_status"`
+	StartAt              *time.Time `json:"start_at,omitempty" db:"start_at"`
+	DueAt                *time.Time `json:"due_at,omitempty" db:"due_at"`
+	Labels               *string    `json:"labels,omitempty" db:"labels"` // JSON array
+	Description          string     `json:"description" db:"description"`
+	ETag                 int64      `json:"etag" db:"etag"`
+	CreatedAt            time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at" db:"updated_at"`
+	CompletedAt          *time.Time `json:"completed_at,omitempty" db:"completed_at"`
+	ArchivedAt           *time.Time `json:"archived_at,omitempty" db:"archived_at"`
+	DeletedAt            *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
+	CreatedByActorUUID   string     `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
+	UpdatedByActorUUID   string     `json:"updated_by_actor_uuid" db:"updated_by_actor_uuid"`
 }
 
 // Section represents a kanban column/lane in a project
@@ -139,8 +159,8 @@ type Comment struct {
 	Meta               *string    `json:"meta,omitempty" db:"meta"` // JSON optional metadata for agents/tools
 	ETag               int64      `json:"etag" db:"etag"`
 	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt          *time.Time `json:"updated_at,omitempty" db:"updated_at"` // nullable; reserved for future editable comments
-	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"` // nullable; soft delete timestamp
+	UpdatedAt          *time.Time `json:"updated_at,omitempty" db:"updated_at"`                       // nullable; reserved for future editable comments
+	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`                       // nullable; soft delete timestamp
 	DeletedByActorUUID *string    `json:"deleted_by_actor_uuid,omitempty" db:"deleted_by_actor_uuid"` // nullable; actor who soft-deleted
 }
 

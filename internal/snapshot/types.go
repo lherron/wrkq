@@ -12,13 +12,13 @@ import (
 // Snapshot represents the complete canonical state of a wrkq database.
 // The JSON shape follows PATCH-MODE.md §2.2.
 type Snapshot struct {
-	Meta       Meta                  `json:"meta"`
-	Actors     map[string]ActorEntry `json:"actors,omitempty"`
+	Meta       Meta                      `json:"meta"`
+	Actors     map[string]ActorEntry     `json:"actors,omitempty"`
 	Containers map[string]ContainerEntry `json:"containers,omitempty"`
-	Tasks      map[string]TaskEntry  `json:"tasks,omitempty"`
-	Comments   map[string]CommentEntry `json:"comments,omitempty"`
-	Links      map[string]LinkEntry  `json:"links,omitempty"`
-	Events     map[string]EventEntry `json:"events,omitempty"`
+	Tasks      map[string]TaskEntry      `json:"tasks,omitempty"`
+	Comments   map[string]CommentEntry   `json:"comments,omitempty"`
+	Links      map[string]LinkEntry      `json:"links,omitempty"`
+	Events     map[string]EventEntry     `json:"events,omitempty"`
 }
 
 // Meta contains snapshot metadata.
@@ -59,23 +59,27 @@ type ContainerEntry struct {
 // TaskEntry represents a task in the snapshot.
 // Keys under "tasks" are UUIDs.
 type TaskEntry struct {
-	ID          string   `json:"id"`
-	Slug        string   `json:"slug"`
-	Title       string   `json:"title"`
-	ProjectUUID string   `json:"project_uuid"`
-	State       string   `json:"state"`
-	Priority    int      `json:"priority"`
-	StartAt     string   `json:"start_at,omitempty"`
-	DueAt       string   `json:"due_at,omitempty"`
-	Labels      []string `json:"labels,omitempty"`
-	Description string   `json:"description,omitempty"`
-	ETag        int64    `json:"etag"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
-	CompletedAt string   `json:"completed_at,omitempty"`
-	ArchivedAt  string   `json:"archived_at,omitempty"`
-	CreatedBy   string   `json:"created_by"`
-	UpdatedBy   string   `json:"updated_by"`
+	ID                   string   `json:"id"`
+	Slug                 string   `json:"slug"`
+	Title                string   `json:"title"`
+	ProjectUUID          string   `json:"project_uuid"`
+	RequestedByProjectID string   `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    string   `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       string   `json:"acknowledged_at,omitempty"`
+	Resolution           string   `json:"resolution,omitempty"`
+	State                string   `json:"state"`
+	Priority             int      `json:"priority"`
+	StartAt              string   `json:"start_at,omitempty"`
+	DueAt                string   `json:"due_at,omitempty"`
+	Labels               []string `json:"labels,omitempty"`
+	Description          string   `json:"description,omitempty"`
+	ETag                 int64    `json:"etag"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
+	CompletedAt          string   `json:"completed_at,omitempty"`
+	ArchivedAt           string   `json:"archived_at,omitempty"`
+	CreatedBy            string   `json:"created_by"`
+	UpdatedBy            string   `json:"updated_by"`
 }
 
 // CommentEntry represents a comment in the snapshot.
@@ -141,25 +145,25 @@ type ImportOptions struct {
 
 // ExportResult contains the result of an export operation.
 type ExportResult struct {
-	OutputPath  string `json:"out"`
-	SnapshotRev string `json:"snapshot_rev"`
-	ActorCount  int    `json:"actors"`
-	ContainerCount int `json:"containers"`
-	TaskCount   int    `json:"tasks"`
-	CommentCount int   `json:"comments"`
-	LinkCount   int    `json:"links,omitempty"`
-	EventCount  int    `json:"events,omitempty"`
+	OutputPath     string `json:"out"`
+	SnapshotRev    string `json:"snapshot_rev"`
+	ActorCount     int    `json:"actors"`
+	ContainerCount int    `json:"containers"`
+	TaskCount      int    `json:"tasks"`
+	CommentCount   int    `json:"comments"`
+	LinkCount      int    `json:"links,omitempty"`
+	EventCount     int    `json:"events,omitempty"`
 }
 
 // ImportResult contains the result of an import operation.
 type ImportResult struct {
-	InputPath   string `json:"from"`
-	SnapshotRev string `json:"snapshot_rev"`
-	ActorCount  int    `json:"actors"`
-	ContainerCount int `json:"containers"`
-	TaskCount   int    `json:"tasks"`
-	CommentCount int   `json:"comments"`
-	DryRun      bool   `json:"dry_run,omitempty"`
+	InputPath      string `json:"from"`
+	SnapshotRev    string `json:"snapshot_rev"`
+	ActorCount     int    `json:"actors"`
+	ContainerCount int    `json:"containers"`
+	TaskCount      int    `json:"tasks"`
+	CommentCount   int    `json:"comments"`
+	DryRun         bool   `json:"dry_run,omitempty"`
 }
 
 // VerifyResult contains the result of a verify operation.

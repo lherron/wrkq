@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 // TaskStore handles task persistence operations.
@@ -17,19 +19,22 @@ type TaskStore struct {
 
 // CreateParams contains parameters for creating a new task.
 type CreateParams struct {
-	UUID              string  // optional: force specific UUID instead of auto-generating
-	Slug              string
-	Title             string
-	Description       string
-	ProjectUUID       string
-	State             string
-	Priority          int
-	Kind              string  // task, subtask, spike, bug, chore - defaults to "task"
-	ParentTaskUUID    *string // for subtasks
-	AssigneeActorUUID *string // task assignment
-	Labels            string  // JSON array
-	DueAt             string
-	StartAt           string
+	UUID                 string // optional: force specific UUID instead of auto-generating
+	Slug                 string
+	Title                string
+	Description          string
+	ProjectUUID          string
+	State                string
+	Priority             int
+	Kind                 string  // task, subtask, spike, bug, chore - defaults to "task"
+	ParentTaskUUID       *string // for subtasks
+	AssigneeActorUUID    *string // task assignment
+	RequestedByProjectID *string
+	AssignedProjectID    *string
+	Resolution           *string
+	Labels               string // JSON array
+	DueAt                string
+	StartAt              string
 }
 
 // CreateResult contains the result of task creation.
@@ -58,55 +63,63 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			query = `
 				INSERT INTO tasks (
 					uuid, id, slug, title, description, project_uuid, state, priority, kind,
-					parent_task_uuid, assignee_actor_uuid, labels, due_at, start_at,
+					parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+					labels, due_at, start_at,
 					created_by_actor_uuid, updated_by_actor_uuid
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`
 			args = []interface{}{
-				params.UUID,              // uuid (forced)
-				"",                       // id (auto-generated)
-				params.Slug,              // slug
-				params.Title,             // title
-				params.Description,       // description
-				params.ProjectUUID,       // project_uuid
-				params.State,             // state
-				params.Priority,          // priority
-				kind,                     // kind
-				params.ParentTaskUUID,    // parent_task_uuid
-				params.AssigneeActorUUID, // assignee_actor_uuid
-				params.Labels,            // labels (can be empty string or JSON)
-				params.DueAt,             // due_at (can be empty string)
-				params.StartAt,           // start_at (can be empty string)
-				actorUUID,                // created_by_actor_uuid
-				actorUUID,                // updated_by_actor_uuid
+				params.UUID,                 // uuid (forced)
+				"",                          // id (auto-generated)
+				params.Slug,                 // slug
+				params.Title,                // title
+				params.Description,          // description
+				params.ProjectUUID,          // project_uuid
+				params.State,                // state
+				params.Priority,             // priority
+				kind,                        // kind
+				params.ParentTaskUUID,       // parent_task_uuid
+				params.AssigneeActorUUID,    // assignee_actor_uuid
+				params.RequestedByProjectID, // requested_by_project_id
+				params.AssignedProjectID,    // assigned_project_id
+				params.Resolution,           // resolution
+				params.Labels,               // labels (can be empty string or JSON)
+				params.DueAt,                // due_at (can be empty string)
+				params.StartAt,              // start_at (can be empty string)
+				actorUUID,                   // created_by_actor_uuid
+				actorUUID,                   // updated_by_actor_uuid
 			}
 		} else {
 			// Auto-generate UUID
 			query = `
 				INSERT INTO tasks (
 					id, slug, title, description, project_uuid, state, priority, kind,
-					parent_task_uuid, assignee_actor_uuid, labels, due_at, start_at,
+					parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+					labels, due_at, start_at,
 					created_by_actor_uuid, updated_by_actor_uuid
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`
 			args = []interface{}{
-				"",                       // id (auto-generated)
-				params.Slug,              // slug
-				params.Title,             // title
-				params.Description,       // description
-				params.ProjectUUID,       // project_uuid
-				params.State,             // state
-				params.Priority,          // priority
-				kind,                     // kind
-				params.ParentTaskUUID,    // parent_task_uuid
-				params.AssigneeActorUUID, // assignee_actor_uuid
-				params.Labels,            // labels (can be empty string or JSON)
-				params.DueAt,             // due_at (can be empty string)
-				params.StartAt,           // start_at (can be empty string)
-				actorUUID,                // created_by_actor_uuid
-				actorUUID,                // updated_by_actor_uuid
+				"",                          // id (auto-generated)
+				params.Slug,                 // slug
+				params.Title,                // title
+				params.Description,          // description
+				params.ProjectUUID,          // project_uuid
+				params.State,                // state
+				params.Priority,             // priority
+				kind,                        // kind
+				params.ParentTaskUUID,       // parent_task_uuid
+				params.AssigneeActorUUID,    // assignee_actor_uuid
+				params.RequestedByProjectID, // requested_by_project_id
+				params.AssignedProjectID,    // assigned_project_id
+				params.Resolution,           // resolution
+				params.Labels,               // labels (can be empty string or JSON)
+				params.DueAt,                // due_at (can be empty string)
+				params.StartAt,              // start_at (can be empty string)
+				actorUUID,                   // created_by_actor_uuid
+				actorUUID,                   // updated_by_actor_uuid
 			}
 		}
 
@@ -142,6 +155,15 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		if params.AssigneeActorUUID != nil {
 			payload["assignee_actor_uuid"] = *params.AssigneeActorUUID
 		}
+		if params.RequestedByProjectID != nil {
+			payload["requested_by_project_id"] = *params.RequestedByProjectID
+		}
+		if params.AssignedProjectID != nil {
+			payload["assigned_project_id"] = *params.AssignedProjectID
+		}
+		if params.Resolution != nil {
+			payload["resolution"] = *params.Resolution
+		}
 		if params.Labels != "" {
 			payload["labels"] = params.Labels
 		}
@@ -176,6 +198,10 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		}
 		return nil
 	})
+
+	if err == nil && result != nil {
+		webhooks.DispatchTask(ts.store.db, result.UUID)
+	}
 
 	return result, err
 }
@@ -253,6 +279,10 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 		return nil
 	})
 
+	if err == nil {
+		webhooks.DispatchTask(ts.store.db, taskUUID)
+	}
+
 	return newETag, err
 }
 
@@ -312,6 +342,10 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 
 		return nil
 	})
+
+	if err == nil {
+		webhooks.DispatchTask(ts.store.db, taskUUID)
+	}
 
 	return newETag, err
 }
@@ -379,6 +413,10 @@ func (ts *TaskStore) Archive(actorUUID, taskUUID string, ifMatch int64) (*Archiv
 		return nil
 	})
 
+	if err == nil && result != nil {
+		webhooks.DispatchTask(ts.store.db, taskUUID)
+	}
+
 	return result, err
 }
 
@@ -392,6 +430,7 @@ type PurgeResult struct {
 // Returns the purge result including attachment statistics.
 func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeResult, error) {
 	var result *PurgeResult
+	var webhookInfo *webhooks.TaskInfo
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
@@ -409,6 +448,18 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
 		}
+
+		// Capture webhook payload info before deletion
+		var info webhooks.TaskInfo
+		if err := tx.QueryRow(`
+			SELECT t.id, t.project_uuid, c.id
+			FROM tasks t
+			JOIN containers c ON c.uuid = t.project_uuid
+			WHERE t.uuid = ?
+		`, taskUUID).Scan(&info.TaskID, &info.ProjectUUID, &info.ProjectID); err != nil {
+			return fmt.Errorf("failed to load webhook info: %w", err)
+		}
+		webhookInfo = &info
 
 		// Count attachments for statistics
 		var attachmentCount int
@@ -463,6 +514,10 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		return nil
 	})
 
+	if err == nil && webhookInfo != nil {
+		webhooks.DispatchTaskInfo(ts.store.db, *webhookInfo)
+	}
+
 	return result, err
 }
 
@@ -496,19 +551,26 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task := &domain.Task{}
 	// Use string intermediates for nullable time fields since SQLite stores times as strings
 	var startAt, dueAt, labels, completedAt, archivedAt *string
+	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution *string
+	var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 	var createdAt, updatedAt string
 
 	err := ts.store.db.QueryRow(`
-		SELECT uuid, id, slug, title, project_uuid, state, priority,
+		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
+			   state, priority,
 			   start_at, due_at, labels, description, etag,
 			   created_at, updated_at, completed_at, archived_at,
+			   acknowledged_at, resolution,
+			   cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
 			   created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks WHERE uuid = ?
 	`, uuid).Scan(
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
-		&task.State, &task.Priority, &startAt, &dueAt,
-		&labels, &task.Description, &task.ETag,
+		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority,
+		&startAt, &dueAt, &labels, &task.Description, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
+		&acknowledgedAt, &resolution,
+		&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
 		&task.CreatedByActorUUID, &task.UpdatedByActorUUID,
 	)
 	if err != nil {
@@ -518,10 +580,33 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
+	task.RequestedByProjectID = requestedByProjectID
+	task.AssignedProjectID = assignedProjectID
+	task.Resolution = resolution
+	task.AcknowledgedAt = parseTimeNullable(acknowledgedAt)
+	task.CPProjectID = cpProjectID
+	task.CPRunID = cpRunID
+	task.CPSessionID = cpSessionID
+	task.SDKSessionID = sdkSessionID
+	task.RunStatus = runStatus
+
 	// Store the labels as-is since it's a JSON string
 	task.Labels = labels
 
 	return task, nil
+}
+
+func parseTimeNullable(value *string) *time.Time {
+	if value == nil || *value == "" {
+		return nil
+	}
+	layouts := []string{time.RFC3339, "2006-01-02 15:04:05"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, *value); err == nil {
+			return &t
+		}
+	}
+	return nil
 }
 
 // cascadeDeleteSubtasks deletes all subtasks when a parent task is deleted.

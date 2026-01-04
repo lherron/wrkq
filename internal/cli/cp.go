@@ -17,6 +17,7 @@ import (
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/webhooks"
 	"github.com/spf13/cobra"
 )
 
@@ -366,6 +367,8 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+
+	webhooks.DispatchTask(database, newUUID)
 
 	// Get destination path
 	var destPath string

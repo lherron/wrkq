@@ -28,6 +28,7 @@ This separation ensures agents get a focused, safe API while admins retain full 
 | **find** | Search tasks and containers with filters |
 | **tree** | Display hierarchical tree structure |
 | **set** | Update task fields (state, priority, title, etc.) |
+| **ack** | Acknowledge completed tasks |
 | **mv** | Move or rename tasks and containers |
 | **cp** | Copy tasks |
 | **rm** | Archive (soft delete) or purge (hard delete) tasks |
@@ -123,6 +124,9 @@ touch ──→ [open] ──→ set --state in_progress ──→ [in_progress]
 | `--kind` | Filter by task kind (task, subtask, spike, bug, chore) |
 | `--assignee` | Filter by assignee actor |
 | `--parent-task` | Filter subtasks of a parent |
+| `--requested-by` | Filter by requester project ID |
+| `--assigned-project` | Filter by assignee project ID |
+| `--ack-pending` | Tasks completed/cancelled with no acknowledgment |
 | `--slug-glob` | Filter by slug pattern |
 | `--due-before` | Tasks due before date |
 | `--due-after` | Tasks due after date |
@@ -142,6 +146,9 @@ touch ──→ [open] ──→ set --state in_progress ──→ [in_progress]
 | priority | `--priority` | `--priority` | 1-4 (1 is highest), default: 3 |
 | kind | `--kind` | `--kind` | task, subtask, spike, bug, chore |
 | assignee | `--assignee` | `--assignee` | Actor slug or ID |
+| requested_by | `--requested-by` | `--requested-by` | Requester project ID |
+| assigned_project | `--assigned-project` | `--assigned-project` | Assignee project ID |
+| resolution | `--resolution` | `--resolution` | done, wont_do, duplicate, needs_info |
 | labels | `--labels` | `--labels` | JSON array |
 | due_at | `--due-at` | `--due-at` | Date/datetime |
 | start_at | `--start-at` | `--start-at` | Date/datetime |

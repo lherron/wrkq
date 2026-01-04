@@ -164,6 +164,7 @@ CREATE TABLE IF NOT EXISTS "containers" (
        CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  webhook_urls TEXT,
   etag INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),

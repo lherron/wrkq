@@ -67,16 +67,20 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 type treeNode struct {
-	Type              string      `json:"type"` // "container" or "task"
-	ID                string      `json:"id"`
-	Slug              string      `json:"slug"`
-	Title             string      `json:"title"`
-	State             string      `json:"state,omitempty"` // for tasks
-	UUID              string      `json:"uuid"`
-	IsArchived        bool        `json:"is_archived"`
-	IsDeleted         bool        `json:"is_deleted"`
-	AllTasksCompleted bool        `json:"all_tasks_completed,omitempty"` // for containers
-	Children          []*treeNode `json:"children,omitempty"`
+	Type                 string      `json:"type"` // "container" or "task"
+	ID                   string      `json:"id"`
+	Slug                 string      `json:"slug"`
+	Title                string      `json:"title"`
+	State                string      `json:"state,omitempty"` // for tasks
+	UUID                 string      `json:"uuid"`
+	RequestedByProjectID *string     `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string     `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string     `json:"acknowledged_at,omitempty"`
+	Resolution           *string     `json:"resolution,omitempty"`
+	IsArchived           bool        `json:"is_archived"`
+	IsDeleted            bool        `json:"is_deleted"`
+	AllTasksCompleted    bool        `json:"all_tasks_completed,omitempty"` // for containers
+	Children             []*treeNode `json:"children,omitempty"`
 }
 
 func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, openOnly bool, porcelain bool, jsonOutput bool) error {
@@ -194,7 +198,8 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 	// Query tasks at this level
 	if parentUUID != nil || path == "" {
 		taskQuery := `
-			SELECT uuid, id, slug, title, state, archived_at, deleted_at
+			SELECT uuid, id, slug, title, state, archived_at, deleted_at,
+			       requested_by_project_id, assigned_project_id, acknowledged_at, resolution
 			FROM tasks
 			WHERE `
 		var taskArgs []interface{}
@@ -222,14 +227,20 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		for taskRows.Next() {
 			var node treeNode
 			var archivedAt, deletedAt *string
+			var requestedBy, assignedProject, acknowledgedAt, resolution *string
 
-			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt, &deletedAt)
+			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt, &deletedAt,
+				&requestedBy, &assignedProject, &acknowledgedAt, &resolution)
 			if err != nil {
 				taskRows.Close()
 				return nil, fmt.Errorf("failed to scan task: %w", err)
 			}
 
 			node.Type = "task"
+			node.RequestedByProjectID = requestedBy
+			node.AssignedProjectID = assignedProject
+			node.AcknowledgedAt = acknowledgedAt
+			node.Resolution = resolution
 			node.IsArchived = archivedAt != nil
 			node.IsDeleted = deletedAt != nil
 			node.Children = make([]*treeNode, 0)
@@ -352,9 +363,13 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 			parts = append(parts, fmt.Sprintf("<%s>", node.State))
 		}
 	} else {
+		displayTitle := node.Title
+		if node.Slug == "inbox" && strings.EqualFold(node.Title, "inbox") {
+			displayTitle = "Inbox"
+		}
 		parts = append(parts, fmt.Sprintf("\033[34m%s/\033[0m", node.Slug)) // Blue directory
-		if node.Title != node.Slug {
-			parts = append(parts, fmt.Sprintf("(%s)", node.Title))
+		if displayTitle != node.Slug {
+			parts = append(parts, fmt.Sprintf("(%s)", displayTitle))
 		}
 		parts = append(parts, fmt.Sprintf("[%s]", node.ID))
 		if node.AllTasksCompleted {

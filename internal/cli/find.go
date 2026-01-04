@@ -32,25 +32,31 @@ Examples:
   wrkq find --kind bug --state open            # Find open bugs
   wrkq find --assignee agent-claude            # Find tasks assigned to agent-claude
   wrkq find --parent-task T-00001              # Find subtasks of T-00001
+  wrkq find --assigned-project rex             # Find tasks assigned to a project
+  wrkq find --requested-by agent-spaces        # Find tasks requested by a project
+  wrkq find --ack-pending                       # Find completed/cancelled tasks awaiting ack
 `,
 	RunE: appctx.WithApp(appctx.DefaultOptions(), runFind),
 }
 
 var (
-	findType       string
-	findSlugGlob   string
-	findState      string
-	findDueBefore  string
-	findDueAfter   string
-	findKind       string
-	findAssignee   string
-	findParentTask string
-	findLimit      int
-	findCursor     string
-	findPorcelain  bool
-	findJSON       bool
-	findNDJSON     bool
-	findPrint0     bool
+	findType            string
+	findSlugGlob        string
+	findState           string
+	findDueBefore       string
+	findDueAfter        string
+	findKind            string
+	findAssignee        string
+	findParentTask      string
+	findRequestedBy     string
+	findAssignedProject string
+	findAckPending      bool
+	findLimit           int
+	findCursor          string
+	findPorcelain       bool
+	findJSON            bool
+	findNDJSON          bool
+	findPrint0          bool
 )
 
 func init() {
@@ -64,6 +70,9 @@ func init() {
 	findCmd.Flags().StringVar(&findKind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
 	findCmd.Flags().StringVar(&findAssignee, "assignee", "", "Filter by assignee (actor slug or ID)")
 	findCmd.Flags().StringVar(&findParentTask, "parent-task", "", "Filter subtasks of a specific parent task (ID or path)")
+	findCmd.Flags().StringVar(&findRequestedBy, "requested-by", "", "Filter by requester project ID")
+	findCmd.Flags().StringVar(&findAssignedProject, "assigned-project", "", "Filter by assignee project ID")
+	findCmd.Flags().BoolVar(&findAckPending, "ack-pending", false, "Filter for ack-pending tasks (acknowledged_at is null; completed/cancelled)")
 	findCmd.Flags().IntVar(&findLimit, "limit", 0, "Limit number of results")
 	findCmd.Flags().StringVar(&findCursor, "cursor", "", "Pagination cursor")
 	findCmd.Flags().BoolVar(&findPorcelain, "porcelain", false, "Stable machine-readable output")
@@ -100,17 +109,20 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Build query based on filters with SQL-based pagination
 	results, hasMore, err := executeFindQuery(database, findOptions{
-		paths:          args,
-		typeFilter:     findType,
-		slugGlob:       findSlugGlob,
-		state:          findState,
-		dueBefore:      findDueBefore,
-		dueAfter:       findDueAfter,
-		kind:           findKind,
-		assigneeUUID:   assigneeUUID,
-		parentTaskUUID: parentTaskUUID,
-		limit:          findLimit,
-		cursor:         findCursor,
+		paths:                args,
+		typeFilter:           findType,
+		slugGlob:             findSlugGlob,
+		state:                findState,
+		dueBefore:            findDueBefore,
+		dueAfter:             findDueAfter,
+		kind:                 findKind,
+		assigneeUUID:         assigneeUUID,
+		parentTaskUUID:       parentTaskUUID,
+		requestedByProjectID: findRequestedBy,
+		assignedProjectID:    findAssignedProject,
+		ackPending:           findAckPending,
+		limit:                findLimit,
+		cursor:               findCursor,
 	})
 	if err != nil {
 		return err
@@ -164,34 +176,41 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 type findOptions struct {
-	paths          []string
-	typeFilter     string
-	slugGlob       string
-	state          string
-	dueBefore      string
-	dueAfter       string
-	kind           string
-	assigneeUUID   string
-	parentTaskUUID string
-	limit          int
-	cursor         string
+	paths                []string
+	typeFilter           string
+	slugGlob             string
+	state                string
+	dueBefore            string
+	dueAfter             string
+	kind                 string
+	assigneeUUID         string
+	parentTaskUUID       string
+	requestedByProjectID string
+	assignedProjectID    string
+	ackPending           bool
+	limit                int
+	cursor               string
 }
 
 type findResult struct {
-	Type         string  `json:"type"` // "task" or "container"
-	UUID         string  `json:"uuid"`
-	ID           string  `json:"id"`
-	Slug         string  `json:"slug"`
-	Title        string  `json:"title"`
-	Path         string  `json:"path"`
-	State        *string `json:"state,omitempty"`          // tasks only
-	Priority     *int    `json:"priority,omitempty"`       // tasks only
-	Kind         *string `json:"kind,omitempty"`           // tasks only
-	Assignee     *string `json:"assignee,omitempty"`       // tasks only (actor slug)
-	ParentTaskID *string `json:"parent_task_id,omitempty"` // subtasks only
-	DueAt        *string `json:"due_at,omitempty"`         // tasks only
-	UpdatedAt    string  `json:"updated_at,omitempty"`     // for cursor pagination
-	ETag         int64   `json:"etag"`
+	Type                 string  `json:"type"` // "task" or "container"
+	UUID                 string  `json:"uuid"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Title                string  `json:"title"`
+	Path                 string  `json:"path"`
+	State                *string `json:"state,omitempty"`                   // tasks only
+	Priority             *int    `json:"priority,omitempty"`                // tasks only
+	Kind                 *string `json:"kind,omitempty"`                    // tasks only
+	Assignee             *string `json:"assignee,omitempty"`                // tasks only (actor slug)
+	ParentTaskID         *string `json:"parent_task_id,omitempty"`          // subtasks only
+	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"` // tasks only
+	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`     // tasks only
+	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`         // tasks only
+	Resolution           *string `json:"resolution,omitempty"`              // tasks only
+	DueAt                *string `json:"due_at,omitempty"`                  // tasks only
+	UpdatedAt            string  `json:"updated_at,omitempty"`              // for cursor pagination
+	ETag                 int64   `json:"etag"`
 }
 
 func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, bool, error) {
@@ -260,7 +279,8 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 
 	query := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.kind,
-		       t.assignee_actor_uuid, t.parent_task_uuid, t.due_at, t.etag,
+		       t.assignee_actor_uuid, t.parent_task_uuid, t.requested_by_project_id,
+		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
 		       cp.path || '/' || t.slug AS path, t.updated_at
 		FROM tasks t
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
@@ -295,6 +315,23 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	if opts.parentTaskUUID != "" {
 		query += " AND t.parent_task_uuid = ?"
 		args = append(args, opts.parentTaskUUID)
+	}
+
+	// Filter by requested-by project
+	if opts.requestedByProjectID != "" {
+		query += " AND t.requested_by_project_id = ?"
+		args = append(args, opts.requestedByProjectID)
+	}
+
+	// Filter by assigned project
+	if opts.assignedProjectID != "" {
+		query += " AND t.assigned_project_id = ?"
+		args = append(args, opts.assignedProjectID)
+	}
+
+	// Filter by ack pending
+	if opts.ackPending {
+		query += " AND t.acknowledged_at IS NULL AND t.state IN ('completed', 'cancelled')"
 	}
 
 	// Filter by due date
@@ -373,10 +410,12 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	for rows.Next() {
 		var r findResult
 		var state, kind, assigneeUUID, parentTaskUUID, dueAt sql.NullString
+		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var priority sql.NullInt64
 
 		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &kind,
-			&assigneeUUID, &parentTaskUUID, &dueAt, &r.ETag, &r.Path, &r.UpdatedAt)
+			&assigneeUUID, &parentTaskUUID, &requestedBy, &assignedProject,
+			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.UpdatedAt)
 		if err != nil {
 			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
@@ -405,6 +444,18 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 			if err := database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", parentTaskUUID.String).Scan(&parentID); err == nil {
 				r.ParentTaskID = &parentID
 			}
+		}
+		if requestedBy.Valid {
+			r.RequestedByProjectID = &requestedBy.String
+		}
+		if assignedProject.Valid {
+			r.AssignedProjectID = &assignedProject.String
+		}
+		if acknowledgedAt.Valid {
+			r.AcknowledgedAt = &acknowledgedAt.String
+		}
+		if resolution.Valid {
+			r.Resolution = &resolution.String
 		}
 		if dueAt.Valid {
 			r.DueAt = &dueAt.String

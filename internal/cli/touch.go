@@ -7,6 +7,7 @@ import (
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
@@ -19,7 +20,7 @@ var touchCmd = &cobra.Command{
 The last segment of each path becomes the task slug (normalized to lowercase [a-z0-9-]).
 
 Supports all flags from 'wrkq set' to set initial values during creation:
-- state, priority, title, description, labels, due-at, start-at
+- state, priority, title, description, labels, due-at, start-at, requested-by, assigned-project, resolution
 
 Examples:
   wrkq touch myproject/feature/task-name -t "Task Title"
@@ -33,17 +34,21 @@ Examples:
 }
 
 var (
-	touchTitle       string
-	touchDescription string
-	touchState       string
-	touchPriority    int
-	touchKind        string
-	touchParentTask  string
-	touchAssignee    string
-	touchLabels      string
-	touchDueAt       string
-	touchStartAt     string
-	touchForceUUID   string
+	touchTitle           string
+	touchDescription     string
+	touchState           string
+	touchPriority        int
+	touchKind            string
+	touchParentTask      string
+	touchAssignee        string
+	touchRequestedBy     string
+	touchAssignedProject string
+	touchResolution      string
+	touchLabels          string
+	touchDueAt           string
+	touchStartAt         string
+	touchForceUUID       string
+	touchJSON            bool
 )
 
 func init() {
@@ -55,10 +60,14 @@ func init() {
 	touchCmd.Flags().StringVar(&touchKind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
 	touchCmd.Flags().StringVar(&touchParentTask, "parent-task", "", "Parent task ID or path (for subtasks)")
 	touchCmd.Flags().StringVar(&touchAssignee, "assignee", "", "Assignee actor slug or ID")
+	touchCmd.Flags().StringVar(&touchRequestedBy, "requested-by", "", "Requester project ID (return-to target)")
+	touchCmd.Flags().StringVar(&touchAssignedProject, "assigned-project", "", "Assignee project ID")
+	touchCmd.Flags().StringVar(&touchResolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
 	touchCmd.Flags().StringVar(&touchLabels, "labels", "", "Initial task labels (JSON array)")
 	touchCmd.Flags().StringVar(&touchDueAt, "due-at", "", "Initial task due date")
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
 	touchCmd.Flags().StringVar(&touchForceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
+	touchCmd.Flags().BoolVar(&touchJSON, "json", false, "Output as JSON")
 }
 
 func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -83,6 +92,13 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Validate kind if provided
 	if touchKind != "" {
 		if err := domain.ValidateTaskKind(touchKind); err != nil {
+			return err
+		}
+	}
+
+	// Validate resolution if provided
+	if touchResolution != "" {
+		if err := domain.ValidateResolution(touchResolution); err != nil {
 			return err
 		}
 	}
@@ -128,6 +144,21 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		assigneeActorUUID = &uuid
 	}
 
+	var requestedByProjectID *string
+	if touchRequestedBy != "" {
+		requestedByProjectID = &touchRequestedBy
+	}
+
+	var assignedProjectID *string
+	if touchAssignedProject != "" {
+		assignedProjectID = &touchAssignedProject
+	}
+
+	var resolution *string
+	if touchResolution != "" {
+		resolution = &touchResolution
+	}
+
 	// Process description if provided
 	var description string
 	if touchDescription != "" {
@@ -140,6 +171,23 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Create store
 	s := store.New(database)
+
+	type touchResult struct {
+		ID       string `json:"id"`
+		UUID     string `json:"uuid"`
+		Slug     string `json:"slug"`
+		Path     string `json:"path"`
+		Title    string `json:"title"`
+		State    string `json:"state"`
+		Priority int    `json:"priority"`
+		Kind     string `json:"kind"`
+	}
+
+	results := []touchResult{}
+	defaultKind := touchKind
+	if defaultKind == "" {
+		defaultKind = "task"
+	}
 
 	// Create each task
 	for _, path := range args {
@@ -180,25 +228,45 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		// Create the task using the store
-		_, err = s.Tasks.Create(actorUUID, store.CreateParams{
-			UUID:              touchForceUUID,
-			Slug:              normalizedSlug,
-			Title:             title,
-			Description:       description,
-			ProjectUUID:       projectUUID,
-			State:             state,
-			Priority:          priority,
-			Kind:              touchKind,
-			ParentTaskUUID:    parentTaskUUID,
-			AssigneeActorUUID: assigneeActorUUID,
-			Labels:            touchLabels,
-			DueAt:             touchDueAt,
-			StartAt:           touchStartAt,
+		result, err := s.Tasks.Create(actorUUID, store.CreateParams{
+			UUID:                 touchForceUUID,
+			Slug:                 normalizedSlug,
+			Title:                title,
+			Description:          description,
+			ProjectUUID:          projectUUID,
+			State:                state,
+			Priority:             priority,
+			Kind:                 touchKind,
+			ParentTaskUUID:       parentTaskUUID,
+			AssigneeActorUUID:    assigneeActorUUID,
+			RequestedByProjectID: requestedByProjectID,
+			AssignedProjectID:    assignedProjectID,
+			Resolution:           resolution,
+			Labels:               touchLabels,
+			DueAt:                touchDueAt,
+			StartAt:              touchStartAt,
 		})
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s\n", path)
+		if touchJSON {
+			results = append(results, touchResult{
+				ID:       result.ID,
+				UUID:     result.UUID,
+				Slug:     normalizedSlug,
+				Path:     path,
+				Title:    title,
+				State:    state,
+				Priority: priority,
+				Kind:     defaultKind,
+			})
+			continue
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s (%s)\n", result.ID, path)
+	}
+
+	if touchJSON {
+		return render.RenderJSON(results, false)
 	}
 
 	return nil

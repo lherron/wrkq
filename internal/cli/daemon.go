@@ -24,6 +24,7 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 // DaemonOptions configures the wrkqd daemon.
@@ -832,6 +833,8 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	webhooks.DispatchTask(s.db, taskUUID)
+
 	task, err := loadTaskDetail(s.db, taskUUID, true, true)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -1060,6 +1063,8 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
+
+	webhooks.DispatchTask(s.db, taskUUID)
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"comment": comment,
