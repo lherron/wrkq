@@ -51,14 +51,9 @@ func ServeDaemon(opts DaemonOptions) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	_, pending, err := database.MigrationStatus()
-	if err != nil {
+	if err := database.RequiresMigrationError(); err != nil {
 		database.Close()
-		return fmt.Errorf("failed to check migration status: %w", err)
-	}
-	if len(pending) > 0 {
-		database.Close()
-		return fmt.Errorf("database requires migration: %d pending migration(s). Run 'wrkqadm migrate' to update", len(pending))
+		return err
 	}
 
 	server := &daemonServer{

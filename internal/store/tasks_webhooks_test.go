@@ -53,6 +53,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		t.Fatalf("failed to create container: %v", err)
 	}
 
+	meta := `{"triage_status":"queued"}`
 	result, err := s.Tasks.Create(actorUUID, CreateParams{
 		Slug:        "task",
 		Title:       "Task",
@@ -60,6 +61,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		ProjectUUID: container.UUID,
 		State:       "open",
 		Priority:    2,
+		Meta:        &meta,
 	})
 	if err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -119,6 +121,9 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		}
 		if got.payload.Kind != "task" {
 			t.Fatalf("unexpected kind: %s", got.payload.Kind)
+		}
+		if string(got.payload.Meta) == "" || string(got.payload.Meta) == "null" {
+			t.Fatalf("unexpected meta payload: %s", string(got.payload.Meta))
 		}
 		if got.payload.ETag != 3 {
 			t.Fatalf("unexpected etag: %d", got.payload.ETag)

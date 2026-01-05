@@ -607,20 +607,20 @@ func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions, sinceEvent
 func exportTask(db *sql.DB, taskUUID string) (string, error) {
 	var id, slug, title, state, description string
 	var priority int
-	var startAt, dueAt, labels, completedAt, archivedAt *string
+	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var createdAt, updatedAt string
 	var etag int64
 	var projectUUID, createdByUUID, updatedByUUID string
 
 	err := db.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
-		       start_at, due_at, labels, description, etag,
+		       start_at, due_at, labels, meta, description, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &state, &priority,
-		&startAt, &dueAt, &labels, &description, &etag,
+		&startAt, &dueAt, &labels, &meta, &description, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&createdByUUID, &updatedByUUID,
 	)
@@ -657,6 +657,9 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 	}
 	if labels != nil && *labels != "" {
 		sb.WriteString(fmt.Sprintf("labels: %s\n", *labels))
+	}
+	if meta != nil && *meta != "" {
+		sb.WriteString(fmt.Sprintf("meta: %s\n", *meta))
 	}
 	sb.WriteString(fmt.Sprintf("etag: %d\n", etag))
 	sb.WriteString(fmt.Sprintf("created_at: %s\n", createdAt))

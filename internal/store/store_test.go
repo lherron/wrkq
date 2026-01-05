@@ -68,6 +68,7 @@ func TestTaskStore_Create(t *testing.T) {
 		RequestedByProjectID: strPtr("agent-spaces"),
 		AssignedProjectID:    strPtr("rex"),
 		Resolution:           strPtr("done"),
+		Meta:                 strPtr(`{"triage_status":"completed"}`),
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -104,6 +105,9 @@ func TestTaskStore_Create(t *testing.T) {
 	}
 	if task.Resolution == nil || *task.Resolution != "done" {
 		t.Errorf("expected resolution 'done', got %v", task.Resolution)
+	}
+	if task.Meta == nil || *task.Meta == "" {
+		t.Errorf("expected meta to be set, got %v", task.Meta)
 	}
 
 	// Verify event was logged
@@ -160,6 +164,57 @@ func TestTaskStore_UpdateFields(t *testing.T) {
 	database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.updated'", createResult.UUID).Scan(&eventCount)
 	if eventCount != 1 {
 		t.Errorf("expected 1 task.updated event, got %d", eventCount)
+	}
+}
+
+func TestTaskStore_UpdateFields_MetaReplace(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	containerUUID := setupTestContainer(t, database, actorUUID)
+	s := New(database)
+
+	createResult, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "meta-test",
+		Title:       "Meta Test",
+		ProjectUUID: containerUUID,
+		State:       "open",
+		Priority:    3,
+		Meta:        strPtr(`{"triage_status":"queued"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Replace meta
+	newETag, err := s.Tasks.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{
+		"meta": `{"triage_status":"completed","triaged_at":"2026-01-04T08:12:00Z"}`,
+	}, 0)
+	if err != nil {
+		t.Fatalf("UpdateFields failed: %v", err)
+	}
+	if newETag != 3 {
+		t.Errorf("expected etag 3, got %d", newETag)
+	}
+
+	task, err := s.Tasks.GetByUUID(createResult.UUID)
+	if err != nil {
+		t.Fatalf("GetByUUID failed: %v", err)
+	}
+	if task.Meta == nil || *task.Meta == "" {
+		t.Fatalf("expected meta to be set, got %v", task.Meta)
+	}
+
+	// Clear meta
+	_, err = s.Tasks.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{"meta": nil}, 0)
+	if err != nil {
+		t.Fatalf("UpdateFields clear meta failed: %v", err)
+	}
+	task, err = s.Tasks.GetByUUID(createResult.UUID)
+	if err != nil {
+		t.Fatalf("GetByUUID failed: %v", err)
+	}
+	if task.Meta != nil {
+		t.Errorf("expected meta to be cleared, got %v", *task.Meta)
 	}
 }
 

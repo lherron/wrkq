@@ -62,41 +62,42 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	type Task struct {
-		ID                   string     `json:"id"`
-		UUID                 string     `json:"uuid"`
-		ProjectID            string     `json:"project_id"`
-		ProjectUUID          string     `json:"project_uuid"`
-		RequestedByProjectID *string    `json:"requested_by_project_id,omitempty"`
-		AssignedProjectID    *string    `json:"assigned_project_id,omitempty"`
-		Slug                 string     `json:"slug"`
-		Title                string     `json:"title"`
-		State                string     `json:"state"`
-		Priority             int        `json:"priority"`
-		Kind                 string     `json:"kind"`
-		ParentTaskID         *string    `json:"parent_task_id,omitempty"`
-		ParentTaskUUID       *string    `json:"parent_task_uuid,omitempty"`
-		AssigneeSlug         *string    `json:"assignee,omitempty"`
-		AssigneeUUID         *string    `json:"assignee_uuid,omitempty"`
-		StartAt              *string    `json:"start_at,omitempty"`
-		DueAt                *string    `json:"due_at,omitempty"`
-		Labels               *string    `json:"labels,omitempty"`
-		Description          string     `json:"description"`
-		AcknowledgedAt       *string    `json:"acknowledged_at,omitempty"`
-		Resolution           *string    `json:"resolution,omitempty"`
-		CPProjectID          *string    `json:"cp_project_id,omitempty"`
-		CPRunID              *string    `json:"cp_run_id,omitempty"`
-		CPSessionID          *string    `json:"cp_session_id,omitempty"`
-		SDKSessionID         *string    `json:"sdk_session_id,omitempty"`
-		RunStatus            *string    `json:"run_status,omitempty"`
-		Etag                 int64      `json:"etag"`
-		CreatedAt            string     `json:"created_at"`
-		UpdatedAt            string     `json:"updated_at"`
-		CompletedAt          *string    `json:"completed_at,omitempty"`
-		ArchivedAt           *string    `json:"archived_at,omitempty"`
-		CreatedBy            string     `json:"created_by"`
-		UpdatedBy            string     `json:"updated_by"`
-		Comments             []Comment  `json:"comments,omitempty"`
-		Relations            []Relation `json:"relations,omitempty"`
+		ID                   string          `json:"id"`
+		UUID                 string          `json:"uuid"`
+		ProjectID            string          `json:"project_id"`
+		ProjectUUID          string          `json:"project_uuid"`
+		RequestedByProjectID *string         `json:"requested_by_project_id,omitempty"`
+		AssignedProjectID    *string         `json:"assigned_project_id,omitempty"`
+		Slug                 string          `json:"slug"`
+		Title                string          `json:"title"`
+		State                string          `json:"state"`
+		Priority             int             `json:"priority"`
+		Kind                 string          `json:"kind"`
+		ParentTaskID         *string         `json:"parent_task_id,omitempty"`
+		ParentTaskUUID       *string         `json:"parent_task_uuid,omitempty"`
+		AssigneeSlug         *string         `json:"assignee,omitempty"`
+		AssigneeUUID         *string         `json:"assignee_uuid,omitempty"`
+		StartAt              *string         `json:"start_at,omitempty"`
+		DueAt                *string         `json:"due_at,omitempty"`
+		Labels               *string         `json:"labels,omitempty"`
+		Meta                 json.RawMessage `json:"meta"`
+		Description          string          `json:"description"`
+		AcknowledgedAt       *string         `json:"acknowledged_at,omitempty"`
+		Resolution           *string         `json:"resolution,omitempty"`
+		CPProjectID          *string         `json:"cp_project_id,omitempty"`
+		CPRunID              *string         `json:"cp_run_id,omitempty"`
+		CPSessionID          *string         `json:"cp_session_id,omitempty"`
+		SDKSessionID         *string         `json:"sdk_session_id,omitempty"`
+		RunStatus            *string         `json:"run_status,omitempty"`
+		Etag                 int64           `json:"etag"`
+		CreatedAt            string          `json:"created_at"`
+		UpdatedAt            string          `json:"updated_at"`
+		CompletedAt          *string         `json:"completed_at,omitempty"`
+		ArchivedAt           *string         `json:"archived_at,omitempty"`
+		CreatedBy            string          `json:"created_by"`
+		UpdatedBy            string          `json:"updated_by"`
+		Comments             []Comment       `json:"comments,omitempty"`
+		Relations            []Relation      `json:"relations,omitempty"`
 	}
 
 	var tasks []Task
@@ -112,7 +113,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		// Get task details
 		var id, slug, title, state, description, kind string
 		var priority int
-		var startAt, dueAt, labels, completedAt, archivedAt *string
+		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
 		var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 		var parentTaskUUID, assigneeActorUUID *string
@@ -124,7 +125,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			       state, priority,
 			       kind, parent_task_uuid, assignee_actor_uuid,
-			       start_at, due_at, labels, description, etag,
+			       start_at, due_at, labels, meta, description, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
 			       cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
@@ -133,7 +134,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		`, taskUUID).Scan(
 			&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
 			&kind, &parentTaskUUID, &assigneeActorUUID,
-			&startAt, &dueAt, &labels, &description, &etag,
+			&startAt, &dueAt, &labels, &meta, &description, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
 			&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
@@ -170,6 +171,10 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		metaValue := "{}"
+		if meta != nil && *meta != "" && json.Valid([]byte(*meta)) {
+			metaValue = *meta
+		}
 		task := Task{
 			ID:                   id,
 			UUID:                 taskUUID,
@@ -189,6 +194,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			StartAt:              startAt,
 			DueAt:                dueAt,
 			Labels:               labels,
+			Meta:                 json.RawMessage(metaValue),
 			Description:          description,
 			AcknowledgedAt:       acknowledgedAt,
 			Resolution:           resolution,
@@ -348,6 +354,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				if task.Labels != nil && *task.Labels != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
 				}
+				fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
 				if task.AcknowledgedAt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
 				}

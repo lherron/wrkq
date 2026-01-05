@@ -426,6 +426,8 @@ type bundleTaskUpdate struct {
 	DueAt       *string
 	StartAt     *string
 	Labels      *string
+	Meta        *string
+	MetaSet     bool
 	Description *string
 }
 
@@ -577,6 +579,49 @@ func parseBundleTaskContent(content string) (*bundleTaskUpdate, error) {
 					labelStr := string(data)
 					update.Labels = &labelStr
 				}
+			}
+		}
+		if v, ok := fm["meta"]; ok {
+			update.MetaSet = true
+			if v == nil {
+				update.Meta = nil
+			} else if metaStr, ok := v.(string); ok {
+				trimmed := strings.TrimSpace(metaStr)
+				if trimmed == "" {
+					return nil, fmt.Errorf("invalid meta JSON: empty value")
+				}
+				if trimmed == "null" {
+					update.Meta = nil
+				} else {
+					var meta map[string]interface{}
+					if err := json.Unmarshal([]byte(trimmed), &meta); err != nil {
+						return nil, fmt.Errorf("invalid meta JSON: %w", err)
+					}
+					update.Meta = &trimmed
+				}
+			} else {
+				var metaMap map[string]interface{}
+				switch typed := v.(type) {
+				case map[string]interface{}:
+					metaMap = typed
+				case map[interface{}]interface{}:
+					metaMap = make(map[string]interface{}, len(typed))
+					for key, val := range typed {
+						keyStr, ok := key.(string)
+						if !ok {
+							return nil, fmt.Errorf("invalid meta key type %T", key)
+						}
+						metaMap[keyStr] = val
+					}
+				default:
+					return nil, fmt.Errorf("invalid meta value type %T", v)
+				}
+				data, err := json.Marshal(metaMap)
+				if err != nil {
+					return nil, fmt.Errorf("invalid meta JSON: %w", err)
+				}
+				trimmed := string(data)
+				update.Meta = &trimmed
 			}
 		}
 	}
@@ -782,6 +827,14 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 	if update.Labels != nil {
 		labels = *update.Labels
 	}
+	meta := interface{}(nil)
+	if update.MetaSet {
+		if update.Meta != nil {
+			meta = *update.Meta
+		} else {
+			meta = nil
+		}
+	}
 
 	dueAt := interface{}(nil)
 	if update.DueAt != nil {
@@ -802,16 +855,16 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 		res, errIns = tx.Exec(`
 			INSERT INTO tasks (
 				uuid, id, slug, title, description, project_uuid, state, priority, kind,
-				labels, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-			) VALUES (?, '', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?)
-		`, task.UUID, slug, title, description, projectUUID, state, priority, labels, dueAt, startAt, actorUUID, actorUUID)
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
+			) VALUES (?, '', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
+		`, task.UUID, slug, title, description, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
 	} else {
 		res, errIns = tx.Exec(`
 			INSERT INTO tasks (
 				id, slug, title, description, project_uuid, state, priority, kind,
-				labels, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-			) VALUES ('', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?)
-		`, slug, title, description, projectUUID, state, priority, labels, dueAt, startAt, actorUUID, actorUUID)
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
+			) VALUES ('', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
+		`, slug, title, description, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
 	}
 	if errIns != nil {
 		return fmt.Errorf("failed to create task %s: %w", task.Path, errIns)
@@ -873,6 +926,13 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bund
 	}
 	if update.Labels != nil {
 		fields["labels"] = *update.Labels
+	}
+	if update.MetaSet {
+		if update.Meta != nil {
+			fields["meta"] = *update.Meta
+		} else {
+			fields["meta"] = nil
+		}
 	}
 	if update.Description != nil {
 		fields["description"] = *update.Description

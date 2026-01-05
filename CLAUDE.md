@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+
+## WRKQ Usage Reference
+
+** ALWAYS USE WRKQ TO TRACK YOUR TASK **
+
+@internal/cli/embedded/WRKQ-USAGE.md
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -277,4 +284,4 @@ Most commands support:
 - `docs/SPEC.md` - Full product specification (source of truth for behavior)
 - `docs/WRKQADM.md` - Binary separation rationale
 - `docs/ER.md` - Entity-relationship documentation
-- `WRKQ-USAGE.md` - Quick reference for agents
+- `internal/cli/embedded/WRKQ-USAGE.md` - Quick reference for agents (embedded in binary)

@@ -32,7 +32,8 @@ type CreateParams struct {
 	RequestedByProjectID *string
 	AssignedProjectID    *string
 	Resolution           *string
-	Labels               string // JSON array
+	Labels               string  // JSON array
+	Meta                 *string // JSON object
 	DueAt                string
 	StartAt              string
 }
@@ -64,10 +65,10 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 				INSERT INTO tasks (
 					uuid, id, slug, title, description, project_uuid, state, priority, kind,
 					parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
-					labels, due_at, start_at,
+					labels, meta, due_at, start_at,
 					created_by_actor_uuid, updated_by_actor_uuid
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`
 			args = []interface{}{
 				params.UUID,                 // uuid (forced)
@@ -85,6 +86,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 				params.AssignedProjectID,    // assigned_project_id
 				params.Resolution,           // resolution
 				params.Labels,               // labels (can be empty string or JSON)
+				params.Meta,                 // meta (JSON object, nullable)
 				params.DueAt,                // due_at (can be empty string)
 				params.StartAt,              // start_at (can be empty string)
 				actorUUID,                   // created_by_actor_uuid
@@ -96,10 +98,10 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 				INSERT INTO tasks (
 					id, slug, title, description, project_uuid, state, priority, kind,
 					parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
-					labels, due_at, start_at,
+					labels, meta, due_at, start_at,
 					created_by_actor_uuid, updated_by_actor_uuid
 				)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`
 			args = []interface{}{
 				"",                          // id (auto-generated)
@@ -116,6 +118,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 				params.AssignedProjectID,    // assigned_project_id
 				params.Resolution,           // resolution
 				params.Labels,               // labels (can be empty string or JSON)
+				params.Meta,                 // meta (JSON object, nullable)
 				params.DueAt,                // due_at (can be empty string)
 				params.StartAt,              // start_at (can be empty string)
 				actorUUID,                   // created_by_actor_uuid
@@ -550,7 +553,7 @@ func (ts *TaskStore) GetAttachments(taskUUID string) ([]AttachmentInfo, error) {
 func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task := &domain.Task{}
 	// Use string intermediates for nullable time fields since SQLite stores times as strings
-	var startAt, dueAt, labels, completedAt, archivedAt *string
+	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution *string
 	var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 	var createdAt, updatedAt string
@@ -558,7 +561,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	err := ts.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			   state, priority,
-			   start_at, due_at, labels, description, etag,
+			   start_at, due_at, labels, meta, description, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
 			   cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
@@ -567,7 +570,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	`, uuid).Scan(
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
 		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority,
-		&startAt, &dueAt, &labels, &task.Description, &task.ETag,
+		&startAt, &dueAt, &labels, &meta, &task.Description, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
@@ -592,6 +595,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 
 	// Store the labels as-is since it's a JSON string
 	task.Labels = labels
+	task.Meta = meta
 
 	return task, nil
 }

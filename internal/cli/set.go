@@ -24,7 +24,7 @@ var setCmd = &cobra.Command{
 	Aliases: []string{"edit"},
 	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
 
 Description can be set from:
   - String: --description "text"
@@ -58,6 +58,8 @@ var (
 	setTitle           string
 	setSlug            string
 	setLabels          string
+	setMeta            string
+	setMetaFile        string
 	setDueAt           string
 	setStartAt         string
 	setKind            string
@@ -86,6 +88,8 @@ func init() {
 	setCmd.Flags().StringVar(&setTitle, "title", "", "Update task title")
 	setCmd.Flags().StringVar(&setSlug, "slug", "", "Update task slug")
 	setCmd.Flags().StringVar(&setLabels, "labels", "", "Update task labels (JSON array)")
+	setCmd.Flags().StringVar(&setMeta, "meta", "", "Update task metadata (JSON object or null)")
+	setCmd.Flags().StringVar(&setMetaFile, "meta-file", "", "Load task metadata from file (JSON object or null)")
 	setCmd.Flags().StringVar(&setDueAt, "due-at", "", "Update task due date")
 	setCmd.Flags().StringVar(&setStartAt, "start-at", "", "Update task start date")
 	setCmd.Flags().StringVar(&setKind, "kind", "", "Update task kind (task, subtask, spike, bug, chore)")
@@ -230,6 +234,19 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 			return nil, fmt.Errorf("invalid labels JSON: %w", err)
 		}
 		fields["labels"] = setLabels
+	}
+
+	// Handle meta
+	metaSet, metaValue, err := readMetaValue(setMeta, setMetaFile)
+	if err != nil {
+		return nil, err
+	}
+	if metaSet {
+		if metaValue == nil {
+			fields["meta"] = nil
+		} else {
+			fields["meta"] = *metaValue
+		}
 	}
 
 	// Handle due_at

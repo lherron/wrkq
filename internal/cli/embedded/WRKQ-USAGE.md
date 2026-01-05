@@ -51,6 +51,12 @@ wrkq mkdir -p myproject/api-feature
 wrkq rmdir myproject
 ```
 
+## Project Scope
+Most projects have a .env.local with WRKQ_PROJECT_ROOT set to their own project root, and are not able to view other projects.  If you need to view other projects, run:
+```bash
+WRKQ_PROJECT_ROOT= wrkq <command>
+```
+
 ## Finding Tasks
 ```bash
 # Find all open tasks

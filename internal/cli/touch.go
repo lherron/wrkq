@@ -20,7 +20,7 @@ var touchCmd = &cobra.Command{
 The last segment of each path becomes the task slug (normalized to lowercase [a-z0-9-]).
 
 Supports all flags from 'wrkq set' to set initial values during creation:
-- state, priority, title, description, labels, due-at, start-at, requested-by, assigned-project, resolution
+- state, priority, title, description, labels, meta, due-at, start-at, requested-by, assigned-project, resolution
 
 Examples:
   wrkq touch myproject/feature/task-name -t "Task Title"
@@ -45,6 +45,8 @@ var (
 	touchAssignedProject string
 	touchResolution      string
 	touchLabels          string
+	touchMeta            string
+	touchMetaFile        string
 	touchDueAt           string
 	touchStartAt         string
 	touchForceUUID       string
@@ -64,6 +66,8 @@ func init() {
 	touchCmd.Flags().StringVar(&touchAssignedProject, "assigned-project", "", "Assignee project ID")
 	touchCmd.Flags().StringVar(&touchResolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
 	touchCmd.Flags().StringVar(&touchLabels, "labels", "", "Initial task labels (JSON array)")
+	touchCmd.Flags().StringVar(&touchMeta, "meta", "", "Initial task metadata (JSON object or null)")
+	touchCmd.Flags().StringVar(&touchMetaFile, "meta-file", "", "Load task metadata from file (JSON object or null)")
 	touchCmd.Flags().StringVar(&touchDueAt, "due-at", "", "Initial task due date")
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
 	touchCmd.Flags().StringVar(&touchForceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
@@ -109,6 +113,11 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err := json.Unmarshal([]byte(touchLabels), &labels); err != nil {
 			return fmt.Errorf("invalid labels JSON: %w", err)
 		}
+	}
+
+	metaSet, metaValue, err := readMetaValue(touchMeta, touchMetaFile)
+	if err != nil {
+		return err
 	}
 
 	// Validate force-uuid if provided
@@ -243,8 +252,14 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 			AssignedProjectID:    assignedProjectID,
 			Resolution:           resolution,
 			Labels:               touchLabels,
-			DueAt:                touchDueAt,
-			StartAt:              touchStartAt,
+			Meta: func() *string {
+				if metaSet {
+					return metaValue
+				}
+				return nil
+			}(),
+			DueAt:   touchDueAt,
+			StartAt: touchStartAt,
 		})
 		if err != nil {
 			return err

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -78,4 +79,39 @@ func readDescriptionValue(value string) (string, error) {
 
 	// Handle string literal
 	return value, nil
+}
+
+func readMetaValue(value string, filename string) (bool, *string, error) {
+	if value == "" && filename == "" {
+		return false, nil, nil
+	}
+
+	var raw string
+	if filename != "" {
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return true, nil, fmt.Errorf("failed to read meta file %s: %w", filename, err)
+		}
+		if len(data) == 0 {
+			return true, nil, fmt.Errorf("meta file %s is empty", filename)
+		}
+		raw = string(data)
+	} else {
+		raw = value
+	}
+
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return true, nil, fmt.Errorf("meta is empty")
+	}
+	if trimmed == "null" {
+		return true, nil, nil
+	}
+
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &meta); err != nil {
+		return true, nil, fmt.Errorf("invalid meta JSON: %w", err)
+	}
+
+	return true, &trimmed, nil
 }

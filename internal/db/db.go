@@ -276,3 +276,25 @@ func (db *DB) MigrationStatus() (applied []string, pending []string, err error) 
 
 	return applied, pending, nil
 }
+
+// RequiresMigrationError checks if the database has pending migrations and returns
+// a descriptive error including the database path and current schema version.
+// Returns nil if no migrations are pending.
+func (db *DB) RequiresMigrationError() error {
+	applied, pending, err := db.MigrationStatus()
+	if err != nil {
+		return fmt.Errorf("failed to check migration status: %w", err)
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	// Determine current version (last applied migration, or "none")
+	currentVersion := "none"
+	if len(applied) > 0 {
+		currentVersion = applied[len(applied)-1]
+	}
+
+	return fmt.Errorf("database at %s (version: %s) requires migration: %d pending migration(s). Run 'wrkqadm migrate' to update",
+		db.path, currentVersion, len(pending))
+}
