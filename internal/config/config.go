@@ -23,7 +23,7 @@ type Config struct {
 
 // Load loads configuration from multiple sources with precedence:
 // 1. Environment variables
-// 2. ./.env.local (dotenv)
+// 2. ./.env.local (dotenv) - walks up parent directories to find it
 // 3. ~/.config/wrkq/config.yaml (YAML)
 func Load() (*Config, error) {
 	cfg := &Config{
@@ -32,8 +32,10 @@ func Load() (*Config, error) {
 		Output:           "table",
 	}
 
-	// Load .env.local if it exists
-	_ = godotenv.Load(".env.local")
+	// Load .env.local if it exists (walking up parent directories)
+	if envPath := findEnvLocal(); envPath != "" {
+		_ = godotenv.Load(envPath)
+	}
 
 	// Load ~/.config/wrkq/config.yaml if it exists
 	if err := loadYAMLConfig(cfg); err != nil {
@@ -111,6 +113,53 @@ func getEnvOrFile(envVar, fileVar string) string {
 		if err == nil {
 			return string(data)
 		}
+	}
+
+	return ""
+}
+
+// findEnvLocal searches for .env.local starting from cwd and walking up
+// parent directories. Stops at the user's home directory.
+// Returns the path to .env.local if found, empty string otherwise.
+func findEnvLocal() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// If we can't get home dir, just check cwd
+		if _, err := os.Stat(".env.local"); err == nil {
+			return ".env.local"
+		}
+		return ""
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	// Clean paths for reliable comparison
+	homeDir = filepath.Clean(homeDir)
+	dir := filepath.Clean(cwd)
+
+	for {
+		envPath := filepath.Join(dir, ".env.local")
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
+
+		// Stop if we've reached home directory
+		if dir == homeDir {
+			break
+		}
+
+		// Get parent directory
+		parent := filepath.Dir(dir)
+
+		// Stop if we've reached the filesystem root
+		if parent == dir {
+			break
+		}
+
+		dir = parent
 	}
 
 	return ""

@@ -3,10 +3,14 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -28,6 +32,7 @@ Examples:
   wrkq touch myproject/feature/task-name -t "Title" -d @description.md
   wrkq touch inbox/new-task --state in_progress --priority 1
   wrkq touch inbox/bug-fix --labels '["bug","urgent"]' --due-at 2025-12-01
+  wrkq touch --project other feature/new-task
   echo "Description from stdin" | wrkq touch inbox/new-task -d -`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: appctx.WithApp(appctx.WithActor(), runTouch),
@@ -51,13 +56,14 @@ var (
 	touchStartAt         string
 	touchForceUUID       string
 	touchJSON            bool
+	touchProject         string
 )
 
 func init() {
 	rootCmd.AddCommand(touchCmd)
 	touchCmd.Flags().StringVarP(&touchTitle, "title", "t", "", "Title for the task (defaults to slug)")
 	touchCmd.Flags().StringVarP(&touchDescription, "description", "d", "", "Description for the task (use @file.md for file or - for stdin)")
-	touchCmd.Flags().StringVar(&touchState, "state", "open", "Initial task state (draft, open, in_progress, completed, blocked, cancelled)")
+	touchCmd.Flags().StringVar(&touchState, "state", "open", "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled)")
 	touchCmd.Flags().IntVar(&touchPriority, "priority", 3, "Initial task priority (1-4)")
 	touchCmd.Flags().StringVar(&touchKind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
 	touchCmd.Flags().StringVar(&touchParentTask, "parent-task", "", "Parent task ID or path (for subtasks)")
@@ -72,12 +78,25 @@ func init() {
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
 	touchCmd.Flags().StringVar(&touchForceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
 	touchCmd.Flags().BoolVar(&touchJSON, "json", false, "Output as JSON")
+	touchCmd.Flags().StringVar(&touchProject, "project", "", "Create tasks under a specific project (overrides WRKQ_PROJECT_ROOT)")
 }
 
 func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
-	args = applyProjectRootToPaths(app.Config, args, false)
+
+	projectPathOverride, err := resolveTouchProjectOverride(database, touchProject)
+	if err != nil {
+		return err
+	}
+	if projectPathOverride != "" {
+		args, err = applyProjectOverrideToPaths(projectPathOverride, args)
+		if err != nil {
+			return err
+		}
+	} else {
+		args = applyProjectRootToPaths(app.Config, args, false)
+	}
 
 	// Validate state
 	if touchState != "" {
@@ -134,7 +153,16 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Resolve parent task if provided
 	var parentTaskUUID *string
 	if touchParentTask != "" {
-		parentRef := applyProjectRootToSelector(app.Config, touchParentTask, false)
+		parentRef := touchParentTask
+		if projectPathOverride != "" {
+			var err error
+			parentRef, err = applyProjectOverrideToSelector(projectPathOverride, touchParentTask)
+			if err != nil {
+				return err
+			}
+		} else {
+			parentRef = applyProjectRootToSelector(app.Config, touchParentTask, false)
+		}
 		uuid, _, err := selectors.ResolveTask(database, parentRef)
 		if err != nil {
 			return fmt.Errorf("failed to resolve parent task: %w", err)
@@ -285,4 +313,106 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func resolveTouchProjectOverride(database *db.DB, projectSelector string) (string, error) {
+	selector := strings.TrimSpace(projectSelector)
+	if selector == "" {
+		return "", nil
+	}
+
+	projectUUID, _, err := selectors.ResolveContainer(database, selector)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve project %q: %w", selector, err)
+	}
+
+	var projectPath string
+	if err := database.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", projectUUID).Scan(&projectPath); err != nil {
+		return "", fmt.Errorf("failed to resolve project path: %w", err)
+	}
+
+	projectPath = strings.Trim(projectPath, "/")
+	return projectPath, nil
+}
+
+func applyProjectOverrideToPaths(projectPath string, pathsIn []string) ([]string, error) {
+	if projectPath == "" {
+		return pathsIn, nil
+	}
+	if len(pathsIn) == 0 {
+		return pathsIn, nil
+	}
+
+	out := make([]string, 0, len(pathsIn))
+	for _, path := range pathsIn {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			out = append(out, trimmed)
+			continue
+		}
+
+		if id.IsFriendlyID(trimmed) || id.IsUUID(trimmed) {
+			out = append(out, trimmed)
+			continue
+		}
+
+		normalized := strings.Trim(trimmed, "/")
+		if normalized == "" {
+			out = append(out, trimmed)
+			continue
+		}
+
+		if isAlreadyRooted(projectPath, normalized) {
+			return nil, fmt.Errorf("path %q already includes project %q; remove the project prefix when using --project", path, projectPath)
+		}
+		out = append(out, paths.JoinPath(projectPath, normalized))
+	}
+
+	return out, nil
+}
+
+func applyProjectOverrideToSelector(projectPath, selector string) (string, error) {
+	trimmed := strings.TrimSpace(selector)
+	if projectPath == "" || trimmed == "" {
+		return trimmed, nil
+	}
+
+	if strings.HasPrefix(trimmed, "t:") || strings.HasPrefix(trimmed, "c:") {
+		prefix := trimmed[:2]
+		token := strings.TrimSpace(trimmed[2:])
+		if token == "" {
+			return trimmed, nil
+		}
+		if id.IsFriendlyID(token) || id.IsUUID(token) {
+			return prefix + token, nil
+		}
+		normalized := strings.Trim(token, "/")
+		if normalized == "" {
+			return trimmed, nil
+		}
+		if isAlreadyRooted(projectPath, normalized) {
+			return "", fmt.Errorf("selector %q already includes project %q; remove the project prefix when using --project", selector, projectPath)
+		}
+		return prefix + paths.JoinPath(projectPath, normalized), nil
+	}
+
+	if id.IsFriendlyID(trimmed) || id.IsUUID(trimmed) {
+		return trimmed, nil
+	}
+
+	normalized := strings.Trim(trimmed, "/")
+	if normalized == "" {
+		return trimmed, nil
+	}
+	if isAlreadyRooted(projectPath, normalized) {
+		return "", fmt.Errorf("selector %q already includes project %q; remove the project prefix when using --project", selector, projectPath)
+	}
+	return paths.JoinPath(projectPath, normalized), nil
+}
+
+func isAlreadyRooted(projectPath, candidate string) bool {
+	if candidate == projectPath {
+		return true
+	}
+	return strings.HasPrefix(candidate, projectPath+"/")
 }

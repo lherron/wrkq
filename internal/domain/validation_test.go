@@ -12,6 +12,7 @@ func TestValidateState(t *testing.T) {
 		state   string
 		wantErr bool
 	}{
+		{name: "idea", state: "idea", wantErr: false},
 		{name: "draft", state: "draft", wantErr: false},
 		{name: "open", state: "open", wantErr: false},
 		{name: "in_progress", state: "in_progress", wantErr: false},

@@ -62,7 +62,7 @@ func createTestDB(t *testing.T) *sql.DB {
 			assigned_project_id TEXT,
 			acknowledged_at TEXT,
 			resolution TEXT,
-			state TEXT NOT NULL CHECK (state IN ('open','in_progress','completed','archived')),
+			state TEXT NOT NULL CHECK (state IN ('idea','draft','open','in_progress','completed','archived','blocked','cancelled','deleted')),
 			priority INTEGER NOT NULL DEFAULT 3,
 			start_at TEXT,
 			due_at TEXT,

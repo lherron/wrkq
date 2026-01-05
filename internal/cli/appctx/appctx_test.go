@@ -192,6 +192,13 @@ func TestBootstrap_ActorNotConfigured(t *testing.T) {
 	}
 	database.Close()
 
+	// Change to temp dir to avoid finding parent .env.local files
+	oldCwd, _ := os.Getwd()
+	defer os.Chdir(oldCwd)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
 	// Set DB path but NOT actor
 	os.Setenv("WRKQ_DB_PATH", dbPath)
 	os.Unsetenv("WRKQ_ACTOR")

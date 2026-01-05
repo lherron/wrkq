@@ -23,7 +23,7 @@ var findCmd = &cobra.Command{
 	Long: `Search for tasks and containers using metadata filters.
 
 Examples:
-  wrkq find                                    # Find all non-archived items
+  wrkq find                                    # Find active items (excludes archived, deleted, idea)
   wrkq find portal/**                          # Find items under portal
   wrkq find -type t --state open              # Find open tasks
   wrkq find --slug-glob 'login-*'              # Find items with slug matching pattern
@@ -64,7 +64,7 @@ func init() {
 
 	findCmd.Flags().StringVarP(&findType, "type", "", "", "Filter by type: t (task), p (project/container)")
 	findCmd.Flags().StringVar(&findSlugGlob, "slug-glob", "", "Filter by slug glob pattern (e.g. 'login-*')")
-	findCmd.Flags().StringVar(&findState, "state", "", "Filter by state: draft, open, in_progress, completed, blocked, cancelled, archived, deleted, or 'all' for everything")
+	findCmd.Flags().StringVar(&findState, "state", "", "Filter by state: idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted, or 'all' for everything")
 	findCmd.Flags().StringVar(&findDueBefore, "due-before", "", "Filter tasks due before date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findDueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findKind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
@@ -288,15 +288,15 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	`
 	args := []interface{}{}
 
-	// Filter by state (default: exclude archived and deleted)
+	// Filter by state (default: exclude archived, deleted, and idea)
 	if opts.state == "all" {
 		// Include all states (no filter)
 	} else if opts.state != "" {
 		query += " AND t.state = ?"
 		args = append(args, opts.state)
 	} else {
-		// Default: exclude archived and deleted
-		query += " AND t.state NOT IN ('archived', 'deleted')"
+		// Default: exclude archived, deleted, and idea
+		query += " AND t.state NOT IN ('archived', 'deleted', 'idea')"
 	}
 
 	// Filter by kind

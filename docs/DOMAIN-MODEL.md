@@ -123,6 +123,14 @@ Maintenance work that doesn't add features. Chores:
 
 Tasks move through states as work progresses.
 
+### Idea
+
+Pre-triage concept captured for later refinement. Ideas are intentionally excluded from default views until promoted to draft.
+
+### Draft
+
+Triage-ready work that is defined enough to evaluate but not yet committed to execution.
+
 ### Open
 
 Work has been defined but not started. The task is in the backlog, waiting to be picked up.

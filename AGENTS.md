@@ -1,11 +1,17 @@
 # Repository Guidelines
 
+## Talking to the user
 
-## WRKQ Usage Reference
+If you have questions, number them for easier responses.
 
-** ALWAYS USE WRKQ TO TRACK YOUR TASK **
+## Finding your way around
 
-@WRKQ-USAGE.md
+Almost every project has a Justfile.   just --list  will help a lot when you
+look at other projects.
+Every project should have a 'just install' for installing things.  If your
+Justfile doesn't have it, add it.
+
+
 
 ## Project Structure & Module Organization
 - `cmd/wrkq` and `cmd/wrkqadm`: CLI entrypoints. Keep binaries in `bin/` (gitignored).

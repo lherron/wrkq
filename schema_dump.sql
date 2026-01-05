@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS "tasks" (
        CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
   title TEXT NOT NULL,
   project_uuid TEXT NOT NULL REFERENCES containers(uuid) ON DELETE RESTRICT,
-  state TEXT NOT NULL CHECK (state IN ('open','in_progress','completed','archived')),
+  state TEXT NOT NULL CHECK (state IN ('idea','draft','open','in_progress','completed','archived','blocked','cancelled','deleted')),
   priority INTEGER NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 4),
   start_at TEXT,
   due_at   TEXT,

@@ -65,25 +65,30 @@ This separation ensures agents get a focused, safe API while admins retain full 
 ## Task Lifecycle
 
 ```
-touch ──→ [open] ──→ set --state in_progress ──→ [in_progress]
-             │                                        │
-             │                    ┌───────────────────┘
-             │                    │
-             ▼                    ▼
-        [blocked] ◄──────────► set --state completed ──→ [completed]
-             │                                               │
-             │                                               │
-             ▼                                               ▼
-       [cancelled]                                      rm ──→ [archived]
-                                                              │
-                                                              ▼
-                                                        rm --purge (permanent)
+touch --state idea ──→ [idea] ──→ set --state draft ──→ [draft] ──→ set --state open ──→ [open]
+                                                                               │
+                                                                               ▼
+                                                      set --state in_progress ──→ [in_progress]
+                                                                               │
+                                                      ┌────────────────────────┘
+                                                      │
+                                                      ▼
+                                                [blocked] ◄──────────► set --state completed ──→ [completed]
+                                                      │                                               │
+                                                      │                                               │
+                                                      ▼                                               ▼
+                                                [cancelled]                                      rm ──→ [archived]
+                                                                                                       │
+                                                                                                       ▼
+                                                                                                 rm --purge (permanent)
 ```
 
 ### Task States
 
 | State | Description |
 |-------|-------------|
+| `idea` | Pre-triage concept (excluded from default `find`) |
+| `draft` | Triage-ready but not yet committed to work |
 | `open` | Not started, default for new tasks |
 | `in_progress` | Currently being worked on |
 | `completed` | Done successfully |
@@ -95,6 +100,8 @@ touch ──→ [open] ──→ set --state in_progress ──→ [in_progress]
 
 | From | To | Command |
 |------|-----|---------|
+| Any | `idea` | `wrkq set T-00001 --state idea` |
+| Any | `draft` | `wrkq set T-00001 --state draft` |
 | Any | `open` | `wrkq set T-00001 --state open` |
 | Any | `in_progress` | `wrkq set T-00001 --state in_progress` |
 | Any | `completed` | `wrkq set T-00001 --state completed` |
@@ -120,7 +127,7 @@ touch ──→ [open] ──→ set --state in_progress ──→ [in_progress]
 | Filter | Description |
 |--------|-------------|
 | `--type t\|p` | Filter by type (task or project/container) |
-| `--state` | Filter by task state |
+| `--state` | Filter by task state (default excludes `idea`) |
 | `--kind` | Filter by task kind (task, subtask, spike, bug, chore) |
 | `--assignee` | Filter by assignee actor |
 | `--parent-task` | Filter subtasks of a parent |

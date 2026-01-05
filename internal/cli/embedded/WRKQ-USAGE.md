@@ -23,7 +23,7 @@
 Update the wrkq task **before** using the TodoWrite tool. When using the TodoWrite tool, include the wrkq task id in parenthesis whenever possible.
 
 ### Naming Conventions
-1. **Use a top-level container for your project (e.g. `myproject`).**
+1. **Use a top-level container for your project (e.g. `myfeat`).**
 2. **Use subdirectories for major features. (e.g. `api-authentication`)**
 3. **Use short, descriptive slugs for tasks. (e.g. `login-auth-flow`, `logout-auth-flow`)**
 
@@ -42,13 +42,13 @@ Example:  If Claude Code tries to run **wrkq tree --json** and that flag isn't i
 ## Managing Containers
 ```bash
 # Create a container
-wrkq mkdir myproject
+wrkq mkdir myfeat
 
 # Create a subcontainer with parents
-wrkq mkdir -p myproject/api-feature
+wrkq mkdir -p myfeat/api-feature
 
 # Remove an empty container
-wrkq rmdir myproject
+wrkq rmdir myfeat
 ```
 
 ## Project Scope
@@ -61,9 +61,9 @@ WRKQ_PROJECT_ROOT= wrkq <command>
 ```bash
 # Find all open tasks
 wrkq find --state open --json
-wrkq find 'myproject/api-feature/**' --state open
+wrkq find 'myfeat/api-feature/**' --state open
 wrkq find --slug-glob 'login-*'
-wrkq tree myproject --json
+wrkq tree myfeat --json
 wrkq tree --json         # Show all tasks including completed
 ```
 
@@ -76,16 +76,19 @@ wrkq cat T-00001
 wrkq cat T-00001 --json
 
 # List tasks in a path
-wrkq ls myproject/api-feature --json
+wrkq ls myfeat/api-feature --json
 ```
 
 ## Creating Tasks
 
 ```bash
 # Create with title and description
-wrkq touch myproject/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
+wrkq touch myfeat/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
 # Create and emit JSON for scripting
-wrkq touch myproject/feature/task-slug -t "New Task" -d "Description" --json
+wrkq touch myfeat/feature/task-slug -t "New Task" -d "Description" --json
+
+# Create under a different project (overrides WRKQ_PROJECT_ROOT)
+wrkq touch --project other feature/new-task -t "New Task"
 ```
 
 
@@ -93,10 +96,10 @@ wrkq touch myproject/feature/task-slug -t "New Task" -d "Description" --json
 
 ```bash
 # Delete a task
-wrkq rm myproject/api-feature/feature-slug
+wrkq rm myfeat/api-feature/feature-slug
 
 # Delete a task and all its attachments (interactive if --yes is not provided)
-wrkq rm myproject/api-feature/feature-slug --purge --yes
+wrkq rm myfeat/api-feature/feature-slug --purge --yes
 ```
 
 ## Updating Tasks

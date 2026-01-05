@@ -169,7 +169,7 @@ Fields
 - `slug` (fs-safe, normalized; unique among siblings within same container)
 - `title` (free text)
 - `project_uuid` (FK to container)
-- `state` (`draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled`)
+- `state` (`idea` | `draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled`)
 - `priority` (1..4, 1 is highest; default 3)
 - `kind` (`task` | `subtask` | `spike` | `bug` | `chore`)
 - `parent_task_uuid` (nullable; FK to parent Task for subtasks)
@@ -183,14 +183,15 @@ Fields
 - `updated_by_actor_uuid` (FK Actor)
 
 Task States
-- `draft`: Early-stage idea or concept, not yet ready to work on
+- `idea`: Pre-triage concept; capture without committing to work
+- `draft`: Triage-ready but not yet committed to work
 - `open`: Not started (default)
 - `in_progress`: Currently being worked on
 - `completed`: Done, meets acceptance criteria
 - `blocked`: Cannot continue due to external dependency
 - `cancelled`: Will not be done
 
-Lifecycle flow: `draft` → `open` → `in_progress` → `completed`/`blocked`/`cancelled`
+Lifecycle flow: `idea` → `draft` → `open` → `in_progress` → `completed`/`blocked`/`cancelled`
 
 Note: Archiving is handled via `archived_at` timestamp, not as a workflow state.
 
@@ -651,7 +652,7 @@ Output
 - `wrkq set <PATHSPEC|ID...> [--field value ...]`
   - Update task fields quickly.
   - Supported fields:
-    - `--state <state>` (open, in_progress, completed, blocked, cancelled)
+    - `--state <state>` (idea, draft, open, in_progress, completed, blocked, cancelled)
     - `--priority <1-4>`
     - `--title <text>`
     - `--slug <slug>` (validated against slug rules)
@@ -681,7 +682,7 @@ Output
   - Flags:
     - `-t, --title <text>` (task title)
     - `-d, --description <text|@file|->` (task description)
-    - `--state <state>` (default: open)
+    - `--state <state>` (default: open; idea is pre-triage)
     - `--priority <1-4>` (default: 3)
     - `--kind <kind>` (task, subtask, spike, bug, chore; default: task)
     - `--parent-task <id>` (for subtasks)
@@ -729,7 +730,7 @@ Output
   - Flags:
     - `-type p|t` (filter by type: project/container or task)
     - `--slug-glob <glob>` (slug pattern matching)
-    - `--state <state>` (open, in_progress, completed, blocked, cancelled)
+    - `--state <state>` (idea, draft, open, in_progress, completed, blocked, cancelled)
     - `--kind <kind>` (task, subtask, spike, bug, chore)
     - `--assignee <actor>` (filter by assignee)
     - `--parent-task <id>` (filter subtasks of a parent)

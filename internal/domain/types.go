@@ -96,7 +96,7 @@ type Task struct {
 	ProjectUUID          string     `json:"project_uuid" db:"project_uuid"`
 	RequestedByProjectID *string    `json:"requested_by_project_id,omitempty" db:"requested_by_project_id"`
 	AssignedProjectID    *string    `json:"assigned_project_id,omitempty" db:"assigned_project_id"`
-	State                string     `json:"state" db:"state"`       // draft, open, in_progress, completed, blocked, cancelled, archived, deleted
+	State                string     `json:"state" db:"state"`       // idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted
 	Priority             int        `json:"priority" db:"priority"` // 1-4, 1 is highest
 	Kind                 TaskKind   `json:"kind" db:"kind"`         // task, subtask, spike, bug, chore
 	ParentTaskUUID       *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
