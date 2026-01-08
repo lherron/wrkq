@@ -88,7 +88,7 @@ wrkq touch myfeat/feature/task-slug --state open --priority 2 -t "New Task" -d "
 wrkq touch myfeat/feature/task-slug -t "New Task" -d "Description" --json
 
 # Create under a different project (overrides WRKQ_PROJECT_ROOT)
-wrkq touch --project other feature/new-task -t "New Task"
+wrkq touch --project webwrkq inbox/new-task -t "New Task"
 ```
 
 

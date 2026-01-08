@@ -64,9 +64,16 @@ func runContainerCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	selector := applyProjectRootToSelector(app.Config, args[0], false)
-	containerUUID, containerPath, err := selectors.ResolveContainer(database, selector)
+	containerUUID, _, err := selectors.ResolveContainer(database, selector)
 	if err != nil {
 		return err
+	}
+
+	// Get full path from view
+	var containerPath string
+	err = database.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", containerUUID).Scan(&containerPath)
+	if err != nil {
+		return fmt.Errorf("failed to get container path: %w", err)
 	}
 
 	var id, slug, title, description, kind string
