@@ -109,19 +109,6 @@ changelog:
     - title: Others
       order: 999
 
-# SBOM generation
-sboms:
-  - id: default
-    artifacts: archive
-    documents:
-      - >-
-        {{ .ProjectName }}_{{ .Version }}_
-        {{- if eq .Os "darwin" }}macOS
-        {{- else }}{{ .Os }}{{ end }}_
-        {{- if eq .Arch "amd64" }}x86_64
-        {{- else if eq .Arch "386" }}i386
-        {{- else }}{{ .Arch }}{{ end }}.sbom.json
-
 # Release configuration
 release:
   github:
@@ -150,22 +137,3 @@ release:
 
     Report issues at https://github.com/lherron/wrkq/issues
 
-# Announce (optional - for future use)
-announce:
-  skip: true
-
-# Signing (optional - for future use)
-signs:
-  - cmd: cosign
-    artifacts: checksum
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
-    args:
-      - sign-blob
-      - --output-signature
-      - "${artifact}.sig"
-      - --output-certificate
-      - "${artifact}.pem"
-      - "${artifact}"
-    env:
-      - COSIGN_EXPERIMENTAL=1
