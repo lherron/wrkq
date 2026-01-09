@@ -20,6 +20,13 @@ const (
 	defaultConcurrency = 4
 )
 
+// BlockerInfo represents an incomplete blocking task.
+// This matches the format used in wrkq cat --json output.
+type BlockerInfo struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+}
+
 // Payload is the webhook payload for task updates.
 type Payload struct {
 	TicketID     string          `json:"ticket_id"`
@@ -37,6 +44,7 @@ type Payload struct {
 	CPRunID      *string         `json:"cp_run_id"`
 	CPSessionID  *string         `json:"cp_session_id"`
 	SDKSessionID *string         `json:"sdk_session_id"`
+	BlockedBy    []BlockerInfo   `json:"blocked_by,omitempty"`
 }
 
 // TaskInfo carries task metadata needed for webhook dispatch.
@@ -56,6 +64,7 @@ type TaskInfo struct {
 	CPRunID      *string
 	CPSessionID  *string
 	SDKSessionID *string
+	BlockedBy    []BlockerInfo
 }
 
 // DispatchTask resolves task info then dispatches webhooks.
@@ -92,6 +101,7 @@ func DispatchTaskInfo(database *db.DB, info TaskInfo) {
 		CPRunID:      info.CPRunID,
 		CPSessionID:  info.CPSessionID,
 		SDKSessionID: info.SDKSessionID,
+		BlockedBy:    info.BlockedBy,
 	}
 	urls, err := ResolveWebhookTargets(database, info.ProjectUUID, payload)
 	if err != nil {
@@ -159,6 +169,33 @@ func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 	if sdkSessionID.Valid {
 		info.SDKSessionID = &sdkSessionID.String
 	}
+
+	// Query incomplete blockers for this task
+	blockerRows, err := database.Query(`
+		SELECT t.id, t.state
+		FROM task_relations r
+		JOIN tasks t ON r.from_task_uuid = t.uuid
+		WHERE r.to_task_uuid = ?
+		  AND r.kind = 'blocks'
+		  AND t.state NOT IN ('completed', 'archived', 'deleted', 'cancelled', 'idea')
+		ORDER BY t.id
+	`, taskUUID)
+	if err != nil {
+		return TaskInfo{}, fmt.Errorf("query blockers: %w", err)
+	}
+	defer blockerRows.Close()
+
+	for blockerRows.Next() {
+		var blocker BlockerInfo
+		if err := blockerRows.Scan(&blocker.ID, &blocker.State); err != nil {
+			return TaskInfo{}, fmt.Errorf("scan blocker: %w", err)
+		}
+		info.BlockedBy = append(info.BlockedBy, blocker)
+	}
+	if err := blockerRows.Err(); err != nil {
+		return TaskInfo{}, fmt.Errorf("iterate blockers: %w", err)
+	}
+
 	return info, nil
 }
 

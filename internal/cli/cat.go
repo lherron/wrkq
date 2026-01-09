@@ -7,6 +7,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +62,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CreatedByID string `json:"created_by_id"`
 	}
 
+	// BlockerInfo represents an incomplete blocking task
+	type BlockerInfo struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+	}
+
 	type Task struct {
 		ID                   string          `json:"id"`
 		UUID                 string          `json:"uuid"`
@@ -96,6 +103,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ArchivedAt           *string         `json:"archived_at,omitempty"`
 		CreatedBy            string          `json:"created_by"`
 		UpdatedBy            string          `json:"updated_by"`
+		BlockedBy            []BlockerInfo   `json:"blocked_by,omitempty"`
 		Comments             []Comment       `json:"comments,omitempty"`
 		Relations            []Relation      `json:"relations,omitempty"`
 	}
@@ -305,6 +313,23 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			task.Relations = relations
 		}
 
+		// Query incomplete blockers using the store's BlockedBy method
+		s := store.New(database)
+		blockers, err := s.Tasks.BlockedBy(taskUUID)
+		if err != nil {
+			return fmt.Errorf("failed to query blockers: %w", err)
+		}
+		if len(blockers) > 0 {
+			blockerInfos := make([]BlockerInfo, len(blockers))
+			for i, b := range blockers {
+				blockerInfos[i] = BlockerInfo{
+					ID:    b.ID,
+					State: b.State,
+				}
+			}
+			task.BlockedBy = blockerInfos
+		}
+
 		// For JSON output, collect tasks
 		if catJSON || catNDJSON {
 			tasks = append(tasks, task)
@@ -375,6 +400,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				if task.RunStatus != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
+				}
+				if len(task.BlockedBy) > 0 {
+					parts := make([]string, len(task.BlockedBy))
+					for i, b := range task.BlockedBy {
+						parts[i] = fmt.Sprintf("%s (%s)", b.ID, b.State)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "blocked_by: [%s]\n", strings.Join(parts, ", "))
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
 				fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)

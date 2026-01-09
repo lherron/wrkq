@@ -669,3 +669,194 @@ func TestApplyCommand_EtagMismatch(t *testing.T) {
 	// Reset for other tests
 	applyIfMatch = 0
 }
+
+func TestCatCommand_BlockedBy(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create blocker task (in_progress - incomplete)
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('blocker-uuid-1', 'T-00001', 'blocker-task', 'Blocker Task', '00000000-0000-0000-0000-000000000002', 'in_progress', 2, 'This task blocks another', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create blocker task: %v", err)
+	}
+
+	// Create blocked task
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('blocked-uuid-1', 'T-00002', 'blocked-task', 'Blocked Task', '00000000-0000-0000-0000-000000000002', 'blocked', 2, 'This task is blocked', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create blocked task: %v", err)
+	}
+
+	// Create blocks relation: blocker -> blocked
+	_, err = database.Exec(`
+		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
+		VALUES ('blocker-uuid-1', 'blocked-uuid-1', 'blocks', '00000000-0000-0000-0000-000000000001')
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create relation: %v", err)
+	}
+
+	// Set environment variables
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+	defer os.Unsetenv("WRKQ_DB_PATH")
+	defer os.Unsetenv("WRKQ_ACTOR")
+
+	// Test cat on the blocked task - should show blocked_by
+	cmd := rootCmd
+	cmd.SetArgs([]string{"cat", "T-00002"})
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Command failed: %v", err)
+	}
+
+	output := out.String()
+
+	// Verify output contains blocked_by with blocker task
+	if !strings.Contains(output, "blocked_by:") {
+		t.Errorf("Output should contain 'blocked_by:' field when task is blocked")
+	}
+	if !strings.Contains(output, "T-00001 (in_progress)") {
+		t.Errorf("Output should contain blocker task ID and state 'T-00001 (in_progress)'")
+	}
+}
+
+func TestCatCommand_BlockedBy_CompletedBlockerNotShown(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create blocker task (completed - should not show as blocker)
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('completed-blocker-uuid', 'T-00001', 'completed-blocker', 'Completed Blocker', '00000000-0000-0000-0000-000000000002', 'completed', 2, 'This task is complete', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create blocker task: %v", err)
+	}
+
+	// Create blocked task
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('waiting-task-uuid', 'T-00002', 'waiting-task', 'Waiting Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Waiting for blocker', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create waiting task: %v", err)
+	}
+
+	// Create blocks relation: blocker -> waiting
+	_, err = database.Exec(`
+		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
+		VALUES ('completed-blocker-uuid', 'waiting-task-uuid', 'blocks', '00000000-0000-0000-0000-000000000001')
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create relation: %v", err)
+	}
+
+	// Set environment variables
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+	defer os.Unsetenv("WRKQ_DB_PATH")
+	defer os.Unsetenv("WRKQ_ACTOR")
+
+	// Test cat on the waiting task - should NOT show blocked_by (blocker is completed)
+	cmd := rootCmd
+	cmd.SetArgs([]string{"cat", "T-00002"})
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Command failed: %v", err)
+	}
+
+	output := out.String()
+
+	// Verify output does NOT contain blocked_by (blocker is completed)
+	if strings.Contains(output, "blocked_by:") {
+		t.Errorf("Output should NOT contain 'blocked_by:' when blocker is completed, got: %s", output)
+	}
+}
+
+func TestCatCommand_BlockedBy_JSON(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+
+	// Create blocker task (open - incomplete)
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('json-blocker-uuid', 'T-00001', 'json-blocker', 'JSON Blocker', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Blocker task', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create blocker task: %v", err)
+	}
+
+	// Create blocked task
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('json-blocked-uuid', 'T-00002', 'json-blocked', 'JSON Blocked', '00000000-0000-0000-0000-000000000002', 'blocked', 2, 'Blocked task', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create blocked task: %v", err)
+	}
+
+	// Create blocks relation
+	_, err = database.Exec(`
+		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
+		VALUES ('json-blocker-uuid', 'json-blocked-uuid', 'blocks', '00000000-0000-0000-0000-000000000001')
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create relation: %v", err)
+	}
+
+	// Set environment variables
+	os.Setenv("WRKQ_DB_PATH", dbPath)
+	os.Setenv("WRKQ_ACTOR", "test-user")
+	defer os.Unsetenv("WRKQ_DB_PATH")
+	defer os.Unsetenv("WRKQ_ACTOR")
+
+	// Test cat with JSON output
+	cmd := rootCmd
+	cmd.SetArgs([]string{"cat", "T-00002", "--json"})
+
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Command failed: %v", err)
+	}
+
+	// Parse JSON output
+	var tasks []struct {
+		BlockedBy []struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		} `json:"blocked_by"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &tasks); err != nil {
+		t.Fatalf("Failed to parse JSON: %v\nOutput: %s", err, out.String())
+	}
+
+	if len(tasks) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(tasks))
+	}
+
+	if len(tasks[0].BlockedBy) != 1 {
+		t.Fatalf("Expected 1 blocker, got %d", len(tasks[0].BlockedBy))
+	}
+
+	if tasks[0].BlockedBy[0].ID != "T-00001" {
+		t.Errorf("Expected blocker ID 'T-00001', got %q", tasks[0].BlockedBy[0].ID)
+	}
+
+	if tasks[0].BlockedBy[0].State != "open" {
+		t.Errorf("Expected blocker state 'open', got %q", tasks[0].BlockedBy[0].State)
+	}
+}

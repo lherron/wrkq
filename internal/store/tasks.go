@@ -213,11 +213,13 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 // Returns the new etag on success.
 func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]interface{}, ifMatch int64) (int64, error) {
 	var newETag int64
+	var unblockedTaskUUIDs []string
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		// Get current etag
+		// Get current etag and state
 		var currentETag int64
-		err := tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag)
+		var currentState string
+		err := tx.QueryRow("SELECT etag, state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &currentState)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("task not found: %s", taskUUID)
@@ -228,6 +230,36 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 		// Check etag if ifMatch was provided
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
+		}
+
+		// Check if we're transitioning to a completion state (for unblock webhook logic)
+		newState, hasStateChange := fields["state"].(string)
+		transitioningToCompletion := hasStateChange && !isCompletionState(currentState) && isCompletionState(newState)
+
+		// If transitioning to completion, find tasks that might become unblocked
+		var potentiallyUnblockedUUIDs []string
+		if transitioningToCompletion {
+			rows, err := tx.Query(`
+				SELECT to_task_uuid
+				FROM task_relations
+				WHERE from_task_uuid = ?
+				  AND kind = 'blocks'
+			`, taskUUID)
+			if err != nil {
+				return fmt.Errorf("failed to query blocked tasks: %w", err)
+			}
+			for rows.Next() {
+				var uuid string
+				if err := rows.Scan(&uuid); err != nil {
+					rows.Close()
+					return fmt.Errorf("failed to scan blocked task: %w", err)
+				}
+				potentiallyUnblockedUUIDs = append(potentiallyUnblockedUUIDs, uuid)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("error iterating blocked tasks: %w", err)
+			}
 		}
 
 		// Build UPDATE query
@@ -260,6 +292,31 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 			}
 		}
 
+		// After state update, check which tasks are now fully unblocked
+		// (all their blockers are in completion states)
+		if transitioningToCompletion {
+			for _, blockedUUID := range potentiallyUnblockedUUIDs {
+				// Count remaining incomplete blockers for this task
+				var incompleteBlockerCount int
+				err := tx.QueryRow(`
+					SELECT COUNT(*)
+					FROM task_relations r
+					JOIN tasks t ON r.from_task_uuid = t.uuid
+					WHERE r.to_task_uuid = ?
+					  AND r.kind = 'blocks'
+					  AND t.state NOT IN ('completed', 'archived', 'deleted', 'cancelled', 'idea')
+				`, blockedUUID).Scan(&incompleteBlockerCount)
+				if err != nil {
+					return fmt.Errorf("failed to count blockers for task %s: %w", blockedUUID, err)
+				}
+
+				// If no more incomplete blockers, this task is now unblocked
+				if incompleteBlockerCount == 0 {
+					unblockedTaskUUIDs = append(unblockedTaskUUIDs, blockedUUID)
+				}
+			}
+		}
+
 		// Log event with structured payload
 		changesJSON, err := json.Marshal(fields)
 		if err != nil {
@@ -283,7 +340,13 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 	})
 
 	if err == nil {
+		// Dispatch webhook for the updated task
 		webhooks.DispatchTask(ts.store.db, taskUUID)
+
+		// Dispatch webhooks for newly unblocked tasks
+		for _, unblockedUUID := range unblockedTaskUUIDs {
+			webhooks.DispatchTask(ts.store.db, unblockedUUID)
+		}
 	}
 
 	return newETag, err
@@ -611,6 +674,105 @@ func parseTimeNullable(value *string) *time.Time {
 		}
 	}
 	return nil
+}
+
+// BlockingTask represents a lightweight view of a task that is blocking another task.
+// Used by BlockedBy to return only essential info for dependency checking.
+type BlockingTask struct {
+	UUID  string `json:"uuid"`
+	ID    string `json:"id"`
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+	State string `json:"state"`
+}
+
+// BlockedBy returns all incomplete tasks that are blocking the given task.
+// A task is considered "blocking" if there is a 'blocks' relation where
+// the blocking task is the source (from_task_uuid) and the given task is the target (to_task_uuid).
+// A task is considered "incomplete" if its state is NOT in: completed, archived, deleted, cancelled.
+// Tasks in 'idea' state are also excluded as they represent uncommitted work.
+func (ts *TaskStore) BlockedBy(taskUUID string) ([]BlockingTask, error) {
+	rows, err := ts.store.db.Query(`
+		SELECT t.uuid, t.id, t.slug, t.title, t.state
+		FROM task_relations r
+		JOIN tasks t ON r.from_task_uuid = t.uuid
+		WHERE r.to_task_uuid = ?
+		  AND r.kind = 'blocks'
+		  AND t.state NOT IN ('completed', 'archived', 'deleted', 'cancelled', 'idea')
+		ORDER BY t.id
+	`, taskUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query blocking tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var blockers []BlockingTask
+	for rows.Next() {
+		var b BlockingTask
+		if err := rows.Scan(&b.UUID, &b.ID, &b.Slug, &b.Title, &b.State); err != nil {
+			return nil, fmt.Errorf("failed to scan blocking task: %w", err)
+		}
+		blockers = append(blockers, b)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating blocking tasks: %w", err)
+	}
+
+	// Return empty slice instead of nil for consistency
+	if blockers == nil {
+		blockers = []BlockingTask{}
+	}
+
+	return blockers, nil
+}
+
+// GetTasksBlockedBy returns all task UUIDs that are blocked by the given task.
+// In other words, it finds tasks where the given task is the blocker (from_task_uuid).
+// This is the inverse of BlockedBy - BlockedBy returns "who is blocking me",
+// GetTasksBlockedBy returns "who am I blocking".
+func (ts *TaskStore) GetTasksBlockedBy(blockerTaskUUID string) ([]string, error) {
+	rows, err := ts.store.db.Query(`
+		SELECT to_task_uuid
+		FROM task_relations
+		WHERE from_task_uuid = ?
+		  AND kind = 'blocks'
+	`, blockerTaskUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query blocked tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var blockedTasks []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, fmt.Errorf("failed to scan blocked task: %w", err)
+		}
+		blockedTasks = append(blockedTasks, uuid)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating blocked tasks: %w", err)
+	}
+
+	// Return empty slice instead of nil for consistency
+	if blockedTasks == nil {
+		blockedTasks = []string{}
+	}
+
+	return blockedTasks, nil
+}
+
+// isCompletionState returns true if the given state represents a "completed" blocker
+// that should no longer block other tasks.
+func isCompletionState(state string) bool {
+	switch state {
+	case "completed", "cancelled", "archived", "deleted":
+		return true
+	default:
+		return false
+	}
 }
 
 // cascadeDeleteSubtasks deletes all subtasks when a parent task is deleted.
