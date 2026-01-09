@@ -64,7 +64,6 @@ archives:
       - README.md
       - LICENSE*
       - docs/*
-      - completions/*
 
 # Homebrew tap
 brews:
@@ -79,11 +78,6 @@ brews:
     install: |
       bin.install "wrkq"
       bin.install "wrkqadm"
-
-      # Install shell completions
-      bash_completion.install "completions/wrkq.bash" => "wrkq"
-      zsh_completion.install "completions/_wrkq"
-      fish_completion.install "completions/wrkq.fish"
     test: |
       system "#{bin}/wrkq", "--version"
       system "#{bin}/wrkqadm", "--version"
@@ -116,14 +110,6 @@ changelog:
       order: 1
     - title: Others
       order: 999
-
-# Generate shell completions
-after_build:
-  hooks:
-    - cmd: mkdir -p dist/completions
-    - cmd: "{{ .Path }} completion bash > dist/completions/wrkq.bash"
-    - cmd: "{{ .Path }} completion zsh > dist/completions/_wrkq"
-    - cmd: "{{ .Path }} completion fish > dist/completions/wrkq.fish"
 
 # SBOM generation
 sboms:
