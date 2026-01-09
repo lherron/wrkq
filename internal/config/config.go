@@ -67,19 +67,30 @@ func Load() (*Config, error) {
 
 	// Set defaults if not configured
 	if cfg.DBPath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		// Check for project-local database first
+		if _, err := os.Stat(".wrkq/wrkq.db"); err == nil {
+			cfg.DBPath = ".wrkq/wrkq.db"
+		} else {
+			// Fall back to user-global database
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get home directory: %w", err)
+			}
+			cfg.DBPath = filepath.Join(homeDir, ".local", "share", "wrkq", "wrkq.db")
 		}
-		cfg.DBPath = filepath.Join(homeDir, ".local", "share", "wrkq", "wrkq.db")
 	}
 
 	if cfg.AttachDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		// Use project-local attachments if using local database
+		if cfg.DBPath == ".wrkq/wrkq.db" {
+			cfg.AttachDir = ".wrkq/attachments"
+		} else {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get home directory: %w", err)
+			}
+			cfg.AttachDir = filepath.Join(homeDir, ".local", "share", "wrkq", "attachments")
 		}
-		cfg.AttachDir = filepath.Join(homeDir, ".local", "share", "wrkq", "attachments")
 	}
 
 	return cfg, nil
