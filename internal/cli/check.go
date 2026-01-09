@@ -43,8 +43,8 @@ Examples:
 }
 
 var (
-	checkBlockedJSON   bool
-	checkBlockedQuiet  bool
+	checkBlockedJSON  bool
+	checkBlockedQuiet bool
 )
 
 func init() {

@@ -98,16 +98,16 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		comment := map[string]interface{}{
-			"uuid":        commentUUID,
-			"id":          commentID,
-			"task_uuid":   taskUUID,
-			"task_id":     taskID,
-			"actor_uuid":  actorUUID,
-			"actor_slug":  actorSlug,
-			"actor_role":  actorRole,
-			"body":        body,
-			"etag":        etag,
-			"created_at":  createdAt,
+			"uuid":       commentUUID,
+			"id":         commentID,
+			"task_uuid":  taskUUID,
+			"task_id":    taskID,
+			"actor_uuid": actorUUID,
+			"actor_slug": actorSlug,
+			"actor_role": actorRole,
+			"body":       body,
+			"etag":       etag,
+			"created_at": createdAt,
 		}
 
 		if meta.Valid && meta.String != "" {

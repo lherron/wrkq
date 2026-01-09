@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -25,9 +26,9 @@ Examples:
 }
 
 var (
-	containerCatJSON       bool
-	containerCatNDJSON     bool
-	containerCatPorcelain  bool
+	containerCatJSON          bool
+	containerCatNDJSON        bool
+	containerCatPorcelain     bool
 	containerCatNoFrontmatter bool
 )
 
@@ -201,10 +202,5 @@ func runContainerCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 func lastIndexSlash(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '/' {
-			return i
-		}
-	}
-	return -1
+	return strings.LastIndex(s, "/")
 }

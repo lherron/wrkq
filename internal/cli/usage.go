@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// wrkqUsageContent is embedded in initadm.go
+// wrkqUsageContent and agentUsageContent are embedded in initadm.go
 
 var usageCmd = &cobra.Command{
 	Use:     "usage",
@@ -17,11 +17,22 @@ var usageCmd = &cobra.Command{
 	RunE:    runUsage,
 }
 
+var agentInfoCmd = &cobra.Command{
+	Use:   "agent-info",
+	Short: "Display condensed wrkq quick reference for agents",
+	Long:  `Displays a condensed quick reference of essential wrkq commands for coding agents.`,
+	RunE:  runAgentInfo,
+}
+
 var usageJSON bool
+var agentInfoJSON bool
 
 func init() {
 	rootCmd.AddCommand(usageCmd)
 	usageCmd.Flags().BoolVar(&usageJSON, "json", false, "Output as JSON")
+
+	rootCmd.AddCommand(agentInfoCmd)
+	agentInfoCmd.Flags().BoolVar(&agentInfoJSON, "json", false, "Output as JSON")
 }
 
 func runUsage(cmd *cobra.Command, args []string) error {
@@ -35,5 +46,19 @@ func runUsage(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprint(cmd.OutOrStdout(), wrkqUsageContent)
+	return nil
+}
+
+func runAgentInfo(cmd *cobra.Command, args []string) error {
+	if agentInfoJSON {
+		output := map[string]interface{}{
+			"content": agentUsageContent,
+		}
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(output)
+	}
+
+	fmt.Fprint(cmd.OutOrStdout(), agentUsageContent)
 	return nil
 }

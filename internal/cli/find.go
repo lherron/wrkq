@@ -289,14 +289,15 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	args := []interface{}{}
 
 	// Filter by state (default: exclude archived, deleted, and idea)
-	if opts.state == "all" {
+	switch opts.state {
+	case "all":
 		// Include all states (no filter)
-	} else if opts.state != "" {
-		query += " AND t.state = ?"
-		args = append(args, opts.state)
-	} else {
+	case "":
 		// Default: exclude archived, deleted, and idea
 		query += " AND t.state NOT IN ('archived', 'deleted', 'idea')"
+	default:
+		query += " AND t.state = ?"
+		args = append(args, opts.state)
 	}
 
 	// Filter by kind

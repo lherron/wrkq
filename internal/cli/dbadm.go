@@ -33,10 +33,10 @@ var (
 )
 
 type snapshotManifest struct {
-	Timestamp                string `json:"timestamp"`
-	SourceDBPath             string `json:"source_db_path"`
-	SnapshotDBPath           string `json:"snapshot_db_path"`
-	MachineInterfaceVersion  int    `json:"machine_interface_version"`
+	Timestamp               string `json:"timestamp"`
+	SourceDBPath            string `json:"source_db_path"`
+	SnapshotDBPath          string `json:"snapshot_db_path"`
+	MachineInterfaceVersion int    `json:"machine_interface_version"`
 }
 
 func init() {

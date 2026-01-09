@@ -17,11 +17,27 @@ builds:
     main: ./cmd/wrkq
     binary: wrkq
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - linux
       - darwin
-      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/lherron/wrkq/internal/cli.Version={{.Version}}
+      - -X github.com/lherron/wrkq/internal/cli.GitCommit={{.Commit}}
+      - -X github.com/lherron/wrkq/internal/cli.BuildDate={{.Date}}
+
+  - id: wrkqadm
+    main: ./cmd/wrkqadm
+    binary: wrkqadm
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+      - darwin
     goarch:
       - amd64
       - arm64
@@ -32,8 +48,11 @@ builds:
       - -X github.com/lherron/wrkq/internal/cli.BuildDate={{.Date}}
 
 archives:
-  - id: wrkq
+  - id: default
     format: tar.gz
+    builds:
+      - wrkq
+      - wrkqadm
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_
       {{- if eq .Os "darwin" }}macOS
@@ -41,14 +60,36 @@ archives:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - README.md
       - LICENSE*
       - docs/*
       - completions/*
+
+# Homebrew tap
+brews:
+  - name: wrkq
+    repository:
+      owner: lherron
+      name: homebrew-wrkq
+    directory: Formula
+    homepage: "https://github.com/lherron/wrkq"
+    description: "Task management CLI for agent/human collaboration"
+    license: "MIT"
+    install: |
+      bin.install "wrkq"
+      bin.install "wrkqadm"
+
+      # Install shell completions
+      bash_completion.install "completions/wrkq.bash" => "wrkq"
+      zsh_completion.install "completions/_wrkq"
+      fish_completion.install "completions/wrkq.fish"
+    test: |
+      system "#{bin}/wrkq", "--version"
+      system "#{bin}/wrkqadm", "--version"
+    dependencies:
+      - name: sqlite
+        type: recommended
 
 checksum:
   name_template: 'checksums.txt'
@@ -111,13 +152,14 @@ release:
 
     ### Installation
 
-    #### Quick Install (macOS/Linux)
+    #### Homebrew (macOS/Linux)
     ```bash
-    curl -fsSL https://raw.githubusercontent.com/lherron/wrkq/main/install.sh | bash
+    brew tap lherron/wrkq
+    brew install wrkq
     ```
 
     #### Manual Installation
-    Download the appropriate binary for your platform below, extract it, and place it in your `PATH`.
+    Download the appropriate archive for your platform below, extract it, and place the binaries in your `PATH`.
   footer: |
     ---
     **Full documentation**: https://github.com/lherron/wrkq

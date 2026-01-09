@@ -17,6 +17,9 @@ import (
 //go:embed embedded/WRKQ-USAGE.md
 var wrkqUsageContent string
 
+//go:embed embedded/AGENT-WRKQ-USAGE.md
+var agentUsageContent string
+
 var initAdmCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the wrkq database and configuration",
@@ -28,11 +31,11 @@ This is an administrative command and should not be exposed to agents.`,
 }
 
 var (
-	initAdmHumanSlug  string
-	initAdmHumanName  string
-	initAdmAgentSlug  string
-	initAdmAgentName  string
-	initAdmAttachDir  string
+	initAdmHumanSlug string
+	initAdmHumanName string
+	initAdmAgentSlug string
+	initAdmAgentName string
+	initAdmAttachDir string
 )
 
 func init() {

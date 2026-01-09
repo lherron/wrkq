@@ -471,12 +471,3 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-
-// UsageError represents a usage error (exit code 2)
-type UsageError struct {
-	Message string
-}
-
-func (e *UsageError) Error() string {
-	return e.Message
-}

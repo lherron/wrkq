@@ -111,16 +111,20 @@ func DispatchTaskInfo(database *db.DB, info TaskInfo) {
 	dispatchURLs(urls, payload)
 }
 
+// nullStringToPtr converts sql.NullString to *string.
+func nullStringToPtr(ns sql.NullString) *string {
+	if ns.Valid {
+		return &ns.String
+	}
+	return nil
+}
+
 // LookupTaskInfo fetches the task and project friendly IDs for dispatch.
 func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 	var info TaskInfo
-	var runStatus sql.NullString
-	var resolution sql.NullString
-	var meta sql.NullString
-	var cpProjectID sql.NullString
-	var cpRunID sql.NullString
-	var cpSessionID sql.NullString
-	var sdkSessionID sql.NullString
+	var runStatus, resolution, meta sql.NullString
+	var cpProjectID, cpRunID, cpSessionID, sdkSessionID sql.NullString
+
 	err := database.QueryRow(`
 		SELECT t.id, t.uuid, t.project_uuid, c.id,
 		       t.state, t.priority, t.kind, t.run_status, t.resolution, t.meta, t.etag,
@@ -129,46 +133,22 @@ func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 		JOIN containers c ON c.uuid = t.project_uuid
 		WHERE t.uuid = ?
 	`, taskUUID).Scan(
-		&info.TaskID,
-		&info.TaskUUID,
-		&info.ProjectUUID,
-		&info.ProjectID,
-		&info.State,
-		&info.Priority,
-		&info.Kind,
-		&runStatus,
-		&resolution,
-		&meta,
-		&info.ETag,
-		&cpProjectID,
-		&cpRunID,
-		&cpSessionID,
-		&sdkSessionID,
+		&info.TaskID, &info.TaskUUID, &info.ProjectUUID, &info.ProjectID,
+		&info.State, &info.Priority, &info.Kind,
+		&runStatus, &resolution, &meta, &info.ETag,
+		&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID,
 	)
 	if err != nil {
 		return TaskInfo{}, fmt.Errorf("lookup task info: %w", err)
 	}
-	if runStatus.Valid {
-		info.RunStatus = &runStatus.String
-	}
-	if resolution.Valid {
-		info.Resolution = &resolution.String
-	}
-	if meta.Valid {
-		info.Meta = &meta.String
-	}
-	if cpProjectID.Valid {
-		info.CPProjectID = &cpProjectID.String
-	}
-	if cpRunID.Valid {
-		info.CPRunID = &cpRunID.String
-	}
-	if cpSessionID.Valid {
-		info.CPSessionID = &cpSessionID.String
-	}
-	if sdkSessionID.Valid {
-		info.SDKSessionID = &sdkSessionID.String
-	}
+
+	info.RunStatus = nullStringToPtr(runStatus)
+	info.Resolution = nullStringToPtr(resolution)
+	info.Meta = nullStringToPtr(meta)
+	info.CPProjectID = nullStringToPtr(cpProjectID)
+	info.CPRunID = nullStringToPtr(cpRunID)
+	info.CPSessionID = nullStringToPtr(cpSessionID)
+	info.SDKSessionID = nullStringToPtr(sdkSessionID)
 
 	// Query incomplete blockers for this task
 	blockerRows, err := database.Query(`

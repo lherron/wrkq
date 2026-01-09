@@ -1,7 +1,4 @@
 # ===== GENERAL =====
-.wrkq/wrkq.db
-.wrkq/wrkq.db-wal
-.wrkq/wrkq.db-shm
 bin/
 tmp/
 .playwright-mcp/
@@ -281,25 +278,5 @@ secrets.json
 # API keys (double-check these don't leak)
 .api-keys
 .secrets
-# wrkq database
-/tmp/test-init-actors.db
-/Users/lherron/projects/evaitools/.wrkq/wrkq.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.DAaLiCIlIO
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.8Jdjx5HPnb
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.3h0MkI8QyU
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.CiNpNUrU5S
-/tmp/test-deleted.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.8Hh4ocqCSy
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.AKjNcTHEwe
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.jpSye1yYaE
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.K2XDt4UGux
-/tmp/trigger-test.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.z7Zx7RLmpB
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/wrkqd-smoke-XXXXXX.lnLgySrueE/db1/wrkq1.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/wrkqd-smoke-XXXXXX.33T08XgAZT/db1/wrkq1.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/wrkqd-smoke-XXXXXX.33T08XgAZT/db2/wrkq2.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/wrkqd-smoke-XXXXXX.RxqEUFzNNQ/db1/wrkq1.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/wrkqd-smoke-XXXXXX.RxqEUFzNNQ/db2/wrkq2.db
-/tmp/test-rename.db
-/tmp/wrkq-async-run-linkage-smoke-test.db
-/var/folders/c0/klfmxdkd20x6qnclf4zbvgnh0000gn/T/tmp.ICEriGwhko/test.db
+# wrkq local data directory
+.wrkq/
