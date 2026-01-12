@@ -25,25 +25,22 @@ func resetTouchGlobals() {
 	touchStartAt = ""
 	touchForceUUID = ""
 	touchJSON = false
-	touchProject = ""
 }
 
 func TestTouchProjectOverride(t *testing.T) {
 	database, dbPath := setupTestEnv(t)
 
-	demoUUID := "00000000-0000-0000-0000-000000000010"
 	otherUUID := "00000000-0000-0000-0000-000000000011"
 	featureUUID := "00000000-0000-0000-0000-000000000012"
 
-	insertContainer(t, database, demoUUID, "P-00002", "demo", "Demo", "", "2024-01-01T00:00:00Z")
 	insertContainer(t, database, otherUUID, "P-00003", "other", "Other", "", "2024-01-01T00:00:00Z")
 	insertContainer(t, database, featureUUID, "P-00004", "feature", "Feature", otherUUID, "2024-01-01T00:00:00Z")
 
 	app := createTestApp(t, database, dbPath)
-	app.Config.ProjectRoot = "demo"
+	// Simulate --project other (now handled via Config.ProjectRoot override in Bootstrap)
+	app.Config.ProjectRoot = "other"
 
 	resetTouchGlobals()
-	touchProject = "other"
 
 	buf := &bytes.Buffer{}
 	cmd := &cobra.Command{}
@@ -72,7 +69,6 @@ func TestTouchProjectOverride(t *testing.T) {
 	}
 
 	resetTouchGlobals()
-	touchProject = "other"
 	touchParentTask = "feature/parent-task"
 
 	if err := runTouch(app, cmd, []string{"feature/child-task"}); err != nil {
@@ -88,7 +84,9 @@ func TestTouchProjectOverride(t *testing.T) {
 	}
 }
 
-func TestTouchProjectOverrideRejectsRootedPaths(t *testing.T) {
+func TestTouchProjectRootHandlesAlreadyRootedPaths(t *testing.T) {
+	// With the global --project flag approach, paths that already include the project root
+	// are handled gracefully (not re-prefixed), not rejected with an error.
 	database, dbPath := setupTestEnv(t)
 
 	otherUUID := "00000000-0000-0000-0000-000000000030"
@@ -97,16 +95,27 @@ func TestTouchProjectOverrideRejectsRootedPaths(t *testing.T) {
 	insertContainer(t, database, featureUUID, "P-00006", "feature", "Feature", otherUUID, "2024-01-01T00:00:00Z")
 
 	app := createTestApp(t, database, dbPath)
-	app.Config.ProjectRoot = "demo"
+	// Simulate --project other
+	app.Config.ProjectRoot = "other"
 
 	resetTouchGlobals()
-	touchProject = "other"
 
 	cmd := &cobra.Command{}
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
 
-	if err := runTouch(app, cmd, []string{"other/feature/bad-task"}); err == nil {
-		t.Fatalf("Expected error for rooted path, got nil")
+	// Path "other/feature/rooted-task" already starts with "other" - should work without double-prefixing
+	if err := runTouch(app, cmd, []string{"other/feature/rooted-task"}); err != nil {
+		t.Fatalf("runTouch with already-rooted path should succeed: %v", err)
+	}
+
+	// Verify task was created in the right container
+	var projectUUID string
+	if err := database.QueryRow(`SELECT project_uuid FROM tasks WHERE slug = ?`, "rooted-task").Scan(&projectUUID); err != nil {
+		t.Fatalf("Failed to load created task: %v", err)
+	}
+	if projectUUID != featureUUID {
+		t.Fatalf("Expected task in feature container %s, got %s", featureUUID, projectUUID)
 	}
 }

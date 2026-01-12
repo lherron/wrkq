@@ -52,7 +52,24 @@ wrkq rmdir myfeat
 ```
 
 ## Project Scope
-Most projects have a .env.local with WRKQ_PROJECT_ROOT set to their own project root, and are not able to view other projects.  If you need to view other projects, run:
+Most projects have a .env.local with WRKQ_PROJECT_ROOT set to their own project root, and are not able to view other projects.
+
+### Global --project Flag
+Use `--project` to override the default project for any command:
+```bash
+wrkq ls --project other-project inbox          # List tasks in other-project/inbox
+wrkq cat --project webwrkq T-00001             # View task from webwrkq project
+wrkq find --project myproject --state open     # Find open tasks in myproject
+wrkq touch --project demo inbox/task -t "New"  # Create task in demo/inbox
+```
+
+### View All Projects
+```bash
+wrkq projects                    # List all available projects
+wrkq projects --json             # Output as JSON
+```
+
+### Clear Project Root (alternative)
 ```bash
 WRKQ_PROJECT_ROOT= wrkq <command>
 ```
@@ -86,9 +103,6 @@ wrkq ls myfeat/api-feature --json
 wrkq touch myfeat/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
 # Create and emit JSON for scripting
 wrkq touch myfeat/feature/task-slug -t "New Task" -d "Description" --json
-
-# Create under a different project (overrides WRKQ_PROJECT_ROOT)
-wrkq touch --project webwrkq inbox/new-task -t "New Task"
 ```
 
 

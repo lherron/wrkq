@@ -71,6 +71,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	type Task struct {
 		ID                   string          `json:"id"`
 		UUID                 string          `json:"uuid"`
+		Path                 string          `json:"path"`
 		ProjectID            string          `json:"project_id"`
 		ProjectUUID          string          `json:"project_uuid"`
 		RequestedByProjectID *string         `json:"requested_by_project_id,omitempty"`
@@ -161,6 +162,10 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var projectID string
 		database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
+		// Get task path from v_task_paths view
+		var taskPath string
+		database.QueryRow("SELECT path FROM v_task_paths WHERE uuid = ?", taskUUID).Scan(&taskPath)
+
 		// Get parent task ID if parent exists
 		var parentTaskID *string
 		if parentTaskUUID != nil {
@@ -186,6 +191,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		task := Task{
 			ID:                   id,
 			UUID:                 taskUUID,
+			Path:                 taskPath,
 			ProjectID:            projectID,
 			ProjectUUID:          projectUUID,
 			RequestedByProjectID: requestedBy,
@@ -345,6 +351,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				fmt.Fprintln(cmd.OutOrStdout(), "---")
 				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
 				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
+				fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
 				fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
 				fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
 				if task.RequestedByProjectID != nil {

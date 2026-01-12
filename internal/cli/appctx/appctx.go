@@ -5,10 +5,12 @@ package appctx
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -114,6 +116,18 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 		}
 
 		app.DB = database
+
+		// Override project root from --project flag if provided
+		if projectFlag := cmd.Flag("project"); projectFlag != nil {
+			if projectSelector := projectFlag.Value.String(); projectSelector != "" {
+				projectPath, err := resolveProjectFlag(database, projectSelector)
+				if err != nil {
+					database.Close()
+					return nil, err
+				}
+				app.Config.ProjectRoot = projectPath
+			}
+		}
 	}
 
 	// Resolve actor if needed
@@ -164,4 +178,26 @@ func resolveActor(database *db.DB, cfg *config.Config, cmd *cobra.Command) (uuid
 	}
 
 	return actorUUID, actorID, nil
+}
+
+// resolveProjectFlag resolves a project selector (path, slug, or ID) to a project path.
+// This is used to override the WRKQ_PROJECT_ROOT config from the --project flag.
+func resolveProjectFlag(database *db.DB, projectSelector string) (string, error) {
+	selector := strings.TrimSpace(projectSelector)
+	if selector == "" {
+		return "", nil
+	}
+
+	projectUUID, _, err := selectors.ResolveContainer(database, selector)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve project %q: %w", selector, err)
+	}
+
+	var projectPath string
+	if err := database.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", projectUUID).Scan(&projectPath); err != nil {
+		return "", fmt.Errorf("failed to resolve project path: %w", err)
+	}
+
+	projectPath = strings.Trim(projectPath, "/")
+	return projectPath, nil
 }
