@@ -280,3 +280,4 @@ secrets.json
 .secrets
 # wrkq local data directory
 .wrkq/
+asp_modules/

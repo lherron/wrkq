@@ -1,8 +1,21 @@
 set shell := ["bash", "-cu"]
 
-# Default task: show common commands
+# Default task
 default:
+  @just info
   @just --list
+
+# Project information
+info:
+  @echo "Current Project: wrkq"
+  @echo "Description: Task management CLI and library for agent work queues"
+  @echo "Stack:       Go with SQLite"
+  @echo ""
+  @echo "Key commands:"
+  @echo "  just build     - Build wrkq, wrkqadm, wrkqd binaries"
+  @echo "  just test      - Run Go tests"
+  @echo "  just lint      - Run golangci-lint"
+  @echo "  just verify    - Run lint + test"
 
 # --- Database tasks ---
 

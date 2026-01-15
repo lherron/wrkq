@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/db"
 )
@@ -137,6 +138,7 @@ func TestTaskStore_UpdateFields(t *testing.T) {
 	}
 
 	// Update the task
+	time.Sleep(1100 * time.Millisecond)
 	fields := map[string]interface{}{
 		"state":    "in_progress",
 		"priority": 1,
@@ -157,6 +159,22 @@ func TestTaskStore_UpdateFields(t *testing.T) {
 	}
 	if task.Priority != 1 {
 		t.Errorf("expected priority 1, got %d", task.Priority)
+	}
+
+	var createdAt, updatedAt string
+	if err := database.QueryRow("SELECT created_at, updated_at FROM tasks WHERE uuid = ?", createResult.UUID).Scan(&createdAt, &updatedAt); err != nil {
+		t.Fatalf("failed to query timestamps: %v", err)
+	}
+	createdTime, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		t.Fatalf("failed to parse created_at: %v", err)
+	}
+	updatedTime, err := time.Parse(time.RFC3339, updatedAt)
+	if err != nil {
+		t.Fatalf("failed to parse updated_at: %v", err)
+	}
+	if !updatedTime.After(createdTime) {
+		t.Errorf("expected updated_at to be after created_at; created_at=%s updated_at=%s", createdAt, updatedAt)
 	}
 
 	// Verify event
