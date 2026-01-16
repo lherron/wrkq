@@ -93,6 +93,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		AcknowledgedAt       *string         `json:"acknowledged_at,omitempty"`
 		Resolution           *string         `json:"resolution,omitempty"`
 		CPProjectID          *string         `json:"cp_project_id,omitempty"`
+		CPWorkItemID         *string         `json:"cp_work_item_id,omitempty"`
 		CPRunID              *string         `json:"cp_run_id,omitempty"`
 		CPSessionID          *string         `json:"cp_session_id,omitempty"`
 		SDKSessionID         *string         `json:"sdk_session_id,omitempty"`
@@ -124,7 +125,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var priority int
 		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
-		var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 		var parentTaskUUID, assigneeActorUUID *string
 		var createdAt, updatedAt string
 		var etag int64
@@ -137,7 +138,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			       start_at, due_at, labels, meta, description, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
-			       cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
+			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
 			       created_by_actor_uuid, updated_by_actor_uuid
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
@@ -146,7 +147,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			&startAt, &dueAt, &labels, &meta, &description, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
-			&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
+			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
 			&createdByUUID, &updatedByUUID,
 		)
 		if err != nil {
@@ -213,6 +214,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			AcknowledgedAt:       acknowledgedAt,
 			Resolution:           resolution,
 			CPProjectID:          cpProjectID,
+			CPWorkItemID:         cpWorkItemID,
 			CPRunID:              cpRunID,
 			CPSessionID:          cpSessionID,
 			SDKSessionID:         sdkSessionID,
@@ -395,6 +397,9 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				if task.CPProjectID != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
+				}
+				if task.CPWorkItemID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_work_item_id: %s\n", *task.CPWorkItemID)
 				}
 				if task.CPRunID != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)

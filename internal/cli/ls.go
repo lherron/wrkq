@@ -70,6 +70,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
 		Resolution           *string `json:"resolution,omitempty"`
 		CPProjectID          *string `json:"cp_project_id,omitempty"`
+		CPWorkItemID         *string `json:"cp_work_item_id,omitempty"`
 		CPRunID              *string `json:"cp_run_id,omitempty"`
 		CPSessionID          *string `json:"cp_session_id,omitempty"`
 		SDKSessionID         *string `json:"sdk_session_id,omitempty"`
@@ -161,13 +162,13 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// Found as task - list this single task (no pagination needed)
 			var slug, title, state, kind string
 			var requestedBy, assignedProject, acknowledgedAt, resolution *string
-			var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+			var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 			err = database.QueryRow(`
 				SELECT slug, title, state, kind, requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
-				       cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+				       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status
 				FROM tasks WHERE uuid = ?
 			`, taskUUID).Scan(&slug, &title, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
-				&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus)
+				&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus)
 			if err != nil {
 				return fmt.Errorf("failed to get task: %w", err)
 			}
@@ -185,6 +186,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				AcknowledgedAt:       acknowledgedAt,
 				Resolution:           resolution,
 				CPProjectID:          cpProjectID,
+				CPWorkItemID:         cpWorkItemID,
 				CPRunID:              cpRunID,
 				CPSessionID:          cpSessionID,
 				SDKSessionID:         sdkSessionID,
@@ -258,7 +260,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				query := `
 					SELECT id, slug, title, state, kind,
 					       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
-					       cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+					       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status
 					FROM tasks
 					WHERE project_uuid = ?
 				`
@@ -292,9 +294,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				for rows.Next() {
 					var id, slug, title, state, kind string
 					var requestedBy, assignedProject, acknowledgedAt, resolution *string
-					var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+					var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 					if err := rows.Scan(&id, &slug, &title, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
-						&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus); err != nil {
+						&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus); err != nil {
 						rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
@@ -318,6 +320,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						AcknowledgedAt:       acknowledgedAt,
 						Resolution:           resolution,
 						CPProjectID:          cpProjectID,
+						CPWorkItemID:         cpWorkItemID,
 						CPRunID:              cpRunID,
 						CPSessionID:          cpSessionID,
 						SDKSessionID:         sdkSessionID,

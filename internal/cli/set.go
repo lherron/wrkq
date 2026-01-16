@@ -24,7 +24,7 @@ var setCmd = &cobra.Command{
 	Aliases: []string{"edit"},
 	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status
 
 Description can be set from:
   - String: --description "text"
@@ -68,6 +68,7 @@ var (
 	setAssignedProject string
 	setResolution      string
 	setCPProjectID     string
+	setCPWorkItemID    string
 	setCPRunID         string
 	setCPSessionID     string
 	setSDKSessionID    string
@@ -98,6 +99,7 @@ func init() {
 	setCmd.Flags().StringVar(&setAssignedProject, "assigned-project", "", "Update assignee project ID")
 	setCmd.Flags().StringVar(&setResolution, "resolution", "", "Update task resolution (done, wont_do, duplicate, needs_info)")
 	setCmd.Flags().StringVar(&setCPProjectID, "cp-project-id", "", "Update CP project ID (async run linkage)")
+	setCmd.Flags().StringVar(&setCPWorkItemID, "cp-work-item-id", "", "Update CP work item ID (multi-agent coordination)")
 	setCmd.Flags().StringVar(&setCPRunID, "cp-run-id", "", "Update CP run ID (async run linkage)")
 	setCmd.Flags().StringVar(&setCPSessionID, "cp-session-id", "", "Update CP session ID (async run linkage)")
 	setCmd.Flags().StringVar(&setSDKSessionID, "sdk-session-id", "", "Update SDK session ID (async run linkage)")
@@ -308,6 +310,11 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 	// Handle CP project ID
 	if setCPProjectID != "" {
 		fields["cp_project_id"] = setCPProjectID
+	}
+
+	// Handle CP work item ID
+	if setCPWorkItemID != "" {
+		fields["cp_work_item_id"] = setCPWorkItemID
 	}
 
 	// Handle CP run ID

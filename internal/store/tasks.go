@@ -588,7 +588,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	// Use string intermediates for nullable time fields since SQLite stores times as strings
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution *string
-	var cpProjectID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 	var createdAt, updatedAt string
 
 	err := ts.store.db.QueryRow(`
@@ -597,7 +597,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 			   start_at, due_at, labels, meta, description, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
-			   cp_project_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
+			   cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
 			   created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks WHERE uuid = ?
 	`, uuid).Scan(
@@ -606,7 +606,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		&startAt, &dueAt, &labels, &meta, &task.Description, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
-		&cpProjectID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
+		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
 		&task.CreatedByActorUUID, &task.UpdatedByActorUUID,
 	)
 	if err != nil {
@@ -621,6 +621,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.Resolution = resolution
 	task.AcknowledgedAt = parseTimeNullable(acknowledgedAt)
 	task.CPProjectID = cpProjectID
+	task.CPWorkItemID = cpWorkItemID
 	task.CPRunID = cpRunID
 	task.CPSessionID = cpSessionID
 	task.SDKSessionID = sdkSessionID

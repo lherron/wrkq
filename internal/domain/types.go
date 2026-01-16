@@ -104,6 +104,7 @@ type Task struct {
 	AcknowledgedAt       *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
 	Resolution           *string    `json:"resolution,omitempty" db:"resolution"`
 	CPProjectID          *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
+	CPWorkItemID         *string    `json:"cp_work_item_id,omitempty" db:"cp_work_item_id"`
 	CPRunID              *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
 	CPSessionID          *string    `json:"cp_session_id,omitempty" db:"cp_session_id"`
 	SDKSessionID         *string    `json:"sdk_session_id,omitempty" db:"sdk_session_id"`
