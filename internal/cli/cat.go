@@ -96,8 +96,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CPProjectID          *string         `json:"cp_project_id,omitempty"`
 		CPWorkItemID         *string         `json:"cp_work_item_id,omitempty"`
 		CPRunID              *string         `json:"cp_run_id,omitempty"`
-		CPSessionID          *string         `json:"cp_session_id,omitempty"`
-		SDKSessionID         *string         `json:"sdk_session_id,omitempty"`
+		SessionID *string `json:"session_id,omitempty"`
 		RunStatus            *string         `json:"run_status,omitempty"`
 		Etag                 int64           `json:"etag"`
 		CreatedAt            string          `json:"created_at"`
@@ -126,7 +125,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var priority int
 		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
-		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
 		var parentTaskUUID, assigneeActorUUID *string
 		var createdAt, updatedAt string
 		var etag int64
@@ -139,7 +138,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			       start_at, due_at, labels, meta, description, specification, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
-			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
+			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status,
 			       created_by_actor_uuid, updated_by_actor_uuid
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
@@ -148,7 +147,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
-			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
+			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus,
 			&createdByUUID, &updatedByUUID,
 		)
 		if err != nil {
@@ -218,8 +217,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			CPProjectID:          cpProjectID,
 			CPWorkItemID:         cpWorkItemID,
 			CPRunID:              cpRunID,
-			CPSessionID:          cpSessionID,
-			SDKSessionID:         sdkSessionID,
+			SessionID: cpSessionID,
 			RunStatus:            runStatus,
 			Etag:                 etag,
 			CreatedAt:            createdAt,
@@ -412,11 +410,8 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				if task.CPRunID != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
 				}
-				if task.CPSessionID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_session_id: %s\n", *task.CPSessionID)
-				}
-				if task.SDKSessionID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "sdk_session_id: %s\n", *task.SDKSessionID)
+				if task.SessionID != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "session_id: %s\n", *task.SessionID)
 				}
 				if task.RunStatus != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)

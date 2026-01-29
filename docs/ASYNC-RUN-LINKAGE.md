@@ -8,13 +8,14 @@ update status without parsing comments.
 Add nullable columns on `tasks`:
 - `cp_project_id` TEXT
 - `cp_run_id` TEXT
-- `cp_session_id` TEXT
-- `sdk_session_id` TEXT
+- `cp_session_id` TEXT (exposed as `session_id` in CLI/API)
 - `run_status` TEXT CHECK (run_status IN ('queued','running','completed','failed','cancelled','timed_out'))
 
 Notes:
 - `cp_run_id` is current-only (overwritten by latest async run).
 - `cp_project_id` is async-only and optional (some tasks are not project-linked).
+- `cp_session_id` is exposed externally as `session_id` to hide CP implementation details.
+- `sdk_session_id` column exists for backward compat but is deprecated (always null).
 - Timestamps are deferred to a later change.
 
 ## Migrations
@@ -26,11 +27,12 @@ Notes:
 Extend `wrkq set` flags to write the new fields:
 - `--cp-project-id <id>` → `cp_project_id`
 - `--cp-run-id <id>` → `cp_run_id`
-- `--cp-session-id <id>` → `cp_session_id`
-- `--sdk-session-id <id>` → `sdk_session_id`
+- `--session-id <id>` → `cp_session_id` (exposed externally as `session_id`)
 - `--run-status <queued|running|completed|failed|cancelled|timed_out>` → `run_status`
 
 Validate `run_status` against the enum list.
+
+Note: `--sdk-session-id` flag has been removed (deprecated).
 
 ## wrkqd (daemon)
 If daemon API parity is needed, extend `handleTasksUpdate` to accept the new keys
@@ -42,11 +44,11 @@ and pass them through to `wrkq set`.
 
 ## webwrkq async flow
 After run creation:
-- PATCH task with `cp_project_id`, `cp_run_id`, `cp_session_id`, `run_status='queued'`.
+- PATCH task with `cp_project_id`, `cp_run_id`, `session_id`, `run_status='queued'`.
 
 During polling:
 - PATCH `run_status` as it changes.
-- PATCH `sdk_session_id` once available.
+- Session continuation is handled by Control Plane (stores `continuation_key` internally).
 
 ## Canonical DB Migration
 Run `wrkqadm migrate` against canonical DB. No backfill required.

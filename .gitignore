@@ -281,3 +281,4 @@ secrets.json
 # wrkq local data directory
 .wrkq/
 asp_modules/
+/tmp/wrkq-async-run-linkage-smoke-test.db

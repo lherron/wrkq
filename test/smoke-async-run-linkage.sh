@@ -107,23 +107,14 @@ run_test_output "verify: cp_run_id in cat --json" \
     "$WRKQ_BIN cat T-00001 --json" \
     '"cp_run_id": "run_456def"'
 
-# Test 3: Set cp_session_id
-run_test "set: cp-session-id" \
-    "$WRKQ_BIN set T-00001 --cp-session-id sess_789ghi"
+# Test 3: Set session_id (exposed as --session-id, internally stored as cp_session_id)
+run_test "set: session-id" \
+    "$WRKQ_BIN set T-00001 --session-id sess_789ghi"
 
-# Verify cp_session_id is set
-run_test_output "verify: cp_session_id in cat --json" \
+# Verify session_id is set
+run_test_output "verify: session_id in cat --json" \
     "$WRKQ_BIN cat T-00001 --json" \
-    '"cp_session_id": "sess_789ghi"'
-
-# Test 4: Set sdk_session_id
-run_test "set: sdk-session-id" \
-    "$WRKQ_BIN set T-00001 --sdk-session-id sdk_abc123"
-
-# Verify sdk_session_id is set
-run_test_output "verify: sdk_session_id in cat --json" \
-    "$WRKQ_BIN cat T-00001 --json" \
-    '"sdk_session_id": "sdk_abc123"'
+    '"session_id": "sess_789ghi"'
 
 # Test 5: Set run_status to queued
 run_test "set: run-status queued" \
@@ -181,7 +172,7 @@ run_test_output "verify: run_status=timed_out in cat --json" \
 
 # Test 11: Set multiple fields at once (simulating webwrkq flow)
 run_test "set: multiple async fields at once" \
-    "$WRKQ_BIN set T-00002 --cp-project-id proj_webwrkq --cp-run-id run_web1 --cp-session-id sess_web1 --run-status queued"
+    "$WRKQ_BIN set T-00002 --cp-project-id proj_webwrkq --cp-run-id run_web1 --session-id sess_web1 --run-status queued"
 
 # Verify all fields are set
 run_test_output "verify: all fields set (cp_project_id)" \
@@ -192,9 +183,9 @@ run_test_output "verify: all fields set (cp_run_id)" \
     "$WRKQ_BIN cat T-00002 --json" \
     '"cp_run_id": "run_web1"'
 
-run_test_output "verify: all fields set (cp_session_id)" \
+run_test_output "verify: all fields set (session_id)" \
     "$WRKQ_BIN cat T-00002 --json" \
-    '"cp_session_id": "sess_web1"'
+    '"session_id": "sess_web1"'
 
 run_test_output "verify: all fields set (run_status)" \
     "$WRKQ_BIN cat T-00002 --json" \
@@ -205,14 +196,14 @@ run_test "set: invalid run-status should fail" \
     "$WRKQ_BIN set T-00001 --run-status invalid_status" \
     1
 
-# Test 13: Update sdk_session_id during run (simulating polling update)
-run_test "set: update sdk-session-id during run" \
-    "$WRKQ_BIN set T-00002 --sdk-session-id sdk_web1_session --run-status running"
+# Test 13: Update session_id during run (simulating polling update)
+run_test "set: update session-id during run" \
+    "$WRKQ_BIN set T-00002 --session-id sess_web1_updated --run-status running"
 
-# Verify sdk_session_id is updated
-run_test_output "verify: sdk_session_id updated" \
+# Verify session_id is updated
+run_test_output "verify: session_id updated" \
     "$WRKQ_BIN cat T-00002 --json" \
-    '"sdk_session_id": "sdk_web1_session"'
+    '"session_id": "sess_web1_updated"'
 
 run_test_output "verify: run_status updated to running" \
     "$WRKQ_BIN cat T-00002 --json" \
@@ -221,7 +212,7 @@ run_test_output "verify: run_status updated to running" \
 # Test 14: Verify fields appear in v_task_paths view via ls --json
 run_test_output "verify: fields in ls --json output" \
     "$WRKQ_BIN ls test-project --json" \
-    '"cp_project_id"'
+    '"session_id"'
 
 # Summary
 echo ""

@@ -24,7 +24,7 @@ var setCmd = &cobra.Command{
 	Aliases: []string{"edit"},
 	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, session_id, run_status
 
 Description can be set from:
   - String: --description "text"
@@ -73,12 +73,11 @@ var (
 	setRequestedBy     string
 	setAssignedProject string
 	setResolution      string
-	setCPProjectID     string
-	setCPWorkItemID    string
-	setCPRunID         string
-	setCPSessionID     string
-	setSDKSessionID    string
-	setRunStatus       string
+	setCPProjectID  string
+	setCPWorkItemID string
+	setCPRunID      string
+	setSessionID    string
+	setRunStatus    string
 )
 
 func init() {
@@ -108,8 +107,7 @@ func init() {
 	setCmd.Flags().StringVar(&setCPProjectID, "cp-project-id", "", "Update CP project ID (async run linkage)")
 	setCmd.Flags().StringVar(&setCPWorkItemID, "cp-work-item-id", "", "Update CP work item ID (multi-agent coordination)")
 	setCmd.Flags().StringVar(&setCPRunID, "cp-run-id", "", "Update CP run ID (async run linkage)")
-	setCmd.Flags().StringVar(&setCPSessionID, "cp-session-id", "", "Update CP session ID (async run linkage)")
-	setCmd.Flags().StringVar(&setSDKSessionID, "sdk-session-id", "", "Update SDK session ID (async run linkage)")
+	setCmd.Flags().StringVar(&setSessionID, "session-id", "", "Update session ID (async run linkage)")
 	setCmd.Flags().StringVar(&setRunStatus, "run-status", "", "Update async run status (queued, running, completed, failed, cancelled, timed_out)")
 }
 
@@ -337,14 +335,9 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 		fields["cp_run_id"] = setCPRunID
 	}
 
-	// Handle CP session ID
-	if setCPSessionID != "" {
-		fields["cp_session_id"] = setCPSessionID
-	}
-
-	// Handle SDK session ID
-	if setSDKSessionID != "" {
-		fields["sdk_session_id"] = setSDKSessionID
+	// Handle session ID (stored internally as cp_session_id)
+	if setSessionID != "" {
+		fields["cp_session_id"] = setSessionID
 	}
 
 	// Handle run status

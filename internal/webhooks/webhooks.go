@@ -43,8 +43,7 @@ type Payload struct {
 	CPProjectID  *string         `json:"cp_project_id"`
 	CPWorkItemID *string         `json:"cp_work_item_id"`
 	CPRunID      *string         `json:"cp_run_id"`
-	CPSessionID  *string         `json:"cp_session_id"`
-	SDKSessionID *string         `json:"sdk_session_id"`
+	SessionID *string `json:"session_id"`
 	BlockedBy    []BlockerInfo   `json:"blocked_by,omitempty"`
 }
 
@@ -64,9 +63,8 @@ type TaskInfo struct {
 	CPProjectID  *string
 	CPWorkItemID *string
 	CPRunID      *string
-	CPSessionID  *string
-	SDKSessionID *string
-	BlockedBy    []BlockerInfo
+	CPSessionID *string // internal name, exposed as session_id
+	BlockedBy   []BlockerInfo
 }
 
 // DispatchTask resolves task info then dispatches webhooks.
@@ -102,8 +100,7 @@ func DispatchTaskInfo(database *db.DB, info TaskInfo) {
 		CPProjectID:  info.CPProjectID,
 		CPWorkItemID: info.CPWorkItemID,
 		CPRunID:      info.CPRunID,
-		CPSessionID:  info.CPSessionID,
-		SDKSessionID: info.SDKSessionID,
+		SessionID:    info.CPSessionID,
 		BlockedBy:    info.BlockedBy,
 	}
 	urls, err := ResolveWebhookTargets(database, info.ProjectUUID, payload)
@@ -126,12 +123,12 @@ func nullStringToPtr(ns sql.NullString) *string {
 func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 	var info TaskInfo
 	var runStatus, resolution, meta sql.NullString
-	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID sql.NullString
+	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID sql.NullString
 
 	err := database.QueryRow(`
 		SELECT t.id, t.uuid, t.project_uuid, c.id,
 		       t.state, t.priority, t.kind, t.run_status, t.resolution, t.meta, t.etag,
-		       t.cp_project_id, t.cp_work_item_id, t.cp_run_id, t.cp_session_id, t.sdk_session_id
+		       t.cp_project_id, t.cp_work_item_id, t.cp_run_id, t.cp_session_id
 		FROM tasks t
 		JOIN containers c ON c.uuid = t.project_uuid
 		WHERE t.uuid = ?
@@ -139,7 +136,7 @@ func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 		&info.TaskID, &info.TaskUUID, &info.ProjectUUID, &info.ProjectID,
 		&info.State, &info.Priority, &info.Kind,
 		&runStatus, &resolution, &meta, &info.ETag,
-		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID,
+		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID,
 	)
 	if err != nil {
 		return TaskInfo{}, fmt.Errorf("lookup task info: %w", err)
@@ -152,7 +149,6 @@ func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 	info.CPWorkItemID = nullStringToPtr(cpWorkItemID)
 	info.CPRunID = nullStringToPtr(cpRunID)
 	info.CPSessionID = nullStringToPtr(cpSessionID)
-	info.SDKSessionID = nullStringToPtr(sdkSessionID)
 
 	// Query incomplete blockers for this task
 	blockerRows, err := database.Query(`

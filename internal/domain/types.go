@@ -106,8 +106,8 @@ type Task struct {
 	CPProjectID          *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
 	CPWorkItemID         *string    `json:"cp_work_item_id,omitempty" db:"cp_work_item_id"`
 	CPRunID              *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
-	CPSessionID          *string    `json:"cp_session_id,omitempty" db:"cp_session_id"`
-	SDKSessionID         *string    `json:"sdk_session_id,omitempty" db:"sdk_session_id"`
+	CPSessionID  *string `json:"session_id,omitempty" db:"cp_session_id"`
+	SDKSessionID *string `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null
 	RunStatus            *string    `json:"run_status,omitempty" db:"run_status"`
 	StartAt              *time.Time `json:"start_at,omitempty" db:"start_at"`
 	DueAt                *time.Time `json:"due_at,omitempty" db:"due_at"`

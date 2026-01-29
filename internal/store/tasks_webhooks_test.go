@@ -134,7 +134,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		if got.payload.Resolution != nil {
 			t.Fatalf("unexpected resolution: %s", *got.payload.Resolution)
 		}
-		if got.payload.CPRunID != nil || got.payload.CPSessionID != nil || got.payload.CPProjectID != nil || got.payload.SDKSessionID != nil {
+		if got.payload.CPRunID != nil || got.payload.SessionID != nil || got.payload.CPProjectID != nil {
 			t.Fatalf("unexpected run linkage payload: %+v", got.payload)
 		}
 	case <-time.After(2 * time.Second):
