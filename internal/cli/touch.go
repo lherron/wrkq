@@ -20,7 +20,7 @@ var touchCmd = &cobra.Command{
 The last segment of each path becomes the task slug (normalized to lowercase [a-z0-9-]).
 
 Supports all flags from 'wrkq set' to set initial values during creation:
-- state, priority, title, description, labels, meta, due-at, start-at, requested-by, assigned-project, resolution
+- state, priority, title, description, specification, labels, meta, due-at, start-at, requested-by, assigned-project, resolution
 
 Examples:
   wrkq touch myproject/feature/task-name -t "Task Title"
@@ -37,6 +37,7 @@ Examples:
 var (
 	touchTitle           string
 	touchDescription     string
+	touchSpecification   string
 	touchState           string
 	touchPriority        int
 	touchKind            string
@@ -58,6 +59,7 @@ func init() {
 	rootCmd.AddCommand(touchCmd)
 	touchCmd.Flags().StringVarP(&touchTitle, "title", "t", "", "Title for the task (defaults to slug)")
 	touchCmd.Flags().StringVarP(&touchDescription, "description", "d", "", "Description for the task (use @file.md for file or - for stdin)")
+	touchCmd.Flags().StringVar(&touchSpecification, "specification", "", "Specification for the task (use @file.md for file or - for stdin)")
 	touchCmd.Flags().StringVar(&touchState, "state", "open", "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled)")
 	touchCmd.Flags().IntVar(&touchPriority, "priority", 3, "Initial task priority (1-4)")
 	touchCmd.Flags().StringVar(&touchKind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
@@ -180,6 +182,15 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to read description: %w", err)
 		}
 	}
+	// Process specification if provided
+	var specification string
+	if touchSpecification != "" {
+		var err error
+		specification, err = readDescriptionValue(touchSpecification)
+		if err != nil {
+			return fmt.Errorf("failed to read specification: %w", err)
+		}
+	}
 
 	// Create store
 	s := store.New(database)
@@ -245,6 +256,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 			Slug:                 normalizedSlug,
 			Title:                title,
 			Description:          description,
+			Specification:        specification,
 			ProjectUUID:          projectUUID,
 			State:                state,
 			Priority:             priority,

@@ -23,6 +23,7 @@ type CreateParams struct {
 	Slug                 string
 	Title                string
 	Description          string
+	Specification        string
 	ProjectUUID          string
 	State                string
 	Priority             int
@@ -61,16 +62,16 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		var args []interface{}
 
 		if params.UUID != "" {
-			query = `INSERT INTO tasks (uuid, id, slug, title, description, project_uuid, state, priority, kind,
+			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
+				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			args = append(args, params.UUID)
+		} else {
+			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
 				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-			args = append(args, params.UUID)
-		} else {
-			query = `INSERT INTO tasks (id, slug, title, description, project_uuid, state, priority, kind,
-				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -79,6 +80,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			params.Slug,
 			params.Title,
 			params.Description,
+			params.Specification,
 			params.ProjectUUID,
 			params.State,
 			params.Priority,
@@ -145,6 +147,9 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		}
 		if params.StartAt != "" {
 			payload["start_at"] = params.StartAt
+		}
+		if params.Specification != "" {
+			payload["specification"] = params.Specification
 		}
 
 		payloadJSON, err := json.Marshal(payload)
@@ -594,7 +599,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	err := ts.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			   state, priority,
-			   start_at, due_at, labels, meta, description, etag,
+			   start_at, due_at, labels, meta, description, specification, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
 			   cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
@@ -603,7 +608,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	`, uuid).Scan(
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
 		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority,
-		&startAt, &dueAt, &labels, &meta, &task.Description, &task.ETag,
+		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,

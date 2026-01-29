@@ -1,0 +1,56 @@
+schema = 1
+
+[targets.clod]
+description = "clod code rules the world"
+yolo = true
+compose = ["space:defaults@dev", "space:praesidium-defaults@dev"]
+
+
+[targets.dev]
+description = "Default target"
+compose = ["space:defaults@stable"]
+
+[targets.ralph-plan]
+description = "Ralph planning loop"
+compose = ["space:ralph-plan-loop@dev", "space:praesidium-defaults@dev"]
+
+[targets.ralph-build]
+description = "Ralph build loop"
+compose = ["space:ralph-build-loop@dev"]
+
+[targets.oracle]
+description = "Coordinator persona (hannibal)"
+compose = ["space:hannibal@dev", "space:defaults@stable"]
+
+[targets.smokey]
+description = "Smokey the e2e smoke tester"
+compose = ["space:smokey@dev", "space:defaults@stable", "space:praesidium-defaults@dev"]
+
+[targets.hannibal]
+description = "Coordinator persona (hannibal)"
+compose = ["space:hannibal@dev", "space:defaults@stable"]
+
+[targets.coordinator]
+description = "Coordination role"
+compose = ["space:defaults@stable"]
+
+[targets.triager]
+description = "Triage role"
+compose = ["space:defaults@stable"]
+
+[targets.implementer]
+description = "Implementation role"
+compose = ["space:default-implementer@dev", "space:defaults@stable"]
+
+[targets.reviewer]
+description = "Review role"
+compose = ["space:default-reviewer@dev", "space:defaults@stable"]
+
+[targets.tester]
+description = "Testing role"
+compose = ["space:default-tester@dev", "space:defaults@stable"]
+
+[targets.architect]
+description = "Spec writing architect for workboard"
+compose = ["space:defaults@dev", "space:praesidium-defaults@dev", "space:praesidium-architect@dev" ]
+yolo = true

@@ -269,6 +269,9 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 		result = append(result, keyValue{"resolution", t.Resolution})
 	}
 	result = append(result, keyValue{"slug", t.Slug})
+	if t.Specification != "" {
+		result = append(result, keyValue{"specification", t.Specification})
+	}
 	if t.StartAt != "" {
 		result = append(result, keyValue{"start_at", t.StartAt})
 	}

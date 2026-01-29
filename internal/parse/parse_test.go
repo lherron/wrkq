@@ -86,7 +86,7 @@ func TestParseJSON(t *testing.T) {
 	}{
 		{
 			name:    "valid JSON with all fields",
-			input:   `{"title": "Test", "state": "open", "priority": 1, "description": "Desc"}`,
+			input:   `{"title": "Test", "state": "open", "priority": 1, "description": "Desc", "specification": "# Spec"}`,
 			wantErr: false,
 			check: func(t *testing.T, u *TaskUpdate) {
 				if u.Title == nil || *u.Title != "Test" {
@@ -94,6 +94,9 @@ func TestParseJSON(t *testing.T) {
 				}
 				if u.State == nil || *u.State != "open" {
 					t.Errorf("state = %v, want open", u.State)
+				}
+				if u.Specification == nil || *u.Specification != "# Spec" {
+					t.Errorf("specification = %v, want # Spec", u.Specification)
 				}
 			},
 		},
@@ -107,7 +110,7 @@ func TestParseJSON(t *testing.T) {
 			input:   `{}`,
 			wantErr: false,
 			check: func(t *testing.T, u *TaskUpdate) {
-				if u.Title != nil || u.State != nil || u.Description != nil {
+				if u.Title != nil || u.State != nil || u.Description != nil || u.Specification != nil {
 					t.Errorf("expected all fields nil for empty object")
 				}
 			},
@@ -140,7 +143,9 @@ func TestParseYAML(t *testing.T) {
 			input: `title: Test Task
 state: open
 priority: 1
-description: Test description`,
+description: Test description
+specification: |-
+  # Spec`,
 			wantErr: false,
 			check: func(t *testing.T, u *TaskUpdate) {
 				if u.Title == nil || *u.Title != "Test Task" {
@@ -148,6 +153,9 @@ description: Test description`,
 				}
 				if u.State == nil || *u.State != "open" {
 					t.Errorf("state = %v, want open", u.State)
+				}
+				if u.Specification == nil || *u.Specification != "# Spec" {
+					t.Errorf("specification = %v, want # Spec", u.Specification)
 				}
 			},
 		},
@@ -161,7 +169,7 @@ description: Test description`,
 			input:   "",
 			wantErr: false,
 			check: func(t *testing.T, u *TaskUpdate) {
-				if u.Title != nil || u.State != nil {
+				if u.Title != nil || u.State != nil || u.Specification != nil {
 					t.Errorf("expected all fields nil for empty YAML")
 				}
 			},
@@ -207,6 +215,8 @@ func TestParseMarkdown(t *testing.T) {
 			input: `---
 title: Test
 state: open
+specification: |-
+  ## Spec
 ---
 
 Description content here`,
@@ -217,6 +227,9 @@ Description content here`,
 				}
 				if u.Description == nil || *u.Description != "Description content here" {
 					t.Errorf("description = %v", u.Description)
+				}
+				if u.Specification == nil || *u.Specification != "## Spec" {
+					t.Errorf("specification = %v, want ## Spec", u.Specification)
 				}
 			},
 		},

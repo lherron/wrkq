@@ -73,6 +73,7 @@ type TaskEntry struct {
 	DueAt                string   `json:"due_at,omitempty"`
 	Labels               []string `json:"labels,omitempty"`
 	Description          string   `json:"description,omitempty"`
+	Specification        string   `json:"specification,omitempty"`
 	ETag                 int64    `json:"etag"`
 	CreatedAt            string   `json:"created_at"`
 	UpdatedAt            string   `json:"updated_at"`

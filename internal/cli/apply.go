@@ -16,10 +16,10 @@ import (
 
 var applyCmd = &cobra.Command{
 	Use:   "apply <PATHSPEC|ID> <FILE|->",
-	Short: "Update task description from file or stdin",
-	Long: `Update task description from file or stdin.
+	Short: "Update task description/specification from file or stdin",
+	Long: `Update task description/specification from file or stdin.
 
-By default, only the description field is updated. Use --with-metadata to also
+By default, only the description and specification fields are updated. Use --with-metadata to also
 update title, state, priority, and due_at fields.
 
 For quick metadata-only updates, use 'wrkq set' instead:
@@ -27,9 +27,9 @@ For quick metadata-only updates, use 'wrkq set' instead:
 
 Accepts:
 - Plain markdown (description only)
-- Markdown with YAML front matter (requires --with-metadata)
-- YAML (requires --with-metadata)
-- JSON (requires --with-metadata)
+- Markdown with YAML front matter (specification supported; metadata requires --with-metadata)
+- YAML (specification supported; metadata requires --with-metadata)
+- JSON (specification supported; metadata requires --with-metadata)
 
 Examples:
   wrkq apply T-00001 description.md              # Update description from file
@@ -53,7 +53,7 @@ func init() {
 	rootCmd.AddCommand(applyCmd)
 
 	applyCmd.Flags().StringVar(&applyFormat, "format", "", "Input format: md, yaml, json (auto-detected if not specified)")
-	applyCmd.Flags().BoolVar(&applyWithMetadata, "with-metadata", false, "Update metadata fields (title, state, priority, due_at) in addition to description")
+	applyCmd.Flags().BoolVar(&applyWithMetadata, "with-metadata", false, "Update metadata fields (title, state, priority, due_at) in addition to description/specification")
 	applyCmd.Flags().Int64Var(&applyIfMatch, "if-match", 0, "Only apply if etag matches (0 = no check)")
 	applyCmd.Flags().BoolVar(&applyDryRun, "dry-run", false, "Show what would be changed without applying")
 }
@@ -153,8 +153,8 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate parsed content
-	if !applyWithMetadata && updates.Description == nil {
-		return fmt.Errorf("no description found in input (description-only mode requires description field)")
+	if !applyWithMetadata && updates.Description == nil && updates.Specification == nil {
+		return fmt.Errorf("no description or specification found in input (body-only mode requires description or specification)")
 	}
 
 	// Check etag if --if-match is specified
@@ -168,6 +168,9 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 		fmt.Printf("Would update task %s (%s)\n", friendlyID, taskUUID)
 		if updates.Description != nil {
 			fmt.Printf("  description: %s\n", *updates.Description)
+		}
+		if updates.Specification != nil {
+			fmt.Printf("  specification: %s\n", *updates.Specification)
 		}
 		if applyWithMetadata {
 			if updates.Title != nil {
@@ -196,12 +199,17 @@ func applyTaskUpdates(database *db.DB, taskUUID string, updates *parse.TaskUpdat
 	var args []interface{}
 
 	if bodyOnly {
-		// Only update description
+		// Only update description/specification
 		if updates.Description != nil {
 			setClauses = append(setClauses, "description = ?")
 			args = append(args, *updates.Description)
-		} else {
-			return fmt.Errorf("no description provided in --body-only mode")
+		}
+		if updates.Specification != nil {
+			setClauses = append(setClauses, "specification = ?")
+			args = append(args, *updates.Specification)
+		}
+		if len(setClauses) == 0 {
+			return fmt.Errorf("no description or specification provided in --body-only mode")
 		}
 	} else {
 		// Update all provided fields
@@ -224,6 +232,10 @@ func applyTaskUpdates(database *db.DB, taskUUID string, updates *parse.TaskUpdat
 		if updates.Description != nil {
 			setClauses = append(setClauses, "description = ?")
 			args = append(args, *updates.Description)
+		}
+		if updates.Specification != nil {
+			setClauses = append(setClauses, "specification = ?")
+			args = append(args, *updates.Specification)
 		}
 	}
 

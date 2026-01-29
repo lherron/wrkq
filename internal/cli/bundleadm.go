@@ -58,14 +58,15 @@ type applyResult struct {
 }
 
 type applyConflict struct {
-	Path            string                      `json:"path"`
-	UUID            string                      `json:"uuid,omitempty"`
-	Reason          string                      `json:"reason"`
-	ExpectedETag    int64                       `json:"expected_etag,omitempty"`
-	ActualETag      int64                       `json:"actual_etag,omitempty"`
-	FieldChanges    map[string]applyFieldChange `json:"field_changes,omitempty"`
-	DescriptionDiff string                      `json:"description_diff,omitempty"`
-	Message         string                      `json:"message,omitempty"`
+	Path              string                      `json:"path"`
+	UUID              string                      `json:"uuid,omitempty"`
+	Reason            string                      `json:"reason"`
+	ExpectedETag      int64                       `json:"expected_etag,omitempty"`
+	ActualETag        int64                       `json:"actual_etag,omitempty"`
+	FieldChanges      map[string]applyFieldChange `json:"field_changes,omitempty"`
+	DescriptionDiff   string                      `json:"description_diff,omitempty"`
+	SpecificationDiff string                      `json:"specification_diff,omitempty"`
+	Message           string                      `json:"message,omitempty"`
 }
 
 type applyFieldChange struct {
@@ -420,30 +421,32 @@ func resolveBundleActor(database *db.DB, cmd *cobra.Command, cfg *config.Config)
 }
 
 type bundleTaskUpdate struct {
-	Title       *string
-	State       *string
-	Priority    *int
-	DueAt       *string
-	StartAt     *string
-	Labels      *string
-	Meta        *string
-	MetaSet     bool
-	Description *string
+	Title         *string
+	State         *string
+	Priority      *int
+	DueAt         *string
+	StartAt       *string
+	Labels        *string
+	Meta          *string
+	MetaSet       bool
+	Description   *string
+	Specification *string
 }
 
 type bundleTaskCurrent struct {
-	UUID        string
-	ID          string
-	Slug        string
-	Title       string
-	Description string
-	State       string
-	Priority    int
-	DueAt       *string
-	StartAt     *string
-	Labels      *string
-	ETag        int64
-	ProjectUUID string
+	UUID          string
+	ID            string
+	Slug          string
+	Title         string
+	Description   string
+	Specification string
+	State         string
+	Priority      int
+	DueAt         *string
+	StartAt       *string
+	Labels        *string
+	ETag          int64
+	ProjectUUID   string
 }
 
 func applyTaskDocumentWithDB(database *db.DB, actorUUID string, task *bundle.TaskDocument, dryRun bool) error {
@@ -624,6 +627,9 @@ func parseBundleTaskContent(content string) (*bundleTaskUpdate, error) {
 				update.Meta = &trimmed
 			}
 		}
+		if v, ok := fm["specification"].(string); ok && v != "" {
+			update.Specification = &v
+		}
 	}
 
 	body = strings.TrimSpace(body)
@@ -665,10 +671,10 @@ func fetchTaskCurrentTx(tx *sql.Tx, taskUUID string) (*bundleTaskCurrent, error)
 	var dueAt, startAt, labels sql.NullString
 
 	err := tx.QueryRow(`
-		SELECT uuid, id, slug, title, description, state, priority, due_at, start_at, labels, etag, project_uuid
+		SELECT uuid, id, slug, title, description, specification, state, priority, due_at, start_at, labels, etag, project_uuid
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
-		&current.UUID, &current.ID, &current.Slug, &current.Title, &current.Description, &current.State,
+		&current.UUID, &current.ID, &current.Slug, &current.Title, &current.Description, &current.Specification, &current.State,
 		&current.Priority, &dueAt, &startAt, &labels, &current.ETag, &current.ProjectUUID,
 	)
 	if err != nil {
@@ -822,6 +828,10 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 	if update.Description != nil {
 		description = *update.Description
 	}
+	specification := ""
+	if update.Specification != nil {
+		specification = *update.Specification
+	}
 
 	labels := interface{}(nil)
 	if update.Labels != nil {
@@ -854,17 +864,17 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 	if task.UUID != "" {
 		res, errIns = tx.Exec(`
 			INSERT INTO tasks (
-				uuid, id, slug, title, description, project_uuid, state, priority, kind,
+				uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
 				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-			) VALUES (?, '', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
-		`, task.UUID, slug, title, description, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
+			) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
+		`, task.UUID, slug, title, description, specification, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
 	} else {
 		res, errIns = tx.Exec(`
 			INSERT INTO tasks (
-				id, slug, title, description, project_uuid, state, priority, kind,
+				id, slug, title, description, specification, project_uuid, state, priority, kind,
 				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-			) VALUES ('', ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
-		`, slug, title, description, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
+			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
+		`, slug, title, description, specification, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
 	}
 	if errIns != nil {
 		return fmt.Errorf("failed to create task %s: %w", task.Path, errIns)
@@ -887,6 +897,9 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 		"state":    state,
 		"priority": priority,
 		"kind":     "task",
+	}
+	if specification != "" {
+		payload["specification"] = specification
 	}
 	payloadJSON, _ := json.Marshal(payload)
 	payloadStr := string(payloadJSON)
@@ -936,6 +949,9 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bund
 	}
 	if update.Description != nil {
 		fields["description"] = *update.Description
+	}
+	if update.Specification != nil {
+		fields["specification"] = *update.Specification
 	}
 
 	if len(fields) == 0 {
@@ -1095,6 +1111,18 @@ func buildConflictDetail(task *bundle.TaskDocument, current *bundleTaskCurrent, 
 		}
 		if diffText, err := difflib.GetUnifiedDiffString(diff); err == nil {
 			conflict.DescriptionDiff = diffText
+		}
+	}
+	if update.Specification != nil && current.Specification != *update.Specification {
+		diff := difflib.UnifiedDiff{
+			A:        difflib.SplitLines(current.Specification),
+			B:        difflib.SplitLines(*update.Specification),
+			FromFile: "current",
+			ToFile:   "incoming",
+			Context:  3,
+		}
+		if diffText, err := difflib.GetUnifiedDiffString(diff); err == nil {
+			conflict.SpecificationDiff = diffText
 		}
 	}
 

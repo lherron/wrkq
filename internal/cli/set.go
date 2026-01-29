@@ -24,12 +24,17 @@ var setCmd = &cobra.Command{
 	Aliases: []string{"edit"},
 	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status
+Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status
 
 Description can be set from:
   - String: --description "text"
   - File: --description @file.md
   - Stdin: --description - (or use -d flag)
+
+Specification can be set from:
+  - String: --specification "text"
+  - File: --specification @file.md
+  - Stdin: --specification -
 
 Examples:
   wrkq set T-00001 --state in_progress
@@ -53,6 +58,7 @@ var (
 	setBatchSize       int
 	setOrdered         bool
 	setDescription     string
+	setSpecification   string
 	setState           string
 	setPriority        int
 	setTitle           string
@@ -84,6 +90,7 @@ func init() {
 	setCmd.Flags().IntVar(&setBatchSize, "batch-size", 1, "Group operations into batches (not yet implemented)")
 	setCmd.Flags().BoolVar(&setOrdered, "ordered", false, "Preserve input order (disables parallelism)")
 	setCmd.Flags().StringVarP(&setDescription, "description", "d", "", "Update task description (use @file.md for file or - for stdin)")
+	setCmd.Flags().StringVar(&setSpecification, "specification", "", "Update task specification (use @file.md for file or - for stdin)")
 	setCmd.Flags().StringVar(&setState, "state", "", "Update task state (idea, draft, open, in_progress, completed, blocked, cancelled)")
 	setCmd.Flags().IntVar(&setPriority, "priority", 0, "Update task priority (1-4)")
 	setCmd.Flags().StringVar(&setTitle, "title", "", "Update task title")
@@ -268,6 +275,14 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 			return nil, fmt.Errorf("failed to read description: %w", err)
 		}
 		fields["description"] = descValue
+	}
+	// Handle specification
+	if setSpecification != "" {
+		specValue, err := readDescriptionValue(setSpecification)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read specification: %w", err)
+		}
+		fields["specification"] = specValue
 	}
 
 	// Handle kind

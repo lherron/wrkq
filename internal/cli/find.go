@@ -199,6 +199,7 @@ type findResult struct {
 	Slug                 string  `json:"slug"`
 	Title                string  `json:"title"`
 	Path                 string  `json:"path"`
+	Specification        string  `json:"specification,omitempty"`
 	State                *string `json:"state,omitempty"`                   // tasks only
 	Priority             *int    `json:"priority,omitempty"`                // tasks only
 	Kind                 *string `json:"kind,omitempty"`                    // tasks only
@@ -278,7 +279,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	}
 
 	query := `
-		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.kind,
+		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
 		       t.assignee_actor_uuid, t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
 		       cp.path || '/' || t.slug AS path, t.updated_at
@@ -410,11 +411,12 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	results := []findResult{}
 	for rows.Next() {
 		var r findResult
+		var specification string
 		var state, kind, assigneeUUID, parentTaskUUID, dueAt sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var priority sql.NullInt64
 
-		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &state, &priority, &kind,
+		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
 			&assigneeUUID, &parentTaskUUID, &requestedBy, &assignedProject,
 			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.UpdatedAt)
 		if err != nil {
@@ -422,6 +424,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 		}
 
 		r.Type = "task"
+		r.Specification = specification
 		if state.Valid {
 			r.State = &state.String
 		}

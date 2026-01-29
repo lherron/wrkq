@@ -127,7 +127,7 @@ wrkq set T-00001 --description "New description text"
 
 # Supported states: open, in_progress, completed, blocked, cancelled
 # Priority: 1-4
-# Supported fields: state, priority, title, slug, labels, due_at, start_at, description
+# Supported fields: state, priority, title, slug, labels, due_at, start_at, description, specification
 
 
 # Update multiple fields at once

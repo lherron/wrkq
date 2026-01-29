@@ -116,6 +116,7 @@ type Task struct {
 	DueAt          *string    `json:"due_at,omitempty"`
 	Labels         *string    `json:"labels,omitempty"`
 	Description    string     `json:"description"`
+	Specification  string     `json:"specification"`
 	Etag           int64      `json:"etag"`
 	CreatedAt      string     `json:"created_at"`
 	UpdatedAt      string     `json:"updated_at"`
@@ -493,6 +494,7 @@ func (s *daemonServer) handleTasksCreate(w http.ResponseWriter, r *http.Request)
 
 	title := getStringField(fields, "title", normalizedSlug)
 	description := getStringField(fields, "description", "")
+	specification := getStringField(fields, "specification", "")
 	state := getStringField(fields, "state", "open")
 	priority := getIntField(fields, "priority", 3)
 	kind := getStringField(fields, "kind", "")
@@ -537,6 +539,7 @@ func (s *daemonServer) handleTasksCreate(w http.ResponseWriter, r *http.Request)
 		Slug:              normalizedSlug,
 		Title:             title,
 		Description:       description,
+		Specification:     specification,
 		ProjectUUID:       projectUUID,
 		State:             state,
 		Priority:          priority,
@@ -601,7 +604,7 @@ func (s *daemonServer) handleTasksUpdate(w http.ResponseWriter, r *http.Request)
 	fields := map[string]interface{}{}
 	for key, value := range req.Fields {
 		switch key {
-		case "title", "state", "description", "due_at", "start_at":
+		case "title", "state", "description", "specification", "due_at", "start_at":
 			if s, ok := value.(string); ok {
 				fields[key] = s
 			}
@@ -782,7 +785,7 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 
 	for key, value := range req.Fields {
 		switch key {
-		case "title", "description", "labels", "due_at", "start_at":
+		case "title", "description", "specification", "labels", "due_at", "start_at":
 			fields[key] = value
 		case "priority":
 			if p, ok := coerceInt(value); ok {
@@ -1600,7 +1603,7 @@ func (s *daemonServer) handleBundleApply(w http.ResponseWriter, r *http.Request)
 }
 
 func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, includeRelations bool) (*Task, error) {
-	var id, slug, title, state, description, kind string
+	var id, slug, title, state, description, specification, kind string
 	var priority int
 	var startAt, dueAt, labels, completedAt, archivedAt, deletedAt *string
 	var parentTaskUUID, assigneeActorUUID *string
@@ -1611,14 +1614,14 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	err := database.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
 		       kind, parent_task_uuid, assignee_actor_uuid,
-		       start_at, due_at, labels, description, etag,
+		       start_at, due_at, labels, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at, deleted_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &state, &priority,
 		&kind, &parentTaskUUID, &assigneeActorUUID,
-		&startAt, &dueAt, &labels, &description, &etag,
+		&startAt, &dueAt, &labels, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt,
 		&createdByUUID, &updatedByUUID,
 	)
@@ -1667,6 +1670,7 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		DueAt:          dueAt,
 		Labels:         labels,
 		Description:    description,
+		Specification:  specification,
 		Etag:           etag,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,

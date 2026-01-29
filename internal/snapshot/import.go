@@ -357,10 +357,10 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO tasks (uuid, id, slug, title, project_uuid, requested_by_project_id,
 		                   assigned_project_id, acknowledged_at, resolution, state, priority,
-		                   start_at, due_at, labels, description, etag,
+		                   start_at, due_at, labels, description, specification, etag,
 		                   created_at, updated_at, completed_at, archived_at,
 		                   created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
 			slug = excluded.slug,
@@ -376,6 +376,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 			due_at = excluded.due_at,
 			labels = excluded.labels,
 			description = excluded.description,
+			specification = excluded.specification,
 			etag = excluded.etag,
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at,
@@ -431,10 +432,14 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		if description == "" {
 			description = "" // Ensure empty string, not NULL
 		}
+		specification := task.Specification
+		if specification == "" {
+			specification = "" // Ensure empty string, not NULL
+		}
 
 		if _, err := stmt.Exec(uuid, task.ID, task.Slug, task.Title, task.ProjectUUID,
 			requestedBy, assignedProject, acknowledgedAt, resolution, task.State, task.Priority,
-			startAt, dueAt, labels, description, task.ETag,
+			startAt, dueAt, labels, description, specification, task.ETag,
 			task.CreatedAt, task.UpdatedAt, completedAt, archivedAt,
 			task.CreatedBy, task.UpdatedBy); err != nil {
 			return fmt.Errorf("failed to import task %s: %w", uuid, err)

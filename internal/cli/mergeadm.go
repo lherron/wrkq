@@ -499,6 +499,7 @@ type sourceTask struct {
 	DueAt          sql.NullString
 	Labels         sql.NullString
 	Description    string
+	Specification  string
 	ETag           int64
 	CreatedAt      string
 	UpdatedAt      string
@@ -605,7 +606,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	tasks, err := database.Query(`
 		SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind,
 		       t.parent_task_uuid, t.assignee_actor_uuid, t.start_at, t.due_at, t.labels,
-		       t.description, t.etag, t.created_at, t.updated_at, t.completed_at,
+		       t.description, t.specification, t.etag, t.created_at, t.updated_at, t.completed_at,
 		       t.archived_at, t.deleted_at, t.created_by_actor_uuid, t.updated_by_actor_uuid
 		FROM tasks t
 		JOIN v_container_paths v ON v.uuid = t.project_uuid
@@ -620,7 +621,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 		var t sourceTask
 		if err := tasks.Scan(&t.UUID, &t.ID, &t.Slug, &t.Title, &t.ProjectUUID, &t.State,
 			&t.Priority, &t.Kind, &t.ParentTaskUUID, &t.AssigneeUUID, &t.StartAt,
-			&t.DueAt, &t.Labels, &t.Description, &t.ETag, &t.CreatedAt, &t.UpdatedAt,
+			&t.DueAt, &t.Labels, &t.Description, &t.Specification, &t.ETag, &t.CreatedAt, &t.UpdatedAt,
 			&t.CompletedAt, &t.ArchivedAt, &t.DeletedAt, &t.CreatedBy, &t.UpdatedBy); err != nil {
 			return nil, fmt.Errorf("failed to scan source task: %w", err)
 		}
@@ -1456,12 +1457,12 @@ func mergeTask(exec *mergeExecutor, writer *events.Writer, actorUUID string, t s
 			}
 			_, err = exec.Exec(`
 				INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, kind, parent_task_uuid,
-					assignee_actor_uuid, start_at, due_at, labels, description, etag, created_at, updated_at,
+					assignee_actor_uuid, start_at, due_at, labels, description, specification, etag, created_at, updated_at,
 					completed_at, archived_at, deleted_at, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`, t.UUID, idValue, slug, t.Title, destProjectUUID, t.State, t.Priority, t.Kind,
 				nullOrValue(parentUUID), mapActorNullable(actorMap, t.AssigneeUUID), nullOrValue(t.StartAt),
-				nullOrValue(t.DueAt), nullOrValue(t.Labels), t.Description, t.ETag, t.CreatedAt, t.UpdatedAt,
+				nullOrValue(t.DueAt), nullOrValue(t.Labels), t.Description, t.Specification, t.ETag, t.CreatedAt, t.UpdatedAt,
 				nullOrValue(t.CompletedAt), nullOrValue(t.ArchivedAt), nullOrValue(t.DeletedAt),
 				mapActor(actorMap, t.CreatedBy), mapActor(actorMap, t.UpdatedBy))
 			if err != nil {
@@ -1489,12 +1490,12 @@ func mergeTask(exec *mergeExecutor, writer *events.Writer, actorUUID string, t s
 		_, err := exec.Exec(`
 			UPDATE tasks
 			SET slug = ?, title = ?, project_uuid = ?, state = ?, priority = ?, kind = ?, parent_task_uuid = ?,
-				assignee_actor_uuid = ?, start_at = ?, due_at = ?, labels = ?, description = ?,
+				assignee_actor_uuid = ?, start_at = ?, due_at = ?, labels = ?, description = ?, specification = ?,
 				completed_at = ?, archived_at = ?, deleted_at = ?, updated_by_actor_uuid = ?, updated_at = ?
 			WHERE uuid = ?
 		`, slug, t.Title, destProjectUUID, t.State, t.Priority, t.Kind, nullOrValue(parentUUID),
 			mapActorNullable(actorMap, t.AssigneeUUID), nullOrValue(t.StartAt), nullOrValue(t.DueAt), nullOrValue(t.Labels),
-			t.Description, nullOrValue(t.CompletedAt), nullOrValue(t.ArchivedAt), nullOrValue(t.DeletedAt),
+			t.Description, t.Specification, nullOrValue(t.CompletedAt), nullOrValue(t.ArchivedAt), nullOrValue(t.DeletedAt),
 			mapActor(actorMap, t.UpdatedBy), t.UpdatedAt, t.UUID)
 		if err != nil {
 			return "", false, false, false, fmt.Errorf("failed to update task %s: %w", t.UUID, err)

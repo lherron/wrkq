@@ -10,11 +10,12 @@ import (
 
 // TaskUpdate represents parsed task data with optional fields
 type TaskUpdate struct {
-	Title       *string `json:"title,omitempty" yaml:"title,omitempty"`
-	State       *string `json:"state,omitempty" yaml:"state,omitempty"`
-	Priority    *int    `json:"priority,omitempty" yaml:"priority,omitempty"`
-	DueAt       *string `json:"due_at,omitempty" yaml:"due_at,omitempty"`
-	Description *string `json:"description,omitempty" yaml:"description,omitempty"`
+	Title         *string `json:"title,omitempty" yaml:"title,omitempty"`
+	State         *string `json:"state,omitempty" yaml:"state,omitempty"`
+	Priority      *int    `json:"priority,omitempty" yaml:"priority,omitempty"`
+	DueAt         *string `json:"due_at,omitempty" yaml:"due_at,omitempty"`
+	Description   *string `json:"description,omitempty" yaml:"description,omitempty"`
+	Specification *string `json:"specification,omitempty" yaml:"specification,omitempty"`
 }
 
 // Format represents supported input formats

@@ -605,7 +605,7 @@ func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions, sinceEvent
 
 // exportTask exports a single task in wrkq cat format
 func exportTask(db *sql.DB, taskUUID string) (string, error) {
-	var id, slug, title, state, description string
+	var id, slug, title, state, description, specification string
 	var priority int
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var createdAt, updatedAt string
@@ -614,13 +614,13 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 
 	err := db.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
-		       start_at, due_at, labels, meta, description, etag,
+		       start_at, due_at, labels, meta, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &state, &priority,
-		&startAt, &dueAt, &labels, &meta, &description, &etag,
+		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&createdByUUID, &updatedByUUID,
 	)
@@ -660,6 +660,12 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 	}
 	if meta != nil && *meta != "" {
 		sb.WriteString(fmt.Sprintf("meta: %s\n", *meta))
+	}
+	if specification != "" {
+		sb.WriteString("specification: |\n")
+		for _, line := range strings.Split(specification, "\n") {
+			sb.WriteString("  " + line + "\n")
+		}
 	}
 	sb.WriteString(fmt.Sprintf("etag: %d\n", etag))
 	sb.WriteString(fmt.Sprintf("created_at: %s\n", createdAt))

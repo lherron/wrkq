@@ -258,7 +258,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id,
 		       assigned_project_id, acknowledged_at, resolution, state, priority,
-		       start_at, due_at, labels, description, etag,
+		       start_at, due_at, labels, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
 		FROM tasks
@@ -273,6 +273,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 	for rows.Next() {
 		var uuid, id, slug, title, projectUUID, state, createdAt, updatedAt string
 		var description string
+		var specification string
 		var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var createdBy, updatedBy string
@@ -281,7 +282,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 
 		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &requestedBy,
 			&assignedProject, &acknowledgedAt, &resolution, &state, &priority,
-			&startAt, &dueAt, &labels, &description, &etag,
+			&startAt, &dueAt, &labels, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&createdBy, &updatedBy); err != nil {
 			return err
@@ -315,6 +316,9 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		}
 		if description != "" {
 			entry.Description = description
+		}
+		if specification != "" {
+			entry.Specification = specification
 		}
 		if startAt.Valid {
 			entry.StartAt = startAt.String

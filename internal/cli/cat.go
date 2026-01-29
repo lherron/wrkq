@@ -90,6 +90,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		Labels               *string         `json:"labels,omitempty"`
 		Meta                 json.RawMessage `json:"meta"`
 		Description          string          `json:"description"`
+		Specification        string          `json:"specification"`
 		AcknowledgedAt       *string         `json:"acknowledged_at,omitempty"`
 		Resolution           *string         `json:"resolution,omitempty"`
 		CPProjectID          *string         `json:"cp_project_id,omitempty"`
@@ -121,7 +122,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		// Get task details
-		var id, slug, title, state, description, kind string
+		var id, slug, title, state, description, specification, kind string
 		var priority int
 		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
@@ -135,7 +136,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			       state, priority,
 			       kind, parent_task_uuid, assignee_actor_uuid,
-			       start_at, due_at, labels, meta, description, etag,
+			       start_at, due_at, labels, meta, description, specification, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
 			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
@@ -144,7 +145,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		`, taskUUID).Scan(
 			&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
 			&kind, &parentTaskUUID, &assigneeActorUUID,
-			&startAt, &dueAt, &labels, &meta, &description, &etag,
+			&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
 			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
@@ -211,6 +212,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			Labels:               labels,
 			Meta:                 json.RawMessage(metaValue),
 			Description:          description,
+			Specification:        specification,
 			AcknowledgedAt:       acknowledgedAt,
 			Resolution:           resolution,
 			CPProjectID:          cpProjectID,
@@ -389,6 +391,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
+				if task.Specification != "" {
+					fmt.Fprintln(cmd.OutOrStdout(), "specification: |")
+					for _, line := range strings.Split(task.Specification, "\n") {
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
+					}
+				}
 				if task.AcknowledgedAt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
 				}

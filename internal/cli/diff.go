@@ -81,24 +81,25 @@ func runDiff(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 type taskData struct {
-	UUID        string
-	ID          string
-	Slug        string
-	Title       string
-	Description *string
-	State       string
-	Priority    *int
-	DueAt       *string
-	ETag        int64
-	CreatedAt   string
-	UpdatedAt   string
+	UUID          string
+	ID            string
+	Slug          string
+	Title         string
+	Description   *string
+	Specification *string
+	State         string
+	Priority      *int
+	DueAt         *string
+	ETag          int64
+	CreatedAt     string
+	UpdatedAt     string
 }
 
 func fetchTaskData(database *db.DB, uuid string) (*taskData, error) {
 	var task taskData
 
 	query := `
-		SELECT uuid, id, slug, title, description, state, priority, due_at, etag, created_at, updated_at
+		SELECT uuid, id, slug, title, description, specification, state, priority, due_at, etag, created_at, updated_at
 		FROM tasks
 		WHERE uuid = ?
 	`
@@ -109,6 +110,7 @@ func fetchTaskData(database *db.DB, uuid string) (*taskData, error) {
 		&task.Slug,
 		&task.Title,
 		&task.Description,
+		&task.Specification,
 		&task.State,
 		&task.Priority,
 		&task.DueAt,
@@ -163,6 +165,19 @@ func compareTasksDetailed(a, b *taskData) *taskDiff {
 	if descriptionA != descriptionB {
 		diff.FieldsChanged = append(diff.FieldsChanged, "description")
 		diff.Changes["description"] = fieldChange{"description", descriptionA, descriptionB}
+	}
+	// Compare nullable specification
+	specA := ""
+	if a.Specification != nil {
+		specA = *a.Specification
+	}
+	specB := ""
+	if b.Specification != nil {
+		specB = *b.Specification
+	}
+	if specA != specB {
+		diff.FieldsChanged = append(diff.FieldsChanged, "specification")
+		diff.Changes["specification"] = fieldChange{"specification", specA, specB}
 	}
 
 	if a.State != b.State {

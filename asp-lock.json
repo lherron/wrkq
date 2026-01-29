@@ -1,0 +1,65 @@
+{
+  "lockfileVersion": 1,
+  "resolverVersion": 1,
+  "generatedAt": "2026-01-29T13:33:18.025Z",
+  "registry": {
+    "type": "git",
+    "url": "/Users/lherron/praesidium/var/spaces-repo/repo"
+  },
+  "spaces": {
+    "defaults@dev": {
+      "id": "defaults",
+      "commit": "dev",
+      "path": "spaces/defaults",
+      "integrity": "sha256:dev",
+      "plugin": {
+        "name": "defaults",
+        "version": "1.0.0"
+      },
+      "deps": {
+        "spaces": []
+      },
+      "resolvedFrom": {
+        "selector": "dev"
+      }
+    },
+    "praesidium-defaults@dev": {
+      "id": "praesidium-defaults",
+      "commit": "dev",
+      "path": "spaces/praesidium-defaults",
+      "integrity": "sha256:dev",
+      "plugin": {
+        "name": "praesidium-defaults",
+        "version": "0.1.0"
+      },
+      "deps": {
+        "spaces": []
+      },
+      "resolvedFrom": {
+        "selector": "dev"
+      }
+    }
+  },
+  "targets": {
+    "clod": {
+      "compose": [
+        "space:defaults@dev",
+        "space:praesidium-defaults@dev"
+      ],
+      "roots": [
+        "defaults@dev",
+        "praesidium-defaults@dev"
+      ],
+      "loadOrder": [
+        "defaults@dev",
+        "praesidium-defaults@dev"
+      ],
+      "envHash": "sha256:61cb0bb1eaed7dcbcf2f67cf04983784e1a7298c043ab165123b01c9a0986f80",
+      "harnesses": {
+        "claude": {
+          "envHash": "sha256:b9d5e624ab36f067939be2f1308301acb29a81c880fd164ba32c436b80970bb5"
+        }
+      }
+    }
+  }
+}

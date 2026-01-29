@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS "tasks" (
   due_at   TEXT,
   labels   TEXT,
   body     TEXT NOT NULL DEFAULT '',
+  specification TEXT NOT NULL DEFAULT '',
   etag     INTEGER NOT NULL DEFAULT 1,
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),

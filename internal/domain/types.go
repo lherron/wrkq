@@ -114,6 +114,7 @@ type Task struct {
 	Labels               *string    `json:"labels,omitempty" db:"labels"` // JSON array
 	Meta                 *string    `json:"meta,omitempty" db:"meta"`     // JSON object
 	Description          string     `json:"description" db:"description"`
+	Specification        string     `json:"specification" db:"specification"`
 	ETag                 int64      `json:"etag" db:"etag"`
 	CreatedAt            time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at" db:"updated_at"`
