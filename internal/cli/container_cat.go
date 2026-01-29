@@ -102,8 +102,8 @@ func runContainerCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Get actor slugs
 	var createdBySlug, updatedBySlug string
-	database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-	database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+	_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
+	_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
 
 	// Get parent info if parent exists
 	var parentID, parentPath *string
@@ -160,42 +160,42 @@ func runContainerCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Markdown output
 	if !containerCatNoFrontmatter {
-		fmt.Fprintln(cmd.OutOrStdout(), "---")
-		fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", container.ID)
-		fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", container.UUID)
-		fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", container.Slug)
-		fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", container.Title)
-		fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", container.Kind)
-		fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", container.Path)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", container.ID)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", container.UUID)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", container.Slug)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", container.Title)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", container.Kind)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", container.Path)
 		if container.ParentID != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "parent_id: %s\n", *container.ParentID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_id: %s\n", *container.ParentID)
 		}
 		if container.ParentUUID != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "parent_uuid: %s\n", *container.ParentUUID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_uuid: %s\n", *container.ParentUUID)
 		}
 		if container.ParentPath != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "parent_path: %s\n", *container.ParentPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_path: %s\n", *container.ParentPath)
 		}
 		if len(container.WebhookURLs) > 0 {
 			webhooksJSON, _ := json.Marshal(container.WebhookURLs)
-			fmt.Fprintf(cmd.OutOrStdout(), "webhook_urls: %s\n", string(webhooksJSON))
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "webhook_urls: %s\n", string(webhooksJSON))
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "sort_index: %d\n", container.SortIndex)
-		fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", container.Etag)
-		fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", container.CreatedAt)
-		fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", container.UpdatedAt)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "sort_index: %d\n", container.SortIndex)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", container.Etag)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", container.CreatedAt)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", container.UpdatedAt)
 		if container.ArchivedAt != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *container.ArchivedAt)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *container.ArchivedAt)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", container.CreatedBy)
-		fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", container.UpdatedBy)
-		fmt.Fprintln(cmd.OutOrStdout(), "---")
-		fmt.Fprintln(cmd.OutOrStdout())
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", container.CreatedBy)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", container.UpdatedBy)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	// Print description
 	if container.Description != "" {
-		fmt.Fprintln(cmd.OutOrStdout(), container.Description)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), container.Description)
 	}
 
 	return nil

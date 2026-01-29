@@ -21,7 +21,7 @@ func setupCheckTestDB(t *testing.T) (*db.DB, string, string, func()) {
 	}
 
 	if err := database.Migrate(); err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to migrate database: %v", err)
 	}
 
@@ -32,7 +32,7 @@ func setupCheckTestDB(t *testing.T) (*db.DB, string, string, func()) {
 		VALUES (?, 'test-actor', 'Test Actor', 'human')
 	`, actorUUID)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to create actor: %v", err)
 	}
 
@@ -43,12 +43,12 @@ func setupCheckTestDB(t *testing.T) (*db.DB, string, string, func()) {
 		VALUES (?, 'test-project', 'Test Project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to create container: %v", err)
 	}
 
 	cleanup := func() {
-		database.Close()
+		_ = database.Close()
 	}
 
 	return database, actorUUID, containerUUID, cleanup

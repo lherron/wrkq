@@ -71,7 +71,7 @@ func runDoctorAdm(cmd *cobra.Command, args []string) error {
 
 	database, err := db.Open(cfg.DBPath)
 	if err == nil {
-		defer database.Close()
+		defer func() { _ = database.Close() }()
 		report.Checks = append(report.Checks, checkDatabasePragmasAdm(database)...)
 		report.Checks = append(report.Checks, checkSchemaAdm(database)...)
 		report.Checks = append(report.Checks, checkDataIntegrityAdm(database)...)
@@ -149,7 +149,7 @@ func checkDatabaseFileAdm(dbPath string) []checkResultAdm {
 			Message: fmt.Sprintf("Database file not writable: %v", err),
 		})
 	} else {
-		f.Close()
+		_ = f.Close()
 		results = append(results, checkResultAdm{
 			Name:    "db_file_permissions",
 			Status:  "ok",
@@ -165,7 +165,7 @@ func checkDatabasePragmasAdm(database *db.DB) []checkResultAdm {
 
 	// Check WAL mode
 	var journalMode string
-	database.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
+	_ = database.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
 	if journalMode == "wal" {
 		results = append(results, checkResultAdm{
 			Name:    "wal_mode",
@@ -183,7 +183,7 @@ func checkDatabasePragmasAdm(database *db.DB) []checkResultAdm {
 
 	// Check foreign keys
 	var foreignKeys int
-	database.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys)
+	_ = database.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys)
 	if foreignKeys == 1 {
 		results = append(results, checkResultAdm{
 			Name:    "foreign_keys",
@@ -201,7 +201,7 @@ func checkDatabasePragmasAdm(database *db.DB) []checkResultAdm {
 
 	// Check integrity
 	var integrityCheck string
-	database.QueryRow("PRAGMA integrity_check").Scan(&integrityCheck)
+	_ = database.QueryRow("PRAGMA integrity_check").Scan(&integrityCheck)
 	if integrityCheck == "ok" {
 		results = append(results, checkResultAdm{
 			Name:    "integrity_check",
@@ -258,7 +258,7 @@ func checkDataIntegrityAdm(database *db.DB) []checkResultAdm {
 
 	// Check for orphaned tasks
 	var orphanedTasks int
-	database.QueryRow(`
+	_ = database.QueryRow(`
 		SELECT COUNT(*) FROM tasks
 		WHERE project_uuid NOT IN (SELECT uuid FROM containers)
 	`).Scan(&orphanedTasks)
@@ -280,7 +280,7 @@ func checkDataIntegrityAdm(database *db.DB) []checkResultAdm {
 
 	// Check for orphaned attachments
 	var orphanedAttachments int
-	database.QueryRow(`
+	_ = database.QueryRow(`
 		SELECT COUNT(*) FROM attachments
 		WHERE task_uuid NOT IN (SELECT uuid FROM tasks)
 	`).Scan(&orphanedAttachments)
@@ -302,7 +302,7 @@ func checkDataIntegrityAdm(database *db.DB) []checkResultAdm {
 
 	// Check for duplicate slugs
 	var duplicateSlugs int
-	database.QueryRow(`
+	_ = database.QueryRow(`
 		SELECT COUNT(*) FROM (
 			SELECT project_uuid, slug, COUNT(*) as cnt
 			FROM tasks
@@ -389,7 +389,7 @@ func checkAttachmentsAdm(database *db.DB, attachDir string) []checkResultAdm {
 	// Check attachment count and size
 	var count int
 	var totalSize sql.NullInt64
-	database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments").Scan(&count, &totalSize)
+	_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments").Scan(&count, &totalSize)
 
 	if count > 0 {
 		results = append(results, checkResultAdm{
@@ -414,7 +414,7 @@ func checkAttachmentsAdm(database *db.DB, attachDir string) []checkResultAdm {
 			if entry.IsDir() {
 				taskUUID := entry.Name()
 				var exists int
-				database.QueryRow("SELECT COUNT(*) FROM tasks WHERE uuid = ?", taskUUID).Scan(&exists)
+				_ = database.QueryRow("SELECT COUNT(*) FROM tasks WHERE uuid = ?", taskUUID).Scan(&exists)
 				if exists == 0 {
 					orphanedDirs++
 				}
@@ -445,8 +445,8 @@ func checkPerformanceAdm(database *db.DB) []checkResultAdm {
 
 	// Count tasks
 	var activeTasks, archivedTasks int
-	database.QueryRow("SELECT COUNT(*) FROM tasks WHERE state != 'archived'").Scan(&activeTasks)
-	database.QueryRow("SELECT COUNT(*) FROM tasks WHERE state = 'archived'").Scan(&archivedTasks)
+	_ = database.QueryRow("SELECT COUNT(*) FROM tasks WHERE state != 'archived'").Scan(&activeTasks)
+	_ = database.QueryRow("SELECT COUNT(*) FROM tasks WHERE state = 'archived'").Scan(&archivedTasks)
 
 	results = append(results, checkResultAdm{
 		Name:    "task_counts",
@@ -456,7 +456,7 @@ func checkPerformanceAdm(database *db.DB) []checkResultAdm {
 
 	// Count containers
 	var containers int
-	database.QueryRow("SELECT COUNT(*) FROM containers").Scan(&containers)
+	_ = database.QueryRow("SELECT COUNT(*) FROM containers").Scan(&containers)
 
 	results = append(results, checkResultAdm{
 		Name:    "container_count",
@@ -466,8 +466,8 @@ func checkPerformanceAdm(database *db.DB) []checkResultAdm {
 
 	// Database size
 	var pageCount, pageSize int64
-	database.QueryRow("PRAGMA page_count").Scan(&pageCount)
-	database.QueryRow("PRAGMA page_size").Scan(&pageSize)
+	_ = database.QueryRow("PRAGMA page_count").Scan(&pageCount)
+	_ = database.QueryRow("PRAGMA page_size").Scan(&pageSize)
 	dbSize := pageCount * pageSize
 
 	results = append(results, checkResultAdm{
@@ -491,14 +491,14 @@ func applyFixesAdm(database *db.DB, report *doctorReportAdm) {
 	}
 
 	if len(outputs) > 0 {
-		fmt.Fprintln(os.Stdout, "\n--fix results")
-		fmt.Fprintln(os.Stdout, strings.Join(outputs, "\n"))
+		_, _ = fmt.Fprintln(os.Stdout, "\n--fix results")
+		_, _ = fmt.Fprintln(os.Stdout, strings.Join(outputs, "\n"))
 	}
 }
 
 func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
-	fmt.Fprintf(cmd.OutOrStdout(), "wrkqadm doctor v%s\n\n", report.Version)
-	fmt.Fprintf(cmd.OutOrStdout(), "Database: %s\n\n", report.DBPath)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrkqadm doctor v%s\n\n", report.Version)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Database: %s\n\n", report.DBPath)
 
 	// Group checks by category
 	categories := map[string][]checkResultAdm{
@@ -537,7 +537,7 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 			continue
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\n", category)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", category)
 		for _, check := range checks {
 			var icon string
 			switch check.Status {
@@ -549,27 +549,27 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 				icon = "✓"
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "  %s %s\n", icon, check.Message)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s %s\n", icon, check.Message)
 
 			if doctorAdmVerbose && len(check.Details) > 0 {
 				for _, detail := range check.Details {
-					fmt.Fprintf(cmd.OutOrStdout(), "      %s\n", detail)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "      %s\n", detail)
 				}
 			}
 		}
-		fmt.Fprintln(cmd.OutOrStdout())
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	// Summary
 	if report.Errors > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d error(s), %d warning(s)\n", report.Errors, report.Warnings)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d error(s), %d warning(s)\n", report.Errors, report.Warnings)
 	} else if report.Warnings > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d warning(s)\n", report.Warnings)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d warning(s)\n", report.Warnings)
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "Summary: All checks passed ✓\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: All checks passed ✓\n")
 	}
 
 	if report.Warnings > 0 || report.Errors > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "\nRun with --verbose for detailed information\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nRun with --verbose for detailed information\n")
 	}
 }

@@ -89,13 +89,13 @@ func runMergeAdm(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open source database: %w", err))
 	}
-	defer srcDB.Close()
+	defer func() { _ = srcDB.Close() }()
 
 	destDB, err := db.Open(destPath)
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open destination database: %w", err))
 	}
-	defer destDB.Close()
+	defer func() { _ = destDB.Close() }()
 
 	if err := ensureMigrationsReady(srcDB, "source", false, mergeDryRun); err != nil {
 		return exitError(1, err)
@@ -148,7 +148,7 @@ func runMergeAdm(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(mergeReportPath, data, 0644); err != nil {
 			return exitError(1, fmt.Errorf("failed to write report: %w", err))
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "✓ Report written to %s\n", mergeReportPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Report written to %s\n", mergeReportPath)
 	}
 
 	printMergeSummary(cmd, report)
@@ -288,7 +288,7 @@ func mergeProjectIntoCanonical(opts mergeOptions) (*mergeReport, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to begin destination transaction: %w", err)
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 	}
 
 	writer := events.NewWriter(opts.DestDB.DB)
@@ -425,29 +425,29 @@ func looksLikeUUID(value string) bool {
 
 func printMergeSummary(cmd *cobra.Command, report *mergeReport) {
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "Merge %s -> %s\n", report.SourceDB, report.DestDB)
-	fmt.Fprintf(out, "Project: %s (%s)\n", report.ProjectSelector, report.SourceProjectPath)
-	fmt.Fprintf(out, "Prefix: %s\n", report.DestPrefix)
+	_, _ = fmt.Fprintf(out, "Merge %s -> %s\n", report.SourceDB, report.DestDB)
+	_, _ = fmt.Fprintf(out, "Project: %s (%s)\n", report.ProjectSelector, report.SourceProjectPath)
+	_, _ = fmt.Fprintf(out, "Prefix: %s\n", report.DestPrefix)
 	if report.DryRun {
-		fmt.Fprintln(out, "Mode: dry-run")
+		_, _ = fmt.Fprintln(out, "Mode: dry-run")
 	}
-	fmt.Fprintf(out, "Actors: %d created, %d updated, %d skipped\n", report.Stats.Actors.Created, report.Stats.Actors.Updated, report.Stats.Actors.Skipped)
-	fmt.Fprintf(out, "Containers: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Containers.Created, report.Stats.Containers.Updated, report.Stats.Containers.Renamed, report.Stats.Containers.Skipped)
-	fmt.Fprintf(out, "Tasks: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Tasks.Created, report.Stats.Tasks.Updated, report.Stats.Tasks.Renamed, report.Stats.Tasks.Skipped)
-	fmt.Fprintf(out, "Comments: %d created, %d updated, %d skipped\n", report.Stats.Comments.Created, report.Stats.Comments.Updated, report.Stats.Comments.Skipped)
-	fmt.Fprintf(out, "Relations: %d created, %d skipped\n", report.Stats.Relations.Created, report.Stats.Relations.Skipped)
-	fmt.Fprintf(out, "Attachments: %d created, %d deduped, %d skipped\n", report.Stats.Attachments.Created, report.Stats.Attachments.Deduped, report.Stats.Attachments.Skipped)
+	_, _ = fmt.Fprintf(out, "Actors: %d created, %d updated, %d skipped\n", report.Stats.Actors.Created, report.Stats.Actors.Updated, report.Stats.Actors.Skipped)
+	_, _ = fmt.Fprintf(out, "Containers: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Containers.Created, report.Stats.Containers.Updated, report.Stats.Containers.Renamed, report.Stats.Containers.Skipped)
+	_, _ = fmt.Fprintf(out, "Tasks: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Tasks.Created, report.Stats.Tasks.Updated, report.Stats.Tasks.Renamed, report.Stats.Tasks.Skipped)
+	_, _ = fmt.Fprintf(out, "Comments: %d created, %d updated, %d skipped\n", report.Stats.Comments.Created, report.Stats.Comments.Updated, report.Stats.Comments.Skipped)
+	_, _ = fmt.Fprintf(out, "Relations: %d created, %d skipped\n", report.Stats.Relations.Created, report.Stats.Relations.Skipped)
+	_, _ = fmt.Fprintf(out, "Attachments: %d created, %d deduped, %d skipped\n", report.Stats.Attachments.Created, report.Stats.Attachments.Deduped, report.Stats.Attachments.Skipped)
 	if !report.DryRun {
-		fmt.Fprintf(out, "Files copied: %d, missing: %d\n", report.Stats.FilesCopied, report.Stats.FilesMissing)
+		_, _ = fmt.Fprintf(out, "Files copied: %d, missing: %d\n", report.Stats.FilesCopied, report.Stats.FilesMissing)
 	}
 	if len(report.Renames) > 0 {
-		fmt.Fprintf(out, "Renames: %d\n", len(report.Renames))
+		_, _ = fmt.Fprintf(out, "Renames: %d\n", len(report.Renames))
 	}
 	if len(report.Conflicts) > 0 {
-		fmt.Fprintf(out, "Conflicts: %d\n", len(report.Conflicts))
+		_, _ = fmt.Fprintf(out, "Conflicts: %d\n", len(report.Conflicts))
 	}
 	if len(report.ActorMismatches) > 0 {
-		fmt.Fprintf(out, "Actor mismatches: %d\n", len(report.ActorMismatches))
+		_, _ = fmt.Fprintf(out, "Actor mismatches: %d\n", len(report.ActorMismatches))
 	}
 }
 
@@ -588,7 +588,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source containers: %w", err)
 	}
-	defer containers.Close()
+	defer func() { _ = containers.Close() }()
 
 	for containers.Next() {
 		var c sourceContainer
@@ -615,7 +615,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source tasks: %w", err)
 	}
-	defer tasks.Close()
+	defer func() { _ = tasks.Close() }()
 
 	for tasks.Next() {
 		var t sourceTask
@@ -642,7 +642,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source comments: %w", err)
 	}
-	defer comments.Close()
+	defer func() { _ = comments.Close() }()
 
 	for comments.Next() {
 		var c sourceComment
@@ -666,7 +666,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source relations: %w", err)
 	}
-	defer relations.Close()
+	defer func() { _ = relations.Close() }()
 
 	for relations.Next() {
 		var r sourceRelation
@@ -690,7 +690,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source attachments: %w", err)
 	}
-	defer attachments.Close()
+	defer func() { _ = attachments.Close() }()
 
 	for attachments.Next() {
 		var a sourceAttachment
@@ -713,7 +713,7 @@ func loadSourceData(database *db.DB, projectUUID, projectPath string) (*sourceDa
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source sections: %w", err)
 	}
-	defer sections.Close()
+	defer func() { _ = sections.Close() }()
 
 	for sections.Next() {
 		var s sourceSection
@@ -789,7 +789,7 @@ func loadSourceActors(database *db.DB, uuids []string) ([]sourceActor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query source actors: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var actors []sourceActor
 	for rows.Next() {
 		var a sourceActor

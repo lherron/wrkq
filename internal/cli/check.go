@@ -133,13 +133,13 @@ func runCheckBlocked(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Human-readable output
 	if isBlocked {
-		fmt.Fprintf(cmd.OutOrStderr(), "Error: Task %s is blocked by %d incomplete task(s):\n", taskID, len(blockers))
+		_, _ = fmt.Fprintf(cmd.OutOrStderr(), "Error: Task %s is blocked by %d incomplete task(s):\n", taskID, len(blockers))
 		for _, b := range blockers {
-			fmt.Fprintf(cmd.OutOrStderr(), "  - %s: %s (state: %s)\n", b.ID, b.Title, b.State)
+			_, _ = fmt.Fprintf(cmd.OutOrStderr(), "  - %s: %s (state: %s)\n", b.ID, b.Title, b.State)
 		}
 		return fmt.Errorf("task %s is blocked", taskID)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Task %s is not blocked\n", taskID)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Task %s is not blocked\n", taskID)
 	return nil
 }

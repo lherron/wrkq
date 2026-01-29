@@ -53,7 +53,7 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err := createContainer(s, actorUUID, path, mkdirParents, mkdirKind); err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", path)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", path)
 	}
 
 	return nil

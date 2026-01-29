@@ -27,7 +27,7 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 	}
 
 	if err := database.Migrate(); err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -37,7 +37,7 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 		VALUES ('00000000-0000-0000-0000-000000000001', 'A-00001', 'test-user', 'Test User', 'human', datetime('now'), datetime('now'))
 	`)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to seed actor: %v", err)
 	}
 
@@ -47,12 +47,12 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 		VALUES ('00000000-0000-0000-0000-000000000002', 'P-00001', 'inbox', 'Inbox', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to seed inbox: %v", err)
 	}
 
 	t.Cleanup(func() {
-		database.Close()
+		_ = database.Close()
 	})
 
 	return database, dbPath
@@ -98,7 +98,7 @@ func TestListCommand_JSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type Task struct {
 		ID       string `json:"id"`
@@ -175,7 +175,7 @@ func TestListCommand_NDJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var buf bytes.Buffer
 	for rows.Next() {
@@ -389,7 +389,7 @@ func TestNullSeparatedOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var buf bytes.Buffer
 	for rows.Next() {
@@ -637,10 +637,10 @@ func TestCatCommand_BlockedBy(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test cat on the blocked task - should show blocked_by
 	cmd := rootCmd
@@ -696,10 +696,10 @@ func TestCatCommand_BlockedBy_CompletedBlockerNotShown(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test cat on the waiting task - should NOT show blocked_by (blocker is completed)
 	cmd := rootCmd
@@ -752,10 +752,10 @@ func TestCatCommand_BlockedBy_JSON(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test cat with JSON output
 	cmd := rootCmd

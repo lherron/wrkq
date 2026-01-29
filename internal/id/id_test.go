@@ -358,7 +358,7 @@ func BenchmarkFormatTask(b *testing.B) {
 func BenchmarkParse(b *testing.B) {
 	id := "T-12345"
 	for i := 0; i < b.N; i++ {
-		Parse(id)
+		_, _, _ = Parse(id)
 	}
 }
 

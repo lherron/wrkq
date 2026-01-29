@@ -106,7 +106,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 	srcTaskUUID, srcPath, taskErr := selectors.ResolveTask(s.DB(), src)
 	if taskErr == nil {
 		if mvDryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "Would move task %s -> %s\n", srcPath, dstPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would move task %s -> %s\n", srcPath, dstPath)
 			return nil
 		}
 
@@ -116,7 +116,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Moved task: %s -> %s\n", srcPath, dstPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved task: %s -> %s\n", srcPath, dstPath)
 		return nil
 	}
 
@@ -124,7 +124,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 	srcContainerUUID, _, containerErr := selectors.ResolveContainer(s.DB(), src)
 	if containerErr == nil {
 		if mvDryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "Would move container %s -> %s\n", src, dstPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would move container %s -> %s\n", src, dstPath)
 			return nil
 		}
 
@@ -134,7 +134,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Moved container: %s -> %s\n", src, dstPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved container: %s -> %s\n", src, dstPath)
 		return nil
 	}
 
@@ -176,7 +176,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID
 		}
 		// Delete existing task
 		if mvDryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "Would overwrite task at %s\n", dstPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would overwrite task at %s\n", dstPath)
 		} else {
 			_, err := s.Tasks.Purge(actorUUID, existingTaskUUID, 0)
 			if err != nil {
@@ -186,7 +186,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID
 	}
 
 	if mvDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would rename/move task %s -> %s\n", srcPath, dstPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would rename/move task %s -> %s\n", srcPath, dstPath)
 		return nil
 	}
 
@@ -200,7 +200,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID
 		return err
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed task: %s -> %s\n", srcPath, dstPath)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed task: %s -> %s\n", srcPath, dstPath)
 	return nil
 }
 
@@ -247,7 +247,7 @@ func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, actorUUID, srcCon
 	}
 
 	if mvDryRun {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would rename/move container %s -> %s\n", srcPath, dstPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would rename/move container %s -> %s\n", srcPath, dstPath)
 		return nil
 	}
 
@@ -261,6 +261,6 @@ func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, actorUUID, srcCon
 		return err
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed container: %s -> %s\n", srcPath, dstPath)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed container: %s -> %s\n", srcPath, dstPath)
 	return nil
 }

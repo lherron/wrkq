@@ -136,7 +136,7 @@ func TestConcurrentReads(t *testing.T) {
 				t.Errorf("Reader %d: Query failed: %v", readerID, err)
 				return
 			}
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 
 			var count int
 			if rows.Next() {

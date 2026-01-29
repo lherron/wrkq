@@ -144,7 +144,7 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Confirmation prompt
 	if !cpYes && len(sourceTasks) > 5 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Copy %d tasks? [y/N] ", len(sourceTasks))
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Copy %d tasks? [y/N] ", len(sourceTasks))
 		reader := bufio.NewReader(cmd.InOrStdin())
 		response, _ := reader.ReadString('\n')
 		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(response)), "y") {
@@ -186,7 +186,7 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 			delimiter = "\x00"
 		}
 		for _, r := range results {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s%s", r.DestID, delimiter)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s%s", r.DestID, delimiter)
 		}
 		return nil
 	}
@@ -216,7 +216,7 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 	var totalAttachments int
 	var totalFiles int64
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Would copy %d task(s):\n\n", len(sourceTasks))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would copy %d task(s):\n\n", len(sourceTasks))
 
 	for _, taskUUID := range sourceTasks {
 		var sourceID, slug string
@@ -226,15 +226,15 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 		}
 
 		var destPath string
-		database.QueryRow("SELECT path FROM container_paths WHERE uuid = ?", destUUID).Scan(&destPath)
+		_ = database.QueryRow("SELECT path FROM container_paths WHERE uuid = ?", destUUID).Scan(&destPath)
 
-		fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s) → %s/%s (new)\n", sourceID, slug, destPath, slug)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s) → %s/%s (new)\n", sourceID, slug, destPath, slug)
 
 		// Count attachments
 		if !cpShallow {
 			var count int
 			var size sql.NullInt64
-			database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
+			_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
 			if count > 0 {
 				totalAttachments += count
 				if size.Valid {
@@ -245,12 +245,12 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 	}
 
 	if totalAttachments > 0 && !cpShallow {
-		fmt.Fprintf(cmd.OutOrStdout(), "\nAttachments:\n")
-		fmt.Fprintf(cmd.OutOrStdout(), "  %d file(s) (%.1f MB total)\n", totalAttachments, float64(totalFiles)/(1024*1024))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAttachments:\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %d file(s) (%.1f MB total)\n", totalAttachments, float64(totalFiles)/(1024*1024))
 		if cpWithAttachments {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Files will be copied to new location\n")
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Files will be copied to new location\n")
 		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Only metadata will be copied (use --with-attachments to copy files)\n")
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Only metadata will be copied (use --with-attachments to copy files)\n")
 		}
 	}
 
@@ -292,7 +292,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 
 	// Check for existing task with same slug in destination
 	var existingUUID string
-	tx.QueryRow("SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ?", destUUID, slug).Scan(&existingUUID)
+	_ = tx.QueryRow("SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ?", destUUID, slug).Scan(&existingUUID)
 
 	if existingUUID != "" && !cpOverwrite {
 		return nil, fmt.Errorf("task with slug '%s' already exists in destination container", slug)
@@ -313,7 +313,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 		}
 
 		newUUID = existingUUID
-		tx.QueryRow("SELECT id FROM tasks WHERE uuid = ?", newUUID).Scan(&newID)
+		_ = tx.QueryRow("SELECT id FROM tasks WHERE uuid = ?", newUUID).Scan(&newID)
 	} else {
 		// Insert new task (omit id and uuid to let triggers generate them)
 		result, err := tx.Exec(`
@@ -372,7 +372,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 
 	// Get destination path
 	var destPath string
-	database.QueryRow("SELECT path FROM task_paths WHERE uuid = ?", newUUID).Scan(&destPath)
+	_ = database.QueryRow("SELECT path FROM task_paths WHERE uuid = ?", newUUID).Scan(&destPath)
 
 	return &copyResult{
 		SourceID:    sourceID,
@@ -393,7 +393,7 @@ func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	count := 0
 	for rows.Next() {

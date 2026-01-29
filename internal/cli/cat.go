@@ -165,7 +165,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Get task path from v_task_paths view
 		var taskPath string
-		database.QueryRow("SELECT path FROM v_task_paths WHERE uuid = ?", taskUUID).Scan(&taskPath)
+		_ = database.QueryRow("SELECT path FROM v_task_paths WHERE uuid = ?", taskUUID).Scan(&taskPath)
 
 		// Get parent task ID if parent exists
 		var parentTaskID *string
@@ -351,89 +351,89 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			if !catNoFrontmatter {
 				// Print YAML front matter
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
-				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
-				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
-				fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
-				fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
-				fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
 				if task.RequestedByProjectID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "requested_by_project_id: %s\n", *task.RequestedByProjectID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "requested_by_project_id: %s\n", *task.RequestedByProjectID)
 				}
 				if task.AssignedProjectID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "assigned_project_id: %s\n", *task.AssignedProjectID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "assigned_project_id: %s\n", *task.AssignedProjectID)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", task.Slug)
-				fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
-				fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
-				fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", task.Priority)
-				fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", task.Kind)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", task.Slug)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", task.Priority)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", task.Kind)
 				if task.ParentTaskID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "parent_task_id: %s\n", *task.ParentTaskID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_task_id: %s\n", *task.ParentTaskID)
 				}
 				if task.ParentTaskUUID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "parent_task_uuid: %s\n", *task.ParentTaskUUID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_task_uuid: %s\n", *task.ParentTaskUUID)
 				}
 				if task.AssigneeSlug != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "assignee: %s\n", *task.AssigneeSlug)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "assignee: %s\n", *task.AssigneeSlug)
 				}
 				if task.AssigneeUUID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
 				}
 				if task.StartAt != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
 				}
 				if task.DueAt != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "due_at: %s\n", *task.DueAt)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "due_at: %s\n", *task.DueAt)
 				}
 				if task.Labels != nil && *task.Labels != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
 				if task.Specification != "" {
 					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "specification: |")
 					for _, line := range strings.Split(task.Specification, "\n") {
-						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
 					}
 				}
 				if task.AcknowledgedAt != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
 				}
 				if task.Resolution != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "resolution: %s\n", *task.Resolution)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "resolution: %s\n", *task.Resolution)
 				}
 				if task.CPProjectID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
 				}
 				if task.CPWorkItemID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_work_item_id: %s\n", *task.CPWorkItemID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "cp_work_item_id: %s\n", *task.CPWorkItemID)
 				}
 				if task.CPRunID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
 				}
 				if task.SessionID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "session_id: %s\n", *task.SessionID)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session_id: %s\n", *task.SessionID)
 				}
 				if task.RunStatus != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
 				}
 				if len(task.BlockedBy) > 0 {
 					parts := make([]string, len(task.BlockedBy))
 					for i, b := range task.BlockedBy {
 						parts[i] = fmt.Sprintf("%s (%s)", b.ID, b.State)
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "blocked_by: [%s]\n", strings.Join(parts, ", "))
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "blocked_by: [%s]\n", strings.Join(parts, ", "))
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
-				fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)
-				fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", task.UpdatedAt)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", task.UpdatedAt)
 				if task.CompletedAt != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "completed_at: %s\n", *task.CompletedAt)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "completed_at: %s\n", *task.CompletedAt)
 				}
 				if task.ArchivedAt != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
-				fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
 				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			}
@@ -451,15 +451,15 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 				for _, comment := range task.Comments {
 					// Print header line
-					fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
 						comment.ID, comment.CreatedAt, comment.ActorSlug, comment.ActorRole)
 
 					// Print body lines with > prefix
 					bodyLines := strings.Split(comment.Body, "\n")
 					for _, line := range bodyLines {
-						fmt.Fprintf(cmd.OutOrStdout(), "> %s\n", line)
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "> %s\n", line)
 					}
-					fmt.Fprintln(cmd.OutOrStdout())
+					_, _ = fmt.Fprintln(cmd.OutOrStdout())
 				}
 			}
 		}

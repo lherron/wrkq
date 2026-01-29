@@ -48,10 +48,10 @@ func runVersionAdm(cmd *cobra.Command, args []string) error {
 		return encoder.Encode(output)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "wrkqadm version %s\n", Version)
-	fmt.Fprintf(cmd.OutOrStdout(), "  commit: %s\n", GitCommit)
-	fmt.Fprintf(cmd.OutOrStdout(), "  built:  %s\n", BuildDate)
-	fmt.Fprintf(cmd.OutOrStdout(), "  machine interface: v%d\n", 1)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrkqadm version %s\n", Version)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  commit: %s\n", GitCommit)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  built:  %s\n", BuildDate)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  machine interface: v%d\n", 1)
 
 	return nil
 }

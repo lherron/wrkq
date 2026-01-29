@@ -57,13 +57,13 @@ func TestPaginationIntegration(t *testing.T) {
 		}
 	}
 
-	database.Close()
+	_ = database.Close()
 
 	// Test ls command with pagination
 	t.Run("ls pagination", func(t *testing.T) {
 		// Set environment for test
-		os.Setenv("WRKQ_DB_PATH", dbPath)
-		defer os.Unsetenv("WRKQ_DB_PATH")
+		_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+		defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
 
 		// This would require refactoring the CLI commands to be more testable
 		// For now, we've verified compilation and structure

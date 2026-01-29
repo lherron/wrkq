@@ -120,21 +120,21 @@ func runStat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Simple text output
 	for _, meta := range results {
-		fmt.Fprintf(cmd.OutOrStdout(), "type: %s\n", meta.Type)
-		fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", meta.UUID)
-		fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", meta.ID)
-		fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", meta.Slug)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "type: %s\n", meta.Type)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", meta.UUID)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", meta.ID)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", meta.Slug)
 		if meta.Title != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", meta.Title)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", meta.Title)
 		}
 		if meta.State != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", meta.State)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", meta.State)
 		}
 		if meta.Priority > 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", meta.Priority)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", meta.Priority)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", meta.ETag)
-		fmt.Fprintln(cmd.OutOrStdout())
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", meta.ETag)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	return nil

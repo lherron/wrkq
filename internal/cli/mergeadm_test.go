@@ -32,7 +32,7 @@ func setupMergeDB(t *testing.T) (*db.DB, string) {
 		t.Fatalf("failed to seed actor: %v", err)
 	}
 	t.Cleanup(func() {
-		database.Close()
+		_ = database.Close()
 	})
 	return database, path
 }

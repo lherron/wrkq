@@ -245,7 +245,7 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 	if err != nil {
 		return nil, false, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var events []logEvent
 	for rows.Next() {

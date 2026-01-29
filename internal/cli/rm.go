@@ -156,7 +156,7 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 	if rmPorcelain {
 		for _, r := range results {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s\n", r.ID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", r.ID)
 		}
 		return nil
 	}
@@ -165,13 +165,13 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	for _, r := range results {
 		if r.Purged {
 			if r.AttachmentsDeleted > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted (%d attachments, %.1f MB)\n",
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted (%d attachments, %.1f MB)\n",
 					r.ID, r.AttachmentsDeleted, float64(r.BytesFreed)/(1024*1024))
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted\n", r.ID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted\n", r.ID)
 			}
 		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "✓ %s archived\n", r.ID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ %s archived\n", r.ID)
 		}
 	}
 
@@ -190,9 +190,9 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 	var totalBytes int64
 
 	if rmPurge {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would permanently delete %d task(s):\n\n", len(taskUUIDs))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would permanently delete %d task(s):\n\n", len(taskUUIDs))
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would archive %d task(s):\n\n", len(taskUUIDs))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would archive %d task(s):\n\n", len(taskUUIDs))
 	}
 
 	for _, taskUUID := range taskUUIDs {
@@ -205,36 +205,36 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 		`, taskUUID).Scan(&id, &slug, &title, &state, &priority)
 
 		if err != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Error reading task %s: %v\n", taskUUID, err)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Error reading task %s: %v\n", taskUUID, err)
 			continue
 		}
 
 		displayPath := slug
 
-		fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s)\n", id, displayPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s)\n", id, displayPath)
 		if title != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "    Title: %s\n", title)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Title: %s\n", title)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "    State: %s, Priority: %d\n", state, priority)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    State: %s, Priority: %d\n", state, priority)
 
 		if rmPurge {
 			var count int
 			var size sql.NullInt64
-			database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
+			_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
 			if count > 0 {
 				totalAttachments += count
 				if size.Valid {
 					totalBytes += size.Int64
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "    Attachments: %d file(s) (%.1f MB)\n", count, float64(size.Int64)/(1024*1024))
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Attachments: %d file(s) (%.1f MB)\n", count, float64(size.Int64)/(1024*1024))
 			}
 		}
-		fmt.Fprintln(cmd.OutOrStdout())
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	if rmPurge && totalAttachments > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Total: %d attachments (%.1f MB)\n\n", totalAttachments, float64(totalBytes)/(1024*1024))
-		fmt.Fprintf(cmd.OutOrStdout(), "WARNING: This action CANNOT be undone!\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Total: %d attachments (%.1f MB)\n\n", totalAttachments, float64(totalBytes)/(1024*1024))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "WARNING: This action CANNOT be undone!\n")
 	}
 
 	return nil
@@ -247,20 +247,20 @@ func confirmPurge(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error
 	for _, taskUUID := range taskUUIDs {
 		var count int
 		var size sql.NullInt64
-		database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
+		_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
 		totalAttachments += count
 		if size.Valid {
 			totalBytes += size.Int64
 		}
 	}
 
-	fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
-	fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", len(taskUUIDs))
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", len(taskUUIDs))
 	if totalAttachments > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "  - %d attachments (%.1f MB)\n", totalAttachments, float64(totalBytes)/(1024*1024))
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %d attachments (%.1f MB)\n", totalAttachments, float64(totalBytes)/(1024*1024))
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "\nThis action CANNOT be undone.\n\n")
-	fmt.Fprintf(cmd.ErrOrStderr(), "Type 'yes' to confirm: ")
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\nThis action CANNOT be undone.\n\n")
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Type 'yes' to confirm: ")
 
 	reader := bufio.NewReader(cmd.InOrStdin())
 	response, _ := reader.ReadString('\n')
@@ -313,7 +313,7 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 
 		// Delete task directory
 		taskDir := filepath.Join(attachDir, "tasks", taskUUID)
-		os.RemoveAll(taskDir) // Ignore errors, directory might not exist
+		_ = os.RemoveAll(taskDir) // Ignore errors, directory might not exist
 	} else {
 		// Archive task (soft delete)
 		_, err := s.Tasks.Archive(actorUUID, taskUUID, 0)

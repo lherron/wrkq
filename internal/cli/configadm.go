@@ -83,11 +83,11 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 			dbNote = fmt.Sprintf("File exists but failed to open: %v", err)
 			dbValid = false
 		} else {
-			defer database.Close()
+			defer func() { _ = database.Close() }()
 
 			// Check WAL mode
 			var journalMode string
-			database.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
+			_ = database.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
 			if journalMode != "wal" {
 				report.Warnings = append(report.Warnings, "Database is not in WAL mode")
 			}
@@ -174,7 +174,7 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 		// Try to resolve actor
 		database, err := db.Open(cfg.DBPath)
 		if err == nil {
-			defer database.Close()
+			defer func() { _ = database.Close() }()
 			resolver := actors.NewResolver(database.DB)
 			uuid, err := resolver.Resolve(actorValue)
 			if err == nil {
@@ -182,7 +182,7 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 				actorUUID = uuid
 
 				// Get friendly ID
-				database.QueryRow("SELECT id FROM actors WHERE uuid = ?", uuid).Scan(&actorID)
+				_ = database.QueryRow("SELECT id FROM actors WHERE uuid = ?", uuid).Scan(&actorID)
 				actorNote = fmt.Sprintf("Resolved to %s (UUID: %s)", actorID, actorUUID[:8]+"...")
 			} else {
 				actorNote = fmt.Sprintf("Failed to resolve: %v", err)
@@ -208,58 +208,58 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	// Human-readable output
-	fmt.Fprintln(cmd.OutOrStdout(), "Configuration Report")
-	fmt.Fprintln(cmd.OutOrStdout(), "====================")
-	fmt.Fprintln(cmd.OutOrStdout())
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Configuration Report")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "====================")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout())
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Database:")
-	fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_DB_PATH: %s\n", report.Config["db_path"].Value)
-	fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["db_path"].Source)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Database:")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_DB_PATH: %s\n", report.Config["db_path"].Value)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["db_path"].Source)
 	if report.Config["db_path"].Valid {
-		fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Valid")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Valid")
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["db_path"].Note)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["db_path"].Note)
 	}
-	fmt.Fprintln(cmd.OutOrStdout())
+	_, _ = fmt.Fprintln(cmd.OutOrStdout())
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Attachments:")
-	fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_ATTACH_DIR: %s\n", report.Config["attach_dir"].Value)
-	fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["attach_dir"].Source)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Attachments:")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_ATTACH_DIR: %s\n", report.Config["attach_dir"].Value)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["attach_dir"].Source)
 	if report.Config["attach_dir"].Valid {
-		fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Valid")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Valid")
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["attach_dir"].Note)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["attach_dir"].Note)
 	}
-	fmt.Fprintln(cmd.OutOrStdout())
+	_, _ = fmt.Fprintln(cmd.OutOrStdout())
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Project Root:")
-	fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_PROJECT_ROOT: %s\n", report.Config["project_root"].Value)
-	fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["project_root"].Source)
-	fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Loaded")
-	fmt.Fprintln(cmd.OutOrStdout())
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Project Root:")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_PROJECT_ROOT: %s\n", report.Config["project_root"].Value)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["project_root"].Source)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✓ Loaded")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout())
 
-	fmt.Fprintln(cmd.OutOrStdout(), "Actor:")
-	fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_ACTOR: %s\n", report.Config["actor"].Value)
-	fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["actor"].Source)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Actor:")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  WRKQ_ACTOR: %s\n", report.Config["actor"].Value)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Source: %s\n", report.Config["actor"].Source)
 	if report.Config["actor"].Valid {
-		fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✓ %s\n", report.Config["actor"].Note)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✓ %s\n", report.Config["actor"].Note)
 	} else {
 		if report.Config["actor"].Note != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["actor"].Note)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Status: ✗ %s\n", report.Config["actor"].Note)
 		} else {
-			fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✗ Not configured")
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "    Status: ✗ Not configured")
 		}
 	}
-	fmt.Fprintln(cmd.OutOrStdout())
+	_, _ = fmt.Fprintln(cmd.OutOrStdout())
 
 	// Warnings
 	if len(report.Warnings) > 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "Warnings:")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Warnings:")
 		for _, warning := range report.Warnings {
-			fmt.Fprintf(cmd.OutOrStdout(), "  ⚠  %s\n", warning)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  ⚠  %s\n", warning)
 		}
 	} else {
-		fmt.Fprintln(cmd.OutOrStdout(), "✓ No warnings")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "✓ No warnings")
 	}
 
 	return nil

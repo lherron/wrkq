@@ -89,7 +89,7 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open database: %w", err))
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Run migrations
 	if err := database.Migrate(); err != nil {
@@ -192,7 +192,7 @@ func updateGitignore(dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open .gitignore: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// If file existed and has content, ensure we start on a new line
 	if existingContent != "" && !strings.HasSuffix(existingContent, "\n") {

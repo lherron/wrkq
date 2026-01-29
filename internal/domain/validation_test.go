@@ -292,13 +292,13 @@ func TestETagMismatchError(t *testing.T) {
 // Benchmark tests
 func BenchmarkValidateState(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		ValidateState("open")
+		_ = ValidateState("open")
 	}
 }
 
 func BenchmarkValidatePriority(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		ValidatePriority(2)
+		_ = ValidatePriority(2)
 	}
 }
 
@@ -306,12 +306,12 @@ func BenchmarkValidateTimestamp(b *testing.B) {
 	timestamp := time.Now().Format(time.RFC3339)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ValidateTimestamp(timestamp)
+		_, _ = ValidateTimestamp(timestamp)
 	}
 }
 
 func BenchmarkCheckETag(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		CheckETag(123, 123)
+		_ = CheckETag(123, 123)
 	}
 }

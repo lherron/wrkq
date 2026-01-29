@@ -106,7 +106,7 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 				&resourceID,
 			)
 			if err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return fmt.Errorf("scan failed: %w", err)
 			}
 
@@ -123,7 +123,7 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 			// Output event
 			if ndjson {
 				if err := encoder.Encode(e); err != nil {
-					rows.Close()
+					_ = rows.Close()
 					return fmt.Errorf("encode failed: %w", err)
 				}
 			} else {
@@ -133,7 +133,7 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 			currentID = e.ID
 			hasEvents = true
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("rows error: %w", err)

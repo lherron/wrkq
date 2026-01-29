@@ -17,9 +17,9 @@ func TestRenameContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	// Create test actor
 	actorUUID := "test-actor-uuid"
@@ -176,7 +176,7 @@ func TestRenameContainer(t *testing.T) {
 
 		// Verify event logged
 		var eventCount int
-		database.QueryRow(`
+		_ = database.QueryRow(`
 			SELECT COUNT(*) FROM event_log
 			WHERE resource_type = 'container' AND resource_uuid = ? AND event_type = 'container.updated'
 		`, result.UUID).Scan(&eventCount)

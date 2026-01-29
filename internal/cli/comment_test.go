@@ -132,7 +132,7 @@ func TestCommentLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query comments: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var ids []string
 	for rows.Next() {
@@ -530,7 +530,7 @@ func TestCommentSequenceIncrement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to query comment IDs: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var id string
@@ -618,7 +618,7 @@ func TestCommentAdd_FileFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	commentText := "This is a comment from a file"
 	if _, err := tmpfile.Write([]byte(commentText)); err != nil {

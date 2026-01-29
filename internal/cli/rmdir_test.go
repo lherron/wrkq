@@ -15,9 +15,9 @@ func TestRmdir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	// Create test actor
 	actorUUID := "test-actor-uuid"
@@ -41,11 +41,11 @@ func TestRmdir(t *testing.T) {
 
 		// Get friendly ID
 		var containerID string
-		database.QueryRow(`SELECT id FROM containers WHERE slug = ?`, slug).Scan(&containerID)
+		_ = database.QueryRow(`SELECT id FROM containers WHERE slug = ?`, slug).Scan(&containerID)
 
 		// Verify container exists
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM containers WHERE slug = ?`, slug).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM containers WHERE slug = ?`, slug).Scan(&count)
 		if count != 1 {
 			t.Fatal("Container should exist before removal")
 		}
@@ -58,7 +58,7 @@ func TestRmdir(t *testing.T) {
 		}
 
 		// Verify container deleted
-		database.QueryRow(`SELECT COUNT(*) FROM containers WHERE slug = ?`, slug).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM containers WHERE slug = ?`, slug).Scan(&count)
 		if count != 0 {
 			t.Error("Container should be deleted")
 		}
@@ -66,17 +66,17 @@ func TestRmdir(t *testing.T) {
 
 	t.Run("fails to remove non-empty container without force", func(t *testing.T) {
 		slug := "non-empty"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', ?, 'Non Empty', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 
 		// Get container UUID and ID
 		var containerUUID, containerID string
-		database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = ?`, slug).Scan(&containerUUID, &containerID)
+		_ = database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = ?`, slug).Scan(&containerUUID, &containerID)
 
 		// Add a task to the container
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', 'task-1', 'Task 1', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
@@ -90,7 +90,7 @@ func TestRmdir(t *testing.T) {
 
 		// Verify container still exists
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid = ?`, containerUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid = ?`, containerUUID).Scan(&count)
 		if count != 1 {
 			t.Error("Container should still exist after failed removal")
 		}
@@ -98,18 +98,18 @@ func TestRmdir(t *testing.T) {
 
 	t.Run("removes non-empty container with force", func(t *testing.T) {
 		slug := "force-test"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', ?, 'Force Test', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 
 		// Get container UUID and ID
 		var containerUUID, containerID string
-		database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = ?`, slug).Scan(&containerUUID, &containerID)
+		_ = database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = ?`, slug).Scan(&containerUUID, &containerID)
 
 		// Add tasks to the container
 		for i := 1; i <= 3; i++ {
-			database.Exec(`
+			_, _ = database.Exec(`
 				INSERT INTO tasks (id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 				VALUES ('', ?, 'Task', ?, 'open', 2, ?, ?, 1)
 			`, "task-"+string(rune('0'+i)), containerUUID, actorUUID, actorUUID)
@@ -125,13 +125,13 @@ func TestRmdir(t *testing.T) {
 
 		// Verify container deleted
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid = ?`, containerUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid = ?`, containerUUID).Scan(&count)
 		if count != 0 {
 			t.Error("Container should be deleted with force")
 		}
 
 		// Verify tasks deleted
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE project_uuid = ?`, containerUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE project_uuid = ?`, containerUUID).Scan(&count)
 		if count != 0 {
 			t.Error("Tasks should be deleted with container")
 		}
@@ -141,21 +141,21 @@ func TestRmdir(t *testing.T) {
 	})
 
 	t.Run("removes container with child containers when forced", func(t *testing.T) {
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', 'parent', 'Parent', ?, ?, 1)
 		`, actorUUID, actorUUID)
 
 		var parentUUID, parentID string
-		database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = 'parent'`).Scan(&parentUUID, &parentID)
+		_ = database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = 'parent'`).Scan(&parentUUID, &parentID)
 
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', 'child', 'Child', ?, ?, ?, 1)
 		`, parentUUID, actorUUID, actorUUID)
 
 		var childUUID string
-		database.QueryRow(`SELECT uuid FROM containers WHERE slug = 'child'`).Scan(&childUUID)
+		_ = database.QueryRow(`SELECT uuid FROM containers WHERE slug = 'child'`).Scan(&childUUID)
 
 		// Remove parent with force
 		rmdirForce = true
@@ -167,7 +167,7 @@ func TestRmdir(t *testing.T) {
 
 		// Verify both containers deleted
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid IN (?, ?)`, parentUUID, childUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid IN (?, ?)`, parentUUID, childUUID).Scan(&count)
 		if count != 0 {
 			t.Error("Both parent and child containers should be deleted")
 		}
@@ -178,13 +178,13 @@ func TestRmdir(t *testing.T) {
 
 	t.Run("logs container.deleted event", func(t *testing.T) {
 		slug := "event-test"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', ?, 'Event Test', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 
 		var containerUUID, containerID string
-		database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = ?`, slug).Scan(&containerUUID, &containerID)
+		_ = database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = ?`, slug).Scan(&containerUUID, &containerID)
 
 		// Remove container
 		rmdirForce = false
@@ -195,7 +195,7 @@ func TestRmdir(t *testing.T) {
 
 		// Verify event logged
 		var eventCount int
-		database.QueryRow(`
+		_ = database.QueryRow(`
 			SELECT COUNT(*) FROM event_log
 			WHERE resource_type = 'container' AND resource_uuid = ? AND event_type = 'container.deleted'
 		`, containerUUID).Scan(&eventCount)
@@ -206,22 +206,22 @@ func TestRmdir(t *testing.T) {
 
 		// Verify event has payload
 		var payload *string
-		database.QueryRow(`SELECT payload FROM event_log WHERE event_type = 'container.deleted' AND resource_uuid = ?`, containerUUID).Scan(&payload)
+		_ = database.QueryRow(`SELECT payload FROM event_log WHERE event_type = 'container.deleted' AND resource_uuid = ?`, containerUUID).Scan(&payload)
 		if payload == nil {
 			t.Error("Expected event payload, got nil")
 		}
 	})
 
 	t.Run("fails to remove container with child containers without force", func(t *testing.T) {
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', 'parent-nf', 'Parent No Force', ?, ?, 1)
 		`, actorUUID, actorUUID)
 
 		var parentUUID, parentID string
-		database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = 'parent-nf'`).Scan(&parentUUID, &parentID)
+		_ = database.QueryRow(`SELECT uuid, id FROM containers WHERE slug = 'parent-nf'`).Scan(&parentUUID, &parentID)
 
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('', 'child-nf', 'Child No Force', ?, ?, ?, 1)
 		`, parentUUID, actorUUID, actorUUID)
@@ -235,7 +235,7 @@ func TestRmdir(t *testing.T) {
 
 		// Verify container still exists
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid = ?`, parentUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM containers WHERE uuid = ?`, parentUUID).Scan(&count)
 		if count != 1 {
 			t.Error("Container should still exist after failed removal")
 		}

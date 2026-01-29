@@ -167,7 +167,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 		err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &archivedAt)
 		if err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, fmt.Errorf("failed to scan container: %w", err)
 		}
 
@@ -183,7 +183,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 		child, err := buildTree(database, childPath, maxDepth, includeArchived, openOnly, currentDepth+1)
 		if err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 
@@ -193,7 +193,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 		root.Children = append(root.Children, &node)
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Query tasks at this level
 	if parentUUID != nil || path == "" {
@@ -232,7 +232,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt, &deletedAt,
 				&requestedBy, &assignedProject, &acknowledgedAt, &resolution)
 			if err != nil {
-				taskRows.Close()
+				_ = taskRows.Close()
 				return nil, fmt.Errorf("failed to scan task: %w", err)
 			}
 
@@ -264,7 +264,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 				tasks = append(tasks, &node)
 			}
 		}
-		taskRows.Close()
+		_ = taskRows.Close()
 
 		// Recursively check if all children (containers + tasks) are "done"
 		// A container is "all done" if:

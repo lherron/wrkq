@@ -52,7 +52,7 @@ func ServeDaemon(opts DaemonOptions) error {
 	}
 
 	if err := database.RequiresMigrationError(); err != nil {
-		database.Close()
+		_ = database.Close()
 		return err
 	}
 
@@ -75,7 +75,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		_ = os.Remove(opts.Unix)
 		listener, err := net.Listen("unix", opts.Unix)
 		if err != nil {
-			database.Close()
+			_ = database.Close()
 			return fmt.Errorf("failed to listen on unix socket: %w", err)
 		}
 		defer func() { _ = listener.Close() }()
@@ -889,7 +889,7 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var comments []map[string]interface{}
 	for rows.Next() {
@@ -1625,11 +1625,11 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	}
 
 	var createdBySlug, updatedBySlug string
-	database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-	database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+	_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
+	_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
 
 	var projectID string
-	database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
+	_ = database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
 	var parentTaskID *string
 	if parentTaskUUID != nil {
@@ -1692,12 +1692,12 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		for rows.Next() {
 			var comment Comment
 			if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &comment.ActorSlug, &comment.ActorRole); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, fmt.Errorf("failed to scan comment: %w", err)
 			}
 			comments = append(comments, comment)
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		if len(comments) > 0 {
 			task.Comments = comments

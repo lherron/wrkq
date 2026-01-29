@@ -148,7 +148,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Dry run handling
 	if setDryRun {
 		for _, ref := range taskRefs {
-			fmt.Fprintf(cmd.OutOrStdout(), "Would update task %s: %+v\n", ref, fields)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would update task %s: %+v\n", ref, fields)
 		}
 		return nil
 	}

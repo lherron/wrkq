@@ -442,7 +442,7 @@ func TestCreate(t *testing.T) {
 
 	basePath := filepath.Join(tmpDir, "base.json")
 	baseData, _ := json.MarshalIndent(base, "", "  ")
-	os.WriteFile(basePath, baseData, 0644)
+	_ = os.WriteFile(basePath, baseData, 0644)
 
 	// Create target snapshot
 	target := &snapshot.Snapshot{
@@ -458,7 +458,7 @@ func TestCreate(t *testing.T) {
 
 	targetPath := filepath.Join(tmpDir, "target.json")
 	targetData, _ := json.MarshalIndent(target, "", "  ")
-	os.WriteFile(targetPath, targetData, 0644)
+	_ = os.WriteFile(targetPath, targetData, 0644)
 
 	// Create patch
 	patchPath := filepath.Join(tmpDir, "test.patch")
@@ -663,12 +663,12 @@ func TestRebase_NoCollision(t *testing.T) {
 	outPath := filepath.Join(tmpDir, "rebased.json")
 
 	oldBaseData, _ := json.MarshalIndent(oldBase, "", "  ")
-	os.WriteFile(oldBasePath, oldBaseData, 0644)
+	_ = os.WriteFile(oldBasePath, oldBaseData, 0644)
 
 	newBaseData, _ := json.MarshalIndent(newBase, "", "  ")
-	os.WriteFile(newBasePath, newBaseData, 0644)
+	_ = os.WriteFile(newBasePath, newBaseData, 0644)
 
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	// Rebase
 	result, err := Rebase(RebaseOptions{
@@ -752,12 +752,12 @@ func TestRebase_WithCollision(t *testing.T) {
 	outPath := filepath.Join(tmpDir, "rebased.json")
 
 	oldBaseData, _ := json.MarshalIndent(oldBase, "", "  ")
-	os.WriteFile(oldBasePath, oldBaseData, 0644)
+	_ = os.WriteFile(oldBasePath, oldBaseData, 0644)
 
 	newBaseData, _ := json.MarshalIndent(newBase, "", "  ")
-	os.WriteFile(newBasePath, newBaseData, 0644)
+	_ = os.WriteFile(newBasePath, newBaseData, 0644)
 
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	// Rebase
 	result, err := Rebase(RebaseOptions{
@@ -806,7 +806,7 @@ func TestSummarize_TextFormat(t *testing.T) {
 	}
 
 	patchPath := filepath.Join(tmpDir, "patch.json")
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	result, err := Summarize(SummarizeOptions{
 		PatchPath: patchPath,
@@ -841,7 +841,7 @@ func TestSummarize_MarkdownFormat(t *testing.T) {
 	}
 
 	patchPath := filepath.Join(tmpDir, "patch.json")
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	result, err := Summarize(SummarizeOptions{
 		PatchPath: patchPath,
@@ -869,7 +869,7 @@ func TestSummarize_JSONFormat(t *testing.T) {
 	}
 
 	patchPath := filepath.Join(tmpDir, "patch.json")
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	result, err := Summarize(SummarizeOptions{
 		PatchPath: patchPath,
@@ -912,7 +912,7 @@ func TestSummarize_WithBase(t *testing.T) {
 
 	basePath := filepath.Join(tmpDir, "base.json")
 	baseData, _ := json.MarshalIndent(base, "", "  ")
-	os.WriteFile(basePath, baseData, 0644)
+	_ = os.WriteFile(basePath, baseData, 0644)
 
 	// Patch updates the existing task
 	p := Patch{
@@ -920,7 +920,7 @@ func TestSummarize_WithBase(t *testing.T) {
 	}
 
 	patchPath := filepath.Join(tmpDir, "patch.json")
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	result, err := Summarize(SummarizeOptions{
 		PatchPath: patchPath,
@@ -951,7 +951,7 @@ func TestSummarize_EmptyPatch(t *testing.T) {
 	p := Patch{}
 
 	patchPath := filepath.Join(tmpDir, "patch.json")
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	result, err := Summarize(SummarizeOptions{
 		PatchPath: patchPath,
@@ -978,7 +978,7 @@ func TestSummarize_DeterministicOrder(t *testing.T) {
 	}
 
 	patchPath := filepath.Join(tmpDir, "patch.json")
-	p.Save(patchPath)
+	_ = p.Save(patchPath)
 
 	// Run twice and compare
 	result1, _ := Summarize(SummarizeOptions{PatchPath: patchPath, Format: "json"})

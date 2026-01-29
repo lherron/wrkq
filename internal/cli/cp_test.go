@@ -20,7 +20,7 @@ func TestCpCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Initialize database
 	if err := database.Migrate(); err != nil {
@@ -83,7 +83,7 @@ func TestCpCommand(t *testing.T) {
 
 		// Verify task exists in destination
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ? AND project_uuid = ?`, result.DestUUID, destUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ? AND project_uuid = ?`, result.DestUUID, destUUID).Scan(&count)
 		if count != 1 {
 			t.Errorf("Expected 1 task in destination, got %d", count)
 		}
@@ -91,7 +91,7 @@ func TestCpCommand(t *testing.T) {
 		// Verify metadata copied
 		var title, state string
 		var priority int
-		database.QueryRow(`SELECT title, state, priority FROM tasks WHERE uuid = ?`, result.DestUUID).Scan(&title, &state, &priority)
+		_ = database.QueryRow(`SELECT title, state, priority FROM tasks WHERE uuid = ?`, result.DestUUID).Scan(&title, &state, &priority)
 		if title != "Source Task" {
 			t.Errorf("Expected title 'Source Task', got '%s'", title)
 		}
@@ -127,14 +127,14 @@ func TestCpCommand(t *testing.T) {
 
 		// Verify attachment metadata copied
 		var attCount int
-		database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&attCount)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&attCount)
 		if attCount != 1 {
 			t.Errorf("Expected 1 attachment in destination, got %d", attCount)
 		}
 
 		// Verify new relative path generated for destination task
 		var relativePath, filename string
-		database.QueryRow(`SELECT relative_path, filename FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&relativePath, &filename)
+		_ = database.QueryRow(`SELECT relative_path, filename FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&relativePath, &filename)
 		expectedPath := fmt.Sprintf("tasks/%s/%s", result.DestUUID, filename)
 		if relativePath != expectedPath {
 			t.Errorf("Expected new relative path %s, got %s", expectedPath, relativePath)
@@ -144,12 +144,12 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy with --shallow skips attachments", func(t *testing.T) {
 		// Create task with attachments
 		taskUUID := "task-shallow"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task-shallow', 'Shallow Task', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'file.pdf', 'tasks/task-shallow/file.pdf', 'application/pdf', 500)
 		`, taskUUID)
@@ -163,7 +163,7 @@ func TestCpCommand(t *testing.T) {
 
 		// Verify no attachments copied
 		var attCount int
-		database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&attCount)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, result.DestUUID).Scan(&attCount)
 		if attCount != 0 {
 			t.Errorf("Expected 0 attachments with --shallow, got %d", attCount)
 		}
@@ -175,14 +175,14 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy with --overwrite replaces existing", func(t *testing.T) {
 		// Create source task
 		sourceUUID := "source-overwrite"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, description, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'overwrite-source', 'Source Version', ?, 'open', 1, 'Original description', ?, ?, 1)
 		`, sourceUUID, containerUUID, actorUUID, actorUUID)
 
 		// Create existing task in destination with same slug
 		existingUUID := "existing-task"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, description, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'overwrite-source', 'Existing Version', ?, 'completed', 3, 'Old description', ?, ?, 1)
 		`, existingUUID, destUUID, actorUUID, actorUUID)
@@ -208,7 +208,7 @@ func TestCpCommand(t *testing.T) {
 
 		// Verify friendly ID preserved (query for actual ID)
 		var existingID string
-		database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", existingUUID).Scan(&existingID)
+		_ = database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", existingUUID).Scan(&existingID)
 		if result.DestID != existingID {
 			t.Errorf("Expected existing ID %s, got %s", existingID, result.DestID)
 		}
@@ -216,7 +216,7 @@ func TestCpCommand(t *testing.T) {
 		// Verify content updated
 		var title, description string
 		var priority int
-		database.QueryRow(`SELECT title, priority, description FROM tasks WHERE uuid = ?`, existingUUID).Scan(&title, &priority, &description)
+		_ = database.QueryRow(`SELECT title, priority, description FROM tasks WHERE uuid = ?`, existingUUID).Scan(&title, &priority, &description)
 		if title != "Source Version" {
 			t.Errorf("Expected updated title 'Source Version', got '%s'", title)
 		}
@@ -234,7 +234,7 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy resets timestamps", func(t *testing.T) {
 		// Create completed task with completed_at timestamp
 		sourceUUID := "completed-task"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, completed_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'completed', 'Completed Task', ?, 'completed', 2, '2025-01-01T00:00:00Z', ?, ?, 1)
 		`, sourceUUID, containerUUID, actorUUID, actorUUID)
@@ -247,7 +247,7 @@ func TestCpCommand(t *testing.T) {
 
 		// Verify completed_at is null (even though source was completed)
 		var completedAt *string
-		database.QueryRow(`SELECT completed_at FROM tasks WHERE uuid = ?`, result.DestUUID).Scan(&completedAt)
+		_ = database.QueryRow(`SELECT completed_at FROM tasks WHERE uuid = ?`, result.DestUUID).Scan(&completedAt)
 		if completedAt != nil {
 			t.Errorf("Expected completed_at to be null, got %v", *completedAt)
 		}
@@ -258,7 +258,7 @@ func TestCpCommand(t *testing.T) {
 
 	t.Run("copy preserves labels and dates", func(t *testing.T) {
 		sourceUUID := "task-with-metadata"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, labels, start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'metadata', 'Task with Metadata', ?, 'open', 2, 'bug,urgent', '2025-01-15T00:00:00Z', '2025-01-20T00:00:00Z', ?, ?, 1)
 		`, sourceUUID, containerUUID, actorUUID, actorUUID)
@@ -269,7 +269,7 @@ func TestCpCommand(t *testing.T) {
 		}
 
 		var labels, startAt, dueAt *string
-		database.QueryRow(`SELECT labels, start_at, due_at FROM tasks WHERE uuid = ?`, result.DestUUID).Scan(&labels, &startAt, &dueAt)
+		_ = database.QueryRow(`SELECT labels, start_at, due_at FROM tasks WHERE uuid = ?`, result.DestUUID).Scan(&labels, &startAt, &dueAt)
 
 		if labels == nil || *labels != "bug,urgent" {
 			t.Errorf("Expected labels 'bug,urgent', got %v", labels)
@@ -285,7 +285,7 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy with etag check", func(t *testing.T) {
 		sourceUUID := "etag-task"
 		// Include explicit id to avoid tasks_ai_friendly trigger
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
 			VALUES (?, 'T-99992', 'etag-task', 'ETag Task', ?, 'open', 2, 5, ?, ?)
 		`, sourceUUID, containerUUID, actorUUID, actorUUID)
@@ -337,14 +337,14 @@ func TestCpCommandEventLogging(t *testing.T) {
 	`, containerUUID, actorUUID, actorUUID)
 
 	destUUID := "dest-container"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'dst', 'Dest', ?, ?, 1)
 	`, destUUID, actorUUID, actorUUID)
 
 	// Create source task
 	sourceUUID := "source-task"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'task', 'Task', ?, 'open', 2, ?, ?, 1)
 	`, sourceUUID, containerUUID, actorUUID, actorUUID)
@@ -357,7 +357,7 @@ func TestCpCommandEventLogging(t *testing.T) {
 
 	// Verify event logged
 	var eventCount int
-	database.QueryRow(`
+	_ = database.QueryRow(`
 		SELECT COUNT(*) FROM event_log
 		WHERE resource_type = 'task' AND resource_uuid = ? AND event_type = 'task.copied'
 	`, result.DestUUID).Scan(&eventCount)
@@ -368,7 +368,7 @@ func TestCpCommandEventLogging(t *testing.T) {
 
 	// Verify payload contains source info
 	var payload *string
-	database.QueryRow(`SELECT payload FROM event_log WHERE event_type = 'task.copied' AND resource_uuid = ?`, result.DestUUID).Scan(&payload)
+	_ = database.QueryRow(`SELECT payload FROM event_log WHERE event_type = 'task.copied' AND resource_uuid = ?`, result.DestUUID).Scan(&payload)
 	if payload == nil {
 		t.Error("Expected event payload, got nil")
 	}

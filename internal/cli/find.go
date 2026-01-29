@@ -407,7 +407,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	if err != nil {
 		return nil, false, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results := []findResult{}
 	for rows.Next() {
@@ -557,7 +557,7 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 	if err != nil {
 		return nil, false, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results := []findResult{}
 	for rows.Next() {

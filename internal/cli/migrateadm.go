@@ -58,7 +58,7 @@ func runMigrateAdm(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open database: %w", err))
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Handle --status flag
 	if migrateStatus {

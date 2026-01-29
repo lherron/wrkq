@@ -13,15 +13,15 @@ func TestRmPurge(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	attachDir := filepath.Join(tmpDir, "attachments")
-	os.MkdirAll(attachDir, 0755)
+	_ = os.MkdirAll(attachDir, 0755)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	// Create test actor
 	actorUUID := "test-actor-uuid"
@@ -45,14 +45,14 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("purge deletes task from database", func(t *testing.T) {
 		taskUUID := "purge-test-1"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'purge-1', 'Purge Test 1', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Verify task exists
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
 		if count != 1 {
 			t.Fatal("Task should exist before purge")
 		}
@@ -65,7 +65,7 @@ func TestRmPurge(t *testing.T) {
 		}
 
 		// Verify task deleted
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
 		if count != 0 {
 			t.Error("Task should be deleted after purge")
 		}
@@ -75,7 +75,7 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("soft delete archives task without removing", func(t *testing.T) {
 		taskUUID := "archive-test"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'archive-1', 'Archive Test', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
@@ -89,21 +89,21 @@ func TestRmPurge(t *testing.T) {
 
 		// Verify task still exists
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
 		if count != 1 {
 			t.Error("Task should still exist after soft delete")
 		}
 
 		// Verify state is archived
 		var state string
-		database.QueryRow(`SELECT state FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state)
+		_ = database.QueryRow(`SELECT state FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state)
 		if state != "archived" {
 			t.Errorf("Expected state 'archived', got '%s'", state)
 		}
 
 		// Verify archived_at is set
 		var archivedAt *string
-		database.QueryRow(`SELECT archived_at FROM tasks WHERE uuid = ?`, taskUUID).Scan(&archivedAt)
+		_ = database.QueryRow(`SELECT archived_at FROM tasks WHERE uuid = ?`, taskUUID).Scan(&archivedAt)
 		if archivedAt == nil {
 			t.Error("Expected archived_at to be set")
 		}
@@ -130,7 +130,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Verify attachment exists
 		var attCount int
-		database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, taskUUID).Scan(&attCount)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, taskUUID).Scan(&attCount)
 		if attCount != 1 {
 			t.Fatal("Attachment should exist before purge")
 		}
@@ -143,7 +143,7 @@ func TestRmPurge(t *testing.T) {
 		}
 
 		// Verify attachments deleted (CASCADE)
-		database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, taskUUID).Scan(&attCount)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM attachments WHERE task_uuid = ?`, taskUUID).Scan(&attCount)
 		if attCount != 0 {
 			t.Error("Attachments should be deleted via CASCADE after purge")
 		}
@@ -153,20 +153,20 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("purge deletes attachment files from filesystem", func(t *testing.T) {
 		taskUUID := "task-with-files"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task-files', 'Task with Files', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Create attachment file
 		taskDir := filepath.Join(attachDir, "tasks", taskUUID)
-		os.MkdirAll(taskDir, 0755)
+		_ = os.MkdirAll(taskDir, 0755)
 		testFile := filepath.Join(taskDir, "test.txt")
-		os.WriteFile(testFile, []byte("test content"), 0644)
+		_ = os.WriteFile(testFile, []byte("test content"), 0644)
 
 		// Add attachment metadata
 		relativePath := "tasks/" + taskUUID + "/test.txt"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'test.txt', ?, 'text/plain', 12)
 		`, taskUUID, relativePath)
@@ -206,14 +206,14 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("purge handles missing files gracefully", func(t *testing.T) {
 		taskUUID := "task-missing-files"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task-missing', 'Task Missing Files', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment metadata but don't create file
 		relativePath := "tasks/" + taskUUID + "/missing.txt"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'missing.txt', ?, 'text/plain', 100)
 		`, taskUUID, relativePath)
@@ -227,7 +227,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Verify task deleted
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
 		if count != 0 {
 			t.Error("Task should be deleted despite missing files")
 		}
@@ -237,7 +237,7 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("purge logs event before deletion", func(t *testing.T) {
 		taskUUID := "event-test"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'event-task', 'Event Test', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
@@ -251,7 +251,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Verify event logged
 		var eventCount int
-		database.QueryRow(`
+		_ = database.QueryRow(`
 			SELECT COUNT(*) FROM event_log
 			WHERE resource_type = 'task' AND resource_uuid = ? AND event_type = 'task.purged'
 		`, taskUUID).Scan(&eventCount)
@@ -262,7 +262,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Verify event has payload with slug
 		var payload *string
-		database.QueryRow(`SELECT payload FROM event_log WHERE event_type = 'task.purged' AND resource_uuid = ?`, taskUUID).Scan(&payload)
+		_ = database.QueryRow(`SELECT payload FROM event_log WHERE event_type = 'task.purged' AND resource_uuid = ?`, taskUUID).Scan(&payload)
 		if payload == nil {
 			t.Error("Expected event payload, got nil")
 		}
@@ -272,7 +272,7 @@ func TestRmPurge(t *testing.T) {
 
 	t.Run("soft delete logs task.updated event", func(t *testing.T) {
 		taskUUID := "soft-delete-event"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'soft-event', 'Soft Delete Event', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
@@ -286,7 +286,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Verify event logged (store uses task.archived for archive operations)
 		var eventCount int
-		database.QueryRow(`
+		_ = database.QueryRow(`
 			SELECT COUNT(*) FROM event_log
 			WHERE resource_type = 'task' AND resource_uuid = ? AND event_type = 'task.archived'
 		`, taskUUID).Scan(&eventCount)
@@ -299,14 +299,14 @@ func TestRmPurge(t *testing.T) {
 	t.Run("purge increments etag before deletion", func(t *testing.T) {
 		taskUUID := "etag-purge"
 		// Include explicit id to avoid tasks_ai_friendly trigger
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
 			VALUES (?, 'T-99991', 'etag-purge', 'ETag Purge', ?, 'open', 2, 3, ?, ?)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Get initial etag
 		var initialEtag int
-		database.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&initialEtag)
+		_ = database.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&initialEtag)
 		if initialEtag != 3 {
 			t.Fatalf("Expected initial etag 3, got %d", initialEtag)
 		}
@@ -320,7 +320,7 @@ func TestRmPurge(t *testing.T) {
 
 		// Task should be deleted (can't check etag after deletion)
 		var count int
-		database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
+		_ = database.QueryRow(`SELECT COUNT(*) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&count)
 		if count != 0 {
 			t.Error("Task should be deleted")
 		}
@@ -331,7 +331,7 @@ func TestRmPurge(t *testing.T) {
 	t.Run("soft delete increments etag", func(t *testing.T) {
 		taskUUID := "etag-archive"
 		// Include explicit id to avoid tasks_ai_friendly trigger (which would cause extra etag increment)
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_by_actor_uuid, updated_by_actor_uuid)
 			VALUES (?, 'T-99990', 'etag-archive', 'ETag Archive', ?, 'open', 2, 5, ?, ?)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
@@ -346,7 +346,7 @@ func TestRmPurge(t *testing.T) {
 		// Verify etag incremented (5 -> 6 from store's explicit increment, then trigger adds another -> 7)
 		// Note: The trigger fires and does etag = OLD.etag + 1, but this uses pre-UPDATE value
 		var newEtag int
-		database.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&newEtag)
+		_ = database.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&newEtag)
 		if newEtag != 6 {
 			t.Errorf("Expected etag 6 after archive, got %d", newEtag)
 		}
@@ -355,20 +355,20 @@ func TestRmPurge(t *testing.T) {
 	t.Run("result contains correct metadata", func(t *testing.T) {
 		taskUUID := "result-test"
 		// Include explicit id to avoid tasks_ai_friendly trigger
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'T-00010', 'result-task', 'Result Test', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment
 		taskDir := filepath.Join(attachDir, "tasks", taskUUID)
-		os.MkdirAll(taskDir, 0755)
+		_ = os.MkdirAll(taskDir, 0755)
 		testFile := filepath.Join(taskDir, "data.bin")
 		testData := make([]byte, 1024) // 1KB
-		os.WriteFile(testFile, testData, 0644)
+		_ = os.WriteFile(testFile, testData, 0644)
 
 		relativePath := "tasks/" + taskUUID + "/data.bin"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'data.bin', ?, 'application/octet-stream', 1024)
 		`, taskUUID, relativePath)
@@ -408,37 +408,37 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	attachDir := filepath.Join(tmpDir, "attachments")
-	os.MkdirAll(attachDir, 0755)
+	_ = os.MkdirAll(attachDir, 0755)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	actorUUID := "test-actor"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test', 'Test', 'human')
 	`, actorUUID)
 
 	containerUUID := "test-container"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'proj', 'Project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 
 	taskUUID := "multi-attach-task"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'multi', 'Multi Attachments', ?, 'open', 2, ?, ?, 1)
 	`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 	// Create multiple attachment files
 	taskDir := filepath.Join(attachDir, "tasks", taskUUID)
-	os.MkdirAll(taskDir, 0755)
+	_ = os.MkdirAll(taskDir, 0755)
 
 	files := []struct {
 		name string
@@ -453,11 +453,11 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 	for _, f := range files {
 		filePath := filepath.Join(taskDir, f.name)
 		data := make([]byte, f.size)
-		os.WriteFile(filePath, data, 0644)
+		_ = os.WriteFile(filePath, data, 0644)
 		totalSize += int64(f.size)
 
 		relativePath := "tasks/" + taskUUID + "/" + f.name
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, ?, ?, 'application/octet-stream', ?)
 		`, taskUUID, f.name, relativePath, f.size)

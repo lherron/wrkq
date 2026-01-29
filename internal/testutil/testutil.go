@@ -25,13 +25,13 @@ func TempDB(t *testing.T) (*sql.DB, string) {
 
 	// Run migrations
 	if err := database.Migrate(); err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
 	// Clean up on test completion
 	t.Cleanup(func() {
-		database.Close()
+		_ = database.Close()
 	})
 
 	return database.DB, dbPath

@@ -21,7 +21,7 @@ func setupTestDB(t *testing.T) *db.DB {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("failed to migrate db: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 

@@ -179,7 +179,7 @@ func BenchmarkTask_GetLabels(b *testing.B) {
 	task := &Task{Labels: labels}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		task.GetLabels()
+		_, _ = task.GetLabels()
 	}
 }
 
@@ -188,6 +188,6 @@ func BenchmarkTask_SetLabels(b *testing.B) {
 	task := &Task{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		task.SetLabels(labels)
+		_ = task.SetLabels(labels)
 	}
 }

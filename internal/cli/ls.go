@@ -120,7 +120,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				if err != nil {
 					return fmt.Errorf("failed to query containers: %w", err)
 				}
-				defer rows.Close()
+				defer func() { _ = rows.Close() }()
 
 				for rows.Next() {
 					var uuid, id, slug string
@@ -227,7 +227,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 					var uuid, id, slug string
 					var title *string
 					if err := rows.Scan(&uuid, &id, &slug, &title); err != nil {
-						rows.Close()
+						_ = rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
 
@@ -250,7 +250,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						Path:  childPath,
 					})
 				}
-				rows.Close()
+				_ = rows.Close()
 			}
 
 			// List tasks
@@ -295,7 +295,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 					var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
 					if err := rows.Scan(&id, &slug, &title, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
 						&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus); err != nil {
-						rows.Close()
+						_ = rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
 
@@ -324,7 +324,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						RunStatus: runStatus,
 					})
 				}
-				rows.Close()
+				_ = rows.Close()
 			}
 		}
 	}
@@ -379,9 +379,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if lsNul {
 			delimiter = "\x00"
 		}
-		fmt.Fprint(cmd.OutOrStdout(), strings.Join(paths, delimiter))
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), strings.Join(paths, delimiter))
 		if len(paths) > 0 && !lsNul {
-			fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
 		}
 		return nil
 	}

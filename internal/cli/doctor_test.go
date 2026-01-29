@@ -162,9 +162,9 @@ func TestDoctorSchemaChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	t.Run("all required tables present", func(t *testing.T) {
 		results := checkSchemaAdm(database)
@@ -215,26 +215,26 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	// Create test data
 	actorUUID := "test-actor"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test', 'Test', 'human')
 	`, actorUUID)
 
 	containerUUID := "test-container"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'proj', 'Project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 
 	t.Run("no orphaned tasks in healthy database", func(t *testing.T) {
 		taskUUID := "valid-task"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task1', 'Task 1', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
@@ -258,11 +258,11 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 
 	t.Run("orphaned tasks detected", func(t *testing.T) {
 		// Temporarily disable foreign keys to create orphaned task
-		database.Exec("PRAGMA foreign_keys = OFF")
-		defer database.Exec("PRAGMA foreign_keys = ON")
+		_, _ = database.Exec("PRAGMA foreign_keys = OFF")
+		defer func() { _, _ = database.Exec("PRAGMA foreign_keys = ON") }()
 
 		// Create task with invalid project_uuid
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('orphan-task-uuid', 'orphan', 'Orphaned', 'nonexistent-uuid', 'open', 2, ?, ?, 1)
 		`, actorUUID, actorUUID)
@@ -281,17 +281,17 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 		}
 
 		// Cleanup
-		database.Exec(`DELETE FROM tasks WHERE slug = 'orphan'`)
+		_, _ = database.Exec(`DELETE FROM tasks WHERE slug = 'orphan'`)
 	})
 
 	t.Run("no orphaned attachments in healthy database", func(t *testing.T) {
 		taskUUID := "task-with-att"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task-att', 'Task Att', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'file.txt', 'tasks/task-with-att/file.txt', 'text/plain', 100)
 		`, taskUUID)
@@ -315,11 +315,11 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 
 	t.Run("orphaned attachments detected", func(t *testing.T) {
 		// Temporarily disable foreign keys to create orphaned attachment
-		database.Exec("PRAGMA foreign_keys = OFF")
-		defer database.Exec("PRAGMA foreign_keys = ON")
+		_, _ = database.Exec("PRAGMA foreign_keys = OFF")
+		defer func() { _, _ = database.Exec("PRAGMA foreign_keys = ON") }()
 
 		// Create attachment with invalid task_uuid
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES ('nonexistent-task', 'orphan.txt', 'tasks/orphan/file.txt', 'text/plain', 50)
 		`)
@@ -338,20 +338,20 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 		}
 
 		// Cleanup
-		database.Exec(`DELETE FROM attachments WHERE task_uuid = 'nonexistent-task'`)
+		_, _ = database.Exec(`DELETE FROM attachments WHERE task_uuid = 'nonexistent-task'`)
 	})
 
 	t.Run("duplicate slugs detected", func(t *testing.T) {
 		// Drop unique index to allow duplicate slugs
-		database.Exec("DROP INDEX IF EXISTS tasks_unique_slug_in_container")
-		defer database.Exec("CREATE UNIQUE INDEX tasks_unique_slug_in_container ON tasks(project_uuid, slug)")
+		_, _ = database.Exec("DROP INDEX IF EXISTS tasks_unique_slug_in_container")
+		defer func() { _, _ = database.Exec("CREATE UNIQUE INDEX tasks_unique_slug_in_container ON tasks(project_uuid, slug)") }()
 
 		// Create two tasks with same slug in same container
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('dup-task-1-uuid', 'duplicate', 'Dup 1', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES ('dup-task-2-uuid', 'duplicate', 'Dup 2', ?, 'open', 2, ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
@@ -370,7 +370,7 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 		}
 
 		// Cleanup
-		database.Exec(`DELETE FROM tasks WHERE slug = 'duplicate'`)
+		_, _ = database.Exec(`DELETE FROM tasks WHERE slug = 'duplicate'`)
 	})
 
 	t.Run("no duplicate slugs in healthy database", func(t *testing.T) {
@@ -442,24 +442,24 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	t.Run("attachment count and size reported", func(t *testing.T) {
 		// Create test data
 		actorUUID := "test-actor"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO actors (uuid, slug, display_name, role)
 			VALUES (?, 'test', 'Test', 'human')
 		`, actorUUID)
 
 		containerUUID := "test-container"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'proj', 'Project', ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
 
 		taskUUID := "task-with-att"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task', 'Task', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'file.txt', 'tasks/task/file.txt', 'text/plain', 1024)
 		`, taskUUID)
@@ -484,9 +484,9 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	t.Run("orphaned directories detected", func(t *testing.T) {
 		// Create orphaned directory
 		tasksDir := filepath.Join(attachDir, "tasks")
-		os.MkdirAll(tasksDir, 0755)
+		_ = os.MkdirAll(tasksDir, 0755)
 		orphanDir := filepath.Join(tasksDir, "orphaned-uuid-123")
-		os.MkdirAll(orphanDir, 0755)
+		_ = os.MkdirAll(orphanDir, 0755)
 
 		results := checkAttachmentsAdm(database, attachDir)
 
@@ -511,7 +511,7 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	t.Run("no orphaned directories in clean database", func(t *testing.T) {
 		// Clean attachments directory
 		cleanDir := filepath.Join(tmpDir, "clean-attachments")
-		os.MkdirAll(cleanDir, 0755)
+		_ = os.MkdirAll(cleanDir, 0755)
 
 		results := checkAttachmentsAdm(database, cleanDir)
 
@@ -539,19 +539,19 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	// Create test data
 	actorUUID := "test-actor"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test', 'Test', 'human')
 	`, actorUUID)
 
 	containerUUID := "test-container"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'proj', 'Project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
@@ -563,7 +563,7 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 			state = "archived"
 		}
 		taskUUID := fmt.Sprintf("task-%d-uuid", i)
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, ?, ?, ?, ?, ?, 2, ?, ?, 1)
 		`, taskUUID, "T-"+string(rune('0'+i)), "task-"+string(rune('0'+i)), "Task "+string(rune('0'+i)), containerUUID, state, actorUUID, actorUUID)
@@ -629,15 +629,15 @@ func TestDoctorReportGeneration(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	attachDir := filepath.Join(tmpDir, "attachments")
-	os.MkdirAll(attachDir, 0755)
+	_ = os.MkdirAll(attachDir, 0755)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	t.Run("report structure is valid", func(t *testing.T) {
 		report := &doctorReportAdm{

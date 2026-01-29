@@ -97,19 +97,19 @@ func removeContainer(cmd *cobra.Command, database *db.DB, actorUUID, path string
 
 	// Confirm if force is used and container is not empty
 	if rmdirForce && !rmdirYes && (taskCount > 0 || childCount > 0) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
-		fmt.Fprintf(cmd.ErrOrStderr(), "  - Container: %s (%s)\n", id, path)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - Container: %s (%s)\n", id, path)
 		if taskCount > 0 {
-			fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", taskCount)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", taskCount)
 		}
 		if childCount > 0 {
-			fmt.Fprintf(cmd.ErrOrStderr(), "  - %d child container(s) (and all their contents)\n", childCount)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %d child container(s) (and all their contents)\n", childCount)
 		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "\nThis action CANNOT be undone.\n\n")
-		fmt.Fprintf(cmd.ErrOrStderr(), "Are you sure? (yes/no): ")
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\nThis action CANNOT be undone.\n\n")
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Are you sure? (yes/no): ")
 
 		var response string
-		fmt.Fscanln(cmd.InOrStdin(), &response)
+		_, _ = fmt.Fscanln(cmd.InOrStdin(), &response)
 		if response != "yes" {
 			return fmt.Errorf("aborted")
 		}
@@ -120,7 +120,7 @@ func removeContainer(cmd *cobra.Command, database *db.DB, actorUUID, path string
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// If force is set, delete tasks and child containers first
 	if rmdirForce {
@@ -161,6 +161,6 @@ func removeContainer(cmd *cobra.Command, database *db.DB, actorUUID, path string
 		return fmt.Errorf("failed to commit: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "✓ Removed: %s (%s)\n", id, path)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Removed: %s (%s)\n", id, path)
 	return nil
 }

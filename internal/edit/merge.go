@@ -54,7 +54,7 @@ func Merge3Way(base, current, edited *TaskDocument) *MergeResult {
 	currentPrio := fmt.Sprintf("%d", current.Priority)
 	editedPrio := fmt.Sprintf("%d", edited.Priority)
 	mergedPrio := mergeField("priority", basePrio, currentPrio, editedPrio, result)
-	fmt.Sscanf(mergedPrio, "%d", &result.Merged.Priority)
+	_, _ = fmt.Sscanf(mergedPrio, "%d", &result.Merged.Priority)
 
 	// Merge due_at
 	result.Merged.DueAt = mergeField(

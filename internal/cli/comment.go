@@ -75,7 +75,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Determine sort field and direction
 	sortField := commentLsSort
@@ -216,7 +216,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 
 	// Output next_cursor to stderr in porcelain mode
 	if commentLsPorcelain && nextCursorStr != "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Output

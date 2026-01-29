@@ -13,7 +13,7 @@ func TestSequenceDriftDetectAndFix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("failed to migrate database: %v", err)

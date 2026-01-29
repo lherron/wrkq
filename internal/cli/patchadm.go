@@ -56,17 +56,17 @@ func init() {
 	patchCreateCmd.Flags().StringVar(&patchCreateOut, "out", "", "Output patch file (required)")
 	patchCreateCmd.Flags().BoolVar(&patchCreateAllowNonCanonical, "allow-noncanonical", false, "Skip canonicalization check")
 	patchCreateCmd.Flags().BoolVar(&patchCreateJSON, "json", false, "Output result as JSON")
-	patchCreateCmd.MarkFlagRequired("from")
-	patchCreateCmd.MarkFlagRequired("to")
-	patchCreateCmd.MarkFlagRequired("out")
+	_ = patchCreateCmd.MarkFlagRequired("from")
+	_ = patchCreateCmd.MarkFlagRequired("to")
+	_ = patchCreateCmd.MarkFlagRequired("out")
 
 	// Validate flags
 	patchValidateCmd.Flags().StringVar(&patchValidatePatch, "patch", "", "Patch file (required)")
 	patchValidateCmd.Flags().StringVar(&patchValidateBase, "base", "", "Base snapshot file (required)")
 	patchValidateCmd.Flags().BoolVar(&patchValidateStrict, "strict", false, "Exit 4 on any violation")
 	patchValidateCmd.Flags().BoolVar(&patchValidateJSON, "json", false, "Output result as JSON")
-	patchValidateCmd.MarkFlagRequired("patch")
-	patchValidateCmd.MarkFlagRequired("base")
+	_ = patchValidateCmd.MarkFlagRequired("patch")
+	_ = patchValidateCmd.MarkFlagRequired("base")
 
 	// Apply flags
 	patchApplyCmd.Flags().StringVar(&patchApplyPatch, "patch", "", "Patch file (required)")
@@ -74,7 +74,7 @@ func init() {
 	patchApplyCmd.Flags().BoolVar(&patchApplyDryRun, "dry-run", false, "Validate without writing")
 	patchApplyCmd.Flags().BoolVar(&patchApplyStrict, "strict", false, "Enable strict validation")
 	patchApplyCmd.Flags().BoolVar(&patchApplyJSON, "json", false, "Output result as JSON")
-	patchApplyCmd.MarkFlagRequired("patch")
+	_ = patchApplyCmd.MarkFlagRequired("patch")
 
 	// Rebase flags
 	patchRebaseCmd.Flags().StringVar(&patchRebasePatch, "patch", "", "Patch file to rebase (required)")
@@ -83,16 +83,16 @@ func init() {
 	patchRebaseCmd.Flags().StringVar(&patchRebaseOut, "out", "", "Output rebased patch file (required)")
 	patchRebaseCmd.Flags().BoolVar(&patchRebaseStrictIDs, "strict-ids", false, "Fail on malformed friendly IDs")
 	patchRebaseCmd.Flags().BoolVar(&patchRebaseJSON, "json", false, "Output result as JSON")
-	patchRebaseCmd.MarkFlagRequired("patch")
-	patchRebaseCmd.MarkFlagRequired("old-base")
-	patchRebaseCmd.MarkFlagRequired("new-base")
-	patchRebaseCmd.MarkFlagRequired("out")
+	_ = patchRebaseCmd.MarkFlagRequired("patch")
+	_ = patchRebaseCmd.MarkFlagRequired("old-base")
+	_ = patchRebaseCmd.MarkFlagRequired("new-base")
+	_ = patchRebaseCmd.MarkFlagRequired("out")
 
 	// Summarize flags
 	patchSummarizeCmd.Flags().StringVar(&patchSummarizePatch, "patch", "", "Patch file to summarize (required)")
 	patchSummarizeCmd.Flags().StringVar(&patchSummarizeBase, "base", "", "Base snapshot for context (optional)")
 	patchSummarizeCmd.Flags().StringVar(&patchSummarizeFormat, "format", "text", "Output format: text, markdown, json")
-	patchSummarizeCmd.MarkFlagRequired("patch")
+	_ = patchSummarizeCmd.MarkFlagRequired("patch")
 }
 
 func runPatchCreate(cmd *cobra.Command, args []string) error {
@@ -215,7 +215,7 @@ func runPatchApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open database: %w", err))
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	opts := patch.ApplyOptions{
 		PatchPath: patchApplyPatch,

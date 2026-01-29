@@ -366,7 +366,7 @@ func Apply(db *sql.DB, opts ApplyOptions) (*ApplyResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	// Generate canonical JSON with updated snapshot_rev
 	newData, err := snapshot.CanonicalJSON(newSnap)

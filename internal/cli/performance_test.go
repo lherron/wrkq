@@ -41,12 +41,12 @@ func TestPerformance_List5kTasks(t *testing.T) {
 			var priority int
 			var etag int64
 			if err := rows.Scan(&id, &slug, &title, &state, &priority, &etag); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				t.Fatalf("Scan failed: %v", err)
 			}
 			count++
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		elapsed := time.Since(start)
 		timings[i] = elapsed
@@ -105,12 +105,12 @@ func TestPerformance_List5kTasksJSON(t *testing.T) {
 		for rows.Next() {
 			var task Task
 			if err := rows.Scan(&task.ID, &task.Slug, &task.Title, &task.State, &task.Priority); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				t.Fatalf("Scan failed: %v", err)
 			}
 			tasks = append(tasks, task)
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		elapsed := time.Since(start)
 		timings[i] = elapsed
@@ -268,7 +268,7 @@ func BenchmarkListTasks(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
 			database, _ := setupBenchPerfEnv(b, size)
-			defer database.Close()
+			defer func() { _ = database.Close() }()
 
 			b.ResetTimer()
 
@@ -286,10 +286,10 @@ func BenchmarkListTasks(b *testing.B) {
 				for rows.Next() {
 					var id, slug, title, state string
 					var priority int
-					rows.Scan(&id, &slug, &title, &state, &priority)
+					_ = rows.Scan(&id, &slug, &title, &state, &priority)
 					count++
 				}
-				rows.Close()
+				_ = rows.Close()
 
 				if count != size {
 					b.Errorf("Expected %d tasks, got %d", size, count)
@@ -302,7 +302,7 @@ func BenchmarkListTasks(b *testing.B) {
 // BenchmarkCreateTask benchmarks task creation
 func BenchmarkCreateTask(b *testing.B) {
 	database, _ := setupBenchPerfEnv(b, 0)
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	b.ResetTimer()
 
@@ -335,7 +335,7 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 	}
 
 	if err := database.Migrate(); err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -345,7 +345,7 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 		VALUES ('00000000-0000-0000-0000-000000000001', 'A-00001', 'test-user', 'Test User', 'human', datetime('now'), datetime('now'))
 	`)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to seed actor: %v", err)
 	}
 
@@ -355,7 +355,7 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 		VALUES ('00000000-0000-0000-0000-000000000002', 'P-00001', 'inbox', 'Inbox', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		t.Fatalf("Failed to seed inbox: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 		// Use a transaction for faster bulk insert
 		tx, err := database.Begin()
 		if err != nil {
-			database.Close()
+			_ = database.Close()
 			t.Fatalf("Failed to begin transaction: %v", err)
 		}
 
@@ -375,8 +375,8 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 			VALUES (?, ?, ?, ?, '00000000-0000-0000-0000-000000000002', 'open', ?, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 		`)
 		if err != nil {
-			tx.Rollback()
-			database.Close()
+			_ = tx.Rollback()
+			_ = database.Close()
 			t.Fatalf("Failed to prepare statement: %v", err)
 		}
 
@@ -388,9 +388,9 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 
 			_, err := stmt.Exec(taskUUID, taskID, taskSlug, fmt.Sprintf("Task %d", i+1), priority)
 			if err != nil {
-				stmt.Close()
-				tx.Rollback()
-				database.Close()
+				_ = stmt.Close()
+				_ = tx.Rollback()
+				_ = database.Close()
 				t.Fatalf("Failed to insert task %d: %v", i, err)
 			}
 
@@ -399,9 +399,9 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 			}
 		}
 
-		stmt.Close()
+		_ = stmt.Close()
 		if err := tx.Commit(); err != nil {
-			database.Close()
+			_ = database.Close()
 			t.Fatalf("Failed to commit transaction: %v", err)
 		}
 
@@ -409,7 +409,7 @@ func setupPerfTestEnv(t *testing.T, numTasks int) (*db.DB, string) {
 	}
 
 	t.Cleanup(func() {
-		database.Close()
+		_ = database.Close()
 	})
 
 	return database, dbPath
@@ -427,17 +427,17 @@ func setupBenchPerfEnv(b *testing.B, numTasks int) (*sql.DB, string) {
 	}
 
 	if err := database.Migrate(); err != nil {
-		database.Close()
+		_ = database.Close()
 		b.Fatalf("Failed to run migrations: %v", err)
 	}
 
 	// Seed data
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, id, slug, display_name, role, created_at, updated_at)
 		VALUES ('00000000-0000-0000-0000-000000000001', 'A-00001', 'bench-user', 'Bench User', 'human', datetime('now'), datetime('now'))
 	`)
 
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES ('00000000-0000-0000-0000-000000000002', 'P-00001', 'inbox', 'Inbox', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
@@ -454,11 +454,11 @@ func setupBenchPerfEnv(b *testing.B, numTasks int) (*sql.DB, string) {
 			taskUUID := fmt.Sprintf("bench-task-%d", i)
 			taskID := fmt.Sprintf("T-%05d", i+1)
 			taskSlug := fmt.Sprintf("task-%d", i)
-			stmt.Exec(taskUUID, taskID, taskSlug, fmt.Sprintf("Task %d", i+1))
+			_, _ = stmt.Exec(taskUUID, taskID, taskSlug, fmt.Sprintf("Task %d", i+1))
 		}
 
-		stmt.Close()
-		tx.Commit()
+		_ = stmt.Close()
+		_ = tx.Commit()
 	}
 
 	return database.DB, dbPath

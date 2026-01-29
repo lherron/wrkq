@@ -122,7 +122,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err := restoreContainer(database, actorUUID, containerUUID); err != nil {
 			return fmt.Errorf("failed to restore container: %w", err)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
 		return nil
 	}
 
@@ -192,7 +192,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to restore subtasks: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Restored task: %s\n", taskID)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored task: %s\n", taskID)
 	return nil
 }
 
@@ -215,7 +215,7 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Build dynamic UPDATE query
 	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL, updated_by_actor_uuid = ?`
@@ -319,7 +319,7 @@ func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetSt
 	if err != nil {
 		return fmt.Errorf("failed to query subtasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var subtaskUUIDs []string
 	for rows.Next() {
@@ -357,7 +357,7 @@ func restoreContainer(database *db.DB, actorUUID, containerUUID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`
 		UPDATE containers

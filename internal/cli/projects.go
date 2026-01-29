@@ -112,7 +112,7 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to query projects: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var uuid, id, slug string
@@ -185,9 +185,9 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if projectsNul {
 			delimiter = "\x00"
 		}
-		fmt.Fprint(cmd.OutOrStdout(), strings.Join(slugs, delimiter))
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), strings.Join(slugs, delimiter))
 		if len(slugs) > 0 && !projectsNul {
-			fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
 		}
 		return nil
 	}
