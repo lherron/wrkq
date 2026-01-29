@@ -223,23 +223,23 @@ func (r *Result) ExitCode() int {
 // PrintSummary prints a human-readable summary of the result
 func (r *Result) PrintSummary(w io.Writer) {
 	if r.Failed == 0 {
-		_, _ = fmt.Fprintf(w, "\n✓ All %d operations succeeded\n", r.TotalItems)
+		fmt.Fprintf(w, "\n✓ All %d operations succeeded\n", r.TotalItems)
 	} else if r.Succeeded == 0 {
-		_, _ = fmt.Fprintf(w, "\n✗ All %d operations failed\n", r.TotalItems)
+		fmt.Fprintf(w, "\n✗ All %d operations failed\n", r.TotalItems)
 	} else {
-		_, _ = fmt.Fprintf(w, "\n⚠ Partial success: %d succeeded, %d failed (out of %d)\n",
+		fmt.Fprintf(w, "\n⚠ Partial success: %d succeeded, %d failed (out of %d)\n",
 			r.Succeeded, r.Failed, r.TotalItems)
 	}
 
 	if len(r.Errors) > 0 && len(r.Errors) <= 10 {
-		_, _ = fmt.Fprintf(w, "\nErrors:\n")
+		fmt.Fprintf(w, "\nErrors:\n")
 		for _, e := range r.Errors {
-			_, _ = fmt.Fprintf(w, "  %s: %v\n", e.Item, e.Error)
+			fmt.Fprintf(w, "  %s: %v\n", e.Item, e.Error)
 		}
 	} else if len(r.Errors) > 10 {
-		_, _ = fmt.Fprintf(w, "\nShowing first 10 errors (of %d):\n", len(r.Errors))
+		fmt.Fprintf(w, "\nShowing first 10 errors (of %d):\n", len(r.Errors))
 		for _, e := range r.Errors[:10] {
-			_, _ = fmt.Fprintf(w, "  %s: %v\n", e.Item, e.Error)
+			fmt.Fprintf(w, "  %s: %v\n", e.Item, e.Error)
 		}
 	}
 }

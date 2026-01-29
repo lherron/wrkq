@@ -216,7 +216,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 
 	// Output next_cursor to stderr in porcelain mode
 	if commentLsPorcelain && nextCursorStr != "" {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
+		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Output

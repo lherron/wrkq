@@ -63,8 +63,8 @@ func runWhoami(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Actor:   %s (%s)\n", displayName, actor.ID)
 	fmt.Fprintf(cmd.OutOrStdout(), "Slug:    %s\n", actor.Slug)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Role:    %s\n", actor.Role)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "DB:      %s\n", cfg.DBPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "Role:    %s\n", actor.Role)
+	fmt.Fprintf(cmd.OutOrStdout(), "DB:      %s\n", cfg.DBPath)
 
 	return nil
 }

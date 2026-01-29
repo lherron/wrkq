@@ -78,8 +78,8 @@ func runVersion(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "wrkq version %s\n", Version)
 	fmt.Fprintf(cmd.OutOrStdout(), "  commit: %s\n", GitCommit)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  built:  %s\n", BuildDate)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  machine interface: v%d\n", 1)
+	fmt.Fprintf(cmd.OutOrStdout(), "  built:  %s\n", BuildDate)
+	fmt.Fprintf(cmd.OutOrStdout(), "  machine interface: v%d\n", 1)
 
 	return nil
 }

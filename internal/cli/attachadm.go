@@ -143,12 +143,12 @@ func runAttachPath(cmd *cobra.Command, args []string) error {
 	}
 
 	if attachPathPorcelain {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
+		fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
 		return nil
 	}
 
 	// Human-readable output
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
+	fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
 
 	return nil
 }

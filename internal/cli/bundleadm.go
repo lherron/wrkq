@@ -243,30 +243,30 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 	}
 
 	if bundleApplyPorcelain {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%d\t%d\t%d\t%d\n",
+		fmt.Fprintf(cmd.OutOrStdout(), "%d\t%d\t%d\t%d\n",
 			result.ContainersAdded, result.TasksApplied, result.TasksFailed, result.AttachmentsAdded)
 		return nil
 	}
 
 	// Human-readable output
 	if bundleApplyDryRun {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Dry run - no changes made\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "Dry run - no changes made\n")
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Bundle applied successfully\n")
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Containers: %d\n", result.ContainersAdded)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Tasks applied: %d\n", result.TasksApplied)
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ Bundle applied successfully\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  Containers: %d\n", result.ContainersAdded)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Tasks applied: %d\n", result.TasksApplied)
 	if result.TasksFailed > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Tasks failed: %d\n", result.TasksFailed)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Tasks failed: %d\n", result.TasksFailed)
 	}
 	if result.AttachmentsAdded > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Attachments: %d\n", result.AttachmentsAdded)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Attachments: %d\n", result.AttachmentsAdded)
 	}
 
 	if len(result.Conflicts) > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStderr(), "\nConflicts detected:\n")
+		fmt.Fprintf(cmd.OutOrStderr(), "\nConflicts detected:\n")
 		for _, conflict := range result.Conflicts {
-			_, _ = fmt.Fprintf(cmd.OutOrStderr(), "  - %s (%s)\n", conflict.Path, conflict.Reason)
+			fmt.Fprintf(cmd.OutOrStderr(), "  - %s (%s)\n", conflict.Path, conflict.Reason)
 		}
 		if !bundleApplyJSON {
 			os.Exit(4)
@@ -275,9 +275,9 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(result.Errors) > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStderr(), "\nErrors:\n")
+		fmt.Fprintf(cmd.OutOrStderr(), "\nErrors:\n")
 		for _, errMsg := range result.Errors {
-			_, _ = fmt.Fprintf(cmd.OutOrStderr(), "  - %s\n", errMsg)
+			fmt.Fprintf(cmd.OutOrStderr(), "  - %s\n", errMsg)
 		}
 	}
 

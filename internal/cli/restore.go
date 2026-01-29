@@ -122,7 +122,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err := restoreContainer(database, actorUUID, containerUUID); err != nil {
 			return fmt.Errorf("failed to restore container: %w", err)
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
+		fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
 		return nil
 	}
 
@@ -192,7 +192,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to restore subtasks: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Restored task: %s\n", taskID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Restored task: %s\n", taskID)
 	return nil
 }
 

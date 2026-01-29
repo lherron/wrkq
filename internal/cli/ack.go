@@ -55,13 +55,13 @@ func runAck(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if counts.Acknowledged > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Acknowledged %d task(s)\n", counts.Acknowledged)
+		fmt.Fprintf(cmd.OutOrStdout(), "Acknowledged %d task(s)\n", counts.Acknowledged)
 	}
 	if counts.Skipped > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d task(s) already acknowledged\n", counts.Skipped)
+		fmt.Fprintf(cmd.OutOrStdout(), "Skipped %d task(s) already acknowledged\n", counts.Skipped)
 	}
 	if counts.Acknowledged == 0 && counts.Skipped == 0 {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No tasks acknowledged")
+		fmt.Fprintln(cmd.OutOrStdout(), "No tasks acknowledged")
 	}
 
 	return nil

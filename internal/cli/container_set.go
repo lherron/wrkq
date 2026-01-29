@@ -72,8 +72,8 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated container: %s\n", containerPath)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Webhook URLs: %d\n", len(webhookURLs))
+	fmt.Fprintf(cmd.OutOrStdout(), "Updated container: %s\n", containerPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "Webhook URLs: %d\n", len(webhookURLs))
 	return nil
 }
 

@@ -126,7 +126,7 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+		fmt.Fprintln(cmd.OutOrStdout(), string(data))
 		return nil
 	}
 
@@ -136,7 +136,7 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+			fmt.Fprintln(cmd.OutOrStdout(), string(data))
 		}
 		return nil
 	}
@@ -144,23 +144,23 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Human-readable output
 	for i, comment := range comments {
 		if i > 0 {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
+			fmt.Fprintln(cmd.OutOrStdout(), "---")
 		}
 
 		if commentCatRaw {
 			// Body only
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), comment["body"].(string))
+			fmt.Fprintln(cmd.OutOrStdout(), comment["body"].(string))
 		} else {
 			// Header + body
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[%s] [%s] %s (%s) - Task: %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "[%s] [%s] %s (%s) - Task: %s\n",
 				comment["id"].(string),
 				comment["created_at"].(string),
 				comment["actor_slug"].(string),
 				comment["actor_role"].(string),
 				comment["task_id"].(string),
 			)
-			_, _ = fmt.Fprintln(cmd.OutOrStdout())
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), comment["body"].(string))
+			fmt.Fprintln(cmd.OutOrStdout())
+			fmt.Fprintln(cmd.OutOrStdout(), comment["body"].(string))
 		}
 	}
 

@@ -148,7 +148,7 @@ func runMergeAdm(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(mergeReportPath, data, 0644); err != nil {
 			return exitError(1, fmt.Errorf("failed to write report: %w", err))
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Report written to %s\n", mergeReportPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Report written to %s\n", mergeReportPath)
 	}
 
 	printMergeSummary(cmd, report)
@@ -425,29 +425,29 @@ func looksLikeUUID(value string) bool {
 
 func printMergeSummary(cmd *cobra.Command, report *mergeReport) {
 	out := cmd.OutOrStdout()
-	_, _ = fmt.Fprintf(out, "Merge %s -> %s\n", report.SourceDB, report.DestDB)
-	_, _ = fmt.Fprintf(out, "Project: %s (%s)\n", report.ProjectSelector, report.SourceProjectPath)
-	_, _ = fmt.Fprintf(out, "Prefix: %s\n", report.DestPrefix)
+	fmt.Fprintf(out, "Merge %s -> %s\n", report.SourceDB, report.DestDB)
+	fmt.Fprintf(out, "Project: %s (%s)\n", report.ProjectSelector, report.SourceProjectPath)
+	fmt.Fprintf(out, "Prefix: %s\n", report.DestPrefix)
 	if report.DryRun {
-		_, _ = fmt.Fprintln(out, "Mode: dry-run")
+		fmt.Fprintln(out, "Mode: dry-run")
 	}
-	_, _ = fmt.Fprintf(out, "Actors: %d created, %d updated, %d skipped\n", report.Stats.Actors.Created, report.Stats.Actors.Updated, report.Stats.Actors.Skipped)
-	_, _ = fmt.Fprintf(out, "Containers: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Containers.Created, report.Stats.Containers.Updated, report.Stats.Containers.Renamed, report.Stats.Containers.Skipped)
-	_, _ = fmt.Fprintf(out, "Tasks: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Tasks.Created, report.Stats.Tasks.Updated, report.Stats.Tasks.Renamed, report.Stats.Tasks.Skipped)
-	_, _ = fmt.Fprintf(out, "Comments: %d created, %d updated, %d skipped\n", report.Stats.Comments.Created, report.Stats.Comments.Updated, report.Stats.Comments.Skipped)
-	_, _ = fmt.Fprintf(out, "Relations: %d created, %d skipped\n", report.Stats.Relations.Created, report.Stats.Relations.Skipped)
-	_, _ = fmt.Fprintf(out, "Attachments: %d created, %d deduped, %d skipped\n", report.Stats.Attachments.Created, report.Stats.Attachments.Deduped, report.Stats.Attachments.Skipped)
+	fmt.Fprintf(out, "Actors: %d created, %d updated, %d skipped\n", report.Stats.Actors.Created, report.Stats.Actors.Updated, report.Stats.Actors.Skipped)
+	fmt.Fprintf(out, "Containers: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Containers.Created, report.Stats.Containers.Updated, report.Stats.Containers.Renamed, report.Stats.Containers.Skipped)
+	fmt.Fprintf(out, "Tasks: %d created, %d updated, %d renamed, %d skipped\n", report.Stats.Tasks.Created, report.Stats.Tasks.Updated, report.Stats.Tasks.Renamed, report.Stats.Tasks.Skipped)
+	fmt.Fprintf(out, "Comments: %d created, %d updated, %d skipped\n", report.Stats.Comments.Created, report.Stats.Comments.Updated, report.Stats.Comments.Skipped)
+	fmt.Fprintf(out, "Relations: %d created, %d skipped\n", report.Stats.Relations.Created, report.Stats.Relations.Skipped)
+	fmt.Fprintf(out, "Attachments: %d created, %d deduped, %d skipped\n", report.Stats.Attachments.Created, report.Stats.Attachments.Deduped, report.Stats.Attachments.Skipped)
 	if !report.DryRun {
-		_, _ = fmt.Fprintf(out, "Files copied: %d, missing: %d\n", report.Stats.FilesCopied, report.Stats.FilesMissing)
+		fmt.Fprintf(out, "Files copied: %d, missing: %d\n", report.Stats.FilesCopied, report.Stats.FilesMissing)
 	}
 	if len(report.Renames) > 0 {
-		_, _ = fmt.Fprintf(out, "Renames: %d\n", len(report.Renames))
+		fmt.Fprintf(out, "Renames: %d\n", len(report.Renames))
 	}
 	if len(report.Conflicts) > 0 {
-		_, _ = fmt.Fprintf(out, "Conflicts: %d\n", len(report.Conflicts))
+		fmt.Fprintf(out, "Conflicts: %d\n", len(report.Conflicts))
 	}
 	if len(report.ActorMismatches) > 0 {
-		_, _ = fmt.Fprintf(out, "Actor mismatches: %d\n", len(report.ActorMismatches))
+		fmt.Fprintf(out, "Actor mismatches: %d\n", len(report.ActorMismatches))
 	}
 }
 

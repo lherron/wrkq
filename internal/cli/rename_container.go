@@ -78,14 +78,14 @@ func runRenameContainer(app *appctx.App, cmd *cobra.Command, args []string) erro
 	}
 
 	if renameContainerDryRun {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would rename container:\n")
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Path:  %s\n", containerPath)
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Slug:  %s -> %s\n", container.Slug, normalizedSlug)
+		fmt.Fprintf(cmd.OutOrStdout(), "Would rename container:\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  Path:  %s\n", containerPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Slug:  %s -> %s\n", container.Slug, normalizedSlug)
 		oldTitle := container.Slug // fallback
 		if container.Title != nil {
 			oldTitle = *container.Title
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Title: %s -> %s\n", oldTitle, newTitle)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Title: %s -> %s\n", oldTitle, newTitle)
 		return nil
 	}
 
@@ -99,6 +99,6 @@ func runRenameContainer(app *appctx.App, cmd *cobra.Command, args []string) erro
 		return err
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Renamed container: %s -> %s\n", containerPath, normalizedSlug)
+	fmt.Fprintf(cmd.OutOrStdout(), "Renamed container: %s -> %s\n", containerPath, normalizedSlug)
 	return nil
 }

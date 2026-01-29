@@ -377,7 +377,7 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", attachID, filename, size)
+	fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", attachID, filename, size)
 	return nil
 }
 
@@ -415,7 +415,7 @@ func runAttachGet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if dstPath != "-" {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", filename, dstPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", filename, dstPath)
 	}
 
 	return nil
@@ -434,7 +434,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			WHERE id = ? OR uuid = ?
 		`, attachmentRef, attachmentRef).Scan(&attachUUID, &attachID, &relativePath, &filename)
 		if err == sql.ErrNoRows {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: attachment not found: %s\n", attachmentRef)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: attachment not found: %s\n", attachmentRef)
 			continue
 		}
 		if err != nil {
@@ -443,7 +443,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Confirm deletion
 		if !attachRmYes {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Delete attachment %s (%s)? [y/N]: ", attachID, filename)
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete attachment %s (%s)? [y/N]: ", attachID, filename)
 			var response string
 			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
@@ -453,7 +453,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Delete file
 		if err := attach.DeleteFile(cfg.AttachDir, relativePath); err != nil {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to delete file for %s: %v\n", attachID, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to delete file for %s: %v\n", attachID, err)
 			// Continue to delete metadata anyway
 		}
 
@@ -494,7 +494,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to commit transaction: %w", err)
 		}
 
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s (%s)\n", attachID, filename)
+		fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s (%s)\n", attachID, filename)
 	}
 
 	return nil

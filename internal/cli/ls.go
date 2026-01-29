@@ -379,9 +379,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if lsNul {
 			delimiter = "\x00"
 		}
-		_, _ = fmt.Fprint(cmd.OutOrStdout(), strings.Join(paths, delimiter))
+		fmt.Fprint(cmd.OutOrStdout(), strings.Join(paths, delimiter))
 		if len(paths) > 0 && !lsNul {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout())
+			fmt.Fprintln(cmd.OutOrStdout())
 		}
 		return nil
 	}

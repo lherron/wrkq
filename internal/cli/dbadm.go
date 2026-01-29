@@ -101,13 +101,13 @@ func runDBSnapshot(cmd *cobra.Command, args []string) error {
 		return encoder.Encode(manifest)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Created snapshot: %s\n", dbSnapshotOut)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Source: %s\n", cfg.DBPath)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Timestamp: %s\n", manifest.Timestamp)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nTo use this snapshot:\n")
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_DB_PATH=%s\n", dbSnapshotOut)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_ATTACH_DIR=/path/to/branch/attachments\n")
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_ACTOR=agent-branch-name\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ Created snapshot: %s\n", dbSnapshotOut)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Source: %s\n", cfg.DBPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Timestamp: %s\n", manifest.Timestamp)
+	fmt.Fprintf(cmd.OutOrStdout(), "\nTo use this snapshot:\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_DB_PATH=%s\n", dbSnapshotOut)
+	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_ATTACH_DIR=/path/to/branch/attachments\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_ACTOR=agent-branch-name\n")
 
 	return nil
 }

@@ -131,7 +131,7 @@ func runActorAdmAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Output
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created actor %s (%s)\n", actor.Slug, actor.ID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Created actor %s (%s)\n", actor.Slug, actor.ID)
 
 	return nil
 }

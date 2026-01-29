@@ -134,13 +134,13 @@ func (r *Renderer) RenderTable(headers []string, rows [][]string) error {
 		r.renderTableSeparator(widths)
 	} else {
 		// Porcelain mode: just tab-separated
-		_, _ = fmt.Fprintln(r.writer, strings.Join(headers, "\t"))
+		fmt.Fprintln(r.writer, strings.Join(headers, "\t"))
 	}
 
 	// Render rows
 	for _, row := range rows {
 		if r.opts.Porcelain {
-			_, _ = fmt.Fprintln(r.writer, strings.Join(row, "\t"))
+			fmt.Fprintln(r.writer, strings.Join(row, "\t"))
 		} else {
 			r.renderTableRow(row, widths)
 		}
@@ -152,23 +152,23 @@ func (r *Renderer) RenderTable(headers []string, rows [][]string) error {
 func (r *Renderer) renderTableRow(cells []string, widths []int) {
 	for i, cell := range cells {
 		if i < len(widths) {
-			_, _ = fmt.Fprintf(r.writer, "%-*s", widths[i], cell)
+			fmt.Fprintf(r.writer, "%-*s", widths[i], cell)
 			if i < len(cells)-1 {
-				_, _ = fmt.Fprint(r.writer, "  ")
+				fmt.Fprint(r.writer, "  ")
 			}
 		}
 	}
-	_, _ = fmt.Fprintln(r.writer)
+	fmt.Fprintln(r.writer)
 }
 
 func (r *Renderer) renderTableSeparator(widths []int) {
 	for i, width := range widths {
-		_, _ = fmt.Fprint(r.writer, strings.Repeat("-", width))
+		fmt.Fprint(r.writer, strings.Repeat("-", width))
 		if i < len(widths)-1 {
-			_, _ = fmt.Fprint(r.writer, "  ")
+			fmt.Fprint(r.writer, "  ")
 		}
 	}
-	_, _ = fmt.Fprintln(r.writer)
+	fmt.Fprintln(r.writer)
 }
 
 // Package-level helper functions for simple rendering

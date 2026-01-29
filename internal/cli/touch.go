@@ -292,7 +292,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 			})
 			continue
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s (%s)\n", result.ID, path)
+		fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s (%s)\n", result.ID, path)
 	}
 
 	if touchJSON {

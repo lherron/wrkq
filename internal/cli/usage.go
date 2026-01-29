@@ -45,7 +45,7 @@ func runUsage(cmd *cobra.Command, args []string) error {
 		return encoder.Encode(output)
 	}
 
-	_, _ = fmt.Fprint(cmd.OutOrStdout(), wrkqUsageContent)
+	fmt.Fprint(cmd.OutOrStdout(), wrkqUsageContent)
 	return nil
 }
 
@@ -59,6 +59,6 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 		return encoder.Encode(output)
 	}
 
-	_, _ = fmt.Fprint(cmd.OutOrStdout(), agentUsageContent)
+	fmt.Fprint(cmd.OutOrStdout(), agentUsageContent)
 	return nil
 }

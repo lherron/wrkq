@@ -144,7 +144,7 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Confirmation prompt
 	if !cpYes && len(sourceTasks) > 5 {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Copy %d tasks? [y/N] ", len(sourceTasks))
+		fmt.Fprintf(cmd.ErrOrStderr(), "Copy %d tasks? [y/N] ", len(sourceTasks))
 		reader := bufio.NewReader(cmd.InOrStdin())
 		response, _ := reader.ReadString('\n')
 		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(response)), "y") {
@@ -186,7 +186,7 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 			delimiter = "\x00"
 		}
 		for _, r := range results {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s%s", r.DestID, delimiter)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s%s", r.DestID, delimiter)
 		}
 		return nil
 	}
@@ -216,7 +216,7 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 	var totalAttachments int
 	var totalFiles int64
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would copy %d task(s):\n\n", len(sourceTasks))
+	fmt.Fprintf(cmd.OutOrStdout(), "Would copy %d task(s):\n\n", len(sourceTasks))
 
 	for _, taskUUID := range sourceTasks {
 		var sourceID, slug string
@@ -228,7 +228,7 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 		var destPath string
 		_ = database.QueryRow("SELECT path FROM container_paths WHERE uuid = ?", destUUID).Scan(&destPath)
 
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s) → %s/%s (new)\n", sourceID, slug, destPath, slug)
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s) → %s/%s (new)\n", sourceID, slug, destPath, slug)
 
 		// Count attachments
 		if !cpShallow {
@@ -245,12 +245,12 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 	}
 
 	if totalAttachments > 0 && !cpShallow {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAttachments:\n")
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %d file(s) (%.1f MB total)\n", totalAttachments, float64(totalFiles)/(1024*1024))
+		fmt.Fprintf(cmd.OutOrStdout(), "\nAttachments:\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  %d file(s) (%.1f MB total)\n", totalAttachments, float64(totalFiles)/(1024*1024))
 		if cpWithAttachments {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Files will be copied to new location\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "  Files will be copied to new location\n")
 		} else {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Only metadata will be copied (use --with-attachments to copy files)\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "  Only metadata will be copied (use --with-attachments to copy files)\n")
 		}
 	}
 

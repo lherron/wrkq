@@ -126,7 +126,7 @@ func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create relation: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created relation: %s %s %s\n", fromTaskID, kind, toTaskID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Created relation: %s %s %s\n", fromTaskID, kind, toTaskID)
 	return nil
 }
 
@@ -170,7 +170,7 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("relation not found: %s %s %s", fromTaskID, kind, toTaskID)
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Removed relation: %s %s %s\n", fromTaskID, kind, toTaskID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Removed relation: %s %s %s\n", fromTaskID, kind, toTaskID)
 	return nil
 }
 
@@ -272,7 +272,7 @@ func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Table output
 	if len(relations) == 0 {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No relations found")
+		fmt.Fprintln(cmd.OutOrStdout(), "No relations found")
 		return nil
 	}
 

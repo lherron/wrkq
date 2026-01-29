@@ -72,7 +72,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		if queryErr == sql.ErrNoRows {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: comment not found: %s\n", commentRef)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: comment not found: %s\n", commentRef)
 			continue
 		}
 		if queryErr != nil {
@@ -81,7 +81,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Check etag if requested
 		if commentRmIfMatch > 0 && etag != commentRmIfMatch {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: etag mismatch for %s (current: %d, expected: %d), skipping\n",
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: etag mismatch for %s (current: %d, expected: %d), skipping\n",
 				commentID, etag, commentRmIfMatch)
 			continue
 		}
@@ -97,7 +97,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			if commentRmPurge {
 				action = "purge"
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would %s comment %s (task %s): %s\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would %s comment %s (task %s): %s\n",
 				action, commentID, taskID, bodyPreview)
 			continue
 		}
@@ -110,7 +110,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 			// Capitalize first letter of action (avoiding deprecated strings.Title)
 			actionTitle := strings.ToUpper(action[:1]) + action[1:]
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s comment %s (task %s)? [y/N]: ",
+			fmt.Fprintf(cmd.OutOrStdout(), "%s comment %s (task %s)? [y/N]: ",
 				actionTitle, commentID, taskID)
 			var response string
 			_, _ = fmt.Scanln(&response)
@@ -144,7 +144,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Purged: %s\n", commentID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Purged: %s\n", commentID)
 		} else {
 			// Soft delete
 			_, err = tx.Exec(`
@@ -211,7 +211,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s\n", commentID)
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s\n", commentID)
 		}
 	}
 

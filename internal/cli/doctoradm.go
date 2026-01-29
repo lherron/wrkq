@@ -491,14 +491,14 @@ func applyFixesAdm(database *db.DB, report *doctorReportAdm) {
 	}
 
 	if len(outputs) > 0 {
-		_, _ = fmt.Fprintln(os.Stdout, "\n--fix results")
-		_, _ = fmt.Fprintln(os.Stdout, strings.Join(outputs, "\n"))
+		fmt.Fprintln(os.Stdout, "\n--fix results")
+		fmt.Fprintln(os.Stdout, strings.Join(outputs, "\n"))
 	}
 }
 
 func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrkqadm doctor v%s\n\n", report.Version)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Database: %s\n\n", report.DBPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "wrkqadm doctor v%s\n\n", report.Version)
+	fmt.Fprintf(cmd.OutOrStdout(), "Database: %s\n\n", report.DBPath)
 
 	// Group checks by category
 	categories := map[string][]checkResultAdm{
@@ -537,7 +537,7 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 			continue
 		}
 
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", category)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s\n", category)
 		for _, check := range checks {
 			var icon string
 			switch check.Status {
@@ -549,27 +549,27 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 				icon = "✓"
 			}
 
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s %s\n", icon, check.Message)
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s %s\n", icon, check.Message)
 
 			if doctorAdmVerbose && len(check.Details) > 0 {
 				for _, detail := range check.Details {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "      %s\n", detail)
+					fmt.Fprintf(cmd.OutOrStdout(), "      %s\n", detail)
 				}
 			}
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	// Summary
 	if report.Errors > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d error(s), %d warning(s)\n", report.Errors, report.Warnings)
+		fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d error(s), %d warning(s)\n", report.Errors, report.Warnings)
 	} else if report.Warnings > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d warning(s)\n", report.Warnings)
+		fmt.Fprintf(cmd.OutOrStdout(), "Summary: %d warning(s)\n", report.Warnings)
 	} else {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Summary: All checks passed ✓\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "Summary: All checks passed ✓\n")
 	}
 
 	if report.Warnings > 0 || report.Errors > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nRun with --verbose for detailed information\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "\nRun with --verbose for detailed information\n")
 	}
 }

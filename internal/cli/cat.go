@@ -344,122 +344,122 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		} else {
 			// Original markdown output
 			if taskCount > 0 {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout())
 			}
 			taskCount++
 
 			if !catNoFrontmatter {
 				// Print YAML front matter
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
+				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
+				fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
+				fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
+				fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
 				if task.RequestedByProjectID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "requested_by_project_id: %s\n", *task.RequestedByProjectID)
+					fmt.Fprintf(cmd.OutOrStdout(), "requested_by_project_id: %s\n", *task.RequestedByProjectID)
 				}
 				if task.AssignedProjectID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "assigned_project_id: %s\n", *task.AssignedProjectID)
+					fmt.Fprintf(cmd.OutOrStdout(), "assigned_project_id: %s\n", *task.AssignedProjectID)
 				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", task.Slug)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", task.Priority)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", task.Kind)
+				fmt.Fprintf(cmd.OutOrStdout(), "slug: %s\n", task.Slug)
+				fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", task.Title)
+				fmt.Fprintf(cmd.OutOrStdout(), "state: %s\n", task.State)
+				fmt.Fprintf(cmd.OutOrStdout(), "priority: %d\n", task.Priority)
+				fmt.Fprintf(cmd.OutOrStdout(), "kind: %s\n", task.Kind)
 				if task.ParentTaskID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_task_id: %s\n", *task.ParentTaskID)
+					fmt.Fprintf(cmd.OutOrStdout(), "parent_task_id: %s\n", *task.ParentTaskID)
 				}
 				if task.ParentTaskUUID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "parent_task_uuid: %s\n", *task.ParentTaskUUID)
+					fmt.Fprintf(cmd.OutOrStdout(), "parent_task_uuid: %s\n", *task.ParentTaskUUID)
 				}
 				if task.AssigneeSlug != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "assignee: %s\n", *task.AssigneeSlug)
+					fmt.Fprintf(cmd.OutOrStdout(), "assignee: %s\n", *task.AssigneeSlug)
 				}
 				if task.AssigneeUUID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
+					fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
 				}
 				if task.StartAt != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
+					fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
 				}
 				if task.DueAt != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "due_at: %s\n", *task.DueAt)
+					fmt.Fprintf(cmd.OutOrStdout(), "due_at: %s\n", *task.DueAt)
 				}
 				if task.Labels != nil && *task.Labels != "" {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
+					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
 				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
+				fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
 				if task.Specification != "" {
-					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "specification: |")
+					fmt.Fprintln(cmd.OutOrStdout(), "specification: |")
 					for _, line := range strings.Split(task.Specification, "\n") {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
 					}
 				}
 				if task.AcknowledgedAt != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
+					fmt.Fprintf(cmd.OutOrStdout(), "acknowledged_at: %s\n", *task.AcknowledgedAt)
 				}
 				if task.Resolution != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "resolution: %s\n", *task.Resolution)
+					fmt.Fprintf(cmd.OutOrStdout(), "resolution: %s\n", *task.Resolution)
 				}
 				if task.CPProjectID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
 				}
 				if task.CPWorkItemID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "cp_work_item_id: %s\n", *task.CPWorkItemID)
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_work_item_id: %s\n", *task.CPWorkItemID)
 				}
 				if task.CPRunID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
+					fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
 				}
 				if task.SessionID != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "session_id: %s\n", *task.SessionID)
+					fmt.Fprintf(cmd.OutOrStdout(), "session_id: %s\n", *task.SessionID)
 				}
 				if task.RunStatus != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
+					fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
 				}
 				if len(task.BlockedBy) > 0 {
 					parts := make([]string, len(task.BlockedBy))
 					for i, b := range task.BlockedBy {
 						parts[i] = fmt.Sprintf("%s (%s)", b.ID, b.State)
 					}
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "blocked_by: [%s]\n", strings.Join(parts, ", "))
+					fmt.Fprintf(cmd.OutOrStdout(), "blocked_by: [%s]\n", strings.Join(parts, ", "))
 				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", task.UpdatedAt)
+				fmt.Fprintf(cmd.OutOrStdout(), "etag: %d\n", task.Etag)
+				fmt.Fprintf(cmd.OutOrStdout(), "created_at: %s\n", task.CreatedAt)
+				fmt.Fprintf(cmd.OutOrStdout(), "updated_at: %s\n", task.UpdatedAt)
 				if task.CompletedAt != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "completed_at: %s\n", *task.CompletedAt)
+					fmt.Fprintf(cmd.OutOrStdout(), "completed_at: %s\n", *task.CompletedAt)
 				}
 				if task.ArchivedAt != nil {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
+					fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
 				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
-				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
+				fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
+				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				fmt.Fprintln(cmd.OutOrStdout())
 			}
 
 			// Print description
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), task.Description)
+			fmt.Fprintln(cmd.OutOrStdout(), task.Description)
 
 			// Print comments unless excluded
 			if !catExcludeComments && len(task.Comments) > 0 {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout())
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
-				_, _ = fmt.Fprintln(cmd.OutOrStdout())
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "<!-- wrkq-comments: do not edit below -->")
-				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout(), "<!-- wrkq-comments: do not edit below -->")
+				fmt.Fprintln(cmd.OutOrStdout())
 
 				for _, comment := range task.Comments {
 					// Print header line
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
+					fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
 						comment.ID, comment.CreatedAt, comment.ActorSlug, comment.ActorRole)
 
 					// Print body lines with > prefix
 					bodyLines := strings.Split(comment.Body, "\n")
 					for _, line := range bodyLines {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "> %s\n", line)
+						fmt.Fprintf(cmd.OutOrStdout(), "> %s\n", line)
 					}
-					_, _ = fmt.Fprintln(cmd.OutOrStdout())
+					fmt.Fprintln(cmd.OutOrStdout())
 				}
 			}
 		}

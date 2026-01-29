@@ -156,7 +156,7 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 	if rmPorcelain {
 		for _, r := range results {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", r.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s\n", r.ID)
 		}
 		return nil
 	}
@@ -165,13 +165,13 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	for _, r := range results {
 		if r.Purged {
 			if r.AttachmentsDeleted > 0 {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted (%d attachments, %.1f MB)\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted (%d attachments, %.1f MB)\n",
 					r.ID, r.AttachmentsDeleted, float64(r.BytesFreed)/(1024*1024))
 			} else {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted\n", r.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s permanently deleted\n", r.ID)
 			}
 		} else {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ %s archived\n", r.ID)
+			fmt.Fprintf(cmd.OutOrStdout(), "✓ %s archived\n", r.ID)
 		}
 	}
 
@@ -190,9 +190,9 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 	var totalBytes int64
 
 	if rmPurge {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would permanently delete %d task(s):\n\n", len(taskUUIDs))
+		fmt.Fprintf(cmd.OutOrStdout(), "Would permanently delete %d task(s):\n\n", len(taskUUIDs))
 	} else {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would archive %d task(s):\n\n", len(taskUUIDs))
+		fmt.Fprintf(cmd.OutOrStdout(), "Would archive %d task(s):\n\n", len(taskUUIDs))
 	}
 
 	for _, taskUUID := range taskUUIDs {
@@ -205,17 +205,17 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 		`, taskUUID).Scan(&id, &slug, &title, &state, &priority)
 
 		if err != nil {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Error reading task %s: %v\n", taskUUID, err)
+			fmt.Fprintf(cmd.OutOrStdout(), "  Error reading task %s: %v\n", taskUUID, err)
 			continue
 		}
 
 		displayPath := slug
 
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s)\n", id, displayPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s)\n", id, displayPath)
 		if title != "" {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Title: %s\n", title)
+			fmt.Fprintf(cmd.OutOrStdout(), "    Title: %s\n", title)
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    State: %s, Priority: %d\n", state, priority)
+		fmt.Fprintf(cmd.OutOrStdout(), "    State: %s, Priority: %d\n", state, priority)
 
 		if rmPurge {
 			var count int
@@ -226,15 +226,15 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 				if size.Valid {
 					totalBytes += size.Int64
 				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "    Attachments: %d file(s) (%.1f MB)\n", count, float64(size.Int64)/(1024*1024))
+				fmt.Fprintf(cmd.OutOrStdout(), "    Attachments: %d file(s) (%.1f MB)\n", count, float64(size.Int64)/(1024*1024))
 			}
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	if rmPurge && totalAttachments > 0 {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Total: %d attachments (%.1f MB)\n\n", totalAttachments, float64(totalBytes)/(1024*1024))
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "WARNING: This action CANNOT be undone!\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "Total: %d attachments (%.1f MB)\n\n", totalAttachments, float64(totalBytes)/(1024*1024))
+		fmt.Fprintf(cmd.OutOrStdout(), "WARNING: This action CANNOT be undone!\n")
 	}
 
 	return nil
@@ -254,13 +254,13 @@ func confirmPurge(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error
 		}
 	}
 
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", len(taskUUIDs))
+	fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
+	fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", len(taskUUIDs))
 	if totalAttachments > 0 {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %d attachments (%.1f MB)\n", totalAttachments, float64(totalBytes)/(1024*1024))
+		fmt.Fprintf(cmd.ErrOrStderr(), "  - %d attachments (%.1f MB)\n", totalAttachments, float64(totalBytes)/(1024*1024))
 	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\nThis action CANNOT be undone.\n\n")
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Type 'yes' to confirm: ")
+	fmt.Fprintf(cmd.ErrOrStderr(), "\nThis action CANNOT be undone.\n\n")
+	fmt.Fprintf(cmd.ErrOrStderr(), "Type 'yes' to confirm: ")
 
 	reader := bufio.NewReader(cmd.InOrStdin())
 	response, _ := reader.ReadString('\n')

@@ -147,11 +147,11 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if commentAddDryRun {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would add comment to task %s:\n", taskID)
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", app.ActorID)
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Body: %s\n", body)
+		fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would add comment to task %s:\n", taskID)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", app.ActorID)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Body: %s\n", body)
 		if metaStr != nil {
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Meta: %s\n", *metaStr)
+			fmt.Fprintf(cmd.OutOrStdout(), "  Meta: %s\n", *metaStr)
 		}
 		return nil
 	}
@@ -256,9 +256,9 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+		fmt.Fprintln(cmd.OutOrStdout(), string(data))
 	} else {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Comment created: %s\n", commentID)
+		fmt.Fprintf(cmd.OutOrStdout(), "Comment created: %s\n", commentID)
 	}
 
 	return nil

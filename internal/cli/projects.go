@@ -185,9 +185,9 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if projectsNul {
 			delimiter = "\x00"
 		}
-		_, _ = fmt.Fprint(cmd.OutOrStdout(), strings.Join(slugs, delimiter))
+		fmt.Fprint(cmd.OutOrStdout(), strings.Join(slugs, delimiter))
 		if len(slugs) > 0 && !projectsNul {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout())
+			fmt.Fprintln(cmd.OutOrStdout())
 		}
 		return nil
 	}
