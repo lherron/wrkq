@@ -156,12 +156,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Get actor slugs
 		var createdBySlug, updatedBySlug string
-		database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-		database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+		_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
+		_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
 
 		// Get project info
 		var projectID string
-		database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
+		_ = database.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
 		// Get task path from v_task_paths view
 		var taskPath string
@@ -246,12 +246,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			for rows.Next() {
 				var comment Comment
 				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &comment.ActorSlug, &comment.ActorRole); err != nil {
-					rows.Close()
+					_ = rows.Close()
 					return fmt.Errorf("failed to scan comment: %w", err)
 				}
 				comments = append(comments, comment)
 			}
-			rows.Close()
+			_ = rows.Close()
 
 			if err := rows.Err(); err != nil {
 				return fmt.Errorf("error iterating comments: %w", err)
@@ -283,13 +283,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		for outgoingRows.Next() {
 			var rel Relation
 			if err := outgoingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
-				outgoingRows.Close()
+				_ = outgoingRows.Close()
 				return fmt.Errorf("failed to scan relation: %w", err)
 			}
 			rel.Direction = "outgoing"
 			relations = append(relations, rel)
 		}
-		outgoingRows.Close()
+		_ = outgoingRows.Close()
 
 		// Get incoming relations (other tasks -> this task)
 		incomingRows, err := database.Query(`
@@ -309,13 +309,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		for incomingRows.Next() {
 			var rel Relation
 			if err := incomingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
-				incomingRows.Close()
+				_ = incomingRows.Close()
 				return fmt.Errorf("failed to scan relation: %w", err)
 			}
 			rel.Direction = "incoming"
 			relations = append(relations, rel)
 		}
-		incomingRows.Close()
+		_ = incomingRows.Close()
 
 		if len(relations) > 0 {
 			task.Relations = relations
@@ -344,13 +344,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		} else {
 			// Original markdown output
 			if taskCount > 0 {
-				fmt.Fprintln(cmd.OutOrStdout())
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			}
 			taskCount++
 
 			if !catNoFrontmatter {
 				// Print YAML front matter
-				fmt.Fprintln(cmd.OutOrStdout(), "---")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
 				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
 				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
 				fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
@@ -390,7 +390,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
 				if task.Specification != "" {
-					fmt.Fprintln(cmd.OutOrStdout(), "specification: |")
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "specification: |")
 					for _, line := range strings.Split(task.Specification, "\n") {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line)
 					}
@@ -434,20 +434,20 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
 				fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
-				fmt.Fprintln(cmd.OutOrStdout(), "---")
-				fmt.Fprintln(cmd.OutOrStdout())
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			}
 
 			// Print description
-			fmt.Fprintln(cmd.OutOrStdout(), task.Description)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), task.Description)
 
 			// Print comments unless excluded
 			if !catExcludeComments && len(task.Comments) > 0 {
-				fmt.Fprintln(cmd.OutOrStdout())
-				fmt.Fprintln(cmd.OutOrStdout(), "---")
-				fmt.Fprintln(cmd.OutOrStdout())
-				fmt.Fprintln(cmd.OutOrStdout(), "<!-- wrkq-comments: do not edit below -->")
-				fmt.Fprintln(cmd.OutOrStdout())
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "---")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "<!-- wrkq-comments: do not edit below -->")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 
 				for _, comment := range task.Comments {
 					// Print header line

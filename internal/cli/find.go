@@ -133,19 +133,20 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if hasMore && len(results) > 0 {
 		lastEntry := results[len(results)-1]
 		// Use appropriate sort field based on type filter
-		if findType == "t" {
+		switch findType {
+		case "t":
 			nextCursorStr, _ = cursor.BuildNextCursor(
 				[]string{"updated_at"},
 				[]interface{}{lastEntry.UpdatedAt},
 				lastEntry.ID,
 			)
-		} else if findType == "p" {
+		case "p":
 			nextCursorStr, _ = cursor.BuildNextCursor(
 				[]string{"path"},
 				[]interface{}{lastEntry.Path},
 				lastEntry.ID,
 			)
-		} else {
+		default:
 			// Mixed results - use ID as sort field
 			nextCursorStr, _ = cursor.BuildNextCursor(
 				[]string{"id"},

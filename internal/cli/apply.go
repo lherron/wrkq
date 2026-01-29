@@ -85,7 +85,7 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 			return fmt.Errorf("failed to open file %s: %w", absPath, err)
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		input = file
 		inputSource = args[1]
 	}
@@ -260,11 +260,4 @@ func applyTaskUpdates(database *db.DB, taskUUID string, updates *parse.TaskUpdat
 
 	fmt.Printf("Updated task %s\n", taskUUID)
 	return nil
-}
-
-func stringOrNil(s *string) string {
-	if s == nil {
-		return "(nil)"
-	}
-	return *s
 }

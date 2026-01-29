@@ -63,7 +63,7 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// If force, truncate tables
 	if opts.Force {
@@ -243,7 +243,7 @@ func importActors(tx *sql.Tx, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, uuid := range uuids {
 		actor := snap.Actors[uuid]
@@ -290,7 +290,7 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, uuid := range ordered {
 		container := snap.Containers[uuid]
@@ -388,7 +388,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, uuid := range uuids {
 		task := snap.Tasks[uuid]
@@ -475,7 +475,7 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, uuid := range uuids {
 		comment := snap.Comments[uuid]

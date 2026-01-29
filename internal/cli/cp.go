@@ -262,7 +262,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Check etag if requested
 	if cpIfMatch > 0 {
@@ -423,13 +423,13 @@ func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string)
 			if err != nil {
 				return count, err
 			}
-			defer sourceFile.Close()
+			defer func() { _ = sourceFile.Close() }()
 
 			destFile, err := os.Create(destPath)
 			if err != nil {
 				return count, err
 			}
-			defer destFile.Close()
+			defer func() { _ = destFile.Close() }()
 
 			if _, err := io.Copy(destFile, sourceFile); err != nil {
 				return count, err

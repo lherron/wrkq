@@ -20,10 +20,10 @@ func TestCommentAdd(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test adding a comment via message flag
 	cmd := rootCmd
@@ -106,10 +106,10 @@ func TestCommentLs(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Query comments directly to verify
 	var count int
@@ -174,10 +174,10 @@ func TestCommentCat(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test showing comment
 	cmd := rootCmd
@@ -229,10 +229,10 @@ func TestCommentRm_SoftDelete(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test soft-deleting comment
 	cmd := rootCmd
@@ -299,10 +299,10 @@ func TestCommentRm_Purge(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test purging comment
 	cmd := rootCmd
@@ -407,10 +407,10 @@ func TestCatWithIncludeComments(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test cat with comments included by default
 	cmd := rootCmd
@@ -505,10 +505,10 @@ func TestCommentSequenceIncrement(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Create multiple comments
 	for i := 1; i <= 3; i++ {
@@ -561,10 +561,10 @@ func TestCommentAdd_PositionalArg(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test adding a comment via positional argument (new default behavior)
 	cmd := rootCmd
@@ -629,10 +629,10 @@ func TestCommentAdd_FileFlag(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test adding a comment via -f flag
 	cmd := rootCmd
@@ -685,10 +685,10 @@ func TestCommentSequenceDesync(t *testing.T) {
 	}
 
 	// Set environment variables
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-user")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Step 1: Add a comment via CLI (uses sequence, sets it to 1)
 	cmd := rootCmd

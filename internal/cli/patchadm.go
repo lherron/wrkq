@@ -310,7 +310,7 @@ func runPatchRebase(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  operations: %d (add: %d, replace: %d, remove: %d)\n",
 			result.OpCount, result.AddCount, result.ReplaceCount, result.RemoveCount)
 
-		if result.CodeRewrites != nil && len(result.CodeRewrites) > 0 {
+		if len(result.CodeRewrites) > 0 {
 			fmt.Println("  ID rewrites:")
 			for resourceType, rewrites := range result.CodeRewrites {
 				for uuid, rewrite := range rewrites {

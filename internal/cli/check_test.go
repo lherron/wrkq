@@ -8,7 +8,6 @@ import (
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/store"
-	"github.com/spf13/cobra"
 )
 
 func setupCheckTestDB(t *testing.T) (*db.DB, string, string, func()) {
@@ -378,14 +377,4 @@ func TestCheckCmd_Subcommands(t *testing.T) {
 	if !foundBlocked {
 		t.Error("Expected 'blocked' subcommand")
 	}
-}
-
-// mockCmd creates a cobra command with stdout/stderr buffers for testing
-func mockCmd() (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
-	cmd := &cobra.Command{}
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	return cmd, stdout, stderr
 }

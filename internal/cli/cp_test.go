@@ -14,7 +14,7 @@ func TestCpCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	attachDir := filepath.Join(tmpDir, "attachments")
-	os.MkdirAll(attachDir, 0755)
+	_ = os.MkdirAll(attachDir, 0755)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestCpCommand(t *testing.T) {
 
 	// Create destination container
 	destUUID := "dest-container-uuid"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'dest', 'Destination', ?, ?, 1)
 	`, destUUID, actorUUID, actorUUID)
@@ -106,13 +106,13 @@ func TestCpCommand(t *testing.T) {
 	t.Run("copy with attachments metadata only", func(t *testing.T) {
 		// Create task with attachments
 		taskUUID := "task-with-attachments"
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
 			VALUES (?, 'task-att', 'Task with Attachments', ?, 'open', 2, ?, ?, 1)
 		`, taskUUID, containerUUID, actorUUID, actorUUID)
 
 		// Add attachment metadata
-		database.Exec(`
+		_, _ = database.Exec(`
 			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
 			VALUES (?, 'test.txt', 'tasks/task-with-attachments/test.txt', 'text/plain', 100)
 		`, taskUUID)
@@ -313,25 +313,25 @@ func TestCpCommandEventLogging(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	attachDir := filepath.Join(tmpDir, "attachments")
-	os.MkdirAll(attachDir, 0755)
+	_ = os.MkdirAll(attachDir, 0755)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	// Create actor and containers
 	actorUUID := "test-actor"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test', 'Test', 'human')
 	`, actorUUID)
 
 	containerUUID := "source-container"
-	database.Exec(`
+	_, _ = database.Exec(`
 		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
 		VALUES (?, 'src', 'Source', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)

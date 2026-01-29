@@ -45,7 +45,7 @@ func init() {
 
 	dbSnapshotCmd.Flags().StringVar(&dbSnapshotOut, "out", "", "Output path for snapshot database (required)")
 	dbSnapshotCmd.Flags().BoolVar(&dbSnapshotJSON, "json", false, "Output JSON manifest")
-	dbSnapshotCmd.MarkFlagRequired("out")
+	_ = dbSnapshotCmd.MarkFlagRequired("out")
 }
 
 func runDBSnapshot(cmd *cobra.Command, args []string) error {
@@ -75,14 +75,14 @@ func runDBSnapshot(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source database: %w", err)
 	}
-	defer sourceDB.Close()
+	defer func() { _ = sourceDB.Close() }()
 
 	// Perform online backup using VACUUM INTO
 	// This creates a clean, optimized copy without WAL/SHM files
 	_, err = sourceDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", dbSnapshotOut))
 	if err != nil {
 		// Clean up failed snapshot
-		os.Remove(dbSnapshotOut)
+		_ = os.Remove(dbSnapshotOut)
 		return fmt.Errorf("failed to create snapshot: %w", err)
 	}
 

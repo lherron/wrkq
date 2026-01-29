@@ -37,10 +37,8 @@ func Load() (*Config, error) {
 		_ = godotenv.Load(envPath)
 	}
 
-	// Load ~/.config/wrkq/config.yaml if it exists
-	if err := loadYAMLConfig(cfg); err != nil {
-		// YAML config is optional, so we don't fail if it doesn't exist
-	}
+	// Load ~/.config/wrkq/config.yaml if it exists (optional, errors ignored)
+	_ = loadYAMLConfig(cfg)
 
 	// Override with environment variables
 	if dbPath := getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE"); dbPath != "" {

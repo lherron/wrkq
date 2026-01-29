@@ -68,10 +68,7 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}()
 
 	// Remove t: prefix if present
-	taskRef := args[0]
-	if strings.HasPrefix(taskRef, "t:") {
-		taskRef = taskRef[2:]
-	}
+	taskRef := strings.TrimPrefix(args[0], "t:")
 	taskRef = applyProjectRootToSelector(app.Config, taskRef, false)
 
 	// Resolve task
@@ -164,7 +161,7 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Check task etag if requested
 	if commentAddIfMatch > 0 {

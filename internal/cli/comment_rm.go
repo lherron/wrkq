@@ -45,10 +45,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	for _, commentRef := range args {
 		// Remove c: prefix if present
-		ref := commentRef
-		if strings.HasPrefix(ref, "c:") {
-			ref = ref[2:]
-		}
+		ref := strings.TrimPrefix(commentRef, "c:")
 
 		// Resolve comment
 		var commentUUID, commentID, taskUUID, taskID, body string
@@ -111,10 +108,12 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			if commentRmPurge {
 				action = "purge"
 			}
+			// Capitalize first letter of action (avoiding deprecated strings.Title)
+			actionTitle := strings.ToUpper(action[:1]) + action[1:]
 			fmt.Fprintf(cmd.OutOrStdout(), "%s comment %s (task %s)? [y/N]: ",
-				strings.Title(action), commentID, taskID)
+				actionTitle, commentID, taskID)
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
 				continue
 			}
@@ -125,7 +124,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		eventWriter := events.NewWriter(database.DB)
 

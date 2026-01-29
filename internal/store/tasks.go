@@ -226,12 +226,12 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 			for rows.Next() {
 				var uuid string
 				if err := rows.Scan(&uuid); err != nil {
-					rows.Close()
+					_ = rows.Close()
 					return fmt.Errorf("failed to scan blocked task: %w", err)
 				}
 				potentiallyUnblockedUUIDs = append(potentiallyUnblockedUUIDs, uuid)
 			}
-			rows.Close()
+			_ = rows.Close()
 			if err := rows.Err(); err != nil {
 				return fmt.Errorf("error iterating blocked tasks: %w", err)
 			}
@@ -509,7 +509,7 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		if err != nil {
 			return fmt.Errorf("failed to query attachments: %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		for rows.Next() {
 			var size int64
@@ -574,7 +574,7 @@ func (ts *TaskStore) GetAttachments(taskUUID string) ([]AttachmentInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query attachments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var attachments []AttachmentInfo
 	for rows.Next() {
@@ -680,7 +680,7 @@ func (ts *TaskStore) BlockedBy(taskUUID string) ([]BlockingTask, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query blocking tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var blockers []BlockingTask
 	for rows.Next() {
@@ -717,7 +717,7 @@ func (ts *TaskStore) GetTasksBlockedBy(blockerTaskUUID string) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query blocked tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var blockedTasks []string
 	for rows.Next() {
@@ -762,7 +762,7 @@ func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskU
 	if err != nil {
 		return fmt.Errorf("failed to query subtasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var subtaskUUIDs []string
 	for rows.Next() {
@@ -772,7 +772,7 @@ func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskU
 		}
 		subtaskUUIDs = append(subtaskUUIDs, uuid)
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Delete each subtask
 	for _, subtaskUUID := range subtaskUUIDs {

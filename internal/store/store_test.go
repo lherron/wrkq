@@ -19,7 +19,7 @@ func setupTestDB(t *testing.T) *db.DB {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("failed to migrate db: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 
@@ -113,7 +113,7 @@ func TestTaskStore_Create(t *testing.T) {
 
 	// Verify event was logged
 	var eventCount int
-	database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.created'", result.UUID).Scan(&eventCount)
+	_ = database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.created'", result.UUID).Scan(&eventCount)
 	if eventCount != 1 {
 		t.Errorf("expected 1 task.created event, got %d", eventCount)
 	}
@@ -179,7 +179,7 @@ func TestTaskStore_UpdateFields(t *testing.T) {
 
 	// Verify event
 	var eventCount int
-	database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.updated'", createResult.UUID).Scan(&eventCount)
+	_ = database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.updated'", createResult.UUID).Scan(&eventCount)
 	if eventCount != 1 {
 		t.Errorf("expected 1 task.updated event, got %d", eventCount)
 	}
@@ -326,14 +326,14 @@ func TestTaskStore_Archive(t *testing.T) {
 
 	// Verify archived_at is set in DB (since GetByUUID doesn't parse times)
 	var archivedAt *string
-	database.QueryRow("SELECT archived_at FROM tasks WHERE uuid = ?", taskResult.UUID).Scan(&archivedAt)
+	_ = database.QueryRow("SELECT archived_at FROM tasks WHERE uuid = ?", taskResult.UUID).Scan(&archivedAt)
 	if archivedAt == nil {
 		t.Error("expected archived_at to be set in database")
 	}
 
 	// Verify event was logged
 	var eventCount int
-	database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.archived'", taskResult.UUID).Scan(&eventCount)
+	_ = database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.archived'", taskResult.UUID).Scan(&eventCount)
 	if eventCount != 1 {
 		t.Errorf("expected 1 task.archived event, got %d", eventCount)
 	}
@@ -370,7 +370,7 @@ func TestTaskStore_Purge(t *testing.T) {
 
 	// Verify purge event was logged
 	var eventCount int
-	database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.purged'", taskResult.UUID).Scan(&eventCount)
+	_ = database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.purged'", taskResult.UUID).Scan(&eventCount)
 	if eventCount != 1 {
 		t.Errorf("expected 1 task.purged event, got %d", eventCount)
 	}
@@ -495,7 +495,7 @@ func TestContainerStore_DeleteNonEmpty(t *testing.T) {
 	container, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "non-empty"})
 
 	// Create a task in the container
-	s.Tasks.Create(actorUUID, CreateParams{
+	_, _ = s.Tasks.Create(actorUUID, CreateParams{
 		Slug:        "child-task",
 		Title:       "Child Task",
 		ProjectUUID: container.UUID,

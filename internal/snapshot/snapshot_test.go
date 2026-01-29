@@ -223,7 +223,7 @@ func TestComputeSnapshotRev(t *testing.T) {
 
 func TestExport(t *testing.T) {
 	db := createTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	seedTestData(t, db)
 
 	// Create temp directory for output
@@ -283,7 +283,7 @@ func TestExport(t *testing.T) {
 
 func TestExportWithLabelsSorted(t *testing.T) {
 	db := createTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	seedTestData(t, db)
 
 	tmpDir := t.TempDir()
@@ -321,7 +321,7 @@ func TestExportWithLabelsSorted(t *testing.T) {
 
 func TestRoundTrip(t *testing.T) {
 	db := createTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	seedTestData(t, db)
 
 	tmpDir := t.TempDir()
@@ -355,7 +355,7 @@ func TestRoundTrip(t *testing.T) {
 
 func TestImportDryRun(t *testing.T) {
 	db := createTestDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	seedTestData(t, db)
 
 	tmpDir := t.TempDir()

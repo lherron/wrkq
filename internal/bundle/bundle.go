@@ -403,7 +403,7 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*TaskExport
 	containerMap := make(map[string]bool)
@@ -630,12 +630,12 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 
 	// Get actor slugs
 	var createdBySlug, updatedBySlug string
-	db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-	db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+	_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
+	_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
 
 	// Get project info
 	var projectID string
-	db.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
+	_ = db.QueryRow("SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
 	// Build frontmatter
 	var sb strings.Builder
@@ -698,10 +698,7 @@ func addBundleFieldsToFrontmatter(content string, path string, baseEtag int) str
 	frontmatter := strings.TrimSpace(parts[1])
 
 	// Remove the leading "\n\n" from body (one newline from --- separator, one blank line)
-	body := parts[2]
-	if strings.HasPrefix(body, "\n\n") {
-		body = body[2:]
-	}
+	body := strings.TrimPrefix(parts[2], "\n\n")
 
 	// Reconstruct with added fields
 	// Format: ---\nfrontmatter\nbase_etag\npath\n---\n\nbody
@@ -748,7 +745,7 @@ func exportAttachments(db *sql.DB, bundleDir string, tasks []*TaskExport) error 
 		if err != nil {
 			return fmt.Errorf("failed to query attachments: %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		for rows.Next() {
 			var filename string
@@ -815,14 +812,14 @@ func exportEvents(db *sql.DB, bundleDir string, opts CreateOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to query events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	eventsPath := filepath.Join(bundleDir, "events.ndjson")
 	f, err := os.Create(eventsPath)
 	if err != nil {
 		return fmt.Errorf("failed to create events file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	encoder := json.NewEncoder(f)
 
@@ -858,13 +855,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return err
@@ -981,14 +978,14 @@ func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocum
 	for rows.Next() {
 		var uuid string
 		if err := rows.Scan(&uuid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		if !included[uuid] {
 			refUUIDs[uuid] = true
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Relations: incoming
 	queryIn := fmt.Sprintf(`SELECT DISTINCT from_task_uuid FROM task_relations WHERE to_task_uuid IN (%s)`, placeholders)
@@ -999,14 +996,14 @@ func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocum
 	for rows.Next() {
 		var uuid string
 		if err := rows.Scan(&uuid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		if !included[uuid] {
 			refUUIDs[uuid] = true
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Parent task refs
 	queryParent := fmt.Sprintf(`SELECT DISTINCT parent_task_uuid FROM tasks WHERE uuid IN (%s) AND parent_task_uuid IS NOT NULL`, placeholders)
@@ -1017,14 +1014,14 @@ func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocum
 	for rows.Next() {
 		var uuid string
 		if err := rows.Scan(&uuid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		if !included[uuid] {
 			refUUIDs[uuid] = true
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	if len(refUUIDs) == 0 {
 		return nil, nil

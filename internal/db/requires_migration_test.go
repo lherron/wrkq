@@ -18,7 +18,7 @@ func TestRequiresMigrationError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not open db: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Create schema_migrations table and add only first migration
 	_, err = database.Exec(`
@@ -75,7 +75,7 @@ func TestRequiresMigrationErrorFreshDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not open db: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	migErr := database.RequiresMigrationError()
 	if migErr == nil {
@@ -103,7 +103,7 @@ func TestRequiresMigrationErrorFullyMigrated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not open db: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Run all migrations
 	if err := database.Migrate(); err != nil {

@@ -112,13 +112,13 @@ func TestRenameContainer(t *testing.T) {
 		}
 
 		// Simulate dry-run output
-		container, _ := s.Containers.GetByUUID(result.UUID)
+		_, _ = s.Containers.GetByUUID(result.UUID)
 		var buf bytes.Buffer
 		buf.WriteString("Would rename container:\n")
 		buf.WriteString("  Slug:  dry-run-test -> new-slug\n")
 
 		// Verify container unchanged
-		container, err = s.Containers.GetByUUID(result.UUID)
+		container, err := s.Containers.GetByUUID(result.UUID)
 		if err != nil {
 			t.Fatalf("Failed to get container: %v", err)
 		}

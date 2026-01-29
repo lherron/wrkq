@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -415,31 +414,6 @@ func TestNullSeparatedOutput(t *testing.T) {
 	}
 }
 
-// Golden file test helper
-func compareGoldenFile(t *testing.T, goldenPath string, actual []byte) {
-	t.Helper()
-
-	// Read golden file
-	golden, err := os.ReadFile(goldenPath)
-	if err != nil {
-		// If golden file doesn't exist, create it
-		if os.IsNotExist(err) {
-			if err := os.WriteFile(goldenPath, actual, 0644); err != nil {
-				t.Fatalf("Failed to write golden file: %v", err)
-			}
-			t.Logf("Created golden file: %s", goldenPath)
-			return
-		}
-		t.Fatalf("Failed to read golden file: %v", err)
-	}
-
-	// Compare
-	if !bytes.Equal(golden, actual) {
-		t.Errorf("Output does not match golden file %s\nExpected:\n%s\n\nActual:\n%s",
-			goldenPath, string(golden), string(actual))
-	}
-}
-
 func TestGoldenFiles_JSONOutput(t *testing.T) {
 	database, _ := setupTestEnv(t)
 
@@ -474,46 +448,8 @@ func TestGoldenFiles_JSONOutput(t *testing.T) {
 	}
 
 	// Write to golden file for demonstration
-	// In a real implementation, you would use compareGoldenFile function
 	_ = jsonData
 	t.Logf("Successfully marshaled task to JSON")
-}
-
-// Helper to execute a SQL query and return results as a slice of maps
-func queryToMaps(t *testing.T, db *sql.DB, query string, args ...interface{}) []map[string]interface{} {
-	t.Helper()
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		t.Fatalf("Query failed: %v", err)
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("Failed to get columns: %v", err)
-	}
-
-	var results []map[string]interface{}
-	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			t.Fatalf("Scan failed: %v", err)
-		}
-
-		result := make(map[string]interface{})
-		for i, col := range columns {
-			result[col] = values[i]
-		}
-		results = append(results, result)
-	}
-
-	return results
 }
 
 // TestApplyCommand_EmptyInput tests that empty input is rejected

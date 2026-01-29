@@ -88,9 +88,10 @@ func runDoctorAdm(cmd *cobra.Command, args []string) error {
 
 	// Count warnings and errors
 	for _, check := range report.Checks {
-		if check.Status == "warning" {
+		switch check.Status {
+		case "warning":
 			report.Warnings++
-		} else if check.Status == "error" {
+		case "error":
 			report.Errors++
 			report.OverallStatus = "error"
 		}
@@ -538,11 +539,14 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\n", category)
 		for _, check := range checks {
-			icon := "✓"
-			if check.Status == "warning" {
+			var icon string
+			switch check.Status {
+			case "warning":
 				icon = "⚠"
-			} else if check.Status == "error" {
+			case "error":
 				icon = "✗"
+			default:
+				icon = "✓"
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s %s\n", icon, check.Message)

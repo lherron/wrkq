@@ -129,7 +129,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Resolve actor for container creation
 	// Bundle apply should attribute changes to the actor who applied the bundle
@@ -172,7 +172,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		ew := events.NewWriter(database.DB)
 
@@ -297,7 +297,7 @@ func ensureContainer(database *db.DB, actorUUID string, path string, dryRun bool
 	if err != nil {
 		return false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	created, err := ensureContainerTx(tx, events.NewWriter(database.DB), actorUUID, path, dryRun)
 	if err != nil {
@@ -454,7 +454,7 @@ func applyTaskDocumentWithDB(database *db.DB, actorUUID string, task *bundle.Tas
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if err := applyTaskDocumentTx(tx, events.NewWriter(database.DB), actorUUID, task, dryRun); err != nil {
 		return err
@@ -1011,7 +1011,7 @@ func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, actorUUID, parentTas
 	if err != nil {
 		return fmt.Errorf("failed to query subtasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var subtaskUUIDs []string
 	for rows.Next() {

@@ -78,7 +78,7 @@ func ServeDaemon(opts DaemonOptions) error {
 			database.Close()
 			return fmt.Errorf("failed to listen on unix socket: %w", err)
 		}
-		defer listener.Close()
+		defer func() { _ = listener.Close() }()
 		return httpServer.Serve(listener)
 	}
 
@@ -166,10 +166,7 @@ func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
 func (s *daemonServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.token != "" {
-			token := r.Header.Get("Authorization")
-			if strings.HasPrefix(token, "Bearer ") {
-				token = strings.TrimPrefix(token, "Bearer ")
-			}
+			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if token == "" {
 				token = r.Header.Get("X-Wrkqd-Token")
 			}
@@ -758,7 +755,7 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var currentState string
 	var currentETag int64
@@ -990,7 +987,7 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if req.IfMatch > 0 {
 		var currentEtag int64
@@ -1111,14 +1108,14 @@ func (s *daemonServer) handleRelationsList(w http.ResponseWriter, r *http.Reques
 	for outgoingRows.Next() {
 		var rel Relation
 		if err := outgoingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
-			outgoingRows.Close()
+			_ = outgoingRows.Close()
 			s.writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		rel.Direction = "outgoing"
 		relations = append(relations, rel)
 	}
-	outgoingRows.Close()
+	_ = outgoingRows.Close()
 
 	incomingRows, err := s.db.Query(`
 		SELECT r.kind, r.created_at,
@@ -1138,14 +1135,14 @@ func (s *daemonServer) handleRelationsList(w http.ResponseWriter, r *http.Reques
 	for incomingRows.Next() {
 		var rel Relation
 		if err := incomingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
-			incomingRows.Close()
+			_ = incomingRows.Close()
 			s.writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		rel.Direction = "incoming"
 		relations = append(relations, rel)
 	}
-	incomingRows.Close()
+	_ = incomingRows.Close()
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"relations": relations,
@@ -1265,8 +1262,6 @@ func (s *daemonServer) handleRelationsDelete(w http.ResponseWriter, r *http.Requ
 		"ok": true,
 	})
 }
-
-type actorsListRequest struct{}
 
 func (s *daemonServer) handleActorsList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1546,7 +1541,7 @@ func (s *daemonServer) handleBundleApply(w http.ResponseWriter, r *http.Request)
 			s.writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		ew := events.NewWriter(s.db.DB)
 
@@ -1729,13 +1724,13 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		for outgoingRows.Next() {
 			var rel Relation
 			if err := outgoingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
-				outgoingRows.Close()
+				_ = outgoingRows.Close()
 				return nil, fmt.Errorf("failed to scan relation: %w", err)
 			}
 			rel.Direction = "outgoing"
 			relations = append(relations, rel)
 		}
-		outgoingRows.Close()
+		_ = outgoingRows.Close()
 
 		incomingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
@@ -1754,13 +1749,13 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		for incomingRows.Next() {
 			var rel Relation
 			if err := incomingRows.Scan(&rel.Kind, &rel.CreatedAt, &rel.TaskID, &rel.TaskUUID, &rel.TaskSlug, &rel.TaskTitle, &rel.CreatedByID); err != nil {
-				incomingRows.Close()
+				_ = incomingRows.Close()
 				return nil, fmt.Errorf("failed to scan relation: %w", err)
 			}
 			rel.Direction = "incoming"
 			relations = append(relations, rel)
 		}
-		incomingRows.Close()
+		_ = incomingRows.Close()
 
 		if len(relations) > 0 {
 			task.Relations = relations

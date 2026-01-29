@@ -101,10 +101,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 	// For each task argument, resolve and list comments
 	for _, taskArg := range args {
 		// Remove t: prefix if present
-		taskRef := taskArg
-		if strings.HasPrefix(taskRef, "t:") {
-			taskRef = taskRef[2:]
-		}
+		taskRef := strings.TrimPrefix(taskArg, "t:")
 		taskRef = applyProjectRootToSelector(cfg, taskRef, false)
 
 		// Resolve task
@@ -160,7 +157,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
 				&actorSlug, &actorRole, &taskIDStr)
 			if err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return fmt.Errorf("failed to scan comment: %w", err)
 			}
 
@@ -192,7 +189,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 
 			allComments = append(allComments, comment)
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("error iterating comments: %w", err)
@@ -240,10 +237,8 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		return render.RenderJSON(allComments, false)
 	}
 
-	if commentLsTSV {
-		// TSV output not yet implemented, fall back to table
-		// Continue to table output below
-	}
+	// Note: TSV output (commentLsTSV) not yet implemented, fall back to table
+	_ = commentLsTSV // silence unused warning until TSV is implemented
 
 	// Table output
 	headers := []string{"ID", "Task", "Actor", "Created", "Body Preview"}

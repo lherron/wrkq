@@ -66,7 +66,7 @@ func (r *Renderer) RenderNDJSON(items []interface{}) error {
 // RenderYAML renders data as YAML
 func (r *Renderer) RenderYAML(data interface{}) error {
 	encoder := yaml.NewEncoder(r.writer)
-	defer encoder.Close()
+	defer func() { _ = encoder.Close() }()
 	return encoder.Encode(data)
 }
 
@@ -134,13 +134,13 @@ func (r *Renderer) RenderTable(headers []string, rows [][]string) error {
 		r.renderTableSeparator(widths)
 	} else {
 		// Porcelain mode: just tab-separated
-		fmt.Fprintln(r.writer, strings.Join(headers, "\t"))
+		_, _ = fmt.Fprintln(r.writer, strings.Join(headers, "\t"))
 	}
 
 	// Render rows
 	for _, row := range rows {
 		if r.opts.Porcelain {
-			fmt.Fprintln(r.writer, strings.Join(row, "\t"))
+			_, _ = fmt.Fprintln(r.writer, strings.Join(row, "\t"))
 		} else {
 			r.renderTableRow(row, widths)
 		}
@@ -152,23 +152,23 @@ func (r *Renderer) RenderTable(headers []string, rows [][]string) error {
 func (r *Renderer) renderTableRow(cells []string, widths []int) {
 	for i, cell := range cells {
 		if i < len(widths) {
-			fmt.Fprintf(r.writer, "%-*s", widths[i], cell)
+			_, _ = fmt.Fprintf(r.writer, "%-*s", widths[i], cell)
 			if i < len(cells)-1 {
-				fmt.Fprint(r.writer, "  ")
+				_, _ = fmt.Fprint(r.writer, "  ")
 			}
 		}
 	}
-	fmt.Fprintln(r.writer)
+	_, _ = fmt.Fprintln(r.writer)
 }
 
 func (r *Renderer) renderTableSeparator(widths []int) {
 	for i, width := range widths {
-		fmt.Fprint(r.writer, strings.Repeat("-", width))
+		_, _ = fmt.Fprint(r.writer, strings.Repeat("-", width))
 		if i < len(widths)-1 {
-			fmt.Fprint(r.writer, "  ")
+			_, _ = fmt.Fprint(r.writer, "  ")
 		}
 	}
-	fmt.Fprintln(r.writer)
+	_, _ = fmt.Fprintln(r.writer)
 }
 
 // Package-level helper functions for simple rendering
@@ -233,9 +233,6 @@ func RenderNulSeparated(items interface{}) error {
 
 	return nil
 }
-
-// Extractor for getting field from struct
-type fieldExtractor func(interface{}) string
 
 // RenderTable renders a slice of structs as a table
 func RenderTable(items interface{}, porcelain bool) error {

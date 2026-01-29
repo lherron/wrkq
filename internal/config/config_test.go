@@ -16,7 +16,7 @@ func TestFindEnvLocal_InCurrentDir(t *testing.T) {
 
 	// Change to temp dir
 	oldCwd, _ := os.Getwd()
-	defer os.Chdir(oldCwd)
+	defer func() { _ = os.Chdir(oldCwd) }()
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestFindEnvLocal_InParentDir(t *testing.T) {
 
 	// Change to child dir
 	oldCwd, _ := os.Getwd()
-	defer os.Chdir(oldCwd)
+	defer func() { _ = os.Chdir(oldCwd) }()
 	if err := os.Chdir(childDir); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestFindEnvLocal_InGrandparentDir(t *testing.T) {
 
 	// Change to grandchild dir
 	oldCwd, _ := os.Getwd()
-	defer os.Chdir(oldCwd)
+	defer func() { _ = os.Chdir(oldCwd) }()
 	if err := os.Chdir(childDir); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestFindEnvLocal_ClosestWins(t *testing.T) {
 
 	// Change to child dir
 	oldCwd, _ := os.Getwd()
-	defer os.Chdir(oldCwd)
+	defer func() { _ = os.Chdir(oldCwd) }()
 	if err := os.Chdir(childDir); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestFindEnvLocal_NotFound(t *testing.T) {
 
 	// Change to temp dir
 	oldCwd, _ := os.Getwd()
-	defer os.Chdir(oldCwd)
+	defer func() { _ = os.Chdir(oldCwd) }()
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatal(err)
 	}

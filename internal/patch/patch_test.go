@@ -683,7 +683,7 @@ func TestRebase_NoCollision(t *testing.T) {
 	}
 
 	// Should have no rewrites since no collision
-	if result.CodeRewrites != nil && len(result.CodeRewrites) > 0 {
+	if len(result.CodeRewrites) > 0 {
 		t.Errorf("expected no rewrites, got %v", result.CodeRewrites)
 	}
 

@@ -85,7 +85,7 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results := []inboxTask{}
 	for rows.Next() {
@@ -152,7 +152,7 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("ack query failed: %w", err)
 		}
-		defer ackRows.Close()
+		defer func() { _ = ackRows.Close() }()
 
 		for ackRows.Next() {
 			var r inboxTask

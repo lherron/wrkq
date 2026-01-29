@@ -70,7 +70,7 @@ func runAttachPath(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Try to resolve as attachment ID first
 	var relativePath, taskUUID, filename, attachmentID string
@@ -143,12 +143,12 @@ func runAttachPath(cmd *cobra.Command, args []string) error {
 	}
 
 	if attachPathPorcelain {
-		fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
 		return nil
 	}
 
 	// Human-readable output
-	fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), absolutePath)
 
 	return nil
 }

@@ -43,7 +43,9 @@ func NormalizeSlug(s string) (string, error) {
 	s = strings.Trim(s, "-")
 
 	// Ensure it starts with alphanumeric
-	if len(s) == 0 || !((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= '0' && s[0] <= '9')) {
+	isLowerAlpha := len(s) > 0 && s[0] >= 'a' && s[0] <= 'z'
+	isDigit := len(s) > 0 && s[0] >= '0' && s[0] <= '9'
+	if len(s) == 0 || (!isLowerAlpha && !isDigit) {
 		return "", fmt.Errorf("slug must start with alphanumeric character")
 	}
 

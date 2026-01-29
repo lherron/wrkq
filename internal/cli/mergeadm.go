@@ -743,9 +743,7 @@ func collectActorUUIDs(data *sourceData) []string {
 		if t.AssigneeUUID.Valid {
 			set[t.AssigneeUUID.String] = struct{}{}
 		}
-		if t.ParentTaskUUID.Valid {
-			// no actor
-		}
+		// Note: ParentTaskUUID doesn't reference an actor, so nothing to add
 	}
 	for _, c := range data.Comments {
 		set[c.ActorUUID] = struct{}{}
@@ -1093,7 +1091,7 @@ func mergeContainer(exec *mergeExecutor, writer *events.Writer, actorUUID string
 		return "", "", "", false, false, false, fmt.Errorf("failed to lookup container %s: %w", c.UUID, err)
 	}
 
-	actualSlug := desiredSlug
+	actualSlug := ""
 	actualUUID := c.UUID
 	created := false
 	updated := false
@@ -1102,6 +1100,7 @@ func mergeContainer(exec *mergeExecutor, writer *events.Writer, actorUUID string
 	resolveSlug := func() (string, bool, error) {
 		return ensureUniqueContainerSlug(exec, desiredParentUUID, c.UUID, desiredSlug)
 	}
+	_ = actualSlug // assigned below
 
 	if err == sql.ErrNoRows {
 		var err error

@@ -78,7 +78,7 @@ func runBundleCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Prepare bundle creation options
 	opts := bundle.CreateOptions{
@@ -130,28 +130,28 @@ func runBundleCreate(cmd *cobra.Command, args []string) error {
 
 	if bundleCreateDryRun {
 		// TODO: Implement dry-run preview
-		fmt.Fprintf(cmd.OutOrStdout(), "Dry run - would create bundle with:\n")
-		fmt.Fprintf(cmd.OutOrStdout(), "  Output: %s\n", opts.OutputDir)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Dry run - would create bundle with:\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Output: %s\n", opts.OutputDir)
 		if opts.Actor != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", opts.Actor)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", opts.Actor)
 		}
 		if opts.Since != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Since: %s\n", opts.Since)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Since: %s\n", opts.Since)
 		}
 		if opts.Until != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Until: %s\n", opts.Until)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Until: %s\n", opts.Until)
 		}
 		if opts.ProjectPath != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Project: %s\n", opts.ProjectPath)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Project: %s\n", opts.ProjectPath)
 		}
 		if len(opts.PathPrefixes) > 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Path prefixes: %s\n", strings.Join(opts.PathPrefixes, ", "))
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Path prefixes: %s\n", strings.Join(opts.PathPrefixes, ", "))
 		}
 		if opts.IncludeRefs {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Include refs: true\n")
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Include refs: true\n")
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "  With attachments: %v\n", opts.WithAttachments)
-		fmt.Fprintf(cmd.OutOrStdout(), "  With events: %v\n", opts.WithEvents)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  With attachments: %v\n", opts.WithAttachments)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  With events: %v\n", opts.WithEvents)
 		return nil
 	}
 
@@ -176,44 +176,44 @@ func runBundleCreate(cmd *cobra.Command, args []string) error {
 
 	if bundleCreatePorcelain {
 		// Tab-separated: tasks_count containers_count bundle_dir
-		fmt.Fprintf(cmd.OutOrStdout(), "%d\t%d\t%s\n",
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%d\t%d\t%s\n",
 			len(b.Tasks), len(b.Containers), b.Dir)
 		return nil
 	}
 
 	// Human-readable output
-	fmt.Fprintf(cmd.OutOrStdout(), "✓ Bundle created successfully\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  Location: %s\n", b.Dir)
-	fmt.Fprintf(cmd.OutOrStdout(), "  Tasks: %d\n", len(b.Tasks))
-	fmt.Fprintf(cmd.OutOrStdout(), "  Containers: %d\n", len(b.Containers))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "✓ Bundle created successfully\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Location: %s\n", b.Dir)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Tasks: %d\n", len(b.Tasks))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Containers: %d\n", len(b.Containers))
 
 	if b.Manifest.Actor != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", b.Manifest.Actor)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", b.Manifest.Actor)
 	}
 	if b.Manifest.Since != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Since: %s\n", b.Manifest.Since)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Since: %s\n", b.Manifest.Since)
 	}
 	if b.Manifest.SinceCursor != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Since cursor: %s\n", b.Manifest.SinceCursor)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Since cursor: %s\n", b.Manifest.SinceCursor)
 	}
 	if b.Manifest.Until != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Until: %s\n", b.Manifest.Until)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Until: %s\n", b.Manifest.Until)
 	}
 	if b.Manifest.Project != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Project: %s\n", b.Manifest.Project)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Project: %s\n", b.Manifest.Project)
 	}
 	if len(b.Manifest.PathPrefixes) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Path prefixes: %s\n", strings.Join(b.Manifest.PathPrefixes, ", "))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Path prefixes: %s\n", strings.Join(b.Manifest.PathPrefixes, ", "))
 	}
 
 	if b.Manifest.WithAttachments {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Attachments: included\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Attachments: included\n")
 	}
 	if b.Manifest.WithEvents {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Events: included\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Events: included\n")
 	}
 	if b.Manifest.IncludeRefs {
-		fmt.Fprintf(cmd.OutOrStdout(), "  Refs: included (%d)\n", b.Manifest.RefCount)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Refs: included (%d)\n", b.Manifest.RefCount)
 	}
 
 	return nil

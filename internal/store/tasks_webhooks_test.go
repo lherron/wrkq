@@ -23,7 +23,7 @@ func setupWebhookTestDB(t *testing.T) *db.DB {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("failed to migrate db: %v", err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
 
@@ -73,7 +73,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 	}, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		var payload webhooks.Payload
 		_ = json.Unmarshal(body, &payload)
@@ -194,7 +194,7 @@ func TestUnblockWebhookSingleBlocker(t *testing.T) {
 	}, 10) // Buffer for multiple webhooks
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		var payload webhooks.Payload
 		_ = json.Unmarshal(body, &payload)
@@ -309,7 +309,7 @@ func TestUnblockWebhookMultipleBlockers(t *testing.T) {
 	}, 10)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		var payload webhooks.Payload
 		_ = json.Unmarshal(body, &payload)
@@ -421,7 +421,7 @@ func TestUnblockWebhookCancelledState(t *testing.T) {
 	calls := make(chan webhooks.Payload, 10)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		var payload webhooks.Payload
 		_ = json.Unmarshal(body, &payload)
@@ -507,7 +507,7 @@ func TestNoUnblockWebhookWhenAlreadyCompleted(t *testing.T) {
 	calls := make(chan webhooks.Payload, 10)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		var payload webhooks.Payload
 		_ = json.Unmarshal(body, &payload)
@@ -605,7 +605,7 @@ func TestWebhookPayloadIncludesBlockedBy(t *testing.T) {
 	calls := make(chan webhooks.Payload, 10)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		var payload webhooks.Payload
 		_ = json.Unmarshal(body, &payload)
@@ -740,7 +740,7 @@ func TestWebhookPayloadBlockedByOmittedWhenEmpty(t *testing.T) {
 	rawPayloads := make(chan []byte, 10)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		rawPayloads <- body
 		w.WriteHeader(http.StatusNoContent)

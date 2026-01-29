@@ -18,8 +18,8 @@ func TestDoctorDatabaseFileChecks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open database: %v", err)
 		}
-		database.Migrate()
-		database.Close()
+		_ = database.Migrate()
+		_ = database.Close()
 
 		results := checkDatabaseFileAdm(dbPath)
 
@@ -63,12 +63,12 @@ func TestDoctorDatabaseFileChecks(t *testing.T) {
 
 		// Create database
 		database, _ := db.Open(dbPath)
-		database.Migrate()
-		database.Close()
+		_ = database.Migrate()
+		_ = database.Close()
 
 		// Make read-only
-		os.Chmod(dbPath, 0444)
-		defer os.Chmod(dbPath, 0644) // Cleanup
+		_ = os.Chmod(dbPath, 0444)
+		defer func() { _ = os.Chmod(dbPath, 0644) }() // Cleanup
 
 		results := checkDatabaseFileAdm(dbPath)
 
@@ -95,9 +95,9 @@ func TestDoctorDatabasePragmaChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	t.Run("WAL mode enabled passes check", func(t *testing.T) {
 		results := checkDatabasePragmasAdm(database)
@@ -189,7 +189,7 @@ func TestDoctorSchemaChecks(t *testing.T) {
 		tmpDir2 := t.TempDir()
 		dbPath2 := filepath.Join(tmpDir2, "incomplete.db")
 		db2, _ := db.Open(dbPath2)
-		defer db2.Close()
+		defer func() { _ = db2.Close() }()
 
 		// Don't run migrations - empty database
 		results := checkSchemaAdm(db2)
@@ -396,15 +396,15 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 	attachDir := filepath.Join(tmpDir, "attachments")
-	os.MkdirAll(attachDir, 0755)
+	_ = os.MkdirAll(attachDir, 0755)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	database.Migrate()
+	_ = database.Migrate()
 
 	t.Run("attachment directory exists check", func(t *testing.T) {
 		results := checkAttachmentsAdm(database, attachDir)
@@ -666,9 +666,10 @@ func TestDoctorReportGeneration(t *testing.T) {
 
 		// Count warnings and errors
 		for _, check := range report.Checks {
-			if check.Status == "warning" {
+			switch check.Status {
+			case "warning":
 				report.Warnings++
-			} else if check.Status == "error" {
+			case "error":
 				report.Errors++
 				report.OverallStatus = "error"
 			}

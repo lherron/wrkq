@@ -40,7 +40,7 @@ func (s *Store) withTx(fn func(tx *sql.Tx, ew *events.Writer) error) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	ew := events.NewWriter(s.db.DB)
 	if err := fn(tx, ew); err != nil {

@@ -173,7 +173,7 @@ func exportActors(db *sql.DB, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var uuid, id, slug, role, createdAt, updatedAt string
@@ -216,7 +216,7 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var uuid, id, slug, title, createdAt, updatedAt string
@@ -268,7 +268,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var uuid, id, slug, title, projectUUID, state, createdAt, updatedAt string
@@ -359,7 +359,7 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var uuid, id, taskUUID, actorUUID, body, createdAt string
@@ -411,7 +411,7 @@ func exportEvents(db *sql.DB, snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var id int64

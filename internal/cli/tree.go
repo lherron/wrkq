@@ -292,9 +292,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		// If all tasks are completed (and all child containers are done), don't add tasks to the tree
 		// Otherwise, add the tasks we collected
 		if !root.AllTasksCompleted || totalTasks == 0 {
-			for _, task := range tasks {
-				root.Children = append(root.Children, task)
-			}
+			root.Children = append(root.Children, tasks...)
 		}
 	}
 

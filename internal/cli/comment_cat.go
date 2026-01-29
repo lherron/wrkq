@@ -42,10 +42,7 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	for _, commentRef := range args {
 		// Remove c: prefix if present
-		ref := commentRef
-		if strings.HasPrefix(ref, "c:") {
-			ref = ref[2:]
-		}
+		ref := strings.TrimPrefix(commentRef, "c:")
 
 		// Resolve comment (friendly ID or UUID)
 		var commentUUID string

@@ -163,7 +163,7 @@ func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
 	if err != nil {
 		return TaskInfo{}, fmt.Errorf("query blockers: %w", err)
 	}
-	defer blockerRows.Close()
+	defer func() { _ = blockerRows.Close() }()
 
 	for blockerRows.Next() {
 		var blocker BlockerInfo
@@ -203,7 +203,7 @@ func collectWebhookURLs(database *db.DB, containerUUID string) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("query webhook urls: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var collected []string
 	for rows.Next() {

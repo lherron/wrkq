@@ -146,7 +146,7 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to query attachments: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	attachments := []map[string]interface{}{}
 	for rows.Next() {
@@ -317,7 +317,7 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Validate size from actual copy
 	if err := attach.ValidateSize(size, int64(cfg.AttachmentsMaxMB)); err != nil {
 		// Clean up the file we just copied
-		os.Remove(absPath)
+		_ = os.Remove(absPath)
 		return err
 	}
 
@@ -326,14 +326,14 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.Exec(`
 		INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum, created_by_actor_uuid)
 		VALUES ('', ?, ?, ?, ?, ?, ?, ?)
 	`, taskUUID, filename, relativePath, mimeType, size, checksum, actorUUID)
 	if err != nil {
-		os.Remove(absPath) // Clean up file
+		_ = os.Remove(absPath) // Clean up file
 		return fmt.Errorf("failed to insert attachment: %w", err)
 	}
 
@@ -344,7 +344,7 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 		SELECT uuid, id FROM attachments WHERE rowid = ?
 	`, lastID).Scan(&attachUUID, &attachID)
 	if err != nil {
-		os.Remove(absPath)
+		_ = os.Remove(absPath)
 		return fmt.Errorf("failed to get attachment ID: %w", err)
 	}
 
@@ -368,16 +368,16 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if err := eventWriter.LogEvent(tx, event); err != nil {
-		os.Remove(absPath)
+		_ = os.Remove(absPath)
 		return fmt.Errorf("failed to log event: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		os.Remove(absPath)
+		_ = os.Remove(absPath)
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", attachID, filename, size)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", attachID, filename, size)
 	return nil
 }
 
@@ -415,7 +415,7 @@ func runAttachGet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if dstPath != "-" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", filename, dstPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", filename, dstPath)
 	}
 
 	return nil
@@ -434,7 +434,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			WHERE id = ? OR uuid = ?
 		`, attachmentRef, attachmentRef).Scan(&attachUUID, &attachID, &relativePath, &filename)
 		if err == sql.ErrNoRows {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: attachment not found: %s\n", attachmentRef)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: attachment not found: %s\n", attachmentRef)
 			continue
 		}
 		if err != nil {
@@ -443,9 +443,9 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Confirm deletion
 		if !attachRmYes {
-			fmt.Fprintf(cmd.OutOrStdout(), "Delete attachment %s (%s)? [y/N]: ", attachID, filename)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Delete attachment %s (%s)? [y/N]: ", attachID, filename)
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
 				continue
 			}
@@ -453,7 +453,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Delete file
 		if err := attach.DeleteFile(cfg.AttachDir, relativePath); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to delete file for %s: %v\n", attachID, err)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to delete file for %s: %v\n", attachID, err)
 			// Continue to delete metadata anyway
 		}
 
@@ -462,7 +462,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		_, err = tx.Exec(`DELETE FROM attachments WHERE uuid = ?`, attachUUID)
 		if err != nil {
@@ -494,7 +494,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to commit transaction: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s (%s)\n", attachID, filename)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s (%s)\n", attachID, filename)
 	}
 
 	return nil

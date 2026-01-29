@@ -69,7 +69,7 @@ func CopyFile(src, dst string) (size int64, checksum string, err error) {
 		if err != nil {
 			return 0, "", fmt.Errorf("failed to open source: %w", err)
 		}
-		defer srcFile.Close()
+		defer func() { _ = srcFile.Close() }()
 	}
 
 	// Open destination
@@ -85,7 +85,7 @@ func CopyFile(src, dst string) (size int64, checksum string, err error) {
 		if err != nil {
 			return 0, "", fmt.Errorf("failed to create destination: %w", err)
 		}
-		defer dstFile.Close()
+		defer func() { _ = dstFile.Close() }()
 	}
 
 	// Copy with checksum computation

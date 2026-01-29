@@ -43,7 +43,7 @@ func Open(path string) (*DB, error) {
 
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("failed to apply pragma %q: %w", pragma, err)
 		}
 	}
@@ -112,14 +112,14 @@ func (db *DB) Migrate() error {
 
 		_, err = tx.Exec(string(content))
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("failed to execute migration %s: %w", migration, err)
 		}
 
 		// Record migration as applied
 		_, err = tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", migration)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("failed to record migration %s: %w", migration, err)
 		}
 
@@ -194,14 +194,14 @@ func (db *DB) MigrateWithInfo() ([]string, error) {
 
 		_, err = tx.Exec(string(content))
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return applied, fmt.Errorf("failed to execute migration %s: %w", migration, err)
 		}
 
 		// Record migration as applied
 		_, err = tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", migration)
 		if err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return applied, fmt.Errorf("failed to record migration %s: %w", migration, err)
 		}
 
@@ -253,7 +253,7 @@ func (db *DB) MigrationStatus() (applied []string, pending []string, err error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query schema_migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var version string

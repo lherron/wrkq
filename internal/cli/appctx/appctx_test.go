@@ -15,8 +15,8 @@ func TestBootstrap_ConfigOnly(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Set environment for test
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	defer os.Unsetenv("WRKQ_DB_PATH")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
 
 	// Create a test command with the db flag
 	cmd := &cobra.Command{}
@@ -54,11 +54,11 @@ func TestBootstrap_WithDB(t *testing.T) {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
-	database.Close()
+	_ = database.Close()
 
 	// Set environment for test
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	defer os.Unsetenv("WRKQ_DB_PATH")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
 
 	// Create a test command
 	cmd := &cobra.Command{}
@@ -94,7 +94,7 @@ func TestBootstrap_DBFlagOverride(t *testing.T) {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
-	database.Close()
+	_ = database.Close()
 
 	database2, err := db.Open(overridePath)
 	if err != nil {
@@ -103,17 +103,17 @@ func TestBootstrap_DBFlagOverride(t *testing.T) {
 	if err := database2.Migrate(); err != nil {
 		t.Fatalf("Failed to run migrations on override: %v", err)
 	}
-	database2.Close()
+	_ = database2.Close()
 
 	// Set environment to point to one path
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	defer os.Unsetenv("WRKQ_DB_PATH")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
 
 	// Create a test command with --db flag set to override path
 	cmd := &cobra.Command{}
 	cmd.Flags().String("db", "", "Database path")
 	cmd.Flags().String("as", "", "Actor")
-	cmd.ParseFlags([]string{"--db", overridePath})
+	_ = cmd.ParseFlags([]string{"--db", overridePath})
 
 	// Bootstrap
 	app, err := Bootstrap(cmd, DefaultOptions())
@@ -149,13 +149,13 @@ func TestBootstrap_WithActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test actor: %v", err)
 	}
-	database.Close()
+	_ = database.Close()
 
 	// Set environment for test
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Setenv("WRKQ_ACTOR", "test-actor")
-	defer os.Unsetenv("WRKQ_DB_PATH")
-	defer os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Setenv("WRKQ_ACTOR", "test-actor")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Create a test command
 	cmd := &cobra.Command{}
@@ -190,20 +190,20 @@ func TestBootstrap_ActorNotConfigured(t *testing.T) {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
-	database.Close()
+	_ = database.Close()
 
 	// Change to temp dir to avoid finding parent .env.local files
 	oldCwd, _ := os.Getwd()
-	defer os.Chdir(oldCwd)
+	defer func() { _ = os.Chdir(oldCwd) }()
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
 	// Set DB path but NOT actor
-	os.Setenv("WRKQ_DB_PATH", dbPath)
-	os.Unsetenv("WRKQ_ACTOR")
-	os.Unsetenv("WRKQ_ACTOR_ID")
-	defer os.Unsetenv("WRKQ_DB_PATH")
+	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
+	_ = os.Unsetenv("WRKQ_ACTOR")
+	_ = os.Unsetenv("WRKQ_ACTOR_ID")
+	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
 
 	// Create a test command
 	cmd := &cobra.Command{}

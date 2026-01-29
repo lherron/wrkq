@@ -33,7 +33,7 @@ type App struct {
 // Safe to call multiple times.
 func (a *App) Close() {
 	if a.DB != nil {
-		a.DB.Close()
+		_ = a.DB.Close()
 		a.DB = nil
 	}
 }
@@ -111,7 +111,7 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 
 		// Check for pending migrations
 		if err := database.RequiresMigrationError(); err != nil {
-			database.Close()
+			_ = database.Close()
 			return nil, err
 		}
 
@@ -122,7 +122,7 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 			if projectSelector := projectFlag.Value.String(); projectSelector != "" {
 				projectPath, err := resolveProjectFlag(database, projectSelector)
 				if err != nil {
-					database.Close()
+					_ = database.Close()
 					return nil, err
 				}
 				app.Config.ProjectRoot = projectPath
