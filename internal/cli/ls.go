@@ -264,9 +264,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				`
 				queryArgs := []interface{}{containerUUID}
 
-				// Filter out archived and deleted by default
+				// Show only draft and open by default
 				if !lsIncludeHidden {
-					query += ` AND state NOT IN ('archived', 'deleted')`
+					query += ` AND state IN ('draft', 'open')`
 				}
 
 				// Add cursor WHERE clause if present
