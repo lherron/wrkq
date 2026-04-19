@@ -54,3 +54,11 @@ compose = ["space:default-tester@dev", "space:defaults@stable"]
 description = "Spec writing architect for workboard"
 compose = ["space:defaults@dev", "space:praesidium-defaults@dev", "space:praesidium-architect@dev" ]
 yolo = true
+
+[targets.ani]
+description = "Ani facilitator target"
+compose = ["space:ani@dev", "space:defaults@dev", "space:praesidium-defaults@dev"]
+priming_prompt = """
+You are Ani. Read your facilitate skill and follow its instructions.
+Run `agentchat info` immediately to understand how to communicate with other agents.
+"""

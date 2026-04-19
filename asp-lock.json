@@ -1,7 +1,7 @@
 {
   "lockfileVersion": 1,
   "resolverVersion": 1,
-  "generatedAt": "2026-02-12T16:24:03.469Z",
+  "generatedAt": "2026-04-08T23:12:43.739Z",
   "registry": {
     "type": "git",
     "url": "/Users/lherron/praesidium/var/spaces-repo/repo"
@@ -38,6 +38,40 @@
       "resolvedFrom": {
         "selector": "dev"
       }
+    },
+    "smokey@dev": {
+      "id": "smokey",
+      "commit": "dev",
+      "path": "spaces/smokey",
+      "integrity": "sha256:dev",
+      "plugin": {
+        "name": "smokey",
+        "version": "0.1.0"
+      },
+      "deps": {
+        "spaces": []
+      },
+      "resolvedFrom": {
+        "selector": "dev"
+      }
+    },
+    "defaults@c6fa9d09fd62": {
+      "id": "defaults",
+      "commit": "c6fa9d09fd627eccb3132a5d271fed8176c08de5",
+      "path": "spaces/defaults",
+      "integrity": "sha256:5783a9caceed13a49575e4dfd26b570160c0b5d137fb82fb6d067d30a062e293",
+      "plugin": {
+        "name": "defaults",
+        "version": "1.0.0"
+      },
+      "deps": {
+        "spaces": []
+      },
+      "resolvedFrom": {
+        "selector": "stable",
+        "tag": "space/defaults/v1.0.0",
+        "semver": "1.0.0"
+      }
     }
   },
   "targets": {
@@ -58,6 +92,29 @@
       "harnesses": {
         "claude": {
           "envHash": "sha256:b9d5e624ab36f067939be2f1308301acb29a81c880fd164ba32c436b80970bb5"
+        }
+      }
+    },
+    "smokey": {
+      "compose": [
+        "space:smokey@dev",
+        "space:defaults@stable",
+        "space:praesidium-defaults@dev"
+      ],
+      "roots": [
+        "smokey@dev",
+        "defaults@c6fa9d09fd62",
+        "praesidium-defaults@dev"
+      ],
+      "loadOrder": [
+        "smokey@dev",
+        "defaults@c6fa9d09fd62",
+        "praesidium-defaults@dev"
+      ],
+      "envHash": "sha256:cec9981e1ee2ac8583bc4b6adecda4c9c581356f6cc3138de6e7ae780f590b3e",
+      "harnesses": {
+        "claude": {
+          "envHash": "sha256:b8af9036fa9585282de2be1c2901393e1f6a3c5cdbea545e0c8b0fceb1294183"
         }
       }
     }

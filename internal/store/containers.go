@@ -438,3 +438,41 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 	container.Kind = domain.ContainerKind(kind)
 	return container, nil
 }
+
+// ListAll returns all non-archived containers (or all containers if includeArchived is true).
+func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, error) {
+	query := `
+		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
+		       created_at, updated_at, archived_at,
+		       created_by_actor_uuid, updated_by_actor_uuid
+		FROM containers
+	`
+	if !includeArchived {
+		query += " WHERE archived_at IS NULL"
+	}
+
+	rows, err := cs.store.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var containers []domain.Container
+	for rows.Next() {
+		var c domain.Container
+		var createdAt, updatedAt string
+		var archivedAt *string
+		var kind string
+		if err := rows.Scan(
+			&c.UUID, &c.ID, &c.Slug, &c.Title,
+			&c.ParentUUID, &kind, &c.SectionUUID, &c.SortIndex, &c.WebhookURLs, &c.ETag,
+			&createdAt, &updatedAt, &archivedAt,
+			&c.CreatedByActorUUID, &c.UpdatedByActorUUID,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan container: %w", err)
+		}
+		c.Kind = domain.ContainerKind(kind)
+		containers = append(containers, c)
+	}
+	return containers, rows.Err()
+}

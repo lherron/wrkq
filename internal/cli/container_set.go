@@ -20,15 +20,21 @@ var containerSetCmd = &cobra.Command{
 Examples:
   wrkq container set inbox --webhook-urls '["http://localhost/hook/{ticket_id}"]'
   wrkq container set P-00001 --webhook-url http://localhost/hook/{ticket_id}
+  wrkq container set inbox --add-webhook-url http://localhost/hook2
+  wrkq container set inbox --remove-webhook-url http://localhost/old-hook
+  wrkq container set --all --remove-webhook-url http://localhost/old-hook
 `,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: appctx.WithApp(appctx.WithActor(), runContainerSet),
 }
 
 var (
-	containerSetWebhookURLs string
-	containerSetWebhookURL  []string
-	containerSetIfMatch     int64
+	containerSetWebhookURLs    string
+	containerSetWebhookURL     []string
+	containerSetAddWebhookURL  []string
+	containerSetRemWebhookURL  []string
+	containerSetIfMatch        int64
+	containerSetAll            bool
 )
 
 func init() {
@@ -36,12 +42,62 @@ func init() {
 
 	containerSetCmd.Flags().StringVar(&containerSetWebhookURLs, "webhook-urls", "", "Webhook URLs JSON array")
 	containerSetCmd.Flags().StringArrayVar(&containerSetWebhookURL, "webhook-url", nil, "Webhook URL (repeatable)")
+	containerSetCmd.Flags().StringArrayVar(&containerSetAddWebhookURL, "add-webhook-url", nil, "Add webhook URL to existing list (repeatable)")
+	containerSetCmd.Flags().StringArrayVar(&containerSetRemWebhookURL, "remove-webhook-url", nil, "Remove webhook URL from existing list (repeatable)")
 	containerSetCmd.Flags().Int64Var(&containerSetIfMatch, "if-match", 0, "Conditional update (etag)")
+	containerSetCmd.Flags().BoolVar(&containerSetAll, "all", false, "Apply to all containers")
 }
 
 func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	actorUUID := app.ActorUUID
+	s := store.New(database)
+
+	hasAddRemove := len(containerSetAddWebhookURL) > 0 || len(containerSetRemWebhookURL) > 0
+
+	if containerSetAll {
+		if !hasAddRemove {
+			return fmt.Errorf("--all requires --add-webhook-url or --remove-webhook-url")
+		}
+		if len(args) > 0 {
+			return fmt.Errorf("--all cannot be used with a container argument")
+		}
+
+		// Validate URLs being added
+		for _, u := range containerSetAddWebhookURL {
+			if !isValidWebhookURL(strings.TrimSpace(u)) {
+				return fmt.Errorf("invalid webhook url: %s", u)
+			}
+		}
+
+		containers, err := s.Containers.ListAll(false)
+		if err != nil {
+			return fmt.Errorf("failed to list containers: %w", err)
+		}
+
+		updated := 0
+		for _, c := range containers {
+			newURLs, changed := applyWebhookDelta(c.WebhookURLs, containerSetAddWebhookURL, containerSetRemWebhookURL)
+			if !changed {
+				continue
+			}
+			payload, err := json.Marshal(newURLs)
+			if err != nil {
+				return fmt.Errorf("failed to encode webhook urls: %w", err)
+			}
+			fields := map[string]interface{}{"webhook_urls": string(payload)}
+			if _, err := s.Containers.UpdateFields(actorUUID, c.UUID, fields, 0); err != nil {
+				return fmt.Errorf("failed to update container %s: %w", c.ID, err)
+			}
+			updated++
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Updated %d containers\n", updated)
+		return nil
+	}
+
+	if len(args) == 0 {
+		return fmt.Errorf("container argument required (or use --all)")
+	}
 
 	selector := applyProjectRootToSelector(app.Config, args[0], false)
 	containerUUID, containerPath, err := selectors.ResolveContainer(database, selector)
@@ -49,12 +105,30 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	webhookURLs, hasWebhookURLs, err := collectWebhookURLs(cmd)
-	if err != nil {
-		return err
-	}
-	if !hasWebhookURLs {
-		return fmt.Errorf("no updates specified")
+	var webhookURLs []string
+
+	if hasAddRemove {
+		// Validate URLs being added
+		for _, u := range containerSetAddWebhookURL {
+			if !isValidWebhookURL(strings.TrimSpace(u)) {
+				return fmt.Errorf("invalid webhook url: %s", u)
+			}
+		}
+
+		container, err := s.Containers.GetByUUID(containerUUID)
+		if err != nil {
+			return err
+		}
+		webhookURLs, _ = applyWebhookDelta(container.WebhookURLs, containerSetAddWebhookURL, containerSetRemWebhookURL)
+	} else {
+		var hasWebhookURLs bool
+		webhookURLs, hasWebhookURLs, err = collectWebhookURLs(cmd)
+		if err != nil {
+			return err
+		}
+		if !hasWebhookURLs {
+			return fmt.Errorf("no updates specified")
+		}
 	}
 
 	payload, err := json.Marshal(webhookURLs)
@@ -66,7 +140,6 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		"webhook_urls": string(payload),
 	}
 
-	s := store.New(database)
 	_, err = s.Containers.UpdateFields(actorUUID, containerUUID, fields, containerSetIfMatch)
 	if err != nil {
 		return err
@@ -109,6 +182,57 @@ func collectWebhookURLs(cmd *cobra.Command) ([]string, bool, error) {
 	}
 
 	return urls, hasWebhookURLs, nil
+}
+
+// applyWebhookDelta adds/removes URLs from an existing webhook_urls JSON string.
+// Returns the new list and whether it changed.
+func applyWebhookDelta(existing *string, add, remove []string) ([]string, bool) {
+	var urls []string
+	if existing != nil && *existing != "" {
+		_ = json.Unmarshal([]byte(*existing), &urls)
+	}
+
+	removeSet := make(map[string]bool, len(remove))
+	for _, u := range remove {
+		removeSet[strings.TrimSpace(u)] = true
+	}
+
+	// Filter out removed URLs
+	filtered := urls[:0]
+	for _, u := range urls {
+		if !removeSet[u] {
+			filtered = append(filtered, u)
+		}
+	}
+
+	// Add new URLs (avoid duplicates)
+	existingSet := make(map[string]bool, len(filtered))
+	for _, u := range filtered {
+		existingSet[u] = true
+	}
+	for _, u := range add {
+		trimmed := strings.TrimSpace(u)
+		if !existingSet[trimmed] {
+			filtered = append(filtered, trimmed)
+			existingSet[trimmed] = true
+		}
+	}
+
+	changed := len(filtered) != len(urls)
+	if !changed {
+		for i := range filtered {
+			if filtered[i] != urls[i] {
+				changed = true
+				break
+			}
+		}
+	}
+
+	if filtered == nil {
+		filtered = []string{}
+	}
+
+	return filtered, changed
 }
 
 func isValidWebhookURL(raw string) bool {
