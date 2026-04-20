@@ -56,6 +56,27 @@ const (
 	TaskRelationDuplicates TaskRelationKind = "duplicates"
 )
 
+// TaskRiskClass represents workflow risk classification for a task.
+type TaskRiskClass string
+
+const (
+	TaskRiskClassLow    TaskRiskClass = "low"
+	TaskRiskClassMedium TaskRiskClass = "medium"
+	TaskRiskClassHigh   TaskRiskClass = "high"
+)
+
+// TaskRole represents a workflow role assignment for a task.
+type TaskRole string
+
+const (
+	TaskRoleTriager        TaskRole = "triager"
+	TaskRoleOwner          TaskRole = "owner"
+	TaskRoleImplementer    TaskRole = "implementer"
+	TaskRoleTester         TaskRole = "tester"
+	TaskRoleReviewer       TaskRole = "reviewer"
+	TaskRoleReleaseManager TaskRole = "release_manager"
+)
+
 // Actor represents an actor in the system
 type Actor struct {
 	UUID        string    `json:"uuid" db:"uuid"`
@@ -106,9 +127,13 @@ type Task struct {
 	CPProjectID          *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
 	CPWorkItemID         *string    `json:"cp_work_item_id,omitempty" db:"cp_work_item_id"`
 	CPRunID              *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
-	CPSessionID  *string `json:"session_id,omitempty" db:"cp_session_id"`
-	SDKSessionID *string `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null
+	CPSessionID          *string    `json:"session_id,omitempty" db:"cp_session_id"`
+	SDKSessionID         *string    `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null
 	RunStatus            *string    `json:"run_status,omitempty" db:"run_status"`
+	WorkflowPreset       *string    `json:"workflow_preset,omitempty" db:"workflow_preset"`
+	PresetVersion        *int       `json:"preset_version,omitempty" db:"preset_version"`
+	Phase                *string    `json:"phase,omitempty" db:"phase"`
+	RiskClass            *string    `json:"risk_class,omitempty" db:"risk_class"`
 	StartAt              *time.Time `json:"start_at,omitempty" db:"start_at"`
 	DueAt                *time.Time `json:"due_at,omitempty" db:"due_at"`
 	Labels               *string    `json:"labels,omitempty" db:"labels"` // JSON array
@@ -150,6 +175,48 @@ type TaskRelation struct {
 	Meta               *string          `json:"meta,omitempty" db:"meta"` // JSON
 	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
 	CreatedByActorUUID string           `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
+}
+
+// TaskRoleAssignment represents an actor bound to a workflow role on a task.
+type TaskRoleAssignment struct {
+	UUID       string    `json:"uuid" db:"uuid"`
+	TaskUUID   string    `json:"task_uuid" db:"task_uuid"`
+	Role       TaskRole  `json:"role" db:"role"`
+	ActorUUID  string    `json:"actor_uuid" db:"actor_uuid"`
+	AssignedAt time.Time `json:"assigned_at" db:"assigned_at"`
+}
+
+// EvidenceItem represents workflow evidence attached to a task.
+type EvidenceItem struct {
+	UUID                string    `json:"uuid" db:"uuid"`
+	ID                  string    `json:"id" db:"id"`
+	TaskUUID            string    `json:"task_uuid" db:"task_uuid"`
+	Kind                string    `json:"kind" db:"kind"`
+	Ref                 string    `json:"ref" db:"ref"`
+	ContentHash         *string   `json:"content_hash,omitempty" db:"content_hash"`
+	ProducedByActorUUID string    `json:"produced_by_actor_uuid" db:"produced_by_actor_uuid"`
+	ProducedByRole      string    `json:"produced_by_role" db:"produced_by_role"`
+	BuildID             *string   `json:"build_id,omitempty" db:"build_id"`
+	BuildVersion        *string   `json:"build_version,omitempty" db:"build_version"`
+	BuildEnv            *string   `json:"build_env,omitempty" db:"build_env"`
+	ProducedAt          time.Time `json:"produced_at" db:"produced_at"`
+	Meta                *string   `json:"meta,omitempty" db:"meta"`
+}
+
+// TaskTransition represents a workflow phase transition recorded for a task.
+type TaskTransition struct {
+	UUID               string    `json:"uuid" db:"uuid"`
+	ID                 string    `json:"id" db:"id"`
+	TaskUUID           string    `json:"task_uuid" db:"task_uuid"`
+	FromPhase          *string   `json:"from_phase,omitempty" db:"from_phase"`
+	ToPhase            string    `json:"to_phase" db:"to_phase"`
+	FromLifecycleState *string   `json:"from_lifecycle_state,omitempty" db:"from_lifecycle_state"`
+	ToLifecycleState   *string   `json:"to_lifecycle_state,omitempty" db:"to_lifecycle_state"`
+	ActorUUID          string    `json:"actor_uuid" db:"actor_uuid"`
+	ActorRole          string    `json:"actor_role" db:"actor_role"`
+	EvidenceItemUUIDs  *string   `json:"evidence_item_uuids,omitempty" db:"evidence_item_uuids"`
+	TransitionedAt     time.Time `json:"transitioned_at" db:"transitioned_at"`
+	Meta               *string   `json:"meta,omitempty" db:"meta"`
 }
 
 // Comment represents a comment on a task

@@ -33,6 +33,8 @@ func DefaultSequenceSpecs() []SequenceSpec {
 		{SeqTable: "container_seq", EntityTable: "containers", IDColumn: "id", Prefix: "P-"},
 		{SeqTable: "task_seq", EntityTable: "tasks", IDColumn: "id", Prefix: "T-"},
 		{SeqTable: "attachment_seq", EntityTable: "attachments", IDColumn: "id", Prefix: "ATT-"},
+		{SeqTable: "evidence_item_seq", EntityTable: "evidence_items", IDColumn: "id", Prefix: "EV-"},
+		{SeqTable: "task_transition_seq", EntityTable: "task_transitions", IDColumn: "id", Prefix: "TR-"},
 		{SeqTable: "event_seq", EntityTable: "event_log", IDColumn: "id", Prefix: ""},
 	}
 }

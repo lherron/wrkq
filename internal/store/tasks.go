@@ -33,6 +33,10 @@ type CreateParams struct {
 	RequestedByProjectID *string
 	AssignedProjectID    *string
 	Resolution           *string
+	WorkflowPreset       *string
+	PresetVersion        *int
+	Phase                *string
+	RiskClass            *string
 	Labels               string  // JSON array
 	Meta                 *string // JSON object
 	DueAt                string
@@ -64,14 +68,16 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		if params.UUID != "" {
 			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+				workflow_preset, preset_version, phase, risk_class,
 				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			args = append(args, params.UUID)
 		} else {
 			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+				workflow_preset, preset_version, phase, risk_class,
 				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -90,6 +96,10 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			params.RequestedByProjectID,
 			params.AssignedProjectID,
 			params.Resolution,
+			params.WorkflowPreset,
+			params.PresetVersion,
+			params.Phase,
+			params.RiskClass,
 			params.Labels,
 			params.Meta,
 			params.DueAt,
@@ -138,6 +148,18 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		}
 		if params.Resolution != nil {
 			payload["resolution"] = *params.Resolution
+		}
+		if params.WorkflowPreset != nil {
+			payload["workflow_preset"] = *params.WorkflowPreset
+		}
+		if params.PresetVersion != nil {
+			payload["preset_version"] = *params.PresetVersion
+		}
+		if params.Phase != nil {
+			payload["phase"] = *params.Phase
+		}
+		if params.RiskClass != nil {
+			payload["risk_class"] = *params.RiskClass
 		}
 		if params.Labels != "" {
 			payload["labels"] = params.Labels
@@ -594,11 +616,14 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution *string
 	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+	var workflowPreset, phase, riskClass *string
+	var presetVersion sql.NullInt64
 	var createdAt, updatedAt string
 
 	err := ts.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			   state, priority,
+			   workflow_preset, preset_version, phase, risk_class,
 			   start_at, due_at, labels, meta, description, specification, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
@@ -608,6 +633,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	`, uuid).Scan(
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
 		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority,
+		&workflowPreset, &presetVersion, &phase, &riskClass,
 		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
@@ -631,6 +657,13 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.CPSessionID = cpSessionID
 	task.SDKSessionID = sdkSessionID
 	task.RunStatus = runStatus
+	task.WorkflowPreset = workflowPreset
+	task.Phase = phase
+	task.RiskClass = riskClass
+	if presetVersion.Valid {
+		value := int(presetVersion.Int64)
+		task.PresetVersion = &value
+	}
 
 	// Store the labels as-is since it's a JSON string
 	task.Labels = labels

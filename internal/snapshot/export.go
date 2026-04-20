@@ -257,7 +257,9 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 func exportTasks(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id,
-		       assigned_project_id, acknowledged_at, resolution, state, priority,
+		       assigned_project_id, acknowledged_at, resolution,
+		       workflow_preset, preset_version, phase, risk_class,
+		       state, priority,
 		       start_at, due_at, labels, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       created_by_actor_uuid, updated_by_actor_uuid
@@ -276,12 +278,16 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var specification string
 		var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
+		var workflowPreset, phase, riskClass sql.NullString
+		var presetVersion sql.NullInt64
 		var createdBy, updatedBy string
 		var priority int
 		var etag int64
 
 		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &requestedBy,
-			&assignedProject, &acknowledgedAt, &resolution, &state, &priority,
+			&assignedProject, &acknowledgedAt, &resolution,
+			&workflowPreset, &presetVersion, &phase, &riskClass,
+			&state, &priority,
 			&startAt, &dueAt, &labels, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&createdBy, &updatedBy); err != nil {
@@ -313,6 +319,18 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		}
 		if resolution.Valid {
 			entry.Resolution = resolution.String
+		}
+		if workflowPreset.Valid {
+			entry.WorkflowPreset = workflowPreset.String
+		}
+		if presetVersion.Valid {
+			entry.PresetVersion = int(presetVersion.Int64)
+		}
+		if phase.Valid {
+			entry.Phase = phase.String
+		}
+		if riskClass.Valid {
+			entry.RiskClass = riskClass.String
 		}
 		if description != "" {
 			entry.Description = description

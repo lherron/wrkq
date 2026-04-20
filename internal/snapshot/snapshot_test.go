@@ -62,6 +62,10 @@ func createTestDB(t *testing.T) *sql.DB {
 			assigned_project_id TEXT,
 			acknowledged_at TEXT,
 			resolution TEXT,
+			workflow_preset TEXT,
+			preset_version INTEGER,
+			phase TEXT,
+			risk_class TEXT,
 			state TEXT NOT NULL CHECK (state IN ('idea','draft','open','in_progress','completed','archived','blocked','cancelled','deleted')),
 			priority INTEGER NOT NULL DEFAULT 3,
 			start_at TEXT,
@@ -135,8 +139,8 @@ func seedTestData(t *testing.T, db *sql.DB) {
 
 	// Insert task
 	_, err = db.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, labels, description, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', 'container-uuid-1', 'open', 2, '["label-b","label-a"]', 'Test description', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'actor-uuid-1', 'actor-uuid-1')
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, workflow_preset, preset_version, phase, risk_class, state, priority, labels, description, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', 'container-uuid-1', 'code_defect_fastlane', 1, 'open', 'medium', 'open', 2, '["label-b","label-a"]', 'Test description', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'actor-uuid-1', 'actor-uuid-1')
 	`)
 	if err != nil {
 		t.Fatalf("failed to insert task: %v", err)

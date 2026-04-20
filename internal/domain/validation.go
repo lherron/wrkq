@@ -115,6 +115,26 @@ func ValidateTaskRelationKind(kind string) error {
 	}
 }
 
+// ValidateTaskRiskClass validates a task workflow risk class.
+func ValidateTaskRiskClass(riskClass string) error {
+	switch riskClass {
+	case "low", "medium", "high":
+		return nil
+	default:
+		return fmt.Errorf("invalid risk_class: must be one of: low, medium, high")
+	}
+}
+
+// ValidateTaskRole validates a task workflow role.
+func ValidateTaskRole(role string) error {
+	switch role {
+	case "triager", "owner", "implementer", "tester", "reviewer", "release_manager":
+		return nil
+	default:
+		return fmt.Errorf("invalid task role: must be one of: triager, owner, implementer, tester, reviewer, release_manager")
+	}
+}
+
 // ValidateTimestamp validates and parses an ISO8601 timestamp
 func ValidateTimestamp(s string) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339, s)

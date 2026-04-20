@@ -224,7 +224,7 @@ func checkSchemaAdm(database *db.DB) []checkResultAdm {
 	var results []checkResultAdm
 
 	// Check required tables exist
-	requiredTables := []string{"actors", "containers", "tasks", "event_log", "attachments"}
+	requiredTables := []string{"actors", "containers", "tasks", "task_role_assignments", "evidence_items", "task_transitions", "event_log", "attachments"}
 	var missingTables []string
 
 	for _, table := range requiredTables {

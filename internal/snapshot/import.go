@@ -356,11 +356,13 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO tasks (uuid, id, slug, title, project_uuid, requested_by_project_id,
-		                   assigned_project_id, acknowledged_at, resolution, state, priority,
+		                   assigned_project_id, acknowledged_at, resolution,
+		                   workflow_preset, preset_version, phase, risk_class,
+		                   state, priority,
 		                   start_at, due_at, labels, description, specification, etag,
 		                   created_at, updated_at, completed_at, archived_at,
 		                   created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
 			slug = excluded.slug,
@@ -370,6 +372,10 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 			assigned_project_id = excluded.assigned_project_id,
 			acknowledged_at = excluded.acknowledged_at,
 			resolution = excluded.resolution,
+			workflow_preset = excluded.workflow_preset,
+			preset_version = excluded.preset_version,
+			phase = excluded.phase,
+			risk_class = excluded.risk_class,
 			state = excluded.state,
 			priority = excluded.priority,
 			start_at = excluded.start_at,
@@ -395,6 +401,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 
 		var startAt, dueAt, labels, completedAt, archivedAt interface{}
 		var requestedBy, assignedProject, acknowledgedAt, resolution interface{}
+		var workflowPreset, presetVersion, phase, riskClass interface{}
 		if task.RequestedByProjectID != "" {
 			requestedBy = task.RequestedByProjectID
 		}
@@ -406,6 +413,18 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		}
 		if task.Resolution != "" {
 			resolution = task.Resolution
+		}
+		if task.WorkflowPreset != "" {
+			workflowPreset = task.WorkflowPreset
+		}
+		if task.PresetVersion > 0 {
+			presetVersion = task.PresetVersion
+		}
+		if task.Phase != "" {
+			phase = task.Phase
+		}
+		if task.RiskClass != "" {
+			riskClass = task.RiskClass
 		}
 		if task.StartAt != "" {
 			startAt = task.StartAt
@@ -438,7 +457,9 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		}
 
 		if _, err := stmt.Exec(uuid, task.ID, task.Slug, task.Title, task.ProjectUUID,
-			requestedBy, assignedProject, acknowledgedAt, resolution, task.State, task.Priority,
+			requestedBy, assignedProject, acknowledgedAt, resolution,
+			workflowPreset, presetVersion, phase, riskClass,
+			task.State, task.Priority,
 			startAt, dueAt, labels, description, specification, task.ETag,
 			task.CreatedAt, task.UpdatedAt, completedAt, archivedAt,
 			task.CreatedBy, task.UpdatedBy); err != nil {

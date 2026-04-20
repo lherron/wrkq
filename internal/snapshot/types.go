@@ -67,6 +67,10 @@ type TaskEntry struct {
 	AssignedProjectID    string   `json:"assigned_project_id,omitempty"`
 	AcknowledgedAt       string   `json:"acknowledged_at,omitempty"`
 	Resolution           string   `json:"resolution,omitempty"`
+	WorkflowPreset       string   `json:"workflow_preset,omitempty"`
+	PresetVersion        int      `json:"preset_version,omitempty"`
+	Phase                string   `json:"phase,omitempty"`
+	RiskClass            string   `json:"risk_class,omitempty"`
 	State                string   `json:"state"`
 	Priority             int      `json:"priority"`
 	StartAt              string   `json:"start_at,omitempty"`

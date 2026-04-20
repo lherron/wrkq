@@ -8,110 +8,10 @@ CREATE TABLE container_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE task_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE attachment_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE event_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
-CREATE TABLE IF NOT EXISTS "attachments" (
-  uuid TEXT NOT NULL PRIMARY KEY
-        DEFAULT (
-          lower(
-            hex(randomblob(4)) || '-' ||
-            hex(randomblob(2)) || '-' ||
-            '4' || substr(hex(randomblob(2)),2) || '-' ||
-            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
-            hex(randomblob(6))
-          )
-        ),
-  id   TEXT UNIQUE,  -- Made nullable so trigger can set it
-  task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
-  filename  TEXT NOT NULL,
-  relative_path TEXT NOT NULL,
-  mime_type TEXT,
-  size_bytes INTEGER NOT NULL DEFAULT 0,
-  checksum   TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  created_by_actor_uuid TEXT REFERENCES actors(uuid) ON DELETE SET NULL
+CREATE TABLE comment_sequences (
+    name TEXT PRIMARY KEY,
+    value INTEGER NOT NULL DEFAULT 0
 );
-CREATE UNIQUE INDEX attachments_task_filename_unique
-  ON attachments(task_uuid, filename);
-CREATE UNIQUE INDEX attachments_relpath_unique
-  ON attachments(relative_path);
-CREATE INDEX attachments_task_idx ON attachments(task_uuid);
-CREATE TRIGGER attachments_ai_friendly
-AFTER INSERT ON attachments
-WHEN NEW.id IS NULL OR NEW.id = ''
-BEGIN
-  INSERT INTO attachment_seq (id) VALUES (NULL);
-  UPDATE attachments
-     SET id = 'ATT-' || printf('%05d', last_insert_rowid())
-   WHERE rowid = NEW.rowid;
-END;
-CREATE TABLE IF NOT EXISTS "tasks" (
-  uuid TEXT NOT NULL PRIMARY KEY
-        DEFAULT (
-          lower(
-            hex(randomblob(4)) || '-' ||
-            hex(randomblob(2)) || '-' ||
-            '4' || substr(hex(randomblob(2)),2) || '-' ||
-            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
-            hex(randomblob(6))
-          )
-        ),
-  id   TEXT UNIQUE,  -- Made nullable so trigger can set it
-  slug TEXT NOT NULL
-       CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
-  title TEXT NOT NULL,
-  project_uuid TEXT NOT NULL REFERENCES containers(uuid) ON DELETE RESTRICT,
-  state TEXT NOT NULL CHECK (state IN ('idea','draft','open','in_progress','completed','archived','blocked','cancelled','deleted')),
-  priority INTEGER NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 4),
-  start_at TEXT,
-  due_at   TEXT,
-  labels   TEXT,
-  body     TEXT NOT NULL DEFAULT '',
-  specification TEXT NOT NULL DEFAULT '',
-  etag     INTEGER NOT NULL DEFAULT 1,
-  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  completed_at TEXT,
-  archived_at  TEXT,
-  created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
-  updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT
-);
-CREATE UNIQUE INDEX tasks_unique_slug_in_container
-  ON tasks(project_uuid, slug);
-CREATE INDEX tasks_state_due_idx ON tasks(state, due_at);
-CREATE INDEX tasks_updated_idx   ON tasks(updated_at);
-CREATE INDEX tasks_project_idx   ON tasks(project_uuid);
-CREATE INDEX tasks_slug_idx      ON tasks(slug);
-CREATE TRIGGER tasks_ai_friendly
-AFTER INSERT ON tasks
-WHEN NEW.id IS NULL OR NEW.id = ''
-BEGIN
-  INSERT INTO task_seq (id) VALUES (NULL);
-  UPDATE tasks
-     SET id = 'T-' || printf('%05d', last_insert_rowid())
-   WHERE rowid = NEW.rowid;
-END;
-CREATE TRIGGER tasks_au_touch
-AFTER UPDATE ON tasks
-BEGIN
-  UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-   WHERE rowid = NEW.rowid;
-END;
-CREATE TRIGGER tasks_au_state_consistency
-AFTER UPDATE OF state ON tasks
-BEGIN
-  -- Set completed_at on transition to completed (if not already set)
-  UPDATE tasks
-     SET completed_at = COALESCE(NEW.completed_at, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-   WHERE rowid = NEW.rowid
-     AND NEW.state = 'completed'
-     AND NEW.completed_at IS NULL;
-
-  -- Set archived_at on transition to archived (if not already set)
-  UPDATE tasks
-     SET archived_at = COALESCE(NEW.archived_at, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-   WHERE rowid = NEW.rowid
-     AND NEW.state = 'archived'
-     AND NEW.archived_at IS NULL;
-END;
 CREATE TABLE IF NOT EXISTS "actors" (
   uuid TEXT NOT NULL PRIMARY KEY
         DEFAULT (
@@ -123,12 +23,12 @@ CREATE TABLE IF NOT EXISTS "actors" (
             hex(randomblob(6))
           )
         ),
-  id   TEXT UNIQUE,  -- Made nullable so trigger can set it
+  id   TEXT UNIQUE,
   slug TEXT NOT NULL UNIQUE
        CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
   display_name TEXT,
   role TEXT NOT NULL CHECK (role IN ('human','agent','system')),
-  meta TEXT,  -- JSON (app-level validated)
+  meta TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
@@ -159,19 +59,19 @@ CREATE TABLE IF NOT EXISTS "containers" (
             hex(randomblob(6))
           )
         ),
-  id   TEXT UNIQUE,  -- Made nullable so trigger can set it
+  id   TEXT UNIQUE,
   parent_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
   slug TEXT NOT NULL
        CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  webhook_urls TEXT,
   etag INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  archived_at TEXT,
   created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
   updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT
-, archived_at TEXT);
+, kind TEXT NOT NULL DEFAULT 'project', sort_index INTEGER NOT NULL DEFAULT 0, section_uuid TEXT REFERENCES sections(uuid) ON DELETE SET NULL, webhook_urls TEXT);
 CREATE UNIQUE INDEX containers_unique_slug_in_parent
   ON containers(parent_uuid, slug) WHERE parent_uuid IS NOT NULL;
 CREATE UNIQUE INDEX containers_unique_root_slug
@@ -191,57 +91,53 @@ BEGIN
   UPDATE containers SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
    WHERE rowid = NEW.rowid;
 END;
-CREATE VIEW v_container_paths AS
-WITH RECURSIVE container_tree(uuid, id, slug, title, parent_uuid, path, level) AS (
-  SELECT uuid, id, slug, title, parent_uuid, slug AS path, 0 AS level
-    FROM containers
-   WHERE parent_uuid IS NULL
-  UNION ALL
-  SELECT c.uuid, c.id, c.slug, c.title, c.parent_uuid,
-         ct.path || '/' || c.slug AS path,
-         ct.level + 1 AS level
-    FROM containers c
-    JOIN container_tree ct ON c.parent_uuid = ct.uuid
-)
-SELECT uuid, id, slug, title, parent_uuid, path, level
-  FROM container_tree
-/* v_container_paths(uuid,id,slug,title,parent_uuid,path,level) */;
-CREATE VIEW v_task_paths AS
-SELECT t.uuid,
-       t.id,
-       t.slug,
-       t.title,
-       t.state,
-       t.priority,
-       t.start_at,
-       t.due_at,
-       t.labels,
-       t.etag,
-       t.created_at,
-       t.updated_at,
-       t.completed_at,
-       t.archived_at,
-       t.project_uuid,
-       cp.path || '/' || t.slug AS path
-  FROM tasks t
-  JOIN v_container_paths cp ON cp.uuid = t.project_uuid
-/* v_task_paths(uuid,id,slug,title,state,priority,start_at,due_at,labels,etag,created_at,updated_at,completed_at,archived_at,project_uuid,path) */;
-CREATE TABLE comment_sequences (
-    name TEXT PRIMARY KEY,
-    value INTEGER NOT NULL DEFAULT 0
+CREATE TABLE IF NOT EXISTS "attachments" (
+  uuid TEXT NOT NULL PRIMARY KEY
+        DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  id   TEXT UNIQUE,
+  task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  filename  TEXT NOT NULL,
+  relative_path TEXT NOT NULL,
+  mime_type TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  checksum   TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  created_by_actor_uuid TEXT REFERENCES actors(uuid) ON DELETE SET NULL
 );
+CREATE UNIQUE INDEX attachments_task_filename_unique
+  ON attachments(task_uuid, filename);
+CREATE UNIQUE INDEX attachments_relpath_unique
+  ON attachments(relative_path);
+CREATE INDEX attachments_task_idx ON attachments(task_uuid);
+CREATE TRIGGER attachments_ai_friendly
+AFTER INSERT ON attachments
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO attachment_seq (id) VALUES (NULL);
+  UPDATE attachments
+     SET id = 'ATT-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
 CREATE TABLE comments (
     uuid TEXT PRIMARY KEY,
-    id TEXT NOT NULL UNIQUE,  -- friendly ID like C-00001
+    id TEXT NOT NULL UNIQUE,
     task_uuid TEXT NOT NULL,
     actor_uuid TEXT NOT NULL,
-    body TEXT NOT NULL,        -- Markdown content
-    meta TEXT,                 -- JSON optional metadata for agents/tools
+    body TEXT NOT NULL,
+    meta TEXT,
     etag INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT,           -- nullable; reserved for future editable comments
-    deleted_at TEXT,           -- nullable; soft delete timestamp
-    deleted_by_actor_uuid TEXT,  -- nullable; actor who soft-deleted this comment
+    updated_at TEXT,
+    deleted_at TEXT,
+    deleted_by_actor_uuid TEXT,
 
     FOREIGN KEY (task_uuid) REFERENCES tasks(uuid) ON DELETE CASCADE,
     FOREIGN KEY (actor_uuid) REFERENCES actors(uuid) ON DELETE RESTRICT,
@@ -264,3 +160,370 @@ CREATE TABLE event_log (
   payload       TEXT
 );
 CREATE INDEX event_log_resource_idx ON event_log(resource_type, resource_uuid, id DESC);
+CREATE TABLE section_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TRIGGER containers_kind_check_insert
+BEFORE INSERT ON containers
+WHEN NEW.kind NOT IN ('project', 'feature', 'area', 'misc')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid container kind: must be project, feature, area, or misc');
+END;
+CREATE TRIGGER containers_kind_check_update
+BEFORE UPDATE OF kind ON containers
+WHEN NEW.kind NOT IN ('project', 'feature', 'area', 'misc')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid container kind: must be project, feature, area, or misc');
+END;
+CREATE TABLE sections (
+  uuid TEXT NOT NULL PRIMARY KEY
+        DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  id TEXT UNIQUE,
+  project_uuid TEXT NOT NULL REFERENCES containers(uuid) ON DELETE CASCADE,
+  slug TEXT NOT NULL
+       CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
+  title TEXT NOT NULL,
+  order_index INTEGER NOT NULL DEFAULT 0,
+  role TEXT NOT NULL DEFAULT 'ready',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  wip_limit INTEGER,
+  meta TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  archived_at TEXT,
+  UNIQUE(project_uuid, slug)
+);
+CREATE TRIGGER sections_role_check_insert
+BEFORE INSERT ON sections
+WHEN NEW.role NOT IN ('backlog', 'ready', 'active', 'review', 'done')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid section role: must be backlog, ready, active, review, or done');
+END;
+CREATE TRIGGER sections_role_check_update
+BEFORE UPDATE OF role ON sections
+WHEN NEW.role NOT IN ('backlog', 'ready', 'active', 'review', 'done')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid section role: must be backlog, ready, active, review, or done');
+END;
+CREATE TRIGGER sections_ai_friendly
+AFTER INSERT ON sections
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO section_seq (id) VALUES (NULL);
+  UPDATE sections
+     SET id = 'S-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER sections_au_touch
+AFTER UPDATE ON sections
+BEGIN
+  UPDATE sections SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+   WHERE rowid = NEW.rowid;
+END;
+CREATE INDEX sections_project_idx ON sections(project_uuid);
+CREATE INDEX sections_role_idx ON sections(role);
+CREATE INDEX containers_section_idx ON containers(section_uuid) WHERE section_uuid IS NOT NULL;
+CREATE TABLE task_relations (
+  from_task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  to_task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  meta TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  PRIMARY KEY (from_task_uuid, to_task_uuid, kind)
+);
+CREATE TRIGGER task_relations_kind_check
+BEFORE INSERT ON task_relations
+WHEN NEW.kind NOT IN ('blocks', 'relates_to', 'duplicates')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid relation kind: must be blocks, relates_to, or duplicates');
+END;
+CREATE TRIGGER task_relations_no_self
+BEFORE INSERT ON task_relations
+WHEN NEW.from_task_uuid = NEW.to_task_uuid
+BEGIN
+  SELECT RAISE(ABORT, 'Task cannot have a relation to itself');
+END;
+CREATE INDEX task_relations_to_idx ON task_relations(to_task_uuid);
+CREATE INDEX task_relations_from_idx ON task_relations(from_task_uuid);
+CREATE INDEX task_relations_kind_idx ON task_relations(kind);
+CREATE VIEW v_container_paths AS
+WITH RECURSIVE container_tree(uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level) AS (
+  SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, slug AS path, 0 AS level
+    FROM containers
+   WHERE parent_uuid IS NULL
+  UNION ALL
+  SELECT c.uuid, c.id, c.slug, c.title, c.parent_uuid, c.kind, c.section_uuid, c.sort_index,
+         ct.path || '/' || c.slug AS path,
+         ct.level + 1 AS level
+    FROM containers c
+    JOIN container_tree ct ON c.parent_uuid = ct.uuid
+)
+SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level
+  FROM container_tree
+/* v_container_paths(uuid,id,slug,title,parent_uuid,kind,section_uuid,sort_index,path,level) */;
+CREATE TABLE IF NOT EXISTS "tasks" (
+  uuid TEXT PRIMARY KEY
+       DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  id   TEXT UNIQUE,
+  slug TEXT NOT NULL
+       CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
+  title TEXT NOT NULL,
+  project_uuid TEXT NOT NULL REFERENCES containers(uuid) ON DELETE RESTRICT,
+  -- Extended state enum: added 'idea' before 'draft'
+  state TEXT NOT NULL CHECK (state IN ('idea','draft','open','in_progress','completed','archived','blocked','cancelled','deleted')),
+  priority INTEGER NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 4),
+  kind TEXT NOT NULL DEFAULT 'task' CHECK (kind IN ('task','subtask','spike','bug','chore')),
+  parent_task_uuid TEXT REFERENCES "tasks"(uuid) ON DELETE CASCADE,
+  assignee_actor_uuid TEXT REFERENCES actors(uuid) ON DELETE SET NULL,
+  requested_by_project_id TEXT,
+  assigned_project_id TEXT,
+  acknowledged_at TEXT,
+  resolution TEXT,
+  cp_project_id TEXT,
+  cp_run_id TEXT,
+  cp_session_id TEXT,
+  sdk_session_id TEXT,
+  run_status TEXT CHECK (run_status IN ('queued','running','completed','failed','cancelled','timed_out')),
+  start_at TEXT,
+  due_at   TEXT,
+  labels   TEXT,
+  meta     TEXT,
+  description TEXT NOT NULL DEFAULT '',
+  etag     INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  completed_at TEXT,
+  archived_at  TEXT,
+  deleted_at   TEXT,
+  created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT
+, cp_work_item_id TEXT, specification TEXT NOT NULL DEFAULT '', workflow_preset TEXT, preset_version INTEGER, phase TEXT, risk_class TEXT
+  CHECK (risk_class IS NULL OR risk_class IN ('low','medium','high')));
+CREATE UNIQUE INDEX tasks_unique_slug_in_container
+  ON tasks(project_uuid, slug);
+CREATE INDEX tasks_state_due_idx ON tasks(state, due_at);
+CREATE INDEX tasks_updated_idx   ON tasks(updated_at);
+CREATE INDEX tasks_project_idx   ON tasks(project_uuid);
+CREATE INDEX tasks_slug_idx      ON tasks(slug);
+CREATE INDEX tasks_parent_task_idx ON tasks(parent_task_uuid) WHERE parent_task_uuid IS NOT NULL;
+CREATE INDEX tasks_assignee_idx ON tasks(assignee_actor_uuid) WHERE assignee_actor_uuid IS NOT NULL;
+CREATE INDEX tasks_kind_idx ON tasks(kind);
+CREATE INDEX tasks_deleted_at_idx ON tasks(deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX tasks_requested_by_idx ON tasks(requested_by_project_id);
+CREATE INDEX tasks_assigned_idx ON tasks(assigned_project_id);
+CREATE INDEX tasks_ack_pending_idx ON tasks(requested_by_project_id, state, acknowledged_at)
+  WHERE acknowledged_at IS NULL;
+CREATE INDEX tasks_cp_run_id_idx ON tasks(cp_run_id);
+CREATE INDEX tasks_cp_session_id_idx ON tasks(cp_session_id);
+CREATE TRIGGER tasks_ai_friendly
+AFTER INSERT ON tasks
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO task_seq (id) VALUES (NULL);
+  UPDATE tasks
+     SET id = 'T-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER tasks_au_etag
+AFTER UPDATE ON tasks
+FOR EACH ROW
+BEGIN
+  UPDATE tasks SET etag = OLD.etag + 1 WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER tasks_au_deleted_at
+AFTER UPDATE OF state ON tasks
+WHEN NEW.state = 'deleted' AND OLD.state != 'deleted'
+BEGIN
+  UPDATE tasks SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+  WHERE rowid = NEW.rowid AND deleted_at IS NULL;
+END;
+CREATE TRIGGER tasks_au_undelete
+AFTER UPDATE OF state ON tasks
+WHEN OLD.state = 'deleted' AND NEW.state != 'deleted'
+BEGIN
+  UPDATE tasks SET deleted_at = NULL WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER tasks_au_touch
+AFTER UPDATE ON tasks
+BEGIN
+  UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER tasks_au_state_consistency
+AFTER UPDATE OF state ON tasks
+BEGIN
+  -- Set completed_at on transition to completed (if not already set)
+  UPDATE tasks
+     SET completed_at = COALESCE(NEW.completed_at, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+   WHERE rowid = NEW.rowid
+     AND NEW.state = 'completed'
+     AND NEW.completed_at IS NULL;
+
+  -- Set archived_at on transition to archived (if not already set)
+  UPDATE tasks
+     SET archived_at = COALESCE(NEW.archived_at, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+   WHERE rowid = NEW.rowid
+     AND NEW.state = 'archived'
+     AND NEW.archived_at IS NULL;
+END;
+CREATE INDEX tasks_cp_work_item_id_idx ON tasks(cp_work_item_id);
+CREATE TRIGGER tasks_bi_workflow_consistency
+BEFORE INSERT ON tasks
+WHEN NOT (
+  (NEW.workflow_preset IS NULL AND NEW.preset_version IS NULL AND NEW.phase IS NULL) OR
+  (NEW.workflow_preset IS NOT NULL AND NEW.preset_version IS NOT NULL AND NEW.phase IS NOT NULL)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'workflow_preset, preset_version, and phase must all be NULL or all be set');
+END;
+CREATE TRIGGER tasks_bu_workflow_consistency
+BEFORE UPDATE OF workflow_preset, preset_version, phase ON tasks
+WHEN NOT (
+  (NEW.workflow_preset IS NULL AND NEW.preset_version IS NULL AND NEW.phase IS NULL) OR
+  (NEW.workflow_preset IS NOT NULL AND NEW.preset_version IS NOT NULL AND NEW.phase IS NOT NULL)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'workflow_preset, preset_version, and phase must all be NULL or all be set');
+END;
+CREATE TABLE evidence_item_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TABLE task_transition_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TABLE task_role_assignments (
+  uuid TEXT NOT NULL PRIMARY KEY
+       DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('triager','owner','implementer','tester','reviewer','release_manager')),
+  actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  assigned_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  UNIQUE(task_uuid, role)
+);
+CREATE INDEX task_role_assignments_task_idx ON task_role_assignments(task_uuid);
+CREATE TABLE evidence_items (
+  uuid TEXT NOT NULL PRIMARY KEY
+       DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  id TEXT UNIQUE,
+  task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  content_hash TEXT,
+  produced_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  produced_by_role TEXT NOT NULL,
+  build_id TEXT,
+  build_version TEXT,
+  build_env TEXT,
+  produced_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  meta TEXT
+);
+CREATE INDEX evidence_items_task_produced_at_idx ON evidence_items(task_uuid, produced_at);
+CREATE INDEX evidence_items_task_kind_idx ON evidence_items(task_uuid, kind);
+CREATE TRIGGER evidence_items_ai_friendly
+AFTER INSERT ON evidence_items
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO evidence_item_seq (id) VALUES (NULL);
+  UPDATE evidence_items
+     SET id = 'EV-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TABLE task_transitions (
+  uuid TEXT NOT NULL PRIMARY KEY
+       DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  id TEXT UNIQUE,
+  task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  from_phase TEXT,
+  to_phase TEXT NOT NULL,
+  from_lifecycle_state TEXT,
+  to_lifecycle_state TEXT,
+  actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  actor_role TEXT NOT NULL,
+  evidence_item_uuids TEXT,
+  transitioned_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  meta TEXT
+);
+CREATE INDEX task_transitions_task_transitioned_at_idx ON task_transitions(task_uuid, transitioned_at);
+CREATE TRIGGER task_transitions_ai_friendly
+AFTER INSERT ON task_transitions
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO task_transition_seq (id) VALUES (NULL);
+  UPDATE task_transitions
+     SET id = 'TR-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE VIEW v_task_paths AS
+SELECT t.uuid,
+       t.id,
+       t.slug,
+       t.title,
+       t.state,
+       t.priority,
+       t.kind,
+       t.parent_task_uuid,
+       t.assignee_actor_uuid,
+       t.requested_by_project_id,
+       t.assigned_project_id,
+       t.acknowledged_at,
+       t.resolution,
+       t.cp_project_id,
+       t.cp_work_item_id,
+       t.cp_run_id,
+       t.cp_session_id,
+       t.sdk_session_id,
+       t.run_status,
+       t.workflow_preset,
+       t.preset_version,
+       t.phase,
+       t.risk_class,
+       t.start_at,
+       t.due_at,
+       t.labels,
+       t.meta,
+       t.etag,
+       t.created_at,
+       t.updated_at,
+       t.completed_at,
+       t.archived_at,
+       t.deleted_at,
+       t.project_uuid,
+       cp.path || '/' || t.slug AS path
+  FROM tasks t
+  JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+/* v_task_paths(uuid,id,slug,title,state,priority,kind,parent_task_uuid,assignee_actor_uuid,requested_by_project_id,assigned_project_id,acknowledged_at,resolution,cp_project_id,cp_work_item_id,cp_run_id,cp_session_id,sdk_session_id,run_status,workflow_preset,preset_version,phase,risk_class,start_at,due_at,labels,meta,etag,created_at,updated_at,completed_at,archived_at,deleted_at,project_uuid,path) */;
