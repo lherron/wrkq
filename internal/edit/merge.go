@@ -170,7 +170,7 @@ func (r *MergeResult) FormatConflicts() string {
 	var sb strings.Builder
 	sb.WriteString("Merge conflicts detected:\n\n")
 	for i, conflict := range r.Conflicts {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, conflict))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, conflict)
 	}
 	sb.WriteString("\nPlease resolve conflicts manually and try again.\n")
 	return sb.String()

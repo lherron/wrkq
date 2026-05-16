@@ -640,26 +640,26 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 	// Build frontmatter
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("id: %s\n", id))
-	sb.WriteString(fmt.Sprintf("uuid: %s\n", taskUUID))
-	sb.WriteString(fmt.Sprintf("project_id: %s\n", projectID))
-	sb.WriteString(fmt.Sprintf("project_uuid: %s\n", projectUUID))
-	sb.WriteString(fmt.Sprintf("slug: %s\n", slug))
+	fmt.Fprintf(&sb, "id: %s\n", id)
+	fmt.Fprintf(&sb, "uuid: %s\n", taskUUID)
+	fmt.Fprintf(&sb, "project_id: %s\n", projectID)
+	fmt.Fprintf(&sb, "project_uuid: %s\n", projectUUID)
+	fmt.Fprintf(&sb, "slug: %s\n", slug)
 	// Quote title if it contains special YAML characters
-	sb.WriteString(fmt.Sprintf("title: %s\n", quoteYAMLIfNeeded(title)))
-	sb.WriteString(fmt.Sprintf("state: %s\n", state))
-	sb.WriteString(fmt.Sprintf("priority: %d\n", priority))
+	fmt.Fprintf(&sb, "title: %s\n", quoteYAMLIfNeeded(title))
+	fmt.Fprintf(&sb, "state: %s\n", state)
+	fmt.Fprintf(&sb, "priority: %d\n", priority)
 	if startAt != nil {
-		sb.WriteString(fmt.Sprintf("start_at: %s\n", *startAt))
+		fmt.Fprintf(&sb, "start_at: %s\n", *startAt)
 	}
 	if dueAt != nil {
-		sb.WriteString(fmt.Sprintf("due_at: %s\n", *dueAt))
+		fmt.Fprintf(&sb, "due_at: %s\n", *dueAt)
 	}
 	if labels != nil && *labels != "" {
-		sb.WriteString(fmt.Sprintf("labels: %s\n", *labels))
+		fmt.Fprintf(&sb, "labels: %s\n", *labels)
 	}
 	if meta != nil && *meta != "" {
-		sb.WriteString(fmt.Sprintf("meta: %s\n", *meta))
+		fmt.Fprintf(&sb, "meta: %s\n", *meta)
 	}
 	if specification != "" {
 		sb.WriteString("specification: |\n")
@@ -667,17 +667,17 @@ func exportTask(db *sql.DB, taskUUID string) (string, error) {
 			sb.WriteString("  " + line + "\n")
 		}
 	}
-	sb.WriteString(fmt.Sprintf("etag: %d\n", etag))
-	sb.WriteString(fmt.Sprintf("created_at: %s\n", createdAt))
-	sb.WriteString(fmt.Sprintf("updated_at: %s\n", updatedAt))
+	fmt.Fprintf(&sb, "etag: %d\n", etag)
+	fmt.Fprintf(&sb, "created_at: %s\n", createdAt)
+	fmt.Fprintf(&sb, "updated_at: %s\n", updatedAt)
 	if completedAt != nil {
-		sb.WriteString(fmt.Sprintf("completed_at: %s\n", *completedAt))
+		fmt.Fprintf(&sb, "completed_at: %s\n", *completedAt)
 	}
 	if archivedAt != nil {
-		sb.WriteString(fmt.Sprintf("archived_at: %s\n", *archivedAt))
+		fmt.Fprintf(&sb, "archived_at: %s\n", *archivedAt)
 	}
-	sb.WriteString(fmt.Sprintf("created_by: %s\n", createdBySlug))
-	sb.WriteString(fmt.Sprintf("updated_by: %s\n", updatedBySlug))
+	fmt.Fprintf(&sb, "created_by: %s\n", createdBySlug)
+	fmt.Fprintf(&sb, "updated_by: %s\n", updatedBySlug)
 	sb.WriteString("---\n\n")
 	sb.WriteString(description)
 
@@ -1094,18 +1094,18 @@ func exportRefStub(db *sql.DB, taskUUID string) (string, string, error) {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	if id != "" {
-		sb.WriteString(fmt.Sprintf("id: %s\n", id))
+		fmt.Fprintf(&sb, "id: %s\n", id)
 	}
-	sb.WriteString(fmt.Sprintf("uuid: %s\n", taskUUID))
+	fmt.Fprintf(&sb, "uuid: %s\n", taskUUID)
 	if projectID != "" {
-		sb.WriteString(fmt.Sprintf("project_id: %s\n", projectID))
+		fmt.Fprintf(&sb, "project_id: %s\n", projectID)
 	}
-	sb.WriteString(fmt.Sprintf("project_uuid: %s\n", projectUUID))
-	sb.WriteString(fmt.Sprintf("slug: %s\n", slug))
-	sb.WriteString(fmt.Sprintf("title: %s\n", quoteYAMLIfNeeded(title)))
-	sb.WriteString(fmt.Sprintf("state: %s\n", state))
-	sb.WriteString(fmt.Sprintf("priority: %d\n", priority))
-	sb.WriteString(fmt.Sprintf("path: %s\n", path))
+	fmt.Fprintf(&sb, "project_uuid: %s\n", projectUUID)
+	fmt.Fprintf(&sb, "slug: %s\n", slug)
+	fmt.Fprintf(&sb, "title: %s\n", quoteYAMLIfNeeded(title))
+	fmt.Fprintf(&sb, "state: %s\n", state)
+	fmt.Fprintf(&sb, "priority: %d\n", priority)
+	fmt.Fprintf(&sb, "path: %s\n", path)
 	sb.WriteString("ref: true\n")
 	sb.WriteString("---\n")
 

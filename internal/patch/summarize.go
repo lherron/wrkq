@@ -381,7 +381,7 @@ func formatMarkdown(counts EntityCounts, details []OpDetail) string {
 		// Escape pipe characters in table
 		pathOrTitle = strings.ReplaceAll(pathOrTitle, "|", "\\|")
 
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", entity, op, id, pathOrTitle))
+		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n", entity, op, id, pathOrTitle)
 	}
 
 	return sb.String()
