@@ -29,16 +29,6 @@ Update the wrkq task **before** using the TodoWrite tool. When using the TodoWri
 
 One-off tasks should be created/tracked in the **inbox** container.
 
-### Agent Feature Requests
-Coding agents should log any requests for new features or improvements to the task repository in **inbox/agent-feature-requests**.  (Create the container if it doesn't exist.)
-
-Example:  If Claude Code tries to run **wrkq tree --json** and that flag isn't implemented, file a feature request to have it added in future.  Be sure to add a description of the feature request and the reason why it's needed.
-  ```bash
-  wrkq touch inbox/agent-feature-requests/workq-tree-json-flag -t "Add --json flag to wrkq tree command"
-
-  # Then use wrkq tool to add a comment to the feature request
-  ```
-
 ## Managing Containers
 ```bash
 # Create a container
@@ -51,13 +41,10 @@ wrkq mkdir -p myfeat/api-feature
 wrkq rmdir myfeat
 ```
 
-## Project Scope
-Most projects have a .env.local with WRKQ_PROJECT_ROOT set to their own project root, and are not able to view other projects.
-
 ### Global --project Flag
 Use `--project` to override the default project for any command:
 ```bash
-wrkq ls --project other-project inbox          # List tasks in other-project/inbox
+wrkq ls --project agent-spaces inbox          # List tasks in agent-spaces/inbox
 wrkq cat --project webwrkq T-00001             # View task from webwrkq project
 wrkq find --project myproject --state open     # Find open tasks in myproject
 wrkq touch --project demo inbox/task -t "New"  # Create task in demo/inbox
@@ -65,13 +52,7 @@ wrkq touch --project demo inbox/task -t "New"  # Create task in demo/inbox
 
 ### View All Projects
 ```bash
-wrkq projects                    # List all available projects
-wrkq projects --json             # Output as JSON
-```
-
-### Clear Project Root (alternative)
-```bash
-WRKQ_PROJECT_ROOT= wrkq <command>
+wrkq projects --json             # List all available projects
 ```
 
 ## Finding Tasks
@@ -99,10 +80,21 @@ wrkq ls myfeat/api-feature --json
 ## Creating Tasks
 
 ```bash
-# Create with title and description
-wrkq touch myfeat/feature/task-slug --state open --priority 2 -t "New Task" -d "Description"
-# Create and emit JSON for scripting
-wrkq touch myfeat/feature/task-slug -t "New Task" -d "Description" --json
+# Create with title and a multi-line description via heredoc on stdin
+wrkq touch myfeat/feature/task-slug --state open --priority 2 -t "New Task" -d - <<'EOF'
+Multi-line description goes here.
+
+- bullet one
+- bullet two
+EOF
+
+# Same pattern works for --specification -
+# Use <<'EOF' (quoted) to prevent shell expansion of $vars/backticks; drop quotes to allow it.
+
+# Emit JSON for scripting
+wrkq touch myfeat/feature/task-slug -t "New Task" -d - --json <<'EOF'
+Description
+EOF
 ```
 
 

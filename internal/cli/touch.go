@@ -29,7 +29,13 @@ Examples:
   wrkq touch inbox/new-task --state in_progress --priority 1
   wrkq touch inbox/bug-fix --labels '["bug","urgent"]' --due-at 2025-12-01
   wrkq touch --project other feature/new-task
-  echo "Description from stdin" | wrkq touch inbox/new-task -d -`,
+  echo "Description from stdin" | wrkq touch inbox/new-task -d -
+  wrkq touch inbox/new-task -t "Title" -d - <<'EOF'
+  Multi-line description.
+
+  - bullet one
+  - bullet two
+  EOF`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: appctx.WithApp(appctx.WithActor(), runTouch),
 }
