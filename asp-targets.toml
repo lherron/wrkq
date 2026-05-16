@@ -38,18 +38,6 @@ compose = ["space:defaults@stable"]
 description = "Triage role"
 compose = ["space:defaults@stable"]
 
-[targets.implementer]
-description = "Implementation role"
-compose = ["space:default-implementer@dev", "space:defaults@stable"]
-
-[targets.reviewer]
-description = "Review role"
-compose = ["space:default-reviewer@dev", "space:defaults@stable"]
-
-[targets.tester]
-description = "Testing role"
-compose = ["space:default-tester@dev", "space:defaults@stable"]
-
 [targets.architect]
 description = "Spec writing architect for workboard"
 compose = ["space:defaults@dev", "space:praesidium-defaults@dev", "space:praesidium-architect@dev" ]
