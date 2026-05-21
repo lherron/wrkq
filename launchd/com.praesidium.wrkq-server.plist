@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.praesidium.wrkq-server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/lherron/.local/bin/wrkq</string>
+    <string>server</string>
+    <string>serve</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/lherron/.local/bin:/Users/lherron/.bun/bin:/Users/lherron/.tooling/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/lherron</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+    <key>WRKQ_DB_PATH</key>
+    <string>/Users/lherron/praesidium/var/db/wrkq.db</string>
+    <key>WRKQD_ADDR</key>
+    <string>127.0.0.1:7171</string>
+    <key>WRKQD_TOKEN</key>
+    <string>dev</string>
+    <key>WRKQ_RUNTIME_DIR</key>
+    <string>/Users/lherron/praesidium/var/run/wrkq</string>
+    <key>WRKQ_LOG_PATH</key>
+    <string>/Users/lherron/praesidium/var/logs/wrkq-server.log</string>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/lherron/praesidium/wrkq</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/lherron/praesidium/var/logs/wrkq-server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/lherron/praesidium/var/logs/wrkq-server.err.log</string>
+</dict>
+</plist>

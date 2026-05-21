@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -10,8 +11,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/lherron/wrkq/internal/actors"
@@ -29,10 +33,11 @@ import (
 
 // DaemonOptions configures the wrkqd daemon.
 type DaemonOptions struct {
-	Addr   string
-	Unix   string
-	Token  string
-	DBPath string
+	Addr    string
+	Unix    string
+	Token   string
+	DBPath  string
+	PIDPath string
 }
 
 // ServeDaemon starts the wrkqd daemon.
@@ -55,12 +60,21 @@ func ServeDaemon(opts DaemonOptions) error {
 		_ = database.Close()
 		return err
 	}
+	defer func() { _ = database.Close() }()
+
+	if opts.PIDPath != "" {
+		if err := writePIDFile(opts.PIDPath); err != nil {
+			return err
+		}
+		defer func() { _ = os.Remove(opts.PIDPath) }()
+	}
 
 	server := &daemonServer{
 		db:    database,
 		cfg:   cfg,
 		token: opts.Token,
 	}
+	server.startSearchIndexer()
 
 	mux := http.NewServeMux()
 	server.registerRoutes(mux)
@@ -75,11 +89,10 @@ func ServeDaemon(opts DaemonOptions) error {
 		_ = os.Remove(opts.Unix)
 		listener, err := net.Listen("unix", opts.Unix)
 		if err != nil {
-			_ = database.Close()
 			return fmt.Errorf("failed to listen on unix socket: %w", err)
 		}
 		defer func() { _ = listener.Close() }()
-		return httpServer.Serve(listener)
+		return serveHTTPWithSignals(httpServer, listener)
 	}
 
 	addr := opts.Addr
@@ -88,8 +101,57 @@ func ServeDaemon(opts DaemonOptions) error {
 	}
 	httpServer.Addr = addr
 
-	return httpServer.ListenAndServe()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = listener.Close() }()
+	return serveHTTPWithSignals(httpServer, listener)
 }
+
+func writePIDFile(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create pid directory: %w", err)
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+}
+
+func serveHTTPWithSignals(server *http.Server, listener net.Listener) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(listener)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signalNotify(sigCh)
+	defer signalStop(sigCh)
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-sigCh:
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			_ = server.Close()
+			return err
+		}
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
+}
+
+var (
+	signalNotify = func(ch chan<- os.Signal) {
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	}
+	signalStop = signal.Stop
+)
 
 type daemonServer struct {
 	db    *db.DB

@@ -3,6 +3,7 @@ module github.com/lherron/wrkq
 go 1.25.4
 
 require (
+	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.32

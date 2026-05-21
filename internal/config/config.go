@@ -11,14 +11,28 @@ import (
 
 // Config represents the application configuration
 type Config struct {
+	DBPath           string       `yaml:"db_path"`
+	AttachDir        string       `yaml:"attach_dir"`
+	AttachmentsMaxMB int          `yaml:"attachments_max_mb"`
+	DefaultActor     string       `yaml:"default_actor"`
+	ProjectRoot      string       `yaml:"project_root"`
+	LogLevel         string       `yaml:"log_level"`
+	Output           string       `yaml:"output"`
+	Pager            string       `yaml:"pager"`
+	Search           SearchConfig `yaml:"search"`
+}
+
+// SearchConfig controls the derived local search sidecar.
+type SearchConfig struct {
+	Enabled          bool   `yaml:"enabled"`
 	DBPath           string `yaml:"db_path"`
-	AttachDir        string `yaml:"attach_dir"`
-	AttachmentsMaxMB int    `yaml:"attachments_max_mb"`
-	DefaultActor     string `yaml:"default_actor"`
-	ProjectRoot      string `yaml:"project_root"`
-	LogLevel         string `yaml:"log_level"`
-	Output           string `yaml:"output"`
-	Pager            string `yaml:"pager"`
+	DenseProvider    string `yaml:"dense_provider"`
+	DenseBaseURL     string `yaml:"dense_base_url"`
+	DenseModel       string `yaml:"dense_model"`
+	DenseDimension   int    `yaml:"dense_dimension"`
+	QueryInstruction string `yaml:"query_instruction"`
+	IndexBatchSize   int    `yaml:"index_batch_size"`
+	CandidateLimit   int    `yaml:"candidate_limit"`
 }
 
 // Load loads configuration from multiple sources with precedence:
@@ -30,6 +44,16 @@ func Load() (*Config, error) {
 		AttachmentsMaxMB: 50,
 		LogLevel:         "info",
 		Output:           "table",
+		Search: SearchConfig{
+			Enabled:          true,
+			DenseProvider:    "llama-cpp",
+			DenseBaseURL:     "http://127.0.0.1:8080",
+			DenseModel:       "Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M",
+			DenseDimension:   4096,
+			QueryInstruction: "Instruct: Given a wrkq task search query, retrieve relevant software project tasks, specifications, comments, and implementation notes\nQuery: ",
+			IndexBatchSize:   8,
+			CandidateLimit:   300,
+		},
 	}
 
 	// Load .env.local if it exists (walking up parent directories)
@@ -61,6 +85,36 @@ func Load() (*Config, error) {
 	}
 	if projectRoot := os.Getenv("WRKQ_PROJECT_ROOT"); projectRoot != "" {
 		cfg.ProjectRoot = projectRoot
+	}
+	if searchEnabled := os.Getenv("WRKQ_SEARCH_ENABLED"); searchEnabled != "" {
+		cfg.Search.Enabled = searchEnabled != "0" && searchEnabled != "false" && searchEnabled != "FALSE"
+	}
+	if searchDBPath := os.Getenv("WRKQ_SEARCH_DB_PATH"); searchDBPath != "" {
+		cfg.Search.DBPath = searchDBPath
+	}
+	if provider := os.Getenv("WRKQ_SEARCH_DENSE_PROVIDER"); provider != "" {
+		cfg.Search.DenseProvider = provider
+	}
+	if baseURL := os.Getenv("WRKQ_SEARCH_DENSE_BASE_URL"); baseURL != "" {
+		cfg.Search.DenseBaseURL = baseURL
+	}
+	if model := os.Getenv("WRKQ_SEARCH_DENSE_MODEL"); model != "" {
+		cfg.Search.DenseModel = model
+	}
+	if dim := os.Getenv("WRKQ_SEARCH_DENSE_DIM"); dim != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(dim, "%d", &parsed); err == nil && parsed > 0 {
+			cfg.Search.DenseDimension = parsed
+		}
+	}
+	if instruction := os.Getenv("WRKQ_SEARCH_QUERY_INSTRUCTION"); instruction != "" {
+		cfg.Search.QueryInstruction = instruction
+	}
+	if batchSize := os.Getenv("WRKQ_SEARCH_INDEX_BATCH_SIZE"); batchSize != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(batchSize, "%d", &parsed); err == nil && parsed > 0 {
+			cfg.Search.IndexBatchSize = parsed
+		}
 	}
 
 	// Set defaults if not configured
