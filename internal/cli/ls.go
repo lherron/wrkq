@@ -72,7 +72,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CPProjectID          *string `json:"cp_project_id,omitempty"`
 		CPWorkItemID         *string `json:"cp_work_item_id,omitempty"`
 		CPRunID              *string `json:"cp_run_id,omitempty"`
-		SessionID *string `json:"session_id,omitempty"`
+		SessionID            *string `json:"session_id,omitempty"`
 		RunStatus            *string `json:"run_status,omitempty"`
 	}
 
@@ -187,8 +187,8 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				CPProjectID:          cpProjectID,
 				CPWorkItemID:         cpWorkItemID,
 				CPRunID:              cpRunID,
-				SessionID: cpSessionID,
-				RunStatus: runStatus,
+				SessionID:            cpSessionID,
+				RunStatus:            runStatus,
 			})
 		}
 
@@ -320,8 +320,8 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						CPProjectID:          cpProjectID,
 						CPWorkItemID:         cpWorkItemID,
 						CPRunID:              cpRunID,
-						SessionID: cpSessionID,
-						RunStatus: runStatus,
+						SessionID:            cpSessionID,
+						RunStatus:            runStatus,
 					})
 				}
 				_ = rows.Close()

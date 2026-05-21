@@ -79,11 +79,11 @@ func TestFormatFunctions(t *testing.T) {
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantType    Type
-		wantSeq     int
-		wantErr     bool
+		name     string
+		input    string
+		wantType Type
+		wantSeq  int
+		wantErr  bool
 	}{
 		// Valid IDs
 		{

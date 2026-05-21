@@ -72,6 +72,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ID                   string          `json:"id"`
 		UUID                 string          `json:"uuid"`
 		Path                 string          `json:"path"`
+		ArtifactDir          string          `json:"artifact_dir"`
 		ProjectID            string          `json:"project_id"`
 		ProjectUUID          string          `json:"project_uuid"`
 		RequestedByProjectID *string         `json:"requested_by_project_id,omitempty"`
@@ -96,7 +97,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CPProjectID          *string         `json:"cp_project_id,omitempty"`
 		CPWorkItemID         *string         `json:"cp_work_item_id,omitempty"`
 		CPRunID              *string         `json:"cp_run_id,omitempty"`
-		SessionID *string `json:"session_id,omitempty"`
+		SessionID            *string         `json:"session_id,omitempty"`
 		RunStatus            *string         `json:"run_status,omitempty"`
 		Etag                 int64           `json:"etag"`
 		CreatedAt            string          `json:"created_at"`
@@ -193,6 +194,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			ID:                   id,
 			UUID:                 taskUUID,
 			Path:                 taskPath,
+			ArtifactDir:          taskArtifactDir(id),
 			ProjectID:            projectID,
 			ProjectUUID:          projectUUID,
 			RequestedByProjectID: requestedBy,
@@ -217,7 +219,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			CPProjectID:          cpProjectID,
 			CPWorkItemID:         cpWorkItemID,
 			CPRunID:              cpRunID,
-			SessionID: cpSessionID,
+			SessionID:            cpSessionID,
 			RunStatus:            runStatus,
 			Etag:                 etag,
 			CreatedAt:            createdAt,
@@ -354,6 +356,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(cmd.OutOrStdout(), "id: %s\n", task.ID)
 				fmt.Fprintf(cmd.OutOrStdout(), "uuid: %s\n", task.UUID)
 				fmt.Fprintf(cmd.OutOrStdout(), "path: %s\n", task.Path)
+				fmt.Fprintf(cmd.OutOrStdout(), "artifact_dir: %s\n", task.ArtifactDir)
 				fmt.Fprintf(cmd.OutOrStdout(), "project_id: %s\n", task.ProjectID)
 				fmt.Fprintf(cmd.OutOrStdout(), "project_uuid: %s\n", task.ProjectUUID)
 				if task.RequestedByProjectID != nil {

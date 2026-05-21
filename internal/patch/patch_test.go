@@ -482,9 +482,9 @@ func TestCreate(t *testing.T) {
 
 func TestValidatePatchOps(t *testing.T) {
 	tests := []struct {
-		name      string
-		patch     Patch
-		wantErrs  int
+		name     string
+		patch    Patch
+		wantErrs int
 	}{
 		{
 			name: "valid patch",

@@ -61,7 +61,8 @@ func Decode(encoded string) (*Cursor, error) {
 // BuildWhereClause constructs a SQL WHERE clause for cursor-based pagination
 // Returns the WHERE clause string and slice of parameters
 // For ORDER BY a DESC, b DESC, id DESC, generates:
-//   WHERE (a < ?) OR (a = ? AND b < ?) OR (a = ? AND b = ? AND id < ?)
+//
+//	WHERE (a < ?) OR (a = ? AND b < ?) OR (a = ? AND b = ? AND id < ?)
 func (c *Cursor) BuildWhereClause(descending []bool) (string, []interface{}, error) {
 	if len(c.SortFields) != len(descending) {
 		return "", nil, fmt.Errorf("sort fields and descending flags length mismatch")

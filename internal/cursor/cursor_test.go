@@ -298,7 +298,7 @@ func TestApply(t *testing.T) {
 			wantErr:        false,
 		},
 		{
-			name:      "with cursor",
+			name: "with cursor",
 			cursorStr: func() string {
 				c, _ := NewCursor([]string{"updated_at"}, []interface{}{"2025-11-19T10:00:00Z"}, "T-00123")
 				encoded, _ := c.Encode()

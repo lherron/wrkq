@@ -12,7 +12,7 @@ info:
   @echo "Stack:       Go with SQLite"
   @echo ""
   @echo "Key commands:"
-  @echo "  just build     - Build wrkq, wrkqadm, wrkqd binaries"
+  @echo "  just build     - Build wrkq, wrkf, wrkqadm, wrkqd binaries"
   @echo "  just test      - Run Go tests"
   @echo "  just lint      - Run golangci-lint"
   @echo "  just verify    - Run lint + test"
@@ -54,10 +54,11 @@ db-reset:
 
 # --- CLI tasks (Golang) ---
 
-# Build CLI binaries (wrkq, wrkqadm, wrkqd)
+# Build CLI binaries (wrkq, wrkf, wrkqadm, wrkqd)
 build:
-  echo "Building wrkq, wrkqadm, and wrkqd binaries..."
+  echo "Building wrkq, wrkf, wrkqadm, and wrkqd binaries..."
   go build -o bin/wrkq ./cmd/wrkq
+  go build -o bin/wrkf ./cmd/wrkf
   go build -o bin/wrkqadm ./cmd/wrkqadm
   go build -o bin/wrkqd ./cmd/wrkqd
 
@@ -81,14 +82,17 @@ install: build
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries
-  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkqadm ~/.local/bin/wrkqd
+  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkqadm ~/.local/bin/wrkqd
   cp bin/wrkq ~/.local/bin/wrkq
+  cp bin/wrkf ~/.local/bin/wrkf
   cp bin/wrkqadm ~/.local/bin/wrkqadm
   cp bin/wrkqd ~/.local/bin/wrkqd
   chmod +x ~/.local/bin/wrkq
+  chmod +x ~/.local/bin/wrkf
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
   echo "✓ Installed to ~/.local/bin/wrkq"
+  echo "✓ Installed to ~/.local/bin/wrkf"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo "✓ Installed to ~/.local/bin/wrkqd"
   echo ""
@@ -97,7 +101,7 @@ install: build
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
   fi
-  echo "✓ Run 'wrkq version', 'wrkqadm version', and 'wrkqd --help' to verify"
+  echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkqadm version', and 'wrkqd --help' to verify"
 
 # Install CLI binaries to /usr/local/bin (requires sudo - run manually)
 install-system:
@@ -105,20 +109,25 @@ install-system:
   set -euo pipefail
   echo "Building wrkq binaries..."
   go build -o bin/wrkq ./cmd/wrkq
+  go build -o bin/wrkf ./cmd/wrkf
   go build -o bin/wrkqadm ./cmd/wrkqadm
   go build -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
   # Remove old binary first to avoid crashes when overwriting running binaries
   sudo rm -f /usr/local/bin/wrkq
+  sudo rm -f /usr/local/bin/wrkf
   sudo rm -f /usr/local/bin/wrkqadm
   sudo rm -f /usr/local/bin/wrkqd
   sudo cp bin/wrkq /usr/local/bin/wrkq
+  sudo cp bin/wrkf /usr/local/bin/wrkf
   sudo cp bin/wrkqadm /usr/local/bin/wrkqadm
   sudo cp bin/wrkqd /usr/local/bin/wrkqd
   sudo chmod +x /usr/local/bin/wrkq
+  sudo chmod +x /usr/local/bin/wrkf
   sudo chmod +x /usr/local/bin/wrkqadm
   sudo chmod +x /usr/local/bin/wrkqd
   echo "✓ Installed to /usr/local/bin/wrkq"
+  echo "✓ Installed to /usr/local/bin/wrkf"
   echo "✓ Installed to /usr/local/bin/wrkqadm"
   echo "✓ Installed to /usr/local/bin/wrkqd"
   echo "✓ Run 'wrkq --version' to verify"
@@ -132,6 +141,12 @@ uninstall:
     echo "Removing ~/.local/bin/wrkq..."
     rm ~/.local/bin/wrkq
     echo "✓ Uninstalled wrkq from ~/.local/bin"
+    UNINSTALLED=1
+  fi
+  if [ -f ~/.local/bin/wrkf ]; then
+    echo "Removing ~/.local/bin/wrkf..."
+    rm ~/.local/bin/wrkf
+    echo "✓ Uninstalled wrkf from ~/.local/bin"
     UNINSTALLED=1
   fi
   if [ -f ~/.local/bin/wrkqadm ]; then
@@ -152,6 +167,12 @@ uninstall:
     echo "✓ Uninstalled wrkq from /usr/local/bin"
     UNINSTALLED=1
   fi
+  if [ -f /usr/local/bin/wrkf ]; then
+    echo "Removing /usr/local/bin/wrkf (requires sudo)..."
+    sudo rm /usr/local/bin/wrkf
+    echo "✓ Uninstalled wrkf from /usr/local/bin"
+    UNINSTALLED=1
+  fi
   if [ -f /usr/local/bin/wrkqadm ]; then
     echo "Removing /usr/local/bin/wrkqadm (requires sudo)..."
     sudo rm /usr/local/bin/wrkqadm
@@ -165,7 +186,7 @@ uninstall:
     UNINSTALLED=1
   fi
   if [ $UNINSTALLED -eq 0 ]; then
-    echo "wrkq and wrkqadm are not installed"
+    echo "wrkq, wrkf, and wrkqadm are not installed"
   fi
 
 # Format CLI code
@@ -202,8 +223,9 @@ clean:
 tree:
   tree -I 'node_modules|dist|bin|coverage*|.git' -L 3
 
-# Run quick smoke test (build + wrkqd + merge smoke scripts)
+# Run quick smoke test (build + wrkqd + merge + wrkf smoke scripts)
 smoke: build
   test/smoke-wrkqd.sh
   test/smoke-mergeadm.sh
+  test/smoke-wrkf.sh
   @echo "✓ Smoke test passed"

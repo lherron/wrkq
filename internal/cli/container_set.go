@@ -29,12 +29,12 @@ Examples:
 }
 
 var (
-	containerSetWebhookURLs    string
-	containerSetWebhookURL     []string
-	containerSetAddWebhookURL  []string
-	containerSetRemWebhookURL  []string
-	containerSetIfMatch        int64
-	containerSetAll            bool
+	containerSetWebhookURLs   string
+	containerSetWebhookURL    []string
+	containerSetAddWebhookURL []string
+	containerSetRemWebhookURL []string
+	containerSetIfMatch       int64
+	containerSetAll           bool
 )
 
 func init() {

@@ -172,10 +172,10 @@ func (w *Writer) LogCommentCreated(tx *sql.Tx, actorUUID string, comment *domain
 // LogCommentDeleted logs a comment soft-delete event
 func (w *Writer) LogCommentDeleted(tx *sql.Tx, actorUUID string, comment *domain.Comment) error {
 	payload, err := json.Marshal(map[string]interface{}{
-		"task_id":              comment.TaskUUID,
-		"comment_id":           comment.ID,
-		"deleted_by_actor_id":  actorUUID,
-		"soft_delete":          true,
+		"task_id":             comment.TaskUUID,
+		"comment_id":          comment.ID,
+		"deleted_by_actor_id": actorUUID,
+		"soft_delete":         true,
 	})
 	if err != nil {
 		return err
@@ -197,8 +197,8 @@ func (w *Writer) LogCommentDeleted(tx *sql.Tx, actorUUID string, comment *domain
 // LogCommentPurged logs a comment hard-delete event
 func (w *Writer) LogCommentPurged(tx *sql.Tx, actorUUID string, commentUUID string, commentID string, taskUUID string) error {
 	payload, err := json.Marshal(map[string]interface{}{
-		"task_id":    taskUUID,
-		"comment_id": commentID,
+		"task_id":     taskUUID,
+		"comment_id":  commentID,
 		"hard_delete": true,
 	})
 	if err != nil {

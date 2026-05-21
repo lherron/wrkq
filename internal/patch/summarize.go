@@ -47,15 +47,15 @@ type OpCounts struct {
 
 // OpDetail describes a single operation.
 type OpDetail struct {
-	Entity    string `json:"entity"`
-	Op        string `json:"op"`
-	UUID      string `json:"uuid"`
-	ID        string `json:"id,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Title     string `json:"title,omitempty"`
-	Field     string `json:"field,omitempty"`
-	OldValue  string `json:"old_value,omitempty"`
-	NewValue  string `json:"new_value,omitempty"`
+	Entity   string `json:"entity"`
+	Op       string `json:"op"`
+	UUID     string `json:"uuid"`
+	ID       string `json:"id,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Field    string `json:"field,omitempty"`
+	OldValue string `json:"old_value,omitempty"`
+	NewValue string `json:"new_value,omitempty"`
 }
 
 // Summarize generates a human-friendly summary of a patch.

@@ -59,11 +59,11 @@ type ApplyOptions struct {
 
 // CreateResult contains the result of a patch create operation.
 type CreateResult struct {
-	OutputPath  string `json:"out"`
-	OpCount     int    `json:"ops"`
-	AddCount    int    `json:"adds"`
-	ReplaceCount int   `json:"replaces"`
-	RemoveCount int    `json:"removes"`
+	OutputPath   string `json:"out"`
+	OpCount      int    `json:"ops"`
+	AddCount     int    `json:"adds"`
+	ReplaceCount int    `json:"replaces"`
+	RemoveCount  int    `json:"removes"`
 }
 
 // ValidateResult contains the result of a patch validate operation.
@@ -75,13 +75,13 @@ type ValidateResult struct {
 
 // ApplyResult contains the result of a patch apply operation.
 type ApplyResult struct {
-	Applied     bool   `json:"applied"`
-	DryRun      bool   `json:"dry_run,omitempty"`
-	SnapshotRev string `json:"snapshot_rev,omitempty"`
-	OpCount     int    `json:"ops"`
-	AddCount    int    `json:"adds"`
-	ReplaceCount int   `json:"replaces"`
-	RemoveCount int    `json:"removes"`
+	Applied      bool   `json:"applied"`
+	DryRun       bool   `json:"dry_run,omitempty"`
+	SnapshotRev  string `json:"snapshot_rev,omitempty"`
+	OpCount      int    `json:"ops"`
+	AddCount     int    `json:"adds"`
+	ReplaceCount int    `json:"replaces"`
+	RemoveCount  int    `json:"removes"`
 }
 
 // LoadPatch reads and parses a patch file.

@@ -43,7 +43,7 @@ type Payload struct {
 	CPProjectID  *string         `json:"cp_project_id"`
 	CPWorkItemID *string         `json:"cp_work_item_id"`
 	CPRunID      *string         `json:"cp_run_id"`
-	SessionID *string `json:"session_id"`
+	SessionID    *string         `json:"session_id"`
 	BlockedBy    []BlockerInfo   `json:"blocked_by,omitempty"`
 }
 
@@ -63,8 +63,8 @@ type TaskInfo struct {
 	CPProjectID  *string
 	CPWorkItemID *string
 	CPRunID      *string
-	CPSessionID *string // internal name, exposed as session_id
-	BlockedBy   []BlockerInfo
+	CPSessionID  *string // internal name, exposed as session_id
+	BlockedBy    []BlockerInfo
 }
 
 // DispatchTask resolves task info then dispatches webhooks.

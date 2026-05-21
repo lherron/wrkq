@@ -7,8 +7,8 @@ import (
 
 // MergeResult represents the outcome of a 3-way merge
 type MergeResult struct {
-	Merged    *TaskDocument
-	Conflicts []string
+	Merged      *TaskDocument
+	Conflicts   []string
 	HasConflict bool
 }
 

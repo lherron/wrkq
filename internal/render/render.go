@@ -14,19 +14,19 @@ import (
 type Format string
 
 const (
-	FormatTable Format = "table"
-	FormatJSON  Format = "json"
+	FormatTable  Format = "table"
+	FormatJSON   Format = "json"
 	FormatNDJSON Format = "ndjson"
-	FormatYAML  Format = "yaml"
-	FormatTSV   Format = "tsv"
+	FormatYAML   Format = "yaml"
+	FormatTSV    Format = "tsv"
 )
 
 // Options for rendering
 type Options struct {
-	Format     Format
-	Porcelain  bool
-	Fields     []string
-	Delimiter  string // for -1 (newline) or -0 (NUL)
+	Format    Format
+	Porcelain bool
+	Fields    []string
+	Delimiter string // for -1 (newline) or -0 (NUL)
 }
 
 // Renderer handles output rendering

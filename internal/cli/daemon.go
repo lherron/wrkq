@@ -101,6 +101,7 @@ type daemonServer struct {
 type Task struct {
 	ID             string     `json:"id"`
 	UUID           string     `json:"uuid"`
+	ArtifactDir    string     `json:"artifact_dir"`
 	ProjectID      string     `json:"project_id"`
 	ProjectUUID    string     `json:"project_uuid"`
 	Slug           string     `json:"slug"`
@@ -1650,6 +1651,7 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	task := &Task{
 		ID:             id,
 		UUID:           taskUUID,
+		ArtifactDir:    taskArtifactDir(id),
 		ProjectID:      projectID,
 		ProjectUUID:    projectUUID,
 		Slug:           slug,

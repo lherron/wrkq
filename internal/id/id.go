@@ -8,12 +8,12 @@ import (
 )
 
 var (
-	actorIDPattern     = regexp.MustCompile(`^A-\d{5}$`)
-	containerIDPattern = regexp.MustCompile(`^P-\d{5}$`)
-	taskIDPattern      = regexp.MustCompile(`^T-\d{5}$`)
-	commentIDPattern   = regexp.MustCompile(`^C-\d{5}$`)
+	actorIDPattern      = regexp.MustCompile(`^A-\d{5}$`)
+	containerIDPattern  = regexp.MustCompile(`^P-\d{5}$`)
+	taskIDPattern       = regexp.MustCompile(`^T-\d{5}$`)
+	commentIDPattern    = regexp.MustCompile(`^C-\d{5}$`)
 	attachmentIDPattern = regexp.MustCompile(`^ATT-\d{5}$`)
-	uuidPattern        = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 // Type represents the type of resource

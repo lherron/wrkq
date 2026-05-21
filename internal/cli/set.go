@@ -73,11 +73,11 @@ var (
 	setRequestedBy     string
 	setAssignedProject string
 	setResolution      string
-	setCPProjectID  string
-	setCPWorkItemID string
-	setCPRunID      string
-	setSessionID    string
-	setRunStatus    string
+	setCPProjectID     string
+	setCPWorkItemID    string
+	setCPRunID         string
+	setSessionID       string
+	setRunStatus       string
 )
 
 func init() {

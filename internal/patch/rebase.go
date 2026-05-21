@@ -27,11 +27,11 @@ type RebaseOptions struct {
 
 // RebaseResult contains the result of a patch rebase operation.
 type RebaseResult struct {
-	OutputPath   string                       `json:"out"`
-	OpCount      int                          `json:"ops"`
-	AddCount     int                          `json:"adds"`
-	ReplaceCount int                          `json:"replaces"`
-	RemoveCount  int                          `json:"removes"`
+	OutputPath   string                          `json:"out"`
+	OpCount      int                             `json:"ops"`
+	AddCount     int                             `json:"adds"`
+	ReplaceCount int                             `json:"replaces"`
+	RemoveCount  int                             `json:"removes"`
 	CodeRewrites map[string]map[string]IDRewrite `json:"code_rewrites,omitempty"`
 }
 

@@ -202,14 +202,15 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	s := store.New(database)
 
 	type touchResult struct {
-		ID       string `json:"id"`
-		UUID     string `json:"uuid"`
-		Slug     string `json:"slug"`
-		Path     string `json:"path"`
-		Title    string `json:"title"`
-		State    string `json:"state"`
-		Priority int    `json:"priority"`
-		Kind     string `json:"kind"`
+		ID          string `json:"id"`
+		UUID        string `json:"uuid"`
+		Slug        string `json:"slug"`
+		Path        string `json:"path"`
+		Title       string `json:"title"`
+		State       string `json:"state"`
+		Priority    int    `json:"priority"`
+		Kind        string `json:"kind"`
+		ArtifactDir string `json:"artifact_dir"`
 	}
 
 	results := []touchResult{}
@@ -285,16 +286,21 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		artifactDir, err := ensureTaskArtifactDir(result.ID)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to create artifact directory %s: %v\n", artifactDir, err)
+		}
 		if touchJSON {
 			results = append(results, touchResult{
-				ID:       result.ID,
-				UUID:     result.UUID,
-				Slug:     normalizedSlug,
-				Path:     path,
-				Title:    title,
-				State:    state,
-				Priority: priority,
-				Kind:     defaultKind,
+				ID:          result.ID,
+				UUID:        result.UUID,
+				Slug:        normalizedSlug,
+				Path:        path,
+				Title:       title,
+				State:       state,
+				Priority:    priority,
+				Kind:        defaultKind,
+				ArtifactDir: artifactDir,
 			})
 			continue
 		}

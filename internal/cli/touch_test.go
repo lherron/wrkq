@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -10,6 +13,7 @@ import (
 func resetTouchGlobals() {
 	touchTitle = ""
 	touchDescription = ""
+	touchSpecification = ""
 	touchState = "open"
 	touchPriority = 3
 	touchKind = ""
@@ -25,6 +29,58 @@ func resetTouchGlobals() {
 	touchStartAt = ""
 	touchForceUUID = ""
 	touchJSON = false
+}
+
+func resetCatGlobals() {
+	catNoFrontmatter = false
+	catExcludeComments = false
+	catJSON = false
+	catNDJSON = false
+	catPorcelain = false
+}
+
+func TestTouchCreatesArtifactDirAndCatShowsHint(t *testing.T) {
+	database, dbPath := setupTestEnv(t)
+	praesidiumHome := filepath.Join(t.TempDir(), "praesidium")
+	t.Setenv("PRAESIDIUM_HOME", praesidiumHome)
+
+	app := createTestApp(t, database, dbPath)
+	resetTouchGlobals()
+
+	touchBuf := &bytes.Buffer{}
+	touchCmd := &cobra.Command{}
+	touchCmd.SetOut(touchBuf)
+	touchCmd.SetErr(touchBuf)
+
+	if err := runTouch(app, touchCmd, []string{"inbox/artifact-smoke"}); err != nil {
+		t.Fatalf("runTouch failed: %v", err)
+	}
+
+	var taskID string
+	if err := database.QueryRow(`SELECT id FROM tasks WHERE slug = ?`, "artifact-smoke").Scan(&taskID); err != nil {
+		t.Fatalf("Failed to load created task: %v", err)
+	}
+
+	expectedDir := filepath.Join(praesidiumHome, "var", "wrkq-artifacts", taskID)
+	if stat, err := os.Stat(expectedDir); err != nil {
+		t.Fatalf("expected artifact directory to exist at %s: %v", expectedDir, err)
+	} else if !stat.IsDir() {
+		t.Fatalf("expected artifact path to be a directory: %s", expectedDir)
+	}
+
+	resetCatGlobals()
+	catBuf := &bytes.Buffer{}
+	catCmd := &cobra.Command{}
+	catCmd.SetOut(catBuf)
+	catCmd.SetErr(catBuf)
+
+	if err := runCat(app, catCmd, []string{taskID}); err != nil {
+		t.Fatalf("runCat failed: %v", err)
+	}
+
+	if !strings.Contains(catBuf.String(), "artifact_dir: "+expectedDir) {
+		t.Fatalf("cat output missing artifact_dir hint %q:\n%s", expectedDir, catBuf.String())
+	}
 }
 
 func TestTouchProjectOverride(t *testing.T) {

@@ -344,7 +344,9 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 	t.Run("duplicate slugs detected", func(t *testing.T) {
 		// Drop unique index to allow duplicate slugs
 		_, _ = database.Exec("DROP INDEX IF EXISTS tasks_unique_slug_in_container")
-		defer func() { _, _ = database.Exec("CREATE UNIQUE INDEX tasks_unique_slug_in_container ON tasks(project_uuid, slug)") }()
+		defer func() {
+			_, _ = database.Exec("CREATE UNIQUE INDEX tasks_unique_slug_in_container ON tasks(project_uuid, slug)")
+		}()
 
 		// Create two tasks with same slug in same container
 		_, _ = database.Exec(`
