@@ -259,11 +259,7 @@ func init() {
 
 // runHandoffList lives in handoff_list.go (Phase C2 / T-01598).
 
-// runHandoffGet is the stub for `wrkq handoff get`. Real behavior lands in
-// Phase C3 (T-01589 C3).
-func runHandoffGet(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("not implemented yet (T-01589 C3)")
-}
+// runHandoffGet lives in handoff_get.go (Phase C3 / T-01599).
 
 // runHandoffAck is the stub for `wrkq handoff acknowledge`. Real behavior
 // lands in Phase C4 (T-01589 C4).

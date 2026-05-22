@@ -34,19 +34,19 @@ type handoffJSON struct {
 	ScopeKind               string     `json:"scope_kind"`
 	AgentID                 string     `json:"agent_id"`
 	ProjectID               string     `json:"project_id"`
-	AgentActorUUID          *string    `json:"agent_actor_uuid,omitempty"`
-	ProjectContainerUUID    *string    `json:"project_container_uuid,omitempty"`
+	AgentActorUUID          *string    `json:"agent_actor_uuid"`
+	ProjectContainerUUID    *string    `json:"project_container_uuid"`
 	CreatedByAgentID        string     `json:"created_by_agent_id"`
-	CreatedByActorUUID      *string    `json:"created_by_actor_uuid,omitempty"`
+	CreatedByActorUUID      *string    `json:"created_by_actor_uuid"`
 	Title                   string     `json:"title"`
 	Body                    string     `json:"body"`
 	Status                  string     `json:"status"`
-	IdempotencyKey          *string    `json:"idempotency_key,omitempty"`
-	AcknowledgedAt          *time.Time `json:"acknowledged_at,omitempty"`
-	AcknowledgedByAgentID   *string    `json:"acknowledged_by_agent_id,omitempty"`
-	AcknowledgedByActorUUID *string    `json:"acknowledged_by_actor_uuid,omitempty"`
-	AcknowledgementNote     *string    `json:"acknowledgement_note,omitempty"`
-	Meta                    *string    `json:"meta,omitempty"`
+	IdempotencyKey          *string    `json:"idempotency_key"`
+	AcknowledgedAt          *time.Time `json:"acknowledged_at"`
+	AcknowledgedByAgentID   *string    `json:"acknowledged_by_agent_id"`
+	AcknowledgedByActorUUID *string    `json:"acknowledged_by_actor_uuid"`
+	AcknowledgementNote     *string    `json:"acknowledgement_note"`
+	Meta                    *string    `json:"meta"`
 	ETag                    int64      `json:"etag"`
 	CreatedAt               time.Time  `json:"created_at"`
 	UpdatedAt               time.Time  `json:"updated_at"`
@@ -58,9 +58,10 @@ type handoffErrorOutput struct {
 }
 
 type structuredCLIError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Example string `json:"example,omitempty"`
+	Code      string `json:"code"`
+	HandoffID string `json:"handoff_id,omitempty"`
+	Message   string `json:"message"`
+	Example   string `json:"example,omitempty"`
 }
 
 type handoffOutputMode string
