@@ -1,10 +1,6 @@
 package cli
 
-import (
-	"fmt"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 // handoffCmd is the parent group for all `wrkq handoff` subcommands.
 //
@@ -187,7 +183,7 @@ narrow the result set further. Results are bounded and paginated via
 
 Output defaults to human-readable on a TTY and JSON when piped. Use --json,
 --ndjson, or --human to force a mode.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: runHandoffSearch,
 }
 
@@ -266,8 +262,4 @@ func init() {
 
 // runHandoffAck lives in handoff_acknowledge.go (Phase C4 / T-01600).
 
-// runHandoffSearch is the stub for `wrkq handoff search`. Real behavior
-// lands in Phase C5 (T-01589 C5).
-func runHandoffSearch(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("not implemented yet (T-01589 C5)")
-}
+// runHandoffSearch lives in handoff_search.go (Phase C5 / T-01601).
