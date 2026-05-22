@@ -139,10 +139,11 @@ Alias: 'wrkq handoff cat <id>'.`,
 // ---- handoff acknowledge --------------------------------------------------
 
 var (
-	handoffAckNote   string
-	handoffAckDryRun bool
-	handoffAckJSON   bool
-	handoffAckHuman  bool
+	handoffAckNote    string
+	handoffAckDryRun  bool
+	handoffAckIfMatch int64
+	handoffAckJSON    bool
+	handoffAckHuman   bool
 )
 
 var handoffAckCmd = &cobra.Command{
@@ -240,6 +241,8 @@ func init() {
 		"Optional acknowledgement note describing why the handoff was consumed or is obsolete")
 	handoffAckCmd.Flags().BoolVar(&handoffAckDryRun, "dry-run", false,
 		"Inspect the mutation without applying it")
+	handoffAckCmd.Flags().Int64Var(&handoffAckIfMatch, "if-match", 0,
+		"Reject the acknowledgement when the current etag does not equal this value")
 	handoffAckCmd.Flags().BoolVar(&handoffAckJSON, "json", false, "Force JSON output")
 	handoffAckCmd.Flags().BoolVar(&handoffAckHuman, "human", false, "Force human-readable output")
 
@@ -261,11 +264,7 @@ func init() {
 
 // runHandoffGet lives in handoff_get.go (Phase C3 / T-01599).
 
-// runHandoffAck is the stub for `wrkq handoff acknowledge`. Real behavior
-// lands in Phase C4 (T-01589 C4).
-func runHandoffAck(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("not implemented yet (T-01589 C4)")
-}
+// runHandoffAck lives in handoff_acknowledge.go (Phase C4 / T-01600).
 
 // runHandoffSearch is the stub for `wrkq handoff search`. Real behavior
 // lands in Phase C5 (T-01589 C5).
