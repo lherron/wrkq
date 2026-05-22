@@ -257,11 +257,7 @@ func init() {
 	handoffSearchCmd.Flags().BoolVar(&handoffSearchHuman, "human", false, "Force human-readable output")
 }
 
-// runHandoffList is the stub for `wrkq handoff list`. Real behavior lands in
-// Phase C2 (T-01589 C2).
-func runHandoffList(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("not implemented yet (T-01589 C2)")
-}
+// runHandoffList lives in handoff_list.go (Phase C2 / T-01598).
 
 // runHandoffGet is the stub for `wrkq handoff get`. Real behavior lands in
 // Phase C3 (T-01589 C3).
