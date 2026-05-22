@@ -103,6 +103,19 @@ install: build
   fi
   echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkqadm version', and 'wrkqd --help' to verify"
 
+# Install the wrkq launchd agent plist
+install-launchd:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  src="launchd/com.praesidium.wrkq-server.plist"
+  dst="$HOME/Library/LaunchAgents/com.praesidium.wrkq-server.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  cp "$src" "$dst"
+  echo "✓ Installed $dst"
+  echo "Bootstrap with:"
+  echo "  launchctl bootstrap gui/$(id -u) $dst"
+  echo "  launchctl kickstart -k gui/$(id -u)/com.praesidium.wrkq-server"
+
 # Install CLI binaries to /usr/local/bin (requires sudo - run manually)
 install-system:
   #!/usr/bin/env bash
