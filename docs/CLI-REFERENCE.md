@@ -37,6 +37,8 @@ This separation ensures agents get a focused, safe API while admins retain full 
 | **comment** | Manage task comments (ls, add, rm, cat) |
 | **attach** | Manage file attachments (ls, put, get, rm) |
 | **relation** | Manage task relations (add, rm, ls) |
+| **handoff** | Manage agent session handoffs (create, list, get, acknowledge, search) |
+| **agent-context** | Print the resolved agent scope and runtime environment |
 | **log** | Show change history from event log |
 | **apply** | Update task description from file or stdin |
 | **edit** | Interactive 3-way merge editing |
@@ -242,6 +244,163 @@ List relations: `wrkq relation ls T-00001`
 
 ---
 
+## Handoffs (Agent Session Continuity)
+
+Handoffs are intentional context records an agent leaves for its own later sessions. They are a sibling primitive to tasks, comments, and memory — see [DOMAIN-MODEL.md](DOMAIN-MODEL.md#handoffs-agent-session-continuity) for the full conceptual model.
+
+**Scope is `(agent, project)` for v1.** Default scope is resolved env-first from `ASP_SCOPE_REF` → `ASP_HANDLE` → `ASP_AGENT_ID + ASP_PROJECT`; use `--scope` to override. Scope refs accept either the long form (`agent:cody:project:wrkq`) or the short form (`cody@wrkq`); both normalize down to the canonical project-kind ref.
+
+| Action | Command |
+|--------|---------|
+| Create handoff | `wrkq handoff create -t "Title" --body-file notes.md` |
+| List pending handoffs | `wrkq handoff list` (or `handoff ls`) |
+| Get one handoff | `wrkq handoff get H-00001` (or `handoff cat`) |
+| Acknowledge handoff | `wrkq handoff acknowledge H-00001 --note "loaded"` |
+| Search handoffs | `wrkq handoff search "<query>"` |
+
+### `wrkq handoff create`
+
+Creates a new pending handoff for the resolved scope.
+
+| Flag | Purpose |
+|------|---------|
+| `-t, --title <text>` | Title (required) |
+| `--body-file <path\|->` | Markdown body source: a file path, or `-` for stdin (required) |
+| `--scope <ref-or-handle>` | Override resolved scope, e.g. `agent:cody:project:wrkq` or `cody@wrkq` |
+| `--profile <name>` | Named profile to source scope/defaults from |
+| `--idempotency-key <key>` | Safe-retry key; same scope + same key + same payload replays |
+| `--meta <json>` | Optional JSON object of extra metadata |
+| `--dry-run` | Validate inputs and print the prospective handoff without writing |
+| `--json` / `--ndjson` / `--human` | Force an output mode (defaults: human on TTY, JSON when piped) |
+
+**Body input rules:** `--body-file` is required and may be a file path or `-` for stdin. The body is trimmed of trailing whitespace and must be non-empty.
+
+**Idempotency semantics:** `(scope_ref, idempotency_key)` is unique. Replaying the same `--idempotency-key` with the same title/body returns the existing handoff (no new row, `idempotent_replay=true`). A mismatched payload returns exit code 3.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Created (or idempotent replay) |
+| `1` | Generic error (validation, runtime, db) |
+| `2` | Scope unresolvable (env missing and no `--scope`, invalid ref grammar) |
+| `3` | Idempotency payload mismatch — same key, different title/body |
+
+### `wrkq handoff list`
+
+Lists handoffs for the resolved scope. **Defaults to `--status pending`** so the bare command shows only pending entries — the common agent case.
+
+Alias: `wrkq handoff ls`.
+
+| Flag | Purpose |
+|------|---------|
+| `--scope <ref-or-handle>` | Override resolved scope |
+| `--status pending\|acknowledged\|all` | Status filter (default: `pending`) |
+| `--limit <n>` | Page size (default: 50, max: 500; over-cap clamps with stderr warning) |
+| `--cursor <token>` | Pagination cursor from a previous page's `next_cursor` |
+| `--json` / `--ndjson` / `--human` | Force output mode |
+| `--porcelain` | In addition to the chosen output, emit `next_cursor=<token>` on stderr for shell piping |
+
+**Pagination shape:** every structured response includes `next_cursor` (nullable string) and `truncated` (bool). NDJSON streams individual handoff objects followed by a footer object `{"cursor": ..., "truncated": ...}`. Use `--porcelain` to additionally surface the cursor on stderr so a shell wrapper can capture it without parsing JSON.
+
+**Output defaults:** human-readable table on a TTY (`ID Scope Status Created Title`), JSON when piped or non-TTY. `--json`, `--ndjson`, or `--human` overrides detection.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (including empty result set) |
+| `1` | Generic error (validation, runtime, db) |
+| `2` | Scope unresolvable |
+
+### `wrkq handoff get <id>`
+
+Fetches one handoff. The argument may be a friendly ID (`H-00001`) or a UUID.
+
+Alias: `wrkq handoff cat <id>`.
+
+| Flag | Purpose |
+|------|---------|
+| `--json` / `--human` | Force output mode |
+
+Human mode prints a key/value header followed by the body. JSON mode returns the full handoff record including acknowledgement metadata when present.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Found |
+| `1` | Generic runtime error |
+| `4` | Handoff not found |
+
+### `wrkq handoff acknowledge <id>`
+
+Marks a pending handoff as acknowledged. Acknowledgement is the only retirement mechanism in v1 — handoffs do not expire automatically.
+
+| Flag | Purpose |
+|------|---------|
+| `--note <text>` | Optional acknowledgement note. If passed it must be non-empty after trim |
+| `--dry-run` | Inspect the resulting state without writing |
+| `--if-match <etag>` | Reject the acknowledgement when the current etag does not equal this value |
+| `--json` / `--human` | Force output mode |
+
+The acting agent is read from `ASP_AGENT_ID` (or `ASP_SCOPE_REF`); acknowledging without a resolvable actor agent is a validation error.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Acknowledged (or dry-run preview) |
+| `1` | Validation or runtime error |
+| `4` | Handoff not found |
+| `5` | Already acknowledged — message includes the existing `acknowledged_at` |
+| `6` | ETag mismatch (`--if-match` did not match the current etag) |
+
+### `wrkq handoff search <query>`
+
+LIKE-based search across title, body, and scope_ref. v1 is intentionally simple — no FTS, no ranking. Same pagination and output shape as `handoff list`.
+
+| Flag | Purpose |
+|------|---------|
+| `--scope <ref-or-handle>` | Override resolved scope |
+| `--status pending\|acknowledged\|all` | Status filter (default: `pending`) |
+| `--limit <n>` | Page size (default: 50, max: 500) |
+| `--cursor <token>` | Pagination cursor |
+| `--json` / `--ndjson` / `--human` | Force output mode |
+| `--porcelain` | Emit `next_cursor=<token>` on stderr (mirrors `handoff list --porcelain`) |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (including empty result set) |
+| `1` | Generic error (validation, runtime, db) |
+| `2` | Scope unresolvable |
+
+---
+
+## `wrkq agent-context`
+
+Prints the resolved agent scope and runtime environment. Useful for debugging why a handoff command did or did not resolve a scope before running it.
+
+| Flag | Purpose |
+|------|---------|
+| `--scope <ref-or-handle>` | Override scope to see how it parses |
+| `--json` / `--human` | Force output mode (default: human on TTY, JSON when piped) |
+
+The command works even without a database connection — actor and container UUID lookups are best-effort extras that are only attempted when the configured DB exists and is reachable.
+
+**Output sections** (human mode): the active environment variables (`ASP_SCOPE_REF`, `ASP_HANDLE`, `ASP_AGENT_ID`, `ASP_PROJECT`, plus `--scope` if used), the resolved scope (source, kind, agent_id, project_id, canonical_ref), diagnostics if any, database reachability, and best-effort actor/container lookups.
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Scope resolved |
+| `2` | Scope unresolvable |
+
+---
+
 ## Container Hierarchy
 
 | Command | Action |
@@ -298,6 +457,7 @@ Resources can be referenced by multiple identifiers:
 | `C-` | Comment |
 | `A-` | Actor |
 | `ATT-` | Attachment |
+| `H-` | Handoff (agent session continuity) |
 
 ### Glob Patterns
 
@@ -573,6 +733,7 @@ project_root: my-project
 | **Task** | Actionable item under a container | `T-00001` |
 | **Comment** | Immutable note on a task | `C-00001` |
 | **Attachment** | File reference (metadata + filesystem) | `ATT-00001` |
+| **Handoff** | Agent session continuity record (agent/project scoped) | `H-00001` |
 | **Event** | Audit log entry | N/A |
 
 ---

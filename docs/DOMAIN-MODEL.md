@@ -181,6 +181,91 @@ A file associated with a task. Attachments provide supporting materials:
 
 ---
 
+## Handoffs (Agent Session Continuity)
+
+A **handoff** is an intentional, manually-created context record that one session of an agent leaves behind for a later session of the same agent. Handoffs are a sibling collaboration primitive to tasks, comments, and memory — not a special task kind, not a comment, and not an auto-managed memory entry.
+
+### Tasks vs Comments vs Memory vs Handoffs
+
+These four primitives are deliberately distinct. Picking the wrong one causes coordination noise.
+
+| Primitive | Audience | Lifecycle | Purpose |
+|-----------|----------|-----------|---------|
+| **Task** | Between actors (human↔agent, agent↔agent) | Workflow states (open → in_progress → completed/…) | Coordinate work that needs an owner, definition of done, and tracking |
+| **Comment** | On a specific task, between actors collaborating on it | Append-only, immutable | Progress updates, questions, blockers, completion notes |
+| **Memory** | Belongs to one agent | Auto-managed and auto-pruned | Background knowledge the agent has absorbed; not deliberately curated for a future session |
+| **Handoff** | Same agent, current → future session | Created → pending → acknowledged (manual retirement only) | Carry deliberate, auditable context forward between the same agent's sessions |
+
+A simple test: "Do I need someone else to do this?" → task. "Am I updating a task?" → comment. "Should the model just remember this in general?" → memory. "Do I, this same agent, want to pick this up next session with full context?" → handoff.
+
+### Scope Model
+
+Handoffs are scoped to an `(agent, project)` pair in v1. Task and lane variants are intentionally excluded for now; the schema's `scope_kind` column reserves space for future expansion without a migration.
+
+Scope is identified by a validated **ScopeRef** drawn from the canonical `agent-scope` package (the TypeScript original lives in `agent-spaces/packages/agent-scope`; the Go port lives in `internal/scope/`). Two surface forms:
+
+- **Long form (`scopeRef`)**: `agent:<agentId>:project:<projectId>[:task:<taskId>][:role:<roleName>]` — e.g. `agent:cody:project:wrkq`
+- **Short form (`scopeHandle`)**: `<agentId>[@<projectId>[:<taskId>][/<roleName>]]` — e.g. `cody@wrkq`
+
+For v1, handoffs accept either form and normalize down to the `project` kind. Task and role variants on the input parse, but the stored `scope_ref` is reduced to `agent:<agentId>:project:<projectId>`.
+
+### Default scope resolution (env-first)
+
+Handoff commands are expected to be called by an agent process that already has its runtime context. Resolution order:
+
+1. `--scope <ref-or-handle>` flag (explicit override)
+2. `ASP_SCOPE_REF` env var (parse, normalize to `project` kind)
+3. `ASP_HANDLE` env var (parse, normalize to `project` kind)
+4. `ASP_AGENT_ID + ASP_PROJECT` env vars (construct and validate)
+5. Fail with a corrective error and an example
+
+There is no `WRKQ_PROJECT_ROOT` fallback for scope — `WRKQ_PROJECT_ROOT` is a wrkq task-tree helper, not a platform project identity. Use `wrkq agent-context` to inspect what the CLI resolves at the current moment.
+
+### Lifecycle
+
+Two terminal states, no automation:
+
+```
+(created) ──→ pending ──→ acknowledge ──→ acknowledged
+```
+
+- **Pending** handoffs are eligible to be loaded into future agent context.
+- **Acknowledged** handoffs are retained for history and search but do not appear in default pending listings.
+- There is **no auto-expiration**, no auto-pruning, and no soft-delete in v1. Retirement happens only via `wrkq handoff acknowledge`.
+- There is **no `superseded_by` relationship** in v1; an acknowledgement note is the only way to record why a handoff is obsolete.
+
+### Idempotency
+
+`wrkq handoff create --idempotency-key <key>` is keyed by `(scope_ref, idempotency_key)`:
+
+- Same scope + same key + **same payload** → replays the existing handoff (no new row, idempotent).
+- Same scope + same key + **different payload** → error with exit code 3 (`idempotency_payload_mismatch`).
+- Different scope or different key → independent handoff.
+
+This makes it safe for agents to retry a `handoff create` call without producing duplicates.
+
+### Data Model Fields
+
+A handoff record minimally carries:
+
+| Field | Notes |
+|-------|-------|
+| `uuid`, `id` (`H-NNNNN`) | Stable identifiers |
+| `scope_ref`, `scope_kind` | Canonical scope reference; `scope_kind = 'project'` for v1 |
+| `agent_id`, `project_id` | Extracted from `scope_ref` for indexing |
+| `agent_actor_uuid`, `project_container_uuid` | Optional FKs into `actors` and `containers` when a local row exists |
+| `created_by_agent_id`, `created_by_actor_uuid` | Captures the acting agent at creation time |
+| `title`, `body` | Markdown body; title and body are both required and non-empty |
+| `status` | `pending` or `acknowledged` |
+| `idempotency_key` | Unique per `(scope_ref, idempotency_key)` when set |
+| `acknowledged_at`, `acknowledged_by_agent_id`, `acknowledged_by_actor_uuid`, `acknowledgement_note` | Acknowledgement metadata; null while pending |
+| `meta` | Optional JSON blob for additional metadata |
+| `etag`, `created_at`, `updated_at` | Standard optimistic-concurrency and timestamp fields |
+
+The implementation lives in migration `000015_handoff_schema.sql` and `internal/store/handoffs.go`; see [CLI-REFERENCE.md](CLI-REFERENCE.md#handoffs-agent-session-continuity) for the verb surface.
+
+---
+
 ## Planning Concepts
 
 Tools for organizing and prioritizing work.
@@ -428,6 +513,11 @@ TASKS relate via:
   - DUPLICATES (same work)
 
 SECTIONS organize tasks into kanban columns within projects (planned, not yet in CLI)
+
+AGENTS leave HANDOFFS for their own later sessions:
+  - Scoped to (agent, project) in v1
+  - Created → pending → acknowledged (manual retirement only)
+  - Sibling to tasks/comments/memory, not a task subtype
 
 All changes create EVENTS (immutable audit trail)
 ```

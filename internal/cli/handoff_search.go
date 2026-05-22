@@ -19,7 +19,7 @@ var handoffSearchPorcelain bool
 
 func init() {
 	handoffSearchCmd.Flags().BoolVar(&handoffSearchPorcelain, "porcelain", false,
-		"Emit next_cursor=<token> on stderr (mirrors `wrkq handoff list --porcelain`)")
+		"Emit next_cursor=<token> on stderr (mirrors 'wrkq handoff list --porcelain')")
 }
 
 type handoffSearchOutput struct {

@@ -27,7 +27,7 @@ var handoffListPorcelain bool
 
 func init() {
 	handoffListCmd.Flags().BoolVar(&handoffListPorcelain, "porcelain", false,
-		"Emit next_cursor=<token> on stderr (mirrors `wrkq comment ls --porcelain`)")
+		"Emit next_cursor=<token> on stderr (mirrors 'wrkq comment ls --porcelain')")
 }
 
 // handoffListOutput is the structured payload returned by JSON and NDJSON modes.
