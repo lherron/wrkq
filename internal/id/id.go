@@ -12,6 +12,7 @@ var (
 	containerIDPattern  = regexp.MustCompile(`^P-\d{5}$`)
 	taskIDPattern       = regexp.MustCompile(`^T-\d{5}$`)
 	commentIDPattern    = regexp.MustCompile(`^C-\d{5}$`)
+	handoffIDPattern    = regexp.MustCompile(`^H-\d{5}$`)
 	attachmentIDPattern = regexp.MustCompile(`^ATT-\d{5}$`)
 	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
@@ -24,6 +25,7 @@ const (
 	TypeContainer  Type = "container"
 	TypeTask       Type = "task"
 	TypeComment    Type = "comment"
+	TypeHandoff    Type = "handoff"
 	TypeAttachment Type = "attachment"
 )
 
@@ -45,6 +47,11 @@ func FormatTask(seq int) string {
 // FormatComment formats a comment friendly ID
 func FormatComment(seq int) string {
 	return fmt.Sprintf("C-%05d", seq)
+}
+
+// FormatHandoff formats a handoff friendly ID
+func FormatHandoff(seq int) string {
+	return fmt.Sprintf("H-%05d", seq)
 }
 
 // FormatAttachment formats an attachment friendly ID
@@ -69,6 +76,9 @@ func Parse(id string) (Type, int, error) {
 	case commentIDPattern.MatchString(id):
 		seq, _ := strconv.Atoi(id[2:])
 		return TypeComment, seq, nil
+	case handoffIDPattern.MatchString(id):
+		seq, _ := strconv.Atoi(id[2:])
+		return TypeHandoff, seq, nil
 	case attachmentIDPattern.MatchString(id):
 		seq, _ := strconv.Atoi(id[4:])
 		return TypeAttachment, seq, nil

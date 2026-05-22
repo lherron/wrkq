@@ -54,6 +54,18 @@ func TestFormatFunctions(t *testing.T) {
 			want: "C-00001",
 		},
 		{
+			name: "FormatHandoff with seq 1",
+			fn:   FormatHandoff,
+			seq:  1,
+			want: "H-00001",
+		},
+		{
+			name: "FormatHandoff with seq 123",
+			fn:   FormatHandoff,
+			seq:  123,
+			want: "H-00123",
+		},
+		{
 			name: "FormatAttachment with seq 1",
 			fn:   FormatAttachment,
 			seq:  1,
@@ -121,6 +133,18 @@ func TestParse(t *testing.T) {
 			input:    "C-00001",
 			wantType: TypeComment,
 			wantSeq:  1,
+		},
+		{
+			name:     "handoff ID",
+			input:    "H-00001",
+			wantType: TypeHandoff,
+			wantSeq:  1,
+		},
+		{
+			name:     "handoff ID with seq 123",
+			input:    "H-00123",
+			wantType: TypeHandoff,
+			wantSeq:  123,
 		},
 		{
 			name:     "attachment ID",
@@ -270,6 +294,7 @@ func TestIsFriendlyID(t *testing.T) {
 		{name: "container ID", input: "P-00001", want: true},
 		{name: "task ID", input: "T-00001", want: true},
 		{name: "comment ID", input: "C-00001", want: true},
+		{name: "handoff ID", input: "H-00001", want: true},
 		{name: "attachment ID", input: "ATT-00001", want: true},
 		{name: "invalid format", input: "INVALID", want: false},
 		{name: "UUID", input: "123e4567-e89b-12d3-a456-426614174000", want: false},
@@ -317,6 +342,12 @@ func TestIDFormatParseRoundtrip(t *testing.T) {
 			name:     "comment IDs",
 			formatFn: FormatComment,
 			idType:   TypeComment,
+			seqs:     []int{1, 42, 100, 12345, 99999},
+		},
+		{
+			name:     "handoff IDs",
+			formatFn: FormatHandoff,
+			idType:   TypeHandoff,
 			seqs:     []int{1, 42, 100, 12345, 99999},
 		},
 		{
