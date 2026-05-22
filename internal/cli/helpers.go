@@ -8,10 +8,51 @@ import (
 	"strings"
 )
 
-// exitError returns an error that will cause the CLI to exit with the given code
+type cliExitError struct {
+	code     int
+	err      error
+	reported bool
+}
+
+func (e cliExitError) Error() string {
+	if e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e cliExitError) Unwrap() error {
+	return e.err
+}
+
+// exitError returns an error that causes the real CLI binary to exit with the
+// given code. Tests can inspect the code with ExitCodeForError.
 func exitError(code int, err error) error {
-	// For now, just return the error. We'll enhance this with proper exit codes later
-	return err
+	return cliExitError{code: code, err: err}
+}
+
+func exitErrorReported(code int, err error) error {
+	return cliExitError{code: code, err: err, reported: true}
+}
+
+// ExitCodeForError returns the process exit code represented by err.
+func ExitCodeForError(err error) int {
+	if err == nil {
+		return 0
+	}
+	if e, ok := err.(cliExitError); ok {
+		return e.code
+	}
+	return 1
+}
+
+// ErrorAlreadyReported reports whether a command already wrote its own
+// structured error to stderr.
+func ErrorAlreadyReported(err error) bool {
+	if e, ok := err.(cliExitError); ok {
+		return e.reported
+	}
+	return false
 }
 
 // readDescriptionValue reads description from string, file (@file.md), or stdin (-)

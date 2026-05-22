@@ -9,7 +9,9 @@ import (
 
 func main() {
 	if err := cli.ExecuteAdmin(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		if !cli.ErrorAlreadyReported(err) {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		os.Exit(cli.ExitCodeForError(err))
 	}
 }
