@@ -57,10 +57,10 @@ db-reset:
 # Build CLI binaries (wrkq, wrkf, wrkqadm, wrkqd)
 build:
   echo "Building wrkq, wrkf, wrkqadm, and wrkqd binaries..."
-  go build -o bin/wrkq ./cmd/wrkq
-  go build -o bin/wrkf ./cmd/wrkf
-  go build -o bin/wrkqadm ./cmd/wrkqadm
-  go build -o bin/wrkqd ./cmd/wrkqd
+  go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
+  go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
+  go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
 
 # Run the wrkq CLI
 run *args:
@@ -116,15 +116,32 @@ install-launchd:
   echo "  launchctl bootstrap gui/$(id -u) $dst"
   echo "  launchctl kickstart -k gui/$(id -u)/com.praesidium.wrkq-server"
 
+# Install the llama-server launchd plist (dense embeddings for search index)
+install-llama-launchd:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  src="launchd/com.praesidium.llama-server.plist"
+  dst="$HOME/Library/LaunchAgents/com.praesidium.llama-server.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  mkdir -p "$HOME/praesidium/var/logs/llama-cpp"
+  cp "$src" "$dst"
+  echo "✓ Installed $dst"
+  echo "Bootstrap with:"
+  echo "  launchctl bootstrap gui/$(id -u) $dst"
+  echo "  launchctl kickstart -k gui/$(id -u)/com.praesidium.llama-server"
+  echo
+  echo "Verify with:"
+  echo "  curl http://127.0.0.1:18480/health"
+
 # Install CLI binaries to /usr/local/bin (requires sudo - run manually)
 install-system:
   #!/usr/bin/env bash
   set -euo pipefail
   echo "Building wrkq binaries..."
-  go build -o bin/wrkq ./cmd/wrkq
-  go build -o bin/wrkf ./cmd/wrkf
-  go build -o bin/wrkqadm ./cmd/wrkqadm
-  go build -o bin/wrkqd ./cmd/wrkqd
+  go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
+  go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
+  go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
   # Remove old binary first to avoid crashes when overwriting running binaries
   sudo rm -f /usr/local/bin/wrkq

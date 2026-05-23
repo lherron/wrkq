@@ -12,7 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const SchemaVersion = "1"
+const SchemaVersion = "2"
 
 type DB struct {
 	*sql.DB
@@ -75,16 +75,42 @@ func (db *DB) Path() string {
 }
 
 func (db *DB) Migrate() error {
+	stateSchema := `
+CREATE TABLE IF NOT EXISTS search_index_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`
+	if _, err := db.Exec(stateSchema); err != nil {
+		return fmt.Errorf("failed to create search state table: %w", err)
+	}
+	storedVersion, _, _ := db.State("schema_version")
+	if storedVersion != "" && storedVersion != SchemaVersion {
+		if err := db.dropChunkTables(); err != nil {
+			return err
+		}
+		if err := db.SetState("last_indexed_event_id", "0"); err != nil {
+			return err
+		}
+		if err := db.SetState("last_successful_indexed_event_id", "0"); err != nil {
+			return err
+		}
+	}
+
 	schema := `
 CREATE TABLE IF NOT EXISTS search_chunks (
   ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
   chunk_id TEXT NOT NULL UNIQUE,
-  resource_type TEXT NOT NULL CHECK (resource_type IN ('task','comment')),
-  task_uuid TEXT NOT NULL,
+  resource_type TEXT NOT NULL CHECK (resource_type IN ('task','comment','handoff')),
+  resource_uuid TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  task_uuid TEXT,
   comment_uuid TEXT,
-  path TEXT NOT NULL,
-  task_id TEXT NOT NULL,
+  task_id TEXT,
   comment_id TEXT,
+  scope_ref TEXT,
+  status TEXT,
+  path TEXT NOT NULL,
   state TEXT,
   kind TEXT,
   title TEXT NOT NULL,
@@ -97,8 +123,10 @@ CREATE TABLE IF NOT EXISTS search_chunks (
   indexed_at TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS search_chunks_resource_idx ON search_chunks(resource_type, resource_uuid);
 CREATE INDEX IF NOT EXISTS search_chunks_task_idx ON search_chunks(task_uuid);
 CREATE INDEX IF NOT EXISTS search_chunks_path_idx ON search_chunks(path);
+CREATE INDEX IF NOT EXISTS search_chunks_scope_status_idx ON search_chunks(scope_ref, status);
 CREATE INDEX IF NOT EXISTS search_chunks_state_kind_idx ON search_chunks(state, kind);
 CREATE INDEX IF NOT EXISTS search_chunks_hash_idx ON search_chunks(content_hash);
 
@@ -107,11 +135,6 @@ CREATE TABLE IF NOT EXISTS search_fts_plain (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   path TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS search_index_state (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS search_failures (
@@ -126,23 +149,47 @@ CREATE TABLE IF NOT EXISTS search_failures (
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("failed to migrate search database: %w", err)
 	}
-	if _, err := db.Exec(`
+	_, ftsErr := db.Exec(`
 		CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
 		  chunk_id UNINDEXED,
 		  title,
 		  body,
 		  path
 		)
-	`); err != nil {
-		_ = db.SetState("fts_available", "false")
-	} else {
+	`)
+	var ftsTableCount int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='search_fts'`).Scan(&ftsTableCount)
+	if ftsTableCount > 0 {
 		_ = db.SetState("fts_available", "true")
+	} else {
+		_ = db.SetState("fts_available", "false")
 	}
+	_ = ftsErr
 	if err := db.SetState("schema_version", SchemaVersion); err != nil {
 		return err
 	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO search_index_state (key, value) VALUES ('status', 'ready')`); err != nil {
 		return fmt.Errorf("failed to initialize search state: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) dropChunkTables() error {
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS search_fts`,
+		`DROP TABLE IF EXISTS search_fts_plain`,
+		`DROP TABLE IF EXISTS search_dense_vec`,
+		`DROP TABLE IF EXISTS search_chunks`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to drop legacy search table: %w", err)
+		}
+	}
+	if err := db.SetState("dense_dimension", "0"); err != nil {
+		return err
+	}
+	if err := db.SetState("fts_available", "false"); err != nil {
+		return err
 	}
 	return nil
 }

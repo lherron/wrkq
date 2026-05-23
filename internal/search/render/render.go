@@ -11,11 +11,15 @@ import (
 type Chunk struct {
 	ChunkID         string
 	ResourceType    string
+	ResourceUUID    string
+	ResourceID      string
 	TaskUUID        string
 	CommentUUID     *string
 	Path            string
 	TaskID          string
 	CommentID       *string
+	ScopeRef        string
+	Status          string
 	State           string
 	Kind            string
 	Title           string
@@ -142,6 +146,8 @@ func renderTaskChunk(task taskRow) Chunk {
 	chunk := Chunk{
 		ChunkID:         "task:" + task.UUID,
 		ResourceType:    "task",
+		ResourceUUID:    task.UUID,
+		ResourceID:      task.ID,
 		TaskUUID:        task.UUID,
 		Path:            task.Path,
 		TaskID:          task.ID,
@@ -172,6 +178,8 @@ func renderCommentChunk(task taskRow, comment commentRow) Chunk {
 	chunk := Chunk{
 		ChunkID:         "comment:" + comment.UUID,
 		ResourceType:    "comment",
+		ResourceUUID:    comment.UUID,
+		ResourceID:      comment.ID,
 		TaskUUID:        task.UUID,
 		CommentUUID:     &commentUUID,
 		Path:            task.Path,
@@ -184,6 +192,88 @@ func renderCommentChunk(task taskRow, comment commentRow) Chunk {
 		Labels:          task.Labels,
 		SourceETag:      comment.ETag,
 		SourceUpdatedAt: comment.UpdatedAt,
+	}
+	chunk.ContentHash = hashChunk(chunk)
+	return chunk
+}
+
+func AllSearchableHandoffUUIDs(database *sql.DB) ([]string, error) {
+	rows, err := database.Query(`SELECT uuid FROM handoffs ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query searchable handoffs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return uuids, nil
+}
+
+func HandoffChunks(database *sql.DB, handoffUUID string) ([]Chunk, error) {
+	var h handoffRow
+	err := database.QueryRow(`
+		SELECT uuid, id, scope_ref, scope_kind, agent_id, project_id,
+		       created_by_agent_id, title, body, status,
+		       COALESCE(acknowledgement_note, ''), etag, updated_at
+		FROM handoffs
+		WHERE uuid = ?
+	`, handoffUUID).Scan(
+		&h.UUID, &h.ID, &h.ScopeRef, &h.ScopeKind, &h.AgentID, &h.ProjectID,
+		&h.CreatedByAgentID, &h.Title, &h.Body, &h.Status,
+		&h.AckNote, &h.ETag, &h.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to load handoff for search rendering: %w", err)
+	}
+	return []Chunk{renderHandoffChunk(h)}, nil
+}
+
+type handoffRow struct {
+	UUID, ID, ScopeRef, ScopeKind, AgentID, ProjectID, CreatedByAgentID string
+	Title, Body, Status, AckNote                                        string
+	ETag                                                                int64
+	UpdatedAt                                                           string
+}
+
+func renderHandoffChunk(h handoffRow) Chunk {
+	body := strings.Join(nonEmptyLines([]string{
+		"Scope: " + h.ScopeRef,
+		"Handoff: " + h.ID,
+		"Agent: " + h.AgentID,
+		"Project: " + h.ProjectID,
+		"Created-By: " + h.CreatedByAgentID,
+		"Status: " + h.Status,
+		"Acknowledgement: " + h.AckNote,
+		"Title: " + h.Title,
+		"Body:",
+		h.Body,
+	}), "\n")
+
+	chunk := Chunk{
+		ChunkID:         "handoff:" + h.UUID,
+		ResourceType:    "handoff",
+		ResourceUUID:    h.UUID,
+		ResourceID:      h.ID,
+		Path:            h.ScopeRef,
+		ScopeRef:        h.ScopeRef,
+		Status:          h.Status,
+		Kind:            "handoff",
+		Title:           h.Title,
+		Body:            body,
+		SourceETag:      h.ETag,
+		SourceUpdatedAt: h.UpdatedAt,
 	}
 	chunk.ContentHash = hashChunk(chunk)
 	return chunk

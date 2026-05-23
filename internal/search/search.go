@@ -27,6 +27,10 @@ type Options struct {
 	State          string
 	Kind           string
 	AssigneeUUID   string
+	ResourceType   string
+	ScopeRef       string
+	Status         string
+	Offset         int
 	Limit          int
 	CandidateLimit int
 	Fresh          bool
@@ -34,14 +38,18 @@ type Options struct {
 }
 
 type Result struct {
-	TaskID       string         `json:"task_id"`
-	TaskUUID     string         `json:"task_uuid"`
+	ResourceType string         `json:"resource_type"`
+	ResourceID   string         `json:"resource_id"`
+	ResourceUUID string         `json:"resource_uuid"`
+	TaskID       string         `json:"task_id,omitempty"`
+	TaskUUID     string         `json:"task_uuid,omitempty"`
+	CommentID    *string        `json:"comment_id,omitempty"`
+	ScopeRef     string         `json:"scope_ref,omitempty"`
+	Status       string         `json:"status,omitempty"`
 	Path         string         `json:"path"`
 	Title        string         `json:"title"`
-	State        string         `json:"state"`
-	Kind         string         `json:"kind"`
-	ResourceType string         `json:"resource_type"`
-	CommentID    *string        `json:"comment_id,omitempty"`
+	State        string         `json:"state,omitempty"`
+	Kind         string         `json:"kind,omitempty"`
 	Snippet      string         `json:"snippet"`
 	Score        float64        `json:"score"`
 	Stale        bool           `json:"stale"`
@@ -49,10 +57,12 @@ type Result struct {
 }
 
 type Response struct {
-	Query   string          `json:"query"`
-	Stale   bool            `json:"stale"`
-	Status  *indexdb.Status `json:"status"`
-	Results []Result        `json:"results"`
+	Query        string          `json:"query"`
+	Stale        bool            `json:"stale"`
+	Status       *indexdb.Status `json:"status"`
+	Results      []Result        `json:"results"`
+	TotalMatches int             `json:"total_matches"`
+	Offset       int             `json:"offset"`
 }
 
 func NewService(canonical *db.DB, index *indexdb.DB, embedder embed.DenseEmbedder) *Service {
@@ -94,17 +104,41 @@ func (s *Service) Search(ctx context.Context, opts Options) (*Response, error) {
 
 	scoreMap := rank.RRF([][]rank.Candidate{fts, dense}, 60)
 	if len(scoreMap) == 0 {
-		return &Response{Query: opts.Query, Stale: stale, Status: status, Results: []Result{}}, nil
+		return &Response{
+			Query:        opts.Query,
+			Stale:        stale,
+			Status:       status,
+			Results:      []Result{},
+			TotalMatches: 0,
+			Offset:       opts.Offset,
+		}, nil
 	}
 
 	results, err := s.materializeResults(scoreMap, opts, stale)
 	if err != nil {
 		return nil, err
 	}
-	if len(results) > opts.Limit {
-		results = results[:opts.Limit]
+	total := len(results)
+	start := opts.Offset
+	if start < 0 {
+		start = 0
 	}
-	return &Response{Query: opts.Query, Stale: stale, Status: status, Results: results}, nil
+	if start > total {
+		start = total
+	}
+	end := start + opts.Limit
+	if end > total {
+		end = total
+	}
+	page := results[start:end]
+	return &Response{
+		Query:        opts.Query,
+		Stale:        stale,
+		Status:       status,
+		Results:      page,
+		TotalMatches: total,
+		Offset:       start,
+	}, nil
 }
 
 func (s *Service) ftsCandidates(query string, limit int) ([]rank.Candidate, error) {
@@ -229,40 +263,57 @@ func (s *Service) materializeResults(scoreMap map[string]float64, opts Options, 
 	results := make([]Result, 0, len(chunkIDs))
 	for _, chunkID := range chunkIDs {
 		row := s.Index.QueryRow(`
-			SELECT resource_type, task_uuid, comment_id, path, task_id, state, kind, title, body
+			SELECT resource_type, resource_uuid, resource_id,
+			       task_uuid, task_id, comment_id,
+			       scope_ref, status, path, state, kind, title, body
 			FROM search_chunks
 			WHERE chunk_id = ?
 		`, chunkID)
-		var resourceType, taskUUID, path, taskID, state, kind, title, body string
-		var commentID sql.NullString
-		if err := row.Scan(&resourceType, &taskUUID, &commentID, &path, &taskID, &state, &kind, &title, &body); err != nil {
+		var resourceType, resourceUUID, resourceID, path, title, body string
+		var taskUUID, taskID, commentID, scopeRef, status, state, kind sql.NullString
+		if err := row.Scan(&resourceType, &resourceUUID, &resourceID,
+			&taskUUID, &taskID, &commentID,
+			&scopeRef, &status, &path, &state, &kind, &title, &body); err != nil {
 			if err == sql.ErrNoRows {
 				continue
 			}
 			return nil, err
 		}
-		if !s.canonicalTaskMatches(taskUUID, opts) {
+		if opts.ResourceType != "" && resourceType != opts.ResourceType {
 			continue
+		}
+		switch resourceType {
+		case "task", "comment":
+			if !s.canonicalTaskMatches(taskUUID.String, opts) {
+				continue
+			}
+		case "handoff":
+			if !handoffMatches(scopeRef.String, status.String, opts) {
+				continue
+			}
 		}
 		if !pathMatches(path, opts.Paths) {
 			continue
 		}
-		var commentIDPtr *string
-		if commentID.Valid {
-			commentIDPtr = &commentID.String
-		}
 		result := Result{
-			TaskID:       taskID,
-			TaskUUID:     taskUUID,
+			ResourceType: resourceType,
+			ResourceID:   resourceID,
+			ResourceUUID: resourceUUID,
+			TaskID:       taskID.String,
+			TaskUUID:     taskUUID.String,
+			ScopeRef:     scopeRef.String,
+			Status:       status.String,
 			Path:         path,
 			Title:        title,
-			State:        state,
-			Kind:         kind,
-			ResourceType: resourceType,
-			CommentID:    commentIDPtr,
+			State:        state.String,
+			Kind:         kind.String,
 			Snippet:      snippet(body, opts.Query),
 			Score:        scoreMap[chunkID],
 			Stale:        stale,
+		}
+		if commentID.Valid {
+			cid := commentID.String
+			result.CommentID = &cid
 		}
 		if opts.Explain {
 			result.Explain = map[string]any{"chunk_id": chunkID, "rrf_score": scoreMap[chunkID]}
@@ -272,7 +323,7 @@ func (s *Service) materializeResults(scoreMap map[string]float64, opts Options, 
 
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Score == results[j].Score {
-			return results[i].TaskID < results[j].TaskID
+			return results[i].ResourceID < results[j].ResourceID
 		}
 		return results[i].Score > results[j].Score
 	})
@@ -280,7 +331,7 @@ func (s *Service) materializeResults(scoreMap map[string]float64, opts Options, 
 	seen := map[string]int{}
 	aggregated := make([]Result, 0, len(results))
 	for _, result := range results {
-		key := result.TaskUUID
+		key := result.ResourceType + ":" + result.ResourceUUID
 		if idx, ok := seen[key]; ok {
 			if result.Score > aggregated[idx].Score {
 				aggregated[idx] = result
@@ -291,6 +342,29 @@ func (s *Service) materializeResults(scoreMap map[string]float64, opts Options, 
 		aggregated = append(aggregated, result)
 	}
 	return aggregated, nil
+}
+
+func handoffMatches(scopeRef, status string, opts Options) bool {
+	if opts.ScopeRef != "" && scopeRef != opts.ScopeRef {
+		return false
+	}
+	switch opts.Status {
+	case "", "pending":
+		if status != "pending" {
+			return false
+		}
+	case "acknowledged":
+		if status != "acknowledged" {
+			return false
+		}
+	case "all":
+		// no filter
+	default:
+		if status != opts.Status {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) canonicalTaskMatches(taskUUID string, opts Options) bool {

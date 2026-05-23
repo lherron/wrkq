@@ -216,10 +216,20 @@ func runIndexRebuild(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = idx.Close() }()
 
-	ix := indexer.New(app.DB, idx, denseEmbedderFromConfig(app.Config))
+	embedder := denseEmbedderFromConfig(app.Config)
+	ix := indexer.New(app.DB, idx, embedder)
 	ix.BatchSize = app.Config.Search.IndexBatchSize
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
+
+	// Single-attempt pre-flight: if llama-server is down, try one launchctl
+	// kickstart of com.praesidium.llama-server. If it doesn't come back, fail
+	// the index — per the "single attempt, if it fails the index fails"
+	// contract. No-op when the embedder is HashEmbedder or nil.
+	if err := embed.EnsureLlamaReady(ctx, embedder, 60*time.Second); err != nil {
+		return fmt.Errorf("dense embedder unavailable: %w", err)
+	}
+
 	if err := ix.Rebuild(ctx); err != nil {
 		return err
 	}
@@ -238,10 +248,16 @@ func runIndexUpdate(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = idx.Close() }()
 
-	ix := indexer.New(app.DB, idx, denseEmbedderFromConfig(app.Config))
+	embedder := denseEmbedderFromConfig(app.Config)
+	ix := indexer.New(app.DB, idx, embedder)
 	ix.BatchSize = app.Config.Search.IndexBatchSize
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+
+	if err := embed.EnsureLlamaReady(ctx, embedder, 60*time.Second); err != nil {
+		return fmt.Errorf("dense embedder unavailable: %w", err)
+	}
+
 	if err := ix.IndexPending(ctx); err != nil {
 		return err
 	}

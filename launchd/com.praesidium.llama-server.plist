@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.praesidium.llama-server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/llama-server</string>
+    <string>--hf-repo</string>
+    <string>Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>18480</string>
+    <string>--embedding</string>
+    <string>--pooling</string>
+    <string>mean</string>
+    <string>--ctx-size</string>
+    <string>4096</string>
+    <string>--batch-size</string>
+    <string>4096</string>
+    <string>--ubatch-size</string>
+    <string>4096</string>
+    <string>--parallel</string>
+    <string>1</string>
+    <string>--cache-ram</string>
+    <string>0</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/lherron/praesidium/var/logs/llama-cpp/server.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/lherron/praesidium/var/logs/llama-cpp/server.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/lherron</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

@@ -17,6 +17,7 @@ import (
 	searchrender "github.com/lherron/wrkq/internal/search/render"
 )
 
+
 type Indexer struct {
 	Canonical *db.DB
 	Index     *indexdb.DB
@@ -70,6 +71,18 @@ func (ix *Indexer) Rebuild(ctx context.Context) error {
 		}
 		denseChunks = append(denseChunks, chunks...)
 	}
+	handoffUUIDs, err := searchrender.AllSearchableHandoffUUIDs(ix.Canonical.DB)
+	if err != nil {
+		return err
+	}
+	for _, handoffUUID := range handoffUUIDs {
+		chunks, err := ix.indexHandoffMetadata(ctx, handoffUUID, maxEventID)
+		if err != nil {
+			ix.Index.RecordFailure(maxEventID, handoffUUID, "index_handoff", err)
+			return err
+		}
+		denseChunks = append(denseChunks, chunks...)
+	}
 	if len(denseChunks) > 0 && ix.Embedder != nil && ix.Embedder.Dimension() > 0 && ix.Index.HasDenseTable() {
 		if err := ix.indexDenseBatches(ctx, denseChunks, maxEventID); err != nil {
 			ix.Index.RecordFailure(maxEventID, "", "dense_embed", err)
@@ -100,17 +113,25 @@ func (ix *Indexer) IndexPending(ctx context.Context) error {
 	_ = ix.Index.SetState("last_error", "")
 	_ = ix.Index.SetState("status", "indexing")
 
-	dirty, err := ix.DirtyTasksSince(last)
+	dirty, err := ix.DirtyResourcesSince(last)
 	if err != nil {
 		return err
 	}
 	if err := ix.prepareDenseTable(); err != nil {
 		ix.Index.RecordFailure(maxEventID, "", "dense_schema", err)
 	}
-	for taskUUID := range dirty {
-		if err := ix.IndexTask(ctx, taskUUID, maxEventID); err != nil {
-			ix.Index.RecordFailure(maxEventID, taskUUID, "index_task", err)
-			return err
+	for resource := range dirty {
+		switch resource.Type {
+		case "task":
+			if err := ix.IndexTask(ctx, resource.UUID, maxEventID); err != nil {
+				ix.Index.RecordFailure(maxEventID, resource.UUID, "index_task", err)
+				return err
+			}
+		case "handoff":
+			if err := ix.IndexHandoff(ctx, resource.UUID, maxEventID); err != nil {
+				ix.Index.RecordFailure(maxEventID, resource.UUID, "index_handoff", err)
+				return err
+			}
 		}
 	}
 	if err := ix.Index.SetState("last_indexed_event_id", strconv.FormatInt(maxEventID, 10)); err != nil {
@@ -136,6 +157,99 @@ func (ix *Indexer) IndexTask(ctx context.Context, taskUUID string, indexedEventI
 	return nil
 }
 
+func (ix *Indexer) IndexHandoff(ctx context.Context, handoffUUID string, indexedEventID int64) error {
+	denseChunks, err := ix.indexHandoffMetadata(ctx, handoffUUID, indexedEventID)
+	if err != nil {
+		return err
+	}
+	if len(denseChunks) > 0 && ix.Embedder != nil && ix.Embedder.Dimension() > 0 && ix.Index.HasDenseTable() {
+		if err := ix.indexDense(ctx, denseChunks, indexedEventID); err != nil {
+			ix.Index.RecordFailure(indexedEventID, handoffUUID, "dense_embed", err)
+		}
+	}
+	return nil
+}
+
+func (ix *Indexer) indexHandoffMetadata(ctx context.Context, handoffUUID string, indexedEventID int64) ([]searchrender.Chunk, error) {
+	chunks, err := searchrender.HandoffChunks(ix.Canonical.DB, handoffUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := ix.Index.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	existing, err := existingResourceChunks(tx, "handoff", handoffUUID)
+	if err != nil {
+		return nil, err
+	}
+	next := map[string]searchrender.Chunk{}
+	for _, chunk := range chunks {
+		next[chunk.ChunkID] = chunk
+	}
+	for chunkID, ordinal := range existing {
+		if _, ok := next[chunkID]; ok {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM search_fts WHERE chunk_id = ?`, chunkID); err != nil {
+			if ix.Index.FTSAvailable() {
+				return nil, err
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM search_fts_plain WHERE chunk_id = ?`, chunkID); err != nil {
+			return nil, err
+		}
+		if ix.Index.HasDenseTable() {
+			if _, err := tx.Exec(`DELETE FROM search_dense_vec WHERE rowid = ?`, ordinal); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM search_chunks WHERE chunk_id = ?`, chunkID); err != nil {
+			return nil, err
+		}
+	}
+
+	var denseChunks []searchrender.Chunk
+	for _, chunk := range chunks {
+		changed, err := upsertChunk(tx, chunk, indexedEventID)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			if _, err := tx.Exec(`DELETE FROM search_fts WHERE chunk_id = ?`, chunk.ChunkID); err != nil {
+				if ix.Index.FTSAvailable() {
+					return nil, err
+				}
+			}
+			if ix.Index.FTSAvailable() {
+				if _, err := tx.Exec(`INSERT INTO search_fts (chunk_id, title, body, path) VALUES (?, ?, ?, ?)`, chunk.ChunkID, chunk.Title, chunk.Body, chunk.Path); err != nil {
+					return nil, err
+				}
+			}
+			if _, err := tx.Exec(`
+				INSERT INTO search_fts_plain (chunk_id, title, body, path)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(chunk_id) DO UPDATE SET
+				  title = excluded.title,
+				  body = excluded.body,
+				  path = excluded.path
+			`, chunk.ChunkID, chunk.Title, chunk.Body, chunk.Path); err != nil {
+				return nil, err
+			}
+			denseChunks = append(denseChunks, chunk)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return denseChunks, nil
+}
+
 func (ix *Indexer) indexTaskMetadata(ctx context.Context, taskUUID string, indexedEventID int64) ([]searchrender.Chunk, error) {
 	chunks, err := searchrender.TaskChunks(ix.Canonical.DB, taskUUID)
 	if err != nil {
@@ -148,7 +262,7 @@ func (ix *Indexer) indexTaskMetadata(ctx context.Context, taskUUID string, index
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	existing, err := existingTaskChunks(tx, taskUUID)
+	existing, err := existingTaskFamilyChunks(tx, taskUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +423,28 @@ func (ix *Indexer) prepareDenseTable() error {
 	return ix.Index.EnsureDenseTable(ix.Embedder.Dimension(), ix.Embedder.ModelID())
 }
 
-func existingTaskChunks(tx *sql.Tx, taskUUID string) (map[string]int64, error) {
+func existingResourceChunks(tx *sql.Tx, resourceType, resourceUUID string) (map[string]int64, error) {
+	rows, err := tx.Query(`SELECT chunk_id, ordinal FROM search_chunks WHERE resource_type = ? AND resource_uuid = ?`, resourceType, resourceUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int64{}
+	for rows.Next() {
+		var chunkID string
+		var ordinal int64
+		if err := rows.Scan(&chunkID, &ordinal); err != nil {
+			return nil, err
+		}
+		out[chunkID] = ordinal
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func existingTaskFamilyChunks(tx *sql.Tx, taskUUID string) (map[string]int64, error) {
 	rows, err := tx.Query(`SELECT chunk_id, ordinal FROM search_chunks WHERE task_uuid = ?`, taskUUID)
 	if err != nil {
 		return nil, err
@@ -341,20 +476,34 @@ func upsertChunk(tx *sql.Tx, chunk searchrender.Chunk, eventID int64) (bool, err
 		return false, err
 	}
 
+	taskUUID := nullIfEmpty(chunk.TaskUUID)
+	taskID := nullIfEmpty(chunk.TaskID)
+	scopeRef := nullIfEmpty(chunk.ScopeRef)
+	status := nullIfEmpty(chunk.Status)
+	state := nullIfEmpty(chunk.State)
+	kind := nullIfEmpty(chunk.Kind)
+	labels := nullIfEmpty(chunk.Labels)
+
 	_, err = tx.Exec(`
 		INSERT INTO search_chunks (
-		  chunk_id, resource_type, task_uuid, comment_uuid, path, task_id, comment_id,
-		  state, kind, title, body, labels, content_hash, source_etag, source_updated_at,
+		  chunk_id, resource_type, resource_uuid, resource_id,
+		  task_uuid, comment_uuid, task_id, comment_id,
+		  scope_ref, status, path, state, kind, title, body, labels,
+		  content_hash, source_etag, source_updated_at,
 		  indexed_event_id, indexed_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(chunk_id) DO UPDATE SET
 		  resource_type = excluded.resource_type,
+		  resource_uuid = excluded.resource_uuid,
+		  resource_id = excluded.resource_id,
 		  task_uuid = excluded.task_uuid,
 		  comment_uuid = excluded.comment_uuid,
-		  path = excluded.path,
 		  task_id = excluded.task_id,
 		  comment_id = excluded.comment_id,
+		  scope_ref = excluded.scope_ref,
+		  status = excluded.status,
+		  path = excluded.path,
 		  state = excluded.state,
 		  kind = excluded.kind,
 		  title = excluded.title,
@@ -365,13 +514,22 @@ func upsertChunk(tx *sql.Tx, chunk searchrender.Chunk, eventID int64) (bool, err
 		  source_updated_at = excluded.source_updated_at,
 		  indexed_event_id = excluded.indexed_event_id,
 		  indexed_at = excluded.indexed_at
-	`, chunk.ChunkID, chunk.ResourceType, chunk.TaskUUID, chunk.CommentUUID, chunk.Path, chunk.TaskID, chunk.CommentID,
-		chunk.State, chunk.Kind, chunk.Title, chunk.Body, chunk.Labels, chunk.ContentHash, chunk.SourceETag, chunk.SourceUpdatedAt,
+	`, chunk.ChunkID, chunk.ResourceType, chunk.ResourceUUID, chunk.ResourceID,
+		taskUUID, chunk.CommentUUID, taskID, chunk.CommentID,
+		scopeRef, status, chunk.Path, state, kind, chunk.Title, chunk.Body, labels,
+		chunk.ContentHash, chunk.SourceETag, chunk.SourceUpdatedAt,
 		eventID, now())
 	if err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (ix *Indexer) CanonicalMaxEventID() (int64, error) {
@@ -383,7 +541,12 @@ func (ix *Indexer) CanonicalMaxEventID() (int64, error) {
 	return maxID, nil
 }
 
-func (ix *Indexer) DirtyTasksSince(lastEventID int64) (map[string]struct{}, error) {
+type DirtyResource struct {
+	Type string
+	UUID string
+}
+
+func (ix *Indexer) DirtyResourcesSince(lastEventID int64) (map[DirtyResource]struct{}, error) {
 	rows, err := ix.Canonical.Query(`
 		SELECT id, resource_type, resource_uuid, event_type, COALESCE(payload, '')
 		FROM event_log
@@ -395,7 +558,7 @@ func (ix *Indexer) DirtyTasksSince(lastEventID int64) (map[string]struct{}, erro
 	}
 	defer func() { _ = rows.Close() }()
 
-	dirty := map[string]struct{}{}
+	dirty := map[DirtyResource]struct{}{}
 	for rows.Next() {
 		var id int64
 		var resourceType, eventType, payload string
@@ -406,12 +569,12 @@ func (ix *Indexer) DirtyTasksSince(lastEventID int64) (map[string]struct{}, erro
 		switch resourceType {
 		case "task":
 			if resourceUUID.Valid {
-				dirty[resourceUUID.String] = struct{}{}
+				dirty[DirtyResource{Type: "task", UUID: resourceUUID.String}] = struct{}{}
 			}
 		case "comment":
 			taskUUID := ix.taskUUIDForCommentEvent(resourceUUID, payload)
 			if taskUUID != "" {
-				dirty[taskUUID] = struct{}{}
+				dirty[DirtyResource{Type: "task", UUID: taskUUID}] = struct{}{}
 			}
 		case "container":
 			if resourceUUID.Valid {
@@ -420,8 +583,12 @@ func (ix *Indexer) DirtyTasksSince(lastEventID int64) (map[string]struct{}, erro
 					return nil, err
 				}
 				for _, uuid := range uuids {
-					dirty[uuid] = struct{}{}
+					dirty[DirtyResource{Type: "task", UUID: uuid}] = struct{}{}
 				}
+			}
+		case "handoff":
+			if resourceUUID.Valid {
+				dirty[DirtyResource{Type: "handoff", UUID: resourceUUID.String}] = struct{}{}
 			}
 		}
 		_ = id

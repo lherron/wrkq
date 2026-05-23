@@ -9,9 +9,13 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
+
+const LlamaLaunchdLabel = "com.praesidium.llama-server"
 
 const DefaultQwenModel = "Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M"
 
@@ -46,6 +50,84 @@ func (e *LlamaCPP) EmbedDocuments(ctx context.Context, texts []string) ([][]floa
 		return nil, nil
 	}
 	return e.embed(ctx, texts)
+}
+
+// EnsureLlamaReady is the package-level helper used by CLI commands before
+// they kick off an indexing operation that requires dense embeddings. It
+// type-asserts to *LlamaCPP and calls EnsureReady; other embedder types
+// (HashEmbedder in tests, nil) are no-ops.
+//
+// Lance's contract: single restart attempt. If the server is still not
+// reachable after the restart attempt, the caller should fail the
+// indexing operation rather than degrade silently.
+func EnsureLlamaReady(ctx context.Context, e DenseEmbedder, readyTimeout time.Duration) error {
+	llama, ok := e.(*LlamaCPP)
+	if !ok || llama == nil {
+		return nil
+	}
+	if llama.Dimension() <= 0 {
+		return nil
+	}
+	return llama.EnsureReady(ctx, readyTimeout)
+}
+
+// EnsureReady probes /health. If the server is reachable, it returns nil.
+// If unreachable, it makes a single attempt to launchctl-kickstart the
+// service labeled `com.praesidium.llama-server`, then waits up to
+// readyTimeout for /health to respond. If the server still does not come
+// up, EnsureReady returns the underlying error and the caller is expected
+// to fail the operation that required dense embeddings. This matches the
+// "single restart attempt; if it fails the index fails" contract.
+//
+// No-op when BaseURL is empty.
+func (e *LlamaCPP) EnsureReady(ctx context.Context, readyTimeout time.Duration) error {
+	baseURL := strings.TrimRight(e.BaseURL, "/")
+	if baseURL == "" {
+		return nil
+	}
+	if pingHealth(ctx, baseURL, 2*time.Second) {
+		return nil
+	}
+
+	kickCtx, kickCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer kickCancel()
+	cmd := exec.CommandContext(kickCtx, "launchctl", "kickstart", "-k",
+		fmt.Sprintf("gui/%d/%s", os.Getuid(), LlamaLaunchdLabel))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("llama-server at %s is down and launchctl kickstart %s failed (%w): %s",
+			baseURL, LlamaLaunchdLabel, err, strings.TrimSpace(string(out)))
+	}
+
+	if readyTimeout <= 0 {
+		readyTimeout = 60 * time.Second
+	}
+	deadline := time.Now().Add(readyTimeout)
+	for time.Now().Before(deadline) {
+		if pingHealth(ctx, baseURL, 2*time.Second) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("llama-server at %s did not respond on /health within %s after restart", baseURL, readyTimeout)
+}
+
+func pingHealth(ctx context.Context, baseURL string, timeout time.Duration) bool {
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(pctx, http.MethodGet, baseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode == http.StatusOK
 }
 
 func (e *LlamaCPP) EmbedQuery(ctx context.Context, query string) ([]float32, error) {

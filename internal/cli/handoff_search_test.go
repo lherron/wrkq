@@ -70,6 +70,8 @@ func setSearchScopeEnv(t *testing.T, databasePath, agentID, projectID string) {
 	t.Setenv("ASP_AGENT_ID", agentID)
 	t.Setenv("ASP_PROJECT", projectID)
 	t.Setenv("ASP_HANDLE", "")
+	// Skip remote dense embedding for tests; FTS path is sufficient for assertions.
+	t.Setenv("WRKQ_SEARCH_DENSE_PROVIDER", "none")
 }
 
 func TestHandoffSearchMatchesTitleBodyAndScope(t *testing.T) {

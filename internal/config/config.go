@@ -47,7 +47,7 @@ func Load() (*Config, error) {
 		Search: SearchConfig{
 			Enabled:          true,
 			DenseProvider:    "llama-cpp",
-			DenseBaseURL:     "http://127.0.0.1:8080",
+			DenseBaseURL:     "http://127.0.0.1:18480",
 			DenseModel:       "Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M",
 			DenseDimension:   4096,
 			QueryInstruction: "Instruct: Given a wrkq task search query, retrieve relevant software project tasks, specifications, comments, and implementation notes\nQuery: ",
