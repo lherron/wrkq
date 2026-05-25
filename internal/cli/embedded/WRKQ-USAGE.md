@@ -61,6 +61,7 @@ wrkq projects --json             # List all available projects
 wrkq find --state open --json
 wrkq find 'myfeat/api-feature/**' --state open
 wrkq find --slug-glob 'login-*'
+wrkq find --sort updated_at --reverse --limit 5
 wrkq tree myfeat --json
 wrkq tree --json         # Show all tasks including completed
 ```
@@ -75,6 +76,7 @@ wrkq cat T-00001 --json
 
 # List tasks in a path
 wrkq ls myfeat/api-feature --json
+wrkq ls myfeat/api-feature --type t --sort updated_at --reverse --limit 5
 ```
 
 ## Creating Tasks

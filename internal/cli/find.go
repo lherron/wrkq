@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,6 +54,8 @@ var (
 	findAckPending      bool
 	findLimit           int
 	findCursor          string
+	findSort            string
+	findReverse         bool
 	findPorcelain       bool
 	findJSON            bool
 	findNDJSON          bool
@@ -75,6 +78,8 @@ func init() {
 	findCmd.Flags().BoolVar(&findAckPending, "ack-pending", false, "Filter for ack-pending tasks (acknowledged_at is null; completed/cancelled)")
 	findCmd.Flags().IntVar(&findLimit, "limit", 0, "Limit number of results")
 	findCmd.Flags().StringVar(&findCursor, "cursor", "", "Pagination cursor")
+	findCmd.Flags().StringVar(&findSort, "sort", "", "Sort by field: updated_at, created_at, id, path")
+	findCmd.Flags().BoolVar(&findReverse, "reverse", false, "Reverse sort order")
 	findCmd.Flags().BoolVar(&findPorcelain, "porcelain", false, "Stable machine-readable output")
 	findCmd.Flags().BoolVar(&findJSON, "json", false, "Output as JSON")
 	findCmd.Flags().BoolVar(&findNDJSON, "ndjson", false, "Output as newline-delimited JSON")
@@ -108,6 +113,11 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Build query based on filters with SQL-based pagination
+	sortField, sortDescending, err := normalizeFindSort(findSort, findReverse, findType)
+	if err != nil {
+		return err
+	}
+
 	results, hasMore, err := executeFindQuery(database, findOptions{
 		paths:                args,
 		typeFilter:           findType,
@@ -123,6 +133,8 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ackPending:           findAckPending,
 		limit:                findLimit,
 		cursor:               findCursor,
+		sortField:            sortField,
+		sortDescending:       sortDescending,
 	})
 	if err != nil {
 		return err
@@ -132,28 +144,11 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var nextCursorStr string
 	if hasMore && len(results) > 0 {
 		lastEntry := results[len(results)-1]
-		// Use appropriate sort field based on type filter
-		switch findType {
-		case "t":
-			nextCursorStr, _ = cursor.BuildNextCursor(
-				[]string{"updated_at"},
-				[]interface{}{lastEntry.UpdatedAt},
-				lastEntry.ID,
-			)
-		case "p":
-			nextCursorStr, _ = cursor.BuildNextCursor(
-				[]string{"path"},
-				[]interface{}{lastEntry.Path},
-				lastEntry.ID,
-			)
-		default:
-			// Mixed results - use ID as sort field
-			nextCursorStr, _ = cursor.BuildNextCursor(
-				[]string{"id"},
-				[]interface{}{lastEntry.ID},
-				lastEntry.ID,
-			)
-		}
+		nextCursorStr, _ = cursor.BuildNextCursor(
+			[]string{sortField},
+			[]interface{}{findResultSortValue(lastEntry, sortField)},
+			lastEntry.ID,
+		)
 	}
 
 	// Output next_cursor to stderr in porcelain mode
@@ -191,6 +186,8 @@ type findOptions struct {
 	ackPending           bool
 	limit                int
 	cursor               string
+	sortField            string
+	sortDescending       bool
 }
 
 type findResult struct {
@@ -211,7 +208,8 @@ type findResult struct {
 	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`         // tasks only
 	Resolution           *string `json:"resolution,omitempty"`              // tasks only
 	DueAt                *string `json:"due_at,omitempty"`                  // tasks only
-	UpdatedAt            string  `json:"updated_at,omitempty"`              // for cursor pagination
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
 	ETag                 int64   `json:"etag"`
 }
 
@@ -249,14 +247,15 @@ func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, bool, er
 		}
 	}
 
-	// If searching both types, apply in-memory pagination
+	// If searching both types, apply in-memory sorting and pagination
 	if searchBoth && opts.limit > 0 {
-		// For mixed results, sort by ID for consistent pagination
-		// (keeping original order since queries already returned ordered results)
+		sortFindResults(results, opts.sortField, opts.sortDescending)
 		if len(results) > opts.limit {
 			hasMore = true
 			results = results[:opts.limit]
 		}
+	} else if searchBoth {
+		sortFindResults(results, opts.sortField, opts.sortDescending)
 	}
 
 	return results, hasMore, nil
@@ -268,9 +267,9 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	var err error
 	if !skipPagination {
 		pag, err = cursor.Apply(opts.cursor, cursor.ApplyOptions{
-			SortFields: []string{"updated_at"},
-			SQLFields:  []string{"t.updated_at"},
-			Descending: []bool{true},
+			SortFields: []string{opts.sortField},
+			SQLFields:  []string{findTaskSortSQL(opts.sortField)},
+			Descending: []bool{opts.sortDescending},
 			IDField:    "t.id",
 			Limit:      opts.limit,
 		})
@@ -283,7 +282,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
 		       t.assignee_actor_uuid, t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
-		       cp.path || '/' || t.slug AS path, t.updated_at
+		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at
 		FROM tasks t
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
 		WHERE 1=1
@@ -394,7 +393,19 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	if pag != nil {
 		query += " " + pag.OrderByClause
 	} else {
-		query += " ORDER BY t.updated_at DESC"
+		query += " ORDER BY " + findTaskSortSQL(opts.sortField)
+		if opts.sortDescending {
+			query += " DESC"
+		} else {
+			query += " ASC"
+		}
+		if opts.sortField != "id" {
+			if opts.sortDescending {
+				query += ", t.id DESC"
+			} else {
+				query += ", t.id ASC"
+			}
+		}
 	}
 
 	// Add LIMIT
@@ -419,7 +430,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 
 		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
 			&assigneeUUID, &parentTaskUUID, &requestedBy, &assignedProject,
-			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.UpdatedAt)
+			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt)
 		if err != nil {
 			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
@@ -489,9 +500,9 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 	var err error
 	if !skipPagination {
 		pag, err = cursor.Apply(opts.cursor, cursor.ApplyOptions{
-			SortFields: []string{"path"},
-			SQLFields:  []string{"cp.path"},
-			Descending: []bool{false}, // ASC
+			SortFields: []string{opts.sortField},
+			SQLFields:  []string{findContainerSortSQL(opts.sortField)},
+			Descending: []bool{opts.sortDescending},
 			IDField:    "c.id",
 			Limit:      opts.limit,
 		})
@@ -502,7 +513,7 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 
 	query := `
 		SELECT c.uuid, c.id, c.slug, COALESCE(c.title, c.slug) as title, c.etag,
-		       cp.path
+		       cp.path, c.created_at, c.updated_at
 		FROM containers c
 		JOIN v_container_paths cp ON cp.uuid = c.uuid
 		WHERE c.archived_at IS NULL
@@ -544,7 +555,19 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 	if pag != nil {
 		query += " " + pag.OrderByClause
 	} else {
-		query += " ORDER BY cp.path"
+		query += " ORDER BY " + findContainerSortSQL(opts.sortField)
+		if opts.sortDescending {
+			query += " DESC"
+		} else {
+			query += " ASC"
+		}
+		if opts.sortField != "id" {
+			if opts.sortDescending {
+				query += ", c.id DESC"
+			} else {
+				query += ", c.id ASC"
+			}
+		}
 	}
 
 	// Add LIMIT
@@ -563,7 +586,7 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 	for rows.Next() {
 		var r findResult
 
-		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &r.ETag, &r.Path)
+		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt)
 		if err != nil {
 			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
@@ -584,4 +607,80 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 	}
 
 	return results, hasMore, nil
+}
+
+func normalizeFindSort(field string, reverse bool, typeFilter string) (string, bool, error) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		switch typeFilter {
+		case "p":
+			return "path", reverse, nil
+		default:
+			return "updated_at", !reverse, nil
+		}
+	}
+
+	switch field {
+	case "updated_at", "created_at", "id", "path":
+	default:
+		return "", false, fmt.Errorf("invalid --sort %q: choose updated_at, created_at, id, or path", field)
+	}
+
+	return field, reverse, nil
+}
+
+func findTaskSortSQL(field string) string {
+	switch field {
+	case "id":
+		return "t.id"
+	case "created_at":
+		return "t.created_at"
+	case "path":
+		return "cp.path || '/' || t.slug"
+	default:
+		return "t.updated_at"
+	}
+}
+
+func findContainerSortSQL(field string) string {
+	switch field {
+	case "id":
+		return "c.id"
+	case "created_at":
+		return "c.created_at"
+	case "updated_at":
+		return "c.updated_at"
+	default:
+		return "cp.path"
+	}
+}
+
+func sortFindResults(results []findResult, field string, descending bool) {
+	sort.SliceStable(results, func(i, j int) bool {
+		left := findResultSortValue(results[i], field)
+		right := findResultSortValue(results[j], field)
+		if left == right {
+			if descending {
+				return results[i].ID > results[j].ID
+			}
+			return results[i].ID < results[j].ID
+		}
+		if descending {
+			return left > right
+		}
+		return left < right
+	})
+}
+
+func findResultSortValue(result findResult, field string) string {
+	switch field {
+	case "id":
+		return result.ID
+	case "created_at":
+		return result.CreatedAt
+	case "path":
+		return result.Path
+	default:
+		return result.UpdatedAt
+	}
 }

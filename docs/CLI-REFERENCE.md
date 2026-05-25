@@ -139,6 +139,9 @@ touch --state idea ──→ [idea] ──→ set --state draft ──→ [draft
 | `--slug-glob` | Filter by slug pattern |
 | `--due-before` | Tasks due before date |
 | `--due-after` | Tasks due after date |
+| `--sort updated_at\|created_at\|id\|path` | Sort results (`find` defaults task searches to newest updated first) |
+| `--reverse` | Reverse the requested sort order |
+| `--limit <n>` | Limit result count |
 | Path patterns | Glob patterns like `portal/**` |
 
 ---
@@ -470,6 +473,9 @@ wrkq find --slug-glob 'login-*'
 
 # Recursive listing
 wrkq ls -R myproject
+
+# Most recently touched tasks in a project
+wrkq ls myproject/inbox --type t --sort updated_at --reverse --limit 5
 ```
 
 ---

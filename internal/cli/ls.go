@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
@@ -32,7 +33,30 @@ var (
 	lsLimit         int
 	lsCursor        string
 	lsIncludeHidden bool
+	lsSort          string
+	lsReverse       bool
 )
+
+type lsEntry struct {
+	Type                 string  `json:"type"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Title                string  `json:"title,omitempty"`
+	Path                 string  `json:"path"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+	State                string  `json:"state,omitempty"`
+	Kind                 string  `json:"kind,omitempty"`
+	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
+	Resolution           *string `json:"resolution,omitempty"`
+	CPProjectID          *string `json:"cp_project_id,omitempty"`
+	CPWorkItemID         *string `json:"cp_work_item_id,omitempty"`
+	CPRunID              *string `json:"cp_run_id,omitempty"`
+	SessionID            *string `json:"session_id,omitempty"`
+	RunStatus            *string `json:"run_status,omitempty"`
+}
 
 func init() {
 	rootCmd.AddCommand(lsCmd)
@@ -47,6 +71,8 @@ func init() {
 	lsCmd.Flags().IntVar(&lsLimit, "limit", 0, "Maximum number of results to return (0 = no limit)")
 	lsCmd.Flags().StringVar(&lsCursor, "cursor", "", "Pagination cursor from previous page")
 	lsCmd.Flags().BoolVarP(&lsIncludeHidden, "all", "a", false, "Include archived and deleted items")
+	lsCmd.Flags().StringVar(&lsSort, "sort", "slug", "Sort by field: slug, updated_at, created_at, id")
+	lsCmd.Flags().BoolVar(&lsReverse, "reverse", false, "Reverse sort order")
 }
 
 func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -57,29 +83,15 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		paths = []string{""}
 	}
 
-	type Entry struct {
-		Type                 string  `json:"type"`
-		ID                   string  `json:"id"`
-		Slug                 string  `json:"slug"`
-		Title                string  `json:"title,omitempty"`
-		Path                 string  `json:"path"`
-		State                string  `json:"state,omitempty"`
-		Kind                 string  `json:"kind,omitempty"`
-		RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
-		AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
-		AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
-		Resolution           *string `json:"resolution,omitempty"`
-		CPProjectID          *string `json:"cp_project_id,omitempty"`
-		CPWorkItemID         *string `json:"cp_work_item_id,omitempty"`
-		CPRunID              *string `json:"cp_run_id,omitempty"`
-		SessionID            *string `json:"session_id,omitempty"`
-		RunStatus            *string `json:"run_status,omitempty"`
+	sortField, sortDescending, err := normalizeLsSort(lsSort, lsReverse)
+	if err != nil {
+		return err
 	}
 
 	// Build cursor pagination
 	pag, err := cursor.Apply(lsCursor, cursor.ApplyOptions{
-		SortFields: []string{"slug"},
-		Descending: []bool{false}, // ASC
+		SortFields: []string{sortField},
+		Descending: []bool{sortDescending},
 		IDField:    "id",
 		Limit:      lsLimit,
 	})
@@ -87,7 +99,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var entries []Entry
+	var entries []lsEntry
 	var hasMore bool
 
 	for _, path := range paths {
@@ -95,7 +107,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// List root containers with SQL-based pagination
 			if lsType == "" || lsType == "p" {
 				query := `
-					SELECT uuid, id, slug, title
+					SELECT uuid, id, slug, title, created_at, updated_at
 					FROM containers
 					WHERE parent_uuid IS NULL
 				`
@@ -123,9 +135,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				defer func() { _ = rows.Close() }()
 
 				for rows.Next() {
-					var uuid, id, slug string
+					var uuid, id, slug, createdAt, updatedAt string
 					var title *string
-					if err := rows.Scan(&uuid, &id, &slug, &title); err != nil {
+					if err := rows.Scan(&uuid, &id, &slug, &title, &createdAt, &updatedAt); err != nil {
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
 
@@ -134,12 +146,14 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						titleStr = *title
 					}
 
-					entries = append(entries, Entry{
-						Type:  "container",
-						ID:    id,
-						Slug:  slug,
-						Title: titleStr,
-						Path:  slug,
+					entries = append(entries, lsEntry{
+						Type:      "container",
+						ID:        id,
+						Slug:      slug,
+						Title:     titleStr,
+						Path:      slug,
+						CreatedAt: createdAt,
+						UpdatedAt: updatedAt,
 					})
 				}
 			}
@@ -159,25 +173,27 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 
 			// Found as task - list this single task (no pagination needed)
-			var slug, title, state, kind string
+			var slug, title, createdAt, updatedAt, state, kind string
 			var requestedBy, assignedProject, acknowledgedAt, resolution *string
 			var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
 			err = database.QueryRow(`
-				SELECT slug, title, state, kind, requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
+				SELECT slug, title, created_at, updated_at, state, kind, requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 				       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status
 				FROM tasks WHERE uuid = ?
-			`, taskUUID).Scan(&slug, &title, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
+			`, taskUUID).Scan(&slug, &title, &createdAt, &updatedAt, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
 				&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus)
 			if err != nil {
 				return fmt.Errorf("failed to get task: %w", err)
 			}
 
-			entries = append(entries, Entry{
+			entries = append(entries, lsEntry{
 				Type:                 "task",
 				ID:                   taskID,
 				Slug:                 slug,
 				Title:                title,
 				Path:                 path,
+				CreatedAt:            createdAt,
+				UpdatedAt:            updatedAt,
 				State:                state,
 				Kind:                 kind,
 				RequestedByProjectID: requestedBy,
@@ -197,7 +213,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// List child containers
 			if lsType == "" || lsType == "p" {
 				query := `
-					SELECT uuid, id, slug, title
+					SELECT uuid, id, slug, title, created_at, updated_at
 					FROM containers
 					WHERE parent_uuid = ?
 				`
@@ -224,9 +240,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 
 				for rows.Next() {
-					var uuid, id, slug string
+					var uuid, id, slug, createdAt, updatedAt string
 					var title *string
-					if err := rows.Scan(&uuid, &id, &slug, &title); err != nil {
+					if err := rows.Scan(&uuid, &id, &slug, &title, &createdAt, &updatedAt); err != nil {
 						_ = rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
@@ -242,12 +258,14 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 					}
 					childPath += slug
 
-					entries = append(entries, Entry{
-						Type:  "container",
-						ID:    id,
-						Slug:  slug,
-						Title: titleStr,
-						Path:  childPath,
+					entries = append(entries, lsEntry{
+						Type:      "container",
+						ID:        id,
+						Slug:      slug,
+						Title:     titleStr,
+						Path:      childPath,
+						CreatedAt: createdAt,
+						UpdatedAt: updatedAt,
 					})
 				}
 				_ = rows.Close()
@@ -256,7 +274,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// List tasks
 			if lsType == "" || lsType == "t" {
 				query := `
-					SELECT id, slug, title, state, kind,
+					SELECT id, slug, title, created_at, updated_at, state, kind,
 					       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 					       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status
 					FROM tasks
@@ -290,10 +308,10 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 
 				for rows.Next() {
-					var id, slug, title, state, kind string
+					var id, slug, title, createdAt, updatedAt, state, kind string
 					var requestedBy, assignedProject, acknowledgedAt, resolution *string
 					var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
-					if err := rows.Scan(&id, &slug, &title, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
+					if err := rows.Scan(&id, &slug, &title, &createdAt, &updatedAt, &state, &kind, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
 						&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus); err != nil {
 						_ = rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
@@ -305,12 +323,14 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 					}
 					taskPath += slug
 
-					entries = append(entries, Entry{
+					entries = append(entries, lsEntry{
 						Type:                 "task",
 						ID:                   id,
 						Slug:                 slug,
 						Title:                title,
 						Path:                 taskPath,
+						CreatedAt:            createdAt,
+						UpdatedAt:            updatedAt,
 						State:                state,
 						Kind:                 kind,
 						RequestedByProjectID: requestedBy,
@@ -329,6 +349,8 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	sortLsEntries(entries, sortField, sortDescending)
+
 	// Check if there are more results (we requested limit+1)
 	if lsLimit > 0 && len(entries) > lsLimit {
 		hasMore = true
@@ -339,9 +361,10 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var nextCursorStr string
 	if hasMore && len(entries) > 0 {
 		lastEntry := entries[len(entries)-1]
+		lastValue := lsEntrySortValue(lastEntry, sortField)
 		nextCursorStr, _ = cursor.BuildNextCursor(
-			[]string{"slug"},
-			[]interface{}{lastEntry.Slug},
+			[]string{sortField},
+			[]interface{}{lastValue},
 			lastEntry.ID,
 		)
 	}
@@ -387,7 +410,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Table output
-	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind"}
+	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind", "CreatedAt", "UpdatedAt"}
 	var rowsData [][]string
 	for _, entry := range entries {
 		typeStr := "project"
@@ -402,6 +425,8 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			entry.Title,
 			entry.State,
 			entry.Kind,
+			entry.CreatedAt,
+			entry.UpdatedAt,
 		})
 	}
 
@@ -411,4 +436,49 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	})
 
 	return r.RenderTable(headers, rowsData)
+}
+
+func normalizeLsSort(field string, reverse bool) (string, bool, error) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		field = "slug"
+	}
+
+	switch field {
+	case "slug", "updated_at", "created_at", "id":
+	default:
+		return "", false, fmt.Errorf("invalid --sort %q: choose slug, updated_at, created_at, or id", field)
+	}
+
+	return field, reverse, nil
+}
+
+func sortLsEntries(entries []lsEntry, field string, descending bool) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		left := lsEntrySortValue(entries[i], field)
+		right := lsEntrySortValue(entries[j], field)
+		if left == right {
+			if descending {
+				return entries[i].ID > entries[j].ID
+			}
+			return entries[i].ID < entries[j].ID
+		}
+		if descending {
+			return left > right
+		}
+		return left < right
+	})
+}
+
+func lsEntrySortValue(entry lsEntry, field string) string {
+	switch field {
+	case "id":
+		return entry.ID
+	case "created_at":
+		return entry.CreatedAt
+	case "updated_at":
+		return entry.UpdatedAt
+	default:
+		return entry.Slug
+	}
 }

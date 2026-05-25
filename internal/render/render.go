@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -186,20 +187,17 @@ func RenderJSON(data interface{}, compact bool) error {
 func RenderNDJSON(items interface{}) error {
 	encoder := json.NewEncoder(os.Stdout)
 
-	// Handle slice types
-	switch v := items.(type) {
-	case []interface{}:
-		for _, item := range v {
-			if err := encoder.Encode(item); err != nil {
+	value := reflect.ValueOf(items)
+	if value.IsValid() && (value.Kind() == reflect.Slice || value.Kind() == reflect.Array) {
+		for i := 0; i < value.Len(); i++ {
+			if err := encoder.Encode(value.Index(i).Interface()); err != nil {
 				return err
 			}
 		}
-	default:
-		// Try to encode as a single item
-		return encoder.Encode(items)
+		return nil
 	}
 
-	return nil
+	return encoder.Encode(items)
 }
 
 // RenderNulSeparated renders items with NUL separators

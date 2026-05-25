@@ -13,7 +13,7 @@ func TestCommentAdd(t *testing.T) {
 	// Create a test task
 	_, err := database.Exec(`
 		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task body', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', '00000000-0000-0000-0000-000000000002', 'open', 2, 'Task body', '2000-01-01T00:00:00Z', '2000-01-01T00:00:00Z', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create test task: %v", err)
@@ -79,6 +79,19 @@ func TestCommentAdd(t *testing.T) {
 
 	if eventCount != 1 {
 		t.Errorf("Expected 1 event log entry, got %d", eventCount)
+	}
+
+	var taskUpdatedAt string
+	var taskETag int64
+	err = database.QueryRow("SELECT updated_at, etag FROM tasks WHERE uuid = 'task-uuid-1'").Scan(&taskUpdatedAt, &taskETag)
+	if err != nil {
+		t.Fatalf("Failed to query task updated_at: %v", err)
+	}
+	if taskUpdatedAt <= "2000-01-01T00:00:00Z" {
+		t.Errorf("Expected comment add to advance task updated_at, got %s", taskUpdatedAt)
+	}
+	if taskETag <= 1 {
+		t.Errorf("Expected comment add to advance task etag, got %d", taskETag)
 	}
 }
 

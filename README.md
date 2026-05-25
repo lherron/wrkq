@@ -105,6 +105,7 @@ Resources can be referenced by:
 wrkq ls myproject --json      # Pretty JSON
 wrkq ls myproject --ndjson    # Newline-delimited JSON
 wrkq ls myproject --porcelain # Stable machine-readable
+wrkq ls myproject --type t --sort updated_at --reverse --limit 5
 ```
 
 ## Configuration

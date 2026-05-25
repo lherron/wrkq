@@ -10,6 +10,7 @@ wrkq cat T-00001                        # View task details
 wrkq touch inbox/task-slug -t "Title"   # Create task
 wrkq set T-00001 --state STATE          # Update state
 wrkq find --state open                  # Find open tasks
+wrkq ls --sort updated_at --reverse --limit 5  # Recent tasks
 ```
 
 ## Task Lifecycle
