@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/lherron/wrkq/internal/db"
@@ -35,6 +36,8 @@ type Options struct {
 	CandidateLimit int
 	Fresh          bool
 	Explain        bool
+	Sort           string
+	Reverse        bool
 }
 
 type Result struct {
@@ -52,6 +55,8 @@ type Result struct {
 	Kind         string         `json:"kind,omitempty"`
 	Snippet      string         `json:"snippet"`
 	Score        float64        `json:"score"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
 	Stale        bool           `json:"stale"`
 	Explain      map[string]any `json:"explain,omitempty"`
 }
@@ -78,6 +83,12 @@ func (s *Service) Search(ctx context.Context, opts Options) (*Response, error) {
 	}
 	if opts.CandidateLimit <= 0 {
 		opts.CandidateLimit = 300
+	}
+	if opts.Sort == "" {
+		opts.Sort = "relevance"
+	}
+	if opts.Sort != "relevance" && opts.Sort != "updated_at" && opts.Sort != "created_at" {
+		return nil, fmt.Errorf("invalid search sort %q: choose relevance, updated_at, or created_at", opts.Sort)
 	}
 
 	ix := indexer.New(s.Canonical, s.Index, s.Embedder)
@@ -118,6 +129,7 @@ func (s *Service) Search(ctx context.Context, opts Options) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	sortResults(results, opts)
 	total := len(results)
 	start := opts.Offset
 	if start < 0 {
@@ -318,15 +330,16 @@ func (s *Service) materializeResults(scoreMap map[string]float64, opts Options, 
 		if opts.Explain {
 			result.Explain = map[string]any{"chunk_id": chunkID, "rrf_score": scoreMap[chunkID]}
 		}
+		createdAt, updatedAt, err := s.resourceTimestamps(resourceType, resourceUUID)
+		if err != nil {
+			continue
+		}
+		result.CreatedAt = normalizeTimestamp(createdAt)
+		result.UpdatedAt = normalizeTimestamp(updatedAt)
 		results = append(results, result)
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Score == results[j].Score {
-			return results[i].ResourceID < results[j].ResourceID
-		}
-		return results[i].Score > results[j].Score
-	})
+	sortResults(results, Options{Sort: "relevance"})
 
 	seen := map[string]int{}
 	aggregated := make([]Result, 0, len(results))
@@ -342,6 +355,100 @@ func (s *Service) materializeResults(scoreMap map[string]float64, opts Options, 
 		aggregated = append(aggregated, result)
 	}
 	return aggregated, nil
+}
+
+func (s *Service) resourceTimestamps(resourceType, resourceUUID string) (string, string, error) {
+	var createdAt, updatedAt string
+	switch resourceType {
+	case "task":
+		err := s.Canonical.QueryRow(`
+			SELECT created_at, updated_at
+			FROM tasks
+			WHERE uuid = ?
+		`, resourceUUID).Scan(&createdAt, &updatedAt)
+		return createdAt, updatedAt, err
+	case "comment":
+		err := s.Canonical.QueryRow(`
+			SELECT created_at, COALESCE(updated_at, created_at)
+			FROM comments
+			WHERE uuid = ?
+		`, resourceUUID).Scan(&createdAt, &updatedAt)
+		return createdAt, updatedAt, err
+	case "handoff":
+		err := s.Canonical.QueryRow(`
+			SELECT created_at, updated_at
+			FROM handoffs
+			WHERE uuid = ?
+		`, resourceUUID).Scan(&createdAt, &updatedAt)
+		return createdAt, updatedAt, err
+	default:
+		return "", "", fmt.Errorf("unsupported search resource type %q", resourceType)
+	}
+}
+
+func sortResults(results []Result, opts Options) {
+	sortField := opts.Sort
+	if sortField == "" {
+		sortField = "relevance"
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		cmp := 0
+		switch sortField {
+		case "created_at":
+			if results[i].CreatedAt < results[j].CreatedAt {
+				cmp = -1
+			} else if results[i].CreatedAt > results[j].CreatedAt {
+				cmp = 1
+			} else {
+				cmp = compareString(results[i].ResourceID, results[j].ResourceID)
+			}
+		case "updated_at":
+			if results[i].UpdatedAt < results[j].UpdatedAt {
+				cmp = -1
+			} else if results[i].UpdatedAt > results[j].UpdatedAt {
+				cmp = 1
+			} else {
+				cmp = compareString(results[i].ResourceID, results[j].ResourceID)
+			}
+		default:
+			if results[i].Score > results[j].Score {
+				cmp = -1
+			} else if results[i].Score < results[j].Score {
+				cmp = 1
+			} else {
+				cmp = compareString(results[i].ResourceID, results[j].ResourceID)
+			}
+		}
+		if opts.Reverse {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func compareString(left, right string) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func normalizeTimestamp(value string) string {
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed.UTC().Format(time.RFC3339)
+		}
+	}
+	return value
 }
 
 func handoffMatches(scopeRef, status string, opts Options) bool {

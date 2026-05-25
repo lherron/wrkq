@@ -62,6 +62,8 @@ wrkq find --state open --json
 wrkq find 'myfeat/api-feature/**' --state open
 wrkq find --slug-glob 'login-*'
 wrkq find --sort updated_at --reverse --limit 5
+wrkq search 'query text' --ndjson
+wrkq search 'query text' --sort updated_at --reverse --limit 5
 wrkq tree myfeat --json
 wrkq tree --json         # Show all tasks including completed
 ```

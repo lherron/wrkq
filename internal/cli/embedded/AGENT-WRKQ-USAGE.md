@@ -11,6 +11,7 @@ wrkq touch inbox/task-slug -t "Title"   # Create task
 wrkq set T-00001 --state STATE          # Update state
 wrkq find --state open                  # Find open tasks
 wrkq ls --sort updated_at --reverse --limit 5  # Recent tasks
+wrkq search "query" --ndjson            # Full-text search with timestamps
 ```
 
 ## Task Lifecycle

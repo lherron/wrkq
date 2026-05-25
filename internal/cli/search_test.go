@@ -44,6 +44,7 @@ func TestSearchCommandRebuildAndSearchJSON(t *testing.T) {
 	}
 
 	searchJSON = true
+	searchNDJSON = false
 	searchState = ""
 	searchKind = ""
 	searchAssignee = ""
@@ -51,10 +52,15 @@ func TestSearchCommandRebuildAndSearchJSON(t *testing.T) {
 	searchCandidateLimit = 20
 	searchExplain = true
 	searchFresh = true
+	searchSort = "relevance"
+	searchReverse = false
 	defer func() {
 		searchJSON = false
+		searchNDJSON = false
 		searchExplain = false
 		searchFresh = false
+		searchSort = "relevance"
+		searchReverse = false
 	}()
 
 	searchBuf := &bytes.Buffer{}
@@ -67,8 +73,10 @@ func TestSearchCommandRebuildAndSearchJSON(t *testing.T) {
 
 	var response struct {
 		Results []struct {
-			TaskID string `json:"task_id"`
-			State  string `json:"state"`
+			TaskID    string `json:"task_id"`
+			State     string `json:"state"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(searchBuf.Bytes(), &response); err != nil {
@@ -79,5 +87,32 @@ func TestSearchCommandRebuildAndSearchJSON(t *testing.T) {
 	}
 	if response.Results[0].State != "open" {
 		t.Fatalf("expected open result, got %s", response.Results[0].State)
+	}
+	if response.Results[0].CreatedAt == "" || response.Results[0].UpdatedAt == "" {
+		t.Fatalf("expected JSON result timestamps, got %#v", response.Results[0])
+	}
+
+	searchJSON = false
+	searchNDJSON = true
+	searchExplain = false
+
+	ndjsonBuf := &bytes.Buffer{}
+	ndjsonCmd := &cobra.Command{}
+	ndjsonCmd.SetOut(ndjsonBuf)
+	ndjsonCmd.SetErr(ndjsonBuf)
+	if err := runSearch(app, ndjsonCmd, []string{"qwen"}); err != nil {
+		t.Fatalf("runSearch ndjson failed: %v", err)
+	}
+
+	var line struct {
+		TaskID    string `json:"task_id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(ndjsonBuf.Bytes()), &line); err != nil {
+		t.Fatalf("invalid NDJSON result: %v\n%s", err, ndjsonBuf.String())
+	}
+	if line.TaskID == "" || line.CreatedAt == "" || line.UpdatedAt == "" {
+		t.Fatalf("expected NDJSON result timestamps, got %#v", line)
 	}
 }

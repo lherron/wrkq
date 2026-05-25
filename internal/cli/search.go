@@ -33,6 +33,8 @@ var (
 	searchAssignee       string
 	searchLimit          int
 	searchCandidateLimit int
+	searchSort           string
+	searchReverse        bool
 	searchJSON           bool
 	searchNDJSON         bool
 	searchExplain        bool
@@ -46,6 +48,8 @@ func init() {
 	searchCmd.Flags().StringVar(&searchAssignee, "assignee", "", "Filter by assignee actor")
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 20, "Maximum number of task results")
 	searchCmd.Flags().IntVar(&searchCandidateLimit, "candidate-limit", 300, "Candidate chunks to retrieve before aggregation")
+	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by relevance, updated_at, or created_at")
+	searchCmd.Flags().BoolVar(&searchReverse, "reverse", false, "Reverse sort order")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output as JSON")
 	searchCmd.Flags().BoolVar(&searchNDJSON, "ndjson", false, "Output as newline-delimited JSON")
 	searchCmd.Flags().BoolVar(&searchExplain, "explain", false, "Include ranking diagnostics in JSON output")
@@ -86,6 +90,8 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CandidateLimit: searchCandidateLimit,
 		Fresh:          searchFresh,
 		Explain:        searchExplain,
+		Sort:           searchSort,
+		Reverse:        searchReverse,
 	})
 	if err != nil {
 		return err

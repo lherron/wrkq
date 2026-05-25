@@ -138,6 +138,141 @@ func TestSearchFreshFailsWhenIndexIsStale(t *testing.T) {
 	}
 }
 
+func TestSearchSortUpdatedAtReverseAndTimestamps(t *testing.T) {
+	canonical, actorUUID, containerUUID := setupSearchDB(t)
+
+	tasks := []struct {
+		uuid      string
+		id        string
+		slug      string
+		title     string
+		createdAt string
+		updatedAt string
+	}{
+		{
+			uuid:      "old-search-task-uuid",
+			id:        "T-10001",
+			slug:      "old-search-task",
+			title:     "Old needle search task",
+			createdAt: "2026-05-20T10:00:00Z",
+			updatedAt: "2026-05-20T10:30:00Z",
+		},
+		{
+			uuid:      "new-search-task-uuid",
+			id:        "T-10002",
+			slug:      "new-search-task",
+			title:     "New needle search task",
+			createdAt: "2026-05-21T10:00:00Z",
+			updatedAt: "2026-05-25T12:00:00Z",
+		},
+	}
+
+	for _, task := range tasks {
+		if _, err := canonical.Exec(`
+			INSERT INTO tasks (
+				uuid, id, slug, title, project_uuid, state, priority, kind,
+				description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag
+			)
+			VALUES (?, ?, ?, ?, ?, 'open', 2, 'task', 'needle body', ?, ?, ?, ?, 1)
+		`, task.uuid, task.id, task.slug, task.title, containerUUID, task.createdAt, task.updatedAt, actorUUID, actorUUID); err != nil {
+			t.Fatalf("insert task %s: %v", task.id, err)
+		}
+	}
+
+	idx := setupSearchIndex(t)
+	ix := indexer.New(canonical, idx, nil)
+	if err := ix.Rebuild(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	svc := NewService(canonical, idx, nil)
+	resp, err := svc.Search(context.Background(), Options{
+		Query:   "needle",
+		Limit:   10,
+		Sort:    "updated_at",
+		Reverse: true,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(resp.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d: %#v", len(resp.Results), resp.Results)
+	}
+	if resp.Results[0].TaskUUID != "new-search-task-uuid" {
+		t.Fatalf("expected newest updated task first, got %#v", resp.Results)
+	}
+	if resp.Results[0].CreatedAt != "2026-05-21T10:00:00Z" || resp.Results[0].UpdatedAt != "2026-05-25T12:00:00Z" {
+		t.Fatalf("expected timestamps on result, got %#v", resp.Results[0])
+	}
+
+	relevanceResp, err := svc.Search(context.Background(), Options{Query: "needle", Limit: 10})
+	if err != nil {
+		t.Fatalf("relevance search: %v", err)
+	}
+	if len(relevanceResp.Results) != 2 {
+		t.Fatalf("expected 2 relevance results, got %d", len(relevanceResp.Results))
+	}
+	if relevanceResp.Results[0].Score < relevanceResp.Results[1].Score {
+		t.Fatalf("default relevance sort should remain descending, got %#v", relevanceResp.Results)
+	}
+}
+
+func TestSearchNormalizesCommentTimestamps(t *testing.T) {
+	canonical, actorUUID, containerUUID := setupSearchDB(t)
+
+	if _, err := canonical.Exec(`
+		INSERT INTO tasks (
+			uuid, id, slug, title, project_uuid, state, priority, kind,
+			description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag
+		)
+		VALUES (
+			'comment-timestamp-task-uuid', 'T-10003', 'comment-timestamp-task',
+			'Comment timestamp task', ?, 'open', 2, 'task',
+			'needle parent', '2026-05-20T10:00:00Z', '2026-05-20T10:00:00Z', ?, ?, 1
+		)
+	`, containerUUID, actorUUID, actorUUID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	if _, err := canonical.Exec(`
+		INSERT INTO comments (
+			uuid, id, task_uuid, actor_uuid, body, etag, created_at, updated_at
+		)
+		VALUES (
+			'comment-timestamp-comment-uuid', 'C-10001', 'comment-timestamp-task-uuid',
+			?, 'needle comment', 1, '2026-05-21 14:21:49', '2026-05-22 15:22:50'
+		)
+	`, actorUUID); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	idx := setupSearchIndex(t)
+	ix := indexer.New(canonical, idx, nil)
+	if err := ix.Rebuild(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	svc := NewService(canonical, idx, nil)
+	resp, err := svc.Search(context.Background(), Options{
+		Query: "comment",
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	for _, result := range resp.Results {
+		if result.CommentID == nil || *result.CommentID != "C-10001" {
+			continue
+		}
+		if result.CreatedAt != "2026-05-21T14:21:49Z" || result.UpdatedAt != "2026-05-22T15:22:50Z" {
+			t.Fatalf("expected normalized comment timestamps, got %#v", result)
+		}
+		return
+	}
+	t.Fatalf("expected comment result in %#v", resp.Results)
+}
+
 func setupSearchDB(t *testing.T) (*db.DB, string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "wrkq.db")

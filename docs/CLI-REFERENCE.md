@@ -26,6 +26,7 @@ This separation ensures agents get a focused, safe API while admins retain full 
 | **cat** | Print tasks as markdown with YAML front matter |
 | **stat** | Print machine-friendly metadata for resources |
 | **find** | Search tasks and containers with filters |
+| **search** | Full-text search across task and comment text |
 | **tree** | Display hierarchical tree structure |
 | **set** | Update task fields (state, priority, title, etc.) |
 | **ack** | Acknowledge completed tasks |
@@ -143,6 +144,28 @@ touch --state idea ──→ [idea] ──→ set --state draft ──→ [draft
 | `--reverse` | Reverse the requested sort order |
 | `--limit <n>` | Limit result count |
 | Path patterns | Glob patterns like `portal/**` |
+
+---
+
+### Full-Text Search
+
+`wrkq search <query> [PATH...]` returns relevance-ranked task and comment matches by default. Structured output includes `created_at` and `updated_at` for each result.
+
+| Flag | Description |
+|------|-------------|
+| `--json` / `--ndjson` | Structured output with timestamps |
+| `--sort relevance\|updated_at\|created_at` | Sort results (default: `relevance`) |
+| `--reverse` | Reverse the requested sort order |
+| `--state` | Filter by task state (default: open tasks) |
+| `--kind` | Filter by task kind |
+| `--assignee` | Filter by assignee actor |
+| `--limit <n>` | Maximum result count |
+| `--fresh` | Fail if the search index is stale |
+
+```bash
+wrkq search "needle" --ndjson
+wrkq search "needle" --sort updated_at --reverse --limit 5
+```
 
 ---
 
