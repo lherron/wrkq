@@ -31,7 +31,7 @@ One-off tasks should be created/tracked in the **inbox** container.
 
 ## Managing Containers
 ```bash
-# Create a container
+# Create a directory container
 wrkq mkdir myfeat
 
 # Create a subcontainer with parents

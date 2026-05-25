@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -27,7 +28,7 @@ var (
 func init() {
 	rootCmd.AddCommand(mkdirCmd)
 	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "Create parent containers as needed")
-	mkdirCmd.Flags().StringVar(&mkdirKind, "kind", "", "Container kind: project, feature, area, misc (default: project)")
+	mkdirCmd.Flags().StringVar(&mkdirKind, "kind", "", "Container kind: project, directory, feature, area, misc (default: directory)")
 }
 
 func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -37,11 +38,8 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Validate kind if provided
 	if mkdirKind != "" {
-		switch mkdirKind {
-		case "project", "feature", "area", "misc":
-			// valid
-		default:
-			return fmt.Errorf("invalid --kind: must be project, feature, area, or misc")
+		if err := domain.ValidateContainerKind(mkdirKind); err != nil {
+			return fmt.Errorf("invalid --kind: %w", err)
 		}
 	}
 
@@ -81,12 +79,13 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool,
 				continue
 			}
 
-			// Determine kind for this segment:
-			// - Use provided kind only for the final segment
-			// - Use "project" for intermediate segments
-			segmentKind := "project"
+			// Use provided kind only for the final segment.
+			segmentKind := string(domain.ContainerKindDirectory)
 			if i == len(segments)-1 && kind != "" {
 				segmentKind = kind
+			}
+			if segmentKind == string(domain.ContainerKindProject) && parentUUID != nil {
+				return fmt.Errorf("--kind project is only valid for root containers")
 			}
 
 			// Create container using store
@@ -109,6 +108,9 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool,
 	if err != nil {
 		// Wrap error to suggest -p flag
 		return fmt.Errorf("%w (use -p to create parents)", err)
+	}
+	if kind == string(domain.ContainerKindProject) && parentUUID != nil {
+		return fmt.Errorf("--kind project is only valid for root containers")
 	}
 
 	// Create container using store

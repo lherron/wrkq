@@ -9,10 +9,11 @@ import (
 type ContainerKind string
 
 const (
-	ContainerKindProject ContainerKind = "project"
-	ContainerKindFeature ContainerKind = "feature"
-	ContainerKindArea    ContainerKind = "area"
-	ContainerKindMisc    ContainerKind = "misc"
+	ContainerKindProject   ContainerKind = "project"
+	ContainerKindDirectory ContainerKind = "directory"
+	ContainerKindFeature   ContainerKind = "feature"
+	ContainerKindArea      ContainerKind = "area"
+	ContainerKindMisc      ContainerKind = "misc"
 )
 
 // TaskKind represents the type of task

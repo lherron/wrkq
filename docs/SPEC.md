@@ -668,11 +668,11 @@ Output
 ### 10.5 Structure and Lifecycle (wrkq)
 
 - `wrkq mkdir <PATH...>`
-  - Create projects/subprojects (containers).
+  - Create directories/containers. Root containers may be explicit projects.
   - Last segment is treated as container slug and normalized.
   - Flags:
     - `-p` (create parents as needed)
-    - `--kind <kind>` (project, feature, area, misc; default: project)
+    - `--kind <kind>` (project, directory, feature, area, misc; default: directory; project is root-only)
     - `--title <text>` (display title)
     - `--meta key=val`
 

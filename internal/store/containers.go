@@ -20,7 +20,7 @@ type ContainerCreateParams struct {
 	Slug       string
 	Title      string // defaults to Slug if empty
 	ParentUUID *string
-	Kind       string // project, feature, area, misc - defaults to "project"
+	Kind       string // project, directory, feature, area, misc - defaults to "directory"
 }
 
 // ContainerCreateResult contains the result of container creation.
@@ -40,10 +40,16 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 		title = defaultContainerTitle(params.Slug)
 	}
 
-	// Default kind to "project" if not provided
+	// Default kind to "directory" if not provided
 	kind := params.Kind
 	if kind == "" {
-		kind = "project"
+		kind = string(domain.ContainerKindDirectory)
+	}
+	if err := domain.ValidateContainerKind(kind); err != nil {
+		return nil, err
+	}
+	if kind == string(domain.ContainerKindProject) && params.ParentUUID != nil {
+		return nil, fmt.Errorf("project containers must be created at the root")
 	}
 
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
@@ -121,7 +127,9 @@ func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields m
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current etag
 		var currentETag int64
-		err := tx.QueryRow("SELECT etag FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag)
+		var currentKind string
+		var currentParentUUID *string
+		err := tx.QueryRow("SELECT etag, kind, parent_uuid FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &currentKind, &currentParentUUID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("container not found: %s", containerUUID)
@@ -131,6 +139,9 @@ func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields m
 
 		// Check etag if ifMatch was provided
 		if err := checkETag(currentETag, ifMatch); err != nil {
+			return err
+		}
+		if err := validateContainerKindUpdate(currentKind, currentParentUUID, fields); err != nil {
 			return err
 		}
 
@@ -191,7 +202,8 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 		// Get current state
 		var currentETag int64
 		var oldParentUUID *string
-		err := tx.QueryRow("SELECT etag, parent_uuid FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &oldParentUUID)
+		var kind string
+		err := tx.QueryRow("SELECT etag, parent_uuid, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &oldParentUUID, &kind)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("container not found: %s", containerUUID)
@@ -202,6 +214,9 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 		// Check etag if ifMatch was provided
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
+		}
+		if kind == string(domain.ContainerKindProject) && newParentUUID != nil {
+			return fmt.Errorf("project containers must remain at the root")
 		}
 
 		// Update the container
@@ -243,6 +258,39 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 	})
 
 	return newETag, err
+}
+
+func validateContainerKindUpdate(currentKind string, currentParentUUID *string, fields map[string]interface{}) error {
+	nextKind := currentKind
+	if raw, ok := fields["kind"]; ok {
+		value, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("container kind must be a string")
+		}
+		if err := domain.ValidateContainerKind(value); err != nil {
+			return err
+		}
+		nextKind = value
+	}
+
+	nextParentUUID := currentParentUUID
+	if raw, ok := fields["parent_uuid"]; ok {
+		switch value := raw.(type) {
+		case nil:
+			nextParentUUID = nil
+		case *string:
+			nextParentUUID = value
+		case string:
+			nextParentUUID = &value
+		default:
+			return fmt.Errorf("container parent_uuid must be a string pointer or nil")
+		}
+	}
+
+	if nextKind == string(domain.ContainerKindProject) && nextParentUUID != nil {
+		return fmt.Errorf("project containers must be root containers")
+	}
+	return nil
 }
 
 // Archive soft-deletes a container by setting archived_at timestamp.

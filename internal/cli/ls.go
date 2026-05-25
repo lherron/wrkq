@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ var lsCmd = &cobra.Command{
 	Use:     "ls [path...]",
 	Aliases: []string{"list"},
 	Short:   "List containers and tasks",
-	Long:    `Lists containers (projects/subprojects) and tasks at the specified paths.`,
+	Long:    `Lists direct child containers and tasks at the specified paths. Child containers include recursive task rollups.`,
 	RunE:    appctx.WithApp(appctx.DefaultOptions(), runLs),
 }
 
@@ -47,6 +48,8 @@ type lsEntry struct {
 	UpdatedAt            string  `json:"updated_at"`
 	State                string  `json:"state,omitempty"`
 	Kind                 string  `json:"kind,omitempty"`
+	TaskCount            *int    `json:"task_count,omitempty"`
+	ActiveTaskCount      *int    `json:"active_task_count,omitempty"`
 	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
 	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
@@ -107,7 +110,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// List root containers with SQL-based pagination
 			if lsType == "" || lsType == "p" {
 				query := `
-					SELECT uuid, id, slug, title, created_at, updated_at
+					SELECT uuid, id, slug, title, kind, created_at, updated_at
 					FROM containers
 					WHERE parent_uuid IS NULL
 				`
@@ -135,9 +138,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				defer func() { _ = rows.Close() }()
 
 				for rows.Next() {
-					var uuid, id, slug, createdAt, updatedAt string
+					var uuid, id, slug, kind, createdAt, updatedAt string
 					var title *string
-					if err := rows.Scan(&uuid, &id, &slug, &title, &createdAt, &updatedAt); err != nil {
+					if err := rows.Scan(&uuid, &id, &slug, &title, &kind, &createdAt, &updatedAt); err != nil {
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
 
@@ -146,14 +149,22 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 						titleStr = *title
 					}
 
+					taskCount, activeTaskCount, err := containerRollupCounts(database, uuid)
+					if err != nil {
+						return err
+					}
+
 					entries = append(entries, lsEntry{
-						Type:      "container",
-						ID:        id,
-						Slug:      slug,
-						Title:     titleStr,
-						Path:      slug,
-						CreatedAt: createdAt,
-						UpdatedAt: updatedAt,
+						Type:            "container",
+						ID:              id,
+						Slug:            slug,
+						Title:           titleStr,
+						Path:            slug,
+						CreatedAt:       createdAt,
+						UpdatedAt:       updatedAt,
+						Kind:            kind,
+						TaskCount:       &taskCount,
+						ActiveTaskCount: &activeTaskCount,
 					})
 				}
 			}
@@ -213,7 +224,7 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// List child containers
 			if lsType == "" || lsType == "p" {
 				query := `
-					SELECT uuid, id, slug, title, created_at, updated_at
+					SELECT uuid, id, slug, title, kind, created_at, updated_at
 					FROM containers
 					WHERE parent_uuid = ?
 				`
@@ -240,9 +251,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 
 				for rows.Next() {
-					var uuid, id, slug, createdAt, updatedAt string
+					var uuid, id, slug, kind, createdAt, updatedAt string
 					var title *string
-					if err := rows.Scan(&uuid, &id, &slug, &title, &createdAt, &updatedAt); err != nil {
+					if err := rows.Scan(&uuid, &id, &slug, &title, &kind, &createdAt, &updatedAt); err != nil {
 						_ = rows.Close()
 						return fmt.Errorf("failed to scan row: %w", err)
 					}
@@ -258,14 +269,23 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 					}
 					childPath += slug
 
+					taskCount, activeTaskCount, err := containerRollupCounts(database, uuid)
+					if err != nil {
+						_ = rows.Close()
+						return err
+					}
+
 					entries = append(entries, lsEntry{
-						Type:      "container",
-						ID:        id,
-						Slug:      slug,
-						Title:     titleStr,
-						Path:      childPath,
-						CreatedAt: createdAt,
-						UpdatedAt: updatedAt,
+						Type:            "container",
+						ID:              id,
+						Slug:            slug,
+						Title:           titleStr,
+						Path:            childPath,
+						CreatedAt:       createdAt,
+						UpdatedAt:       updatedAt,
+						Kind:            kind,
+						TaskCount:       &taskCount,
+						ActiveTaskCount: &activeTaskCount,
 					})
 				}
 				_ = rows.Close()
@@ -410,21 +430,33 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Table output
-	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind", "CreatedAt", "UpdatedAt"}
+	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind", "Tasks", "CreatedAt", "UpdatedAt"}
 	var rowsData [][]string
 	for _, entry := range entries {
-		typeStr := "project"
+		typeStr := "container"
+		slug := entry.Slug
+		title := entry.Title
+		tasks := ""
 		if entry.Type == "task" {
 			typeStr = "task"
+		} else {
+			slug += "/"
+			tasks = formatContainerRollup(entry)
+			if entry.Kind != "" && tasks != "" {
+				title = fmt.Sprintf("[%s] %s", entry.Kind, tasks)
+			} else if title == entry.Slug {
+				title = ""
+			}
 		}
 
 		rowsData = append(rowsData, []string{
 			typeStr,
 			entry.ID,
-			entry.Slug,
-			entry.Title,
+			slug,
+			title,
 			entry.State,
 			entry.Kind,
+			tasks,
 			entry.CreatedAt,
 			entry.UpdatedAt,
 		})
@@ -436,6 +468,45 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	})
 
 	return r.RenderTable(headers, rowsData)
+}
+
+func containerRollupCounts(database interface {
+	QueryRow(query string, args ...interface{}) *sql.Row
+}, containerUUID string) (int, int, error) {
+	var taskCount, activeTaskCount int
+	err := database.QueryRow(`
+		WITH RECURSIVE descendants(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid
+			  FROM containers c
+			  JOIN descendants d ON c.parent_uuid = d.uuid
+		)
+		SELECT
+			COUNT(t.uuid),
+			COALESCE(SUM(CASE
+				WHEN t.state IN ('draft', 'open', 'in_progress', 'blocked')
+				 AND t.archived_at IS NULL
+				 AND t.deleted_at IS NULL
+				THEN 1 ELSE 0 END), 0)
+		  FROM descendants d
+		  LEFT JOIN tasks t ON t.project_uuid = d.uuid
+	`, containerUUID).Scan(&taskCount, &activeTaskCount)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to count container rollup tasks: %w", err)
+	}
+	return taskCount, activeTaskCount, nil
+}
+
+func formatContainerRollup(entry lsEntry) string {
+	if entry.TaskCount == nil || entry.ActiveTaskCount == nil {
+		return ""
+	}
+	taskLabel := "tasks"
+	if *entry.TaskCount == 1 {
+		taskLabel = "task"
+	}
+	return fmt.Sprintf("%d %s (%d active)", *entry.TaskCount, taskLabel, *entry.ActiveTaskCount)
 }
 
 func normalizeLsSort(field string, reverse bool) (string, bool, error) {

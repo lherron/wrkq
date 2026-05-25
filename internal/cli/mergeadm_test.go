@@ -39,11 +39,15 @@ func setupMergeDB(t *testing.T) (*db.DB, string) {
 
 func insertContainer(t *testing.T, database *db.DB, uuid, id, slug, title, parentUUID, updatedAt string) {
 	t.Helper()
+	kind := "project"
+	if parentUUID != "" {
+		kind = "directory"
+	}
 	_, err := database.Exec(`
 		INSERT INTO containers (uuid, id, slug, title, description, parent_uuid, kind, sort_index, etag,
 			created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES (?, ?, ?, ?, '', ?, 'project', 0, 1, '2024-01-01T00:00:00Z', ?, ?, ?)
-	`, uuid, id, slug, title, nullString(parentUUID), updatedAt, testActorUUID, testActorUUID)
+		VALUES (?, ?, ?, ?, '', ?, ?, 0, 1, '2024-01-01T00:00:00Z', ?, ?, ?)
+	`, uuid, id, slug, title, nullString(parentUUID), kind, updatedAt, testActorUUID, testActorUUID)
 	if err != nil {
 		t.Fatalf("failed to insert container: %v", err)
 	}

@@ -374,8 +374,8 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 				pathConditions = append(pathConditions, "(cp.path || '/' || t.slug) GLOB ?")
 				args = append(args, pattern)
 			} else {
-				pathConditions = append(pathConditions, "(cp.path || '/' || t.slug) LIKE ? || '%'")
-				args = append(args, p)
+				pathConditions = append(pathConditions, "((cp.path || '/' || t.slug) = ? OR (cp.path || '/' || t.slug) LIKE ? || '/%')")
+				args = append(args, p, p)
 			}
 		}
 		if len(pathConditions) > 0 {
@@ -536,8 +536,8 @@ func findContainers(database *db.DB, opts findOptions, skipPagination bool) ([]f
 				pathConditions = append(pathConditions, "cp.path GLOB ?")
 				args = append(args, pattern)
 			} else {
-				pathConditions = append(pathConditions, "cp.path LIKE ? || '%'")
-				args = append(args, p)
+				pathConditions = append(pathConditions, "(cp.path = ? OR cp.path LIKE ? || '/%')")
+				args = append(args, p, p)
 			}
 		}
 		if len(pathConditions) > 0 {

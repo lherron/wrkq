@@ -104,27 +104,8 @@ func (db *DB) Migrate() error {
 			return fmt.Errorf("failed to read migration %s: %w", migration, err)
 		}
 
-		// Execute migration in a transaction
-		tx, err := db.Begin()
-		if err != nil {
-			return fmt.Errorf("failed to begin transaction for %s: %w", migration, err)
-		}
-
-		_, err = tx.Exec(string(content))
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("failed to execute migration %s: %w", migration, err)
-		}
-
-		// Record migration as applied
-		_, err = tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", migration)
-		if err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("failed to record migration %s: %w", migration, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit migration %s: %w", migration, err)
+		if err := db.applyMigration(migration, content); err != nil {
+			return err
 		}
 	}
 
@@ -186,33 +167,44 @@ func (db *DB) MigrateWithInfo() ([]string, error) {
 			return applied, fmt.Errorf("failed to read migration %s: %w", migration, err)
 		}
 
-		// Execute migration in a transaction
-		tx, err := db.Begin()
-		if err != nil {
-			return applied, fmt.Errorf("failed to begin transaction for %s: %w", migration, err)
-		}
-
-		_, err = tx.Exec(string(content))
-		if err != nil {
-			_ = tx.Rollback()
-			return applied, fmt.Errorf("failed to execute migration %s: %w", migration, err)
-		}
-
-		// Record migration as applied
-		_, err = tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", migration)
-		if err != nil {
-			_ = tx.Rollback()
-			return applied, fmt.Errorf("failed to record migration %s: %w", migration, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return applied, fmt.Errorf("failed to commit migration %s: %w", migration, err)
+		if err := db.applyMigration(migration, content); err != nil {
+			return applied, err
 		}
 
 		applied = append(applied, migration)
 	}
 
 	return applied, nil
+}
+
+func (db *DB) applyMigration(migration string, content []byte) error {
+	foreignKeysOff := strings.Contains(string(content), "wrkq:foreign-keys-off")
+	if foreignKeysOff {
+		if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+			return fmt.Errorf("failed to disable foreign keys for %s: %w", migration, err)
+		}
+		defer func() { _, _ = db.Exec("PRAGMA foreign_keys = ON") }()
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for %s: %w", migration, err)
+	}
+
+	if _, err := tx.Exec(string(content)); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("failed to execute migration %s: %w", migration, err)
+	}
+
+	if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", migration); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("failed to record migration %s: %w", migration, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit migration %s: %w", migration, err)
+	}
+	return nil
 }
 
 // MigrationStatus returns lists of applied and pending migrations
