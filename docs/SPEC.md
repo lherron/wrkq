@@ -147,7 +147,7 @@ Fields
 - `slug` (fs-safe, normalized; unique among siblings)
 - `title` (optional, defaults to slug)
 - `parent_uuid` (nullable; null = top-level project)
-- `kind` (`project` | `feature` | `area` | `misc`)
+- `kind` (`project` | `directory` | `feature` | `area`)
 - `section_uuid` (nullable; FK to Section, for kanban assignment)
 - `sort_index` (integer; ordering within parent)
 - `etag` (bigint)
@@ -156,10 +156,10 @@ Fields
 - `updated_by_actor_uuid` (FK Actor)
 
 Container Kinds
-- `project`: Top-level organizational boundary (default)
+- `project`: Top-level organizational boundary
+- `directory`: Organizational folder (default)
 - `feature`: Deliverable capability within a project
 - `area`: Cross-cutting concern that spans features
-- `misc`: Catch-all for uncategorized items
 
 ### 5.3 Task
 
@@ -672,7 +672,7 @@ Output
   - Last segment is treated as container slug and normalized.
   - Flags:
     - `-p` (create parents as needed)
-    - `--kind <kind>` (project, directory, feature, area, misc; default: directory; project is root-only)
+    - `--kind <kind>` (project, directory, feature, area; default: directory; project is root-only)
     - `--title <text>` (display title)
     - `--meta key=val`
 

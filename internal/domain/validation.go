@@ -58,10 +58,10 @@ func ValidateResourceType(resourceType string) error {
 // ValidateContainerKind validates a container kind
 func ValidateContainerKind(kind string) error {
 	switch kind {
-	case "project", "directory", "feature", "area", "misc":
+	case "project", "directory", "feature", "area":
 		return nil
 	default:
-		return fmt.Errorf("invalid container kind: must be one of: project, directory, feature, area, misc")
+		return fmt.Errorf("invalid container kind: must be one of: project, directory, feature, area")
 	}
 }
 

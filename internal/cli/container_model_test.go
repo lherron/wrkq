@@ -190,6 +190,11 @@ func TestMkdirDefaultsToDirectoryAndRestrictsNestedProject(t *testing.T) {
 	if kind != "project" {
 		t.Fatalf("root kind=%q, want project", kind)
 	}
+
+	mkdirKind = "misc"
+	if err := runMkdir(app, cmd, []string{"inbox/misc-folder"}); err == nil {
+		t.Fatal("expected misc mkdir to fail")
+	}
 }
 
 func resetLsFlagsForTest(t *testing.T) {

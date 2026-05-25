@@ -20,7 +20,7 @@ type ContainerCreateParams struct {
 	Slug       string
 	Title      string // defaults to Slug if empty
 	ParentUUID *string
-	Kind       string // project, directory, feature, area, misc - defaults to "directory"
+	Kind       string // project, directory, feature, area - defaults to "directory"
 }
 
 // ContainerCreateResult contains the result of container creation.

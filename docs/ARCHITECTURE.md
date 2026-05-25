@@ -174,10 +174,10 @@ internal/
 
 | Kind | Description |
 |------|-------------|
-| `project` | Top-level project (default) |
+| `project` | Top-level project |
+| `directory` | Organizational folder (default) |
 | `feature` | Feature area within a project |
 | `area` | Cross-cutting concern |
-| `misc` | Miscellaneous/catch-all |
 
 ### Task Kinds
 

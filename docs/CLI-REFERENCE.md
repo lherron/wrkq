@@ -203,10 +203,10 @@ wrkq search "needle" --sort updated_at --reverse --limit 5
 
 | Kind | Description |
 |------|-------------|
-| `project` | Top-level project (default) |
+| `project` | Top-level project |
+| `directory` | Organizational folder (default) |
 | `feature` | Feature area |
 | `area` | Organizational area |
-| `misc` | Miscellaneous |
 
 ### Bulk Operations
 

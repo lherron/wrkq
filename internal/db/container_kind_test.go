@@ -159,3 +159,92 @@ func TestContainerDirectoryKindMigrationPreservesLegacyNestedProjectTasks(t *tes
 		t.Fatalf("kind default=%q, want 'directory'", defaultKind)
 	}
 }
+
+func TestFoldMiscContainerKindMigrationReclassifiesAndRejectsMisc(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	if _, err := database.Exec(`
+		CREATE TABLE schema_migrations (
+			version TEXT PRIMARY KEY,
+			applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+		)
+	`); err != nil {
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if name >= "000018_fold_misc_container_kind.sql" {
+			break
+		}
+		content, err := migrationsFS.ReadFile(filepath.Join("migrations", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if err := database.applyMigration(name, content); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+
+	if _, err := database.Exec(`
+		INSERT INTO actors (uuid, id, slug, display_name, role)
+		VALUES ('00000000-0000-4000-8000-000000000001', 'A-00001', 'tester', 'Tester', 'human');
+
+		INSERT INTO containers (uuid, id, slug, title, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('00000000-0000-4000-8000-000000000010', 'P-00001', 'misc-root', 'Misc Root', 'misc',
+		        '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001');
+	`); err != nil {
+		t.Fatalf("insert legacy misc container: %v", err)
+	}
+
+	content, err := migrationsFS.ReadFile("migrations/000018_fold_misc_container_kind.sql")
+	if err != nil {
+		t.Fatalf("read 000018: %v", err)
+	}
+	if err := database.applyMigration("000018_fold_misc_container_kind.sql", content); err != nil {
+		t.Fatalf("apply 000018: %v", err)
+	}
+
+	var kind string
+	if err := database.QueryRow(`SELECT kind FROM containers WHERE id = 'P-00001'`).Scan(&kind); err != nil {
+		t.Fatalf("query migrated kind: %v", err)
+	}
+	if kind != "directory" {
+		t.Fatalf("migrated kind=%q, want directory", kind)
+	}
+
+	_, err = database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('00000000-0000-4000-8000-000000000011', 'P-00002', 'new-misc', 'New Misc', 'misc',
+		        '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001')
+	`)
+	if err == nil {
+		t.Fatal("expected misc insert to fail")
+	}
+	if !strings.Contains(err.Error(), "project, directory, feature, or area") {
+		t.Fatalf("unexpected misc insert error: %v", err)
+	}
+
+	_, err = database.Exec(`UPDATE containers SET kind = 'misc' WHERE id = 'P-00001'`)
+	if err == nil {
+		t.Fatal("expected misc update to fail")
+	}
+	if !strings.Contains(err.Error(), "project, directory, feature, or area") {
+		t.Fatalf("unexpected misc update error: %v", err)
+	}
+}

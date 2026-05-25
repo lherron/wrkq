@@ -28,7 +28,7 @@ var (
 func init() {
 	rootCmd.AddCommand(mkdirCmd)
 	mkdirCmd.Flags().BoolVarP(&mkdirParents, "parents", "p", false, "Create parent containers as needed")
-	mkdirCmd.Flags().StringVar(&mkdirKind, "kind", "", "Container kind: project, directory, feature, area, misc (default: directory)")
+	mkdirCmd.Flags().StringVar(&mkdirKind, "kind", "", "Container kind: project, directory, feature, area (default: directory)")
 }
 
 func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {

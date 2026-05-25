@@ -13,7 +13,6 @@ const (
 	ContainerKindDirectory ContainerKind = "directory"
 	ContainerKindFeature   ContainerKind = "feature"
 	ContainerKindArea      ContainerKind = "area"
-	ContainerKindMisc      ContainerKind = "misc"
 )
 
 // TaskKind represents the type of task
