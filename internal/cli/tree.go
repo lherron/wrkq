@@ -16,14 +16,16 @@ var treeCmd = &cobra.Command{
 	Short: "Display containers and tasks in a tree structure",
 	Long: `Display containers and tasks in a hierarchical tree structure.
 
-By default, archived and deleted items are hidden. Use -a/--all to include them.
+By default, archived and deleted containers are hidden, only draft/open tasks are shown,
+and containers without visible task descendants are collapsed.
+Use -a/--all to include archived and empty containers.
 When all tasks in a container are completed/archived, they are collapsed
 and an "(All done)" indicator is shown on the container.
 
 Examples:
-  wrkq tree                    # Show tree (excluding archived)
+  wrkq tree                    # Show active containers and draft/open tasks
   wrkq tree --open             # Show only open tasks
-  wrkq tree -a                 # Include archived items
+  wrkq tree -a                 # Include archived and empty containers
   wrkq tree portal             # Show tree under portal
   wrkq tree -L 2               # Limit depth to 2 levels
   wrkq tree --json             # Output as JSON
@@ -44,8 +46,8 @@ func init() {
 	rootCmd.AddCommand(treeCmd)
 
 	treeCmd.Flags().IntVarP(&treeDepth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived and deleted items")
-	treeCmd.Flags().BoolVar(&treeOpenOnly, "open", false, "Show only active tasks (open, in_progress, blocked)")
+	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived and empty containers")
+	treeCmd.Flags().BoolVar(&treeOpenOnly, "open", false, "Show only open tasks")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
 	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
@@ -80,12 +82,15 @@ type treeNode struct {
 	IsArchived           bool        `json:"is_archived"`
 	IsDeleted            bool        `json:"is_deleted"`
 	AllTasksCompleted    bool        `json:"all_tasks_completed,omitempty"` // for containers
+	HasVisibleTasks      bool        `json:"-"`
+	HasVisibleContent    bool        `json:"-"`
+	HiddenContainerCount int         `json:"-"`
 	Children             []*treeNode `json:"children,omitempty"`
 }
 
 func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, openOnly bool, porcelain bool, jsonOutput bool) error {
 	// Build tree structure
-	root, err := buildTree(database, rootPath, maxDepth, includeArchived, openOnly, 0)
+	root, err := buildTree(database, rootPath, maxDepth, includeArchived, openOnly, !includeArchived, 0)
 	if err != nil {
 		return err
 	}
@@ -94,8 +99,9 @@ func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived
 	if jsonOutput {
 		// Create a wrapper structure with metadata
 		output := map[string]interface{}{
-			"path":     rootPath,
-			"children": root.Children,
+			"path":                            rootPath,
+			"children":                        root.Children,
+			"hidden_containers_not_displayed": root.HiddenContainerCount,
 		}
 		if rootPath == "" {
 			output["path"] = "."
@@ -111,10 +117,13 @@ func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived
 	}
 
 	printTree(root, "", true, porcelain)
+	if root.HiddenContainerCount > 0 && !porcelain {
+		fmt.Printf("(plus %d empty containers not displayed; use --all to show empty containers)\n", root.HiddenContainerCount)
+	}
 	return nil
 }
 
-func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool, openOnly bool, currentDepth int) (*treeNode, error) {
+func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool, openOnly bool, pruneEmptyContainers bool, currentDepth int) (*treeNode, error) {
 	root := &treeNode{
 		Type:     "container",
 		Slug:     path,
@@ -181,7 +190,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		}
 		childPath += node.Slug
 
-		child, err := buildTree(database, childPath, maxDepth, includeArchived, openOnly, currentDepth+1)
+		child, err := buildTree(database, childPath, maxDepth, includeArchived, openOnly, pruneEmptyContainers, currentDepth+1)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -190,8 +199,18 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		// Merge child's children and metadata into node
 		node.Children = child.Children
 		node.AllTasksCompleted = child.AllTasksCompleted
+		node.HasVisibleTasks = child.HasVisibleTasks
+		node.HasVisibleContent = child.HasVisibleContent
+		node.HiddenContainerCount = child.HiddenContainerCount
 
-		root.Children = append(root.Children, &node)
+		shouldShowContainer := !pruneEmptyContainers || node.HasVisibleContent || alwaysShowTreeContainer(&node)
+		if shouldShowContainer {
+			root.Children = append(root.Children, &node)
+			root.HasVisibleContent = true
+			root.HiddenContainerCount += node.HiddenContainerCount
+		} else {
+			root.HiddenContainerCount += 1 + node.HiddenContainerCount
+		}
 	}
 	_ = rows.Close()
 
@@ -251,17 +270,19 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 				closedTasks++
 			}
 
-			// Determine if task should be shown based on filters
-			showTask := true
+			// Determine if task should be shown based on filters.
+			showTask := node.State == "draft" || node.State == "open"
 			if !includeArchived && (node.IsArchived || node.IsDeleted) {
 				showTask = false
 			}
-			if openOnly && node.State != "open" && node.State != "in_progress" && node.State != "blocked" {
+			if openOnly && node.State != "open" {
 				showTask = false
 			}
 
 			if showTask {
 				tasks = append(tasks, &node)
+				root.HasVisibleTasks = true
+				root.HasVisibleContent = true
 			}
 		}
 		_ = taskRows.Close()
@@ -296,7 +317,12 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		}
 	}
 
+	root.HasVisibleContent = root.HasVisibleContent || root.HasVisibleTasks || len(root.Children) > 0
 	return root, nil
+}
+
+func alwaysShowTreeContainer(node *treeNode) bool {
+	return node.Type == "container" && node.Slug == "inbox"
 }
 
 func printTree(node *treeNode, prefix string, isLast bool, porcelain bool) {
@@ -352,11 +378,10 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 	var parts []string
 
 	if node.Type == "task" {
-		parts = append(parts, fmt.Sprintf("\033[1m%s\033[0m", node.Slug)) // Bold task slug
-		if node.Title != node.Slug {
-			parts = append(parts, fmt.Sprintf("(%s)", node.Title))
+		parts = append(parts, node.ID)
+		if node.Title != "" && node.Title != node.Slug {
+			parts = append(parts, node.Title)
 		}
-		parts = append(parts, fmt.Sprintf("[%s]", node.ID))
 		if node.State != "" {
 			parts = append(parts, fmt.Sprintf("<%s>", node.State))
 		}

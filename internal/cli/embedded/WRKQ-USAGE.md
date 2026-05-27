@@ -37,6 +37,9 @@ wrkq mkdir myfeat
 # Create a subcontainer with parents
 wrkq mkdir -p myfeat/api-feature
 
+# Archive a closed container so tree hides it by default
+wrkq rm myfeat
+
 # Remove an empty container
 wrkq rmdir myfeat
 ```
@@ -65,7 +68,8 @@ wrkq find --sort updated_at --reverse --limit 5
 wrkq search 'query text' --ndjson
 wrkq search 'query text' --sort updated_at --reverse --limit 5
 wrkq tree myfeat --json
-wrkq tree --json         # Show all tasks including completed
+wrkq tree --json         # Show active containers and draft/open tasks
+wrkq tree --all          # Include archived and empty containers
 ```
 
 ## Reading Tasks

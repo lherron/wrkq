@@ -612,7 +612,8 @@ Output
     `-type p|s|t`, `--limit`, `--cursor`, `--porcelain`.
 
 - `wrkq tree [PATHSPEC...]`
-  - Pretty tree of containers and tasks.
+  - Pretty tree of active containers and tasks.
+  - By default, show draft/open tasks and containers with draft/open task descendants; always show `inbox`.
   - Flags: `-a`, `-L <depth>`, `--fields`, `--porcelain`.
 
 - `wrkq stat <PATHSPEC|ID...>`

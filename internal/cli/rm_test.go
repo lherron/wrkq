@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/spf13/cobra"
 )
 
 func TestRmPurge(t *testing.T) {
@@ -492,4 +494,89 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 	}
 
 	rmPurge = false
+}
+
+func TestRmArchivesContainerAndTreeHidesBranch(t *testing.T) {
+	resetRmFlagsForTest(t)
+	database, dbPath := setupTestEnv(t)
+	app := createTestApp(t, database, dbPath)
+
+	_, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES
+			('00000000-0000-0000-0000-000000000401', 'P-00401', 'closed-feature', 'Closed Feature', '00000000-0000-0000-0000-000000000002', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1),
+			('00000000-0000-0000-0000-000000000402', 'P-00402', 'nested-work', 'Nested Work', '00000000-0000-0000-0000-000000000401', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed containers: %v", err)
+	}
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000403', 'T-00403', 'open-work', 'Open Work', '00000000-0000-0000-0000-000000000402', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed task: %v", err)
+	}
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	if err := runRm(app, cmd, []string{"inbox/closed-feature"}); err != nil {
+		t.Fatalf("runRm failed: %v", err)
+	}
+
+	var archivedAt *string
+	if err := database.QueryRow(`SELECT archived_at FROM containers WHERE id = 'P-00401'`).Scan(&archivedAt); err != nil {
+		t.Fatalf("Failed to read archived_at: %v", err)
+	}
+	if archivedAt == nil {
+		t.Fatal("Expected container archived_at to be set")
+	}
+
+	root, err := buildTree(database, "inbox", 0, false, false, true, 0)
+	if err != nil {
+		t.Fatalf("buildTree failed: %v", err)
+	}
+	slugs := collectTreeSlugs(root)
+	if slugs["closed-feature"] || slugs["nested-work"] || slugs["open-work"] {
+		t.Fatalf("Expected archived container branch to be hidden, got %#v", slugs)
+	}
+
+	rootWithArchived, err := buildTree(database, "inbox", 0, true, false, false, 0)
+	if err != nil {
+		t.Fatalf("buildTree with archived failed: %v", err)
+	}
+	slugs = collectTreeSlugs(rootWithArchived)
+	if !slugs["closed-feature"] || !slugs["nested-work"] || !slugs["open-work"] {
+		t.Fatalf("Expected --all tree to include archived branch, got %#v", slugs)
+	}
+}
+
+func resetRmFlagsForTest(t *testing.T) {
+	t.Helper()
+	rmRecursive = false
+	rmForce = false
+	rmYes = false
+	rmDryRun = false
+	rmPurge = false
+	rmNullglob = false
+	rmJobs = 1
+	rmContinueOnError = false
+	rmJSON = false
+	rmNDJSON = false
+	rmPorcelain = false
+	t.Cleanup(func() {
+		rmRecursive = false
+		rmForce = false
+		rmYes = false
+		rmDryRun = false
+		rmPurge = false
+		rmNullglob = false
+		rmJobs = 1
+		rmContinueOnError = false
+		rmJSON = false
+		rmNDJSON = false
+		rmPorcelain = false
+	})
 }

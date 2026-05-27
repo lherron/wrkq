@@ -23,6 +23,7 @@ var rmCmd = &cobra.Command{
 	Long: `Archives (soft delete) or permanently deletes tasks and containers.
 
 By default, performs soft delete (sets archived_at). Use --purge for hard delete.
+Container purge only removes empty containers; use rmdir --force for recursive deletion.
 
 WARNING: --purge permanently deletes tasks and attachments. This CANNOT be undone!`,
 	Args: cobra.MinimumNArgs(1),
@@ -44,6 +45,7 @@ var (
 )
 
 type rmResult struct {
+	Type               string `json:"type"`
 	ID                 string `json:"id"`
 	UUID               string `json:"uuid"`
 	Slug               string `json:"slug"`
@@ -51,6 +53,12 @@ type rmResult struct {
 	Purged             bool   `json:"purged"`
 	AttachmentsDeleted int    `json:"attachments_deleted,omitempty"`
 	BytesFreed         int64  `json:"bytes_freed,omitempty"`
+}
+
+type rmTarget struct {
+	Type string
+	UUID string
+	ID   string
 }
 
 func init() {
@@ -95,34 +103,51 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		args[i] = applyProjectRootToSelector(app.Config, arg, false)
 	}
 
-	// Resolve all tasks
-	var taskUUIDs []string
+	// Resolve all targets. Task resolution wins when a path is ambiguous.
+	var targets []rmTarget
+	targetsByKey := map[string]rmTarget{}
+	var targetKeys []string
 	for _, arg := range args {
 		taskUUID, _, err := selectors.ResolveTask(database, arg)
-		if err != nil {
-			if !rmNullglob {
-				return fmt.Errorf("task not found: %s", arg)
-			}
+		if err == nil {
+			target := rmTarget{Type: "task", UUID: taskUUID}
+			key := target.Key()
+			targets = append(targets, target)
+			targetsByKey[key] = target
+			targetKeys = append(targetKeys, key)
 			continue
 		}
-		taskUUIDs = append(taskUUIDs, taskUUID)
+
+		containerUUID, containerID, containerErr := selectors.ResolveContainer(database, arg)
+		if containerErr == nil {
+			target := rmTarget{Type: "container", UUID: containerUUID, ID: containerID}
+			key := target.Key()
+			targets = append(targets, target)
+			targetsByKey[key] = target
+			targetKeys = append(targetKeys, key)
+			continue
+		}
+
+		if !rmNullglob {
+			return fmt.Errorf("target not found: %s", arg)
+		}
 	}
 
-	if len(taskUUIDs) == 0 {
+	if len(targets) == 0 {
 		if !rmNullglob {
-			return fmt.Errorf("no tasks found to remove")
+			return fmt.Errorf("no targets found to remove")
 		}
 		return nil
 	}
 
 	// Dry run with details
 	if rmDryRun {
-		return showRemovalPlan(cmd, database, taskUUIDs)
+		return showRemovalPlan(cmd, database, targets)
 	}
 
 	// Confirmation for purge operations
 	if rmPurge && !rmYes {
-		if err := confirmPurge(cmd, database, taskUUIDs); err != nil {
+		if err := confirmPurge(cmd, database, targets); err != nil {
 			return err
 		}
 	}
@@ -135,8 +160,9 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	results := []rmResult{}
-	result := op.Execute(taskUUIDs, func(taskUUID string) error {
-		res, err := removeTask(s, cfg.AttachDir, actorUUID, taskUUID)
+	result := op.Execute(targetKeys, func(key string) error {
+		target := targetsByKey[key]
+		res, err := removeTarget(s, cfg.AttachDir, actorUUID, target)
 		if err == nil && res != nil {
 			results = append(results, *res)
 		}
@@ -185,27 +211,51 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error {
+func (t rmTarget) Key() string {
+	return t.Type + ":" + t.UUID
+}
+
+func showRemovalPlan(cmd *cobra.Command, database *db.DB, targets []rmTarget) error {
 	var totalAttachments int
 	var totalBytes int64
 
 	if rmPurge {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would permanently delete %d task(s):\n\n", len(taskUUIDs))
+		fmt.Fprintf(cmd.OutOrStdout(), "Would permanently delete %d item(s):\n\n", len(targets))
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "Would archive %d task(s):\n\n", len(taskUUIDs))
+		fmt.Fprintf(cmd.OutOrStdout(), "Would archive %d item(s):\n\n", len(targets))
 	}
 
-	for _, taskUUID := range taskUUIDs {
+	for _, target := range targets {
+		if target.Type == "container" {
+			var id, slug, title, kind string
+			err := database.QueryRow(`
+				SELECT id, slug, COALESCE(title, ''), kind
+				FROM containers
+				WHERE uuid = ?
+			`, target.UUID).Scan(&id, &slug, &title, &kind)
+			if err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Error reading container %s: %v\n", target.UUID, err)
+				continue
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s/)\n", id, slug)
+			if title != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "    Title: %s\n", title)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "    Kind: %s\n\n", kind)
+			continue
+		}
+
 		var id, slug, title, state string
 		var priority int
 		err := database.QueryRow(`
 			SELECT t.id, t.slug, COALESCE(t.title, ''), t.state, t.priority
 			FROM tasks t
 			WHERE t.uuid = ?
-		`, taskUUID).Scan(&id, &slug, &title, &state, &priority)
+		`, target.UUID).Scan(&id, &slug, &title, &state, &priority)
 
 		if err != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "  Error reading task %s: %v\n", taskUUID, err)
+			fmt.Fprintf(cmd.OutOrStdout(), "  Error reading task %s: %v\n", target.UUID, err)
 			continue
 		}
 
@@ -220,7 +270,7 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 		if rmPurge {
 			var count int
 			var size sql.NullInt64
-			_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
+			_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", target.UUID).Scan(&count, &size)
 			if count > 0 {
 				totalAttachments += count
 				if size.Valid {
@@ -240,14 +290,17 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, taskUUIDs []string) er
 	return nil
 }
 
-func confirmPurge(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error {
+func confirmPurge(cmd *cobra.Command, database *db.DB, targets []rmTarget) error {
 	var totalAttachments int
 	var totalBytes int64
 
-	for _, taskUUID := range taskUUIDs {
+	for _, target := range targets {
+		if target.Type != "task" {
+			continue
+		}
 		var count int
 		var size sql.NullInt64
-		_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&count, &size)
+		_ = database.QueryRow("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE task_uuid = ?", target.UUID).Scan(&count, &size)
 		totalAttachments += count
 		if size.Valid {
 			totalBytes += size.Int64
@@ -255,7 +308,7 @@ func confirmPurge(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error
 	}
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "\nWARNING: This will permanently delete:\n")
-	fmt.Fprintf(cmd.ErrOrStderr(), "  - %d task(s)\n", len(taskUUIDs))
+	fmt.Fprintf(cmd.ErrOrStderr(), "  - %d item(s)\n", len(targets))
 	if totalAttachments > 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), "  - %d attachments (%.1f MB)\n", totalAttachments, float64(totalBytes)/(1024*1024))
 	}
@@ -271,6 +324,13 @@ func confirmPurge(cmd *cobra.Command, database *db.DB, taskUUIDs []string) error
 	return nil
 }
 
+func removeTarget(s *store.Store, attachDir, actorUUID string, target rmTarget) (*rmResult, error) {
+	if target.Type == "container" {
+		return removeContainerTarget(s, actorUUID, target.UUID)
+	}
+	return removeTask(s, attachDir, actorUUID, target.UUID)
+}
+
 func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResult, error) {
 	// Get task info
 	task, err := s.Tasks.GetByUUID(taskUUID)
@@ -279,6 +339,7 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 	}
 
 	result := &rmResult{
+		Type:   "task",
 		ID:     task.ID,
 		UUID:   taskUUID,
 		Slug:   task.Slug,
@@ -318,6 +379,34 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 		// Archive task (soft delete)
 		_, err := s.Tasks.Archive(actorUUID, taskUUID, 0)
 		if err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}
+
+func removeContainerTarget(s *store.Store, actorUUID, containerUUID string) (*rmResult, error) {
+	container, err := s.Containers.GetByUUID(containerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("container not found: %w", err)
+	}
+
+	result := &rmResult{
+		Type:   "container",
+		ID:     container.ID,
+		UUID:   containerUUID,
+		Slug:   container.Slug,
+		Path:   container.Slug,
+		Purged: rmPurge,
+	}
+
+	if rmPurge {
+		if err := s.Containers.Delete(actorUUID, containerUUID, 0); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := s.Containers.Archive(actorUUID, containerUUID, 0); err != nil {
 			return nil, err
 		}
 	}

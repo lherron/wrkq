@@ -121,7 +121,7 @@ touch --state idea ──→ [idea] ──→ set --state draft ──→ [draft
 |---------|-------|----------|
 | **ls** | Path-scoped | List children of a container or root |
 | **find** | Repository-wide | Search with filters (state, kind, assignee, dates) |
-| **tree** | Hierarchical | Visual tree of containers and tasks |
+| **tree** | Hierarchical | Visual tree of active containers and draft/open tasks |
 | **cat** | Single resource | Full task details with comments |
 | **stat** | Single resource | Machine-friendly metadata |
 
@@ -433,6 +433,7 @@ The command works even without a database connection — actor and container UUI
 |---------|--------|
 | `mkdir myproject` | Create root container |
 | `mkdir -p myproject/feature/subfeature` | Create with parents |
+| `rm myproject` | Archive container, hiding it from default `tree` output |
 | `rmdir myproject` | Remove empty container |
 | `mv myproject/old myproject/new` | Rename container |
 | `mv task.md myproject/` | Move task to container |

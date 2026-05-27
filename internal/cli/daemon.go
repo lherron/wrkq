@@ -320,7 +320,7 @@ func (s *daemonServer) handleContainersTree(w http.ResponseWriter, r *http.Reque
 	}
 
 	rootPath := strings.Trim(req.Path, "/")
-	root, err := buildTree(s.db, rootPath, req.Depth, req.IncludeArchived, req.OpenOnly, 0)
+	root, err := buildTree(s.db, rootPath, req.Depth, req.IncludeArchived, req.OpenOnly, !req.IncludeArchived, 0)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
@@ -332,8 +332,9 @@ func (s *daemonServer) handleContainersTree(w http.ResponseWriter, r *http.Reque
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"path":     path,
-		"children": root.Children,
+		"path":                            path,
+		"children":                        root.Children,
+		"hidden_containers_not_displayed": root.HiddenContainerCount,
 	})
 }
 
