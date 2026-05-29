@@ -56,6 +56,15 @@ func Load() (*Config, error) {
 		},
 	}
 
+	// Capture project-root signals from the real process env BEFORE loading
+	// .env.local. godotenv.Load() does not override existing env vars, so an
+	// empty value here means WRKQ_PROJECT_ROOT was not explicitly exported and
+	// any later value comes from the (possibly shared) .env.local / config.yaml.
+	// This lets an explicit WRKQ_PROJECT_ROOT export and ASP_PROJECT outrank a
+	// shared global-default .env.local. See project-root precedence below.
+	explicitProjectRoot := os.Getenv("WRKQ_PROJECT_ROOT")
+	aspProject := os.Getenv("ASP_PROJECT")
+
 	// Load .env.local if it exists (walking up parent directories)
 	if envPath := findEnvLocal(); envPath != "" {
 		_ = godotenv.Load(envPath)
@@ -83,7 +92,20 @@ func Load() (*Config, error) {
 	if defaultActor := os.Getenv("WRKQ_ACTOR"); defaultActor != "" {
 		cfg.DefaultActor = defaultActor
 	}
-	if projectRoot := os.Getenv("WRKQ_PROJECT_ROOT"); projectRoot != "" {
+	// Project-root precedence (high -> low):
+	//   1. --project flag             (applied later, in appctx)
+	//   2. explicit WRKQ_PROJECT_ROOT (exported in the real process env)
+	//   3. ASP_PROJECT                (the per-runtime current project scope)
+	//   4. .env.local WRKQ_PROJECT_ROOT / config.yaml project_root (global default)
+	// ASP_PROJECT must outrank the .env.local value because the shared
+	// ~/praesidium/.env.local pins WRKQ_PROJECT_ROOT to a single project for
+	// every runtime; without this, every agent's tasks land in that one project
+	// regardless of the runtime's actual scope.
+	if explicitProjectRoot != "" {
+		cfg.ProjectRoot = explicitProjectRoot
+	} else if aspProject != "" {
+		cfg.ProjectRoot = aspProject
+	} else if projectRoot := os.Getenv("WRKQ_PROJECT_ROOT"); projectRoot != "" {
 		cfg.ProjectRoot = projectRoot
 	}
 	if searchEnabled := os.Getenv("WRKQ_SEARCH_ENABLED"); searchEnabled != "" {
