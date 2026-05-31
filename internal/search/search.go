@@ -531,9 +531,35 @@ func pathMatches(path string, prefixes []string) bool {
 	return false
 }
 
+// contentBody strips the structured chunk preamble (Path:/Task:/Title:/…)
+// emitted by the renderer, returning just the description or comment body.
+// The CLI surfaces id, title, state, and path as their own columns, so the
+// snippet should focus on the matched prose rather than repeating metadata.
+func contentBody(body string) string {
+	lines := strings.Split(body, "\n")
+	start := -1
+	for i, ln := range lines {
+		if ln == "Description:" || ln == "Body:" {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return body
+	}
+	out := make([]string, 0, len(lines)-start)
+	for _, ln := range lines[start:] {
+		if ln == "Specification:" { // drop the bare section label, keep its prose
+			continue
+		}
+		out = append(out, ln)
+	}
+	return strings.Join(out, "\n")
+}
+
 func snippet(body, query string) string {
 	const max = 240
-	compact := strings.Join(strings.Fields(body), " ")
+	compact := strings.Join(strings.Fields(contentBody(body)), " ")
 	if len(compact) <= max {
 		return compact
 	}
@@ -552,5 +578,24 @@ func snippet(body, query string) string {
 	if end > len(compact) {
 		end = len(compact)
 	}
-	return compact[start:end]
+	// Snap the window to word boundaries so it doesn't slice mid-word, and
+	// mark each trimmed edge with an ellipsis.
+	if start > 0 {
+		if sp := strings.IndexByte(compact[start:end], ' '); sp >= 0 {
+			start += sp + 1
+		}
+	}
+	if end < len(compact) {
+		if sp := strings.LastIndexByte(compact[start:end], ' '); sp > 0 {
+			end = start + sp
+		}
+	}
+	out := compact[start:end]
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(compact) {
+		out += "…"
+	}
+	return out
 }

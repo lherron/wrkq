@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -113,16 +115,193 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if resp.Stale {
-		fmt.Fprintf(cmd.ErrOrStderr(), "search index is stale by %d event(s)\n", resp.Status.StaleEventCount)
+		fmt.Fprintln(cmd.ErrOrStderr(), paint(colStateStop, fmt.Sprintf("search index is stale by %d event(s)", resp.Status.StaleEventCount)))
 	}
-	for _, result := range resp.Results {
-		comment := ""
-		if result.CommentID != nil {
-			comment = " " + *result.CommentID
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s%s\t%s\t%s\t%.4f\t%s\n", result.TaskID, comment, result.State, result.Path, result.Score, result.Snippet)
-	}
+	renderSearchResults(cmd.OutOrStdout(), query, resp.Results)
 	return nil
+}
+
+// colHit lifts matched query terms out of the dim snippet — bold amber, the
+// same "attention" accent the tree view uses for open tasks.
+const colHit = "1;33"
+
+const (
+	searchTitleBudget   = 72
+	searchSnippetBudget = 150
+)
+
+// renderSearchResults prints results in the wrkq tree aesthetic: scaffolding
+// (ids, paths, scores) recedes in dim, the title leads in plain text, and the
+// state badge carries color. Each result is a small three-line card —
+//
+//	T-01752  C-02933  Title of the task                         <open>
+//	                  path/to/container  ·  0.016
+//	                  …matched snippet with the query highlighted…
+//
+// The comment column is always reserved (blank for task hits) so titles and
+// state badges line up whether or not a row matched on a comment.
+func renderSearchResults(w io.Writer, query string, results []search.Result) {
+	if len(results) == 0 {
+		fmt.Fprintln(w, paint(colDim, fmt.Sprintf("no matches for %q", query)))
+		return
+	}
+
+	noun := "results"
+	if len(results) == 1 {
+		noun = "result"
+	}
+	fmt.Fprintf(w, "%s %s   %s\n\n",
+		paint(colDim, "search"),
+		query,
+		paint(colDim, fmt.Sprintf("%d %s", len(results), noun)))
+
+	// Measure the id / comment-id columns so the title column starts at a
+	// fixed offset across every row.
+	idW, cidW := 0, 0
+	for _, r := range results {
+		if n := len(r.TaskID); n > idW {
+			idW = n
+		}
+		if r.CommentID != nil {
+			if n := len(*r.CommentID); n > cidW {
+				cidW = n
+			}
+		}
+	}
+
+	gutter := idW + 2
+	if cidW > 0 {
+		gutter += cidW + 2
+	}
+	indent := strings.Repeat(" ", gutter)
+	terms := strings.Fields(strings.ToLower(query))
+
+	for _, r := range results {
+		// Primary line: id · comment-id · title · <state>
+		var line strings.Builder
+		line.WriteString(paint(colDim, padRight(r.TaskID, idW)))
+		if cidW > 0 {
+			cid := ""
+			if r.CommentID != nil {
+				cid = *r.CommentID
+			}
+			line.WriteString("  " + paint(colDim, padRight(cid, cidW)))
+		}
+		title := firstNonEmpty(r.Title, lastPathSegment(r.Path))
+		line.WriteString("  " + truncateRunes(title, searchTitleBudget))
+		if r.State != "" {
+			line.WriteString("  " + paint(stateColor(r.State), "<"+r.State+">"))
+		}
+		fmt.Fprintln(w, line.String())
+
+		// Secondary line: path · score, aligned under the title.
+		fmt.Fprintf(w, "%s%s\n", indent,
+			paint(colDim, fmt.Sprintf("%s  ·  %.3f", r.Path, r.Score)))
+
+		// Tertiary line: the matched snippet, dim with highlighted terms.
+		if snip := clipSnippet(r.Snippet, searchSnippetBudget); snip != "" {
+			fmt.Fprintf(w, "%s%s\n", indent, highlightTerms(snip, terms))
+		}
+	}
+}
+
+// highlightTerms renders text in dim, lifting each occurrence of a query term
+// into the bold-amber hit accent. No-ops to plain dim when color is disabled.
+func highlightTerms(text string, terms []string) string {
+	if !colorEnabled || len(terms) == 0 {
+		return paint(colDim, text)
+	}
+	lower := strings.ToLower(text)
+	var spans [][2]int
+	for _, t := range terms {
+		if t == "" {
+			continue
+		}
+		for from := 0; ; {
+			i := strings.Index(lower[from:], t)
+			if i < 0 {
+				break
+			}
+			s := from + i
+			spans = append(spans, [2]int{s, s + len(t)})
+			from = s + len(t)
+		}
+	}
+	if len(spans) == 0 {
+		return paint(colDim, text)
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+
+	dim := "\033[" + colDim + "m"
+	hit := "\033[" + colHit + "m"
+	const reset = "\033[0m"
+	var b strings.Builder
+	b.WriteString(dim)
+	pos := 0
+	for _, sp := range spans {
+		if sp[0] < pos { // overlapping match already covered
+			continue
+		}
+		b.WriteString(text[pos:sp[0]])
+		b.WriteString(reset + hit + text[sp[0]:sp[1]] + reset + dim)
+		pos = sp[1]
+	}
+	b.WriteString(text[pos:])
+	b.WriteString(reset)
+	return b.String()
+}
+
+func padRight(s string, w int) string {
+	if len(s) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-len(s))
+}
+
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n == 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// clipSnippet limits a snippet to n runes, backing off to the last word
+// boundary and appending an ellipsis so the display cut lands cleanly.
+func clipSnippet(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n])
+	if sp := strings.LastIndexByte(cut, ' '); sp > n/2 {
+		cut = cut[:sp]
+	}
+	cut = strings.TrimRight(cut, " ,.;:—-")
+	return cut + "…"
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func lastPathSegment(p string) string {
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 var indexCmd = &cobra.Command{

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
@@ -10,6 +11,55 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
+
+// Subtle ANSI palette for the tree view. Scaffolding recedes (faint),
+// containers anchor (bold blue, matching ls dir convention), and color is
+// reserved for structure and task state rather than painting whole lines.
+const (
+	colDim       = "2"    // tree branches, IDs, secondary metadata
+	colDir       = "1;34" // container slug — bold blue
+	colStateOpen = "33"   // amber — active/needs attention
+	colStateWIP  = "36"   // cyan — in progress
+	colStateStop = "31"   // red — blocked
+	colDone      = "32"   // green — completed / all done
+)
+
+// colorEnabled reports whether to emit ANSI styling. Honors NO_COLOR and only
+// colors when stdout is an interactive terminal (clean output when piped).
+var colorEnabled = func() bool {
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}()
+
+// paint wraps s in an ANSI SGR sequence when color is enabled.
+func paint(code, s string) string {
+	if !colorEnabled || code == "" {
+		return s
+	}
+	return "\033[" + code + "m" + s + "\033[0m"
+}
+
+// stateColor maps a task state to its subtle accent color.
+func stateColor(state string) string {
+	switch state {
+	case "open":
+		return colStateOpen
+	case "in_progress":
+		return colStateWIP
+	case "blocked":
+		return colStateStop
+	case "completed":
+		return colDone
+	default: // draft and anything else recede
+		return colDim
+	}
+}
 
 var treeCmd = &cobra.Command{
 	Use:   "tree [PATH...]",
@@ -86,6 +136,8 @@ type treeNode struct {
 	HasVisibleContent    bool        `json:"-"`
 	HiddenContainerCount int         `json:"-"`
 	Children             []*treeNode `json:"children,omitempty"`
+
+	parentTaskUUID string // for tasks: nests under the parent task when present
 }
 
 func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, openOnly bool, porcelain bool, jsonOutput bool) error {
@@ -118,7 +170,7 @@ func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived
 
 	printTree(root, "", true, porcelain)
 	if root.HiddenContainerCount > 0 && !porcelain {
-		fmt.Printf("(plus %d empty containers not displayed; use --all to show empty containers)\n", root.HiddenContainerCount)
+		fmt.Println(paint(colDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", root.HiddenContainerCount)))
 	}
 	return nil
 }
@@ -218,7 +270,8 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 	if parentUUID != nil || path == "" {
 		taskQuery := `
 			SELECT uuid, id, slug, title, state, archived_at, deleted_at,
-			       requested_by_project_id, assigned_project_id, acknowledged_at, resolution
+			       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
+			       parent_task_uuid
 			FROM tasks
 			WHERE `
 		var taskArgs []interface{}
@@ -231,8 +284,10 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		taskQuery += `project_uuid = ?`
 		taskArgs = append(taskArgs, *parentUUID)
 
-		// Always query all tasks to check if all are completed
-		taskQuery += ` ORDER BY slug`
+		// Always query all tasks to check if all are completed.
+		// Order oldest to newest within the container (id is monotonic,
+		// zero-padded, assigned in creation order; created_at as primary key).
+		taskQuery += ` ORDER BY created_at ASC, id ASC`
 
 		taskRows, err := database.Query(taskQuery, taskArgs...)
 		if err != nil {
@@ -246,13 +301,16 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		for taskRows.Next() {
 			var node treeNode
 			var archivedAt, deletedAt *string
-			var requestedBy, assignedProject, acknowledgedAt, resolution *string
+			var requestedBy, assignedProject, acknowledgedAt, resolution, parentTaskUUID *string
 
 			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt, &deletedAt,
-				&requestedBy, &assignedProject, &acknowledgedAt, &resolution)
+				&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &parentTaskUUID)
 			if err != nil {
 				_ = taskRows.Close()
 				return nil, fmt.Errorf("failed to scan task: %w", err)
+			}
+			if parentTaskUUID != nil {
+				node.parentTaskUUID = *parentTaskUUID
 			}
 
 			node.Type = "task"
@@ -310,10 +368,27 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		// Set AllTasksCompleted: true if all tasks (if any) are closed and all child containers are done
 		root.AllTasksCompleted = allDirectTasksClosed && allChildContainersDone
 
+		// Nest visible subtasks under their parent task. A task whose parent is
+		// also visible is attached to that parent's children (recursively, since
+		// we key on the actual node pointers); tasks whose parent is absent from
+		// the visible set surface at the container's top level so they aren't lost.
+		byUUID := make(map[string]*treeNode, len(tasks))
+		for _, t := range tasks {
+			byUUID[t.UUID] = t
+		}
+		topTasks := make([]*treeNode, 0, len(tasks))
+		for _, t := range tasks {
+			if parent, ok := byUUID[t.parentTaskUUID]; ok && t.parentTaskUUID != "" {
+				parent.Children = append(parent.Children, t)
+				continue
+			}
+			topTasks = append(topTasks, t)
+		}
+
 		// If all tasks are completed (and all child containers are done), don't add tasks to the tree
 		// Otherwise, add the tasks we collected
 		if !root.AllTasksCompleted || totalTasks == 0 {
-			root.Children = append(root.Children, tasks...)
+			root.Children = append(root.Children, topTasks...)
 		}
 	}
 
@@ -339,6 +414,7 @@ func printTree(node *treeNode, prefix string, isLast bool, porcelain bool) {
 			} else {
 				connector = "├── "
 			}
+			connector = paint(colDim, connector)
 		}
 
 		// Format node display
@@ -361,7 +437,7 @@ func printTree(node *treeNode, prefix string, isLast bool, porcelain bool) {
 				if isLastChild {
 					newPrefix = prefix + "    "
 				} else {
-					newPrefix = prefix + "│   "
+					newPrefix = prefix + paint(colDim, "│") + "   "
 				}
 			}
 			printTree(child, newPrefix, isLastChild, porcelain)
@@ -378,30 +454,30 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 	var parts []string
 
 	if node.Type == "task" {
-		parts = append(parts, node.ID)
+		parts = append(parts, paint(colDim, node.ID)) // ID recedes; title leads
 		if node.Title != "" && node.Title != node.Slug {
-			parts = append(parts, node.Title)
+			parts = append(parts, node.Title) // content stays plain
 		}
 		if node.State != "" {
-			parts = append(parts, fmt.Sprintf("<%s>", node.State))
+			parts = append(parts, paint(stateColor(node.State), fmt.Sprintf("<%s>", node.State)))
 		}
 	} else {
 		displayTitle := node.Title
 		if node.Slug == "inbox" && strings.EqualFold(node.Title, "inbox") {
 			displayTitle = "Inbox"
 		}
-		parts = append(parts, fmt.Sprintf("\033[34m%s/\033[0m", node.Slug)) // Blue directory
+		parts = append(parts, paint(colDir, node.Slug+"/")) // bold blue directory
 		if displayTitle != node.Slug {
-			parts = append(parts, fmt.Sprintf("(%s)", displayTitle))
+			parts = append(parts, paint(colDim, fmt.Sprintf("(%s)", displayTitle)))
 		}
-		parts = append(parts, fmt.Sprintf("[%s]", node.ID))
+		parts = append(parts, paint(colDim, fmt.Sprintf("[%s]", node.ID)))
 		if node.AllTasksCompleted {
-			parts = append(parts, "\033[32m(All done)\033[0m") // Green "All done"
+			parts = append(parts, paint(colDone, "(All done)"))
 		}
 	}
 
 	if node.IsArchived {
-		parts = append(parts, "\033[2m(archived)\033[0m")
+		parts = append(parts, paint(colDim, "(archived)"))
 	}
 
 	return strings.Join(parts, " ")
