@@ -11,7 +11,7 @@ import (
 
 // agentTarget is the fixed agent this alias dispatches to. It is intentionally
 // hardcoded: `wrkq agent` is a convenience alias for one predefined agent.
-const agentTarget = "nestor"
+const agentTarget = "seshat"
 
 var (
 	agentNew    bool
@@ -22,10 +22,10 @@ var (
 
 var agentCmd = &cobra.Command{
 	Use:   "agent [prompt] [-- extra hrcchat-turn args]",
-	Short: "Run a chat turn with the nestor agent",
-	Long: `Run a chat turn against the predefined agent "nestor".
+	Short: "Run a chat turn with the seshat agent",
+	Long: `Run a chat turn against the predefined agent "seshat".
 
-This is a thin pass-through to 'hrcchat turn nestor'. The 'hrcchat' binary must
+This is a thin pass-through to 'hrcchat turn seshat'. The 'hrcchat' binary must
 be on PATH; wrkq does not depend on it at build time. Project context is
 resolved by hrcchat itself (ASP_PROJECT), exactly as for any other caller.
 
