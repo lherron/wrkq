@@ -15,6 +15,7 @@ var (
 	handoffIDPattern    = regexp.MustCompile(`^H-\d{5}$`)
 	attachmentIDPattern = regexp.MustCompile(`^ATT-\d{5}$`)
 	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	bareSeqPattern      = regexp.MustCompile(`^\d{1,5}$`)
 )
 
 // Type represents the type of resource
@@ -85,6 +86,22 @@ func Parse(id string) (Type, int, error) {
 	default:
 		return "", 0, fmt.Errorf("invalid friendly ID format: %s", id)
 	}
+}
+
+// ExpandTaskID expands a bare sequence number into a full task friendly ID
+// as a convenience (e.g. "1454" -> "T-01454"). It returns (expanded, true)
+// when s is a bare 1-5 digit number, and (s, false) otherwise so callers can
+// leave non-matching tokens untouched.
+func ExpandTaskID(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if !bareSeqPattern.MatchString(s) {
+		return s, false
+	}
+	seq, err := strconv.Atoi(s)
+	if err != nil {
+		return s, false
+	}
+	return FormatTask(seq), true
 }
 
 // IsUUID checks if a string is a valid UUID

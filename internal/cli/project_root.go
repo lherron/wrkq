@@ -84,6 +84,12 @@ func applyProjectRootToken(root, token string) string {
 		return token
 	}
 
+	// A bare sequence number ("1454") is an ID-like task shorthand, not a
+	// path segment, so leave it untouched here; ResolveTask expands it.
+	if _, ok := id.ExpandTaskID(token); ok {
+		return token
+	}
+
 	normalized := strings.Trim(token, "/")
 	if normalized == "" {
 		return normalized

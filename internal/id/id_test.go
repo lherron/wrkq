@@ -386,6 +386,31 @@ func BenchmarkFormatTask(b *testing.B) {
 	}
 }
 
+func TestExpandTaskID(t *testing.T) {
+	tests := []struct {
+		in     string
+		wantID string
+		wantOK bool
+	}{
+		{"1454", "T-01454", true},
+		{"1", "T-00001", true},
+		{"00123", "T-00123", true},
+		{"99999", "T-99999", true},
+		{"  1454  ", "T-01454", true}, // trimmed
+		{"123456", "123456", false},   // 6 digits, too wide for a T- id
+		{"T-01454", "T-01454", false}, // already a friendly id
+		{"abc", "abc", false},
+		{"", "", false},
+		{"12a", "12a", false},
+	}
+	for _, tt := range tests {
+		gotID, gotOK := ExpandTaskID(tt.in)
+		if gotID != tt.wantID || gotOK != tt.wantOK {
+			t.Errorf("ExpandTaskID(%q) = (%q, %v), want (%q, %v)", tt.in, gotID, gotOK, tt.wantID, tt.wantOK)
+		}
+	}
+}
+
 func BenchmarkParse(b *testing.B) {
 	id := "T-12345"
 	for i := 0; i < b.N; i++ {

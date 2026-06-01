@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
 )
 
@@ -254,6 +255,12 @@ func ResolveTask(database *db.DB, selector string) (string, string, error) {
 	}
 
 	token := parsed.Token
+
+	// Convenience: expand a bare sequence number ("1454") into a full task
+	// friendly ID ("T-01454") so it can be looked up like any other T- id.
+	if expanded, ok := id.ExpandTaskID(token); ok {
+		token = expanded
+	}
 
 	// Try as friendly ID
 	if strings.HasPrefix(token, "T-") {
