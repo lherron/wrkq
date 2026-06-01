@@ -229,6 +229,14 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 			return err
 		}
 
+		// Validate re-parenting (same container, no self-parent, no cycles, depth <= 1).
+		if pv, ok := fields["parent_task_uuid"]; ok && pv != nil {
+			parentUUID, _ := pv.(string)
+			if err := validateParentAssignment(tx, taskUUID, parentUUID); err != nil {
+				return err
+			}
+		}
+
 		// Check if we're transitioning to a completion state (for unblock webhook logic)
 		newState, hasStateChange := fields["state"].(string)
 		transitioningToCompletion := hasStateChange && !isCompletionState(currentState) && isCompletionState(newState)
@@ -347,6 +355,55 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 	}
 
 	return newETag, err
+}
+
+// validateParentAssignment enforces the invariants for re-parenting a task:
+// the parent must exist, parent and child must share a container, a task may not
+// be its own parent, and the single-level subtask depth (max depth 1) must hold —
+// neither the parent being a subtask nor the child already having subtasks.
+func validateParentAssignment(tx *sql.Tx, childUUID, parentUUID string) error {
+	if parentUUID == childUUID {
+		return fmt.Errorf("a task cannot be its own parent")
+	}
+
+	var childProject string
+	if err := tx.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", childUUID).Scan(&childProject); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task not found: %s", childUUID)
+		}
+		return fmt.Errorf("failed to load task: %w", err)
+	}
+
+	var parentProject string
+	var parentParent sql.NullString
+	err := tx.QueryRow("SELECT project_uuid, parent_task_uuid FROM tasks WHERE uuid = ?", parentUUID).Scan(&parentProject, &parentParent)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("parent task not found: %s", parentUUID)
+		}
+		return fmt.Errorf("failed to load parent task: %w", err)
+	}
+
+	if parentProject != childProject {
+		return fmt.Errorf("parent task must be in the same container as the task")
+	}
+
+	if parentParent.Valid && parentParent.String != "" {
+		return fmt.Errorf("parent task is itself a subtask (max depth is 1)")
+	}
+
+	var childHasSubtasks int
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM tasks WHERE parent_task_uuid = ? AND state != 'deleted'",
+		childUUID,
+	).Scan(&childHasSubtasks); err != nil {
+		return fmt.Errorf("failed to check for existing subtasks: %w", err)
+	}
+	if childHasSubtasks > 0 {
+		return fmt.Errorf("cannot reparent a task that already has subtasks (max depth is 1)")
+	}
+
+	return nil
 }
 
 // Move moves a task to a different container and logs a task.updated event.

@@ -11,7 +11,6 @@ import (
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -24,7 +23,14 @@ var setCmd = &cobra.Command{
 	Aliases: []string{"edit"},
 	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, session_id, run_status
+Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, parent_task, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, session_id, run_status
+
+Reparenting:
+  --parent-task (or --parent-id) accepts a task ID or path. The task is set
+  to kind=subtask unless --kind is also given. Pass an empty value to clear
+  the parent (reverts kind to task unless --kind is given). Parent and child
+  must be in the same container, a task cannot be its own parent, and subtasks
+  cannot themselves have subtasks (max depth 1).
 
 Description can be set from:
   - String: --description "text"
@@ -44,6 +50,8 @@ Examples:
   echo "New description" | wrkq set T-00001 -d -
   wrkq set T-00001 --state in_progress --priority 1 --title "New Title"
   wrkq set T-00001 --kind bug
+  wrkq set T-00001 --parent-task T-00002
+  wrkq set T-00001 --parent-id ""
   wrkq set T-00001 --assignee agent-claude
   wrkq set T-00001 --cp-run-id run123 --run-status queued`,
 	Args: cobra.MinimumNArgs(1),
@@ -69,6 +77,8 @@ var (
 	setDueAt           string
 	setStartAt         string
 	setKind            string
+	setParentTask      string
+	setParentID        string
 	setAssignee        string
 	setRequestedBy     string
 	setAssignedProject string
@@ -100,6 +110,8 @@ func init() {
 	setCmd.Flags().StringVar(&setDueAt, "due-at", "", "Update task due date")
 	setCmd.Flags().StringVar(&setStartAt, "start-at", "", "Update task start date")
 	setCmd.Flags().StringVar(&setKind, "kind", "", "Update task kind (task, subtask, spike, bug, chore)")
+	setCmd.Flags().StringVar(&setParentTask, "parent-task", "", "Set parent task ID or path (empty to clear); sets kind=subtask unless --kind given")
+	setCmd.Flags().StringVar(&setParentID, "parent-id", "", "Alias for --parent-task")
 	setCmd.Flags().StringVar(&setAssignee, "assignee", "", "Update task assignee (actor slug or ID)")
 	setCmd.Flags().StringVar(&setRequestedBy, "requested-by", "", "Update requester project ID")
 	setCmd.Flags().StringVar(&setAssignedProject, "assigned-project", "", "Update assignee project ID")
@@ -136,7 +148,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Build fields map from flags
-	fields, err := buildFieldsFromFlags(database)
+	fields, err := buildFieldsFromFlags(app, cmd)
 	if err != nil {
 		return err
 	}
@@ -200,7 +212,8 @@ func readLinesFromStdin(r io.Reader) ([]string, error) {
 	return lines, nil
 }
 
-func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
+func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]interface{}, error) {
+	database := app.DB
 	fields := make(map[string]interface{})
 
 	// Handle state
@@ -289,6 +302,39 @@ func buildFieldsFromFlags(database *db.DB) (map[string]interface{}, error) {
 			return nil, err
 		}
 		fields["kind"] = setKind
+	}
+
+	// Handle parent task (re-parenting). --parent-id is an alias for --parent-task.
+	parentChanged := false
+	parentVal := ""
+	switch {
+	case cmd.Flags().Changed("parent-task") && cmd.Flags().Changed("parent-id"):
+		return nil, fmt.Errorf("specify only one of --parent-task or --parent-id")
+	case cmd.Flags().Changed("parent-task"):
+		parentChanged = true
+		parentVal = setParentTask
+	case cmd.Flags().Changed("parent-id"):
+		parentChanged = true
+		parentVal = setParentID
+	}
+	if parentChanged {
+		if strings.TrimSpace(parentVal) == "" {
+			// Clear parent; revert to a top-level task unless caller set kind explicitly.
+			fields["parent_task_uuid"] = nil
+			if setKind == "" {
+				fields["kind"] = "task"
+			}
+		} else {
+			parentRef := applyProjectRootToSelector(app.Config, parentVal, false)
+			parentUUID, _, err := selectors.ResolveTask(database, parentRef)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve parent task: %w", err)
+			}
+			fields["parent_task_uuid"] = parentUUID
+			if setKind == "" {
+				fields["kind"] = "subtask"
+			}
+		}
 	}
 
 	// Handle assignee

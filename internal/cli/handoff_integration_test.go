@@ -149,6 +149,9 @@ func requireOnlyHandoffIDs(t *testing.T, handoffs []handoffJSON, want ...string)
 func TestHandoffIntegrationRoundTrip(t *testing.T) {
 	database, _ := setupTestEnv(t)
 	t.Setenv("WRKQ_DB_PATH", database.Path())
+	// Force lexical-only search so the term-match assertions below are
+	// deterministic regardless of any dense embedder configured on the host.
+	t.Setenv("WRKQ_SEARCH_DENSE_PROVIDER", "none")
 	t.Setenv("ASP_SCOPE_REF", "agent:larry:project:wrkq:task:T-01603")
 	t.Setenv("ASP_AGENT_ID", "larry")
 	t.Setenv("ASP_PROJECT", "wrkq")
