@@ -62,6 +62,27 @@ build:
   go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
 
+# Conservative no-network check for agents/CI sandboxes
+agent-check:
+  scripts/agent-check.sh
+
+# Compile packages only with vendored deps, no network, and conservative parallelism
+agent-compile:
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
+    go test -tags sqlite_fts5 -run '^$' ./...
+
+# Build all binaries with vendored deps, no network, and conservative parallelism
+agent-build:
+  mkdir -p bin
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
+    go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
+    go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
+    go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
+    go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
+
 # Run the wrkq CLI
 run *args:
   go run ./cmd/wrkq {{args}}
@@ -72,7 +93,7 @@ wrkqadm-run *args:
 
 # Run CLI tests with coverage
 test-coverage:
-  go test -v -coverprofile=coverage.out ./...
+  go test -tags sqlite_fts5 -v -coverprofile=coverage.out ./...
   go tool cover -html=coverage.out -o coverage.html
 
 # Install CLI binaries to ~/.local/bin (no sudo required)
@@ -232,12 +253,26 @@ lint:
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
-  go test -v ./...
+  go test -tags sqlite_fts5 ./...
   @echo "✓ Golang tests complete"
+
+# Run all tests with verbose logs
+test-verbose:
+  go test -v -tags sqlite_fts5 ./...
 
 # Verify code quality (lint + test)
 verify: lint test
   @echo "✓ All checks passed"
+
+# --- Documentation tasks ---
+
+# Serve standalone HTML docs from docs/html
+serve-docs port="8000" host="0.0.0.0":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p docs/html
+  echo "Serving docs/html at http://{{host}}:{{port}}/"
+  python3 -m http.server "{{port}}" --bind "{{host}}" --directory docs/html
 
 # Run pre-commit checks
 pre-commit: fmt lint test

@@ -40,8 +40,18 @@ wrkq agent-info 2>/dev/null || echo "(wrkq info failed or not available, notify 
 
 ### Requirements
 
-- Go 1.21+
+- Go 1.23.2 or newer local toolchain; see `go.mod`
 - SQLite 3.x (bundled via go-sqlite3)
+
+## Agent / sandbox validation
+
+For no-network or constrained environments, run:
+
+```bash
+scripts/agent-check.sh
+```
+
+See [AGENTS.md](AGENTS.md) for details.
 
 ## Quick Start
 
@@ -73,10 +83,12 @@ wrkq set T-00001 --state completed
 
 ## Architecture
 
-The system ships two binaries:
+The system ships four binaries:
 
-- **`wrkq`** - Day-to-day task management, made for agents
+- **`wrkq`** - Day-to-day task management, made for agents and humans
 - **`wrkqadm`** - Administrative operations (database init, migrations, actor management)
+- **`wrkqd`** - Local daemon for shared database access
+- **`wrkf`** - Workflow engine CLI
 
 ## Core Concepts
 

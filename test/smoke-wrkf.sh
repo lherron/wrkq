@@ -9,9 +9,9 @@ DB="$TMPDIR/wrkq.db"
 BIN="$TMPDIR/bin"
 mkdir -p "$BIN"
 
-go build -o "$BIN/wrkq" "$ROOT/cmd/wrkq"
-go build -o "$BIN/wrkqadm" "$ROOT/cmd/wrkqadm"
-go build -o "$BIN/wrkf" "$ROOT/cmd/wrkf"
+go build -tags sqlite_fts5 -o "$BIN/wrkq" "$ROOT/cmd/wrkq"
+go build -tags sqlite_fts5 -o "$BIN/wrkqadm" "$ROOT/cmd/wrkqadm"
+go build -tags sqlite_fts5 -o "$BIN/wrkf" "$ROOT/cmd/wrkf"
 
 cd "$TMPDIR"
 export WRKQ_DB_PATH="$DB"

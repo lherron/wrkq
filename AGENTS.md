@@ -27,6 +27,32 @@ The wrkq/wrkqadm split exists so agents get a focused, safe API while admins ret
 
 If a project lacks `just install`, add it.
 
+## Deterministic local validation
+
+For no-network or sandboxed environments, use:
+
+```bash
+scripts/agent-check.sh
+```
+
+This assumes vendored Go dependencies and disables toolchain/dependency downloads:
+
+- `GOPROXY=off`
+- `GOSUMDB=off`
+- `GOTOOLCHAIN=local`
+- `GOFLAGS=-mod=vendor -p=1`
+- `CGO_CFLAGS=-O0 -g0`
+
+Expected local Go version: see `go.mod`.
+
+Keep `go.mod`, `vendor/`, and `vendor/modules.txt` in sync:
+
+```bash
+go mod tidy
+go mod vendor
+go list -mod=vendor ./... >/dev/null
+```
+
 ## Config precedence
 
 CLI flags → env vars → `./.env.local` → `~/.config/wrkq/config.yaml`.

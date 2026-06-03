@@ -58,6 +58,10 @@ func TestDoctorDatabaseFileChecks(t *testing.T) {
 	})
 
 	t.Run("read-only database reports permission error", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("permission check is not meaningful as root")
+		}
+
 		tmpDir := t.TempDir()
 		dbPath := filepath.Join(tmpDir, "readonly.db")
 
