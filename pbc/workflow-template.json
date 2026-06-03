@@ -1,0 +1,504 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "pbc-progressive-refinement",
+  "version": "2",
+  "kind": "agent_first_workflow",
+  "description": "Progressively refine one-line feedback into a Behavior Note, finalized PBC, and downstream derivation seeds without multiplying product artifacts.",
+  "initial": {
+    "status": "open",
+    "phase": "intake"
+  },
+  "roles": {
+    "agent": {
+      "description": "Normalizes feedback, writes artifacts, runs pressure passes, and records evidence."
+    },
+    "product_owner": {
+      "description": "Answers the single highest-leverage clarification or patch decision when needed."
+    }
+  },
+  "states": [
+    {
+      "status": "open",
+      "phase": "intake"
+    },
+    {
+      "status": "active",
+      "phase": "behavior_note"
+    },
+    {
+      "status": "waiting",
+      "phase": "clarification"
+    },
+    {
+      "status": "active",
+      "phase": "pbc_draft"
+    },
+    {
+      "status": "active",
+      "phase": "pressure"
+    },
+    {
+      "status": "waiting",
+      "phase": "patch_decision"
+    },
+    {
+      "status": "closed",
+      "phase": "finalized"
+    },
+    {
+      "status": "closed",
+      "phase": "disposed"
+    }
+  ],
+  "evidenceKinds": {
+    "intake_metadata": {
+      "description": "Raw one-line feedback plus normalized signal, likely type, and candidate highest-leverage question."
+    },
+    "behavior_note": {
+      "description": "The Behavior Note stored in the wrkq task description."
+    },
+    "pre_interview_analysis": {
+      "description": "Agent analysis of what can be inferred from available context, what remains uncertain, whether clarification is needed, and the single recommended question/default if needed."
+    },
+    "clarification_response": {
+      "description": "The product-owner answer to the single clarification question."
+    },
+    "pbc_draft": {
+      "description": "The draft PBC stored in the wrkq task specification."
+    },
+    "pressure_pass": {
+      "description": "The compact pressure pass verdict, tighten list, and patch."
+    },
+    "patch_decision": {
+      "description": "Accepted, adjusted, rejected, or waived decision on the pressure patch."
+    },
+    "pbc_final": {
+      "description": "The finalized PBC stored in the wrkq task specification."
+    },
+    "disposition_decision": {
+      "description": "Reason this feedback is closed without a finalized PBC."
+    }
+  },
+  "obligationKinds": {
+    "clarification_response": {
+      "description": "Blocking wait for the product owner to answer the one clarification question."
+    },
+    "patch_decision": {
+      "description": "Blocking wait for the product owner to accept, adjust, reject, or waive the pressure patch."
+    }
+  },
+  "transitions": [
+    {
+      "id": "normalize_feedback",
+      "from": {
+        "status": "open",
+        "phase": "intake"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "intake_metadata"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "normalized",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "behavior_note"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ask_clarification",
+      "from": {
+        "status": "active",
+        "phase": "behavior_note"
+      },
+      "by": [
+        "agent"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "behavior_note"
+          }
+        },
+        {
+          "evidence": {
+            "kind": "pre_interview_analysis"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "needs_answer",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "clarification"
+          },
+          "obligations": [
+            {
+              "kind": "clarification_response",
+              "ownerRole": "product_owner",
+              "blocking": true,
+              "reason": "Answer the Behavior Note open question or accept the default recommendation."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "draft_pbc",
+      "from": {
+        "status": "active",
+        "phase": "behavior_note"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "behavior_note"
+          }
+        },
+        {
+          "evidence": {
+            "kind": "pre_interview_analysis"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "drafted",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "pbc_draft"
+          }
+        }
+      ]
+    },
+    {
+      "id": "answer_clarification",
+      "from": {
+        "status": "waiting",
+        "phase": "clarification"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "clarification_response"
+          }
+        },
+        {
+          "obligation": {
+            "kind": "clarification_response",
+            "status": "satisfied"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "answered",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "pbc_draft"
+          }
+        }
+      ]
+    },
+    {
+      "id": "run_pressure_pass",
+      "from": {
+        "status": "active",
+        "phase": "pbc_draft"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "pbc_draft"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "pressure_ready",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "pressure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "finalize_ready_pbc",
+      "from": {
+        "status": "active",
+        "phase": "pressure"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "pressure_pass"
+          }
+        },
+        {
+          "evidence": {
+            "kind": "pbc_final"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "finalized",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "finalized"
+          }
+        }
+      ]
+    },
+    {
+      "id": "request_patch_decision",
+      "from": {
+        "status": "active",
+        "phase": "pressure"
+      },
+      "by": [
+        "agent"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "pressure_pass"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "needs_decision",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "patch_decision"
+          },
+          "obligations": [
+            {
+              "kind": "patch_decision",
+              "ownerRole": "product_owner",
+              "blocking": true,
+              "reason": "Accept, adjust, reject, or waive the pressure-pass patch."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "finalize_with_patch",
+      "from": {
+        "status": "waiting",
+        "phase": "patch_decision"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "patch_decision"
+          }
+        },
+        {
+          "obligation": {
+            "kind": "patch_decision",
+            "status": "satisfied"
+          }
+        },
+        {
+          "evidence": {
+            "kind": "pbc_final"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "finalized",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "finalized"
+          }
+        }
+      ]
+    },
+    {
+      "id": "revise_after_patch_decision",
+      "from": {
+        "status": "waiting",
+        "phase": "patch_decision"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "patch_decision"
+          }
+        },
+        {
+          "obligation": {
+            "kind": "patch_decision",
+            "status": "satisfied"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "revise",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "pbc_draft"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dispose_from_behavior_note",
+      "from": {
+        "status": "active",
+        "phase": "behavior_note"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "disposition_decision"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "disposed",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "disposed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dispose_from_pbc_draft",
+      "from": {
+        "status": "active",
+        "phase": "pbc_draft"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "disposition_decision"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "disposed",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "disposed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dispose_from_pressure",
+      "from": {
+        "status": "active",
+        "phase": "pressure"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "disposition_decision"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "disposed",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "disposed"
+          }
+        }
+      ]
+    }
+  ]
+}

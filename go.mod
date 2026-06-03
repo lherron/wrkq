@@ -1,6 +1,6 @@
 module github.com/lherron/wrkq
 
-go 1.25.4
+go 1.23.2
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6

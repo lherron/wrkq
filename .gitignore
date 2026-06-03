@@ -108,9 +108,6 @@ cli/coverage.html
 go.work
 go.work.sum
 
-# Dependency directories (Go modules)
-vendor/
-
 # Air live reload
 tmp/
 
@@ -283,3 +280,6 @@ secrets.json
 asp_modules/
 /tmp/wrkq-async-run-linkage-smoke-test.db
 .wrkq/wrkq.db
+/tmp/wrkf-scaffold-smoke.db
+/tmp/triage.db
+/tmp/wrkf-recipe-check.db
