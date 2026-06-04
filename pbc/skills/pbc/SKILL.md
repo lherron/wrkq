@@ -21,7 +21,7 @@ Install and attach the workflow template:
 ```bash
 wrkf workflow validate ./pbc/workflow-template.json
 wrkf workflow install ./pbc/workflow-template.json
-wrkf task attach <task> --workflow pbc-progressive-refinement@3
+wrkf task attach <task> --workflow pbc-progressive-refinement@4
 ```
 
 Run transitions with `--role agent` unless the user/product owner is explicitly acting.
@@ -110,7 +110,7 @@ Check only:
 
 Write a compact pressure pass using `./pbc/templates/pressure-pass.md`.
 
-The verdict goes in `--facts` (it routes `finalize_ready_pbc` vs `request_patch_decision`); the tighten list and patch stay in `--data`.
+The verdict goes in `--facts` (it routes `finalize_ready_pbc`, `request_patch_decision`, or `revise_too_vague_pbc`); the tighten list and patch stay in `--data`.
 
 - `--facts`: `{"verdict":"ready"|"needs_patch"|"too_vague"}`.
 - `--data`: tighten list, patch, and any supporting detail.
@@ -133,21 +133,40 @@ If it needs a patch:
 wrkf transition <task> request_patch_decision --role agent
 ```
 
-After the user accepts or adjusts the patch, update `task.specification`, then:
+If it is too vague, revise the PBC and return to draft:
 
 ```bash
-wrkf evidence add <task> --kind patch_decision --ref "user:<source>" --summary "accepted|adjusted|rejected"
+wrkf transition <task> revise_too_vague_pbc --role agent
+```
+
+After the user accepts or adjusts the patch, update `task.specification`, then route to finalization:
+
+```bash
+wrkf evidence add <task> --kind patch_decision --ref "user:<source>" --summary "accepted|adjusted" --facts '{"route":"finalize"}' --data '<json>'
 wrkf obligation satisfy <task> <obligation-id> --evidence <evidence-id>
 wrkf evidence add <task> --kind pbc_final --ref "wrkq:<task>#specification" --summary "Final PBC"
-wrkf transition <task> finalize_with_patch --role agent
+wrkf transition <task> finalize_after_patch_decision --role agent
 wrkq set <task> --state completed
 ```
 
 If the patch is rejected and the PBC needs another pass:
 
 ```bash
+wrkf evidence add <task> --kind patch_decision --ref "user:<source>" --summary "revise" --facts '{"route":"revise"}' --data '<json>'
+wrkf obligation satisfy <task> <obligation-id> --evidence <evidence-id>
 wrkf transition <task> revise_after_patch_decision --role agent
 ```
+
+## Disposition
+
+If the feedback should close without a finalized PBC, record a disposition decision with a routing fact:
+
+```bash
+wrkf evidence add <task> --kind disposition_decision --ref "user:<source>" --summary "wont_fix|duplicate|unclear|out_of_scope" --facts '{"resolution":"wont_fix"}' --data '<json>'
+wrkf transition <task> dispose_from_behavior_note --role agent
+```
+
+Use the matching dispose transition for the current phase: `dispose_from_behavior_note`, `dispose_from_pbc_draft`, or `dispose_from_pressure`.
 
 ## Derivation
 

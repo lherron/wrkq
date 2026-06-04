@@ -1,7 +1,7 @@
 {
   "schemaVersion": "wrkf.workflow-template.v0",
   "id": "pbc-progressive-refinement",
-  "version": "3",
+  "version": "4",
   "kind": "agent_first_workflow",
   "description": "Progressively refine one-line feedback into a Behavior Note, finalized PBC, and downstream derivation seeds without multiplying product artifacts.",
   "initial": {
@@ -97,13 +97,45 @@
       }
     },
     "patch_decision": {
-      "description": "Accepted, adjusted, rejected, or waived decision on the pressure patch."
+      "class": "decision",
+      "description": "Product-owner decision after a pressure pass requests a patch.",
+      "facts": {
+        "required": [
+          "route"
+        ],
+        "properties": {
+          "route": {
+            "type": "string",
+            "enum": [
+              "finalize",
+              "revise"
+            ]
+          }
+        }
+      }
     },
     "pbc_final": {
       "description": "The finalized PBC stored in the wrkq task specification."
     },
     "disposition_decision": {
-      "description": "Reason this feedback is closed without a finalized PBC."
+      "class": "decision",
+      "description": "Reason this feedback is closed without a finalized PBC.",
+      "facts": {
+        "required": [
+          "resolution"
+        ],
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "wont_fix",
+              "duplicate",
+              "unclear",
+              "out_of_scope"
+            ]
+          }
+        }
+      }
     }
   },
   "obligationKinds": {
@@ -373,7 +405,40 @@
       ]
     },
     {
-      "id": "finalize_with_patch",
+      "id": "revise_too_vague_pbc",
+      "from": {
+        "status": "active",
+        "phase": "pressure"
+      },
+      "by": [
+        "agent",
+        "product_owner"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "pressure_pass",
+            "facts": {
+              "verdict": "too_vague"
+            }
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "revise",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "pbc_draft"
+          }
+        }
+      ]
+    },
+    {
+      "id": "finalize_after_patch_decision",
       "from": {
         "status": "waiting",
         "phase": "patch_decision"
@@ -385,7 +450,10 @@
       "requires": [
         {
           "evidence": {
-            "kind": "patch_decision"
+            "kind": "patch_decision",
+            "facts": {
+              "route": "finalize"
+            }
           }
         },
         {
@@ -426,7 +494,10 @@
       "requires": [
         {
           "evidence": {
-            "kind": "patch_decision"
+            "kind": "patch_decision",
+            "facts": {
+              "route": "revise"
+            }
           }
         },
         {
