@@ -214,33 +214,37 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// Output next_cursor to stderr in porcelain mode
-	if commentLsPorcelain && nextCursorStr != "" {
+	sel, err := resolveOutputMode(cmd, cfg, outputShapeList, outputResolveOptions{
+		Allow:      []outputMode{outputModeTable, outputModeHuman, outputModeJSON, outputModeNDJSON, outputModeYAML, outputModeTSV},
+		DefaultTTY: outputModeTable,
+	})
+	if err != nil {
+		return err
+	}
+	if cmd.Flag("json") == nil {
+		switch {
+		case (commentLsJSON && commentLsNDJSON) || (commentLsJSON && commentLsYAML) || (commentLsJSON && commentLsTSV) ||
+			(commentLsNDJSON && commentLsYAML) || (commentLsNDJSON && commentLsTSV) || (commentLsYAML && commentLsTSV):
+			return fmt.Errorf("choose only one output mode")
+		case commentLsJSON:
+			sel = outputSelection{Mode: outputModeJSON, Stable: commentLsPorcelain}
+		case commentLsNDJSON:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: commentLsPorcelain}
+		case commentLsYAML:
+			sel = outputSelection{Mode: outputModeYAML, Stable: commentLsPorcelain}
+		case commentLsTSV:
+			sel = outputSelection{Mode: outputModeTSV, Stable: commentLsPorcelain}
+		case commentLsPorcelain:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: true}
+		default:
+			sel = outputSelection{Mode: outputModeTable}
+		}
+	}
+
+	if sel.Stable && nextCursorStr != "" {
 		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
-	// Output
-	if commentLsJSON {
-		return render.RenderJSON(allComments, false)
-	}
-
-	if commentLsNDJSON {
-		items := make([]interface{}, len(allComments))
-		for i, c := range allComments {
-			items[i] = c
-		}
-		return render.RenderNDJSON(items)
-	}
-
-	if commentLsYAML {
-		// YAML output not yet implemented, fall back to JSON
-		return render.RenderJSON(allComments, false)
-	}
-
-	// Note: TSV output (commentLsTSV) not yet implemented, fall back to table
-	_ = commentLsTSV // silence unused warning until TSV is implemented
-
-	// Table output
 	headers := []string{"ID", "Task", "Actor", "Created", "Body Preview"}
 	var rowsData [][]string
 	for _, comment := range allComments {
@@ -260,8 +264,19 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	switch sel.Mode {
+	case outputModeJSON:
+		return writeJSONOutput(cmd.OutOrStdout(), sel, allComments)
+	case outputModeNDJSON:
+		return writeNDJSONOutput(cmd.OutOrStdout(), allComments)
+	case outputModeYAML:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatYAML}).RenderYAML(allComments)
+	case outputModeTSV:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
+	}
+
 	renderer := render.NewRenderer(cmd.OutOrStdout(), render.Options{
-		Porcelain: commentLsPorcelain,
+		Porcelain: sel.Stable,
 	})
 	return renderer.RenderTable(headers, rowsData)
 }

@@ -2,9 +2,7 @@ package cli
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -389,28 +387,30 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// Output next_cursor to stderr in porcelain mode
-	if lsPorcelain && nextCursorStr != "" {
-		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
+	sel, err := resolveOutputMode(cmd, app.Config, outputShapeList, outputResolveOptions{
+		Allow:      []outputMode{outputModeTable, outputModeHuman, outputModeJSON, outputModeNDJSON, outputModeYAML, outputModeTSV},
+		DefaultTTY: outputModeTable,
+	})
+	if err != nil {
+		return err
+	}
+	if cmd.Flag("json") == nil {
+		switch {
+		case lsJSON && lsNDJSON:
+			return fmt.Errorf("choose only one output mode")
+		case lsJSON:
+			sel = outputSelection{Mode: outputModeJSON, Stable: lsPorcelain}
+		case lsNDJSON:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: lsPorcelain}
+		case lsPorcelain:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: true}
+		default:
+			sel = outputSelection{Mode: outputModeTable}
+		}
 	}
 
-	// Render output
-	if lsJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		if !lsPorcelain {
-			encoder.SetIndent("", "  ")
-		}
-		return encoder.Encode(entries)
-	}
-
-	if lsNDJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		for _, entry := range entries {
-			if err := encoder.Encode(entry); err != nil {
-				return err
-			}
-		}
-		return nil
+	if sel.Stable && nextCursorStr != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
 	if lsOne || lsNul {
@@ -429,7 +429,6 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Table output
 	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind", "Tasks", "CreatedAt", "UpdatedAt"}
 	var rowsData [][]string
 	for _, entry := range entries {
@@ -462,9 +461,20 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	switch sel.Mode {
+	case outputModeJSON:
+		return writeJSONOutput(cmd.OutOrStdout(), sel, entries)
+	case outputModeNDJSON:
+		return writeNDJSONOutput(cmd.OutOrStdout(), entries)
+	case outputModeYAML:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatYAML}).RenderYAML(entries)
+	case outputModeTSV:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
+	}
+
 	r := render.NewRenderer(cmd.OutOrStdout(), render.Options{
 		Format:    render.FormatTable,
-		Porcelain: lsPorcelain,
+		Porcelain: sel.Stable,
 	})
 
 	return r.RenderTable(headers, rowsData)

@@ -41,6 +41,25 @@ func init() {
 
 func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
+	sel, err := resolveOutputMode(cmd, app.Config, outputShapeContent, outputResolveOptions{
+		Allow:      []outputMode{outputModeRaw, outputModeJSON, outputModeNDJSON},
+		DefaultTTY: outputModeRaw,
+	})
+	if err != nil {
+		return err
+	}
+	if cmd.Flag("json") == nil {
+		switch {
+		case catJSON && catNDJSON:
+			return fmt.Errorf("choose only one output mode")
+		case catJSON:
+			sel = outputSelection{Mode: outputModeJSON, Stable: catPorcelain}
+		case catNDJSON:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: catPorcelain}
+		case catPorcelain:
+			sel = outputSelection{Mode: outputModeRaw, Stable: true}
+		}
+	}
 
 	// Define structs for JSON output
 	type Comment struct {
@@ -341,7 +360,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		// For JSON output, collect tasks
-		if catJSON || catNDJSON {
+		if sel.Mode == outputModeJSON || sel.Mode == outputModeNDJSON {
 			tasks = append(tasks, task)
 		} else {
 			// Original markdown output
@@ -469,22 +488,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Output JSON if requested
-	if catJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		if !catPorcelain {
-			encoder.SetIndent("", "  ")
-		}
-		return encoder.Encode(tasks)
+	if sel.Mode == outputModeJSON {
+		return writeJSONOutput(cmd.OutOrStdout(), sel, tasks)
 	}
 
-	if catNDJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		for _, task := range tasks {
-			if err := encoder.Encode(task); err != nil {
-				return err
-			}
-		}
-		return nil
+	if sel.Mode == outputModeNDJSON {
+		return writeNDJSONOutput(cmd.OutOrStdout(), tasks)
 	}
 
 	return nil

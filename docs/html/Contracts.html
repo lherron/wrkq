@@ -5,728 +5,822 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>wrkq + wrkf Public Interface Contracts</title>
     <style>
-      :root {
-        --paper: #fafaf7;
-        --ink: #151515;
-        --muted: #5f6567;
-        --quiet: #8b9190;
-        --line: #d6dbd9;
-        --line-strong: #aeb8b6;
-        --panel: #ffffff;
-        --wrkq: #006f73;
-        --wrkq-soft: #ddf4f2;
-        --wrkf: #8d3f7a;
-        --wrkf-soft: #f3e8f1;
-        --ops: #9a6400;
-        --ops-soft: #fff0c7;
-        --audit: #445b96;
-        --audit-soft: #e9edff;
-        --risk: #ad3127;
-        --risk-soft: #ffe7e3;
-        --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-        --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", Verdana, sans-serif;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html {
-        scroll-behavior: smooth;
-      }
-
-      body {
-        margin: 0;
-        background:
-          linear-gradient(90deg, rgba(21, 21, 21, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
-          linear-gradient(0deg, rgba(21, 21, 21, 0.026) 1px, transparent 1px) 0 0 / 28px 28px,
-          var(--paper);
-        color: var(--ink);
-        font-family: var(--sans);
-        font-size: 16px;
-        line-height: 1.55;
-      }
-
-      a {
-        color: var(--wrkq);
-        text-decoration-thickness: 1px;
-        text-underline-offset: 3px;
-      }
-
-      code,
-      pre {
-        font-family: var(--mono);
-      }
-
-      .page {
-        display: grid;
-        grid-template-columns: 292px minmax(0, 1fr);
-        min-height: 100vh;
-      }
-
-      .sidebar {
-        position: sticky;
-        top: 0;
-        align-self: start;
-        height: 100vh;
-        overflow: auto;
-        border-right: 1px solid var(--line);
-        background: rgba(250, 250, 247, 0.94);
-        backdrop-filter: blur(14px);
-        padding: 28px 20px;
-      }
-
-      .brand {
-        display: grid;
-        gap: 8px;
-        margin-bottom: 26px;
-      }
-
-      .brand-kicker {
-        color: var(--wrkq);
-        font-family: var(--mono);
-        font-size: 12px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .brand-title {
-        font-family: var(--serif);
-        font-size: 30px;
-        font-weight: 700;
-        line-height: 1;
-      }
-
-      .brand-subtitle,
-      .sidebar-note,
-      .section-intro,
-      .minor,
-      .source-note {
-        color: var(--muted);
-      }
-
-      .brand-subtitle,
-      .sidebar-note {
-        font-size: 13px;
-      }
-
-      .nav {
-        display: grid;
-        gap: 7px;
-        margin: 0 0 28px;
-      }
-
-      .nav a {
-        border: 1px solid transparent;
-        border-radius: 8px;
-        color: var(--ink);
-        display: block;
-        font-size: 13px;
-        font-weight: 700;
-        line-height: 1.2;
-        padding: 10px 11px;
-        text-decoration: none;
-      }
-
-      .nav a:hover,
-      .nav a:focus {
-        border-color: var(--line-strong);
-        background: var(--panel);
-      }
-
-      .sidebar-note {
-        border-top: 1px solid var(--line);
-        padding-top: 18px;
-      }
-
-      main {
-        min-width: 0;
-      }
-
-      .content {
-        width: min(1220px, calc(100vw - 292px));
-        max-width: 100%;
-        padding: 42px 48px 76px;
-      }
-
-      .hero {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(280px, 0.48fr);
-        gap: 28px;
-        align-items: stretch;
-        margin-bottom: 28px;
-      }
-
-      .hero-copy {
-        border-top: 10px solid var(--wrkq);
-        padding-top: 26px;
-      }
-
-      .eyebrow {
-        color: var(--muted);
-        font-family: var(--mono);
-        font-size: 12px;
-        letter-spacing: 0.09em;
-        margin-bottom: 12px;
-        text-transform: uppercase;
-      }
-
-      h1,
-      h2,
-      h3 {
-        letter-spacing: 0;
-        overflow-wrap: anywhere;
-      }
-
-      h1 {
-        font-family: var(--serif);
-        font-size: clamp(42px, 5.6vw, 68px);
-        line-height: 0.95;
-        margin: 0 0 18px;
-        max-width: 900px;
-      }
-
-      h2 {
-        align-items: end;
-        border-top: 2px solid var(--ink);
-        display: flex;
-        font-family: var(--serif);
-        font-size: clamp(30px, 4vw, 45px);
-        gap: 14px;
-        line-height: 1;
-        margin: 44px 0 20px;
-        padding-top: 18px;
-      }
-
-      h2 .section-num {
-        color: var(--quiet);
-        font-family: var(--mono);
-        font-size: 12px;
-        font-weight: 500;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      h3 {
-        font-family: var(--serif);
-        font-size: 23px;
-        line-height: 1.12;
-        margin: 0 0 10px;
-      }
-
-      p {
-        margin: 0 0 14px;
-      }
-
-      .lead {
-        color: #323637;
-        font-family: var(--serif);
-        font-size: clamp(21px, 2.4vw, 28px);
-        line-height: 1.2;
-        max-width: 860px;
-      }
-
-      .hero-board {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-top: 10px solid var(--wrkf);
-        border-radius: 8px;
-        display: grid;
-        gap: 0;
-        overflow: hidden;
-      }
-
-      .route-card {
-        padding: 19px 20px;
-      }
-
-      .route-card + .route-card {
-        border-top: 1px solid var(--line);
-      }
-
-      .route-label {
-        color: var(--muted);
-        font-family: var(--mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        margin-bottom: 8px;
-        text-transform: uppercase;
-      }
-
-      .route-title {
-        font-family: var(--serif);
-        font-size: 20px;
-        font-weight: 700;
-        line-height: 1.08;
-        margin-bottom: 7px;
-      }
-
-      .route-copy {
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.45;
-      }
-
-      .inline-code {
-        background: rgba(0, 0, 0, 0.055);
-        border: 1px solid rgba(0, 0, 0, 0.06);
-        border-radius: 4px;
-        font-family: var(--mono);
-        font-size: 0.92em;
-        overflow-wrap: anywhere;
-        padding: 0.04em 0.3em;
-      }
-
-      .grid {
-        display: grid;
-        gap: 16px;
-      }
-
-      .grid.two {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .grid.three {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .panel,
-      .callout {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        overflow: auto;
-        padding: 20px;
-      }
-
-      .panel {
-        border-top: 10px solid var(--line-strong);
-        box-shadow: 0 8px 22px rgba(27, 31, 33, 0.045);
-      }
-
-      .callout {
-        border-left: 8px solid var(--wrkq);
-        margin: 22px 0;
-      }
-
-      .callout strong {
-        display: block;
-        margin-bottom: 5px;
-      }
-
-      .badge {
-        align-items: center;
-        border-radius: 999px;
-        display: inline-flex;
-        font-family: var(--mono);
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.05em;
-        line-height: 1;
-        padding: 7px 9px;
-        text-transform: uppercase;
-      }
-
-      .badge.wrkq {
-        background: var(--wrkq-soft);
-        color: var(--wrkq);
-      }
-
-      .badge.wrkf {
-        background: var(--wrkf-soft);
-        color: var(--wrkf);
-      }
-
-      .badge.ops {
-        background: var(--ops-soft);
-        color: var(--ops);
-      }
-
-      .badge.audit {
-        background: var(--audit-soft);
-        color: var(--audit);
-      }
-
-      .method-ledger {
-        border-top: 1px solid var(--line);
-        display: grid;
-      }
-
-      .method-row {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: minmax(170px, 0.7fr) minmax(190px, 0.8fr) minmax(190px, 0.9fr) minmax(240px, 1.2fr);
-        min-width: 0;
-        padding: 15px 18px;
-      }
-
-      .method-row > * {
-        min-width: 0;
-      }
-
-      .method-row.three-col {
-        grid-template-columns: minmax(190px, 0.7fr) minmax(260px, 0.9fr) minmax(0, 1.25fr);
-      }
-
-      .method-row + .method-row {
-        border-top: 1px solid var(--line);
-      }
-
-      .method-row:hover {
-        background: rgba(var(--contract-accent-rgb), 0.045);
-      }
-
-      .method-row.header {
-        background: linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.075), transparent 52%);
-        color: var(--muted);
-        font-family: var(--mono);
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .method-name {
-        color: var(--ink);
-        font-family: var(--mono);
-        font-weight: 800;
-        overflow-wrap: anywhere;
-      }
-
-      .method-copy {
-        color: #333839;
-        min-width: 0;
-        overflow-wrap: anywhere;
-        word-break: break-word;
-      }
-
-      .contract-pair {
-        display: grid;
-        gap: 6px;
-      }
-
-      .pair-line {
-        display: grid;
-        gap: 8px;
-        grid-template-columns: 62px minmax(0, 1fr);
-      }
-
-      .pair-label {
-        color: var(--muted);
-        font-family: var(--mono);
-        font-size: 10px;
-        font-weight: 800;
-        letter-spacing: 0.07em;
-        padding-top: 2px;
-        text-transform: uppercase;
-      }
-
-      .contract-object {
-        --contract-accent: var(--wrkq);
-        --contract-accent-rgb: 0, 111, 115;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        border-top: 10px solid var(--contract-accent);
-        box-shadow: 0 8px 22px rgba(27, 31, 33, 0.055);
-        margin-top: 28px;
-        min-width: 0;
-        overflow: hidden;
-      }
-
-      .contract-object.wrkq {
-        --contract-accent: var(--wrkq);
-        --contract-accent-rgb: 0, 111, 115;
-      }
-
-      .contract-object.wrkf {
-        --contract-accent: var(--wrkf);
-        --contract-accent-rgb: 141, 63, 122;
-      }
-
-      .contract-object.ops {
-        --contract-accent: var(--ops);
-        --contract-accent-rgb: 154, 100, 0;
-      }
-
-      .contract-object.audit {
-        --contract-accent: var(--audit);
-        --contract-accent-rgb: 68, 91, 150;
-      }
-
-      .contract-object-head {
-        align-items: start;
-        background:
-          linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.055), transparent 38%),
-          linear-gradient(180deg, #ffffff 0%, #fbfcfa 100%);
-        display: grid;
-        gap: 28px;
-        grid-template-columns: minmax(0, 0.72fr) minmax(190px, 0.28fr);
-        min-height: 128px;
-        padding: 30px 28px 28px;
-      }
-
-      .contract-object-head > div:first-child {
-        max-width: 760px;
-      }
-
-      .contract-object-head .badge {
-        margin-bottom: 14px;
-      }
-
-      .contract-object-head p {
-        color: var(--muted);
-        line-height: 1.55;
-        margin: 0;
-        max-width: 760px;
-      }
-
-      .object-chip-row {
-        align-content: start;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-end;
-        padding-top: 2px;
-      }
-
-      .code-panel {
-        background:
-          linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.075) 0 54px, transparent 54px),
-          linear-gradient(180deg, #fffdf7 0%, #f8fbfa 100%);
-        border-top: 1px solid var(--line);
-        color: #18201f;
-        overflow: visible;
-        padding: 0;
-      }
-
-      pre {
-        margin: 0;
-        min-width: 0;
-        overflow: visible;
-        padding: 0;
-        white-space: normal;
-      }
-
-      pre code {
-        display: block;
-        font-size: 13px;
-        line-height: 1.52;
-      }
-
-      .schema-line {
-        display: grid;
-        gap: 12px;
-        grid-template-columns: 42px minmax(0, 1fr);
-        min-width: 0;
-        padding: 2px 18px 2px 0;
-      }
-
-      .schema-line:hover {
-        background: rgba(var(--contract-accent-rgb), 0.06);
-      }
-
-      .schema-line-no {
-        color: #8c9a98;
-        font-family: var(--mono);
-        font-size: 11px;
-        padding-top: 1px;
-        text-align: right;
-        user-select: none;
-      }
-
-      .schema-code {
-        display: grid;
-        gap: 18px;
-        grid-template-columns: minmax(330px, 0.92fr) minmax(260px, 1.08fr);
-        min-width: 0;
-      }
-
-      .schema-code.no-comment {
-        grid-template-columns: minmax(0, 1fr);
-      }
-
-      .schema-code-text {
-        min-width: 0;
-        overflow-wrap: anywhere;
-        white-space: pre-wrap;
-      }
-
-      .schema-comment {
-        border-left: 2px solid rgba(0, 111, 115, 0.18);
-        color: #5f6d68;
-        font-family: var(--sans);
-        font-size: 13px;
-        font-style: italic;
-        line-height: 1.45;
-        min-width: 0;
-        padding-left: 12px;
-        white-space: normal;
-      }
-
-      .grid.two .schema-code {
-        gap: 5px;
-        grid-template-columns: 1fr;
-      }
-
-      .grid.two .schema-comment {
-        margin-left: 1.5ch;
-      }
-
-      .schema-comment.block-comment {
-        border-left-color: rgba(173, 49, 39, 0.72);
-        color: #7e2d28;
-        font-style: normal;
-      }
-
-      .comment-marker {
-        color: #9bacaa;
-        font-family: var(--mono);
-        font-style: normal;
-        font-weight: 800;
-        margin-right: 8px;
-      }
-
-      .syntax-field {
-        color: var(--wrkq);
-        font-weight: 800;
-      }
-
-      .syntax-keyword {
-        color: var(--risk);
-        font-weight: 800;
-      }
-
-      .syntax-string {
-        color: #8b5d00;
-        font-weight: 700;
-      }
-
-      .contract-legend {
-        align-items: center;
-        border-top: 1px solid var(--line);
-        color: var(--muted);
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px 14px;
-        padding: 12px 18px;
-      }
-
-      .legend-item {
-        align-items: center;
-        display: inline-flex;
-        font-family: var(--mono);
-        font-size: 11px;
-        gap: 6px;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .legend-swatch {
-        border-radius: 999px;
-        display: inline-block;
-        height: 9px;
-        width: 9px;
-      }
-
-      .legend-swatch.field {
-        background: var(--wrkq);
-      }
-
-      .legend-swatch.comment {
-        background: #7f918d;
-      }
-
-      .legend-swatch.type {
-        background: var(--risk);
-      }
-
-      .legend-swatch.literal {
-        background: var(--ops);
-      }
-
-      .source-note {
-        border-top: 1px solid var(--line);
-        font-size: 12px;
-        padding: 12px 18px;
-      }
-
-      .footer {
-        border-top: 1px solid var(--line);
-        color: var(--muted);
-        font-size: 12px;
-        margin-top: 48px;
-        padding-top: 18px;
-      }
-
-      @media (max-width: 900px) {
-        .page {
-          display: block;
-        }
-
-        .sidebar {
-          height: auto;
-          position: relative;
-        }
-
-        .content {
-          width: 100%;
-          padding: 28px 18px 56px;
-        }
-
-        .hero,
-        .grid.two,
-        .grid.three,
-        .contract-object-head {
-          grid-template-columns: 1fr;
-        }
-
-        .schema-line {
-          gap: 9px;
-          grid-template-columns: 32px minmax(0, 1fr);
-          padding-right: 12px;
-        }
-
-        .schema-code {
-          gap: 5px;
-          grid-template-columns: 1fr;
-        }
-
-        .schema-comment {
-          border-left: 2px solid rgba(0, 111, 115, 0.2);
-          margin-left: 1.5ch;
-          padding-left: 10px;
-        }
-
-        .method-row,
-        .method-row.three-col {
-          grid-template-columns: 1fr;
-          gap: 5px;
-          padding: 13px 16px;
-        }
-
-        .pair-line {
-          grid-template-columns: 1fr;
-          gap: 1px;
-        }
-
-        .method-row.header {
-          display: none;
-        }
-
-        .object-chip-row {
-          justify-content: flex-start;
-        }
-      }
+:root {
+  --paper: #fafaf7;
+  --ink: #151515;
+  --muted: #5f6567;
+  --quiet: #8b9190;
+  --line: #d6dbd9;
+  --line-strong: #aeb8b6;
+  --panel: #ffffff;
+  --domain-a: #b1281e;
+  --domain-a-soft: #ffe8e4;
+  --domain-b: #007274;
+  --domain-b-soft: #dff5f2;
+  --domain-c: #a06d00;
+  --domain-c-soft: #fff2c9;
+  --domain-d: #5b5f97;
+  --domain-d-soft: #ededff;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(21, 21, 21, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(0deg, rgba(21, 21, 21, 0.026) 1px, transparent 1px) 0 0 / 28px 28px,
+    var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+a {
+  color: var(--domain-b);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
+
+.page {
+  display: grid;
+  grid-template-columns: 292px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: rgba(250, 250, 247, 0.94);
+  backdrop-filter: blur(14px);
+  padding: 28px 20px;
+}
+
+.brand {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 26px;
+}
+
+.brand-kicker {
+  color: var(--domain-a);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brand-title {
+  font-family: var(--serif);
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.brand-subtitle,
+.sidebar-note,
+.section-intro,
+.minor,
+.source-note {
+  color: var(--muted);
+}
+
+.brand-subtitle,
+.sidebar-note {
+  font-size: 13px;
+}
+
+.nav {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 28px;
+}
+
+.nav a {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 10px 11px;
+  text-decoration: none;
+}
+
+.nav a:hover,
+.nav a:focus {
+  border-color: var(--line-strong);
+  background: var(--panel);
+}
+
+.sidebar-note {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+main {
+  min-width: 0;
+}
+
+.content {
+  width: min(1220px, calc(100vw - 292px));
+  max-width: 100%;
+  padding: 42px 48px 76px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.48fr);
+  gap: 28px;
+  align-items: stretch;
+  margin-bottom: 28px;
+}
+
+.hero-copy {
+  border-top: 10px solid var(--domain-a);
+  padding-top: 26px;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: 0;
+}
+
+h1 {
+  font-family: var(--serif);
+  font-size: clamp(42px, 5.6vw, 68px);
+  line-height: 0.95;
+  margin: 0 0 18px;
+  max-width: 900px;
+}
+
+h2 {
+  align-items: end;
+  border-top: 2px solid var(--ink);
+  display: flex;
+  font-family: var(--serif);
+  font-size: clamp(30px, 4vw, 45px);
+  gap: 14px;
+  line-height: 1;
+  margin: 44px 0 20px;
+  padding-top: 18px;
+}
+
+h2 .section-num {
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h3 {
+  font-family: var(--serif);
+  font-size: 23px;
+  line-height: 1.12;
+  margin: 0 0 10px;
+}
+
+p {
+  margin: 0 0 14px;
+}
+
+.lead {
+  color: #323637;
+  font-family: var(--serif);
+  font-size: clamp(21px, 2.4vw, 28px);
+  line-height: 1.2;
+  max-width: 860px;
+}
+
+.hero-board,
+.panel,
+.callout,
+.contract-object {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hero-board {
+  border-top: 10px solid var(--domain-b);
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.route-card {
+  padding: 19px 20px;
+}
+
+.route-card + .route-card {
+  border-top: 1px solid var(--line);
+}
+
+.route-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.route-title {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.08;
+  margin-bottom: 7px;
+}
+
+.route-copy {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inline-code {
+  background: rgba(0, 0, 0, 0.055);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  padding: 0.04em 0.3em;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.panel,
+.callout {
+  overflow: auto;
+  padding: 20px;
+}
+
+.panel {
+  border-top: 10px solid var(--line-strong);
+  box-shadow: 0 8px 22px rgba(27, 31, 33, 0.045);
+}
+
+.callout {
+  border-left: 8px solid var(--domain-a);
+  margin: 22px 0;
+}
+
+.callout strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.badge {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 7px 9px;
+  text-transform: uppercase;
+}
+
+.badge.domain-a,
+.badge.compiler,
+.badge.api {
+  background: var(--domain-a-soft);
+  color: var(--domain-a);
+}
+
+.badge.domain-b,
+.badge.control,
+.badge.client {
+  background: var(--domain-b-soft);
+  color: var(--domain-b);
+}
+
+.badge.domain-c,
+.badge.broker,
+.badge.server {
+  background: var(--domain-c-soft);
+  color: var(--domain-c);
+}
+
+.badge.domain-d,
+.badge.runtime,
+.badge.event {
+  background: var(--domain-d-soft);
+  color: var(--domain-d);
+}
+
+.method-ledger {
+  border-top: 1px solid var(--line);
+  display: grid;
+}
+
+.method-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(170px, 0.7fr) minmax(190px, 0.8fr) minmax(0, 1.2fr);
+  min-width: 0;
+  padding: 15px 18px;
+}
+
+.method-row.two-col {
+  grid-template-columns: minmax(190px, 0.7fr) minmax(0, 1.3fr);
+}
+
+.method-row.four-col {
+  grid-template-columns: minmax(160px, 0.7fr) minmax(170px, 0.72fr) minmax(170px, 0.72fr) minmax(0, 1.25fr);
+}
+
+.method-row > * {
+  min-width: 0;
+}
+
+.method-row + .method-row {
+  border-top: 1px solid var(--line);
+}
+
+.method-row:hover {
+  background: rgba(var(--contract-accent-rgb), 0.045);
+}
+
+.method-row.header {
+  background: linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.075), transparent 52%);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.method-name {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.method-copy {
+  color: #333839;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.contract-pair {
+  display: grid;
+  gap: 6px;
+}
+
+.pair-line {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+.pair-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  padding-top: 2px;
+  text-transform: uppercase;
+}
+
+.contract-object {
+  --contract-accent: var(--domain-b);
+  --contract-accent-rgb: 0, 114, 116;
+  box-shadow: 0 8px 22px rgba(27, 31, 33, 0.055);
+  margin-top: 28px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.contract-object.domain-a,
+.contract-object.compiler,
+.contract-object.api {
+  --contract-accent: var(--domain-a);
+  --contract-accent-rgb: 177, 40, 30;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.domain-b,
+.contract-object.control,
+.contract-object.client {
+  --contract-accent: var(--domain-b);
+  --contract-accent-rgb: 0, 114, 116;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.domain-c,
+.contract-object.broker,
+.contract-object.server {
+  --contract-accent: var(--domain-c);
+  --contract-accent-rgb: 160, 109, 0;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.domain-d,
+.contract-object.runtime,
+.contract-object.event {
+  --contract-accent: var(--domain-d);
+  --contract-accent-rgb: 91, 95, 151;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object-head {
+  align-items: start;
+  background:
+    linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.055), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #fbfcfa 100%);
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(0, 0.72fr) minmax(190px, 0.28fr);
+  min-height: 128px;
+  padding: 30px 28px 28px;
+}
+
+.contract-object-head > div:first-child {
+  max-width: 760px;
+}
+
+.contract-object-head .badge {
+  margin-bottom: 14px;
+}
+
+.contract-object-head p {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 760px;
+}
+
+.object-chip-row {
+  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.code-panel {
+  background:
+    linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.075) 0 54px, transparent 54px),
+    linear-gradient(180deg, #fffdf7 0%, #f8fbfa 100%);
+  border-top: 1px solid var(--line);
+  color: #18201f;
+  overflow: visible;
+  padding: 0;
+}
+
+.contract-object .code-panel pre {
+  font-size: 13px;
+  line-height: 1.52;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
+  white-space: normal;
+}
+
+.contract-object .code-panel code {
+  display: block;
+}
+
+.schema-line {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-width: 0;
+  padding: 2px 18px 2px 0;
+}
+
+.schema-line:hover {
+  background: rgba(var(--contract-accent-rgb), 0.06);
+}
+
+.schema-line-no {
+  color: #8c9a98;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding-top: 1px;
+  text-align: right;
+  user-select: none;
+}
+
+.schema-code {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(330px, 0.92fr) minmax(260px, 1.08fr);
+  min-width: 0;
+}
+
+.schema-code.no-comment {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.schema-code-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.schema-code.has-comment .schema-code-text {
+  padding-right: 4px;
+}
+
+.schema-comment {
+  border-left: 2px solid rgba(0, 114, 116, 0.18);
+  color: #5f6d68;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  min-width: 0;
+  padding-left: 12px;
+  white-space: normal;
+}
+
+.schema-comment.block-comment {
+  border-left-color: rgba(177, 40, 30, 0.72);
+  color: #7e2d28;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.comment-marker {
+  color: #9bacaa;
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 800;
+  margin-right: 8px;
+}
+
+.syntax-field {
+  color: var(--domain-b);
+  font-weight: 800;
+}
+
+.syntax-keyword {
+  color: var(--domain-a);
+  font-weight: 800;
+}
+
+.syntax-string {
+  color: #8b5d00;
+  font-weight: 700;
+}
+
+.syntax-comment {
+  color: #5f6d68;
+}
+
+.contract-legend {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 18px;
+}
+
+.legend-item {
+  align-items: center;
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 11px;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 9px;
+  width: 9px;
+}
+
+.legend-swatch.field {
+  background: var(--domain-b);
+}
+
+.legend-swatch.comment {
+  background: #7f918d;
+}
+
+.legend-swatch.type {
+  background: var(--domain-a);
+}
+
+.legend-swatch.literal {
+  background: var(--domain-c);
+}
+
+.source-note {
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  padding: 12px 18px;
+}
+
+.footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 48px;
+  padding-top: 18px;
+}
+
+@media (max-width: 900px) {
+  .page {
+    display: block;
+  }
+
+  .sidebar {
+    height: auto;
+    position: relative;
+  }
+
+  .content {
+    width: 100%;
+    padding: 28px 18px 56px;
+  }
+
+  .hero,
+  .grid.two,
+  .grid.three,
+  .contract-object-head {
+    grid-template-columns: 1fr;
+  }
+
+  .schema-line {
+    gap: 9px;
+    grid-template-columns: 32px minmax(0, 1fr);
+    padding-right: 12px;
+  }
+
+  .schema-code {
+    gap: 5px;
+    grid-template-columns: 1fr;
+  }
+
+  .schema-comment {
+    border-left: 2px solid rgba(0, 114, 116, 0.2);
+    margin-left: 1.5ch;
+    padding-left: 10px;
+  }
+
+  .method-row,
+  .method-row.two-col,
+  .method-row.four-col {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 13px 16px;
+  }
+
+  .pair-line {
+    grid-template-columns: 1fr;
+    gap: 1px;
+  }
+
+  .method-row.header {
+    display: none;
+  }
+
+  .object-chip-row {
+    justify-content: flex-start;
+  }
+}
+
+
+/* wrkq/wrkf project aliases layered over the dto-contract-html visual system. */
+:root {
+  --wrkq: var(--domain-b);
+  --wrkq-soft: var(--domain-b-soft);
+  --wrkf: var(--domain-d);
+  --wrkf-soft: var(--domain-d-soft);
+  --ops: var(--domain-c);
+  --ops-soft: var(--domain-c-soft);
+  --audit: var(--domain-a);
+  --audit-soft: var(--domain-a-soft);
+}
+
+.brand-kicker,
+a {
+  color: var(--wrkq);
+}
+
+.hero-copy {
+  border-top-color: var(--wrkq);
+}
+
+.badge.wrkq { background: var(--wrkq-soft); color: var(--wrkq); }
+.badge.wrkf { background: var(--wrkf-soft); color: var(--wrkf); }
+.badge.ops { background: var(--ops-soft); color: var(--ops); }
+.badge.audit { background: var(--audit-soft); color: var(--audit); }
+
+.contract-object.wrkq {
+  --contract-accent: var(--wrkq);
+  --contract-accent-rgb: 0, 114, 116;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.wrkf {
+  --contract-accent: var(--wrkf);
+  --contract-accent-rgb: 91, 95, 151;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.ops {
+  --contract-accent: var(--ops);
+  --contract-accent-rgb: 160, 109, 0;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.audit {
+  --contract-accent: var(--audit);
+  --contract-accent-rgb: 177, 40, 30;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.method-row.three-col {
+  grid-template-columns: minmax(190px, 0.75fr) minmax(260px, 0.9fr) minmax(0, 1.35fr);
+}
+
+h1,
+h2,
+h3,
+.method-name,
+.inline-code,
+.schema-code-text,
+.schema-comment {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .method-row.three-col {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 13px 16px;
+  }
+}
+
     </style>
   </head>
   <body>
     <div class="page">
-      <aside class="sidebar" aria-label="wrkq and wrkf contract navigation">
+      <aside class="sidebar" aria-label="Document navigation">
         <div class="brand">
-          <div class="brand-kicker">Standalone contract</div>
-          <div class="brand-title">wrkq + wrkf DTOs</div>
+          <div class="brand-kicker">Contract</div>
+          <div class="brand-title">wrkq + wrkf</div>
           <div class="brand-subtitle">Public CLI JSON surfaces and workflow engine records</div>
         </div>
         <nav class="nav" aria-label="Page sections">
@@ -740,9 +834,7 @@
           <a href="#wrkf-runtime-dtos">wrkf Runtime DTOs</a>
           <a href="#source-map">Source Map</a>
         </nav>
-        <div class="sidebar-note">
-          DTO catalog for stable machine-facing JSON outputs. Human markdown, porcelain text, and interactive editing formats are intentionally summarized rather than typed as JSON contracts.
-        </div>
+        <p class="sidebar-note">DTO catalog for stable machine-facing JSON outputs. Human markdown, porcelain text, and interactive editing formats are summarized rather than typed as JSON contracts.</p>
       </aside>
 
       <main>
@@ -751,9 +843,7 @@
             <div class="hero-copy">
               <div class="eyebrow">wrkq task plane -> wrkf workflow plane</div>
               <h1 id="page-title">Public contract shapes for tasks, handoffs, bundles, and workflow routing.</h1>
-              <p class="lead">
-                <span class="inline-code">wrkq</span> owns project/task collaboration records. <span class="inline-code">wrkf</span> owns workflow templates, instances, routing evidence, checks, effects, obligations, and next-action suggestions. Both expose stable machine surfaces through JSON-oriented CLI output.
-              </p>
+              <p class="lead"><span class="inline-code">wrkq</span> owns project/task collaboration records. <span class="inline-code">wrkf</span> owns workflow templates, instances, routing evidence, checks, effects, obligations, and next-action suggestions.</p>
             </div>
             <div class="hero-board" aria-label="Interface boundary summary">
               <div class="route-card">
@@ -769,17 +859,14 @@
               <div class="route-card">
                 <div class="route-label">Compatibility rule</div>
                 <div class="route-title">DTO fields are additive by default</div>
-                <div class="route-copy">Consumers should tolerate unknown fields and rely on IDs, etags, revisions, and context hashes for concurrency-sensitive operations.</div>
+                <div class="route-copy">Consumers should tolerate unknown fields and use ids, etags, revisions, and context hashes for concurrency-sensitive operations.</div>
               </div>
             </div>
           </section>
 
           <section id="surface-map" aria-labelledby="surface-map-title">
             <h2 id="surface-map-title"><span class="section-num">01</span> Surface Map</h2>
-            <p class="section-intro">
-              The public machine contract is split by binary and responsibility. <span class="inline-code">wrkq</span> is the safe collaboration surface for agents and humans. <span class="inline-code">wrkf</span> is the workflow state machine layered over wrkq tasks.
-            </p>
-
+            <p class="section-intro">The public machine contract is split by binary and responsibility. <span class="inline-code">wrkq</span> is the safe collaboration surface for agents and humans. <span class="inline-code">wrkf</span> is the workflow state machine layered over wrkq tasks.</p>
             <div class="grid three">
               <article class="panel">
                 <span class="badge wrkq">wrkq</span>
@@ -789,15 +876,14 @@
               <article class="panel">
                 <span class="badge wrkf">wrkf</span>
                 <h3>Workflow records</h3>
-                <p class="minor">Template validation/install, task attachment, state inspection, transition, checks, evidence, effects, obligations, and next actions.</p>
+                <p class="minor">Template validation/install, task attachment, state inspection, transitions, checks, evidence, effects, obligations, and next actions.</p>
               </article>
               <article class="panel">
                 <span class="badge ops">Format</span>
                 <h3>DTO notation</h3>
-                <p class="minor">Types below use TypeScript-like DTO syntax over the actual JSON field names emitted by the CLI and current Go structs.</p>
+                <p class="minor">Types use TypeScript-like DTO syntax over the actual JSON field names emitted by the CLI and current Go structs.</p>
               </article>
             </div>
-
             <div class="callout">
               <strong>Stability boundary</strong>
               Public consumers should prefer <span class="inline-code">--json</span>, <span class="inline-code">--ndjson</span>, <span class="inline-code">--tsv</span>, <span class="inline-code">--columns</span>, and <span class="inline-code">--porcelain</span> over parsing human tables or markdown bodies.
@@ -806,10 +892,8 @@
 
           <section id="wrkq-commands" aria-labelledby="wrkq-commands-title">
             <h2 id="wrkq-commands-title"><span class="section-num">02</span> wrkq Command Surface</h2>
-            <p class="section-intro">
-              The wrkq CLI exposes resource and collaboration operations. Most commands support structured output; mutating commands require actor attribution and support optimistic concurrency where the target has an etag.
-            </p>
-
+            <p class="section-intro">The wrkq CLI exposes resource and collaboration operations. Most commands support structured output; mutating commands require actor attribution and support optimistic concurrency where the target has an etag.</p>
+            
             <article class="contract-object wrkq">
               <div class="contract-object-head">
                 <div>
@@ -818,9 +902,7 @@
                   <p>Command families grouped by their public DTO surface. Human-friendly aliases are not exhaustive here; the contract is the resource shape returned by structured output.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkq">--json</span>
-                  <span class="badge ops">--ndjson</span>
-                  <span class="badge audit">etag</span>
+                  <span class="badge wrkq">--json</span><span class="badge ops">--ndjson</span><span class="badge audit">etag</span>
                 </div>
               </div>
               <div class="method-ledger">
@@ -828,41 +910,34 @@
                   <span>Command family</span>
                   <span>DTOs</span>
                   <span>Purpose</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">ls, tree, find, cat, stat</span>
                   <span class="method-copy">TaskDTO, ContainerDTO, CommentDTO</span>
                   <span class="method-copy">Discover and read task/container resources. <span class="inline-code">cat --json</span> is the richest task read shape.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">touch, set, mv, rm, restore</span>
                   <span class="method-copy">TaskDTO, ContainerDTO</span>
-                  <span class="method-copy">Create, update, move, archive/delete, and restore resources. Mutations accept <span class="inline-code">--if-match</span> when concurrency matters.</span>
-                </div>
-                <div class="method-row three-col">
+                  <span class="method-copy">Create, update, move, archive/delete, and restore resources. Mutations accept <span class="inline-code">--if-match</span> where etags are available.</span>
+                </div><div class="method-row three-col">
                   <span class="method-name">comment *</span>
                   <span class="method-copy">CommentDTO</span>
                   <span class="method-copy">Append immutable task comments and soft/hard-delete them through dedicated comment commands.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">attach *</span>
                   <span class="method-copy">AttachmentDTO</span>
                   <span class="method-copy">Manage attachment metadata and filesystem-backed payloads under the configured attachment directory.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">handoff *</span>
                   <span class="method-copy">HandoffDTO, HandoffPageDTO</span>
                   <span class="method-copy">Create, list, read, acknowledge, and search agent session continuity records scoped to <span class="inline-code">(agent, project)</span>.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">watch, log, diff, search</span>
                   <span class="method-copy">EventDTO, SearchResultDTO</span>
                   <span class="method-copy">Stream changes, inspect history, compare resources, and query indexed task/comment content.</span>
-                </div>
-                <div class="method-row three-col">
-                  <span class="method-name">bundle create</span>
+                </div><div class="method-row three-col">
+                  <span class="method-name">bundle create/apply</span>
                   <span class="method-copy">BundleManifestDTO, TaskDocumentDTO</span>
-                  <span class="method-copy">Export Git-ops bundles with manifest metadata, task documents, optional refs, events, and attachments.</span>
+                  <span class="method-copy">Export and apply Git-ops bundles with manifest metadata, task documents, refs, events, and attachments.</span>
                 </div>
               </div>
             </article>
@@ -870,10 +945,8 @@
 
           <section id="wrkf-commands" aria-labelledby="wrkf-commands-title">
             <h2 id="wrkf-commands-title"><span class="section-num">03</span> wrkf Command Surface</h2>
-            <p class="section-intro">
-              wrkf commands operate on workflow templates and workflow instances attached to wrkq tasks. JSON output is the primary machine contract for orchestration agents.
-            </p>
-
+            <p class="section-intro">wrkf commands operate on workflow templates and workflow instances attached to wrkq tasks. JSON output is the primary machine contract for orchestration agents.</p>
+            
             <article class="contract-object wrkf">
               <div class="contract-object-head">
                 <div>
@@ -882,9 +955,7 @@
                   <p>The command families map directly to workflow DTOs. Transition safety is driven by revision, context hash, task document hash, check ids, and idempotency keys.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkf">--json</span>
-                  <span class="badge audit">revision</span>
-                  <span class="badge ops">context</span>
+                  <span class="badge wrkf">--json</span><span class="badge audit">revision</span><span class="badge ops">context</span>
                 </div>
               </div>
               <div class="method-ledger">
@@ -892,33 +963,27 @@
                   <span>Command family</span>
                   <span>DTOs</span>
                   <span>Purpose</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">workflow validate/install/show/list/diff</span>
                   <span class="method-copy">WorkflowTemplateDTO, ValidateResultDTO</span>
                   <span class="method-copy">Validate templates, install versioned definitions, inspect installed templates, and compare template files.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">task attach/inspect/timeline/refresh/sync-meta</span>
                   <span class="method-copy">WorkflowInstanceDTO, WorkflowEventDTO</span>
                   <span class="method-copy">Attach task instances, inspect current workflow state, refresh context, and synchronize task metadata projections.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">next</span>
                   <span class="method-copy">NextActionResponseDTO</span>
                   <span class="method-copy">Return ranked actions, blocked transitions, open obligations, and pending effects for the current role.</span>
-                </div>
-                <div class="method-row three-col">
+                </div><div class="method-row three-col">
                   <span class="method-name">transition</span>
                   <span class="method-copy">TransitionResultDTO</span>
-                  <span class="method-copy">Attempt a workflow transition with optional expected revision, context hash, check ids, check execution, dry-run, and idempotency key.</span>
-                </div>
-                <div class="method-row three-col">
+                  <span class="method-copy">Attempt a workflow transition with expected revision, context hash, checks, dry-run, and idempotency controls.</span>
+                </div><div class="method-row three-col">
                   <span class="method-name">evidence/check/obligation/effect/run/hook</span>
                   <span class="method-copy">EvidenceDTO, CheckRunDTO, ObligationDTO, EffectDTO, RunDTO, HookCatalogDTO</span>
-                  <span class="method-copy">Operate the supporting runtime records that influence transitions and next-action generation.</span>
-                </div>
-                <div class="method-row three-col">
+                  <span class="method-copy">Operate supporting runtime records that influence transitions and next-action generation.</span>
+                </div><div class="method-row three-col">
                   <span class="method-name">supervisor *</span>
                   <span class="method-copy">EffectDTO, ObligationDTO, TransitionResultDTO</span>
                   <span class="method-copy">Create escalation effects, create obligations, or force supervisor-mediated transition/retry actions.</span>
@@ -929,220 +994,274 @@
 
           <section id="wrkq-dtos" aria-labelledby="wrkq-dtos-title">
             <h2 id="wrkq-dtos-title"><span class="section-num">04</span> wrkq Resource DTOs</h2>
-            <p class="section-intro">
-              Core wrkq DTOs are filesystem-flavored resources backed by SQLite rows. Friendly IDs are human-stable, UUIDs are storage-stable, and etags increment on mutation.
-            </p>
-
+            <p class="section-intro">Core wrkq DTOs are filesystem-flavored resources backed by SQLite rows. Container, comment, and attachment DTOs are each kept as standalone full-width contract objects.</p>
+            
             <article class="contract-object wrkq" id="task-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkq">Resource DTO</span>
                   <h3><span class="inline-code">TaskDTO</span></h3>
-                  <p>Task records are the primary work item. Some rich fields are stored as JSON strings in current Go structs and emitted as parsed values by selected CLI paths.</p>
+                  <p>Task records are the primary work item. Friendly ids are human-stable, UUIDs are storage-stable, and etags protect concurrent mutation.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkq">T-</span>
-                  <span class="badge audit">etag</span>
-                  <span class="badge ops">state</span>
+                  <span class="badge wrkq">T-</span><span class="badge audit">etag</span><span class="badge ops">state</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code no-comment"><span class="schema-code-text"><span class="syntax-keyword">type</span> TaskState = <span class="syntax-string">"idea"</span> | <span class="syntax-string">"draft"</span> | <span class="syntax-string">"open"</span> | <span class="syntax-string">"in_progress"</span> | <span class="syntax-string">"blocked"</span> | <span class="syntax-string">"completed"</span> | <span class="syntax-string">"cancelled"</span> | <span class="syntax-string">"archived"</span> | <span class="syntax-string">"deleted"</span></span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code no-comment"><span class="schema-code-text"><span class="syntax-keyword">type</span> TaskKind = <span class="syntax-string">"task"</span> | <span class="syntax-string">"subtask"</span> | <span class="syntax-string">"spike"</span> | <span class="syntax-string">"bug"</span> | <span class="syntax-string">"chore"</span></span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> TaskDTO {</span><span class="schema-comment">Returned by task discovery, reads, creates, updates, and bundle materialization paths.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string</span><span class="schema-comment">Friendly task id such as T-00001.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">uuid</span>: string</span><span class="schema-comment">Stable storage id.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">slug</span>: string</span><span class="schema-comment">Lowercase path segment unique among sibling tasks.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">title</span>: string</span><span class="schema-comment">Human-readable task title.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">project_uuid</span>: string</span><span class="schema-comment">Owning container UUID.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">state</span>: TaskState</span><span class="schema-comment">Workflow lifecycle state.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">priority</span>: 1 | 2 | 3 | 4</span><span class="schema-comment">1 is highest priority.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">kind</span>: TaskKind</span><span class="schema-comment">Work item classification.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">parent_task_uuid</span>?: string</span><span class="schema-comment">Subtask parent when present.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">assignee_actor_uuid</span>?: string</span><span class="schema-comment">Assigned actor UUID when assigned.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">14</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">start_at</span>?: string</span><span class="schema-comment">Scheduled start timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">15</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">due_at</span>?: string</span><span class="schema-comment">Due timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">16</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">labels</span>?: string[] | string</span><span class="schema-comment">JSON array semantically; some low-level structs hold it as a JSON string.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">17</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">meta</span>?: Record&lt;string, unknown&gt; | string</span><span class="schema-comment">JSON object semantically; may be emitted as encoded JSON in raw store-shaped outputs.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">18</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">description</span>: string</span><span class="schema-comment">Main task body.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">19</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">specification</span>?: string</span><span class="schema-comment">Optional structured spec body.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">20</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">etag</span>: number</span><span class="schema-comment">Optimistic concurrency token.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">21</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">created_at</span>: string</span><span class="schema-comment">Creation timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">22</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">updated_at</span>: string</span><span class="schema-comment">Last mutation timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">23</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">completed_at</span>?: string</span><span class="schema-comment">Present when completed.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">24</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">archived_at</span>?: string</span><span class="schema-comment">Soft archive visibility timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">25</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">deleted_at</span>?: string</span><span class="schema-comment">Soft delete timestamp when deleted.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">26</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">comments</span>?: CommentDTO[]</span><span class="schema-comment">Included by rich task read outputs such as cat --json.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">27</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">relations</span>?: TaskRelationDTO[]</span><span class="schema-comment">Included by rich task read outputs when relation data is loaded.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">28</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
-              </div>
-              <div class="source-note">Sources: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md#json-fields-cat-json</span></div>
-            </article>
+<pre><code>type TaskState = &#x27;idea&#x27; | &#x27;draft&#x27; | &#x27;open&#x27; | &#x27;in_progress&#x27; | &#x27;blocked&#x27; | &#x27;completed&#x27; | &#x27;cancelled&#x27; | &#x27;archived&#x27; | &#x27;deleted&#x27; // Lifecycle values accepted by task state filters and mutations.
+type TaskKind = &#x27;task&#x27; | &#x27;subtask&#x27; | &#x27;spike&#x27; | &#x27;bug&#x27; | &#x27;chore&#x27; // Work item classification stored on TaskDTO.kind.
 
+type TaskDTO = { // Primary work item returned by task discovery, reads, creates, updates, and bundle materialization.
+  id: string // Friendly task id such as T-00001.
+  uuid: string // Stable storage identity for joins, attachments, and history.
+  path?: string // Resolved container/task path emitted by list and read commands.
+  slug: string // Lowercase path segment unique among sibling tasks.
+  title: string // Human-readable task title.
+  project_uuid: string // Owning container UUID.
+  parent_task_uuid?: string // Parent task UUID when this task is modeled as a subtask.
+  assignee_actor_uuid?: string // Assigned actor UUID when work has an owner.
+  state: TaskState // Workflow lifecycle state persisted on the task row.
+  priority: 1 | 2 | 3 | 4 // Priority where 1 is highest and 4 is lowest.
+  kind: TaskKind // Task type used for filtering and display.
+  start_at?: string // Optional scheduled start timestamp.
+  due_at?: string // Optional due timestamp.
+  labels?: string[] | string // Label set; raw store-shaped outputs may expose encoded JSON.
+  meta?: Record&lt;string, unknown&gt; | string // Task metadata; raw store-shaped outputs may expose encoded JSON.
+  description: string // Main task body.
+  specification?: string // Optional structured specification body.
+  etag: number // Optimistic concurrency token incremented on mutation.
+  created_at: string // Creation timestamp.
+  updated_at: string // Last mutation timestamp.
+  completed_at?: string // Completion timestamp when the state reached completed.
+  archived_at?: string // Soft archive timestamp that hides the task from default reads.
+  deleted_at?: string // Soft delete timestamp when the task was deleted.
+  comments?: CommentDTO[] // Included by rich task reads such as cat --json.
+  attachments?: AttachmentDTO[] // Included by rich task reads when attachment metadata is loaded.
+  relations?: TaskRelationDTO[] // Included by rich task reads when relation data is loaded.
+}
+
+type TaskRelationDTO = { // Directed relation between two task records.
+  id: string // Friendly relation id when surfaced by resource reads.
+  uuid: string // Stable relation storage identity.
+  from_task_uuid: string // Source task UUID.
+  to_task_uuid: string // Target task UUID.
+  kind: string // Relation kind such as blocks, relates, or parent-child.
+  created_at: string // Relation creation timestamp.
+}</code></pre>
+</div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md#json-fields-cat-json</span></div>
+            </article>
+            
             <article class="contract-object wrkq" id="container-dto">
-                <div class="contract-object-head">
-                  <div>
-                    <span class="badge wrkq">Resource DTO</span>
-                    <h3><span class="inline-code">ContainerDTO</span></h3>
-                    <p>Hierarchical project/subproject containers that own tasks and child containers.</p>
-                  </div>
-                  <div class="object-chip-row">
-                    <span class="badge wrkq">P-</span>
-                    <span class="badge audit">etag</span>
-                  </div>
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge wrkq">Resource DTO</span>
+                  <h3><span class="inline-code">ContainerDTO</span></h3>
+                  <p>Hierarchical project and subproject containers that own tasks and child containers.</p>
                 </div>
-                <div class="code-panel">
-                  <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> ContainerDTO {</span><span class="schema-comment">Container JSON read/write shape.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string</span><span class="schema-comment">Friendly project/container id such as P-00001.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">uuid</span>: string</span><span class="schema-comment">Stable storage id.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">slug</span>: string</span><span class="schema-comment">Path segment.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">title</span>?: string</span><span class="schema-comment">Optional display title.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">parent_uuid</span>?: string</span><span class="schema-comment">Parent container UUID.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">kind</span>: <span class="syntax-string">"project"</span> | <span class="syntax-string">"feature"</span> | <span class="syntax-string">"area"</span> | string</span><span class="schema-comment">Container kind; current docs reserve several semantic names.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">sort_index</span>: number</span><span class="schema-comment">Sibling ordering value.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">webhook_urls</span>?: string[] | string</span><span class="schema-comment">Webhook URLs, semantically JSON array.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">path</span>?: string</span><span class="schema-comment">Resolved path appears in CLI cat/list shapes.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">etag</span>: number</span><span class="schema-comment">Optimistic concurrency token.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">created_at</span>: string</span><span class="schema-comment">Creation timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">updated_at</span>: string</span><span class="schema-comment">Last mutation timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">14</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">archived_at</span>?: string</span><span class="schema-comment">Soft archive timestamp.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">15</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
+                <div class="object-chip-row">
+                  <span class="badge wrkq">P-</span><span class="badge audit">etag</span>
                 </div>
-                <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/container_cat.go</span></div>
-            </article>
+              </div>
+              <div class="code-panel">
+<pre><code>type ContainerKind = &#x27;project&#x27; | &#x27;feature&#x27; | &#x27;area&#x27; | string // Container category stored in the hierarchy.
 
+type ContainerDTO = { // Hierarchical project/subproject container returned by container read and list commands.
+  id: string // Friendly project/container id such as P-00001.
+  uuid: string // Stable storage identity.
+  slug: string // Path segment unique among sibling containers.
+  title?: string // Optional display title for UI and docs.
+  parent_uuid?: string // Parent container UUID when nested.
+  kind: ContainerKind // Container kind used by callers for grouping.
+  sort_index: number // Sibling ordering value.
+  webhook_urls?: string[] | string // Optional webhook URL list; raw store-shaped outputs may expose encoded JSON.
+  path?: string // Resolved container path emitted by CLI read/list shapes.
+  etag: number // Optimistic concurrency token incremented on mutation.
+  created_at: string // Creation timestamp.
+  updated_at: string // Last mutation timestamp.
+  archived_at?: string // Soft archive timestamp when hidden from default views.
+}</code></pre>
+</div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/container_cat.go</span></div>
+            </article>
+            
             <article class="contract-object wrkq" id="comment-dto">
-                <div class="contract-object-head">
-                  <div>
-                    <span class="badge wrkq">Collaboration DTO</span>
-                    <h3><span class="inline-code">CommentDTO</span></h3>
-                    <p>Task-local comments are append-only collaboration records. Soft deletion preserves audit history and hides deleted comments from default reads.</p>
-                  </div>
-                  <div class="object-chip-row">
-                    <span class="badge wrkq">C-</span>
-                    <span class="badge audit">etag</span>
-                  </div>
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge wrkq">Collaboration DTO</span>
+                  <h3><span class="inline-code">CommentDTO</span></h3>
+                  <p>Task-local comments are append-only collaboration records. Soft deletion preserves audit history while hiding deleted comments from default reads.</p>
                 </div>
-                <div class="code-panel">
-                  <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> CommentDTO {</span><span class="schema-comment">Returned by comment commands and rich task reads.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string; <span class="syntax-field">uuid</span>: string; <span class="syntax-field">task_uuid</span>: string</span><span class="schema-comment">Friendly id, stable id, and owning task id.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">actor_uuid</span>: string; <span class="syntax-field">body</span>: string</span><span class="schema-comment">Author and immutable comment body.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">meta</span>?: Record&lt;string, unknown&gt; | string</span><span class="schema-comment">Optional JSON object metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">etag</span>: number; <span class="syntax-field">created_at</span>: string; <span class="syntax-field">updated_at</span>?: string</span><span class="schema-comment">Concurrency and timestamps.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">deleted_at</span>?: string; <span class="syntax-field">deleted_by_actor_uuid</span>?: string</span><span class="schema-comment">Soft delete metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
+                <div class="object-chip-row">
+                  <span class="badge wrkq">C-</span><span class="badge audit">etag</span>
                 </div>
-                <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span></div>
+              </div>
+              <div class="code-panel">
+<pre><code>type CommentDTO = { // Append-only task comment returned by comment commands and rich task reads.
+  id: string // Friendly comment id such as C-00001.
+  uuid: string // Stable comment storage identity.
+  task_uuid: string // Owning task UUID.
+  actor_uuid: string // Author actor UUID recorded at creation.
+  body: string // Immutable comment body.
+  meta?: Record&lt;string, unknown&gt; | string // Optional comment metadata; raw store-shaped outputs may expose encoded JSON.
+  etag: number // Optimistic concurrency token for comment metadata and delete operations.
+  created_at: string // Comment creation timestamp.
+  updated_at?: string // Last mutation timestamp when metadata or deletion state changed.
+  deleted_at?: string // Soft delete timestamp when hidden from default reads.
+  deleted_by_actor_uuid?: string // Actor UUID that deleted the comment.
+}</code></pre>
+</div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span></div>
             </article>
-
+            
             <article class="contract-object wrkq" id="attachment-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkq">Collaboration DTO</span>
                   <h3><span class="inline-code">AttachmentDTO</span></h3>
-                  <p>Attachment records keep metadata in the database and payload bytes on disk under the configured attachment directory. Task moves do not rewrite attachment paths.</p>
+                  <p>Attachment records keep metadata in the database and payload bytes on disk under the configured attachment directory.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkq">ATT-</span>
-                  <span class="badge ops">filesystem</span>
+                  <span class="badge wrkq">ATT-</span><span class="badge ops">filesystem</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> AttachmentDTO {</span><span class="schema-comment">Returned by attachment list/put/get metadata paths.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string; <span class="syntax-field">uuid</span>: string; <span class="syntax-field">task_uuid</span>: string</span><span class="schema-comment">Friendly id, stable id, and owning task id.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">filename</span>: string; <span class="syntax-field">relative_path</span>: string</span><span class="schema-comment">Logical filename and path under attachment storage.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">mime_type</span>?: string; <span class="syntax-field">size_bytes</span>: number; <span class="syntax-field">checksum</span>?: string</span><span class="schema-comment">Payload metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">created_at</span>: string; <span class="syntax-field">created_by_actor_uuid</span>: string</span><span class="schema-comment">Creation metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
-              </div>
+<pre><code>type AttachmentDTO = { // Attachment metadata returned by attachment list, put, and get metadata paths.
+  id: string // Friendly attachment id such as ATT-00001.
+  uuid: string // Stable attachment storage identity.
+  task_uuid: string // Owning task UUID.
+  filename: string // Logical filename presented to users and bundle exports.
+  relative_path: string // Path under the configured attachment storage root.
+  mime_type?: string // Optional detected or supplied MIME type.
+  size_bytes: number // Payload size in bytes.
+  checksum?: string // Optional content checksum for integrity checks.
+  created_at: string // Metadata creation timestamp.
+  created_by_actor_uuid: string // Actor UUID that attached the payload.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span></div>
             </article>
-
+            
             <article class="contract-object audit" id="handoff-event-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge audit">Continuity + audit DTOs</span>
                   <h3><span class="inline-code">HandoffDTO</span> and <span class="inline-code">EventDTO</span></h3>
-                  <p>Handoffs are agent/project-scoped continuity records. Events are append-only audit log records used by watch, history, and bundle workflows.</p>
+                  <p>Handoffs preserve agent session continuity; events provide the append-only audit stream used by watch, history, and bundles.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge audit">H-</span>
-                  <span class="badge ops">cursor</span>
-                  <span class="badge audit">event log</span>
+                  <span class="badge audit">H-</span><span class="badge ops">cursor</span><span class="badge audit">event log</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">type</span> HandoffStatus = <span class="syntax-string">"pending"</span> | <span class="syntax-string">"acknowledged"</span></span><span class="schema-comment">Default list/search filter is pending.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> HandoffDTO {</span><span class="schema-comment">JSON shape returned by handoff create/list/get/search.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string; <span class="syntax-field">uuid</span>: string</span><span class="schema-comment">Friendly H- id and stable UUID.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">scope_ref</span>: string; <span class="syntax-field">scope_kind</span>: <span class="syntax-string">"project"</span> | string</span><span class="schema-comment">Canonical scope, usually agent:&lt;agent&gt;:project:&lt;project&gt;.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">agent_id</span>: string; <span class="syntax-field">project_id</span>: string</span><span class="schema-comment">Resolved scope components.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">title</span>: string; <span class="syntax-field">body</span>: string; <span class="syntax-field">status</span>: HandoffStatus</span><span class="schema-comment">Continuity payload and lifecycle state.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">idempotency_key</span>?: string; <span class="syntax-field">idempotent_replay</span>?: boolean</span><span class="schema-comment">Safe retry metadata on create responses.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">acknowledged_at</span>?: string; <span class="syntax-field">acknowledged_by_agent_id</span>?: string; <span class="syntax-field">acknowledgement_note</span>?: string</span><span class="schema-comment">Retirement metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">meta</span>?: Record&lt;string, unknown&gt; | string; <span class="syntax-field">etag</span>: number</span><span class="schema-comment">Optional JSON metadata and concurrency token.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">created_at</span>: string; <span class="syntax-field">updated_at</span>: string</span><span class="schema-comment">Timestamps.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> EventDTO {</span><span class="schema-comment">Watch/history/audit event shape.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: number; <span class="syntax-field">timestamp</span>: string; <span class="syntax-field">actor_uuid</span>?: string</span><span class="schema-comment">Event identity, time, and actor.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">14</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">resource_type</span>: string; <span class="syntax-field">resource_uuid</span>?: string; <span class="syntax-field">resource_id</span>?: string</span><span class="schema-comment">Changed resource reference.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">15</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">event_type</span>: string; <span class="syntax-field">etag</span>?: number; <span class="syntax-field">payload</span>?: string | Record&lt;string, unknown&gt;</span><span class="schema-comment">Event name, resulting etag, and event-specific JSON payload.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">16</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
-              </div>
-              <div class="source-note">Sources: <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md#handoffs-agent-session-continuity</span>, <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/watch.go</span></div>
+<pre><code>type HandoffStatus = &#x27;pending&#x27; | &#x27;acknowledged&#x27; // Handoff lifecycle state used by list and search filters.
+
+type HandoffDTO = { // Agent/project-scoped continuity record returned by handoff create, list, get, and search.
+  id: string // Friendly handoff id such as H-00001.
+  uuid: string // Stable handoff storage identity.
+  scope_ref: string // Canonical scope such as agent:cody:project:wrkq.
+  scope_kind: &#x27;project&#x27; | string // Scope discriminator currently centered on project scope.
+  agent_id: string // Agent id resolved from the handoff scope.
+  project_id: string // Project id resolved from the handoff scope.
+  title: string // Short handoff title.
+  body: string // Continuity payload intended for the next agent session.
+  status: HandoffStatus // Pending or acknowledged lifecycle state.
+  idempotency_key?: string // Optional create retry key supplied by the caller.
+  idempotent_replay?: boolean // True when create returned an existing handoff for the same key.
+  acknowledged_at?: string // Timestamp when the handoff was retired.
+  acknowledged_by_agent_id?: string // Agent id that acknowledged the handoff.
+  acknowledgement_note?: string // Optional note supplied during acknowledgement.
+  meta?: Record&lt;string, unknown&gt; | string // Optional metadata; raw store-shaped outputs may expose encoded JSON.
+  etag: number // Optimistic concurrency token.
+  created_at: string // Creation timestamp.
+  updated_at: string // Last mutation timestamp.
+}
+
+type EventDTO = { // Append-only audit event returned by watch, history, and bundle event exports.
+  id: number // Monotonic event id within the database.
+  timestamp: string // Event creation timestamp.
+  actor_uuid?: string // Actor UUID responsible for the mutation when known.
+  resource_type: string // Resource family affected by the event.
+  resource_uuid?: string // Stable UUID of the affected resource.
+  resource_id?: string // Friendly id of the affected resource when available.
+  event_type: string // Event name such as created, updated, deleted, or moved.
+  etag?: number // Resulting resource etag after the event.
+  payload?: string | Record&lt;string, unknown&gt; // Event-specific JSON payload or raw encoded JSON.
+}</code></pre>
+</div>
+              <div class="source-note">Source: <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md#handoffs-agent-session-continuity</span>, <span class="inline-code">internal/domain/types.go</span></div>
             </article>
           </section>
 
           <section id="wrkq-operational-dtos" aria-labelledby="wrkq-operational-title">
             <h2 id="wrkq-operational-title"><span class="section-num">05</span> wrkq Operational DTOs</h2>
-            <p class="section-intro">
-              Operational outputs wrap resources for pagination, scope diagnosis, branch bundle exchange, and compatibility reporting.
-            </p>
-
+            <p class="section-intro">Operational outputs wrap resources for pagination, scope diagnosis, branch bundle exchange, and compatibility reporting. HandoffPageDTO and AgentContextDTO are each standalone full-width objects.</p>
+            
             <article class="contract-object ops" id="pagination-dto">
-                <div class="contract-object-head">
-                  <div>
-                    <span class="badge ops">Paging DTO</span>
-                    <h3><span class="inline-code">HandoffPageDTO</span></h3>
-                    <p>List and search handoff output includes a cursor footer. NDJSON streams items followed by an equivalent footer object.</p>
-                  </div>
-                  <div class="object-chip-row">
-                    <span class="badge ops">cursor</span>
-                  </div>
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge ops">Paging DTO</span>
+                  <h3><span class="inline-code">HandoffPageDTO</span></h3>
+                  <p>List and search handoff output includes cursor metadata. NDJSON streams items followed by equivalent footer state.</p>
                 </div>
-                <div class="code-panel">
-                  <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> HandoffPageDTO {</span><span class="schema-comment">Structured response from handoff list/search.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">handoffs</span>: HandoffDTO[]</span><span class="schema-comment">Page items.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">next_cursor</span>: string | null</span><span class="schema-comment">Pass to --cursor to fetch the next page.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">truncated</span>: boolean</span><span class="schema-comment">True when more records are available.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
+                <div class="object-chip-row">
+                  <span class="badge ops">cursor</span>
                 </div>
-                <div class="source-note">Source: <span class="inline-code">docs/CLI-REFERENCE.md#wrkq-handoff-list</span></div>
+              </div>
+              <div class="code-panel">
+<pre><code>type HandoffPageDTO = { // Structured response from handoff list and search commands.
+  handoffs: HandoffDTO[] // Page items in descending or search-ranked order.
+  next_cursor: string | null // Cursor to pass to --cursor for the next page.
+  truncated: boolean // True when more records are available after this page.
+}</code></pre>
+</div>
+              <div class="source-note">Source: <span class="inline-code">docs/CLI-REFERENCE.md#wrkq-handoff-list</span></div>
             </article>
-
+            
             <article class="contract-object ops" id="agent-context-dto">
-                <div class="contract-object-head">
-                  <div>
-                    <span class="badge ops">Scope DTO</span>
-                    <h3><span class="inline-code">AgentContextDTO</span></h3>
-                    <p>Diagnostic output from <span class="inline-code">wrkq agent-context --json</span>; DB-backed actor/container lookup fields are best-effort.</p>
-                  </div>
-                  <div class="object-chip-row">
-                    <span class="badge ops">scope</span>
-                  </div>
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge ops">Scope DTO</span>
+                  <h3><span class="inline-code">AgentContextDTO</span></h3>
+                  <p>Diagnostic output from <span class="inline-code">wrkq agent-context --json</span>; database-backed actor/container lookup fields are best-effort.</p>
                 </div>
-                <div class="code-panel">
-                  <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> AgentContextDTO {</span><span class="schema-comment">Resolved agent scope and runtime environment.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">environment</span>: Record&lt;string, string | undefined&gt;</span><span class="schema-comment">ASP_SCOPE_REF, ASP_HANDLE, ASP_AGENT_ID, ASP_PROJECT, and override input.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">scope</span>?: { <span class="syntax-field">source</span>: string; <span class="syntax-field">kind</span>: string; <span class="syntax-field">agent_id</span>: string; <span class="syntax-field">project_id</span>: string; <span class="syntax-field">canonical_ref</span>: string }</span><span class="schema-comment">Resolved canonical scope when valid.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">diagnostics</span>: string[]</span><span class="schema-comment">Resolution warnings/errors.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">database</span>: { <span class="syntax-field">reachable</span>: boolean; <span class="syntax-field">path</span>?: string }</span><span class="schema-comment">Best-effort DB reachability.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">actor</span>?: ActorDTO; <span class="syntax-field">project</span>?: ContainerDTO</span><span class="schema-comment">Best-effort resolved resources.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
+                <div class="object-chip-row">
+                  <span class="badge ops">scope</span>
                 </div>
-                <div class="source-note">Source: <span class="inline-code">docs/CLI-REFERENCE.md#wrkq-agent-context</span></div>
-            </article>
+              </div>
+              <div class="code-panel">
+<pre><code>type AgentContextDTO = { // Diagnostic output from wrkq agent-context --json.
+  environment: Record&lt;string, string | undefined&gt; // ASP scope and handle environment observed by the command.
+  scope?: AgentScopeDTO // Resolved canonical scope when the inputs are valid.
+  diagnostics: string[] // Resolution warnings and errors emitted for humans and automation.
+  database: AgentDatabaseDTO // Best-effort database reachability and path information.
+  actor?: ActorDTO // Resolved actor row when the database lookup succeeds.
+  project?: ContainerDTO // Resolved project/container row when lookup succeeds.
+}
 
+type AgentScopeDTO = { // Canonical parsed agent/project scope.
+  source: string // Input source selected by resolution precedence.
+  kind: string // Scope kind extracted from the canonical reference.
+  agent_id: string // Agent id from ASP_AGENT_ID, ASP_HANDLE, or explicit override.
+  project_id: string // Project id from ASP_PROJECT or explicit override.
+  canonical_ref: string // Normalized scope reference used by handoff commands.
+}
+
+type AgentDatabaseDTO = { // Database reachability summary for the resolved context.
+  reachable: boolean // True when wrkq opened the configured database.
+  path?: string // Database path used for the reachability check.
+}
+
+type ActorDTO = { // Actor row used for attribution and diagnostics.
+  id: string // Friendly actor id such as A-00001.
+  uuid: string // Stable actor storage identity.
+  slug: string // Actor slug used by --as and config defaults.
+  role?: string // Optional actor role label.
+}</code></pre>
+</div>
+              <div class="source-note">Source: <span class="inline-code">docs/CLI-REFERENCE.md#wrkq-agent-context</span></div>
+            </article>
+            
             <article class="contract-object ops" id="bundle-dto">
               <div class="contract-object-head">
                 <div>
@@ -1151,133 +1270,260 @@
                   <p>Bundles exchange branch-scoped task documents and optional attachments/events through versioned manifests.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge ops">manifest.json</span>
-                  <span class="badge audit">events.ndjson</span>
+                  <span class="badge ops">manifest.json</span><span class="badge audit">events.ndjson</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> BundleManifestDTO {</span><span class="schema-comment">manifest.json at the bundle root.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">machine_interface_version</span>: number</span><span class="schema-comment">Compatibility guard checked on apply.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">version</span>?: string; <span class="syntax-field">commit</span>?: string; <span class="syntax-field">build_date</span>?: string</span><span class="schema-comment">Build identity metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">timestamp</span>: string; <span class="syntax-field">actor</span>?: string</span><span class="schema-comment">Export timestamp and actor filter.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">since</span>?: string; <span class="syntax-field">until</span>?: string; <span class="syntax-field">since_cursor</span>?: string</span><span class="schema-comment">Time/event selection window.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">project</span>?: string; <span class="syntax-field">project_uuid</span>?: string; <span class="syntax-field">path_prefixes</span>?: string[]</span><span class="schema-comment">Path/project filter metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">with_attachments</span>: boolean; <span class="syntax-field">with_events</span>: boolean</span><span class="schema-comment">Included bundle components.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">include_refs</span>?: boolean; <span class="syntax-field">ref_count</span>?: number</span><span class="schema-comment">Optional reference document export metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> TaskDocumentDTO {</span><span class="schema-comment">Frontmatter plus markdown body in tasks/*.md or refs/*.md.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">path</span>: string; <span class="syntax-field">base_etag</span>?: number; <span class="syntax-field">uuid</span>?: string</span><span class="schema-comment">Conflict guard and identity metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">description</span>: string</span><span class="schema-comment">Markdown task body after frontmatter.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
-              </div>
+<pre><code>type BundleManifestDTO = { // manifest.json at the root of a wrkq bundle export.
+  machine_interface_version: number // Compatibility guard checked during bundle apply.
+  version?: string // wrkq version that produced the bundle when known.
+  commit?: string // Source commit or build commit associated with the exporter.
+  build_date?: string // Build date metadata for the exporting binary.
+  timestamp: string // Export timestamp.
+  actor?: string // Actor filter or actor identity used during export.
+  since?: string // Lower timestamp bound for selected events or resources.
+  until?: string // Upper timestamp bound for selected events or resources.
+  since_cursor?: string // Event cursor used as the export lower bound.
+  project?: string // Project selector used during export.
+  project_uuid?: string // Resolved project UUID for the export.
+  path_prefixes?: string[] // Included path prefixes when export was narrowed.
+  with_attachments: boolean // True when attachment payloads were included.
+  with_events: boolean // True when events.ndjson was included.
+  include_refs?: boolean // True when reference documents were included.
+  ref_count?: number // Number of exported reference documents.
+}
+
+type TaskDocumentDTO = { // Frontmatter plus markdown body in tasks/*.md or refs/*.md.
+  path: string // Resource path represented by the document.
+  base_etag?: number // Conflict guard recorded when the document was exported.
+  uuid?: string // Existing resource UUID when the document represents an existing row.
+  description: string // Markdown task body following frontmatter.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/bundle/bundle.go</span>, <span class="inline-code">docs/SPEC.md#branchpr-sync-commands</span></div>
             </article>
           </section>
 
           <section id="wrkf-template-dtos" aria-labelledby="wrkf-template-title">
             <h2 id="wrkf-template-title"><span class="section-num">06</span> wrkf Template DTOs</h2>
-            <p class="section-intro">
-              Workflow templates are versioned state-machine definitions. They define states, roles, evidence kinds, checks, transitions, guards, effects, and obligations.
-            </p>
-
+            <p class="section-intro">Workflow templates are versioned state-machine definitions. They define states, roles, evidence kinds, checks, transitions, guards, effects, and obligations.</p>
+            
             <article class="contract-object wrkf" id="workflow-template-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkf">Template DTO</span>
                   <h3><span class="inline-code">WorkflowTemplateDTO</span></h3>
-                  <p>Installed template definition. Template hash and validation output are used to pin the instance to the exact installed definition.</p>
+                  <p>Installed workflow template definition. Template hash and validation output pin instances to the exact installed definition.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkf">schemaVersion</span>
-                  <span class="badge audit">hash</span>
+                  <span class="badge wrkf">schemaVersion</span><span class="badge audit">hash</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> WorkflowStateDTO { <span class="syntax-field">status</span>: string; <span class="syntax-field">phase</span>?: string; <span class="syntax-field">outcome</span>?: string }</span><span class="schema-comment">Compact state tuple used by templates and instances.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> WorkflowTemplateDTO {</span><span class="schema-comment">Template file/install/show shape.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">schemaVersion</span>: string; <span class="syntax-field">id</span>: string; <span class="syntax-field">version</span>: string; <span class="syntax-field">kind</span>: string</span><span class="schema-comment">Template identity and schema marker.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">description</span>?: string; <span class="syntax-field">initial</span>: WorkflowStateDTO</span><span class="schema-comment">Description and initial state.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">roles</span>: Record&lt;string, { <span class="syntax-field">description</span>?: string }&gt;</span><span class="schema-comment">Role catalog.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">states</span>: WorkflowStateDTO[]</span><span class="schema-comment">Allowed state tuples.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">evidenceKinds</span>?: Record&lt;string, KindSpecDTO&gt;; <span class="syntax-field">obligationKinds</span>?: Record&lt;string, KindSpecDTO&gt;</span><span class="schema-comment">Named evidence/obligation kinds.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">checks</span>?: Record&lt;string, CheckSpecDTO&gt;</span><span class="schema-comment">Template check definitions.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">transitions</span>: TransitionSpecDTO[]</span><span class="schema-comment">State transition graph.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">stateHooks</span>?: Record&lt;string, HookRefDTO[]&gt;</span><span class="schema-comment">Hooks keyed by state/hook phase.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">nextActionModel</span>?: Record&lt;string, unknown&gt;; <span class="syntax-field">supervisor</span>?: Record&lt;string, unknown&gt;</span><span class="schema-comment">Template-specific next-action and supervisor configuration.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> ValidateResultDTO { <span class="syntax-field">valid</span>: boolean; <span class="syntax-field">id</span>?: string; <span class="syntax-field">version</span>?: string; <span class="syntax-field">hash</span>?: string; <span class="syntax-field">errors</span>?: string[] }</span><span class="schema-comment">workflow validate JSON output.</span></span></span></code></pre>
-              </div>
+<pre><code>type WorkflowStateDTO = { // Compact workflow state tuple used by templates and instances.
+  status: string // Primary status component.
+  phase?: string // Optional phase component within the status.
+  outcome?: string // Optional terminal or branch outcome.
+}
+
+type WorkflowTemplateDTO = { // Installed workflow template definition.
+  schemaVersion: string // Template schema marker understood by wrkf.
+  id: string // Template id selected by attach and install commands.
+  version: string // Template version string.
+  kind: string // Template kind or domain family.
+  description?: string // Optional template summary.
+  initial: WorkflowStateDTO // Initial state assigned to newly attached instances.
+  roles: Record&lt;string, RoleSpecDTO&gt; // Role catalog available to transitions and next-action routing.
+  states: WorkflowStateDTO[] // Allowed state tuples.
+  evidenceKinds?: Record&lt;string, KindSpecDTO&gt; // Named evidence kinds referenced by predicates and requirements.
+  obligationKinds?: Record&lt;string, KindSpecDTO&gt; // Named obligation kinds produced or checked by the workflow.
+  checks?: Record&lt;string, CheckSpecDTO&gt; // Template check definitions referenced by transitions.
+  transitions: TransitionSpecDTO[] // State transition graph.
+  stateHooks?: Record&lt;string, HookRefDTO[]&gt; // Hooks keyed by state and hook phase.
+  nextActionModel?: Record&lt;string, unknown&gt; // Template-specific next-action ranking configuration.
+  supervisor?: Record&lt;string, unknown&gt; // Supervisor escalation and override configuration.
+}
+
+type RoleSpecDTO = { // Template role definition.
+  description?: string // Human-readable role explanation.
+}
+
+type KindSpecDTO = { // Named evidence or obligation kind definition.
+  description?: string // Human-readable kind explanation.
+  schema?: unknown // Optional JSON schema-like validation payload.
+}
+
+type CheckSpecDTO = { // Template check definition.
+  description?: string // Human-readable check explanation.
+  hook?: string // Hook id that implements the check.
+}
+
+type ValidateResultDTO = { // workflow validate JSON output.
+  valid: boolean // True when the template parsed and passed validation.
+  id?: string // Template id extracted during validation.
+  version?: string // Template version extracted during validation.
+  hash?: string // Canonical template hash when validation succeeds.
+  errors?: string[] // Validation errors when valid is false.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span></div>
             </article>
-
+            
             <article class="contract-object wrkf" id="transition-spec-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkf">Template DTO</span>
                   <h3><span class="inline-code">TransitionSpecDTO</span> and predicates</h3>
-                  <p>Transition specs define who can move from one state to another, what guards/requires/checks must pass, and what effects or obligations are created.</p>
+                  <p>Transition specs define who can move state, which guards and checks must pass, and which outcomes, effects, or obligations result.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkf">guards</span>
-                  <span class="badge wrkf">requires</span>
+                  <span class="badge wrkf">guards</span><span class="badge wrkf">requires</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> TransitionSpecDTO {</span><span class="schema-comment">Template transition definition.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string; <span class="syntax-field">from</span>: WorkflowStateDTO; <span class="syntax-field">by</span>: string[]</span><span class="schema-comment">Transition identity, source state, and allowed roles.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">responsibility</span>?: ResponsibilitySpecDTO</span><span class="schema-comment">Optional owner/lane/fallback routing.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">guards</span>?: PredicateDTO[]; <span class="syntax-field">requires</span>?: RequirementSpecDTO[]; <span class="syntax-field">checks</span>?: string[]</span><span class="schema-comment">Preconditions and check ids.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">outcomes</span>: OutcomeCaseDTO[]</span><span class="schema-comment">Predicate-selected target states, effects, and obligations.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">hooks</span>?: Record&lt;string, HookRefDTO[]&gt;</span><span class="schema-comment">Transition-local hooks.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> PredicateDTO {</span><span class="schema-comment">Composable predicate union represented as an object with one active branch.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">always</span>?: boolean; <span class="syntax-field">otherwise</span>?: boolean; <span class="syntax-field">all</span>?: PredicateDTO[]; <span class="syntax-field">any</span>?: PredicateDTO[]; <span class="syntax-field">not</span>?: PredicateDTO</span><span class="schema-comment">Boolean composition branches.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">checkVerdict</span>?: { <span class="syntax-field">check</span>: string; <span class="syntax-field">is</span>: string }; <span class="syntax-field">checkOutcome</span>?: { <span class="syntax-field">check</span>: string; <span class="syntax-field">is</span>: string }</span><span class="schema-comment">Check result predicates.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">evidenceExists</span>?: { <span class="syntax-field">kind</span>: string }; <span class="syntax-field">obligationStatus</span>?: { <span class="syntax-field">kind</span>?: string; <span class="syntax-field">id</span>?: string; <span class="syntax-field">is</span>: string }</span><span class="schema-comment">Evidence/obligation predicates in the current implementation.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">factEquals</span>?: { <span class="syntax-field">path</span>: string; <span class="syntax-field">value</span>: unknown }</span><span class="schema-comment">Task facts predicate.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
-              </div>
+<pre><code>type TransitionSpecDTO = { // Template transition definition.
+  id: string // Stable transition id used by transition commands and events.
+  from: WorkflowStateDTO // Required source state tuple.
+  by: string[] // Roles allowed to attempt the transition.
+  responsibility?: ResponsibilitySpecDTO // Optional owner, lane, and fallback routing.
+  guards?: PredicateDTO[] // Preconditions evaluated before transition admission.
+  requires?: RequirementSpecDTO[] // Evidence or obligation requirements that must be satisfied.
+  checks?: string[] // Check ids that must run or be supplied before transition.
+  outcomes: OutcomeCaseDTO[] // Predicate-selected target states and side effects.
+  hooks?: Record&lt;string, HookRefDTO[]&gt; // Transition-local hooks keyed by phase.
+}
+
+type PredicateDTO = { // Composable predicate object with one or more active branches.
+  always?: boolean // Branch that always evaluates true.
+  otherwise?: boolean // Branch used as a fallback outcome selector.
+  all?: PredicateDTO[] // Logical AND over nested predicates.
+  any?: PredicateDTO[] // Logical OR over nested predicates.
+  not?: PredicateDTO // Logical negation of a nested predicate.
+  checkVerdict?: CheckPredicateDTO // Predicate against a check verdict.
+  checkOutcome?: CheckPredicateDTO // Predicate against a check outcome value.
+  evidenceExists?: EvidencePredicateDTO // Predicate requiring evidence of a kind.
+  obligationStatus?: ObligationPredicateDTO // Predicate against obligation status.
+  factEquals?: FactPredicateDTO // Predicate comparing a task fact path to a value.
+}
+
+type CheckPredicateDTO = { // Check result selector used by predicate branches.
+  check: string // Check id to read from the current transition context.
+  is: string // Required verdict or outcome value.
+}
+
+type EvidencePredicateDTO = { // Evidence existence selector.
+  kind: string // Evidence kind that must be present.
+}
+
+type ObligationPredicateDTO = { // Obligation status selector.
+  kind?: string // Optional obligation kind filter.
+  id?: string // Optional obligation id filter.
+  is: string // Required obligation status value.
+}
+
+type FactPredicateDTO = { // Task fact equality selector.
+  path: string // Fact path in the task context.
+  value: unknown // Required value at the selected path.
+}
+
+type OutcomeCaseDTO = { // Transition outcome selected when its predicate matches.
+  when?: PredicateDTO // Optional predicate deciding whether this outcome applies.
+  to: WorkflowStateDTO // Target state tuple.
+  effects?: EffectSpecDTO[] // Effects queued when this outcome is applied.
+  obligations?: ObligationSpecDTO[] // Obligations created when this outcome is applied.
+}
+
+type ResponsibilitySpecDTO = { // Transition responsibility routing definition.
+  role?: string // Preferred owner role.
+  actor?: string // Preferred owner actor.
+  lane?: string // Optional execution lane.
+}
+
+type RequirementSpecDTO = { // Requirement checked before a transition may proceed.
+  kind: string // Requirement category.
+  ref?: string // Optional evidence, check, or obligation reference.
+}
+
+type HookRefDTO = { // Hook reference embedded in template state or transition hooks.
+  id: string // Hook id from the hook catalog.
+  optional?: boolean // True when failure should not hard-block execution.
+}
+
+type EffectSpecDTO = { // Effect to enqueue when an outcome applies.
+  kind: string // Effect handler kind.
+  payload?: unknown // Handler-specific payload.
+}
+
+type ObligationSpecDTO = { // Obligation to create when an outcome applies.
+  kind: string // Obligation kind.
+  ownerRole?: string // Role responsible for satisfying it.
+  blocking?: boolean // True when it blocks further progress.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span></div>
             </article>
           </section>
 
           <section id="wrkf-runtime-dtos" aria-labelledby="wrkf-runtime-title">
             <h2 id="wrkf-runtime-title"><span class="section-num">07</span> wrkf Runtime DTOs</h2>
-            <p class="section-intro">
-              Runtime records are instance-scoped. Transitions append events, evidence/checks/obligations/effects/runs support routing, and next-action output aggregates the current actionable view.
-            </p>
-
+            <p class="section-intro">Runtime records are instance-scoped. Transitions append events; evidence, checks, obligations, effects, and runs support routing; next-action output aggregates the current actionable view.</p>
+            
             <article class="contract-object wrkf" id="workflow-instance-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkf">Runtime DTO</span>
                   <h3><span class="inline-code">WorkflowInstanceDTO</span> and <span class="inline-code">WorkflowEventDTO</span></h3>
-                  <p>Instances bind a task to an installed template. Events are the instance audit log and carry revision deltas and context/task document hashes.</p>
+                  <p>Instances bind tasks to installed templates. Events are the instance audit log and carry revision deltas and context/task hashes.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge audit">revision</span>
-                  <span class="badge audit">contextHash</span>
+                  <span class="badge audit">revision</span><span class="badge audit">contextHash</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> WorkflowInstanceDTO {</span><span class="schema-comment">Returned by task attach/inspect/refresh and embedded in next output.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string; <span class="syntax-field">taskUuid</span>?: string; <span class="syntax-field">taskRef</span>: string; <span class="syntax-field">projectId</span>?: string</span><span class="schema-comment">Instance and task identity.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">templateId</span>: string; <span class="syntax-field">templateVersion</span>: string; <span class="syntax-field">templateHash</span>: string</span><span class="schema-comment">Pinned installed template.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">status</span>: string; <span class="syntax-field">phase</span>?: string; <span class="syntax-field">outcome</span>?: string</span><span class="schema-comment">Current state tuple.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">revision</span>: number; <span class="syntax-field">contextHash</span>: string; <span class="syntax-field">taskDocEtag</span>: string; <span class="syntax-field">taskDocHash</span>: string</span><span class="schema-comment">Concurrency and stale-context guards.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">createdAt</span>: string; <span class="syntax-field">updatedAt</span>: string; <span class="syntax-field">closedAt</span>?: string</span><span class="schema-comment">Lifecycle timestamps.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> WorkflowEventDTO {</span><span class="schema-comment">Instance event stream item.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">id</span>: string; <span class="syntax-field">instanceId</span>: string; <span class="syntax-field">seq</span>: number; <span class="syntax-field">schemaVersion</span>: string; <span class="syntax-field">type</span>: string</span><span class="schema-comment">Event identity and type.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">actor</span>?: string; <span class="syntax-field">role</span>?: string; <span class="syntax-field">runId</span>?: string</span><span class="schema-comment">Attribution.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">11</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">observedRevision</span>: number; <span class="syntax-field">nextRevision</span>: number</span><span class="schema-comment">Revision movement.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">12</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">taskDocEtag</span>?: string; <span class="syntax-field">taskDocHash</span>?: string; <span class="syntax-field">contextHash</span>?: string</span><span class="schema-comment">Observed context.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">13</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">idempotencyKey</span>?: string; <span class="syntax-field">result</span>?: string; <span class="syntax-field">rejectionCode</span>?: string; <span class="syntax-field">payload</span>?: unknown; <span class="syntax-field">createdAt</span>: string</span><span class="schema-comment">Transition result metadata.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">14</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span></code></pre>
-              </div>
+<pre><code>type WorkflowInstanceDTO = { // Runtime record binding a wrkq task to an installed workflow template.
+  id: string // Stable workflow instance id.
+  taskUuid?: string // Bound wrkq task UUID when resolved.
+  taskRef: string // Task selector used when the instance was attached or inspected.
+  projectId?: string // Project id associated with the task context.
+  templateId: string // Installed template id.
+  templateVersion: string // Installed template version.
+  templateHash: string // Hash of the installed template definition.
+  status: string // Current primary state status.
+  phase?: string // Current optional state phase.
+  outcome?: string // Current optional state outcome.
+  revision: number // Monotonic instance revision incremented by accepted events.
+  contextHash: string // Hash of the task/workflow context used for stale-context checks.
+  taskDocEtag: string // Task document etag observed by the instance.
+  taskDocHash: string // Hash of the task document content observed by the instance.
+  createdAt: string // Instance creation timestamp.
+  updatedAt: string // Last instance mutation timestamp.
+  closedAt?: string // Timestamp when the instance reached a terminal state.
+}
+
+type WorkflowEventDTO = { // Ordered event stream item for a workflow instance.
+  id: string // Stable event id.
+  instanceId: string // Owning workflow instance id.
+  seq: number // Monotonic event sequence within the instance.
+  schemaVersion: string // Event schema marker.
+  type: string // Event discriminator.
+  actor?: string // Actor that caused or recorded the event.
+  role?: string // Workflow role used for attribution.
+  runId?: string // Associated run id when event came from an agent run.
+  observedRevision: number // Revision seen before applying the event.
+  nextRevision: number // Revision after applying the event.
+  taskDocEtag?: string // Task document etag observed by this event.
+  taskDocHash?: string // Task document hash observed by this event.
+  contextHash?: string // Context hash observed by this event.
+  idempotencyKey?: string // Caller-supplied key used to deduplicate retries.
+  result?: string // Transition or operation result label.
+  rejectionCode?: string // Machine-readable rejection reason when not accepted.
+  payload?: unknown // Event-specific payload.
+  createdAt: string // Event creation timestamp.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span></div>
             </article>
-
+            
             <article class="contract-object wrkf" id="workflow-support-dtos">
               <div class="contract-object-head">
                 <div>
@@ -1286,73 +1532,201 @@
                   <p>These records provide the durable facts that transition blockers, predicates, hooks, and next-action recommendations read.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkf">evidence</span>
-                  <span class="badge wrkf">checks</span>
-                  <span class="badge ops">effects</span>
+                  <span class="badge wrkf">evidence</span><span class="badge wrkf">checks</span><span class="badge ops">effects</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> EvidenceDTO { <span class="syntax-field">id</span>: string; <span class="syntax-field">instanceId</span>?: string; <span class="syntax-field">kind</span>: string; <span class="syntax-field">ref</span>: string; <span class="syntax-field">summary</span>?: string; <span class="syntax-field">data</span>?: unknown; <span class="syntax-field">source</span>?: unknown; <span class="syntax-field">actor</span>?: string; <span class="syntax-field">role</span>?: string; <span class="syntax-field">runId</span>?: string; <span class="syntax-field">taskEtagAtProduction</span>?: string; <span class="syntax-field">producedAt</span>: string }</span><span class="schema-comment">Recorded workflow evidence. Current implementation validates data as JSON only.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> ObligationDTO { <span class="syntax-field">id</span>: string; <span class="syntax-field">instanceId</span>?: string; <span class="syntax-field">kind</span>: string; <span class="syntax-field">ownerRole</span>?: string; <span class="syntax-field">ownerActor</span>?: string; <span class="syntax-field">blocking</span>: boolean; <span class="syntax-field">status</span>: string; <span class="syntax-field">reason</span>?: string; <span class="syntax-field">data</span>?: unknown; <span class="syntax-field">satisfiedByEvidenceId</span>?: string; <span class="syntax-field">createdAt</span>: string; <span class="syntax-field">updatedAt</span>: string }</span><span class="schema-comment">Open or resolved responsibility record.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> EffectDTO { <span class="syntax-field">id</span>: string; <span class="syntax-field">instanceId</span>?: string; <span class="syntax-field">revision</span>: number; <span class="syntax-field">kind</span>: string; <span class="syntax-field">payload</span>?: unknown; <span class="syntax-field">status</span>: string; <span class="syntax-field">idempotencyKey</span>?: string; <span class="syntax-field">attempts</span>: number; <span class="syntax-field">leasedBy</span>?: string; <span class="syntax-field">leasedUntil</span>?: string; <span class="syntax-field">deliveredAt</span>?: string; <span class="syntax-field">lastError</span>?: string; <span class="syntax-field">createdAt</span>: string; <span class="syntax-field">updatedAt</span>: string }</span><span class="schema-comment">Side-effect delivery queue record.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> CheckRunDTO { <span class="syntax-field">id</span>: string; <span class="syntax-field">instanceId</span>?: string; <span class="syntax-field">transitionId</span>: string; <span class="syntax-field">checkId</span>: string; <span class="syntax-field">hookId</span>?: string; <span class="syntax-field">inputHash</span>: string; <span class="syntax-field">exitCode</span>?: number; <span class="syntax-field">verdict</span>: string; <span class="syntax-field">outcome</span>?: string; <span class="syntax-field">code</span>?: string; <span class="syntax-field">summary</span>?: string; <span class="syntax-field">facts</span>?: unknown; <span class="syntax-field">actor</span>?: string; <span class="syntax-field">role</span>?: string; <span class="syntax-field">runId</span>?: string; <span class="syntax-field">startedAt</span>: string; <span class="syntax-field">completedAt</span>?: string }</span><span class="schema-comment">Hook or predicate check execution result.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> RunDTO { <span class="syntax-field">id</span>: string; <span class="syntax-field">instanceId</span>?: string; <span class="syntax-field">role</span>: string; <span class="syntax-field">actor</span>: string; <span class="syntax-field">deliveryRef</span>?: string; <span class="syntax-field">lane</span>?: string; <span class="syntax-field">externalRunRef</span>?: string; <span class="syntax-field">status</span>: string; <span class="syntax-field">startedAt</span>: string; <span class="syntax-field">completedAt</span>?: string; <span class="syntax-field">terminalResult</span>?: string }</span><span class="schema-comment">Actor run binding for workflow role execution.</span></span></span></code></pre>
-              </div>
+<pre><code>type EvidenceDTO = { // Recorded workflow evidence read by predicates, transitions, and next actions.
+  id: string // Stable evidence id.
+  instanceId?: string // Owning workflow instance id.
+  kind: string // Evidence kind from the template or caller.
+  ref: string // External or local reference for the evidence.
+  summary?: string // Optional human-readable summary.
+  data?: unknown // JSON evidence payload validated as JSON by current code.
+  source?: unknown // Optional producer/source descriptor.
+  actor?: string // Actor that produced the evidence.
+  role?: string // Workflow role that produced the evidence.
+  runId?: string // Run id associated with evidence production.
+  taskEtagAtProduction?: string // Task etag observed when evidence was produced.
+  producedAt: string // Evidence production timestamp.
+}
+
+type ObligationDTO = { // Durable responsibility record that may block progress.
+  id: string // Stable obligation id.
+  instanceId?: string // Owning workflow instance id.
+  kind: string // Obligation kind from the template or supervisor.
+  ownerRole?: string // Role responsible for satisfying the obligation.
+  ownerActor?: string // Actor responsible for satisfying the obligation.
+  blocking: boolean // True when the obligation blocks transition recommendations.
+  status: string // Open, satisfied, cancelled, or implementation-defined status.
+  reason?: string // Human-readable reason the obligation exists.
+  data?: unknown // Optional obligation payload.
+  satisfiedByEvidenceId?: string // Evidence id that satisfied the obligation.
+  createdAt: string // Obligation creation timestamp.
+  updatedAt: string // Last obligation mutation timestamp.
+}
+
+type EffectDTO = { // Side-effect delivery queue record.
+  id: string // Stable effect id.
+  instanceId?: string // Owning workflow instance id.
+  revision: number // Instance revision that produced the effect.
+  kind: string // Effect handler kind.
+  payload?: unknown // Handler-specific payload.
+  status: string // Delivery lifecycle state.
+  idempotencyKey?: string // Delivery dedupe key.
+  attempts: number // Number of delivery attempts.
+  leasedBy?: string // Worker or actor currently leasing the effect.
+  leasedUntil?: string // Lease expiration timestamp.
+  deliveredAt?: string // Successful delivery timestamp.
+  lastError?: string // Last delivery error message.
+  createdAt: string // Effect creation timestamp.
+  updatedAt: string // Last effect mutation timestamp.
+}
+
+type CheckRunDTO = { // Hook or predicate check execution result.
+  id: string // Stable check run id.
+  instanceId?: string // Owning workflow instance id.
+  transitionId: string // Transition being checked.
+  checkId: string // Template check id.
+  hookId?: string // Hook catalog id used to execute the check.
+  inputHash: string // Hash of the check input context.
+  exitCode?: number // Process exit code when hook-backed.
+  verdict: string // Check verdict used by predicates.
+  outcome?: string // Optional check-specific outcome value.
+  code?: string // Optional machine-readable diagnostic code.
+  summary?: string // Human-readable check summary.
+  facts?: unknown // JSON facts emitted by the check.
+  actor?: string // Actor that ran or submitted the check.
+  role?: string // Workflow role used by the actor.
+  runId?: string // Run id associated with the check.
+  startedAt: string // Check start timestamp.
+  completedAt?: string // Check completion timestamp.
+}
+
+type RunDTO = { // Actor run binding for workflow role execution.
+  id: string // Stable run id.
+  instanceId?: string // Owning workflow instance id.
+  role: string // Workflow role being exercised.
+  actor: string // Actor executing the run.
+  deliveryRef?: string // Optional delivery reference from an external system.
+  lane?: string // Optional execution lane.
+  externalRunRef?: string // External runner id or URL.
+  status: string // Run lifecycle state.
+  startedAt: string // Run start timestamp.
+  completedAt?: string // Run completion timestamp.
+  terminalResult?: string // Final result label when complete.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span></div>
             </article>
-
+            
             <article class="contract-object wrkf" id="next-action-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkf">Recommendation DTO</span>
                   <h3><span class="inline-code">NextActionResponseDTO</span></h3>
-                  <p>The next-action response is the operational read model for a workflow instance: candidate actions, blocked transitions, open obligations, and pending effects.</p>
+                  <p>The next-action response is the operational read model for candidate actions, blockers, obligations, and pending effects.</p>
                 </div>
                 <div class="object-chip-row">
-                  <span class="badge wrkf">next</span>
-                  <span class="badge audit">stale</span>
+                  <span class="badge wrkf">next</span><span class="badge audit">stale</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> NextActionResponseDTO {</span><span class="schema-comment">Returned by wrkf next, check preflight, and some supervisor planning paths.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">instance</span>: NextInstanceDTO</span><span class="schema-comment">Instance summary plus template/task doc hashes.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">03</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">actions</span>: NextActionDTO[]</span><span class="schema-comment">Ranked recommended actions.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">04</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">blockedTransitions</span>: BlockedTransitionDTO[]</span><span class="schema-comment">Transitions blocked by evidence, obligations, guards, checks, or context.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">05</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">openObligations</span>: ObligationDTO[]</span><span class="schema-comment">Blocking and nonblocking open obligations.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">06</span><span class="schema-code has-comment"><span class="schema-code-text">  <span class="syntax-field">pendingEffects</span>: EffectDTO[]</span><span class="schema-comment">Effects awaiting acknowledgement/delivery/retry.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">07</span><span class="schema-code no-comment"><span class="schema-code-text">}</span></span></span>
-<span class="schema-line"><span class="schema-line-no">08</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> NextActionDTO { <span class="syntax-field">id</span>: string; <span class="syntax-field">kind</span>: string; <span class="syntax-field">mode</span>: string; <span class="syntax-field">owner</span>: ActionOwnerDTO; <span class="syntax-field">rank</span>: number; <span class="syntax-field">confidence</span>?: number; <span class="syntax-field">why</span>: string; <span class="syntax-field">unblocks</span>?: string[]; <span class="syntax-field">blocksOn</span>?: BlockerDTO[]; <span class="syntax-field">command</span>?: string; <span class="syntax-field">preflight</span>?: string; <span class="syntax-field">expectedState</span>?: WorkflowStateDTO; <span class="syntax-field">guardrails</span>: GuardrailsDTO }</span><span class="schema-comment">Individual recommended action.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">09</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> BlockerDTO { <span class="syntax-field">kind</span>: string; <span class="syntax-field">ref</span>: string; <span class="syntax-field">message</span>: string }</span><span class="schema-comment">Human-readable blocker with machine-sortable kind/ref.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">10</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> GuardrailsDTO { <span class="syntax-field">hard</span>: string[]; <span class="syntax-field">warnings</span>: string[] }</span><span class="schema-comment">Execution constraints surfaced to agents.</span></span></span></code></pre>
-              </div>
+<pre><code>type NextActionResponseDTO = { // Operational read model returned by wrkf next and related planning paths.
+  instance: NextInstanceDTO // Instance summary plus template and task document hashes.
+  actions: NextActionDTO[] // Ranked recommended actions for the current context.
+  blockedTransitions: BlockedTransitionDTO[] // Transitions blocked by evidence, obligations, guards, checks, or context.
+  openObligations: ObligationDTO[] // Blocking and nonblocking obligations not yet satisfied.
+  pendingEffects: EffectDTO[] // Effects awaiting acknowledgement, delivery, or retry.
+}
+
+type NextInstanceDTO = { // Compact instance snapshot embedded in next-action output.
+  id: string // Workflow instance id.
+  state: WorkflowStateDTO // Current workflow state tuple.
+  revision: number // Current instance revision.
+  templateHash: string // Installed template hash used for planning.
+  taskDocHash: string // Task document hash used for planning.
+  contextHash: string // Context hash used for stale output detection.
+}
+
+type NextActionDTO = { // Individual recommended action returned to an agent or supervisor.
+  id: string // Stable action id within the response.
+  kind: string // Action category such as transition, evidence, check, or obligation.
+  mode: string // Suggested execution mode.
+  owner: ActionOwnerDTO // Actor or role expected to take the action.
+  rank: number // Sort key where lower ranks should be considered first.
+  confidence?: number // Optional planner confidence score.
+  why: string // Human-readable reason the action is recommended.
+  unblocks?: string[] // Transition or obligation refs unblocked by the action.
+  blocksOn?: BlockerDTO[] // Outstanding blockers that must clear first.
+  command?: string // Suggested CLI command when available.
+  preflight?: string // Suggested preflight command or check id.
+  expectedState?: WorkflowStateDTO // Expected state after successful action.
+  guardrails: GuardrailsDTO // Hard constraints and warnings for the action.
+}
+
+type ActionOwnerDTO = { // Owner descriptor for a next action.
+  role?: string // Workflow role expected to act.
+  actor?: string // Specific actor expected to act.
+  lane?: string // Optional execution lane.
+}
+
+type BlockedTransitionDTO = { // Transition that cannot currently be admitted.
+  transitionId: string // Blocked transition id.
+  blockers: BlockerDTO[] // Reasons the transition is blocked.
+}
+
+type BlockerDTO = { // Human-readable blocker with machine-sortable kind and reference.
+  kind: string // Blocker category.
+  ref: string // Resource, check, obligation, or predicate reference.
+  message: string // Human-readable blocker explanation.
+}
+
+type GuardrailsDTO = { // Execution constraints surfaced to agents.
+  hard: string[] // Non-negotiable constraints.
+  warnings: string[] // Advisories that do not block execution.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span></div>
             </article>
-
+            
             <article class="contract-object wrkf" id="hook-catalog-dto">
               <div class="contract-object-head">
                 <div>
                   <span class="badge wrkf">Hook DTO</span>
                   <h3><span class="inline-code">HookCatalogDTO</span></h3>
-                  <p>Local hook catalog records define executable checks and effect handlers. They are loaded from the configured hook catalog path before wrkf command execution.</p>
+                  <p>Local hook catalog records define executable checks and effect handlers loaded before wrkf command execution.</p>
                 </div>
                 <div class="object-chip-row">
                   <span class="badge wrkf">hooks</span>
                 </div>
               </div>
               <div class="code-panel">
-                <pre><code><span class="schema-line"><span class="schema-line-no">01</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> HookCatalogDTO { <span class="syntax-field">schemaVersion</span>: string; <span class="syntax-field">hooks</span>: Record&lt;string, HookSpecDTO&gt;; <span class="syntax-field">effectHandlers</span>?: Record&lt;string, HookSpecDTO&gt; }</span><span class="schema-comment">Top-level hook catalog.</span></span></span>
-<span class="schema-line"><span class="schema-line-no">02</span><span class="schema-code has-comment"><span class="schema-code-text"><span class="syntax-keyword">interface</span> HookSpecDTO { <span class="syntax-field">kind</span>: string; <span class="syntax-field">argv</span>: string[]; <span class="syntax-field">stdin</span>: string; <span class="syntax-field">stdout</span>: string; <span class="syntax-field">timeoutMs</span>: number; <span class="syntax-field">cwd</span>: string; <span class="syntax-field">env</span>: Record&lt;string, string[]&gt;; <span class="syntax-field">maxStdoutBytes</span>: number; <span class="syntax-field">maxStderrBytes</span>: number }</span><span class="schema-comment">Executable hook constraints and IO contract.</span></span></span></code></pre>
-              </div>
+<pre><code>type HookCatalogDTO = { // Top-level hook catalog loaded before wrkf command execution.
+  schemaVersion: string // Hook catalog schema marker.
+  hooks: Record&lt;string, HookSpecDTO&gt; // Executable checks and general hooks keyed by id.
+  effectHandlers?: Record&lt;string, HookSpecDTO&gt; // Effect delivery handlers keyed by effect kind.
+}
+
+type HookSpecDTO = { // Executable hook constraints and IO contract.
+  kind: string // Hook implementation kind.
+  argv: string[] // Command argv used to invoke the hook.
+  stdin: string // Stdin contract expected by the hook.
+  stdout: string // Stdout contract emitted by the hook.
+  timeoutMs: number // Maximum hook runtime in milliseconds.
+  cwd: string // Working directory used for execution.
+  env: Record&lt;string, string[]&gt; // Environment variables or allowlists supplied to the hook.
+  maxStdoutBytes: number // Maximum stdout bytes captured by wrkf.
+  maxStderrBytes: number // Maximum stderr bytes captured by wrkf.
+}</code></pre>
+</div>
               <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span></div>
             </article>
           </section>
 
           <section id="source-map" aria-labelledby="source-map-title">
             <h2 id="source-map-title"><span class="section-num">08</span> Source Map</h2>
-            <p class="section-intro">
-              This page is a contract explainer, not a replacement for generated API docs. The sources below are the current ground truth for field names and command behavior.
-            </p>
-
+            <p class="section-intro">This page is a contract explainer, not a replacement for generated API docs. The sources below are the current ground truth for field names and command behavior.</p>
             <div class="grid two">
               <article class="panel">
                 <span class="badge wrkq">wrkq</span>
@@ -1367,11 +1741,146 @@
             </div>
           </section>
 
-          <div class="footer">
-            Source repository: <span class="inline-code">/Users/lherron/praesidium/wrkq</span>. Artifact: <span class="inline-code">docs/html/Contracts.html</span>. Generated from current wrkq/wrkf public interfaces using the wrkq-to-html workflow.
-          </div>
+          <footer class="footer">Source repository: <span class="inline-code">/Users/lherron/praesidium/wrkq</span>. Artifact: <span class="inline-code">docs/html/Contracts.html</span>. Generated from current wrkq/wrkf public interfaces using the dto-contract-html skill.</footer>
         </div>
       </main>
     </div>
+    <script>
+      window.DTO_CONTRACT_KEYWORDS = ['TaskDTO', 'ContainerDTO', 'CommentDTO', 'AttachmentDTO', 'HandoffDTO', 'WorkflowStateDTO'];
+    </script>
+    <script>
+;(() => {
+  const escapeHtml = (value) =>
+    String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+  const baseKeywords = [
+    'type',
+    'interface',
+    'export',
+    'const',
+    'extends',
+    'readonly',
+    'Promise',
+    'Record',
+    'Extract',
+    'Partial',
+    'Pick',
+    'Omit',
+    'Map',
+    'Set',
+    'List',
+    'Dict',
+    'Optional',
+    'Union',
+    'Any',
+    'unknown',
+    'null',
+    'true',
+    'false',
+  ]
+
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  const configuredKeywords = Array.isArray(window.DTO_CONTRACT_KEYWORDS)
+    ? window.DTO_CONTRACT_KEYWORDS
+    : []
+  const keywords = [...new Set([...baseKeywords, ...configuredKeywords])].filter(Boolean)
+  const keywordPattern = keywords.length
+    ? new RegExp(`\\b(${keywords.map(escapeRegExp).join('|')})\\b`, 'g')
+    : null
+
+  const findCommentIndex = (line) => {
+    let quote = null
+    let escaped = false
+    for (let index = 0; index < line.length - 1; index += 1) {
+      const char = line[index]
+      const next = line[index + 1]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (quote) {
+        if (char === quote) quote = null
+        continue
+      }
+      if (char === '"' || char === "'" || char === '`') {
+        quote = char
+        continue
+      }
+      if (char === '/' && next === '/') return index
+    }
+    return -1
+  }
+
+  const highlightCode = (value) => {
+    let html = escapeHtml(value)
+    html = html.replace(/'([^']*)'/g, '<span class="syntax-string">\'$1\'</span>')
+    html = html.replace(
+      /\b([A-Za-z_][A-Za-z0-9_]*\??)(?=\s*:)/g,
+      '<span class="syntax-field">$1</span>'
+    )
+    if (keywordPattern) {
+      html = html.replace(keywordPattern, '<span class="syntax-keyword">$1</span>')
+    }
+    return html || '&nbsp;'
+  }
+
+  const isBlockCommentLine = (codePart, hasComment) => {
+    if (!hasComment) return false
+    const trimmedCode = codePart.trim()
+    return (
+      trimmedCode.endsWith('{') ||
+      /^type\s+/.test(trimmedCode) ||
+      /^export\s+(interface|type)\s+/.test(trimmedCode) ||
+      /^interface\s+/.test(trimmedCode) ||
+      /^class\s+/.test(trimmedCode)
+    )
+  }
+
+  const renderLine = (line, index) => {
+    const commentIndex = findCommentIndex(line)
+    const hasComment = commentIndex >= 0
+    const codePart = hasComment ? line.slice(0, commentIndex).replace(/\s+$/, '') : line
+    const commentPart = hasComment ? line.slice(commentIndex + 2).trim() : ''
+    const codeClass = hasComment ? 'schema-code has-comment' : 'schema-code no-comment'
+    const isBlockComment = isBlockCommentLine(codePart, hasComment)
+    const commentClass = isBlockComment ? 'schema-comment block-comment' : 'schema-comment'
+    const markerHtml = isBlockComment ? '' : '<span class="comment-marker">//</span>'
+    const commentHtml = hasComment
+      ? `<span class="${commentClass}">${markerHtml}${escapeHtml(commentPart)}</span>`
+      : ''
+    return `<span class="schema-line"><span class="schema-line-no">${index + 1}</span><span class="${codeClass}"><span class="schema-code-text">${highlightCode(codePart)}</span>${commentHtml}</span></span>`
+  }
+
+  const legendHtml = `<div class="contract-legend" aria-label="Contract notation color legend">
+    <span class="legend-item"><span class="legend-swatch field"></span>fields</span>
+    <span class="legend-item"><span class="legend-swatch type"></span>types</span>
+    <span class="legend-item"><span class="legend-swatch literal"></span>literals</span>
+    <span class="legend-item"><span class="legend-swatch comment"></span>comments</span>
+  </div>`
+
+  document.querySelectorAll('.contract-object code').forEach((code) => {
+    if (code.dataset.highlighted === 'true') return
+    if (code.dataset.contractNoRender === 'true') return
+    const raw = code.textContent || ''
+    code.innerHTML = raw.split('\n').map(renderLine).join('')
+    code.dataset.highlighted = 'true'
+  })
+
+  document.querySelectorAll('.contract-object').forEach((object) => {
+    if (!object.querySelector('code')) return
+    if (object.querySelector('.contract-legend')) return
+    const sourceNote = object.querySelector('.source-note')
+    if (sourceNote) {
+      sourceNote.insertAdjacentHTML('beforebegin', legendHtml)
+    }
+  })
+})()
+
+    </script>
   </body>
 </html>

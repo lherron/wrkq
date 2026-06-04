@@ -4,6 +4,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var rootOutput string
+
 var rootCmd = &cobra.Command{
 	Use:   "wrkq",
 	Short: "Filesystem-flavored CLI for managing projects and tasks",
@@ -24,4 +26,5 @@ func init() {
 	rootCmd.PersistentFlags().String("db", "", "Path to database file (overrides WRKQ_DB_PATH)")
 	rootCmd.PersistentFlags().String("as", "", "Actor to perform action as (slug or friendly ID)")
 	rootCmd.PersistentFlags().String("project", "", "Project to operate under (overrides WRKQ_PROJECT_ROOT)")
+	rootCmd.PersistentFlags().StringVar(&rootOutput, "output", "", "Output mode: table, human, json, ndjson, porcelain, yaml, tsv, raw")
 }

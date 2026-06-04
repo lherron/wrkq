@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -44,37 +43,46 @@ func init() {
 
 // agentContextOutput is the JSON shape printed by --json.
 type agentContextOutput struct {
-	Env          scope.EnvSnapshot     `json:"env"`
-	Scope        *scope.ResolvedScope  `json:"scope,omitempty"`
-	Diagnostics  []scope.Diagnostic    `json:"diagnostics,omitempty"`
-	Error        string                `json:"error,omitempty"`
-	Lookups      *agentContextLookups  `json:"lookups,omitempty"`
-	DBPath       string                `json:"db_path,omitempty"`
-	DBReachable  bool                  `json:"db_reachable"`
-	DBError      string                `json:"db_error,omitempty"`
-	OverrideFlag string                `json:"override_flag,omitempty"`
+	Env          scope.EnvSnapshot    `json:"env"`
+	Scope        *scope.ResolvedScope `json:"scope,omitempty"`
+	Diagnostics  []scope.Diagnostic   `json:"diagnostics,omitempty"`
+	Error        string               `json:"error,omitempty"`
+	Lookups      *agentContextLookups `json:"lookups,omitempty"`
+	DBPath       string               `json:"db_path,omitempty"`
+	DBReachable  bool                 `json:"db_reachable"`
+	DBError      string               `json:"db_error,omitempty"`
+	OverrideFlag string               `json:"override_flag,omitempty"`
 }
 
 // agentContextLookups carries optional DB-backed identity info. All fields are
 // best-effort: any failed lookup leaves the corresponding field empty.
 type agentContextLookups struct {
-	ActorUUID            string `json:"actor_uuid,omitempty"`
-	ActorFriendlyID      string `json:"actor_friendly_id,omitempty"`
-	ContainerUUID        string `json:"container_uuid,omitempty"`
-	ContainerFriendlyID  string `json:"container_friendly_id,omitempty"`
+	ActorUUID           string `json:"actor_uuid,omitempty"`
+	ActorFriendlyID     string `json:"actor_friendly_id,omitempty"`
+	ContainerUUID       string `json:"container_uuid,omitempty"`
+	ContainerFriendlyID string `json:"container_friendly_id,omitempty"`
 }
 
 func runAgentContext(cmd *cobra.Command, _ []string) error {
 	stderr := cmd.ErrOrStderr()
 	stdout := cmd.OutOrStdout()
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		return fmt.Errorf("failed to load config: %w", cfgErr)
+	}
+	sel, modeErr := resolveOutputMode(cmd, cfg, outputShapeSingleton, outputResolveOptions{
+		Allow:      []outputMode{outputModeHuman, outputModeJSON, outputModeNDJSON},
+		DefaultTTY: outputModeHuman,
+	})
+	if modeErr != nil {
+		return modeErr
+	}
 
 	env := scope.ReadEnv()
 	resolved, diags, resolveErr := scope.Resolve(agentContextScope)
 
 	// DB lookups are best-effort — never fail the command if they fail.
 	lookups, dbPath, dbReachable, dbErr := tryDBLookups(cmd, resolved, resolveErr)
-
-	jsonMode := agentContextJSON || (!agentContextHuman && !isStdoutTTY(stdout))
 
 	out := agentContextOutput{
 		Env:         env,
@@ -96,13 +104,16 @@ func runAgentContext(cmd *cobra.Command, _ []string) error {
 		out.Lookups = lookups
 	}
 
-	if jsonMode {
-		encoder := json.NewEncoder(stdout)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(out); err != nil {
+	switch sel.Mode {
+	case outputModeJSON:
+		if err := writeJSONOutput(stdout, sel, out); err != nil {
 			return err
 		}
-	} else {
+	case outputModeNDJSON:
+		if err := writeNDJSONOutput(stdout, out); err != nil {
+			return err
+		}
+	default:
 		printAgentContextHuman(stdout, stderr, out)
 	}
 

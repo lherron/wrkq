@@ -18,7 +18,8 @@ func runHandoffGet(cmd *cobra.Command, args []string) error {
 
 	stdout := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
-	mode, modeErr := resolveHandoffGetOutputMode(stdout)
+	sel, modeErr := resolveHandoffSelection(cmd, outputShapeSingleton, true)
+	mode := handoffModeFromSelection(sel)
 	if modeErr != nil {
 		return writeHandoffGetError(stderr, mode, 1, "validation_error", "", modeErr.Error(), "")
 	}
@@ -43,29 +44,6 @@ func runHandoffGet(cmd *cobra.Command, args []string) error {
 		return exitError(1, err)
 	}
 	return nil
-}
-
-func resolveHandoffGetOutputMode(stdout io.Writer) (handoffOutputMode, error) {
-	selected := 0
-	if handoffGetJSON {
-		selected++
-	}
-	if handoffGetHuman {
-		selected++
-	}
-	if selected > 1 {
-		return handoffOutputJSON, fmt.Errorf("choose only one output mode: --json or --human")
-	}
-	switch {
-	case handoffGetJSON:
-		return handoffOutputJSON, nil
-	case handoffGetHuman:
-		return handoffOutputHuman, nil
-	case isStdoutTTY(stdout):
-		return handoffOutputHuman, nil
-	default:
-		return handoffOutputJSON, nil
-	}
 }
 
 func writeHandoffGetOutput(stdout io.Writer, mode handoffOutputMode, out handoffJSON) error {

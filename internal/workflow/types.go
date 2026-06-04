@@ -35,7 +35,22 @@ type RoleSpec struct {
 }
 
 type KindSpec struct {
-	Description string `json:"description,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Class       string         `json:"class,omitempty"`
+	Facts       *FactsContract `json:"facts,omitempty"`
+}
+
+type FactsContract struct {
+	Required   []string                `json:"required,omitempty"`
+	Properties map[string]FactProperty `json:"properties,omitempty"`
+}
+
+type FactProperty struct {
+	Type      string            `json:"type,omitempty"`
+	Enum      []json.RawMessage `json:"enum,omitempty"`
+	MaxLength int               `json:"maxLength,omitempty"`
+	MaxItems  int               `json:"maxItems,omitempty"`
+	ItemsType string            `json:"itemsType,omitempty"`
 }
 
 type TransitionSpec struct {
@@ -61,14 +76,19 @@ type ResponsibilitySpec struct {
 }
 
 type RequirementSpec struct {
-	Evidence *struct {
-		Kind string `json:"kind"`
-	} `json:"evidence,omitempty"`
-	Obligation *struct {
-		Kind   string `json:"kind,omitempty"`
-		ID     string `json:"id,omitempty"`
-		Status string `json:"status,omitempty"`
-	} `json:"obligation,omitempty"`
+	Evidence   *EvidenceRequirementSpec   `json:"evidence,omitempty"`
+	Obligation *ObligationRequirementSpec `json:"obligation,omitempty"`
+}
+
+type EvidenceRequirementSpec struct {
+	Kind  string                     `json:"kind"`
+	Facts map[string]json.RawMessage `json:"facts,omitempty"`
+}
+
+type ObligationRequirementSpec struct {
+	Kind   string `json:"kind,omitempty"`
+	ID     string `json:"id,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 type CheckSpec struct {
@@ -139,7 +159,8 @@ type CheckOutcomePredicate struct {
 }
 
 type EvidencePredicate struct {
-	Kind string `json:"kind"`
+	Kind  string                     `json:"kind"`
+	Facts map[string]json.RawMessage `json:"facts,omitempty"`
 }
 
 type ObligationPredicate struct {
@@ -204,6 +225,7 @@ type Evidence struct {
 	Kind                 string          `json:"kind"`
 	Ref                  string          `json:"ref"`
 	Summary              string          `json:"summary,omitempty"`
+	Facts                json.RawMessage `json:"facts,omitempty"`
 	Data                 json.RawMessage `json:"data,omitempty"`
 	Source               json.RawMessage `json:"source,omitempty"`
 	Actor                string          `json:"actor,omitempty"`
@@ -211,6 +233,17 @@ type Evidence struct {
 	RunID                string          `json:"runId,omitempty"`
 	TaskEtagAtProduction string          `json:"taskEtagAtProduction,omitempty"`
 	ProducedAt           string          `json:"producedAt"`
+}
+
+type AddEvidenceParams struct {
+	TaskSelector string
+	Kind         string
+	Ref          string
+	Summary      string
+	Facts        string
+	Data         string
+	Actor        string
+	Role         string
 }
 
 type Obligation struct {

@@ -48,8 +48,32 @@ func runHandoffSearchCLI(t *testing.T, args []string) handoffSearchExecResult {
 func decodeHandoffSearchOutput(t *testing.T, raw string) handoffSearchOutput {
 	t.Helper()
 	var out handoffSearchOutput
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		t.Fatalf("failed to decode JSON output: %v\n%s", err, raw)
+	if err := json.Unmarshal([]byte(raw), &out); err == nil {
+		return out
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var probe map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &probe); err != nil {
+			t.Fatalf("failed to decode search NDJSON line: %v\n%s", err, raw)
+		}
+		if probe["type"] == "wrkq.pagination" {
+			if cursor, ok := probe["next_cursor"].(string); ok && cursor != "" {
+				out.NextCursor = &cursor
+			}
+			if truncated, ok := probe["truncated"].(bool); ok {
+				out.Truncated = truncated
+			}
+			continue
+		}
+		var h handoffJSON
+		if err := json.Unmarshal([]byte(line), &h); err != nil {
+			t.Fatalf("failed to decode handoff search NDJSON row: %v\n%s", err, raw)
+		}
+		out.Handoffs = append(out.Handoffs, h)
 	}
 	return out
 }

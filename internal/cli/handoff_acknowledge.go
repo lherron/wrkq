@@ -32,7 +32,8 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 	stdout := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
 
-	mode, modeErr := resolveHandoffAckOutputMode(stdout)
+	sel, modeErr := resolveHandoffSelection(cmd, outputShapeMutation, true)
+	mode := handoffModeFromSelection(sel)
 	if modeErr != nil {
 		return writeHandoffAckError(stderr, mode, 1, "validation_error", "", modeErr.Error(), "")
 	}
@@ -135,31 +136,6 @@ func classifyHandoffAckError(ctx context.Context, database *db.DB, stderr io.Wri
 			"wrkq handoff get "+idOrUUID+" --json # inspect current etag")
 	}
 	return writeHandoffAckError(stderr, mode, 1, "runtime_error", idOrUUID, err.Error(), "")
-}
-
-// resolveHandoffAckOutputMode mirrors the get/create resolvers: explicit
-// flags win, otherwise TTY-aware (human on TTY, JSON when piped).
-func resolveHandoffAckOutputMode(stdout io.Writer) (handoffOutputMode, error) {
-	selected := 0
-	if handoffAckJSON {
-		selected++
-	}
-	if handoffAckHuman {
-		selected++
-	}
-	if selected > 1 {
-		return handoffOutputJSON, fmt.Errorf("choose only one output mode: --json or --human")
-	}
-	switch {
-	case handoffAckJSON:
-		return handoffOutputJSON, nil
-	case handoffAckHuman:
-		return handoffOutputHuman, nil
-	case isStdoutTTY(stdout):
-		return handoffOutputHuman, nil
-	default:
-		return handoffOutputJSON, nil
-	}
 }
 
 func writeHandoffAckOutput(stdout io.Writer, mode handoffOutputMode, out handoffAckOutput) error {

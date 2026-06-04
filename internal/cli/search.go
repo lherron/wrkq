@@ -39,6 +39,8 @@ var (
 	searchReverse        bool
 	searchJSON           bool
 	searchNDJSON         bool
+	searchPorcelain      bool
+	searchHuman          bool
 	searchExplain        bool
 	searchFresh          bool
 )
@@ -54,6 +56,8 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchReverse, "reverse", false, "Reverse sort order")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output as JSON")
 	searchCmd.Flags().BoolVar(&searchNDJSON, "ndjson", false, "Output as newline-delimited JSON")
+	searchCmd.Flags().BoolVar(&searchPorcelain, "porcelain", false, "Stable machine-readable output")
+	searchCmd.Flags().BoolVar(&searchHuman, "human", false, "Force human-readable output")
 	searchCmd.Flags().BoolVar(&searchExplain, "explain", false, "Include ranking diagnostics in JSON output")
 	searchCmd.Flags().BoolVar(&searchFresh, "fresh", false, "Fail if the search index is stale")
 }
@@ -99,19 +103,33 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if searchJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(resp)
+	sel, err := resolveOutputMode(cmd, app.Config, outputShapeList, outputResolveOptions{
+		Allow:      []outputMode{outputModeHuman, outputModeJSON, outputModeNDJSON},
+		DefaultTTY: outputModeHuman,
+	})
+	if err != nil {
+		return err
 	}
-	if searchNDJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		for _, result := range resp.Results {
-			if err := encoder.Encode(result); err != nil {
-				return err
-			}
+	if cmd.Flag("json") == nil {
+		switch {
+		case (searchJSON && searchNDJSON) || (searchJSON && searchHuman) || (searchNDJSON && searchHuman):
+			return fmt.Errorf("choose only one output mode")
+		case searchJSON:
+			sel = outputSelection{Mode: outputModeJSON, Stable: searchPorcelain}
+		case searchNDJSON:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: searchPorcelain}
+		case searchHuman:
+			sel = outputSelection{Mode: outputModeHuman, Stable: searchPorcelain}
+		case searchPorcelain:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: true}
 		}
-		return nil
+	}
+
+	switch sel.Mode {
+	case outputModeJSON:
+		return writeJSONOutput(cmd.OutOrStdout(), sel, resp)
+	case outputModeNDJSON:
+		return writeNDJSONOutput(cmd.OutOrStdout(), resp.Results)
 	}
 
 	if resp.Stale {

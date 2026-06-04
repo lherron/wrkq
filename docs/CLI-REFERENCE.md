@@ -327,9 +327,9 @@ Alias: `wrkq handoff ls`.
 | `--json` / `--ndjson` / `--human` | Force output mode |
 | `--porcelain` | In addition to the chosen output, emit `next_cursor=<token>` on stderr for shell piping |
 
-**Pagination shape:** every structured response includes `next_cursor` (nullable string) and `truncated` (bool). NDJSON streams individual handoff objects followed by a footer object `{"cursor": ..., "truncated": ...}`. Use `--porcelain` to additionally surface the cursor on stderr so a shell wrapper can capture it without parsing JSON.
+**Pagination shape:** every JSON response includes `next_cursor` (nullable string) and `truncated` (bool). NDJSON streams individual handoff objects followed by a sentinel footer object `{"type":"wrkq.pagination","next_cursor":...,"truncated":...}`. Use `--porcelain` to additionally surface the cursor on stderr so a shell wrapper can capture it without parsing JSON.
 
-**Output defaults:** human-readable table on a TTY (`ID Scope Status Created Title`), JSON when piped or non-TTY. `--json`, `--ndjson`, or `--human` overrides detection.
+**Output defaults:** human-readable table on a TTY (`ID Scope Status Created Title`), NDJSON when piped or non-TTY. `--json`, `--ndjson`, or `--human` overrides detection.
 
 **Exit codes:**
 
@@ -444,14 +444,17 @@ The command works even without a database connection — actor and container UUI
 
 | Mode | Flag | Description |
 |------|------|-------------|
-| Table | (default) | Human-readable table |
+| Table/Human | `--output table` / `--human` | Human-readable table or text where supported |
 | JSON | `--json` | Pretty-printed JSON |
 | NDJSON | `--ndjson` | Newline-delimited JSON (best for piping) |
 | YAML | `--yaml` | YAML output |
 | TSV | `--tsv` | Tab-separated values |
-| Porcelain | `--porcelain` | Stable machine-readable (no ANSI) |
+| Raw | `--output raw` | Raw content where supported, such as `cat` markdown |
+| Porcelain | `--porcelain` | Stability modifier: no ANSI/width formatting; mirrors `next_cursor` on stderr where applicable |
 
-Most commands support `--json`, `--ndjson`, and `--porcelain`.
+Root `--output table|human|json|ndjson|porcelain|yaml|tsv|raw` and `WRKQ_OUTPUT` set defaults. Command aliases such as `--json`, `--ndjson`, and `--human` take precedence. `--output porcelain` is a compatibility alias for the command's canonical machine output with the porcelain/stable modifier enabled.
+
+Default matrix: non-TTY list/search/history commands use NDJSON; non-TTY singleton and mutation commands use JSON; content commands such as `cat` keep raw markdown unless explicitly overridden.
 
 ### JSON Fields (cat --json)
 

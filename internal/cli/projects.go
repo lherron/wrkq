@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
@@ -152,28 +150,30 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// Output next_cursor to stderr in porcelain mode
-	if projectsPorcelain && nextCursorStr != "" {
-		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
+	sel, err := resolveOutputMode(cmd, app.Config, outputShapeList, outputResolveOptions{
+		Allow:      []outputMode{outputModeTable, outputModeHuman, outputModeJSON, outputModeNDJSON, outputModeYAML, outputModeTSV},
+		DefaultTTY: outputModeTable,
+	})
+	if err != nil {
+		return err
+	}
+	if cmd.Flag("json") == nil {
+		switch {
+		case projectsJSON && projectsNDJSON:
+			return fmt.Errorf("choose only one output mode")
+		case projectsJSON:
+			sel = outputSelection{Mode: outputModeJSON, Stable: projectsPorcelain}
+		case projectsNDJSON:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: projectsPorcelain}
+		case projectsPorcelain:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: true}
+		default:
+			sel = outputSelection{Mode: outputModeTable}
+		}
 	}
 
-	// Render output
-	if projectsJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		if !projectsPorcelain {
-			encoder.SetIndent("", "  ")
-		}
-		return encoder.Encode(projects)
-	}
-
-	if projectsNDJSON {
-		encoder := json.NewEncoder(cmd.OutOrStdout())
-		for _, project := range projects {
-			if err := encoder.Encode(project); err != nil {
-				return err
-			}
-		}
-		return nil
+	if sel.Stable && nextCursorStr != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
 	if projectsOne || projectsNul {
@@ -192,7 +192,6 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Table output
 	headers := []string{"ID", "Slug", "Title"}
 	var rowsData [][]string
 	for _, project := range projects {
@@ -203,9 +202,20 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	switch sel.Mode {
+	case outputModeJSON:
+		return writeJSONOutput(cmd.OutOrStdout(), sel, projects)
+	case outputModeNDJSON:
+		return writeNDJSONOutput(cmd.OutOrStdout(), projects)
+	case outputModeYAML:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatYAML}).RenderYAML(projects)
+	case outputModeTSV:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
+	}
+
 	r := render.NewRenderer(cmd.OutOrStdout(), render.Options{
 		Format:    render.FormatTable,
-		Porcelain: projectsPorcelain,
+		Porcelain: sel.Stable,
 	})
 
 	return r.RenderTable(headers, rowsData)

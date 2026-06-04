@@ -43,7 +43,6 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		AttachmentsMaxMB: 50,
 		LogLevel:         "info",
-		Output:           "table",
 		Search: SearchConfig{
 			Enabled:          true,
 			DenseProvider:    "llama-cpp",

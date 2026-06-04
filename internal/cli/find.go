@@ -3,7 +3,6 @@ package cli
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -151,24 +150,68 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// Output next_cursor to stderr in porcelain mode
-	if findPorcelain && nextCursorStr != "" {
-		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
+	sel, err := resolveOutputMode(cmd, app.Config, outputShapeList, outputResolveOptions{
+		Allow:      []outputMode{outputModeTable, outputModeHuman, outputModeJSON, outputModeNDJSON, outputModeYAML, outputModeTSV},
+		DefaultTTY: outputModeTable,
+	})
+	if err != nil {
+		return err
+	}
+	if cmd.Flag("json") == nil {
+		switch {
+		case findJSON && findNDJSON:
+			return fmt.Errorf("choose only one output mode")
+		case findJSON:
+			sel = outputSelection{Mode: outputModeJSON, Stable: findPorcelain}
+		case findNDJSON:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: findPorcelain}
+		case findPorcelain:
+			sel = outputSelection{Mode: outputModeNDJSON, Stable: true}
+		default:
+			sel = outputSelection{Mode: outputModeTable}
+		}
 	}
 
-	// Render output
-	if findJSON {
-		return render.RenderJSON(results, false)
-	}
-	if findNDJSON {
-		return render.RenderNDJSON(results)
+	if sel.Stable && nextCursorStr != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 	if findPrint0 {
-		return render.RenderNulSeparated(results)
+		var paths []string
+		for _, result := range results {
+			paths = append(paths, result.Path)
+		}
+		if len(paths) > 0 {
+			fmt.Fprint(cmd.OutOrStdout(), strings.Join(paths, "\x00"))
+			fmt.Fprint(cmd.OutOrStdout(), "\x00")
+		}
+		return nil
 	}
 
-	// Default table output
-	return render.RenderTable(results, findPorcelain)
+	switch sel.Mode {
+	case outputModeJSON:
+		return writeJSONOutput(cmd.OutOrStdout(), sel, results)
+	case outputModeNDJSON:
+		return writeNDJSONOutput(cmd.OutOrStdout(), results)
+	case outputModeYAML:
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatYAML}).RenderYAML(results)
+	}
+
+	headers := []string{"Type", "ID", "Path", "Title", "State", "UpdatedAt"}
+	rowsData := make([][]string, 0, len(results))
+	for _, result := range results {
+		state := ""
+		if result.State != nil {
+			state = *result.State
+		}
+		rowsData = append(rowsData, []string{result.Type, result.ID, result.Path, result.Title, state, result.UpdatedAt})
+	}
+	if sel.Mode == outputModeTSV {
+		return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
+	}
+	return render.NewRenderer(cmd.OutOrStdout(), render.Options{
+		Format:    render.FormatTable,
+		Porcelain: sel.Stable,
+	}).RenderTable(headers, rowsData)
 }
 
 type findOptions struct {

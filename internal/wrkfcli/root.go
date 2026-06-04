@@ -311,7 +311,7 @@ func nextCmd() *cobra.Command {
 
 func evidenceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "evidence", Short: "Add and inspect workflow evidence"}
-	var kind, ref, summary, data, transition string
+	var kind, ref, summary, facts, data, transition string
 	add := &cobra.Command{
 		Use:  "add TASK --kind KIND --ref REF",
 		Args: cobra.ExactArgs(1),
@@ -319,7 +319,16 @@ func evidenceCmd() *cobra.Command {
 			if kind == "" || ref == "" {
 				return fmt.Errorf("--kind and --ref are required")
 			}
-			ev, err := a.service.AddEvidence(args[0], kind, ref, summary, data, a.actor, a.role)
+			ev, err := a.service.AddEvidence(workflow.AddEvidenceParams{
+				TaskSelector: args[0],
+				Kind:         kind,
+				Ref:          ref,
+				Summary:      summary,
+				Facts:        facts,
+				Data:         data,
+				Actor:        a.actor,
+				Role:         a.role,
+			})
 			if err != nil {
 				return err
 			}
@@ -329,6 +338,7 @@ func evidenceCmd() *cobra.Command {
 	add.Flags().StringVar(&kind, "kind", "", "Evidence kind")
 	add.Flags().StringVar(&ref, "ref", "", "Evidence reference")
 	add.Flags().StringVar(&summary, "summary", "", "Evidence summary")
+	add.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object")
 	add.Flags().StringVar(&data, "data", "", "Evidence JSON data")
 	list := &cobra.Command{
 		Use:  "list TASK",
@@ -395,7 +405,16 @@ func evidenceCmd() *cobra.Command {
 			}
 			dataJSON, _ := json.Marshal(dataDoc)
 			ref := "command:" + strings.Join(commandArgs, " ")
-			ev, addErr := a.service.AddEvidence(task, kind, ref, summary, string(dataJSON), a.actor, a.role)
+			ev, addErr := a.service.AddEvidence(workflow.AddEvidenceParams{
+				TaskSelector: task,
+				Kind:         kind,
+				Ref:          ref,
+				Summary:      summary,
+				Facts:        facts,
+				Data:         string(dataJSON),
+				Actor:        a.actor,
+				Role:         a.role,
+			})
 			if addErr != nil {
 				return addErr
 			}
@@ -407,6 +426,7 @@ func evidenceCmd() *cobra.Command {
 	}
 	execCmd.Flags().StringVar(&kind, "kind", "", "Evidence kind")
 	execCmd.Flags().StringVar(&summary, "summary", "", "Evidence summary")
+	execCmd.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object")
 	cmd.AddCommand(add, list, show, suggest, execCmd)
 	return cmd
 }

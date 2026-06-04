@@ -111,6 +111,7 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 	if containsInlineExecutable(canonical) {
 		errs = append(errs, "template must not contain inline executable command keys")
 	}
+	errs = append(errs, validateFactsContracts(tpl)...)
 
 	stateSet := map[string]bool{}
 	for _, st := range tpl.States {
@@ -463,7 +464,7 @@ func contextHash(templateHash string, state State, revision int64, taskHash stri
 	if ev != nil {
 		refs := make([]string, 0, len(ev))
 		for _, e := range ev {
-			refs = append(refs, e.Kind+":"+e.Ref)
+			refs = append(refs, e.ID+":"+e.Kind+":"+e.Ref+":"+Hash(e.Facts))
 		}
 		sort.Strings(refs)
 		doc["evidence"] = refs
@@ -730,10 +731,31 @@ func (s *Service) instanceByID(id string) (*Instance, error) {
 	return scanInstance(row)
 }
 
-func (s *Service) AddEvidence(taskSelector, kind, ref, summary, data, actor, role string) (*Evidence, error) {
-	inst, err := s.LatestInstance(taskSelector)
+func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
+	inst, err := s.LatestInstance(params.TaskSelector)
 	if err != nil {
 		return nil, err
+	}
+	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
+	if err != nil {
+		return nil, err
+	}
+	var kindSpec *KindSpec
+	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
+		kindSpec = &spec
+	}
+	facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
+	if err != nil {
+		return nil, err
+	}
+	var dataArg interface{}
+	var dataRaw json.RawMessage
+	if strings.TrimSpace(params.Data) != "" {
+		if !json.Valid([]byte(params.Data)) {
+			return nil, fmt.Errorf("data must be valid JSON")
+		}
+		dataArg = params.Data
+		dataRaw = json.RawMessage(params.Data)
 	}
 	var ev *Evidence
 	err = withTx(s.db.DB, func(tx *sql.Tx) error {
@@ -745,46 +767,67 @@ func (s *Service) AddEvidence(taskSelector, kind, ref, summary, data, actor, rol
 		if err != nil {
 			return err
 		}
-		source := map[string]interface{}{"type": "external_ref", "ref": ref}
+		source := map[string]interface{}{"type": "external_ref", "ref": params.Ref}
 		sourceJSON, _ := json.Marshal(source)
-		var dataArg interface{}
-		if strings.TrimSpace(data) != "" {
-			if !json.Valid([]byte(data)) {
-				return fmt.Errorf("data must be valid JSON")
-			}
-			dataArg = data
+		var factsArg interface{}
+		var factsRaw json.RawMessage
+		if facts != nil {
+			factsArg = string(facts.Raw)
+			factsRaw = facts.Raw
 		}
+		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
-			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, data_json, source_json, actor, role, task_etag_at_production)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, inst.ID, kind, ref, nullIfEmpty(summary), dataArg, string(sourceJSON), emptyToNil(actor), emptyToNil(role), fmt.Sprint(task.ETag))
+			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, role, task_etag_at_production, produced_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.Actor), emptyToNil(params.Role), fmt.Sprint(task.ETag), now)
 		if err != nil {
 			return err
 		}
-		if kind == "delegated_task_manifest" && dataArg != nil {
-			if err := createDelegatedTaskClosureObligationsTx(tx, inst.ID, id, data); err != nil {
+		if params.Kind == "delegated_task_manifest" && dataArg != nil {
+			if err := createDelegatedTaskClosureObligationsTx(tx, inst.ID, id, string(dataRaw)); err != nil {
 				return err
 			}
 		}
-		if kind == "coordinator_runbook" && dataArg != nil {
+		if params.Kind == "coordinator_runbook" && dataArg != nil {
 			if err := createCoordinatorSmokeExecutionObligationTx(tx, inst.ID, id); err != nil {
 				return err
 			}
 		}
-		if kind == "completion_claim" {
+		if params.Kind == "completion_claim" {
 			if err := createObserverCompletionReviewObligationTx(tx, inst.ID, id); err != nil {
 				return err
 			}
 		}
-		if kind == "observer_completion_review" {
-			now := s.now().Format(time.RFC3339)
+		if params.Kind == "observer_completion_review" {
 			_, _ = tx.Exec(`
 				UPDATE workflow_effects
 				SET status = 'delivered', delivered_at = COALESCE(delivered_at, ?), updated_at = ?
 				WHERE instance_id = ? AND kind = 'request_observer_review' AND status IN ('pending','failed','leased')
 			`, now, now, inst.ID)
 		}
-		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: kind, Ref: ref, Summary: summary, Source: sourceJSON, Actor: actor, Role: role, TaskEtagAtProduction: fmt.Sprint(task.ETag), ProducedAt: s.now().Format(time.RFC3339)}
+		evidence, err := listEvidenceTx(tx, inst.ID)
+		if err != nil {
+			return err
+		}
+		obligations, err := listObligationsTx(tx, inst.ID, false)
+		if err != nil {
+			return err
+		}
+		effects, err := listEffectsTx(tx, inst.ID, false)
+		if err != nil {
+			return err
+		}
+		inst.ContextHash = contextHash(inst.TemplateHash, inst.State(), inst.Revision, taskDocHash(task), evidence, obligations, effects)
+		inst.TaskDocEtag = fmt.Sprint(task.ETag)
+		inst.TaskDocHash = taskDocHash(task)
+		inst.UpdatedAt = now
+		if _, err := tx.Exec(`UPDATE workflow_instances SET context_hash = ?, task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`, inst.ContextHash, inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
+			return err
+		}
+		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.Actor); err != nil {
+			return err
+		}
+		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, TaskEtagAtProduction: fmt.Sprint(task.ETag), ProducedAt: now}
 		return nil
 	})
 	return ev, err
@@ -796,7 +839,7 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 		return nil, err
 	}
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(data_json,''), source_json,
+		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
 		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, inst.ID)
@@ -804,12 +847,52 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
+	return scanEvidenceRows(rows)
+}
+
+func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
+	rows, err := tx.Query(`
+		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
+	`, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEvidenceRows(rows)
+}
+
+func (s *Service) ShowEvidence(id string) (*Evidence, error) {
+	rows, err := s.db.Query(`
+		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		FROM workflow_evidence WHERE id = ?
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out, err := scanEvidenceRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("evidence not found: %s", id)
+	}
+	return &out[0], nil
+}
+
+func scanEvidenceRows(rows *sql.Rows) ([]Evidence, error) {
 	var out []Evidence
 	for rows.Next() {
 		var e Evidence
-		var data, source string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &data, &source, &e.Actor, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.ProducedAt); err != nil {
+		var facts, data, source string
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &facts, &data, &source, &e.Actor, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.ProducedAt); err != nil {
 			return nil, err
+		}
+		if facts != "" {
+			e.Facts = json.RawMessage(facts)
 		}
 		if data != "" {
 			e.Data = json.RawMessage(data)
@@ -820,46 +903,6 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
-	rows, err := tx.Query(`SELECT id, kind, ref, COALESCE(summary,''), produced_at FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id`, instanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []Evidence
-	for rows.Next() {
-		var e Evidence
-		if err := rows.Scan(&e.ID, &e.Kind, &e.Ref, &e.Summary, &e.ProducedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-func (s *Service) ShowEvidence(id string) (*Evidence, error) {
-	var e Evidence
-	var data, source string
-	err := s.db.QueryRow(`
-		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
-		FROM workflow_evidence WHERE id = ?
-	`, id).Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &data, &source, &e.Actor, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.ProducedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("evidence not found: %s", id)
-		}
-		return nil, err
-	}
-	if data != "" {
-		e.Data = json.RawMessage(data)
-	}
-	if source != "" {
-		e.Source = json.RawMessage(source)
-	}
-	return &e, nil
 }
 
 func (s *Service) SuggestEvidence(taskSelector, transitionID string) (map[string]interface{}, error) {
@@ -887,9 +930,19 @@ func (s *Service) SuggestEvidence(taskSelector, transitionID string) (map[string
 	missing := []map[string]interface{}{}
 	for _, req := range tr.Requires {
 		if req.Evidence != nil {
-			item := map[string]interface{}{"kind": req.Evidence.Kind, "present": have[req.Evidence.Kind], "source": "transition.requires"}
+			match := matchEvidenceRequirement(ev, *req.Evidence)
+			item := map[string]interface{}{"kind": req.Evidence.Kind, "present": have[req.Evidence.Kind], "source": "transition.requires", "satisfied": match.OK}
+			if len(req.Evidence.Facts) > 0 {
+				item["requiredFacts"] = req.Evidence.Facts
+			}
+			if match.Latest != nil {
+				item["latest"] = map[string]interface{}{"id": match.Latest.ID, "facts": match.Latest.Facts}
+			}
+			if match.Detail != "" {
+				item["message"] = match.Detail
+			}
 			required = append(required, item)
-			if !have[req.Evidence.Kind] {
+			if !match.OK {
 				missing = append(missing, item)
 			}
 		}
@@ -982,12 +1035,7 @@ func evalPredicate(p Predicate, ctx evalContext) bool {
 		return !evalPredicate(*p.Not, ctx)
 	}
 	if p.EvidenceExists != nil {
-		for _, e := range ctx.Evidence {
-			if e.Kind == p.EvidenceExists.Kind {
-				return true
-			}
-		}
-		return false
+		return matchEvidenceRequirement(ctx.Evidence, EvidenceRequirementSpec{Kind: p.EvidenceExists.Kind, Facts: p.EvidenceExists.Facts}).OK
 	}
 	if p.ObligationStatus != nil {
 		for _, o := range ctx.Obligations {
@@ -1357,15 +1405,9 @@ func transitionBlockers(tr TransitionSpec, ev []Evidence, obl []Obligation) []Bl
 	}
 	for _, req := range tr.Requires {
 		if req.Evidence != nil {
-			found := false
-			for _, e := range ev {
-				if e.Kind == req.Evidence.Kind {
-					found = true
-					break
-				}
-			}
-			if !found {
-				blockers = append(blockers, Blocker{Kind: "evidence", Ref: req.Evidence.Kind, Message: "required evidence is missing"})
+			match := matchEvidenceRequirement(ev, *req.Evidence)
+			if !match.OK {
+				blockers = append(blockers, Blocker{Kind: "evidence", Ref: req.Evidence.Kind, Message: match.Detail})
 			}
 		}
 		if req.Obligation != nil {

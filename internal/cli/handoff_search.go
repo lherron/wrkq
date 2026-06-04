@@ -44,7 +44,8 @@ func runHandoffSearch(cmd *cobra.Command, args []string) error {
 	stdout := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
 
-	mode, modeErr := resolveHandoffSearchOutputMode(stdout)
+	sel, modeErr := resolveHandoffSelection(cmd, outputShapeList, true)
+	mode := handoffModeFromSelection(sel)
 	if modeErr != nil {
 		return writeHandoffSearchError(stderr, mode, 1, "validation_error", modeErr.Error(), nil, "")
 	}
@@ -156,7 +157,7 @@ func runHandoffSearch(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if handoffSearchPorcelain && out.NextCursor != nil {
+	if sel.Stable && out.NextCursor != nil {
 		fmt.Fprintf(stderr, "next_cursor=%s\n", *out.NextCursor)
 	}
 
@@ -203,34 +204,6 @@ func encodeHandoffSearchCursor(offset int) (string, error) {
 	return base64.StdEncoding.EncodeToString(raw), nil
 }
 
-func resolveHandoffSearchOutputMode(stdout io.Writer) (handoffOutputMode, error) {
-	selected := 0
-	if handoffSearchJSON {
-		selected++
-	}
-	if handoffSearchNDJSON {
-		selected++
-	}
-	if handoffSearchHuman {
-		selected++
-	}
-	if selected > 1 {
-		return handoffOutputJSON, fmt.Errorf("choose only one output mode: --json, --ndjson, or --human")
-	}
-	switch {
-	case handoffSearchJSON:
-		return handoffOutputJSON, nil
-	case handoffSearchNDJSON:
-		return handoffOutputNDJSON, nil
-	case handoffSearchHuman:
-		return handoffOutputHuman, nil
-	case isStdoutTTY(stdout):
-		return handoffOutputHuman, nil
-	default:
-		return handoffOutputJSON, nil
-	}
-}
-
 func writeHandoffSearchOutput(stdout, stderr io.Writer, mode handoffOutputMode, query, scopeRef string, out handoffSearchOutput) error {
 	switch mode {
 	case handoffOutputHuman:
@@ -265,8 +238,9 @@ func writeHandoffSearchOutput(stdout, stderr io.Writer, mode handoffOutputMode, 
 			}
 		}
 		footer := map[string]interface{}{
-			"cursor":    out.NextCursor,
-			"truncated": out.Truncated,
+			"type":        "wrkq.pagination",
+			"next_cursor": out.NextCursor,
+			"truncated":   out.Truncated,
 		}
 		return encoder.Encode(footer)
 	default:

@@ -44,7 +44,8 @@ func runHandoffList(cmd *cobra.Command, _ []string) error {
 	stdout := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
 
-	mode, modeErr := resolveHandoffListOutputMode(stdout)
+	sel, modeErr := resolveHandoffSelection(cmd, outputShapeList, true)
+	mode := handoffModeFromSelection(sel)
 	if modeErr != nil {
 		return writeHandoffListError(stderr, mode, 1, "validation_error", modeErr.Error(), nil, "")
 	}
@@ -99,7 +100,7 @@ func runHandoffList(cmd *cobra.Command, _ []string) error {
 		out.NextCursor = &nc
 	}
 
-	if handoffListPorcelain && nextCursor != "" {
+	if sel.Stable && nextCursor != "" {
 		fmt.Fprintf(stderr, "next_cursor=%s\n", nextCursor)
 	}
 
@@ -107,36 +108,6 @@ func runHandoffList(cmd *cobra.Command, _ []string) error {
 		return exitError(1, err)
 	}
 	return nil
-}
-
-// resolveHandoffListOutputMode mirrors the handoff create resolver: explicit
-// flags win, otherwise TTY-aware (human on TTY, JSON when piped).
-func resolveHandoffListOutputMode(stdout io.Writer) (handoffOutputMode, error) {
-	selected := 0
-	if handoffListJSON {
-		selected++
-	}
-	if handoffListNDJSON {
-		selected++
-	}
-	if handoffListHuman {
-		selected++
-	}
-	if selected > 1 {
-		return handoffOutputJSON, fmt.Errorf("choose only one output mode: --json, --ndjson, or --human")
-	}
-	switch {
-	case handoffListJSON:
-		return handoffOutputJSON, nil
-	case handoffListNDJSON:
-		return handoffOutputNDJSON, nil
-	case handoffListHuman:
-		return handoffOutputHuman, nil
-	case isStdoutTTY(stdout):
-		return handoffOutputHuman, nil
-	default:
-		return handoffOutputJSON, nil
-	}
 }
 
 // resolveHandoffListLimit applies the default (50) and cap (500). Values above
@@ -216,8 +187,9 @@ func writeHandoffListOutput(stdout, stderr io.Writer, mode handoffOutputMode, sc
 			}
 		}
 		footer := map[string]interface{}{
-			"cursor":    out.NextCursor,
-			"truncated": out.Truncated,
+			"type":        "wrkq.pagination",
+			"next_cursor": out.NextCursor,
+			"truncated":   out.Truncated,
 		}
 		return encoder.Encode(footer)
 	default:

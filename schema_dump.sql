@@ -680,6 +680,10 @@ CREATE TABLE workflow_evidence (
   kind TEXT NOT NULL,
   ref TEXT NOT NULL,
   summary TEXT,
+  facts_json TEXT CHECK (
+  facts_json IS NULL OR
+  (json_valid(facts_json) AND json_type(facts_json) = 'object')
+),
   data_json TEXT,
   source_json TEXT NOT NULL,
   actor TEXT,

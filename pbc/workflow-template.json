@@ -1,7 +1,7 @@
 {
   "schemaVersion": "wrkf.workflow-template.v0",
   "id": "pbc-progressive-refinement",
-  "version": "2",
+  "version": "3",
   "kind": "agent_first_workflow",
   "description": "Progressively refine one-line feedback into a Behavior Note, finalized PBC, and downstream derivation seeds without multiplying product artifacts.",
   "initial": {
@@ -58,7 +58,18 @@
       "description": "The Behavior Note stored in the wrkq task description."
     },
     "pre_interview_analysis": {
-      "description": "Agent analysis of what can be inferred from available context, what remains uncertain, whether clarification is needed, and the single recommended question/default if needed."
+      "class": "analysis",
+      "description": "Agent analysis of what can be inferred from available context, what remains uncertain, whether clarification is needed, and the single recommended question/default if needed.",
+      "facts": {
+        "required": [
+          "clarification_needed"
+        ],
+        "properties": {
+          "clarification_needed": {
+            "type": "boolean"
+          }
+        }
+      }
     },
     "clarification_response": {
       "description": "The product-owner answer to the single clarification question."
@@ -67,7 +78,23 @@
       "description": "The draft PBC stored in the wrkq task specification."
     },
     "pressure_pass": {
-      "description": "The compact pressure pass verdict, tighten list, and patch."
+      "class": "review",
+      "description": "The compact pressure pass verdict, tighten list, and patch.",
+      "facts": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "needs_patch",
+              "too_vague"
+            ]
+          }
+        }
+      }
     },
     "patch_decision": {
       "description": "Accepted, adjusted, rejected, or waived decision on the pressure patch."
@@ -135,7 +162,10 @@
         },
         {
           "evidence": {
-            "kind": "pre_interview_analysis"
+            "kind": "pre_interview_analysis",
+            "facts": {
+              "clarification_needed": true
+            }
           }
         }
       ],
@@ -178,7 +208,10 @@
         },
         {
           "evidence": {
-            "kind": "pre_interview_analysis"
+            "kind": "pre_interview_analysis",
+            "facts": {
+              "clarification_needed": false
+            }
           }
         }
       ],
@@ -274,7 +307,10 @@
       "requires": [
         {
           "evidence": {
-            "kind": "pressure_pass"
+            "kind": "pressure_pass",
+            "facts": {
+              "verdict": "ready"
+            }
           }
         },
         {
@@ -308,7 +344,10 @@
       "requires": [
         {
           "evidence": {
-            "kind": "pressure_pass"
+            "kind": "pressure_pass",
+            "facts": {
+              "verdict": "needs_patch"
+            }
           }
         }
       ],

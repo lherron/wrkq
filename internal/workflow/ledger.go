@@ -1249,27 +1249,16 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 }
 
 func listEvidenceForInstance(database *db.DB, instanceID string) ([]Evidence, error) {
-	rows, err := database.Query(`SELECT id, kind, ref, COALESCE(summary,''), COALESCE(data_json,''), source_json, produced_at FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id`, instanceID)
+	rows, err := database.Query(`
+		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
+	`, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []Evidence
-	for rows.Next() {
-		var e Evidence
-		var data, source string
-		if err := rows.Scan(&e.ID, &e.Kind, &e.Ref, &e.Summary, &data, &source, &e.ProducedAt); err != nil {
-			return nil, err
-		}
-		if data != "" {
-			e.Data = json.RawMessage(data)
-		}
-		if source != "" {
-			e.Source = json.RawMessage(source)
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return scanEvidenceRows(rows)
 }
 
 func (s *Service) StartRun(taskSelector, role, actor, deliveryRef, lane string) (*Run, error) {

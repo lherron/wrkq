@@ -74,12 +74,39 @@ const (
 
 const handoffScopeExample = "wrkq handoff create --scope cody@wrkq -t 'Next steps' --body-file -"
 
+func handoffModeFromSelection(sel outputSelection) handoffOutputMode {
+	switch sel.Mode {
+	case outputModeHuman, outputModeTable:
+		return handoffOutputHuman
+	case outputModeNDJSON:
+		return handoffOutputNDJSON
+	default:
+		return handoffOutputJSON
+	}
+}
+
+func resolveHandoffSelection(cmd *cobra.Command, shape outputShape, allowNDJSON bool) (outputSelection, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return outputSelection{}, fmt.Errorf("failed to load config: %w", err)
+	}
+	allow := []outputMode{outputModeHuman, outputModeJSON}
+	if allowNDJSON {
+		allow = append(allow, outputModeNDJSON)
+	}
+	return resolveOutputMode(cmd, cfg, shape, outputResolveOptions{
+		Allow:      allow,
+		DefaultTTY: outputModeHuman,
+	})
+}
+
 func runHandoffCreate(cmd *cobra.Command, _ []string) error {
 	defer resetHandoffCreateFlags()
 
 	stdout := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
-	mode, modeErr := resolveHandoffCreateOutputMode(stdout)
+	sel, modeErr := resolveHandoffSelection(cmd, outputShapeMutation, true)
+	mode := handoffModeFromSelection(sel)
 	if modeErr != nil {
 		return writeHandoffCreateError(stderr, mode, 1, "validation_error", modeErr.Error(), nil, "")
 	}
@@ -208,34 +235,6 @@ func resetHandoffCreateFlags() {
 	handoffCreateJSON = false
 	handoffCreateNDJSON = false
 	handoffCreateHuman = false
-}
-
-func resolveHandoffCreateOutputMode(stdout io.Writer) (handoffOutputMode, error) {
-	selected := 0
-	if handoffCreateJSON {
-		selected++
-	}
-	if handoffCreateNDJSON {
-		selected++
-	}
-	if handoffCreateHuman {
-		selected++
-	}
-	if selected > 1 {
-		return handoffOutputJSON, fmt.Errorf("choose only one output mode: --json, --ndjson, or --human")
-	}
-	switch {
-	case handoffCreateJSON:
-		return handoffOutputJSON, nil
-	case handoffCreateNDJSON:
-		return handoffOutputNDJSON, nil
-	case handoffCreateHuman:
-		return handoffOutputHuman, nil
-	case isStdoutTTY(stdout):
-		return handoffOutputHuman, nil
-	default:
-		return handoffOutputJSON, nil
-	}
 }
 
 func readHandoffCreateInputs(cmd *cobra.Command) (string, string, *string, *string, error) {

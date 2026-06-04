@@ -79,11 +79,7 @@ func mustIntegrationList(t *testing.T, args []string) handoffListOutput {
 	if res.code != 0 || res.err != nil {
 		t.Fatalf("list failed code=%d err=%v stdout=%s stderr=%s", res.code, res.err, res.stdout, res.stderr)
 	}
-	var out handoffListOutput
-	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
-		t.Fatalf("decode list output: %v\n%s", err, res.stdout)
-	}
-	return out
+	return decodeHandoffListOutput(t, res.stdout)
 }
 
 func mustIntegrationGet(t *testing.T, args []string) handoffJSON {
@@ -118,11 +114,7 @@ func mustIntegrationSearch(t *testing.T, args []string) handoffSearchOutput {
 	if res.code != 0 || res.err != nil {
 		t.Fatalf("search failed code=%d err=%v stdout=%s stderr=%s", res.code, res.err, res.stdout, res.stderr)
 	}
-	var out handoffSearchOutput
-	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
-		t.Fatalf("decode search output: %v\n%s", err, res.stdout)
-	}
-	return out
+	return decodeHandoffSearchOutput(t, res.stdout)
 }
 
 func requireHandoffIDs(t *testing.T, handoffs []handoffJSON, want ...string) {

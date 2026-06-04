@@ -406,15 +406,18 @@ Resource references accepted by all commands:
 ## 7. Output, Piping, and Exit Codes
 
 Formats
-- Human defaults:
-  - Pretty table for `ls`.
-  - Markdown for `cat`.
+- Defaults:
+  - TTY browse commands use human/table output.
+  - Non-TTY list/search/history commands use NDJSON.
+  - Non-TTY singleton and mutation commands use JSON.
+  - Content commands such as `cat` keep raw markdown unless explicitly overridden.
 - Machine formats:
   - `--json` (array or object)
   - `--ndjson` (one JSON object per line)
   - `--yaml`
   - `--tsv`
   - `--columns=field,field,...`
+  - root `--output table|human|json|ndjson|porcelain|yaml|tsv|raw`
 
 Selection and sort
 - `--fields=id,path,type,slug,title,state,priority,labels,due,created_at,updated_at,project,parent,created_by,updated_by,actor,etag`
@@ -425,7 +428,9 @@ Delimiters
 - `-0` NUL separated (xargs `-0`)
 
 Porcelain
-- `--porcelain` disables ANSI, stabilizes keys/columns, and prints `next_cursor` on stderr where applicable.
+- `--porcelain` is a stability modifier, not a separate stdout grammar.
+- It disables ANSI/terminal-width formatting where applicable and mirrors `next_cursor=<token>` on stderr for paged commands.
+- `--output porcelain` aliases to the command's canonical machine output plus the porcelain/stable modifier.
 
 Pagination
 - `--limit`, `--cursor` opaque cursor support.
@@ -925,7 +930,7 @@ Env vars
 - `WRKQ_DB_PATH` (path to SQLite DB file)
 - `WRKQ_DB_PATH_FILE` (file containing path)
 - `WRKQ_LOG_LEVEL`
-- `WRKQ_OUTPUT` (`table|json`)
+- `WRKQ_OUTPUT` (`table|human|json|ndjson|porcelain|yaml|tsv|raw`)
 - `WRKQ_PAGER`
 - `WRKQ_ATTACHMENTS_MAX_MB`
 - `WRKQ_ATTACH_DIR` (base directory for attachments)

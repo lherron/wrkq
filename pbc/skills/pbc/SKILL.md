@@ -21,7 +21,7 @@ Install and attach the workflow template:
 ```bash
 wrkf workflow validate ./pbc/workflow-template.json
 wrkf workflow install ./pbc/workflow-template.json
-wrkf task attach <task> --workflow pbc-progressive-refinement@2
+wrkf task attach <task> --workflow pbc-progressive-refinement@3
 ```
 
 Run transitions with `--role agent` unless the user/product owner is explicitly acting.
@@ -54,16 +54,17 @@ wrkf evidence add <task> --kind behavior_note --ref "wrkq:<task>#description" --
 
 Before deciding whether to ask the user anything, record pre-interview analysis as workflow evidence only. Do not create a separate task, note, or durable artifact for it.
 
-The data should include:
+The routing decision goes in `--facts` (the small surface wrkf branches on); the full analysis stays in `--data`.
 
-- `inferred`: what the agent can infer from the feedback and available context.
-- `uncertain`: what remains unknown.
-- `clarification_needed`: boolean.
-- `question`: the single highest-leverage question, or empty if none.
-- `default_recommendation`: the answer the agent recommends by default.
+- `--facts`: `{"clarification_needed": true|false}` — the only fact that gates `ask_clarification` vs `draft_pbc`.
+- `--data` should include:
+  - `inferred`: what the agent can infer from the feedback and available context.
+  - `uncertain`: what remains unknown.
+  - `question`: the single highest-leverage question, or empty if none.
+  - `default_recommendation`: the answer the agent recommends by default.
 
 ```bash
-wrkf evidence add <task> --kind pre_interview_analysis --ref "agent:pre-interview-analysis" --summary "clarification needed|no clarification needed" --data '<json>'
+wrkf evidence add <task> --kind pre_interview_analysis --ref "agent:pre-interview-analysis" --summary "clarification needed|no clarification needed" --facts '{"clarification_needed":true}' --data '<json>'
 ```
 
 If no clarification is needed:
@@ -109,8 +110,13 @@ Check only:
 
 Write a compact pressure pass using `./pbc/templates/pressure-pass.md`.
 
+The verdict goes in `--facts` (it routes `finalize_ready_pbc` vs `request_patch_decision`); the tighten list and patch stay in `--data`.
+
+- `--facts`: `{"verdict":"ready"|"needs_patch"|"too_vague"}`.
+- `--data`: tighten list, patch, and any supporting detail.
+
 ```bash
-wrkf evidence add <task> --kind pressure_pass --ref "agent:pressure-pass" --summary "ready|needs patch|too vague" --data '<json>'
+wrkf evidence add <task> --kind pressure_pass --ref "agent:pressure-pass" --summary "ready|needs patch|too vague" --facts '{"verdict":"needs_patch"}' --data '<json>'
 ```
 
 If ready, ensure `task.specification` is the final PBC and close:
