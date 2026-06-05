@@ -512,10 +512,49 @@ func withTx(db *sql.DB, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func insertEvent(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
-	id, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+// withImmediateTx starts a write transaction using SQLite BEGIN IMMEDIATE.
+// go-sqlite3 emits BEGIN IMMEDIATE when the connection DSN has _txlock=immediate.
+func withImmediateTx(database *db.DB, fn func(*sql.Tx) error) error {
+	dsn := database.Path()
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	immediateDB, err := sql.Open("sqlite3", dsn+sep+"_txlock=immediate&_busy_timeout=5000")
 	if err != nil {
 		return err
+	}
+	defer func() { _ = immediateDB.Close() }()
+	for _, pragma := range []string{
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA synchronous = NORMAL",
+	} {
+		if _, err := immediateDB.Exec(pragma); err != nil {
+			return err
+		}
+	}
+	tx, err := immediateDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertEvent(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
+	_, err := insertEventWithResult(tx, instanceID, typ, actor, role, runID, observed, next, key, "", "", taskETag, taskHash, ctxHash, payload)
+	return err
+}
+
+func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) (string, error) {
+	id, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+	if err != nil {
+		return "", err
 	}
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
@@ -525,10 +564,10 @@ func insertEvent(tx *sql.Tx, instanceID, typ, actor, role, runID string, observe
 		INSERT INTO workflow_events (
 			id, instance_id, seq, schema_version, type, actor, role, run_id,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
-			idempotency_key, result, payload_json, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?)
-	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), string(payloadJSON), eventHash)
-	return err
+			idempotency_key, request_hash, result, result_json, payload_json, event_hash
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?)
+	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), eventHash)
+	return id, err
 }
 
 func nextSeqID(tx *sql.Tx, table, prefix string) (string, error) {

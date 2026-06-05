@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/selectors"
 )
 
 func (s *Service) ListObligations(taskSelector string, includeClosed bool) ([]Obligation, error) {
@@ -1018,122 +1019,156 @@ func (s *Service) RetryEffect(id string) (*Effect, error) {
 }
 
 func (s *Service) Transition(taskSelector, transitionID string, opts TransitionOptions) (map[string]interface{}, error) {
-	inst, err := s.LatestInstance(taskSelector)
+	taskUUID, _, err := selectors.ResolveTask(s.db, taskSelector)
 	if err != nil {
 		return nil, err
 	}
-	if opts.ExpectRevision != nil && *opts.ExpectRevision != inst.Revision {
-		return nil, fmt.Errorf("workflow revision mismatch: expected %d, got %d", *opts.ExpectRevision, inst.Revision)
-	}
-	if opts.ContextHash != "" && opts.ContextHash != inst.ContextHash {
-		return nil, fmt.Errorf("workflow context hash mismatch")
-	}
-	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
-	if err != nil {
-		return nil, err
-	}
-	tr, err := findTransition(tpl, transitionID)
-	if err != nil {
-		return nil, err
-	}
-	if !stateMatches(*inst, tr.From) {
-		return nil, fmt.Errorf("transition %s cannot run from current state", transitionID)
-	}
-	if !roleAllowed(opts.Role, tr.By) {
-		return nil, fmt.Errorf("role %s is not allowed for transition %s", opts.Role, transitionID)
-	}
-	if opts.IdempotencyKey != "" {
-		var existing string
-		err := s.db.QueryRow(`SELECT id FROM workflow_events WHERE instance_id = ? AND idempotency_key = ?`, inst.ID, opts.IdempotencyKey).Scan(&existing)
-		if err == nil {
-			return map[string]interface{}{"idempotent": true, "eventId": existing, "instance": inst, "state": inst.State(), "revision": inst.Revision}, nil
-		}
-		if err != sql.ErrNoRows {
-			return nil, err
-		}
-	}
-	ev, _ := s.ListEvidence(taskSelector)
-	obl, _ := s.ListObligations(taskSelector, true)
-	blockers := transitionBlockers(*tr, ev, obl)
-	if len(blockers) > 0 {
-		return nil, fmt.Errorf("transition is blocked: %s", blockers[0].Message)
-	}
-	checks := map[string]CheckRun{}
-	if opts.RunChecks {
-		for _, checkID := range tr.Checks {
-			check, ok := tpl.Checks[checkID]
-			if !ok {
-				return nil, fmt.Errorf("check not found: %s", checkID)
-			}
-			cr, err := s.executeCheck(inst, tr, checkID, check, opts.Actor, opts.Role, opts.HookCatalog, opts.TemplateDir, true)
-			if err != nil {
-				return nil, err
-			}
-			checks[checkID] = *cr
-		}
-	} else {
-		for _, checkID := range tr.Checks {
-			if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
-				checks[checkID] = latest
-			}
-		}
-	}
-	for _, id := range opts.CheckIDs {
-		c, err := s.ShowCheckRun(id)
+	requestHash := transitionRequestHash(taskSelector, transitionID, opts)
+	var result map[string]interface{}
+	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := latestInstanceByTaskUUIDTx(tx, taskUUID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		checks[c.CheckID] = *c
-	}
-	task, _ := loadTaskDoc(s.db, inst.TaskUUID)
-	for _, guard := range tr.Guards {
-		if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task}) {
-			return nil, fmt.Errorf("transition guard failed")
+		if opts.IdempotencyKey != "" {
+			replayed, err := replayTransitionResult(tx, inst.ID, opts.IdempotencyKey, requestHash)
+			if err != nil {
+				return err
+			}
+			if replayed != nil {
+				result = replayed
+				return nil
+			}
 		}
-	}
-	var chosen *OutcomeCase
-	for i := range tr.Outcomes {
-		out := &tr.Outcomes[i]
-		if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task}) {
-			chosen = out
-			break
+		if opts.ExpectRevision != nil && *opts.ExpectRevision != inst.Revision {
+			return staleRevisionError(inst.ID, *opts.ExpectRevision, inst.Revision)
 		}
-	}
-	if chosen == nil {
-		return nil, fmt.Errorf("no transition outcome matched")
-	}
-	if opts.DryRun {
-		return map[string]interface{}{"dryRun": true, "transition": transitionID, "outcome": chosen.ID, "state": chosen.To}, nil
-	}
-
-	nextRevision := inst.Revision + 1
-	now := s.now().Format(time.RFC3339)
-	updated := *inst
-	updated.Status = chosen.To.Status
-	updated.Phase = chosen.To.Phase
-	updated.Outcome = chosen.To.Outcome
-	updated.Revision = nextRevision
-	updated.UpdatedAt = now
-	if updated.Status == "closed" {
-		updated.ClosedAt = now
-	}
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+		if opts.ContextHash != "" && opts.ContextHash != inst.ContextHash {
+			return contextMismatchError(inst.ID, opts.ContextHash, inst.ContextHash)
+		}
+		tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
+		if err != nil {
+			return err
+		}
+		tr, err := findTransition(tpl, transitionID)
+		if err != nil {
+			return err
+		}
+		if !stateMatches(*inst, tr.From) {
+			return fmt.Errorf("transition %s cannot run from current state", transitionID)
+		}
+		if !roleAllowed(opts.Role, tr.By) {
+			return roleDeniedError(inst.ID, transitionID, opts.Role)
+		}
+		ev, err := listEvidenceForInstance(s.db, inst.ID)
+		if err != nil {
+			return err
+		}
+		obl, err := listObligationsTx(tx, inst.ID, true)
+		if err != nil {
+			return err
+		}
+		blockers := transitionBlockers(*tr, ev, obl)
+		if len(blockers) > 0 {
+			return transitionBlockedError(inst.ID, transitionID, blockers)
+		}
+		checks := map[string]CheckRun{}
+		if opts.RunChecks {
+			for _, checkID := range tr.Checks {
+				check, ok := tpl.Checks[checkID]
+				if !ok {
+					return fmt.Errorf("check not found: %s", checkID)
+				}
+				cr, err := s.executeCheck(inst, tr, checkID, check, opts.Actor, opts.Role, opts.HookCatalog, opts.TemplateDir, false)
+				if err != nil {
+					return err
+				}
+				checks[checkID] = *cr
+			}
+		} else {
+			for _, checkID := range tr.Checks {
+				if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
+					checks[checkID] = latest
+				}
+			}
+		}
+		for _, id := range opts.CheckIDs {
+			c, err := s.ShowCheckRun(id)
+			if err != nil {
+				return err
+			}
+			checks[c.CheckID] = *c
+		}
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {
 			return err
 		}
+		for _, guard := range tr.Guards {
+			if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task}) {
+				return transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "guard", Message: "transition guard failed"}})
+			}
+		}
+		var chosen *OutcomeCase
+		for i := range tr.Outcomes {
+			out := &tr.Outcomes[i]
+			if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task}) {
+				chosen = out
+				break
+			}
+		}
+		if chosen == nil {
+			return transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}})
+		}
+		if opts.DryRun {
+			result = map[string]interface{}{"dryRun": true, "transition": transitionID, "outcome": chosen.ID, "state": chosen.To}
+			return nil
+		}
+
+		nextRevision := inst.Revision + 1
+		now := s.now().Format(time.RFC3339)
+		updated := *inst
+		updated.Status = chosen.To.Status
+		updated.Phase = chosen.To.Phase
+		updated.Outcome = chosen.To.Outcome
+		updated.Revision = nextRevision
+		updated.UpdatedAt = now
+		if updated.Status == "closed" {
+			updated.ClosedAt = now
+		} else {
+			updated.ClosedAt = ""
+		}
 		updated.TaskDocEtag = fmt.Sprint(task.ETag)
 		updated.TaskDocHash = taskDocHash(task)
-		updated.ContextHash = contextHash(updated.TemplateHash, updated.State(), updated.Revision, updated.TaskDocHash, ev, obl, nil)
-		_, err = tx.Exec(`
+		updated.ContextHash = contextHash(updated.TemplateHash, updated.State(), updated.Revision, updated.TaskDocHash, nil, nil, nil)
+		res, err := tx.Exec(`
 			UPDATE workflow_instances
 			SET status = ?, phase = ?, outcome = ?, revision = ?, context_hash = ?, task_doc_etag = ?, task_doc_hash = ?,
 			    updated_at = ?, closed_at = ?
-			WHERE id = ?
-		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.ContextHash, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID)
+			WHERE id = ? AND revision = ?
+		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.ContextHash, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
 		if err != nil {
 			return err
 		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			actual, loadErr := instanceRevisionContextTx(tx, updated.ID)
+			if loadErr != nil {
+				return loadErr
+			}
+			if opts.ContextHash != "" && opts.ContextHash != actual.contextHash {
+				return contextMismatchError(updated.ID, opts.ContextHash, actual.contextHash)
+			}
+			expected := inst.Revision
+			if opts.ExpectRevision != nil {
+				expected = *opts.ExpectRevision
+			}
+			return staleRevisionError(updated.ID, expected, actual.revision)
+		}
+
+		createdObligations := make([]Obligation, 0, len(chosen.Obligations))
 		for _, ob := range chosen.Obligations {
 			id, err := nextSeqID(tx, "workflow_obligation_seq", "obl")
 			if err != nil {
@@ -1144,13 +1179,18 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 				blocking = 1
 			}
 			_, err = tx.Exec(`
-				INSERT INTO workflow_obligations (id, instance_id, kind, owner_role, owner_actor, blocking, status, reason)
-				VALUES (?, ?, ?, ?, ?, ?, 'open', ?)
-			`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerActor), blocking, nullIfEmpty(ob.Reason))
+				INSERT INTO workflow_obligations (id, instance_id, kind, owner_role, owner_actor, blocking, status, reason, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+			`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerActor), blocking, nullIfEmpty(ob.Reason), now, now)
 			if err != nil {
 				return err
 			}
+			createdObligations = append(createdObligations, Obligation{
+				ID: id, InstanceID: updated.ID, Kind: ob.Kind, OwnerRole: ob.OwnerRole, OwnerActor: ob.OwnerActor,
+				Blocking: ob.Blocking, Status: "open", Reason: ob.Reason, CreatedAt: now, UpdatedAt: now,
+			})
 		}
+		createdEffects := make([]Effect, 0, len(chosen.Effects))
 		for _, ef := range chosen.Effects {
 			id, err := nextSeqID(tx, "workflow_effect_seq", "eff")
 			if err != nil {
@@ -1159,14 +1199,27 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 			payload, _ := json.Marshal(ef)
 			key := fmt.Sprintf("%s:%d:%s:%s", updated.ID, updated.Revision, chosen.ID, id)
 			_, err = tx.Exec(`
-				INSERT INTO workflow_effects (id, instance_id, revision, kind, payload_json, status, idempotency_key)
-				VALUES (?, ?, ?, ?, ?, 'pending', ?)
-			`, id, updated.ID, updated.Revision, ef.Kind, string(payload), key)
+				INSERT INTO workflow_effects (id, instance_id, revision, kind, payload_json, status, idempotency_key, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+			`, id, updated.ID, updated.Revision, ef.Kind, string(payload), key, now, now)
 			if err != nil {
 				return err
 			}
+			createdEffects = append(createdEffects, Effect{
+				ID: id, InstanceID: updated.ID, Revision: updated.Revision, Kind: ef.Kind, Payload: json.RawMessage(payload),
+				Status: "pending", IdempotencyKey: key, CreatedAt: now, UpdatedAt: now,
+			})
 		}
-		if err := insertEvent(tx, updated.ID, "workflow.transitioned", opts.Actor, opts.Role, "", inst.Revision, updated.Revision, opts.IdempotencyKey, task.ETag, updated.TaskDocHash, updated.ContextHash, map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}); err != nil {
+		eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+		if err != nil {
+			return err
+		}
+		result = transitionResultMap(taskSelector, updated, eventID, createdEffects, createdObligations)
+		result["idempotent"] = false
+		result["transition"] = transitionID
+		result["outcome"] = chosen.ID
+		resultJSON, _ := json.Marshal(result)
+		if err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.Actor, opts.Role, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}); err != nil {
 			return err
 		}
 		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.Actor)
@@ -1174,7 +1227,106 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"idempotent": false, "transition": transitionID, "outcome": chosen.ID, "state": updated.State(), "revision": updated.Revision, "instance": updated}, nil
+	return result, nil
+}
+
+type revisionContext struct {
+	revision    int64
+	contextHash string
+}
+
+func latestInstanceByTaskUUIDTx(tx *sql.Tx, taskUUID string) (*Instance, error) {
+	row := tx.QueryRow(`
+		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		FROM workflow_instances
+		WHERE task_uuid = ?
+		ORDER BY created_at DESC LIMIT 1
+	`, taskUUID)
+	return scanInstance(row)
+}
+
+func instanceRevisionContextTx(tx *sql.Tx, instanceID string) (revisionContext, error) {
+	var out revisionContext
+	err := tx.QueryRow(`SELECT revision, context_hash FROM workflow_instances WHERE id = ?`, instanceID).Scan(&out.revision, &out.contextHash)
+	return out, err
+}
+
+func transitionRequestHash(taskSelector, transitionID string, opts TransitionOptions) string {
+	req := struct {
+		Task           string   `json:"task"`
+		Transition     string   `json:"transition"`
+		Actor          string   `json:"actor,omitempty"`
+		Role           string   `json:"role,omitempty"`
+		ExpectRevision *int64   `json:"expectRevision,omitempty"`
+		IdempotencyKey string   `json:"idempotencyKey,omitempty"`
+		ContextHash    string   `json:"contextHash,omitempty"`
+		CheckIDs       []string `json:"checkIds,omitempty"`
+		RunChecks      bool     `json:"runChecks,omitempty"`
+		DryRun         bool     `json:"dryRun,omitempty"`
+	}{
+		Task: taskSelector, Transition: transitionID, Actor: opts.Actor, Role: opts.Role,
+		ExpectRevision: opts.ExpectRevision, IdempotencyKey: opts.IdempotencyKey, ContextHash: opts.ContextHash,
+		CheckIDs: append([]string(nil), opts.CheckIDs...), RunChecks: opts.RunChecks, DryRun: opts.DryRun,
+	}
+	b, _ := json.Marshal(req)
+	return Hash(b)
+}
+
+func replayTransitionResult(tx *sql.Tx, instanceID, key, requestHash string) (map[string]interface{}, error) {
+	var storedHash, resultJSON string
+	err := tx.QueryRow(`
+		SELECT COALESCE(request_hash,''), COALESCE(result_json,'')
+		FROM workflow_events
+		WHERE instance_id = ? AND idempotency_key = ?
+	`, instanceID, key).Scan(&storedHash, &resultJSON)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if storedHash != requestHash {
+		return nil, idempotencyMismatchError(key)
+	}
+	if strings.TrimSpace(resultJSON) == "" {
+		return nil, fmt.Errorf("idempotency result missing for key %q", key)
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(resultJSON), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func transitionResultMap(taskSelector string, updated Instance, eventID string, effects []Effect, obligations []Obligation) map[string]interface{} {
+	return map[string]interface{}{
+		"task":        taskSelector,
+		"instanceId":  updated.ID,
+		"state":       updated.State(),
+		"revision":    updated.Revision,
+		"contextHash": updated.ContextHash,
+		"eventId":     eventID,
+		"effects":     effects,
+		"obligations": obligations,
+		"instance":    updated,
+	}
+}
+
+func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
+	var seq int64
+	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
+	payloadJSON, _ := json.Marshal(payload)
+	eventHash := Hash(payloadJSON)
+	_, err := tx.Exec(`
+		INSERT INTO workflow_events (
+			id, instance_id, seq, schema_version, type, actor, role,
+			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
+			idempotency_key, request_hash, result, result_json, payload_json, event_hash
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?)
+	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), eventHash)
+	return err
 }
 
 func (s *Service) ShowCheckRun(id string) (*CheckRun, error) {
