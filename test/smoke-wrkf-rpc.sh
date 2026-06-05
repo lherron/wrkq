@@ -20,6 +20,7 @@ unset ASP_PROJECT
 
 "$BIN/wrkqadm" init --db "$DB" >/dev/null
 "$BIN/wrkq" --db "$DB" --as local-human touch inbox/wrkf-rpc-smoke -t "wrkf rpc smoke" >/dev/null
+"$BIN/wrkq" --db "$DB" --as local-human touch inbox/pbc-rpc-walk -t "pbc rpc walk" >/dev/null
 
 cat >"$TMPDIR/hook.sh" <<'HOOK'
 #!/usr/bin/env bash
@@ -133,12 +134,12 @@ cat >"$TMPDIR/workflow.json" <<'FLOW'
 }
 FLOW
 
-python3 - "$BIN/wrkf" "$DB" "$TMPDIR/hooks.json" "$TMPDIR/workflow.json" <<'PY'
+python3 - "$BIN/wrkf" "$DB" "$TMPDIR/hooks.json" "$TMPDIR/workflow.json" "$ROOT/pbc/workflow-template.json" <<'PY'
 import json
 import subprocess
 import sys
 
-bin_wrkf, db_path, hooks_path, workflow_path = sys.argv[1:5]
+bin_wrkf, db_path, hooks_path, workflow_path, pbc_preset = sys.argv[1:6]
 
 proc = subprocess.Popen(
     [
@@ -396,6 +397,67 @@ assert closed["state"]["outcome"] == "completed" and closed["revision"] == 2, cl
 done = rpc("wrkf.next", {"task": "T-00001"})
 assert done["actions"] == [], done
 
+# ── Real-preset regression gate: drive ./pbc (pbc-progressive-refinement) intake → finalized ──
+# Uses the actual installed preset, not a synthetic template, to prove the RPC surface
+# walks a real multi-state workflow to a terminal state with CAS + evidence at every step.
+pbc_inst = rpc("wrkf.workflow.install", {"path": pbc_preset})
+assert pbc_inst["id"] == "pbc-progressive-refinement", pbc_inst
+pbc_ref = f"{pbc_inst['id']}@{pbc_inst['version']}"
+
+pbc_att = rpc("wrkf.task.attach", {"task": "T-00002", "workflow": pbc_ref})
+assert pbc_att["phase"] == "intake" and pbc_att["revision"] == 0, pbc_att
+
+PBC_ROLE, PBC_ACTOR = "agent", "human:local-human"
+
+
+def pbc_step(transition, evidence, want_phase):
+    for kind, facts, ref in evidence:
+        rpc(
+            "wrkf.evidence.add",
+            {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts},
+        )
+    # re-read context before each transition: adding evidence rotates the contextHash
+    cur = rpc("wrkf.task.inspect", {"task": "T-00002"})
+    req = {
+        "task": "T-00002",
+        "transition": transition,
+        "role": PBC_ROLE,
+        "actor": PBC_ACTOR,
+        "expectRevision": cur["revision"],
+        "contextHash": cur["contextHash"],
+        "idempotencyKey": f"pbc:{transition}:{cur['revision']}",
+    }
+    res = rpc("wrkf.transition.apply", req)
+    assert res["state"]["phase"] == want_phase, res
+    assert res["revision"] == cur["revision"] + 1, res
+    return res, req
+
+
+pbc_step("normalize_feedback", [("intake_metadata", {}, "note:intake")], "behavior_note")
+pbc_step(
+    "draft_pbc",
+    [
+        ("behavior_note", {}, "note:bn"),
+        ("pre_interview_analysis", {"clarification_needed": False}, "note:pia"),
+    ],
+    "pbc_draft",
+)
+pbc_step("run_pressure_pass", [("pbc_draft", {}, "note:draft")], "pressure")
+pbc_final, pbc_final_req = pbc_step(
+    "finalize_ready_pbc",
+    [("pressure_pass", {"verdict": "ready"}, "note:pp"), ("pbc_final", {}, "note:final")],
+    "finalized",
+)
+assert pbc_final["state"]["status"] == "closed", pbc_final
+
+# idempotency replay: re-applying the finalize with the SAME key+params short-circuits
+# (idempotency is checked before CAS) and returns the ORIGINAL committed result.
+pbc_replay = rpc("wrkf.transition.apply", pbc_final_req)
+assert pbc_replay["eventId"] == pbc_final["eventId"], (pbc_replay, pbc_final)
+
+pbc_done = rpc("wrkf.next", {"task": "T-00002"})
+assert pbc_done["actions"] == [], pbc_done
+
 rpc("wrkf.shutdown")
 proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "wrkf.exit"}) + "\n")
 proc.stdin.flush()
@@ -405,4 +467,4 @@ if code != 0:
     raise AssertionError(f"wrkf rpc exited {code}; stderr={proc.stderr.read()!r}")
 PY
 
-echo "smoke-wrkf-rpc: ok"
+echo "smoke-wrkf-rpc: ok (synthetic lifecycle + real ./pbc preset walk intake->finalized)"
