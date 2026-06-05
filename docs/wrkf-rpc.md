@@ -185,13 +185,16 @@ New named DTOs to add (replace current `map[string]interface{}` returns). All fi
 - `externalRunRef` unique when non-empty.
 
 **`wrkf.run.bindExternal` params:** `{ runId, externalRunRef, deliveryRef?, lane?, idempotencyKey? }`.
-**`wrkf.run.finish` / `wrkf.run.fail`:** idempotent for terminal states. Repeated terminal with identical payload → existing terminal `Run`; conflicting terminal payload → conflict.
+**`wrkf.run.finish` / `wrkf.run.fail` params:** `{ runId, summary? }`. Idempotent for terminal states. Repeated terminal with identical payload → existing terminal `Run`; conflicting terminal payload → conflict. For `wrkf.run.fail`, the failure text is returned on `Run.terminalResult`.
 
 **`wrkf.effect.claim` params:** `{ adapter, limit, leaseMs, task?, kind? }` → `EffectClaim`.
 - Atomically selects pending/failed/expired effects and marks them `leased` with a generated `leaseToken`.
 **`wrkf.effect.ack` params:** `{ effectId, leaseToken, receipt? }`. Wrong/expired token → `WRKF_LEASE_CONFLICT`.
 **`wrkf.effect.fail` params:** `{ effectId, leaseToken, reason, retryable? }`. Wrong/expired token → `WRKF_LEASE_CONFLICT`.
+**`wrkf.effect.retry` params:** `{ effectId }`.
 **`wrkf.effect.deliver`:** in RPC, MUST own claim+lease internally (claim → run handler → ack/fail under the lease). It is NOT a bare `ack` shortcut. Operator `force` is CLI-only.
+
+> Backward compatibility: `wrkf.effect.retry` also accepts legacy `{ id }`, but `{ effectId }` is the canonical RPC surface.
 
 > **Run/role-binding caveat:** the current schema conflates "an active run with a delivery ref" with role binding (`workflow_role_bindings` exists but is underused). v1 TS API exposes `run.start`/`run.bindExternal` as the *execution-attempt* shape and must NOT cement this conflation as a durable role binding. A future `wrkf.role.bind` may split it; v1 names the run shape as a compatibility shape only.
 

@@ -87,7 +87,7 @@ export interface Run {
   externalRunRef?: string;
   deliveryRef?: string;
   lane?: string;
-  summary?: string;
+  terminalResult?: string;
   [k: string]: unknown;
 }
 
@@ -250,8 +250,7 @@ export interface RunFinishParams {
 
 export interface RunFailParams {
   runId: string;
-  reason?: string;
-  retryable?: boolean;
+  summary?: string;
   [k: string]: unknown;
 }
 

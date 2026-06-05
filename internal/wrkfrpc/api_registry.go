@@ -181,8 +181,12 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.effect.fail", apiHandler(func(ctx context.Context, p wrkfapi.EffectFailParams) (any, error) {
 		return api.EffectFail(ctx, p)
 	}))
-	s.Register("wrkf.effect.retry", apiHandler(func(ctx context.Context, p idParams) (any, error) {
-		return api.EffectRetry(ctx, p.ID)
+	s.Register("wrkf.effect.retry", apiHandler(func(ctx context.Context, p effectRetryParams) (any, error) {
+		id := p.EffectID
+		if id == "" {
+			id = p.ID
+		}
+		return api.EffectRetry(ctx, id)
 	}))
 	s.Register("wrkf.effect.deliver", apiHandler(func(ctx context.Context, p wrkfapi.EffectDeliverParams) (any, error) {
 		p.Adapter = defaultString(p.Adapter, opts.DefaultActor)
@@ -323,6 +327,11 @@ type checkListParams struct {
 type effectListParams struct {
 	TaskSelector string `json:"task"`
 	All          bool   `json:"all,omitempty"`
+}
+
+type effectRetryParams struct {
+	EffectID string `json:"effectId"`
+	ID       string `json:"id"`
 }
 
 type idParams struct {
