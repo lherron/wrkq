@@ -295,3 +295,21 @@ smoke: build
   test/smoke-wrkf.sh
   test/smoke-wrkf-rpc.sh
   @echo "✓ Smoke test passed"
+
+# --- @wrkf/client TS package (quarantined; not part of `just build`/`just install`) ---
+
+# Install JS deps for the quarantined @wrkf/client package
+wrkf-client-install:
+  cd packages/wrkf-client && bun install
+
+# Type-check + run @wrkf/client unit tests (fake transport; no binary needed)
+wrkf-client-test:
+  cd packages/wrkf-client && bun run typecheck && bun test test/fake-transport.test.ts
+
+# Run @wrkf/client integration test against the REAL installed `wrkf rpc --stdio`
+wrkf-client-integration: install
+  cd packages/wrkf-client && bun test test/integration.test.ts
+
+# Full RPC verification: Go build/install unaffected + TS unit + TS integration
+verify-rpc: wrkf-client-test wrkf-client-integration
+  @echo "✓ verify-rpc passed (@wrkf/client unit + integration green)"
