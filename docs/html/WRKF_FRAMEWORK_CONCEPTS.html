@@ -1,0 +1,1890 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>wrkf Framework Concepts and DTO Contracts</title>
+    <style>
+      :root {
+        --paper: #f7f6f1;
+        --ink: #151615;
+        --muted: #626864;
+        --quiet: #89918b;
+        --line: #d9ddd5;
+        --line-strong: #a6b0a7;
+        --panel: #ffffff;
+        --panel-soft: #f0f3ee;
+        --active: #147268;
+        --active-soft: #dbf1ec;
+        --wait: #8a6420;
+        --wait-soft: #fff0cf;
+        --risk: #a8322b;
+        --risk-soft: #ffe5e1;
+        --logic: #4f5d9d;
+        --logic-soft: #eceeff;
+        --shadow: 0 18px 42px rgba(21, 22, 21, 0.08);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --serif: Georgia, "Times New Roman", serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(90deg, rgba(21, 22, 21, 0.035) 1px, transparent 1px) 0 0 / 32px 32px,
+          linear-gradient(0deg, rgba(21, 22, 21, 0.026) 1px, transparent 1px) 0 0 / 32px 32px,
+          var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      a {
+        color: inherit;
+        text-decoration-color: rgba(20, 114, 104, 0.45);
+        text-underline-offset: 0.2em;
+      }
+
+      code,
+      pre {
+        font-family: var(--mono);
+      }
+
+      .page {
+        display: grid;
+        grid-template-columns: 292px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        align-self: start;
+        height: 100vh;
+        overflow: auto;
+        border-right: 1px solid var(--line);
+        background: rgba(247, 246, 241, 0.95);
+        backdrop-filter: blur(12px);
+        padding: 26px 20px;
+      }
+
+      .brand {
+        border-top: 6px solid var(--ink);
+        padding-top: 18px;
+        margin-bottom: 26px;
+      }
+
+      .brand-kicker,
+      .eyebrow,
+      .section-num,
+      .source-note,
+      .metric-label,
+      .tiny-label {
+        font-family: var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .brand-kicker {
+        color: var(--active);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      .brand-title {
+        font-family: var(--serif);
+        font-size: 30px;
+        font-weight: 800;
+        line-height: 0.98;
+      }
+
+      .brand-subtitle,
+      .sidebar-note,
+      .section-intro,
+      .minor,
+      .source-note {
+        color: var(--muted);
+      }
+
+      .brand-subtitle,
+      .sidebar-note {
+        font-size: 13px;
+      }
+
+      .nav {
+        display: grid;
+        gap: 7px;
+        margin: 0 0 24px;
+      }
+
+      .nav a {
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: var(--ink);
+        display: block;
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.18;
+        padding: 10px 11px;
+        text-decoration: none;
+      }
+
+      .nav a:hover,
+      .nav a:focus {
+        border-color: var(--line-strong);
+        background: var(--panel);
+      }
+
+      .sidebar-note {
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+      }
+
+      main {
+        min-width: 0;
+      }
+
+      .content {
+        width: min(1240px, calc(100vw - 292px));
+        max-width: 100%;
+        padding: 44px 50px 80px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 0.46fr);
+        gap: 30px;
+        align-items: stretch;
+        margin-bottom: 34px;
+      }
+
+      .hero-copy {
+        border-top: 10px solid var(--active);
+        padding-top: 28px;
+      }
+
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 12px;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        letter-spacing: 0;
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-size: clamp(42px, 5.8vw, 76px);
+        line-height: 0.94;
+        margin: 0 0 18px;
+        max-width: 900px;
+      }
+
+      h2 {
+        align-items: end;
+        border-top: 2px solid var(--ink);
+        display: flex;
+        gap: 13px;
+        font-family: var(--serif);
+        font-size: clamp(30px, 4.2vw, 48px);
+        line-height: 1;
+        margin: 52px 0 20px;
+        padding-top: 18px;
+      }
+
+      h2 .section-num {
+        color: var(--quiet);
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      h3 {
+        font-family: var(--serif);
+        font-size: 23px;
+        line-height: 1.12;
+        margin: 0 0 10px;
+      }
+
+      h4 {
+        font-size: 13px;
+        margin: 0 0 8px;
+        text-transform: uppercase;
+      }
+
+      p {
+        margin: 0 0 14px;
+      }
+
+      .lead {
+        color: #303431;
+        font-family: var(--serif);
+        font-size: clamp(21px, 2.2vw, 29px);
+        line-height: 1.22;
+        max-width: 890px;
+      }
+
+      .hero-board {
+        display: grid;
+        grid-template-rows: repeat(3, 1fr);
+        gap: 12px;
+      }
+
+      .route-card,
+      .panel,
+      .state-tile,
+      .role-row,
+      .transition-row,
+      .rank-row,
+      .contract-object {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        min-width: 0;
+      }
+
+      .route-card {
+        padding: 16px;
+      }
+
+      .route-label,
+      .badge,
+      .tag {
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      .route-label {
+        color: var(--active);
+        margin-bottom: 10px;
+      }
+
+      .route-title {
+        font-weight: 850;
+        line-height: 1.18;
+        margin-bottom: 6px;
+      }
+
+      .route-copy {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .section-intro {
+        max-width: 78ch;
+        margin-bottom: 18px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .panel strong {
+        font-weight: 850;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+        margin: 18px 0 10px;
+      }
+
+      .flow-node {
+        min-height: 148px;
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-top: 6px solid var(--logic);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 14px;
+      }
+
+      .flow-node:nth-child(2) {
+        border-top-color: var(--active);
+      }
+
+      .flow-node:nth-child(3) {
+        border-top-color: var(--wait);
+      }
+
+      .flow-node:nth-child(4) {
+        border-top-color: var(--risk);
+      }
+
+      .flow-node:nth-child(5) {
+        border-top-color: var(--active);
+      }
+
+      .flow-node:nth-child(6) {
+        border-top-color: var(--ink);
+      }
+
+      .flow-node p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .state-grid {
+        display: grid;
+        grid-template-columns: 1.05fr 1.2fr 1.2fr 0.82fr;
+        gap: 14px;
+      }
+
+      .state-tile {
+        box-shadow: none;
+        padding: 16px;
+      }
+
+      .state-tile.active {
+        border-top: 5px solid var(--active);
+      }
+
+      .state-tile.waiting {
+        border-top: 5px solid var(--wait);
+      }
+
+      .state-tile.closed {
+        border-top: 5px solid var(--ink);
+      }
+
+      .state-tile.open {
+        border-top: 5px solid var(--logic);
+      }
+
+      .tuple-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .tuple {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        color: var(--ink);
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 6px 8px;
+        white-space: nowrap;
+      }
+
+      .role-map,
+      .transition-map,
+      .rank-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .role-row,
+      .transition-row,
+      .rank-row {
+        box-shadow: none;
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .role-row {
+        grid-template-columns: minmax(150px, 0.7fr) minmax(160px, 0.72fr) minmax(0, 1.6fr);
+      }
+
+      .transition-row {
+        grid-template-columns: minmax(190px, 0.9fr) minmax(160px, 0.65fr) minmax(0, 1.8fr);
+      }
+
+      .rank-row {
+        grid-template-columns: 40px minmax(190px, 0.75fr) minmax(0, 1.8fr);
+        align-items: start;
+      }
+
+      .rank-num {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: #fff;
+        display: inline-grid;
+        place-items: center;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .metric-label,
+      .tiny-label {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .mono {
+        font-family: var(--mono);
+      }
+
+      .minor {
+        font-size: 13px;
+      }
+
+      .badge {
+        border: 1px solid var(--line);
+        padding: 6px 8px;
+      }
+
+      .badge.state,
+      .tag.state {
+        background: var(--logic-soft);
+        color: var(--logic);
+        border-color: rgba(79, 93, 157, 0.24);
+      }
+
+      .badge.transition,
+      .tag.transition {
+        background: var(--active-soft);
+        color: var(--active);
+        border-color: rgba(20, 114, 104, 0.24);
+      }
+
+      .badge.ledger,
+      .tag.ledger {
+        background: var(--wait-soft);
+        color: var(--wait);
+        border-color: rgba(138, 100, 32, 0.24);
+      }
+
+      .badge.effect,
+      .tag.effect {
+        background: var(--risk-soft);
+        color: var(--risk);
+        border-color: rgba(168, 50, 43, 0.24);
+      }
+
+      .badge.runtime {
+        background: var(--panel-soft);
+        color: var(--ink);
+      }
+
+      .tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 10px;
+      }
+
+      .tag {
+        border: 1px solid transparent;
+        padding: 5px 7px;
+      }
+
+      .callout {
+        border-left: 5px solid var(--active);
+        background: rgba(255, 255, 255, 0.72);
+        padding: 16px 18px;
+        margin: 18px 0;
+      }
+
+      .callout.risk {
+        border-left-color: var(--risk);
+      }
+
+      .method-ledger {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .method-row {
+        display: grid;
+        grid-template-columns: minmax(170px, 0.55fr) minmax(180px, 0.65fr) minmax(0, 1.25fr);
+        gap: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .method-row:first-child {
+        border-top: 0;
+      }
+
+      .method-row.header {
+        background: var(--ink);
+        color: #fff;
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .method-row > span {
+        padding: 12px;
+        border-left: 1px solid var(--line);
+      }
+
+      .method-row > span:first-child {
+        border-left: 0;
+      }
+
+      .method-name,
+      .inline-code {
+        font-family: var(--mono);
+      }
+
+      .inline-code {
+        border: 1px solid rgba(21, 22, 21, 0.12);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 0.08rem 0.28rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .method-copy {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .contract-pair {
+        display: grid;
+        gap: 4px;
+      }
+
+      .pair-line {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr);
+        gap: 6px;
+      }
+
+      .pair-label {
+        color: var(--quiet);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .contract-object {
+        margin: 18px 0;
+        overflow: hidden;
+      }
+
+      .contract-object-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px;
+      }
+
+      .contract-object-head p {
+        color: var(--muted);
+        margin-bottom: 0;
+      }
+
+      .object-chip-row {
+        align-items: start;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+        min-width: 220px;
+      }
+
+      .code-panel {
+        background: #101514;
+        border-top: 1px solid var(--line);
+        color: #edf5f1;
+        overflow-x: auto;
+      }
+
+      .code-panel pre {
+        margin: 0;
+        min-width: 760px;
+        padding: 0;
+        white-space: pre;
+      }
+
+      .code-panel code {
+        display: block;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .schema-line {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr);
+        min-height: 24px;
+      }
+
+      .schema-line-no {
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        color: #72807a;
+        font-family: var(--mono);
+        padding: 3px 10px 3px 0;
+        text-align: right;
+        user-select: none;
+      }
+
+      .schema-code {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.9fr) minmax(280px, 0.85fr);
+        gap: 18px;
+        padding: 3px 16px;
+      }
+
+      .schema-code.no-comment {
+        display: block;
+      }
+
+      .schema-code-text {
+        min-width: 0;
+      }
+
+      .schema-comment {
+        color: #a9d5c9;
+        min-width: 0;
+        white-space: normal;
+      }
+
+      .comment-marker {
+        color: #59776f;
+        margin-right: 8px;
+      }
+
+      .syntax-field {
+        color: #f7d58a;
+      }
+
+      .syntax-keyword {
+        color: #93b3ff;
+      }
+
+      .syntax-string {
+        color: #f3a99f;
+      }
+
+      .contract-legend,
+      .source-note {
+        border-top: 1px solid var(--line);
+        padding: 10px 18px;
+      }
+
+      .contract-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        background: #17201e;
+        color: #c7d2ce;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .legend-swatch.field {
+        background: #f7d58a;
+      }
+
+      .legend-swatch.type {
+        background: #93b3ff;
+      }
+
+      .legend-swatch.literal {
+        background: #f3a99f;
+      }
+
+      .legend-swatch.comment {
+        background: #a9d5c9;
+      }
+
+      .source-note {
+        background: rgba(247, 246, 241, 0.72);
+        font-size: 11px;
+      }
+
+      .footer {
+        border-top: 2px solid var(--ink);
+        color: var(--muted);
+        margin-top: 44px;
+        padding-top: 18px;
+        font-size: 13px;
+      }
+
+      @media (max-width: 1060px) {
+        .page {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .content {
+          width: 100%;
+          padding: 34px 22px 64px;
+        }
+
+        .hero,
+        .grid.two,
+        .grid.three,
+        .state-grid,
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-board {
+          grid-template-rows: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          font-size: 15px;
+        }
+
+        .sidebar {
+          padding: 16px 18px 12px;
+        }
+
+        .brand {
+          margin-bottom: 12px;
+          padding-top: 12px;
+        }
+
+        .brand-title {
+          font-size: 26px;
+        }
+
+        .brand-subtitle {
+          margin-bottom: 0;
+        }
+
+        .nav {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 0;
+          overflow-x: auto;
+          padding-bottom: 6px;
+          scrollbar-width: none;
+        }
+
+        .nav::-webkit-scrollbar {
+          display: none;
+        }
+
+        .nav a {
+          background: var(--panel);
+          border-color: var(--line);
+          flex: 0 0 auto;
+          padding: 8px 10px;
+          white-space: nowrap;
+        }
+
+        .sidebar-note {
+          display: none;
+        }
+
+        .role-row,
+        .transition-row,
+        .rank-row,
+        .method-row {
+          grid-template-columns: 1fr;
+        }
+
+        .method-row > span {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+
+        .method-row > span:first-child {
+          border-top: 0;
+        }
+
+        .contract-object-head {
+          display: block;
+        }
+
+        .object-chip-row {
+          justify-content: flex-start;
+          min-width: 0;
+          margin-top: 12px;
+        }
+
+        .code-panel pre {
+          min-width: 0;
+          white-space: pre-wrap;
+        }
+
+        .schema-line {
+          grid-template-columns: 40px minmax(0, 1fr);
+        }
+
+        .schema-code {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 4px;
+          padding-right: 10px;
+          white-space: pre-wrap;
+        }
+
+        h1 {
+          font-size: clamp(38px, 14vw, 58px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <aside class="sidebar" aria-label="Document navigation">
+        <div class="brand">
+          <div class="brand-kicker">wrkf</div>
+          <div class="brand-title">Framework Concepts</div>
+          <p class="brand-subtitle">State tuples, role-gated transitions, evidence, effects, obligations, scheduling, and DTO contracts.</p>
+        </div>
+        <nav class="nav" aria-label="Sections">
+          <a href="#overview">Overview</a>
+          <a href="#model">Operating Model</a>
+          <a href="#states">States and Roles</a>
+          <a href="#transitions">Transitions</a>
+          <a href="#checks">Checks and Hooks</a>
+          <a href="#ledger">Ledger Lifecycles</a>
+          <a href="#next">Next Action Model</a>
+          <a href="#contracts">DTO Contracts</a>
+          <a href="#sources">Sources</a>
+        </nav>
+        <p class="sidebar-note">Source-backed against live Go types, the wrkf CLI, migrations, the local agent-tasker workflow template, and validator hook catalog.</p>
+      </aside>
+
+      <main>
+        <div class="content">
+          <section class="hero" id="overview" aria-labelledby="title">
+            <div class="hero-copy">
+              <div class="eyebrow">Workflow engine contract</div>
+              <h1 id="title">wrkf is a revisioned state tuple plus an append-only decision ledger.</h1>
+              <p class="lead">Each transition starts from a declared <span class="inline-code">{status, phase}</span> tuple, admits only specific roles, branches on check outcomes, then records the chosen state, effects, obligations, and event metadata for safe retries.</p>
+            </div>
+            <div class="hero-board" aria-label="Contract summary">
+              <div class="route-card">
+                <div class="route-label">State</div>
+                <div class="route-title"><span class="inline-code">State = {status, phase, outcome?}</span></div>
+                <div class="route-copy">The initial state and every outcome target must be listed in the template's declared states.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">Transition</div>
+                <div class="route-title">from -> checked outcomes -> to</div>
+                <div class="route-copy">Runtime admission checks role, revision, context hash, blockers, check runs, guards, and idempotency.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">Scheduler</div>
+                <div class="route-title"><span class="inline-code">wrkf next</span> ranks one best next move</div>
+                <div class="route-copy">Actions are deterministic objects with owner, command, blockers, expected state, and guardrails.</div>
+              </div>
+            </div>
+          </section>
+
+          <section id="model" aria-labelledby="model-title">
+            <h2 id="model-title"><span class="section-num">01</span> Operating Model</h2>
+            <p class="section-intro">The template is the static contract. The instance is the mutable projection. The ledger is the durable memory that checks and transitions consult.</p>
+
+            <div class="flow" aria-label="wrkf operating flow">
+              <article class="flow-node">
+                <h3>State tuple</h3>
+                <p>Instance state is the tuple currently stored on <span class="inline-code">workflow_instances</span>.</p>
+                <span class="tag state">{active, planning}</span>
+              </article>
+              <article class="flow-node">
+                <h3>Transition spec</h3>
+                <p>A transition declares <span class="inline-code">from</span>, <span class="inline-code">by</span>, requirements, checks, and outcomes.</p>
+                <span class="tag transition">role-gated</span>
+              </article>
+              <article class="flow-node">
+                <h3>Checks</h3>
+                <p>Checks run builtin, predicate, role, or hook logic and produce verdict plus outcome.</p>
+                <span class="tag ledger">exitMap</span>
+              </article>
+              <article class="flow-node">
+                <h3>Outcome branch</h3>
+                <p>The first matching outcome chooses the target state and optional effects or obligations.</p>
+                <span class="tag effect">branch</span>
+              </article>
+              <article class="flow-node">
+                <h3>Ledger update</h3>
+                <p>Events, evidence, obligations, effects, runs, and checks persist as normalized rows.</p>
+                <span class="tag transition">append-only evidence</span>
+              </article>
+              <article class="flow-node">
+                <h3>Next action</h3>
+                <p>The scheduler reads current blockers and pending work to return ranked action DTOs.</p>
+                <span class="tag state">deterministic</span>
+              </article>
+            </div>
+
+            <div class="callout">
+              <strong>Runtime invariant:</strong> transition execution rejects stale revisions, mismatched context hashes, illegal roles, wrong source states, open blocking obligations, missing evidence, failing guards, and unmatched outcomes before committing.
+            </div>
+          </section>
+
+          <section id="states" aria-labelledby="states-title">
+            <h2 id="states-title"><span class="section-num">02</span> States and Roles</h2>
+            <p class="section-intro">The agent-tasker template shows the intended role map and the concrete state lattice used by wrkf feature work. The examples in the prompt, <span class="inline-code">{active, planning}</span> and <span class="inline-code">{waiting, impl_results}</span>, are declared template states.</p>
+
+            <div class="state-grid" aria-label="State tuple groups">
+              <article class="state-tile open">
+                <h3>open</h3>
+                <p class="minor">Admitted but not yet in coordinator execution.</p>
+                <div class="tuple-list">
+                  <span class="tuple">{open, intake}</span>
+                </div>
+              </article>
+              <article class="state-tile active">
+                <h3>active</h3>
+                <p class="minor">Coordinator or supervisor owns immediate progress.</p>
+                <div class="tuple-list">
+                  <span class="tuple">{active, diagnosis}</span>
+                  <span class="tuple">{active, planning}</span>
+                  <span class="tuple">{active, setup_tasks}</span>
+                  <span class="tuple">{active, branch_ready}</span>
+                  <span class="tuple">{active, dispatch_reds}</span>
+                  <span class="tuple">{active, red_verified}</span>
+                  <span class="tuple">{active, green_verified}</span>
+                  <span class="tuple">{active, live_smoke}</span>
+                  <span class="tuple">{active, report}</span>
+                  <span class="tuple">{active, error}</span>
+                </div>
+              </article>
+              <article class="state-tile waiting">
+                <h3>waiting</h3>
+                <p class="minor">Progress depends on another role, worker, observer, or recovery input.</p>
+                <div class="tuple-list">
+                  <span class="tuple">{waiting, architect_review}</span>
+                  <span class="tuple">{waiting, red_results}</span>
+                  <span class="tuple">{waiting, impl_results}</span>
+                  <span class="tuple">{waiting, blocked}</span>
+                  <span class="tuple">{waiting, review_pending}</span>
+                </div>
+              </article>
+              <article class="state-tile closed">
+                <h3>closed</h3>
+                <p class="minor">Terminal outcome lives in <span class="inline-code">outcome</span>, not <span class="inline-code">phase</span>.</p>
+                <div class="tuple-list">
+                  <span class="tuple">{closed, completed}</span>
+                  <span class="tuple">{closed, failed}</span>
+                </div>
+              </article>
+            </div>
+
+            <h3>Roles bind to actors and delivery handles</h3>
+            <div class="role-map" aria-label="Role to actor bindings">
+              <div class="role-row">
+                <strong>coordinator</strong>
+                <span class="mono">agent:clod</span>
+                <span class="minor">Owns diagnosis, decomposition, dispatch, monitoring, verification, reporting, and recovery coordination.</span>
+              </div>
+              <div class="role-row">
+                <strong>architect</strong>
+                <span class="mono">agent:cody</span>
+                <span class="minor">Pressure-tests plans, handles architecture questions, and reviews scope drift.</span>
+              </div>
+              <div class="role-row">
+                <strong>red_author</strong>
+                <span class="mono">agent:smokey</span>
+                <span class="minor">Writes failing acceptance tests first and records red evidence.</span>
+              </div>
+              <div class="role-row">
+                <strong>implementer</strong>
+                <span class="mono">agent:larry | agent:curly</span>
+                <span class="minor">Executes scoped implementation work and records implementation evidence.</span>
+              </div>
+              <div class="role-row">
+                <strong>supervisor</strong>
+                <span class="mono">agent:clod</span>
+                <span class="minor">Recovery role for error states, redispatch, preserved patches, obligations, and escalation.</span>
+              </div>
+              <div class="role-row">
+                <strong>observer</strong>
+                <span class="mono">agent:cody</span>
+                <span class="minor">External reviewer for completion claims; bound with <span class="inline-code">wrkf run bind</span> before observer effects are delivered.</span>
+              </div>
+            </div>
+          </section>
+
+          <section id="transitions" aria-labelledby="transitions-title">
+            <h2 id="transitions-title"><span class="section-num">03</span> Transitions</h2>
+            <p class="section-intro">Transitions are not one edge each. They are role-gated branch sets. A check outcome selects a branch, and a branch may loop to the same state, move forward, enter recovery, or emit effects and obligations.</p>
+
+            <div class="transition-map" aria-label="Representative transition branches">
+              <div class="transition-row">
+                <strong>planning_to_architect_review</strong>
+                <span class="mono">{active, planning}</span>
+                <span class="minor">Runs <span class="inline-code">plan_ready</span>. Outcome <span class="inline-code">plan_ready</span> moves to <span class="inline-code">{waiting, architect_review}</span> and wakes the architect; <span class="inline-code">revise_plan</span> or <span class="inline-code">missing_plan</span> loops to planning; other outcomes call supervisor and enter error.</span>
+              </div>
+              <div class="transition-row">
+                <strong>impl_results_terminal</strong>
+                <span class="mono">{waiting, impl_results}</span>
+                <span class="minor">Requires <span class="inline-code">stacked_terminal</span> and <span class="inline-code">impl_verified</span>. Success moves to <span class="inline-code">{active, green_verified}</span>; assignee closure gaps and missing evidence notify implementer; scope drift wakes architect; stash collision enters supervisor recovery.</span>
+              </div>
+              <div class="transition-row">
+                <strong>submit_completion_claim</strong>
+                <span class="mono">{active, report}</span>
+                <span class="minor">Requires coordinator smoke and report readiness. Success moves to <span class="inline-code">{waiting, review_pending}</span> and emits <span class="inline-code">request_observer_review</span> with guardrails for external audit.</span>
+              </div>
+              <div class="transition-row">
+                <strong>report_complete</strong>
+                <span class="mono">{waiting, review_pending}</span>
+                <span class="minor">Observer-owned. Accepted or accepted-with-followups closes completed; needs-work wakes coordinator and creates <span class="inline-code">address_observer_rejection</span>; blocked enters <span class="inline-code">{waiting, blocked}</span> with supervisor obligation.</span>
+              </div>
+              <div class="transition-row">
+                <strong>blocked_resolved / recover_from_error</strong>
+                <span class="mono">recovery target fact</span>
+                <span class="minor">Supervisor or coordinator chooses a declared target via <span class="inline-code">recovery.target</span>. Unknown target routes back to error or closed failed.</span>
+              </div>
+            </div>
+          </section>
+
+          <section id="checks" aria-labelledby="checks-title">
+            <h2 id="checks-title"><span class="section-num">04</span> Checks and Hooks</h2>
+            <p class="section-intro">A check is a typed hook or predicate whose verdict and outcome become branch input. Hook checks execute deterministic local scripts from the hook catalog; exit codes are mapped through each template check's <span class="inline-code">exitMap</span>.</p>
+
+            <div class="grid two">
+              <article class="panel">
+                <h3>plan_ready exit map</h3>
+                <p class="minor"><span class="inline-code">validate_plan_ready.sh</span> requires source spec and decomposition plan evidence. Exit <span class="inline-code">0</span> is pass, <span class="inline-code">11</span> requests plan revision, <span class="inline-code">20</span> reports missing plan, and <span class="inline-code">50</span> routes to supervisor recovery.</p>
+                <div class="tag-row">
+                  <span class="tag transition">0 -> pass / plan_ready</span>
+                  <span class="tag ledger">11 -> fail / revise_plan</span>
+                  <span class="tag ledger">20 -> fail / missing_plan</span>
+                  <span class="tag effect">50 -> error / supervisor_recovery</span>
+                </div>
+              </article>
+              <article class="panel">
+                <h3>Hook catalog</h3>
+                <p class="minor">The local catalog names deterministic scripts such as <span class="inline-code">validate_red_verified.sh</span>, <span class="inline-code">validate_impl_verified.sh</span>, <span class="inline-code">validate_live_smoke.sh</span>, <span class="inline-code">validate_coordinator_smoke_verified.sh</span>, and <span class="inline-code">validate_observer_completion_review.sh</span>.</p>
+                <div class="tag-row">
+                  <span class="tag state">stdin: json</span>
+                  <span class="tag transition">stdout: exit_code</span>
+                  <span class="tag ledger">cwd: template_dir</span>
+                </div>
+              </article>
+            </div>
+
+            <div class="callout risk">
+              <strong>Evidence is the check surface:</strong> hooks consume task facts, evidence rows, obligations, and workflow state. The validator decides exit code; the template decides what that exit code means for branch selection.
+            </div>
+          </section>
+
+          <section id="ledger" aria-labelledby="ledger-title">
+            <h2 id="ledger-title"><span class="section-num">05</span> Ledger Lifecycles</h2>
+            <p class="section-intro">wrkf separates durable artifacts from duties and side effects. Evidence is append-only. Obligations gate progress. Effects are delivery jobs with retryable lifecycle state.</p>
+
+            <div class="grid three">
+              <article class="panel">
+                <span class="badge ledger">Evidence</span>
+                <h3>Typed artifacts</h3>
+                <p class="minor">Examples include <span class="inline-code">red_evidence</span>, <span class="inline-code">coordinator_smoke_execution</span>, <span class="inline-code">completion_claim</span>, and <span class="inline-code">observer_completion_review</span>. Evidence has facts for routing and data for richer payloads.</p>
+              </article>
+              <article class="panel">
+                <span class="badge effect">Effects</span>
+                <h3>At-least-once delivery</h3>
+                <p class="minor">Effects begin <span class="inline-code">pending</span>; handlers deliver, ack, fail, and retry. Observer review is delivered through a registered effect handler and bound role delivery ref.</p>
+              </article>
+              <article class="panel">
+                <span class="badge state">Obligations</span>
+                <h3>Outstanding duties</h3>
+                <p class="minor">Obligations are <span class="inline-code">open</span> until satisfied, waived, or cancelled. Blocking obligations stop transitions; nonblocking obligations still appear in <span class="inline-code">wrkf next</span>.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="next" aria-labelledby="next-title">
+            <h2 id="next-title"><span class="section-num">06</span> Next Action Model</h2>
+            <p class="section-intro">The declarative model says which class of action wins. The current service turns that into ranked DTOs with owner, command, blockers, expected state, and guardrails.</p>
+
+            <div class="rank-list" aria-label="Next action rank order">
+              <div class="rank-row">
+                <span class="rank-num">1</span>
+                <strong>hard_block_recovery</strong>
+                <span class="minor">Supervisor or coordinator action needed for blocked/error state, failed effect, stale binding, or hard obligation.</span>
+              </div>
+              <div class="rank-row">
+                <span class="rank-num">2</span>
+                <strong>owned_transition_available</strong>
+                <span class="minor">A legal transition from the current state is available for the requested role; command includes <span class="inline-code">--expect-revision</span>.</span>
+              </div>
+              <div class="rank-row">
+                <span class="rank-num">3</span>
+                <strong>missing_evidence_collection</strong>
+                <span class="minor">A transition or check input requires a missing evidence kind, so collect the source truth before checking again.</span>
+              </div>
+              <div class="rank-row">
+                <span class="rank-num">4</span>
+                <strong>dispatch_ready_worker</strong>
+                <span class="minor">A worker effect or role wakeup is ready once the role is bound to a delivery ref.</span>
+              </div>
+              <div class="rank-row">
+                <span class="rank-num">5</span>
+                <strong>wait_for_external_owner</strong>
+                <span class="minor">The best move belongs to architect, implementer, red author, observer, or supervisor.</span>
+              </div>
+              <div class="rank-row">
+                <span class="rank-num">6</span>
+                <strong>nonblocking_followup</strong>
+                <span class="minor">Open nonblocking obligations such as observer follow-up or rejection remediation remain visible without preventing all progress.</span>
+              </div>
+            </div>
+
+            <div class="callout">
+              <strong>Delivery reference:</strong> the model's template is <span class="inline-code">{actor}@{project}:{taskId}</span> with lane default <span class="inline-code">main</span>. <span class="inline-code">wrkf run bind TASK ROLE HANDLE</span> persists the role-to-handle binding.
+            </div>
+          </section>
+
+          <section id="contracts" aria-labelledby="contracts-title">
+            <h2 id="contracts-title"><span class="section-num">07</span> DTO Contracts</h2>
+            <p class="section-intro">These DTOs normalize Go structs, CLI flags, migrations, and template JSON into a contract notation. Field names use JSON wire names where the Go source declares them.</p>
+
+            <article class="contract-object runtime" id="method-surface">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge runtime">CLI surface</span>
+                  <h3>wrkf command ledger</h3>
+                  <p>Command groups expose the runtime contract for templates, instances, evidence, checks, transitions, runs, effects, obligations, and supervisor recovery.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge state">read</span>
+                  <span class="badge transition">mutate</span>
+                  <span class="badge ledger">audit</span>
+                </div>
+              </div>
+              <div class="method-ledger">
+                <div class="method-row header">
+                  <span>Command</span>
+                  <span>Contract</span>
+                  <span>Purpose</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkf workflow validate/install/show</span>
+                  <span class="method-copy contract-pair">
+                    <span class="pair-line"><span class="pair-label">input</span><span>Template</span></span>
+                    <span class="pair-line"><span class="pair-label">result</span><span>ValidateResult | Template</span></span>
+                  </span>
+                  <span class="method-copy">Validates and installs hash-covered workflow templates.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkf task attach/inspect/timeline</span>
+                  <span class="method-copy contract-pair">
+                    <span class="pair-line"><span class="pair-label">input</span><span>task selector, template ref</span></span>
+                    <span class="pair-line"><span class="pair-label">result</span><span>Instance | Event[]</span></span>
+                  </span>
+                  <span class="method-copy">Creates and inspects the workflow instance projection for a wrkq task.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkf evidence add/exec/suggest</span>
+                  <span class="method-copy contract-pair">
+                    <span class="pair-line"><span class="pair-label">input</span><span>AddEvidenceParams</span></span>
+                    <span class="pair-line"><span class="pair-label">result</span><span>Evidence | missing evidence report</span></span>
+                  </span>
+                  <span class="method-copy">Appends evidence, optionally from command output, and reports what a transition still needs.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkf check run/show/list</span>
+                  <span class="method-copy contract-pair">
+                    <span class="pair-line"><span class="pair-label">input</span><span>task, transition, hook catalog</span></span>
+                    <span class="pair-line"><span class="pair-label">result</span><span>CheckRun[]</span></span>
+                  </span>
+                  <span class="method-copy">Runs typed checks and persists verdict/outcome records.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkf transition</span>
+                  <span class="method-copy contract-pair">
+                    <span class="pair-line"><span class="pair-label">input</span><span>TransitionCommand</span></span>
+                    <span class="pair-line"><span class="pair-label">result</span><span>TransitionResult</span></span>
+                  </span>
+                  <span class="method-copy">Commits one transition branch with optimistic concurrency and idempotency controls.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkf run bind/effect deliver/obligation satisfy</span>
+                  <span class="method-copy contract-pair">
+                    <span class="pair-line"><span class="pair-label">input</span><span>Run | Effect | Obligation</span></span>
+                    <span class="pair-line"><span class="pair-label">result</span><span>delivery and duty state</span></span>
+                  </span>
+                  <span class="method-copy">Binds external owners, performs side effects, and resolves outstanding duties.</span>
+                </div>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/wrkfcli/root.go</span></div>
+            </article>
+
+            <article class="contract-object state" id="state-and-instance">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge state">Instance</span>
+                  <h3><span class="inline-code">State</span> and <span class="inline-code">Instance</span></h3>
+                  <p>The mutable task workflow projection: current tuple, revision, hashes, and task linkage.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge state">tuple</span>
+                  <span class="badge runtime">revision</span>
+                  <span class="badge ledger">hash</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type State = { // Runtime tuple used by templates, instances, predicates, and transition targets.
+  status: 'open' | 'active' | 'waiting' | 'closed' // Coarse lifecycle bucket validated by service.go and the DB schema.
+  phase?: string // Nonterminal phase name such as planning, impl_results, review_pending, or error.
+  outcome?: string // Terminal or branch outcome, especially closed/completed and closed/failed.
+}
+
+type Instance = { // Stored workflow projection attached to a wrkq task.
+  id: string // Stable workflow instance id allocated when a template is attached.
+  taskUuid?: string // Canonical wrkq task UUID for local DB joins.
+  taskRef: string // Human-facing task reference such as wrkq:T-00001.
+  projectId?: string // Owning project UUID or id copied from the task at attach time.
+  templateId: string // Installed workflow template id.
+  templateVersion: string // Installed workflow template version.
+  templateHash: string // Hash of the canonical template definition admitted by install.
+  status: State['status'] // Current status column mirrored into task meta.
+  phase?: string // Current phase column mirrored into task meta when nonempty.
+  outcome?: string // Current outcome column mirrored into task meta when nonempty.
+  revision: number // Monotonic workflow revision incremented by committed transitions.
+  contextHash: string // Hash covering current state, revision, task doc hash, evidence, obligations, and effects.
+  taskDocEtag: string // Task etag observed by the workflow projection.
+  taskDocHash: string // Hash of task content excluding workflow metadata.
+  createdAt: string // RFC3339 creation timestamp.
+  updatedAt: string // RFC3339 update timestamp.
+  closedAt?: string // RFC3339 terminal timestamp when status is closed.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span></div>
+            </article>
+
+            <article class="contract-object transition" id="template-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge transition">Template</span>
+                  <h3><span class="inline-code">Template</span></h3>
+                  <p>The installed workflow definition: states, roles, evidence contracts, checks, and transition graph.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge transition">hash-covered</span>
+                  <span class="badge state">roles</span>
+                  <span class="badge ledger">catalog refs</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type Template = { // Workflow template admitted by wrkf workflow install.
+  schemaVersion: 'wrkf.workflow-template.v0' // Template schema version required by validation.
+  id: string // Stable template family id such as agent_tasker_feature_request.
+  version: string // Template version paired with id for installed uniqueness.
+  kind: 'agent_first_workflow' // Template kind accepted by ValidateTemplate.
+  description?: string // Human-readable workflow purpose.
+  initial: State // Initial state that must also appear in states.
+  roles: Record&lt;string, RoleSpec&gt; // Role catalog used by transition by lists and responsibility.
+  states: State[] // Complete declared target set for initial and every transition outcome.
+  evidenceKinds?: Record&lt;string, KindSpec&gt; // Evidence names and optional facts contracts available to requirements and checks.
+  obligationKinds?: Record&lt;string, KindSpec&gt; // Obligation names referenced by transition requirements and branch-created duties.
+  checks?: Record&lt;string, CheckSpec&gt; // Named checks referenced by transition checks arrays.
+  transitions: TransitionSpec[] // Ordered transition definitions evaluated by current state and role.
+  stateHooks?: Record&lt;string, HookRef[]&gt; // Optional hook refs grouped by state key.
+  nextActionModel?: Record&lt;string, unknown&gt; // Declarative scheduler metadata such as rank order and delivery ref template.
+  supervisor?: Record&lt;string, unknown&gt; // Supervisor configuration reserved for recovery policy.
+}
+
+type RoleSpec = { // Template-defined role entry.
+  description?: string // Human-readable role responsibility.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">.wrkq/wrkf-agent-tasker/agent-tasker-feature-request.v3.workflow.json</span></div>
+            </article>
+
+            <article class="contract-object transition" id="transition-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge transition">Transition</span>
+                  <h3><span class="inline-code">TransitionSpec</span>, <span class="inline-code">OutcomeCase</span>, and <span class="inline-code">Predicate</span></h3>
+                  <p>The branch contract that moves an instance from one declared tuple to another.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge transition">from/to</span>
+                  <span class="badge state">by</span>
+                  <span class="badge ledger">checks</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type TransitionSpec = { // Template transition evaluated from the current instance state.
+  id: string // Stable transition id used by wrkf transition and check commands.
+  from: State // Source tuple that must match the current instance state.
+  by: string[] // Allowed roles; validation accepts template roles plus supervisor and system.
+  responsibility?: ResponsibilitySpec // Optional owner resolution metadata for scheduling.
+  guards?: Predicate[] // Predicates that must pass before any outcome can commit.
+  requires?: RequirementSpec[] // Evidence or obligation prerequisites checked before guards and outcomes.
+  checks?: string[] // Named check ids whose latest or freshly run outcomes feed branch predicates.
+  outcomes: OutcomeCase[] // Ordered branch set; first matching predicate selects target, effects, and obligations.
+  hooks?: Record&lt;string, HookRef[]&gt; // Optional transition-local hooks grouped by lifecycle point.
+}
+
+type OutcomeCase = { // One possible branch under a transition.
+  id: string // Stable outcome id recorded in the transition event payload.
+  when: Predicate // Branch predicate such as checkOutcome, all, otherwise, or factEquals.
+  to: State // Target tuple that must be declared in template states.
+  effects?: EffectSpec[] // Side effects inserted as pending workflow_effects rows after commit.
+  obligations?: ObligationCreateSpec[] // Duties inserted as open workflow_obligations rows after commit.
+}
+
+type Predicate = { // Recursive predicate language used by guards, outcomes, and predicate checks.
+  always?: boolean // Unconditional true branch.
+  otherwise?: boolean // Fallback branch that must be the final outcome when true.
+  all?: Predicate[] // Conjunction over child predicates.
+  any?: Predicate[] // Disjunction over child predicates.
+  not?: Predicate // Negation over one child predicate.
+  checkVerdict?: { check: string; is: string } // Matches a named check run verdict.
+  checkOutcome?: { check: string; is: string } // Matches a named check run outcome used for branch routing.
+  evidenceExists?: EvidenceRequirementSpec // Tests whether matching evidence exists.
+  obligationStatus?: ObligationPredicate // Tests whether an obligation has the requested status.
+  factEquals?: { path: string; value: unknown } // Compares a task or workflow fact path to a literal value.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span></div>
+            </article>
+
+            <article class="contract-object ledger" id="requirements-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge ledger">Requirements</span>
+                  <h3><span class="inline-code">RequirementSpec</span> and facts contracts</h3>
+                  <p>Small decision facts live beside evidence and are validated against template evidence kind contracts.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge ledger">facts</span>
+                  <span class="badge state">flat</span>
+                  <span class="badge transition">routing</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type RequirementSpec = { // Transition prerequisite checked before guards and outcome selection.
+  evidence?: EvidenceRequirementSpec // Evidence kind and optional facts selector required by the transition.
+  obligation?: ObligationRequirementSpec // Obligation kind or id that must have the requested status.
+}
+
+type EvidenceRequirementSpec = { // Evidence selector used by requirements and evidenceExists predicates.
+  kind: string // Evidence kind name declared in template evidenceKinds.
+  facts?: Record&lt;string, unknown&gt; // Flat fact selectors compared against evidence facts_json.
+}
+
+type ObligationRequirementSpec = { // Obligation selector used to gate progress.
+  kind?: string // Obligation kind to match when id is not enough or not known.
+  id?: string // Specific obligation id such as obl_000001.
+  status?: 'open' | 'satisfied' | 'waived' | 'cancelled' // Required status; defaults to satisfied when omitted.
+}
+
+type KindSpec = { // Template metadata for evidence and obligation kinds.
+  description?: string // Human-readable kind meaning.
+  class?: string // Optional category such as analysis, decision, or review.
+  facts?: FactsContract // Optional small schema for evidence routing facts.
+}
+
+type FactsContract = { // Flat evidence facts contract enforced by AddEvidence.
+  required?: string[] // Fact names that must be present when this evidence kind is recorded.
+  properties?: Record&lt;string, FactProperty&gt; // Per-fact type and constraint definitions.
+}
+
+type FactProperty = { // Supported scalar or scalar-array fact property.
+  type?: 'string' | 'boolean' | 'number' | 'integer' | 'array' // Fact value type accepted by validation.
+  enum?: unknown[] // Optional JSON literal set accepted for this fact.
+  maxLength?: number // Optional string length limit.
+  maxItems?: number // Optional array item count limit.
+  itemsType?: 'string' | 'boolean' | 'number' | 'integer' // Scalar item type allowed when type is array.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/facts.go</span>, <span class="inline-code">internal/db/migrations/000019_workflow_evidence_facts.sql</span></div>
+            </article>
+
+            <article class="contract-object ledger" id="check-hook-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge ledger">Checks</span>
+                  <h3><span class="inline-code">CheckSpec</span>, <span class="inline-code">ExitMap</span>, and hooks</h3>
+                  <p>Typed checks produce verdicts and outcomes; hook checks map validator script exit codes through template exitMap entries.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge ledger">hook</span>
+                  <span class="badge transition">outcome</span>
+                  <span class="badge runtime">script</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type CheckSpec = { // Named transition check referenced by a transition checks array.
+  type: 'hook' | 'predicate' | 'builtin' | 'role' // Check executor category selected by executeCheck.
+  name?: string // Builtin name such as always_pass, always_fail, or task_completed.
+  predicate?: Predicate // Predicate body when type is predicate.
+  hookId?: string // Hook catalog id such as plan_ready or impl_verified.
+  exitMap?: Record&lt;string, ExitMap&gt; // Exit code to verdict/outcome map, with optional wildcard key.
+  role?: string // Role relevant to role checks.
+  instruction?: string // Human instruction for role-gated checks.
+  evidenceKind?: string // Evidence kind required by this check.
+  evidenceKinds?: string[] // Additional evidence kinds required by this check.
+}
+
+type ExitMap = { // Mapping from validator exit code to workflow routing result.
+  verdict: 'pass' | 'fail' | 'block' | 'error' | 'inconclusive' // Normalized check verdict stored on CheckRun.
+  outcome?: string // Branch-routing label such as plan_ready, revise_plan, or supervisor_recovery.
+}
+
+type HookCatalog = { // Local script catalog loaded from WRKF_HOOK_CATALOG or autodiscovery.
+  schemaVersion: 'wrkf.hook-catalog.v0' // Hook catalog schema version.
+  hooks: Record&lt;string, HookSpec&gt; // Check hook definitions keyed by hook id.
+  effectHandlers?: Record&lt;string, HookSpec&gt; // Effect delivery handlers keyed by effect kind.
+}
+
+type HookSpec = { // Deterministic local script execution contract.
+  kind: 'check' | 'effect' // Hook role in the workflow runtime.
+  argv: string[] // Executable and arguments, resolved relative to template_dir when configured.
+  stdin: 'json' | string // Input mode; json streams the runtime input document to stdin.
+  stdout: 'exit_code' | 'json' | string // Output interpretation used by checks or effect receipts.
+  timeoutMs: number // Maximum execution time before the hook process is killed.
+  cwd: 'template_dir' | string // Working directory policy for the script.
+  env: Record&lt;string, string[]&gt; // Environment allowlist or related env policy.
+  maxStdoutBytes: number // Captured stdout byte limit.
+  maxStderrBytes: number // Captured stderr byte limit.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">.wrkq/wrkf-agent-tasker/hook-catalog.json</span></div>
+            </article>
+
+            <article class="contract-object ledger" id="evidence-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge ledger">Evidence</span>
+                  <h3><span class="inline-code">Evidence</span></h3>
+                  <p>Append-only typed artifacts that checks validate and context hashes include.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge ledger">append-only</span>
+                  <span class="badge state">facts</span>
+                  <span class="badge runtime">source</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type Evidence = { // Durable artifact row produced by agents, commands, or external validators.
+  id: string // Evidence id allocated from workflow_evidence_seq.
+  instanceId?: string // Owning workflow instance id.
+  kind: string // Evidence kind declared by the template, such as red_evidence or completion_claim.
+  ref: string // External reference, command reference, path, URL, or other source handle.
+  summary?: string // Human-readable evidence summary.
+  facts?: Record&lt;string, unknown&gt; // Flat routing facts stored as facts_json and validated when a kind contract exists.
+  data?: unknown // Rich freeform evidence payload for humans and agents.
+  source?: unknown // Source descriptor, currently external_ref for AddEvidence.
+  actor?: string // Actor that produced the evidence.
+  role?: string // Workflow role that produced the evidence.
+  runId?: string // Workflow run that produced the evidence when known.
+  taskEtagAtProduction?: string // Task etag observed when the evidence was recorded.
+  producedAt: string // RFC3339 timestamp for ordering and audit.
+}
+
+type AddEvidenceParams = { // Service input accepted by wrkf evidence add and evidence exec.
+  taskSelector: string // Task selector resolved to the latest workflow instance.
+  kind: string // Evidence kind to append.
+  ref: string // Required external or command reference.
+  summary?: string // Optional human summary.
+  facts?: string // JSON object string validated as flat evidence facts.
+  data?: string // JSON document string stored as evidence data.
+  actor?: string // Actor identity copied into the evidence row.
+  role?: string // Role identity copied into the evidence row.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span></div>
+            </article>
+
+            <article class="contract-object effect" id="effect-obligation-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge effect">Effects and obligations</span>
+                  <h3><span class="inline-code">Effect</span> and <span class="inline-code">Obligation</span></h3>
+                  <p>Transition side effects and duties are persisted separately from the state tuple.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge effect">deliver</span>
+                  <span class="badge ledger">gate</span>
+                  <span class="badge runtime">retry</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type EffectSpec = { // Template-side side effect created by an outcome branch.
+  kind: string // Effect kind such as notify, wake_role, call_supervisor, or request_observer_review.
+  role?: string // Target workflow role for delivery or notification.
+  reason?: string // Human-readable reason copied into the effect payload.
+  data?: Record&lt;string, unknown&gt; // Additional effect-specific payload.
+}
+
+type Effect = { // Persisted delivery job emitted by a committed transition.
+  id: string // Effect id allocated from workflow_effect_seq.
+  instanceId?: string // Owning workflow instance id.
+  revision: number // Workflow revision that emitted this effect.
+  kind: string // Effect kind used to select an effect handler.
+  payload?: EffectSpec // JSON payload copied from the branch effect spec.
+  status: 'pending' | 'leased' | 'delivered' | 'failed' | 'cancelled' | 'unsupported' // Delivery lifecycle state.
+  idempotencyKey?: string // Unique key generated from instance, revision, outcome, and effect id.
+  attempts: number // Number of delivery, ack, or fail attempts recorded.
+  leasedBy?: string // Adapter or worker currently leasing the effect.
+  leasedUntil?: string // Lease expiry timestamp when leased.
+  deliveredAt?: string // RFC3339 delivery timestamp when delivered.
+  lastError?: string // Last failure reason from handler or explicit fail command.
+  createdAt: string // RFC3339 creation timestamp.
+  updatedAt: string // RFC3339 update timestamp.
+}
+
+type Obligation = { // Outstanding duty that can block or guide progress.
+  id: string // Obligation id allocated from workflow_obligation_seq or computed obligation id.
+  instanceId?: string // Owning workflow instance id.
+  kind: string // Obligation kind such as assignee_close_task or await_observer_completion_review.
+  ownerRole?: string // Role responsible for resolving the duty.
+  ownerActor?: string // Specific actor responsible when known.
+  blocking: boolean // True when open status blocks transition progress.
+  status: 'open' | 'satisfied' | 'waived' | 'cancelled' // Resolution lifecycle state.
+  reason?: string // Human-readable explanation or computed status detail.
+  data?: unknown // Optional computed or source-specific duty payload.
+  satisfiedByEvidenceId?: string // Evidence id that resolved the obligation.
+  createdAt: string // RFC3339 creation timestamp.
+  updatedAt: string // RFC3339 update timestamp.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/ledger.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span></div>
+            </article>
+
+            <article class="contract-object runtime" id="check-run-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge runtime">Execution records</span>
+                  <h3><span class="inline-code">CheckRun</span> and <span class="inline-code">Run</span></h3>
+                  <p>Check runs record validator decisions; runs bind roles to actors and delivery handles.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge ledger">check</span>
+                  <span class="badge state">binding</span>
+                  <span class="badge transition">owner</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type CheckRun = { // Persisted result of one transition check execution.
+  id: string // Check run id allocated from workflow_check_run_seq.
+  instanceId?: string // Owning workflow instance id.
+  transitionId: string // Transition whose check was executed.
+  checkId: string // Template check id.
+  hookId?: string // Hook catalog id when the check type is hook.
+  inputHash: string // Hash of the JSON input sent to the check executor.
+  exitCode?: number // Process exit code for hook checks.
+  verdict: 'pass' | 'fail' | 'block' | 'error' | 'inconclusive' // Normalized verdict stored in workflow_check_runs.
+  outcome?: string // Branch outcome label selected by exitMap or executor output.
+  code?: string // Optional structured code emitted by JSON stdout hooks.
+  summary?: string // Human summary or stderr text from the check.
+  facts?: Record&lt;string, unknown&gt; // Optional facts emitted by JSON stdout hooks.
+  actor?: string // Actor that ran the check.
+  role?: string // Role that ran the check.
+  runId?: string // Associated workflow run id when supplied.
+  startedAt: string // RFC3339 start timestamp.
+  completedAt?: string // RFC3339 completion timestamp.
+}
+
+type Run = { // Active or completed role binding and execution record.
+  id: string // Run id allocated from workflow_run_seq.
+  instanceId?: string // Owning workflow instance id.
+  role: string // Workflow role for this run or binding.
+  actor: string // Actor id such as clod, cody, larry, curly, or smokey.
+  deliveryRef?: string // Project/task-scoped handle used by effect delivery.
+  lane?: string // Optional lane parsed from the delivery handle suffix.
+  externalRunRef?: string // External runtime reference when known.
+  status: string // Run lifecycle status such as active, completed, or failed.
+  startedAt: string // RFC3339 start timestamp.
+  completedAt?: string // RFC3339 completion timestamp.
+  terminalResult?: string // Human terminal summary recorded by finish or fail.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/ledger.go</span></div>
+            </article>
+
+            <article class="contract-object state" id="next-action-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge state">Scheduler</span>
+                  <h3><span class="inline-code">NextActionResponse</span></h3>
+                  <p>The object returned by <span class="inline-code">wrkf next</span> to explain the single best available action and remaining blockers.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge state">ranked</span>
+                  <span class="badge transition">command</span>
+                  <span class="badge ledger">blockers</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type NextActionResponse = { // Scheduler response for a task's latest workflow instance.
+  instance: NextInstance // Current instance projection and freshness metadata.
+  actions: NextAction[] // Ranked deterministic actions, highest rank first.
+  blockedTransitions: BlockedTransition[] // Legal-state transitions currently blocked by role, evidence, checks, or obligations.
+  openObligations: Obligation[] // Open obligations after computed obligation state is applied.
+  pendingEffects: Effect[] // Pending or leased effects that still require delivery.
+}
+
+type NextAction = { // One candidate action emitted by the scheduler.
+  id: string // Stable action id within this response.
+  kind: string // Action class such as transition, run_check, collect_evidence, bind_role, or deliver_effect.
+  mode: 'deterministic' | string // Scheduling mode; current service emits deterministic actions.
+  owner: ActionOwner // Role, actor, and delivery target expected to perform the action.
+  rank: number // Numeric priority used for sorting, with higher rank first.
+  confidence?: number // Optional confidence score for future scheduler variants.
+  why: string // Human-readable reason this action is recommended.
+  unblocks?: string[] // Transition ids or blocker refs this action can unblock.
+  blocksOn?: Blocker[] // Remaining blockers that prevent immediate execution.
+  command?: string // Concrete wrkf command when the service can construct one.
+  preflight?: string // Optional command or note to run before the action.
+  expectedState?: State // Expected target state for transition actions.
+  guardrails: Guardrails // Hard rules and warnings for executing the action.
+}
+
+type ActionOwner = { // Runtime owner resolved for an action.
+  role: string // Workflow role responsible for the action.
+  actor?: string // Bound actor when known.
+  deliveryRef?: string // Bound delivery handle such as actor@project:taskId.
+  lane?: string // Bound lane parsed from the handle.
+}
+
+type Blocker = { // Structured blocker explaining why work cannot advance.
+  kind: 'role' | 'evidence' | 'obligation' | 'check' | 'check_input' | string // Blocker category used by scheduler logic.
+  ref: string // Blocked role, evidence kind, obligation id, check id, or input ref.
+  message: string // Human-readable blocker explanation.
+}
+
+type Guardrails = { // Execution constraints attached to a next action.
+  hard: string[] // Non-negotiable rules the actor must follow.
+  warnings: string[] // Advisory cautions that do not block execution.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">.wrkq/wrkf-agent-tasker/agent-tasker-feature-request.v3.workflow.json</span></div>
+            </article>
+
+            <article class="contract-object runtime" id="event-concurrency-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge runtime">Concurrency</span>
+                  <h3><span class="inline-code">Event</span>, transition command, and context hash</h3>
+                  <p>Transition commits are concurrency-checked, idempotent when requested, and audited as workflow events.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge runtime">revision</span>
+                  <span class="badge ledger">event</span>
+                  <span class="badge effect">retry-safe</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type TransitionCommand = { // CLI-level command contract for wrkf transition.
+  task: string // Task selector resolved to the latest workflow instance.
+  transition: string // Transition id to attempt from the current state.
+  role?: string // Role supplied by --role or WRKF_ROLE for by-list enforcement.
+  actor?: string // Actor supplied by --actor, WRKF_ACTOR, or WRKQ_ACTOR.
+  expectRevision?: number // Optional --expect-revision guard that must match instance revision.
+  context?: string // Optional --context guard that must match instance contextHash.
+  idempotencyKey?: string // Optional retry key looked up in workflow_events for this instance.
+  runChecks?: boolean // When true, execute transition checks before branch selection.
+  check?: string[] // Explicit check run ids that override or supplement latest checks.
+  dryRun?: boolean // Validate and select outcome without committing state, effects, obligations, or events.
+}
+
+type TransitionResult = { // Service response after transition admission and branch selection.
+  idempotent: boolean // True when an existing idempotency key replay returned without a new commit.
+  eventId?: string // Existing event id returned for idempotent replay.
+  transition?: string // Transition id committed or dry-run.
+  outcome?: string // Outcome id selected by ordered branch predicates.
+  state: State // Current or newly committed state tuple.
+  revision: number // Current or newly committed workflow revision.
+  instance: Instance // Instance projection after replay or commit.
+}
+
+type Event = { // Append-only workflow event emitted for attach and transition commits.
+  id: string // Event id allocated from workflow_event_seq.
+  instanceId: string // Owning workflow instance id.
+  seq: number // Monotonic sequence number within the instance event stream.
+  schemaVersion: 'wrkf.workflow-event.v0' // Event schema version written by insertEvent.
+  type: string // Event type such as workflow.attached or workflow.transitioned.
+  actor?: string // Actor responsible for the event.
+  role?: string // Role responsible for the event.
+  runId?: string // Associated run id when known.
+  observedRevision: number // Revision observed before the mutation.
+  nextRevision: number // Revision after the mutation.
+  taskDocEtag?: string // Task etag observed at event time.
+  taskDocHash?: string // Task document hash observed at event time.
+  contextHash?: string // Context hash after the mutation.
+  idempotencyKey?: string // Retry key stored uniquely per instance when supplied.
+  result?: string // Event result, currently committed for insertEvent.
+  rejectionCode?: string // Rejection code field reserved by schema.
+  payload?: unknown // Event-specific payload such as transition, outcome, from, and to.
+  createdAt: string // RFC3339 event timestamp.
+}
+
+type ContextHashInput = { // Conceptual input covered by contextHash in service.go.
+  templateHash: string // Installed template hash.
+  state: State // Current instance state tuple.
+  revision: number // Current instance revision.
+  taskDocHash: string // Hash of task content excluding workflow metadata.
+  evidence?: string[] // Sorted evidence refs containing id, kind, ref, and facts hash.
+  openObligations?: string[] // Sorted open obligation refs containing id, kind, and blocking flag.
+  pendingEffects?: string[] // Sorted pending or leased effect refs containing id, kind, and status.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/ledger.go</span>, <span class="inline-code">internal/wrkfcli/root.go</span></div>
+            </article>
+          </section>
+
+          <section id="sources" aria-labelledby="sources-title">
+            <h2 id="sources-title"><span class="section-num">08</span> Sources</h2>
+            <div class="grid two">
+              <article class="panel">
+                <h3>Authoritative files</h3>
+                <p class="minor"><span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/ledger.go</span>, <span class="inline-code">internal/workflow/facts.go</span>, <span class="inline-code">internal/wrkfcli/root.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span>, and <span class="inline-code">000019_workflow_evidence_facts.sql</span>.</p>
+              </article>
+              <article class="panel">
+                <h3>Template and hook sources</h3>
+                <p class="minor"><span class="inline-code">.wrkq/wrkf-agent-tasker/agent-tasker-feature-request.v3.workflow.json</span>, <span class="inline-code">.wrkq/wrkf-agent-tasker/hook-catalog.json</span>, <span class="inline-code">.wrkq/wrkf-agent-tasker/scripts/validate_*.sh</span>, and <span class="inline-code">cc-workflow-wrkf-session-2026-06-02.md</span>.</p>
+              </article>
+            </div>
+          </section>
+
+          <footer class="footer">Generated for wrkq task T-01891, "Create wrkf framework HTML representation." Standalone artifact with embedded CSS and JavaScript.</footer>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      ;(() => {
+        const escapeHtml = (value) =>
+          String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+        const keywords = [
+          'type',
+          'interface',
+          'Record',
+          'unknown',
+          'string',
+          'number',
+          'boolean',
+          'true',
+          'false',
+          'null',
+        ]
+
+        const keywordPattern = new RegExp(`\\b(${keywords.join('|')})\\b`, 'g')
+
+        const findCommentIndex = (line) => {
+          let quote = null
+          let escaped = false
+          for (let index = 0; index < line.length - 1; index += 1) {
+            const char = line[index]
+            const next = line[index + 1]
+            if (escaped) {
+              escaped = false
+              continue
+            }
+            if (char === '\\') {
+              escaped = true
+              continue
+            }
+            if (quote) {
+              if (char === quote) quote = null
+              continue
+            }
+            if (char === '"' || char === "'" || char === '`') {
+              quote = char
+              continue
+            }
+            if (char === '/' && next === '/') return index
+          }
+          return -1
+        }
+
+        const highlight = (value) => {
+          let html = escapeHtml(value)
+          html = html.replace(/\b([A-Za-z_][A-Za-z0-9_]*\??)(?=\s*:)/g, '<span class="syntax-field">$1</span>')
+          html = html.replace(keywordPattern, '<span class="syntax-keyword">$1</span>')
+          html = html.replace(/'([^']*)'/g, '<span class="syntax-string">\'$1\'</span>')
+          return html || '&nbsp;'
+        }
+
+        const renderLine = (line, index) => {
+          const commentIndex = findCommentIndex(line)
+          const hasComment = commentIndex >= 0
+          const codePart = hasComment ? line.slice(0, commentIndex).replace(/\s+$/, '') : line
+          const commentPart = hasComment ? line.slice(commentIndex + 2).trim() : ''
+          const comment = hasComment
+            ? `<span class="schema-comment"><span class="comment-marker">//</span>${escapeHtml(commentPart)}</span>`
+            : ''
+          const codeClass = hasComment ? 'schema-code has-comment' : 'schema-code no-comment'
+          return `<span class="schema-line"><span class="schema-line-no">${index + 1}</span><span class="${codeClass}"><span class="schema-code-text">${highlight(codePart)}</span>${comment}</span></span>`
+        }
+
+        const legend = `<div class="contract-legend" aria-label="Contract notation legend">
+          <span class="legend-item"><span class="legend-swatch field"></span>fields</span>
+          <span class="legend-item"><span class="legend-swatch type"></span>types</span>
+          <span class="legend-item"><span class="legend-swatch literal"></span>literals</span>
+          <span class="legend-item"><span class="legend-swatch comment"></span>definitions</span>
+        </div>`
+
+        document.querySelectorAll('.contract-object code').forEach((code) => {
+          if (code.dataset.highlighted === 'true') return
+          const raw = code.textContent || ''
+          code.innerHTML = raw.split('\n').map(renderLine).join('')
+          code.dataset.highlighted = 'true'
+        })
+
+        document.querySelectorAll('.contract-object').forEach((object) => {
+          if (!object.querySelector('code')) return
+          if (object.querySelector('.contract-legend')) return
+          const sourceNote = object.querySelector('.source-note')
+          if (sourceNote) sourceNote.insertAdjacentHTML('beforebegin', legend)
+        })
+      })()
+    </script>
+  </body>
+</html>
