@@ -8,6 +8,8 @@ const (
 	wrkfCodeTransitionBlocked   = "WRKF_TRANSITION_BLOCKED"
 	wrkfCodeRoleDenied          = "WRKF_ROLE_DENIED"
 	wrkfCodeIdempotencyMismatch = "WRKF_IDEMPOTENCY_MISMATCH"
+	wrkfCodeLeaseConflict       = "WRKF_LEASE_CONFLICT"
+	wrkfCodeNotDeliverable      = "WRKF_EFFECT_NOT_DELIVERABLE"
 )
 
 type wrkfError struct {
@@ -62,5 +64,19 @@ func idempotencyMismatchError(key string) error {
 	return &wrkfError{
 		code: wrkfCodeIdempotencyMismatch,
 		msg:  fmt.Sprintf("idempotency key %q was reused with different params", key),
+	}
+}
+
+func leaseConflictError(effectID, token string) error {
+	return &wrkfError{
+		code: wrkfCodeLeaseConflict,
+		msg:  fmt.Sprintf("effect lease conflict: effect %s token %s", effectID, token),
+	}
+}
+
+func effectNotDeliverableError(effectID, status string) error {
+	return &wrkfError{
+		code: wrkfCodeNotDeliverable,
+		msg:  fmt.Sprintf("effect %s is not deliverable from status %s", effectID, status),
 	}
 }

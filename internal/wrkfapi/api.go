@@ -655,6 +655,10 @@ func normalizeError(err error) error {
 			return NewRoleDeniedError("", "", "")
 		case CodeIdempotencyMismatch:
 			return NewIdempotencyMismatchError("")
+		case CodeLeaseConflict:
+			return NewLeaseConflictError("", "")
+		case CodeEffectNotDeliverable:
+			return NewEffectNotDeliverableError("", "")
 		}
 	}
 

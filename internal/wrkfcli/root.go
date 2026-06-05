@@ -502,19 +502,55 @@ func effectCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, eff)
 		}),
 	}
-	var adapter, reason string
+	var adapter, leaseToken, reason string
+	var limit int
+	var leaseMs int64
+	var kind string
+	var force bool
+	claim := &cobra.Command{
+		Use:  "claim [TASK]",
+		Args: cobra.MaximumNArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			taskSelector := ""
+			if len(args) > 0 {
+				taskSelector = args[0]
+			}
+			claimAdapter := adapter
+			if claimAdapter == "" {
+				claimAdapter = a.actor
+			}
+			claim, err := a.service.ClaimEffects(claimAdapter, limit, leaseMs, taskSelector, kind)
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, claim)
+		}),
+	}
+	claim.Flags().StringVar(&adapter, "adapter", "", "Adapter id")
+	claim.Flags().IntVar(&limit, "limit", 10, "Maximum effects to claim")
+	claim.Flags().Int64Var(&leaseMs, "lease-ms", 60000, "Lease duration in milliseconds")
+	claim.Flags().StringVar(&kind, "kind", "", "Effect kind")
 	ack := &cobra.Command{
 		Use:  "ack EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := a.service.AckEffect(args[0], adapter)
+			var (
+				eff *workflow.Effect
+				err error
+			)
+			if force {
+				eff, err = a.service.ForceAckEffect(args[0])
+			} else {
+				eff, err = a.service.AckEffect(args[0], leaseToken)
+			}
 			if err != nil {
 				return err
 			}
 			return printAny(cmd, flagJSON, eff)
 		}),
 	}
-	ack.Flags().StringVar(&adapter, "adapter", "", "Adapter id")
+	ack.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token")
+	ack.Flags().BoolVar(&force, "force", false, "Bypass lease token check")
 	deliver := &cobra.Command{
 		Use:  "deliver EFFECT",
 		Args: cobra.ExactArgs(1),
@@ -533,7 +569,15 @@ func effectCmd() *cobra.Command {
 		Use:  "fail EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := a.service.FailEffect(args[0], reason)
+			var (
+				eff *workflow.Effect
+				err error
+			)
+			if force {
+				eff, err = a.service.ForceFailEffect(args[0], reason)
+			} else {
+				eff, err = a.service.FailEffect(args[0], leaseToken, reason, false)
+			}
 			if err != nil {
 				return err
 			}
@@ -541,6 +585,8 @@ func effectCmd() *cobra.Command {
 		}),
 	}
 	fail.Flags().StringVar(&reason, "reason", "", "Failure reason")
+	fail.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token")
+	fail.Flags().BoolVar(&force, "force", false, "Bypass lease token check")
 	retry := &cobra.Command{
 		Use:  "retry EFFECT",
 		Args: cobra.ExactArgs(1),
@@ -552,7 +598,7 @@ func effectCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, eff)
 		}),
 	}
-	cmd.AddCommand(list, show, deliver, ack, fail, retry)
+	cmd.AddCommand(list, show, claim, deliver, ack, fail, retry)
 	return cmd
 }
 

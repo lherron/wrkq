@@ -170,7 +170,10 @@ fi
 "$BIN/wrkf" --db "$DB" obligation list T-00001 --json | jq -e '.obligations[0].status == "open"' >/dev/null
 "$BIN/wrkf" --db "$DB" effect list T-00001 --json | jq -e '.effects[0].status == "pending"' >/dev/null
 EFF="$("$BIN/wrkf" --db "$DB" effect list T-00001 --json | jq -r '.effects[0].id')"
-"$BIN/wrkf" --db "$DB" effect ack "$EFF" --adapter smoke --json | jq -e '.status == "delivered"' >/dev/null
+CLAIM="$("$BIN/wrkf" --db "$DB" effect claim T-00001 --adapter smoke --limit 1 --lease-ms 30000 --json)"
+TOKEN="$(jq -r '.leaseToken' <<<"$CLAIM")"
+jq -e --arg eff "$EFF" '.effects[0].id == $eff and .effects[0].status == "leased" and .leaseToken != ""' <<<"$CLAIM" >/dev/null
+"$BIN/wrkf" --db "$DB" effect ack "$EFF" --lease-token "$TOKEN" --json | jq -e '.status == "delivered" and (.leasedBy == null)' >/dev/null
 OBL="$("$BIN/wrkf" --db "$DB" obligation list T-00001 --json | jq -r '.obligations[0].id')"
 EV="$("$BIN/wrkf" --db "$DB" evidence list T-00001 --json | jq -r '.evidence[0].id')"
 "$BIN/wrkf" --db "$DB" obligation satisfy T-00001 "$OBL" --evidence "$EV" --json | jq -e '.status == "satisfied"' >/dev/null

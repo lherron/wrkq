@@ -11,6 +11,7 @@ type Event = workflow.Event
 type Evidence = workflow.Evidence
 type Obligation = workflow.Obligation
 type Effect = workflow.Effect
+type EffectClaim = workflow.EffectClaim
 type Run = workflow.Run
 type CheckRun = workflow.CheckRun
 type NextActionResponse = workflow.NextActionResponse
@@ -76,14 +77,34 @@ type SyncMetaResult struct {
 	Updated int `json:"updated"`
 }
 
-type EffectClaim struct {
-	Effects        []workflow.Effect `json:"effects"`
-	LeaseToken     string            `json:"leaseToken"`
-	LeaseExpiresAt string            `json:"leaseExpiresAt"`
-}
-
 type CheckRunResult struct {
 	Runs []workflow.CheckRun `json:"runs"`
+}
+
+type EffectClaimParams struct {
+	Adapter      string `json:"adapter"`
+	Limit        int    `json:"limit"`
+	LeaseMs      int64  `json:"leaseMs"`
+	TaskSelector string `json:"task,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+}
+
+type EffectAckParams struct {
+	EffectID   string          `json:"effectId"`
+	LeaseToken string          `json:"leaseToken"`
+	Receipt    json.RawMessage `json:"receipt,omitempty"`
+}
+
+type EffectFailParams struct {
+	EffectID   string `json:"effectId"`
+	LeaseToken string `json:"leaseToken"`
+	Reason     string `json:"reason"`
+	Retryable  bool   `json:"retryable,omitempty"`
+}
+
+type EffectDeliverParams struct {
+	EffectID string `json:"effectId"`
+	Adapter  string `json:"adapter,omitempty"`
 }
 
 type HookSummary struct {

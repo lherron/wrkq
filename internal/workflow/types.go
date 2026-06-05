@@ -278,6 +278,12 @@ type Effect struct {
 	UpdatedAt      string          `json:"updatedAt"`
 }
 
+type EffectClaim struct {
+	Effects        []Effect `json:"effects"`
+	LeaseToken     string   `json:"leaseToken"`
+	LeaseExpiresAt string   `json:"leaseExpiresAt"`
+}
+
 type CheckRun struct {
 	ID           string          `json:"id"`
 	InstanceID   string          `json:"instanceId,omitempty"`

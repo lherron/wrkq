@@ -1,7 +1,9 @@
 package workflow
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -872,17 +874,178 @@ func (s *Service) ShowEffect(id string) (*Effect, error) {
 	return &effects[0], nil
 }
 
-func (s *Service) AckEffect(id, adapter string) (*Effect, error) {
-	current, err := s.ShowEffect(id)
+func (s *Service) ClaimEffects(adapter string, limit int, leaseMs int64, taskSelector, kind string) (*EffectClaim, error) {
+	if adapter == "" {
+		adapter = "wrkf-effect-claim"
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be greater than zero")
+	}
+	if leaseMs <= 0 {
+		return nil, fmt.Errorf("leaseMs must be greater than zero")
+	}
+	var taskUUID string
+	if taskSelector != "" {
+		resolved, _, err := selectors.ResolveTask(s.db, taskSelector)
+		if err != nil {
+			return nil, err
+		}
+		taskUUID = resolved
+	}
+
+	token, err := newLeaseToken()
 	if err != nil {
 		return nil, err
 	}
-	if current.Kind == "request_observer_review" && current.Status == "pending" {
-		return nil, fmt.Errorf("request_observer_review must be delivered with wrkf effect deliver before ack")
-	}
-	now := s.now().Format(time.RFC3339)
-	if _, err := s.db.Exec(`UPDATE workflow_effects SET status = 'delivered', delivered_at = ?, attempts = attempts + 1, leased_by = ?, updated_at = ? WHERE id = ?`, now, adapter, now, id); err != nil {
+	now := s.now()
+	nowText := now.Format(time.RFC3339)
+	expiresAt := now.Add(time.Duration(leaseMs) * time.Millisecond).Format(time.RFC3339)
+	claim := &EffectClaim{Effects: []Effect{}, LeaseToken: token, LeaseExpiresAt: expiresAt}
+
+	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		query := `
+			SELECT e.id
+			FROM workflow_effects e
+			JOIN workflow_instances i ON i.id = e.instance_id
+			WHERE (
+				e.status IN ('pending', 'failed')
+				OR (e.status = 'leased' AND COALESCE(e.leased_until, '') <= ?)
+			)`
+		args := []interface{}{nowText}
+		if taskUUID != "" {
+			query += ` AND i.task_uuid = ?`
+			args = append(args, taskUUID)
+		}
+		if kind != "" {
+			query += ` AND e.kind = ?`
+			args = append(args, kind)
+		}
+		query += ` ORDER BY e.created_at, e.id LIMIT ?`
+		args = append(args, limit)
+
+		rows, err := tx.Query(query, args...)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+		updateArgs := []interface{}{adapter, expiresAt, token, nowText}
+		for _, id := range ids {
+			updateArgs = append(updateArgs, id)
+		}
+		result, err := tx.Exec(fmt.Sprintf(`
+			UPDATE workflow_effects
+			SET status = 'leased',
+			    leased_by = ?,
+			    leased_until = ?,
+			    lease_token = ?,
+			    updated_at = ?
+			WHERE id IN (%s)
+		`, placeholders), updateArgs...)
+		if err != nil {
+			return err
+		}
+		if affected, err := result.RowsAffected(); err == nil && affected != int64(len(ids)) {
+			return leaseConflictError("", token)
+		}
+
+		effects, err := effectsByLeaseTokenTx(tx, token)
+		if err != nil {
+			return err
+		}
+		claim.Effects = effects
+		return nil
+	})
+	if err != nil {
 		return nil, err
+	}
+	return claim, nil
+}
+
+func effectsByLeaseTokenTx(tx *sql.Tx, token string) ([]Effect, error) {
+	rows, err := tx.Query(`
+		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		       created_at, updated_at
+		FROM workflow_effects
+		WHERE lease_token = ?
+		ORDER BY created_at, id
+	`, token)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEffects(rows)
+}
+
+func newLeaseToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "lease_" + hex.EncodeToString(b[:]), nil
+}
+
+func (s *Service) AckEffect(id, leaseToken string) (*Effect, error) {
+	now := s.now().Format(time.RFC3339)
+	result, err := s.db.Exec(`
+		UPDATE workflow_effects
+		SET status = 'delivered',
+		    delivered_at = ?,
+		    attempts = attempts + 1,
+		    leased_by = NULL,
+		    leased_until = NULL,
+		    lease_token = NULL,
+		    last_error = NULL,
+		    updated_at = ?
+		WHERE id = ?
+		  AND status = 'leased'
+		  AND lease_token = ?
+		  AND leased_until > ?
+	`, now, now, id, leaseToken, now)
+	if err != nil {
+		return nil, err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected != 1 {
+		return nil, leaseConflictError(id, leaseToken)
+	}
+	return s.ShowEffect(id)
+}
+
+func (s *Service) ForceAckEffect(id string) (*Effect, error) {
+	now := s.now().Format(time.RFC3339)
+	result, err := s.db.Exec(`
+		UPDATE workflow_effects
+		SET status = 'delivered',
+		    delivered_at = ?,
+		    attempts = attempts + 1,
+		    leased_by = NULL,
+		    leased_until = NULL,
+		    lease_token = NULL,
+		    last_error = NULL,
+		    updated_at = ?
+		WHERE id = ?
+	`, now, now, id)
+	if err != nil {
+		return nil, err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected != 1 {
+		return nil, fmt.Errorf("effect not found: %s", id)
 	}
 	return s.ShowEffect(id)
 }
@@ -897,27 +1060,36 @@ type EffectDelivery struct {
 }
 
 func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templateDir string) (*EffectDelivery, error) {
-	eff, err := s.ShowEffect(id)
+	current, err := s.ShowEffect(id)
 	if err != nil {
 		return nil, err
 	}
-	if eff.Status == "delivered" {
-		return &EffectDelivery{Effect: eff}, nil
-	}
-	if eff.Status != "pending" && eff.Status != "failed" {
-		return nil, fmt.Errorf("effect %s is not deliverable from status %s", id, eff.Status)
+	if current.Status == "delivered" {
+		return &EffectDelivery{Effect: current}, nil
 	}
 	if catalog == nil {
 		return nil, fmt.Errorf("hook catalog is required for effect delivery")
 	}
-	handler, ok := catalog.EffectHandlers[eff.Kind]
+	handler, ok := catalog.EffectHandlers[current.Kind]
 	if !ok {
-		if h, hookOK := catalog.Hooks["effect_"+eff.Kind]; hookOK {
+		if h, hookOK := catalog.Hooks["effect_"+current.Kind]; hookOK {
 			handler, ok = h, true
 		}
 	}
 	if !ok {
-		return nil, fmt.Errorf("no effect handler registered for %s", eff.Kind)
+		return nil, fmt.Errorf("no effect handler registered for %s", current.Kind)
+	}
+
+	claim, err := s.claimEffectByID(id, adapter, 60_000)
+	if err != nil {
+		return nil, err
+	}
+	if claim == nil || len(claim.Effects) == 0 {
+		return nil, leaseConflictError(id, "")
+	}
+	eff := &claim.Effects[0]
+	if eff.Status == "delivered" {
+		return &EffectDelivery{Effect: eff}, nil
 	}
 	inst, err := s.instanceByID(eff.InstanceID)
 	if err != nil {
@@ -952,21 +1124,98 @@ func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templa
 		out.Receipt = json.RawMessage(stdout)
 	}
 	if exit != 0 {
+		failed, failErr := s.FailEffect(id, claim.LeaseToken, strings.TrimSpace(string(stderr)), true)
+		if failErr == nil {
+			out.Effect = failed
+		}
 		return out, fmt.Errorf("effect handler failed with exit %d: %s", exit, strings.TrimSpace(string(stderr)))
 	}
-	now := s.now().Format(time.RFC3339)
-	if adapter == "" {
-		adapter = "wrkf-effect-deliver"
-	}
-	if _, err := s.db.Exec(`UPDATE workflow_effects SET status = 'delivered', delivered_at = ?, attempts = attempts + 1, leased_by = ?, last_error = NULL, updated_at = ? WHERE id = ?`, now, adapter, now, id); err != nil {
-		return nil, err
-	}
-	delivered, err := s.ShowEffect(id)
+	delivered, err := s.AckEffect(id, claim.LeaseToken)
 	if err != nil {
 		return nil, err
 	}
 	out.Effect = delivered
 	return out, nil
+}
+
+func (s *Service) claimEffectByID(id, adapter string, leaseMs int64) (*EffectClaim, error) {
+	if adapter == "" {
+		adapter = "wrkf-effect-deliver"
+	}
+	if leaseMs <= 0 {
+		return nil, fmt.Errorf("leaseMs must be greater than zero")
+	}
+	token, err := newLeaseToken()
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	nowText := now.Format(time.RFC3339)
+	expiresAt := now.Add(time.Duration(leaseMs) * time.Millisecond).Format(time.RFC3339)
+	claim := &EffectClaim{Effects: []Effect{}, LeaseToken: token, LeaseExpiresAt: expiresAt}
+	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		var status string
+		if err := tx.QueryRow(`SELECT status FROM workflow_effects WHERE id = ?`, id).Scan(&status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("effect not found: %s", id)
+			}
+			return err
+		}
+		if status == "delivered" {
+			effects, err := effectByIDTx(tx, id)
+			if err != nil {
+				return err
+			}
+			claim.Effects = effects
+			claim.LeaseToken = ""
+			claim.LeaseExpiresAt = ""
+			return nil
+		}
+		result, err := tx.Exec(`
+			UPDATE workflow_effects
+			SET status = 'leased',
+			    leased_by = ?,
+			    leased_until = ?,
+			    lease_token = ?,
+			    updated_at = ?
+			WHERE id = ?
+			  AND (
+				status IN ('pending', 'failed')
+				OR (status = 'leased' AND COALESCE(leased_until, '') <= ?)
+			  )
+		`, adapter, expiresAt, token, nowText, id, nowText)
+		if err != nil {
+			return err
+		}
+		if affected, err := result.RowsAffected(); err == nil && affected != 1 {
+			return effectNotDeliverableError(id, status)
+		}
+		effects, err := effectsByLeaseTokenTx(tx, token)
+		if err != nil {
+			return err
+		}
+		claim.Effects = effects
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
+func effectByIDTx(tx *sql.Tx, id string) ([]Effect, error) {
+	rows, err := tx.Query(`
+		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		       created_at, updated_at
+		FROM workflow_effects
+		WHERE id = ?
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanEffects(rows)
 }
 
 func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
@@ -1002,17 +1251,56 @@ func effectRole(eff *Effect) string {
 	return payload.Role
 }
 
-func (s *Service) FailEffect(id, reason string) (*Effect, error) {
+func (s *Service) FailEffect(id, leaseToken, reason string, retryable bool) (*Effect, error) {
 	now := s.now().Format(time.RFC3339)
-	if _, err := s.db.Exec(`UPDATE workflow_effects SET status = 'failed', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ?`, reason, now, id); err != nil {
+	result, err := s.db.Exec(`
+		UPDATE workflow_effects
+		SET status = 'failed',
+		    attempts = attempts + 1,
+		    last_error = ?,
+		    leased_by = NULL,
+		    leased_until = NULL,
+		    lease_token = NULL,
+		    updated_at = ?
+		WHERE id = ?
+		  AND status = 'leased'
+		  AND lease_token = ?
+		  AND leased_until > ?
+	`, reason, now, id, leaseToken, now)
+	if err != nil {
 		return nil, err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected != 1 {
+		return nil, leaseConflictError(id, leaseToken)
+	}
+	return s.ShowEffect(id)
+}
+
+func (s *Service) ForceFailEffect(id, reason string) (*Effect, error) {
+	now := s.now().Format(time.RFC3339)
+	result, err := s.db.Exec(`
+		UPDATE workflow_effects
+		SET status = 'failed',
+		    attempts = attempts + 1,
+		    last_error = ?,
+		    leased_by = NULL,
+		    leased_until = NULL,
+		    lease_token = NULL,
+		    updated_at = ?
+		WHERE id = ?
+	`, reason, now, id)
+	if err != nil {
+		return nil, err
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected != 1 {
+		return nil, fmt.Errorf("effect not found: %s", id)
 	}
 	return s.ShowEffect(id)
 }
 
 func (s *Service) RetryEffect(id string) (*Effect, error) {
 	now := s.now().Format(time.RFC3339)
-	if _, err := s.db.Exec(`UPDATE workflow_effects SET status = 'pending', leased_by = NULL, leased_until = NULL, last_error = NULL, updated_at = ? WHERE id = ?`, now, id); err != nil {
+	if _, err := s.db.Exec(`UPDATE workflow_effects SET status = 'pending', leased_by = NULL, leased_until = NULL, lease_token = NULL, last_error = NULL, updated_at = ? WHERE id = ?`, now, id); err != nil {
 		return nil, err
 	}
 	return s.ShowEffect(id)
