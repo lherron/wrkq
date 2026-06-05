@@ -97,6 +97,8 @@ let dbPath: string;
 let workflowPath: string;
 let hooksPath: string;
 let client: WrkfClient;
+/** Captured from the main lifecycle test; shared by T-01919 effect.retry assertions. */
+let capturedEffId = "";
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "wrkf-client-itest-"));
@@ -251,6 +253,7 @@ describe("WrkfClient over real `wrkf rpc --stdio`", () => {
     const effects = await client.effect.list({ task: "T-00001", all: true });
     expect(effects.length).toBeGreaterThanOrEqual(1);
     const effId = effects[0]!.id;
+    capturedEffId = effId; // share with T-01919 retry tests
 
     const claim = await client.effect.claim({
       adapter: "itest",
@@ -296,5 +299,61 @@ describe("WrkfClient over real `wrkf rpc --stdio`", () => {
 
     const runs = await client.run.list({ task: "T-00001" });
     expect(runs.length).toBe(1);
+  });
+
+  // ── T-01919: effect.retry param skew ──────────────────────────────────────
+  //
+  // The back-compat pin runs first to put the effect back in "pending" state
+  // (RetryEffect has no status guard — it resets any effect).  The canonical
+  // test then retries the same effect; currently Go decodes { effectId } via
+  // the generic idParams{ id } struct and gets an empty ID → "effect not found"
+  // RPC error → RED.  Once larry wires a dedicated struct that accepts effectId,
+  // both assertions turn GREEN.
+
+  test("effect.retry: back-compat {id} param still retries effect (T-01919 pin)", async () => {
+    // The lifecycle test left the effect in "delivered" state. RetryEffect has
+    // no status guard, so calling with the legacy { id } shape resets it to
+    // "pending" and pins the back-compat contract.
+    const retried = await (client.effect as any).retry({ id: capturedEffId });
+    expect(retried.id).toBe(capturedEffId);
+    expect(retried.status).toBe("pending");
+  });
+
+  test("effect.retry: canonical {effectId} param retries effect (T-01919 RED)", async () => {
+    // RED: Go currently registers wrkf.effect.retry with idParams{ id string }
+    // so { effectId } is decoded as id="" → ShowEffect("") → "effect not found"
+    // → WrkfRpcError.  Passes once larry replaces idParams with a struct that
+    // reads effectId (with { id } fallback).
+    const retried = await client.effect.retry({ effectId: capturedEffId });
+    expect(retried.id).toBe(capturedEffId);
+    expect(retried.status).toBe("pending");
+  });
+
+  // ── T-01920: run.fail summary round-trip ──────────────────────────────────
+  //
+  // TS RunFailParams currently advertises reason?/retryable? (not summary?).
+  // Passing summary via the { [k:string]:unknown } index signature is valid TS
+  // and the value does reach Go's RunFailParams.Summary field — but Go serialises
+  // the result as terminalResult (workflow.Run.TerminalResult json:"terminalResult"),
+  // so run.summary in the response is undefined → assertion is RED.
+  // Passes once the Go JSON tag (or a mapping layer) aligns the key to "summary".
+
+  test("run.fail: summary round-trips end-to-end (T-01920 RED)", async () => {
+    // Start a fresh run (the lifecycle run is already "completed").
+    const freshRun = await client.run.start({
+      task: "T-00001",
+      role: "coordinator",
+      actor: ACTOR,
+      idempotencyKey: "itest-run-fail-1", // gitleaks:allow
+    });
+    expect(freshRun.status).toBe("active");
+
+    // summary goes through the [k:string]:unknown index sig — no `as any` needed.
+    // Go receives { runId, summary } correctly and stores it as terminal_result.
+    const failed = await client.run.fail({ runId: freshRun.id, summary: "round-trip-fail" });
+    expect(failed.status).toBe("failed");
+    // RED: Go returns { terminalResult: "round-trip-fail" }, not { summary: "..." }
+    // → failed.summary is undefined until the JSON contract aligns.
+    expect(failed.summary).toBe("round-trip-fail");
   });
 });
