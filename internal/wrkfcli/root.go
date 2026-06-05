@@ -654,7 +654,7 @@ func transitionCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "run", Short: "Bind actors to workflow runs"}
-	var actor, role, delivery, lane, summary string
+	var actor, role, delivery, lane, externalRunRef, idempotencyKey, summary string
 	start := &cobra.Command{
 		Use:  "start TASK --role ROLE --actor ACTOR",
 		Args: cobra.ExactArgs(1),
@@ -668,7 +668,12 @@ func runCmd() *cobra.Command {
 			if role == "" {
 				return fmt.Errorf("--role is required")
 			}
-			run, err := a.service.StartRun(args[0], role, actor, delivery, lane)
+			run, err := a.service.StartRun(args[0], role, actor, workflow.StartRunOptions{
+				IdempotencyKey: idempotencyKey,
+				DeliveryRef:    delivery,
+				Lane:           lane,
+				ExternalRunRef: externalRunRef,
+			})
 			if err != nil {
 				return err
 			}
@@ -679,6 +684,8 @@ func runCmd() *cobra.Command {
 	start.Flags().StringVar(&actor, "actor", "", "Actor id")
 	start.Flags().StringVar(&delivery, "delivery-ref", "", "Delivery ref")
 	start.Flags().StringVar(&lane, "lane", "", "Lane")
+	start.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref")
+	start.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key")
 	bind := &cobra.Command{
 		Use:  "bind TASK ROLE HANDLE",
 		Args: cobra.ExactArgs(3),
@@ -692,7 +699,7 @@ func runCmd() *cobra.Command {
 				lane = handle[i+1:]
 			}
 			actor := strings.SplitN(handle, "@", 2)[0]
-			run, err := a.service.StartRun(task, role, actor, handle, lane)
+			run, err := a.service.StartRun(task, role, actor, workflow.StartRunOptions{DeliveryRef: handle, Lane: lane})
 			if err != nil {
 				return err
 			}
@@ -715,7 +722,7 @@ func runCmd() *cobra.Command {
 		Use:  "fail RUN",
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			run, err := a.service.FinishRun(args[0], "failed", summary)
+			run, err := a.service.FailRun(args[0], summary)
 			if err != nil {
 				return err
 			}
@@ -809,7 +816,7 @@ func supervisorCmd() *cobra.Command {
 			if actor == "" {
 				actor = a.actor
 			}
-			run, err := a.service.StartRun(args[0], "supervisor", actor, "", "")
+			run, err := a.service.StartRun(args[0], "supervisor", actor, workflow.StartRunOptions{})
 			if err != nil {
 				return err
 			}

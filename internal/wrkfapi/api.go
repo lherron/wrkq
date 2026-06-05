@@ -374,36 +374,6 @@ func (api *API) ListCheckRuns(ctx context.Context, taskSelector, transition stri
 	return api.CheckList(ctx, taskSelector, transition)
 }
 
-func (api *API) RunShow(ctx context.Context, id string) (*workflow.Run, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	run, err := api.service.ShowRun(id)
-	if err != nil {
-		return nil, normalizeError(err)
-	}
-	return run, nil
-}
-
-func (api *API) ShowRun(ctx context.Context, id string) (*workflow.Run, error) {
-	return api.RunShow(ctx, id)
-}
-
-func (api *API) RunList(ctx context.Context, taskSelector string) ([]workflow.Run, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	runs, err := api.service.ListRuns(taskSelector)
-	if err != nil {
-		return nil, normalizeError(err)
-	}
-	return runs, nil
-}
-
-func (api *API) ListRuns(ctx context.Context, taskSelector string) ([]workflow.Run, error) {
-	return api.RunList(ctx, taskSelector)
-}
-
 func (api *API) EffectList(ctx context.Context, taskSelector string, all bool) ([]workflow.Effect, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -671,6 +641,21 @@ func normalizeError(err error) error {
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return NewNotFoundError("", "")
+	}
+	var coded codedError
+	if errors.As(err, &coded) {
+		switch coded.Code() {
+		case CodeStaleRevision:
+			return NewStaleRevisionError("", 0, 0)
+		case CodeContextMismatch:
+			return NewContextMismatchError("", "", "")
+		case CodeTransitionBlocked:
+			return NewTransitionBlockedError("", "", nil)
+		case CodeRoleDenied:
+			return NewRoleDeniedError("", "", "")
+		case CodeIdempotencyMismatch:
+			return NewIdempotencyMismatchError("")
+		}
 	}
 
 	msg := err.Error()

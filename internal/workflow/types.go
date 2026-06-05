@@ -312,6 +312,19 @@ type Run struct {
 	TerminalResult string `json:"terminalResult,omitempty"`
 }
 
+type StartRunOptions struct {
+	IdempotencyKey string
+	DeliveryRef    string
+	Lane           string
+	ExternalRunRef string
+}
+
+type BindExternalOptions struct {
+	DeliveryRef    string
+	Lane           string
+	IdempotencyKey string
+}
+
 type HookCatalog struct {
 	SchemaVersion  string              `json:"schemaVersion"`
 	Hooks          map[string]HookSpec `json:"hooks"`

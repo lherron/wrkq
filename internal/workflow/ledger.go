@@ -1413,26 +1413,94 @@ func listEvidenceForInstance(database *db.DB, instanceID string) ([]Evidence, er
 	return scanEvidenceRows(rows)
 }
 
-func (s *Service) StartRun(taskSelector, role, actor, deliveryRef, lane string) (*Run, error) {
+func (s *Service) StartRun(taskSelector, role, actor string, opts StartRunOptions) (*Run, error) {
 	inst, err := s.LatestInstance(taskSelector)
 	if err != nil {
 		return nil, err
 	}
+	requestHash := runStartRequestHash(inst.ID, role, actor, opts)
 	var run *Run
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		if opts.IdempotencyKey != "" {
+			existing, existingHash, err := selectRunByInstanceIdempotencyKey(tx, inst.ID, opts.IdempotencyKey)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				if existingHash != requestHash {
+					return idempotencyMismatchError(opts.IdempotencyKey)
+				}
+				run = existing
+				return nil
+			}
+		}
+
 		id, err := nextSeqID(tx, "workflow_run_seq", "run")
 		if err != nil {
 			return err
 		}
 		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
-			INSERT INTO workflow_runs (id, instance_id, role, actor, delivery_ref, lane, status, started_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
-		`, id, inst.ID, role, actor, nullIfEmpty(deliveryRef), nullIfEmpty(lane), now)
+			INSERT INTO workflow_runs (
+				id, instance_id, role, actor, delivery_ref, lane, external_run_ref,
+				status, started_at, idempotency_key, request_hash
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+		`, id, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash))
+		if err != nil {
+			if isRunUniqueConflict(err) {
+				return idempotencyMismatchError(opts.IdempotencyKey)
+			}
+			return err
+		}
+		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Status: "active", StartedAt: now}
+		return nil
+	})
+	return run, err
+}
+
+func (s *Service) BindExternal(id, externalRunRef string, opts BindExternalOptions) (*Run, error) {
+	if strings.TrimSpace(externalRunRef) == "" {
+		return nil, fmt.Errorf("externalRunRef is required")
+	}
+	var run *Run
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		current, err := selectRunByID(tx, id)
 		if err != nil {
 			return err
 		}
-		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: deliveryRef, Lane: lane, Status: "active", StartedAt: now}
+		if current.ExternalRunRef != "" && current.ExternalRunRef != externalRunRef {
+			return idempotencyMismatchError(opts.IdempotencyKey)
+		}
+		if opts.DeliveryRef != "" && current.DeliveryRef != "" && current.DeliveryRef != opts.DeliveryRef {
+			return idempotencyMismatchError(opts.IdempotencyKey)
+		}
+		if opts.Lane != "" && current.Lane != "" && current.Lane != opts.Lane {
+			return idempotencyMismatchError(opts.IdempotencyKey)
+		}
+		deliveryRef := current.DeliveryRef
+		if opts.DeliveryRef != "" {
+			deliveryRef = opts.DeliveryRef
+		}
+		lane := current.Lane
+		if opts.Lane != "" {
+			lane = opts.Lane
+		}
+		_, err = tx.Exec(`
+			UPDATE workflow_runs
+			SET external_run_ref = ?, delivery_ref = ?, lane = ?
+			WHERE id = ?
+		`, externalRunRef, nullIfEmpty(deliveryRef), nullIfEmpty(lane), id)
+		if err != nil {
+			if isRunUniqueConflict(err) {
+				return idempotencyMismatchError(opts.IdempotencyKey)
+			}
+			return err
+		}
+		current.ExternalRunRef = externalRunRef
+		current.DeliveryRef = deliveryRef
+		current.Lane = lane
+		run = current
 		return nil
 	})
 	return run, err
@@ -1443,10 +1511,35 @@ func (s *Service) FinishRun(id, status, summary string) (*Run, error) {
 		status = "completed"
 	}
 	now := s.now().Format(time.RFC3339)
-	if _, err := s.db.Exec(`UPDATE workflow_runs SET status = ?, terminal_result = ?, completed_at = ? WHERE id = ?`, status, summary, now, id); err != nil {
+	var run *Run
+	if err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		current, err := selectRunByID(tx, id)
+		if err != nil {
+			return err
+		}
+		if isTerminalRunStatus(current.Status) {
+			if current.Status == status && current.TerminalResult == summary {
+				run = current
+				return nil
+			}
+			return idempotencyMismatchError(id)
+		}
+		if _, err := tx.Exec(`UPDATE workflow_runs SET status = ?, terminal_result = ?, completed_at = ? WHERE id = ?`, status, summary, now, id); err != nil {
+			return err
+		}
+		current.Status = status
+		current.TerminalResult = summary
+		current.CompletedAt = now
+		run = current
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	return s.ShowRun(id)
+	return run, nil
+}
+
+func (s *Service) FailRun(id, summary string) (*Run, error) {
+	return s.FinishRun(id, "failed", summary)
 }
 
 func (s *Service) ShowRun(id string) (*Run, error) {
@@ -1463,6 +1556,88 @@ func (s *Service) ShowRun(id string) (*Run, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+type runRowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanRun(scanner runRowScanner) (*Run, error) {
+	var r Run
+	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func selectRunByID(tx *sql.Tx, id string) (*Run, error) {
+	run, err := scanRun(tx.QueryRow(`
+		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		FROM workflow_runs WHERE id = ?
+	`, id))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("run not found: %s", id)
+		}
+		return nil, err
+	}
+	return run, nil
+}
+
+func selectRunByInstanceIdempotencyKey(tx *sql.Tx, instanceID, key string) (*Run, string, error) {
+	var r Run
+	var requestHash string
+	err := tx.QueryRow(`
+		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''), COALESCE(request_hash,'')
+		FROM workflow_runs WHERE instance_id = ? AND idempotency_key = ?
+	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &requestHash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, "", nil
+		}
+		return nil, "", err
+	}
+	return &r, requestHash, nil
+}
+
+func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) string {
+	payload := struct {
+		InstanceID      string `json:"instanceId"`
+		Role            string `json:"role"`
+		Actor           string `json:"actor"`
+		DeliveryRef     string `json:"deliveryRef,omitempty"`
+		Lane            string `json:"lane,omitempty"`
+		ExternalRunRef  string `json:"externalRunRef,omitempty"`
+		IdempotencySalt string `json:"idempotencySalt"`
+	}{
+		InstanceID:      instanceID,
+		Role:            role,
+		Actor:           actor,
+		DeliveryRef:     opts.DeliveryRef,
+		Lane:            opts.Lane,
+		ExternalRunRef:  opts.ExternalRunRef,
+		IdempotencySalt: "workflow.run.start.v1",
+	}
+	b, _ := json.Marshal(payload)
+	return Hash(b)
+}
+
+func isTerminalRunStatus(status string) bool {
+	return status != "" && status != "active"
+}
+
+func isRunUniqueConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") &&
+		(strings.Contains(msg, "workflow_runs.external_run_ref") ||
+			strings.Contains(msg, "workflow_runs.instance_id") ||
+			strings.Contains(msg, "workflow_runs.idempotency_key"))
 }
 
 func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
