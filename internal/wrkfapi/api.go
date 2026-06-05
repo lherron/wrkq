@@ -500,7 +500,13 @@ func templateSummaryFromAny(v any) TemplateSummary {
 func suggestFromAny(out map[string]any) SuggestResult {
 	result := SuggestResult{
 		Transition: stringFromAny(out["transition"]),
+		Required:   []workflow.EvidenceRequirementSpec{},
+		Missing:    []string{},
+		Checks:     []string{},
 		Warnings:   stringSliceFromAny(out["warnings"]),
+	}
+	if result.Warnings == nil {
+		result.Warnings = []string{}
 	}
 	for _, item := range anySlice(out["required"]) {
 		req := evidenceRequirementFromAny(item)

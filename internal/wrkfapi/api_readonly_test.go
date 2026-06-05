@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/lherron/wrkq/internal/workflow"
+	"github.com/lherron/wrkq/internal/wrkfapi"
 )
 
 // newTestAPI spins up a temp migrated DB and returns a wrkfapi.API ready for use.
@@ -92,7 +92,6 @@ func TestListTemplates_DTO(t *testing.T) {
 	}
 
 	// Frozen shape assertion: WorkflowListResult has Templates []TemplateSummary
-	var _ wrkfapi.WorkflowListResult = result
 	_ = result.Templates // []wrkfapi.TemplateSummary
 
 	// On a fresh DB there are no templates — verify the zero case is valid.
@@ -101,7 +100,6 @@ func TestListTemplates_DTO(t *testing.T) {
 	}
 
 	for _, tmpl := range result.Templates {
-		var _ wrkfapi.TemplateSummary = tmpl
 		// Frozen field names from §5:
 		// TemplateSummary { id, version, hash, kind, description, installedAt, installedBy }
 		_ = tmpl.ID
@@ -128,11 +126,10 @@ func TestSuggest_DTO(t *testing.T) {
 		return
 	}
 
-	var _ wrkfapi.SuggestResult = result
-	_ = result.Transition                      // string
-	_ = result.Required                        // []workflow.EvidenceRequirementSpec
-	_ = result.Missing                         // []string
-	_ = result.Checks                          // []string
-	_ = result.Warnings                        // []string
+	_ = result.Transition                                     // string
+	_ = result.Required                                       // []workflow.EvidenceRequirementSpec
+	_ = result.Missing                                        // []string
+	_ = result.Checks                                         // []string
+	_ = result.Warnings                                       // []string
 	_ = ([]workflow.EvidenceRequirementSpec)(result.Required) // frozen element type
 }

@@ -2,6 +2,7 @@ package wrkfcli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/workflow"
+	"github.com/lherron/wrkq/internal/wrkfapi"
+	"github.com/lherron/wrkq/internal/wrkfrpc"
 	"github.com/spf13/cobra"
 )
 
@@ -64,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(obligationCmd())
 	rootCmd.AddCommand(effectCmd())
 	rootCmd.AddCommand(hookCmd())
+	rootCmd.AddCommand(rpcCmd())
 	rootCmd.AddCommand(supervisorCmd())
 }
 
@@ -849,6 +853,36 @@ func hookCmd() *cobra.Command {
 	}
 	run.Flags().StringVar(&hookID, "hook", "", "Hook id")
 	cmd.AddCommand(list, show, run)
+	return cmd
+}
+
+func rpcCmd() *cobra.Command {
+	var stdio bool
+	cmd := &cobra.Command{
+		Use:   "rpc --stdio",
+		Short: "Serve wrkf JSON-RPC over stdio",
+		Args:  cobra.NoArgs,
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			if !stdio {
+				return fmt.Errorf("--stdio is required")
+			}
+			api := wrkfapi.New(
+				a.service,
+				wrkfapi.WithHookCatalog(a.hookCatalog),
+				wrkfapi.WithTemplateDir(workflow.HookCatalogDir(a.hookPath)),
+			)
+			srv := wrkfrpc.NewServer(os.Stdout)
+			wrkfrpc.RegisterAPI(srv, api, wrkfrpc.RegistryOptions{
+				DatabasePath:  a.db.Path(),
+				SchemaHash:    wrkfrpc.SchemaHash(a.db),
+				ServerVersion: "dev",
+				DefaultActor:  a.actor,
+				DefaultRole:   a.role,
+			})
+			return srv.Serve(context.Background(), os.Stdin)
+		}),
+	}
+	cmd.Flags().BoolVar(&stdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")
 	return cmd
 }
 

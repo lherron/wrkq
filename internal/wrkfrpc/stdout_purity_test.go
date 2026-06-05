@@ -78,7 +78,7 @@ func TestStdoutPurity_HandlerMustNotCorruptStream(t *testing.T) {
 	_ = serveErr
 
 	// Close the write end so io.Copy can finish.
-	pw.Close()
+	_ = pw.Close()
 
 	var captured bytes.Buffer
 	if _, err := io.Copy(&captured, pr); err != nil {
@@ -149,7 +149,7 @@ func TestStdoutPurity_OnlyRPCFrames_ShutdownNotification(t *testing.T) {
 
 	ctx := context.Background()
 	_ = srv.Serve(ctx, strings.NewReader(requests))
-	pw.Close()
+	_ = pw.Close()
 
 	var captured bytes.Buffer
 	_, _ = io.Copy(&captured, pr)

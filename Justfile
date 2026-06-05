@@ -293,4 +293,5 @@ smoke: build
   test/smoke-wrkqd.sh
   test/smoke-mergeadm.sh
   test/smoke-wrkf.sh
+  test/smoke-wrkf-rpc.sh
   @echo "✓ Smoke test passed"
