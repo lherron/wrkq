@@ -1,0 +1,1264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PBC Progressive Refinement Workflow Preset</title>
+    <style>
+      :root {
+        --paper: #f8f7f2;
+        --ink: #151615;
+        --muted: #606861;
+        --quiet: #8a928b;
+        --line: #d9ddd6;
+        --panel: #ffffff;
+        --panel-soft: #f0f2ed;
+        --signal: #1d6f68;
+        --signal-soft: #dff0ec;
+        --draft: #4d5f9f;
+        --draft-soft: #ecefff;
+        --decision: #8a6320;
+        --decision-soft: #fff0cf;
+        --risk: #a13a31;
+        --risk-soft: #ffe7e3;
+        --closed: #222523;
+        --shadow: 0 18px 38px rgba(21, 22, 21, 0.08);
+        --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --serif: Georgia, "Times New Roman", serif;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(90deg, rgba(21, 22, 21, 0.035) 1px, transparent 1px) 0 0 / 34px 34px,
+          linear-gradient(0deg, rgba(21, 22, 21, 0.025) 1px, transparent 1px) 0 0 / 34px 34px,
+          var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      a {
+        color: inherit;
+        text-decoration-color: rgba(29, 111, 104, 0.45);
+        text-underline-offset: 0.2em;
+      }
+
+      code,
+      pre {
+        font-family: var(--mono);
+      }
+
+      .page {
+        display: grid;
+        grid-template-columns: 292px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        align-self: start;
+        height: 100vh;
+        overflow: auto;
+        border-right: 1px solid var(--line);
+        background: rgba(248, 247, 242, 0.95);
+        backdrop-filter: blur(12px);
+        padding: 26px 20px;
+      }
+
+      .brand {
+        border-top: 6px solid var(--closed);
+        padding-top: 18px;
+        margin-bottom: 26px;
+      }
+
+      .brand-kicker,
+      .eyebrow,
+      .section-num,
+      .source-note,
+      .tiny-label,
+      .badge,
+      .tag,
+      .route-label {
+        font-family: var(--mono);
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+
+      .brand-kicker {
+        color: var(--signal);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      .brand-title {
+        font-family: var(--serif);
+        font-size: 30px;
+        font-weight: 850;
+        line-height: 0.98;
+      }
+
+      .brand-subtitle,
+      .sidebar-note,
+      .section-intro,
+      .minor,
+      .source-note {
+        color: var(--muted);
+      }
+
+      .brand-subtitle,
+      .sidebar-note {
+        font-size: 13px;
+      }
+
+      .nav {
+        display: grid;
+        gap: 7px;
+        margin: 0 0 24px;
+      }
+
+      .nav a {
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: var(--ink);
+        display: block;
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.18;
+        padding: 10px 11px;
+        text-decoration: none;
+      }
+
+      .nav a:hover,
+      .nav a:focus {
+        border-color: var(--line);
+        background: var(--panel);
+      }
+
+      .sidebar-note {
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+      }
+
+      main {
+        min-width: 0;
+      }
+
+      .content {
+        width: min(1240px, calc(100vw - 292px));
+        max-width: 100%;
+        padding: 44px 50px 80px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(290px, 0.48fr);
+        gap: 30px;
+        align-items: stretch;
+        margin-bottom: 34px;
+      }
+
+      .hero-copy {
+        border-top: 10px solid var(--signal);
+        padding-top: 28px;
+      }
+
+      .eyebrow {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 12px;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        letter-spacing: 0;
+      }
+
+      h1 {
+        font-family: var(--serif);
+        font-size: clamp(42px, 5.8vw, 76px);
+        line-height: 0.94;
+        margin: 0 0 18px;
+        max-width: 930px;
+      }
+
+      h2 {
+        align-items: end;
+        border-top: 2px solid var(--ink);
+        display: flex;
+        gap: 13px;
+        font-family: var(--serif);
+        font-size: clamp(30px, 4.2vw, 48px);
+        line-height: 1;
+        margin: 52px 0 20px;
+        padding-top: 18px;
+      }
+
+      h2 .section-num {
+        color: var(--quiet);
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      h3 {
+        font-family: var(--serif);
+        font-size: 23px;
+        line-height: 1.12;
+        margin: 0 0 10px;
+      }
+
+      h4 {
+        font-size: 13px;
+        margin: 0 0 8px;
+        text-transform: uppercase;
+      }
+
+      p {
+        margin: 0 0 14px;
+      }
+
+      .lead {
+        color: #303431;
+        font-family: var(--serif);
+        font-size: clamp(21px, 2.2vw, 29px);
+        line-height: 1.22;
+        max-width: 900px;
+      }
+
+      .hero-board {
+        display: grid;
+        grid-template-rows: repeat(4, 1fr);
+        gap: 12px;
+      }
+
+      .route-card,
+      .panel,
+      .phase-card,
+      .evidence-card,
+      .transition-row,
+      .template-card,
+      .contract-object {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        min-width: 0;
+      }
+
+      .route-card {
+        padding: 16px;
+      }
+
+      .route-label {
+        color: var(--signal);
+        font-size: 11px;
+        font-weight: 850;
+        margin-bottom: 10px;
+      }
+
+      .route-title {
+        font-weight: 850;
+        line-height: 1.18;
+        margin-bottom: 6px;
+      }
+
+      .route-copy {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .section-intro {
+        max-width: 78ch;
+        margin-bottom: 18px;
+      }
+
+      .minor {
+        font-size: 13px;
+      }
+
+      .inline-code {
+        border: 1px solid rgba(21, 22, 21, 0.12);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.82);
+        font-family: var(--mono);
+        padding: 0.08rem 0.28rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .badge,
+      .tag {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 850;
+        line-height: 1;
+        padding: 6px 8px;
+      }
+
+      .badge.signal,
+      .tag.signal {
+        background: var(--signal-soft);
+        color: var(--signal);
+        border-color: rgba(29, 111, 104, 0.24);
+      }
+
+      .badge.draft,
+      .tag.draft {
+        background: var(--draft-soft);
+        color: var(--draft);
+        border-color: rgba(77, 95, 159, 0.24);
+      }
+
+      .badge.decision,
+      .tag.decision {
+        background: var(--decision-soft);
+        color: var(--decision);
+        border-color: rgba(138, 99, 32, 0.24);
+      }
+
+      .badge.risk,
+      .tag.risk {
+        background: var(--risk-soft);
+        color: var(--risk);
+        border-color: rgba(161, 58, 49, 0.24);
+      }
+
+      .tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 10px;
+      }
+
+      .lifecycle {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+        margin: 18px 0 12px;
+      }
+
+      .phase-card {
+        box-shadow: none;
+        min-height: 190px;
+        padding: 14px;
+        position: relative;
+        border-top: 6px solid var(--signal);
+      }
+
+      .phase-card.draft {
+        border-top-color: var(--draft);
+      }
+
+      .phase-card.decision {
+        border-top-color: var(--decision);
+      }
+
+      .phase-card.risk {
+        border-top-color: var(--risk);
+      }
+
+      .phase-card.closed {
+        border-top-color: var(--closed);
+      }
+
+      .phase-card p {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .phase-index {
+        color: var(--quiet);
+        font-family: var(--mono);
+        font-size: 11px;
+        margin-bottom: 10px;
+      }
+
+      .transition-map {
+        display: grid;
+        gap: 10px;
+      }
+
+      .transition-row {
+        box-shadow: none;
+        display: grid;
+        grid-template-columns: minmax(180px, 0.68fr) minmax(180px, 0.7fr) minmax(0, 1.5fr);
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .transition-row strong {
+        overflow-wrap: anywhere;
+      }
+
+      .state-pill {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        display: inline-flex;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.25;
+        padding: 6px 8px;
+        width: fit-content;
+      }
+
+      .evidence-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .evidence-card {
+        box-shadow: none;
+        padding: 15px;
+      }
+
+      .evidence-card h3 {
+        font-family: var(--mono);
+        font-size: 14px;
+        margin-bottom: 8px;
+        overflow-wrap: anywhere;
+      }
+
+      .fact-box {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-soft);
+        font-family: var(--mono);
+        font-size: 12px;
+        margin-top: 10px;
+        padding: 8px;
+        overflow-wrap: anywhere;
+      }
+
+      .template-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .template-card {
+        overflow: hidden;
+      }
+
+      .template-card header {
+        border-bottom: 1px solid var(--line);
+        padding: 16px;
+      }
+
+      .template-card .body {
+        padding: 16px;
+      }
+
+      .template-list {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .template-list li {
+        border-left: 4px solid var(--signal);
+        color: var(--muted);
+        font-size: 13px;
+        padding-left: 10px;
+      }
+
+      .callout {
+        border-left: 5px solid var(--signal);
+        background: rgba(255, 255, 255, 0.76);
+        margin: 18px 0;
+        padding: 16px 18px;
+      }
+
+      .callout.risk {
+        border-left-color: var(--risk);
+      }
+
+      .contract-object {
+        margin: 18px 0;
+        overflow: hidden;
+      }
+
+      .contract-object-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px;
+      }
+
+      .contract-object-head p {
+        color: var(--muted);
+        margin-bottom: 0;
+      }
+
+      .object-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+        min-width: 210px;
+        align-items: start;
+      }
+
+      .code-panel {
+        background: #101514;
+        border-top: 1px solid var(--line);
+        color: #edf5f1;
+        overflow-x: auto;
+      }
+
+      .code-panel pre {
+        margin: 0;
+        min-width: 760px;
+        padding: 0;
+        white-space: pre;
+      }
+
+      .code-panel code {
+        display: block;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .schema-line {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr);
+        min-height: 24px;
+      }
+
+      .schema-line-no {
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        color: #72807a;
+        font-family: var(--mono);
+        padding: 3px 10px 3px 0;
+        text-align: right;
+        user-select: none;
+      }
+
+      .schema-code {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.9fr) minmax(280px, 0.85fr);
+        gap: 18px;
+        padding: 3px 16px;
+      }
+
+      .schema-code.no-comment {
+        display: block;
+      }
+
+      .schema-comment {
+        color: #a9d5c9;
+        min-width: 0;
+        white-space: normal;
+      }
+
+      .comment-marker {
+        color: #59776f;
+        margin-right: 8px;
+      }
+
+      .syntax-field {
+        color: #f7d58a;
+      }
+
+      .syntax-keyword {
+        color: #93b3ff;
+      }
+
+      .syntax-string {
+        color: #f3a99f;
+      }
+
+      .contract-legend,
+      .source-note {
+        border-top: 1px solid var(--line);
+        padding: 10px 18px;
+      }
+
+      .contract-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        background: #17201e;
+        color: #c7d2ce;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .legend-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .legend-swatch.field {
+        background: #f7d58a;
+      }
+
+      .legend-swatch.type {
+        background: #93b3ff;
+      }
+
+      .legend-swatch.literal {
+        background: #f3a99f;
+      }
+
+      .legend-swatch.comment {
+        background: #a9d5c9;
+      }
+
+      .source-note {
+        background: rgba(248, 247, 242, 0.72);
+        font-size: 11px;
+      }
+
+      .footer {
+        border-top: 2px solid var(--ink);
+        color: var(--muted);
+        margin-top: 44px;
+        padding-top: 18px;
+        font-size: 13px;
+      }
+
+      @media (max-width: 1120px) {
+        .page {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .content {
+          width: 100%;
+          padding: 34px 22px 64px;
+        }
+
+        .hero,
+        .grid.two,
+        .grid.three,
+        .template-grid,
+        .evidence-grid,
+        .lifecycle {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-board {
+          grid-template-rows: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        body {
+          font-size: 15px;
+        }
+
+        .sidebar {
+          padding: 16px 18px 12px;
+        }
+
+        .brand {
+          margin-bottom: 12px;
+          padding-top: 12px;
+        }
+
+        .brand-title {
+          font-size: 26px;
+        }
+
+        .brand-subtitle {
+          margin-bottom: 0;
+        }
+
+        .nav {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 0;
+          overflow-x: auto;
+          padding-bottom: 6px;
+          scrollbar-width: none;
+        }
+
+        .nav::-webkit-scrollbar {
+          display: none;
+        }
+
+        .nav a {
+          background: var(--panel);
+          border-color: var(--line);
+          flex: 0 0 auto;
+          padding: 8px 10px;
+          white-space: nowrap;
+        }
+
+        .sidebar-note {
+          display: none;
+        }
+
+        .transition-row {
+          grid-template-columns: 1fr;
+        }
+
+        .contract-object-head {
+          display: block;
+        }
+
+        .object-chip-row {
+          justify-content: flex-start;
+          min-width: 0;
+          margin-top: 12px;
+        }
+
+        .code-panel pre {
+          min-width: 0;
+          white-space: pre-wrap;
+        }
+
+        .schema-line {
+          grid-template-columns: 40px minmax(0, 1fr);
+        }
+
+        .schema-code {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 4px;
+          padding-right: 10px;
+          white-space: pre-wrap;
+        }
+
+        h1 {
+          font-size: clamp(38px, 14vw, 58px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <aside class="sidebar" aria-label="Document navigation">
+        <div class="brand">
+          <div class="brand-kicker">./pbc preset</div>
+          <div class="brand-title">PBC Workflow</div>
+          <p class="brand-subtitle">Progressive refinement from rough feedback to finalized product behavior contract.</p>
+        </div>
+        <nav class="nav" aria-label="Sections">
+          <a href="#overview">Overview</a>
+          <a href="#lifecycle">Lifecycle</a>
+          <a href="#decisions">Decision Points</a>
+          <a href="#evidence">Evidence</a>
+          <a href="#templates">Artifact Templates</a>
+          <a href="#contracts">Contracts</a>
+          <a href="#sources">Sources</a>
+        </nav>
+        <p class="sidebar-note">Grounded in <span class="inline-code">pbc/workflow-template.json</span> and the three markdown templates under <span class="inline-code">pbc/templates</span>.</p>
+      </aside>
+
+      <main>
+        <div class="content">
+          <section class="hero" id="overview" aria-labelledby="title">
+            <div class="hero-copy">
+              <div class="eyebrow">wrkf.workflow-template.v0 / pbc-progressive-refinement@4</div>
+              <h1 id="title">The PBC preset turns one-line feedback into a compact behavior contract.</h1>
+              <p class="lead">It deliberately avoids multiplying product artifacts: the agent creates a Behavior Note, decides whether one product-owner answer is needed, drafts a PBC, pressure-tests it, and either finalizes, revises, or disposes the work.</p>
+            </div>
+            <div class="hero-board" aria-label="At-a-glance preset facts">
+              <div class="route-card">
+                <div class="route-label">Template</div>
+                <div class="route-title"><span class="inline-code">pbc-progressive-refinement@4</span></div>
+                <div class="route-copy">An agent-first wrkf workflow preset for product behavior clarification.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">Actors</div>
+                <div class="route-title">agent + product_owner</div>
+                <div class="route-copy">The agent does most work; product owner answers only the highest-leverage clarification or patch decision.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">State shape</div>
+                <div class="route-title">8 states, 13 transitions</div>
+                <div class="route-copy">The graph has two waiting states and two terminal states: finalized and disposed.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">Routing facts</div>
+                <div class="route-title">clarification, verdict, route, resolution</div>
+                <div class="route-copy">Small evidence facts choose branches; long artifact text stays in task description or specification.</div>
+              </div>
+            </div>
+          </section>
+
+          <section id="lifecycle" aria-labelledby="lifecycle-title">
+            <h2 id="lifecycle-title"><span class="section-num">01</span> Lifecycle</h2>
+            <p class="section-intro">The preset is a progressive refinement loop. It starts with raw feedback, writes a tentative Behavior Note, drafts a PBC only after enough confidence exists, pressure-tests it, and then either finalizes or loops.</p>
+
+            <div class="lifecycle" aria-label="PBC workflow lifecycle">
+              <article class="phase-card">
+                <div class="phase-index">01 / intake</div>
+                <h3>Normalize feedback</h3>
+                <p>Record <span class="inline-code">intake_metadata</span>, then move from <span class="inline-code">{open, intake}</span> to <span class="inline-code">{active, behavior_note}</span>.</p>
+                <span class="tag signal">normalize_feedback</span>
+              </article>
+              <article class="phase-card draft">
+                <div class="phase-index">02 / behavior_note</div>
+                <h3>Write the Behavior Note</h3>
+                <p>The task description holds signal, problem, impact, tentative direction, disposition, and one open question.</p>
+                <span class="tag draft">behavior_note</span>
+              </article>
+              <article class="phase-card decision">
+                <div class="phase-index">03 / optional wait</div>
+                <h3>Ask one question</h3>
+                <p>If <span class="inline-code">pre_interview_analysis.clarification_needed</span> is true, create a blocking product-owner clarification obligation.</p>
+                <span class="tag decision">clarification_response</span>
+              </article>
+              <article class="phase-card draft">
+                <div class="phase-index">04 / pbc_draft</div>
+                <h3>Draft the PBC</h3>
+                <p>The task specification becomes promise, observable behavior, rules, states, non-scope, and derivation seeds.</p>
+                <span class="tag draft">pbc_draft</span>
+              </article>
+              <article class="phase-card risk">
+                <div class="phase-index">05 / pressure</div>
+                <h3>Pressure pass</h3>
+                <p>A compact review emits verdict <span class="inline-code">ready</span>, <span class="inline-code">needs_patch</span>, or <span class="inline-code">too_vague</span>.</p>
+                <span class="tag risk">pressure_pass</span>
+              </article>
+              <article class="phase-card closed">
+                <div class="phase-index">06 / terminal</div>
+                <h3>Finalize or dispose</h3>
+                <p>Ready PBCs close as finalized. Out-of-scope, duplicates, unclear, or wont-fix items close as disposed.</p>
+                <span class="tag signal">pbc_final</span>
+              </article>
+            </div>
+
+            <div class="callout">
+              <strong>Core design rule:</strong> the workflow asks for product-owner input only when a single question or patch decision materially changes confidence. Otherwise the agent keeps refining locally.
+            </div>
+          </section>
+
+          <section id="decisions" aria-labelledby="decisions-title">
+            <h2 id="decisions-title"><span class="section-num">02</span> Decision Points</h2>
+            <p class="section-intro">The transition graph is mostly linear until evidence facts force a branch. These are the branches that determine whether the preset waits, loops, finalizes, or disposes.</p>
+
+            <div class="transition-map" aria-label="Transition map">
+              <div class="transition-row">
+                <strong>normalize_feedback</strong>
+                <span class="state-pill">{open, intake} -> {active, behavior_note}</span>
+                <span class="minor">Requires <span class="inline-code">intake_metadata</span>. Either role may normalize raw feedback into a structured starting point.</span>
+              </div>
+              <div class="transition-row">
+                <strong>ask_clarification</strong>
+                <span class="state-pill">{active, behavior_note} -> {waiting, clarification}</span>
+                <span class="minor">Requires <span class="inline-code">behavior_note</span> plus <span class="inline-code">pre_interview_analysis</span> where <span class="inline-code">clarification_needed=true</span>. Creates a blocking <span class="inline-code">clarification_response</span> obligation for product owner.</span>
+              </div>
+              <div class="transition-row">
+                <strong>draft_pbc</strong>
+                <span class="state-pill">{active, behavior_note} -> {active, pbc_draft}</span>
+                <span class="minor">Requires <span class="inline-code">clarification_needed=false</span>. The agent can proceed without waiting when the default direction is good enough.</span>
+              </div>
+              <div class="transition-row">
+                <strong>answer_clarification</strong>
+                <span class="state-pill">{waiting, clarification} -> {active, pbc_draft}</span>
+                <span class="minor">Requires <span class="inline-code">clarification_response</span> evidence and a satisfied clarification obligation.</span>
+              </div>
+              <div class="transition-row">
+                <strong>run_pressure_pass</strong>
+                <span class="state-pill">{active, pbc_draft} -> {active, pressure}</span>
+                <span class="minor">Requires <span class="inline-code">pbc_draft</span>. The review is intentionally compact: verdict, tighten list, and patch.</span>
+              </div>
+              <div class="transition-row">
+                <strong>finalize_ready_pbc</strong>
+                <span class="state-pill">{active, pressure} -> {closed, finalized}</span>
+                <span class="minor">Requires <span class="inline-code">pressure_pass.verdict=ready</span> and <span class="inline-code">pbc_final</span>.</span>
+              </div>
+              <div class="transition-row">
+                <strong>request_patch_decision</strong>
+                <span class="state-pill">{active, pressure} -> {waiting, patch_decision}</span>
+                <span class="minor">Requires <span class="inline-code">pressure_pass.verdict=needs_patch</span>. Creates a blocking product-owner patch decision obligation.</span>
+              </div>
+              <div class="transition-row">
+                <strong>revise_too_vague_pbc</strong>
+                <span class="state-pill">{active, pressure} -> {active, pbc_draft}</span>
+                <span class="minor">Requires <span class="inline-code">pressure_pass.verdict=too_vague</span>. The agent loops back to drafting instead of asking for a patch decision.</span>
+              </div>
+              <div class="transition-row">
+                <strong>finalize_after_patch_decision</strong>
+                <span class="state-pill">{waiting, patch_decision} -> {closed, finalized}</span>
+                <span class="minor">Requires <span class="inline-code">patch_decision.route=finalize</span>, satisfied obligation, and <span class="inline-code">pbc_final</span>.</span>
+              </div>
+              <div class="transition-row">
+                <strong>revise_after_patch_decision</strong>
+                <span class="state-pill">{waiting, patch_decision} -> {active, pbc_draft}</span>
+                <span class="minor">Requires <span class="inline-code">patch_decision.route=revise</span> and a satisfied patch decision obligation.</span>
+              </div>
+              <div class="transition-row">
+                <strong>dispose_from_*</strong>
+                <span class="state-pill">behavior_note | pbc_draft | pressure -> {closed, disposed}</span>
+                <span class="minor">Requires <span class="inline-code">disposition_decision</span>. Disposition facts distinguish wont_fix, duplicate, unclear, and out_of_scope.</span>
+              </div>
+            </div>
+          </section>
+
+          <section id="evidence" aria-labelledby="evidence-title">
+            <h2 id="evidence-title"><span class="section-num">03</span> Evidence</h2>
+            <p class="section-intro">The preset keeps evidence small and typed. Rich artifact text belongs in task description/specification; facts are only the branch selectors that wrkf must reason over.</p>
+
+            <div class="evidence-grid" aria-label="Evidence kind matrix">
+              <article class="evidence-card">
+                <h3>intake_metadata</h3>
+                <p class="minor">Raw one-line feedback plus normalized signal, likely type, and candidate highest-leverage question.</p>
+              </article>
+              <article class="evidence-card">
+                <h3>behavior_note</h3>
+                <p class="minor">The Behavior Note stored in the wrkq task description.</p>
+              </article>
+              <article class="evidence-card">
+                <h3>pre_interview_analysis</h3>
+                <p class="minor">Agent analysis of what is known, what remains uncertain, and whether clarification is needed.</p>
+                <div class="fact-box">required: clarification_needed:boolean</div>
+              </article>
+              <article class="evidence-card">
+                <h3>clarification_response</h3>
+                <p class="minor">The product-owner answer to the one clarification question.</p>
+              </article>
+              <article class="evidence-card">
+                <h3>pbc_draft</h3>
+                <p class="minor">The draft PBC stored in the wrkq task specification.</p>
+              </article>
+              <article class="evidence-card">
+                <h3>pressure_pass</h3>
+                <p class="minor">Compact pressure pass verdict, tighten list, and patch.</p>
+                <div class="fact-box">verdict: ready | needs_patch | too_vague</div>
+              </article>
+              <article class="evidence-card">
+                <h3>patch_decision</h3>
+                <p class="minor">Product-owner decision after a pressure pass requests a patch.</p>
+                <div class="fact-box">route: finalize | revise</div>
+              </article>
+              <article class="evidence-card">
+                <h3>pbc_final</h3>
+                <p class="minor">The finalized PBC stored in the wrkq task specification.</p>
+              </article>
+              <article class="evidence-card">
+                <h3>disposition_decision</h3>
+                <p class="minor">Reason this feedback is closed without a finalized PBC.</p>
+                <div class="fact-box">resolution: wont_fix | duplicate | unclear | out_of_scope</div>
+              </article>
+            </div>
+
+            <div class="grid two">
+              <article class="panel">
+                <span class="badge decision">clarification_response</span>
+                <h3>Blocking wait</h3>
+                <p class="minor">When clarification is needed, the workflow creates a blocking product-owner duty. The answer transition requires both the evidence and the satisfied obligation.</p>
+              </article>
+              <article class="panel">
+                <span class="badge decision">patch_decision</span>
+                <h3>Patch gate</h3>
+                <p class="minor">When pressure says the PBC needs a patch, the workflow waits for product owner to accept, adjust, reject, or waive the patch before finalizing or revising.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="templates" aria-labelledby="templates-title">
+            <h2 id="templates-title"><span class="section-num">04</span> Artifact Templates</h2>
+            <p class="section-intro">The markdown templates constrain the amount of product writing. They keep each artifact focused on behavior and branch-driving facts.</p>
+
+            <div class="template-grid">
+              <article class="template-card">
+                <header>
+                  <span class="badge signal">task description</span>
+                  <h3>Behavior Note</h3>
+                </header>
+                <div class="body">
+                  <ul class="template-list">
+                    <li>Signal: the one-line feedback or observed issue.</li>
+                    <li>Problem: what the user tried and what broke.</li>
+                    <li>Impact: why it matters.</li>
+                    <li>Expected direction: tentative product expectation.</li>
+                    <li>Disposition and one open question.</li>
+                  </ul>
+                </div>
+              </article>
+              <article class="template-card">
+                <header>
+                  <span class="badge draft">task specification</span>
+                  <h3>PBC</h3>
+                </header>
+                <div class="body">
+                  <ul class="template-list">
+                    <li>Promise: plain-language product commitment.</li>
+                    <li>Behavior: observable when/then results.</li>
+                    <li>Rules: always, never, visibility, recovery, and safety constraints.</li>
+                    <li>States: empty, ready, working, failed.</li>
+                    <li>Not included plus seeds for downstream derivation.</li>
+                  </ul>
+                </div>
+              </article>
+              <article class="template-card">
+                <header>
+                  <span class="badge risk">review artifact</span>
+                  <h3>Pressure Pass</h3>
+                </header>
+                <div class="body">
+                  <ul class="template-list">
+                    <li>Verdict: ready, needs patch, or too vague.</li>
+                    <li>Tighten: ambiguity, missing state/rule, or scope leak.</li>
+                    <li>Patch: concrete replacements or additions.</li>
+                  </ul>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section id="contracts" aria-labelledby="contracts-title">
+            <h2 id="contracts-title"><span class="section-num">05</span> Contracts</h2>
+            <p class="section-intro">These compact DTO views translate the preset JSON into the runtime objects a wrkf reader needs to scan.</p>
+
+            <article class="contract-object" id="preset-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge signal">Preset</span>
+                  <h3><span class="inline-code">PBCWorkflowPreset</span></h3>
+                  <p>The top-level identity and graph shape of <span class="inline-code">pbc/workflow-template.json</span>.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge signal">identity</span>
+                  <span class="badge draft">states</span>
+                  <span class="badge decision">roles</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type PBCWorkflowPreset = { // Installed wrkf template for progressive PBC refinement.
+  schemaVersion: 'wrkf.workflow-template.v0' // Template schema admitted by wrkf validation.
+  id: 'pbc-progressive-refinement' // Stable preset id.
+  version: '4' // Preset version in ./pbc.
+  kind: 'agent_first_workflow' // Workflow kind accepted by wrkf template validation.
+  description: string // Purpose: refine one-line feedback into Behavior Note, PBC, and derivation seeds.
+  initial: { status: 'open'; phase: 'intake' } // Starting state before feedback is normalized.
+  roles: { agent: RoleSpec; product_owner: RoleSpec } // Two-role collaboration model.
+  states: State[] // Eight declared states, including finalized and disposed terminal phases.
+  evidenceKinds: Record&lt;EvidenceKind, EvidenceKindSpec&gt; // Nine evidence kinds used by transitions.
+  obligationKinds: Record&lt;'clarification_response' | 'patch_decision', ObligationKindSpec&gt; // Two blocking product-owner duties.
+  transitions: TransitionSpec[] // Thirteen role-gated transitions through refinement, waits, loops, and closure.
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">pbc/workflow-template.json</span></div>
+            </article>
+
+            <article class="contract-object" id="facts-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge decision">Routing facts</span>
+                  <h3><span class="inline-code">PBCDecisionFacts</span></h3>
+                  <p>The branch-driving facts declared under evidence kind contracts and transition requirements.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge decision">clarify</span>
+                  <span class="badge risk">pressure</span>
+                  <span class="badge signal">close</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type PBCDecisionFacts = { // Minimal facts wrkf uses to route the PBC workflow.
+  pre_interview_analysis: { // Analysis evidence recorded before asking product owner.
+    clarification_needed: boolean // True sends the workflow to waiting/clarification; false allows draft_pbc.
+  }
+  pressure_pass: { // Review evidence emitted after pbc_draft.
+    verdict: 'ready' | 'needs_patch' | 'too_vague' // Ready finalizes, needs_patch waits for owner, too_vague loops to draft.
+  }
+  patch_decision: { // Product-owner decision after a needs_patch pressure pass.
+    route: 'finalize' | 'revise' // Finalize requires pbc_final; revise returns to pbc_draft.
+  }
+  disposition_decision: { // Closure evidence for items that should not become finalized PBCs.
+    resolution: 'wont_fix' | 'duplicate' | 'unclear' | 'out_of_scope' // Reason the workflow closes as disposed.
+  }
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">pbc/workflow-template.json</span></div>
+            </article>
+
+            <article class="contract-object" id="artifact-contract">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge draft">Artifacts</span>
+                  <h3><span class="inline-code">PBCArtifacts</span></h3>
+                  <p>The preset's three markdown-backed product artifacts and where they are stored.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge signal">description</span>
+                  <span class="badge draft">specification</span>
+                  <span class="badge risk">review</span>
+                </div>
+              </div>
+              <div class="code-panel">
+                <pre><code>type PBCArtifacts = { // Human-readable artifacts produced while the workflow advances.
+  behavior_note: { // First normalized product artifact.
+    storage: 'wrkq task description' // Stored as task description according to behavior_note evidence description.
+    sections: ['Signal', 'Problem', 'Impact', 'Expected direction', 'Disposition', 'Open question'] // Sections from pbc/templates/behavior-note.md.
+  }
+  pbc_draft: { // Draft product behavior contract.
+    storage: 'wrkq task specification' // Stored as task specification according to pbc_draft evidence description.
+    sections: ['Promise', 'Behavior', 'Rules', 'States', 'Not included', 'Seeds'] // Sections from pbc/templates/pbc.md.
+  }
+  pressure_pass: { // Compact review artifact.
+    storage: 'workflow evidence data' // Stored as pressure_pass evidence with verdict facts.
+    sections: ['Verdict', 'Tighten', 'Patch'] // Sections from pbc/templates/pressure-pass.md.
+  }
+}</code></pre>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">pbc/templates/behavior-note.md</span>, <span class="inline-code">pbc/templates/pbc.md</span>, <span class="inline-code">pbc/templates/pressure-pass.md</span></div>
+            </article>
+          </section>
+
+          <section id="sources" aria-labelledby="sources-title">
+            <h2 id="sources-title"><span class="section-num">06</span> Sources</h2>
+            <div class="grid two">
+              <article class="panel">
+                <h3>Preset source</h3>
+                <p class="minor"><span class="inline-code">pbc/workflow-template.json</span> defines schema version, template id/version, roles, states, evidence kinds, obligation kinds, and all transitions.</p>
+              </article>
+              <article class="panel">
+                <h3>Markdown templates</h3>
+                <p class="minor"><span class="inline-code">pbc/templates/behavior-note.md</span>, <span class="inline-code">pbc/templates/pbc.md</span>, and <span class="inline-code">pbc/templates/pressure-pass.md</span> define the artifact sections rendered above.</p>
+              </article>
+            </div>
+          </section>
+
+          <footer class="footer">Generated for wrkq task T-01949, "Create PBC workflow preset HTML explainer." Standalone artifact with embedded CSS and JavaScript.</footer>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      ;(() => {
+        const escapeHtml = (value) =>
+          String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+        const keywords = [
+          'type',
+          'Record',
+          'string',
+          'boolean',
+          'true',
+          'false',
+        ]
+        const keywordPattern = new RegExp(`\\b(${keywords.join('|')})\\b`, 'g')
+
+        const findCommentIndex = (line) => {
+          let quote = null
+          let escaped = false
+          for (let index = 0; index < line.length - 1; index += 1) {
+            const char = line[index]
+            const next = line[index + 1]
+            if (escaped) {
+              escaped = false
+              continue
+            }
+            if (char === '\\') {
+              escaped = true
+              continue
+            }
+            if (quote) {
+              if (char === quote) quote = null
+              continue
+            }
+            if (char === '"' || char === "'" || char === '`') {
+              quote = char
+              continue
+            }
+            if (char === '/' && next === '/') return index
+          }
+          return -1
+        }
+
+        const highlight = (value) => {
+          let html = escapeHtml(value)
+          html = html.replace(/\b([A-Za-z_][A-Za-z0-9_]*\??)(?=\s*:)/g, '<span class="syntax-field">$1</span>')
+          html = html.replace(keywordPattern, '<span class="syntax-keyword">$1</span>')
+          html = html.replace(/'([^']*)'/g, '<span class="syntax-string">\'$1\'</span>')
+          return html || '&nbsp;'
+        }
+
+        const renderLine = (line, index) => {
+          const commentIndex = findCommentIndex(line)
+          const hasComment = commentIndex >= 0
+          const codePart = hasComment ? line.slice(0, commentIndex).replace(/\s+$/, '') : line
+          const commentPart = hasComment ? line.slice(commentIndex + 2).trim() : ''
+          const comment = hasComment
+            ? `<span class="schema-comment"><span class="comment-marker">//</span>${escapeHtml(commentPart)}</span>`
+            : ''
+          const codeClass = hasComment ? 'schema-code has-comment' : 'schema-code no-comment'
+          return `<span class="schema-line"><span class="schema-line-no">${index + 1}</span><span class="${codeClass}"><span class="schema-code-text">${highlight(codePart)}</span>${comment}</span></span>`
+        }
+
+        const legend = `<div class="contract-legend" aria-label="Contract notation legend">
+          <span class="legend-item"><span class="legend-swatch field"></span>fields</span>
+          <span class="legend-item"><span class="legend-swatch type"></span>types</span>
+          <span class="legend-item"><span class="legend-swatch literal"></span>literals</span>
+          <span class="legend-item"><span class="legend-swatch comment"></span>definitions</span>
+        </div>`
+
+        document.querySelectorAll('.contract-object code').forEach((code) => {
+          if (code.dataset.highlighted === 'true') return
+          const raw = code.textContent || ''
+          code.innerHTML = raw.split('\n').map(renderLine).join('')
+          code.dataset.highlighted = 'true'
+        })
+
+        document.querySelectorAll('.contract-object').forEach((object) => {
+          if (!object.querySelector('code')) return
+          if (object.querySelector('.contract-legend')) return
+          const sourceNote = object.querySelector('.source-note')
+          if (sourceNote) sourceNote.insertAdjacentHTML('beforebegin', legend)
+        })
+      })()
+    </script>
+  </body>
+</html>

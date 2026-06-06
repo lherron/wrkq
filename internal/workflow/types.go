@@ -6,9 +6,10 @@ import (
 )
 
 type State struct {
-	Status  string `json:"status"`
-	Phase   string `json:"phase,omitempty"`
-	Outcome string `json:"outcome,omitempty"`
+	Status      string `json:"status"`
+	Phase       string `json:"phase,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type Template struct {
@@ -55,6 +56,7 @@ type FactProperty struct {
 
 type TransitionSpec struct {
 	ID             string               `json:"id"`
+	Description    string               `json:"description,omitempty"`
 	From           State                `json:"from"`
 	By             []string             `json:"by"`
 	Responsibility *ResponsibilitySpec  `json:"responsibility,omitempty"`
@@ -110,6 +112,7 @@ type ExitMap struct {
 
 type OutcomeCase struct {
 	ID          string                 `json:"id"`
+	Description string                 `json:"description,omitempty"`
 	When        Predicate              `json:"when"`
 	To          State                  `json:"to"`
 	Effects     []EffectSpec           `json:"effects,omitempty"`

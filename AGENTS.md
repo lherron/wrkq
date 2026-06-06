@@ -21,6 +21,10 @@ Four binaries (built by `just build`):
 
 The wrkq/wrkqadm split exists so agents get a focused, safe API while admins retain DB lifecycle control.
 
+## Sample workflows
+
+`pbc/` is a sample wrkf workflow, not part of the core wrkq/wrkf runtime. Use it as a concrete example of a workflow template, evidence contracts, descriptions, and generated explanatory artifacts.
+
 ## Justfile is the lifecycle
 
 `just --list` for the full menu. Common: `just build`, `just test`, `just verify` (lint+test), `just install` (canonical install to `~/.local/bin` — Lance's validation flow), `just smoke` (build + wrkqd + wrkf smokes), `just db-migrate-local`, `just db-reset` (destructive, prompts).

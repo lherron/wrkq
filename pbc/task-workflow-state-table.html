@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PBC Task and Workflow State Transitions</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      line-height: 1.4;
+      margin: 24px;
+      color: #222;
+      background: #fff;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0 28px;
+    }
+
+    th,
+    td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f3f3f3;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.95em;
+    }
+
+    .note {
+      border-left: 4px solid #999;
+      padding-left: 12px;
+      margin: 16px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>PBC Combined Task and Workflow State Transition Table</h1>
+
+  <p>
+    Source: <code>pbc/workflow-template.json</code>, workflow
+    <code>pbc-progressive-refinement@5</code>.
+  </p>
+
+  <p>
+    The PBC template now carries plain-English descriptions on workflow states,
+    transitions, and outcomes. The workflow state and transition descriptions below
+    come directly from the template.
+  </p>
+
+  <div class="note">
+    <p>
+      Current implementation note: this PBC workflow template declares workflow transitions,
+      evidence requirements, descriptions, and blocking obligations, but it still does not
+      declare task-state effects. The <code>wrkq task state</code> column below remains the
+      intended coarse task lifecycle policy that would need a native <code>set_task_state</code>
+      effect or an effect handler that calls <code>wrkq set TASK --state STATE</code>.
+    </p>
+  </div>
+
+  <h2>Workflow State Descriptions</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Workflow state</th>
+        <th>wrkq task state</th>
+        <th>Description from template</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>open/intake</code></td>
+        <td><code>open</code></td>
+        <td>Raw one-line feedback has landed but has not yet been normalized into a Behavior Note.</td>
+      </tr>
+      <tr>
+        <td><code>active/behavior_note</code></td>
+        <td><code>in_progress</code></td>
+        <td>Feedback is normalized into a Behavior Note; the agent decides whether one clarification is needed before drafting.</td>
+      </tr>
+      <tr>
+        <td><code>waiting/clarification</code></td>
+        <td><code>blocked</code></td>
+        <td>Blocked on the product owner answering the single highest-leverage clarification question.</td>
+      </tr>
+      <tr>
+        <td><code>active/pbc_draft</code></td>
+        <td><code>in_progress</code></td>
+        <td>A compact PBC has been drafted and is ready for a pressure pass.</td>
+      </tr>
+      <tr>
+        <td><code>active/pressure</code></td>
+        <td><code>in_progress</code></td>
+        <td>A pressure pass is being run against the draft PBC to test it for readiness, needed patches, or vagueness.</td>
+      </tr>
+      <tr>
+        <td><code>waiting/patch_decision</code></td>
+        <td><code>blocked</code></td>
+        <td>Blocked on the product owner deciding whether to finalize with the pressure patch or send the PBC back for revision.</td>
+      </tr>
+      <tr>
+        <td><code>closed/finalized</code></td>
+        <td><code>completed</code></td>
+        <td>Terminal success: the final PBC is accepted and downstream work/test/design seeds can be derived.</td>
+      </tr>
+      <tr>
+        <td><code>closed/disposed</code></td>
+        <td><code>cancelled</code></td>
+        <td>Terminal disposal: the feedback was closed without a finalized PBC (won't fix, duplicate, unclear, or out of scope).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>State Mapping Policy</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Workflow state pattern</th>
+        <th>wrkq task state</th>
+        <th>Lifecycle meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>open/intake</code></td>
+        <td><code>open</code></td>
+        <td>Feedback is captured but work has not begun.</td>
+      </tr>
+      <tr>
+        <td><code>active/*</code></td>
+        <td><code>in_progress</code></td>
+        <td>The workflow is actively producing or revising the Behavior Note, PBC draft, or pressure pass.</td>
+      </tr>
+      <tr>
+        <td><code>waiting/*</code></td>
+        <td><code>blocked</code></td>
+        <td>The workflow is blocked on a product-owner clarification or patch decision.</td>
+      </tr>
+      <tr>
+        <td><code>closed/finalized</code></td>
+        <td><code>completed</code></td>
+        <td>A final PBC has been accepted and stored.</td>
+      </tr>
+      <tr>
+        <td><code>closed/disposed</code></td>
+        <td><code>cancelled</code></td>
+        <td>The feedback is intentionally closed without a final PBC.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Transition Table</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Transition</th>
+        <th>Description from template</th>
+        <th>Required gate</th>
+        <th>Outcome</th>
+        <th>Workflow state change</th>
+        <th>wrkq task state change</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>0</td>
+        <td>Attach workflow</td>
+        <td>Create a workflow instance from <code>pbc-progressive-refinement@5</code>.</td>
+        <td>Attach the template to a wrkq task.</td>
+        <td>Initial workflow instance state.</td>
+        <td><code>-</code> -> <code>open/intake</code></td>
+        <td><code>open</code></td>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td><code>normalize_feedback</code></td>
+        <td>Normalize the raw one-line feedback into a Behavior Note, capturing the normalized signal, likely type, and candidate clarification question.</td>
+        <td><code>intake_metadata</code></td>
+        <td><code>normalized</code>: Feedback was normalized; advance to the Behavior Note state.</td>
+        <td><code>open/intake</code> -> <code>active/behavior_note</code></td>
+        <td><code>open</code> -> <code>in_progress</code></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>ask_clarification</code></td>
+        <td>Pre-interview analysis flagged that clarification is needed; raise the single highest-leverage question and wait for the product owner.</td>
+        <td><code>behavior_note</code> and <code>pre_interview_analysis.clarification_needed=true</code></td>
+        <td><code>needs_answer</code>: Clarification is required; move to the waiting state and open a blocking obligation on the product owner.</td>
+        <td><code>active/behavior_note</code> -> <code>waiting/clarification</code></td>
+        <td><code>in_progress</code> -> <code>blocked</code></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>draft_pbc</code></td>
+        <td>Enough is known without clarification; draft the compact PBC directly from the Behavior Note.</td>
+        <td><code>behavior_note</code> and <code>pre_interview_analysis.clarification_needed=false</code></td>
+        <td><code>drafted</code>: PBC was drafted; advance to the draft state ready for a pressure pass.</td>
+        <td><code>active/behavior_note</code> -> <code>active/pbc_draft</code></td>
+        <td>Stay <code>in_progress</code></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>answer_clarification</code></td>
+        <td>The product owner answered the clarification (or accepted the default); record it and proceed to drafting the PBC.</td>
+        <td><code>clarification_response</code> evidence and satisfied <code>clarification_response</code> obligation.</td>
+        <td><code>answered</code>: Clarification satisfied; advance to the draft state.</td>
+        <td><code>waiting/clarification</code> -> <code>active/pbc_draft</code></td>
+        <td><code>blocked</code> -> <code>in_progress</code></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><code>run_pressure_pass</code></td>
+        <td>Run the compact pressure pass against the draft PBC to produce a verdict, tighten list, and patch.</td>
+        <td><code>pbc_draft</code></td>
+        <td><code>pressure_ready</code>: Pressure pass started; advance to the pressure state where its verdict routes the next step.</td>
+        <td><code>active/pbc_draft</code> -> <code>active/pressure</code></td>
+        <td>Stay <code>in_progress</code></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><code>finalize_ready_pbc</code></td>
+        <td>Pressure pass returned a ready verdict; finalize the PBC and close the task as finalized.</td>
+        <td><code>pressure_pass.verdict=ready</code> and <code>pbc_final</code></td>
+        <td><code>finalized</code>: PBC accepted; transition to the terminal finalized state.</td>
+        <td><code>active/pressure</code> -> <code>closed/finalized</code></td>
+        <td><code>in_progress</code> -> <code>completed</code></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><code>request_patch_decision</code></td>
+        <td>Pressure pass requested a patch; route to the product owner to accept, adjust, reject, or waive it.</td>
+        <td><code>pressure_pass.verdict=needs_patch</code></td>
+        <td><code>needs_decision</code>: A patch decision is required; move to the waiting state and open a blocking obligation on the product owner.</td>
+        <td><code>active/pressure</code> -> <code>waiting/patch_decision</code></td>
+        <td><code>in_progress</code> -> <code>blocked</code></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td><code>revise_too_vague_pbc</code></td>
+        <td>Pressure pass judged the PBC too vague; send it back to drafting without a product-owner decision.</td>
+        <td><code>pressure_pass.verdict=too_vague</code></td>
+        <td><code>revise</code>: PBC needs more work; send it back to the draft state for another iteration.</td>
+        <td><code>active/pressure</code> -> <code>active/pbc_draft</code></td>
+        <td>Stay <code>in_progress</code></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><code>finalize_after_patch_decision</code></td>
+        <td>Product owner chose to finalize after reviewing the pressure patch; finalize the PBC and close the task.</td>
+        <td><code>patch_decision.route=finalize</code>, satisfied <code>patch_decision</code> obligation, and <code>pbc_final</code>.</td>
+        <td><code>finalized</code>: PBC accepted; transition to the terminal finalized state.</td>
+        <td><code>waiting/patch_decision</code> -> <code>closed/finalized</code></td>
+        <td><code>blocked</code> -> <code>completed</code></td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td><code>revise_after_patch_decision</code></td>
+        <td>Product owner chose revision after reviewing the pressure patch; send the PBC back to drafting.</td>
+        <td><code>patch_decision.route=revise</code> and satisfied <code>patch_decision</code> obligation.</td>
+        <td><code>revise</code>: PBC needs more work; send it back to the draft state for another iteration.</td>
+        <td><code>waiting/patch_decision</code> -> <code>active/pbc_draft</code></td>
+        <td><code>blocked</code> -> <code>in_progress</code></td>
+      </tr>
+      <tr>
+        <td>11</td>
+        <td><code>dispose_from_behavior_note</code></td>
+        <td>Dispose the feedback directly from the Behavior Note state when a disposition decision closes it without a PBC.</td>
+        <td><code>disposition_decision</code></td>
+        <td><code>disposed</code>: Feedback closed without a finalized PBC; transition to the terminal disposed state.</td>
+        <td><code>active/behavior_note</code> -> <code>closed/disposed</code></td>
+        <td><code>in_progress</code> -> <code>cancelled</code></td>
+      </tr>
+      <tr>
+        <td>12</td>
+        <td><code>dispose_from_pbc_draft</code></td>
+        <td>Dispose the feedback from the draft state when a disposition decision closes it without finalizing the PBC.</td>
+        <td><code>disposition_decision</code></td>
+        <td><code>disposed</code>: Feedback closed without a finalized PBC; transition to the terminal disposed state.</td>
+        <td><code>active/pbc_draft</code> -> <code>closed/disposed</code></td>
+        <td><code>in_progress</code> -> <code>cancelled</code></td>
+      </tr>
+      <tr>
+        <td>13</td>
+        <td><code>dispose_from_pressure</code></td>
+        <td>Dispose the feedback from the pressure state when a disposition decision closes it instead of patching or finalizing.</td>
+        <td><code>disposition_decision</code></td>
+        <td><code>disposed</code>: Feedback closed without a finalized PBC; transition to the terminal disposed state.</td>
+        <td><code>active/pressure</code> -> <code>closed/disposed</code></td>
+        <td><code>in_progress</code> -> <code>cancelled</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Effect Needed To Make Task State Real</h2>
+  <p>
+    To make the task state changes above happen automatically, each transition outcome that changes
+    coarse task state needs a side effect. A native effect would be preferable to a shell hook.
+  </p>
+
+  <pre><code>{
+  "kind": "set_task_state",
+  "role": "system",
+  "data": {
+    "state": "in_progress"
+  }
+}</code></pre>
+
+  <p>
+    Until that exists, an effect handler could receive the task id and run
+    <code>wrkq set "$task_id" --state "$state"</code>, then acknowledge the effect.
+  </p>
+</body>
+</html>

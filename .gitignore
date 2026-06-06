@@ -283,3 +283,5 @@ asp_modules/
 /tmp/wrkf-scaffold-smoke.db
 /tmp/triage.db
 /tmp/wrkf-recipe-check.db
+/tmp/wrkf-rt-XXXX.db
+/tmp/wrkf-final-XXXX.db

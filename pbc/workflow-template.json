@@ -1,7 +1,7 @@
 {
   "schemaVersion": "wrkf.workflow-template.v0",
   "id": "pbc-progressive-refinement",
-  "version": "4",
+  "version": "5",
   "kind": "agent_first_workflow",
   "description": "Progressively refine one-line feedback into a Behavior Note, finalized PBC, and downstream derivation seeds without multiplying product artifacts.",
   "initial": {
@@ -19,35 +19,43 @@
   "states": [
     {
       "status": "open",
-      "phase": "intake"
+      "phase": "intake",
+      "description": "Raw one-line feedback has landed but has not yet been normalized into a Behavior Note."
     },
     {
       "status": "active",
-      "phase": "behavior_note"
+      "phase": "behavior_note",
+      "description": "Feedback is normalized into a Behavior Note; the agent decides whether one clarification is needed before drafting."
     },
     {
       "status": "waiting",
-      "phase": "clarification"
+      "phase": "clarification",
+      "description": "Blocked on the product owner answering the single highest-leverage clarification question."
     },
     {
       "status": "active",
-      "phase": "pbc_draft"
+      "phase": "pbc_draft",
+      "description": "A compact PBC has been drafted and is ready for a pressure pass."
     },
     {
       "status": "active",
-      "phase": "pressure"
+      "phase": "pressure",
+      "description": "A pressure pass is being run against the draft PBC to test it for readiness, needed patches, or vagueness."
     },
     {
       "status": "waiting",
-      "phase": "patch_decision"
+      "phase": "patch_decision",
+      "description": "Blocked on the product owner deciding whether to finalize with the pressure patch or send the PBC back for revision."
     },
     {
       "status": "closed",
-      "phase": "finalized"
+      "phase": "finalized",
+      "description": "Terminal success: the final PBC is accepted and downstream work/test/design seeds can be derived."
     },
     {
       "status": "closed",
-      "phase": "disposed"
+      "phase": "disposed",
+      "description": "Terminal disposal: the feedback was closed without a finalized PBC (won't fix, duplicate, unclear, or out of scope)."
     }
   ],
   "evidenceKinds": {
@@ -149,6 +157,7 @@
   "transitions": [
     {
       "id": "normalize_feedback",
+      "description": "Normalize the raw one-line feedback into a Behavior Note, capturing the normalized signal, likely type, and candidate clarification question.",
       "from": {
         "status": "open",
         "phase": "intake"
@@ -167,6 +176,7 @@
       "outcomes": [
         {
           "id": "normalized",
+          "description": "Feedback was normalized; advance to the Behavior Note state.",
           "when": {
             "always": true
           },
@@ -179,6 +189,7 @@
     },
     {
       "id": "ask_clarification",
+      "description": "Pre-interview analysis flagged that clarification is needed; raise the single highest-leverage question and wait for the product owner.",
       "from": {
         "status": "active",
         "phase": "behavior_note"
@@ -204,6 +215,7 @@
       "outcomes": [
         {
           "id": "needs_answer",
+          "description": "Clarification is required; move to the waiting state and open a blocking obligation on the product owner.",
           "when": {
             "always": true
           },
@@ -224,6 +236,7 @@
     },
     {
       "id": "draft_pbc",
+      "description": "Enough is known without clarification; draft the compact PBC directly from the Behavior Note.",
       "from": {
         "status": "active",
         "phase": "behavior_note"
@@ -250,6 +263,7 @@
       "outcomes": [
         {
           "id": "drafted",
+          "description": "PBC was drafted; advance to the draft state ready for a pressure pass.",
           "when": {
             "always": true
           },
@@ -262,6 +276,7 @@
     },
     {
       "id": "answer_clarification",
+      "description": "The product owner answered the clarification (or accepted the default); record it and proceed to drafting the PBC.",
       "from": {
         "status": "waiting",
         "phase": "clarification"
@@ -286,6 +301,7 @@
       "outcomes": [
         {
           "id": "answered",
+          "description": "Clarification satisfied; advance to the draft state.",
           "when": {
             "always": true
           },
@@ -298,6 +314,7 @@
     },
     {
       "id": "run_pressure_pass",
+      "description": "Run the compact pressure pass against the draft PBC to produce a verdict, tighten list, and patch.",
       "from": {
         "status": "active",
         "phase": "pbc_draft"
@@ -316,6 +333,7 @@
       "outcomes": [
         {
           "id": "pressure_ready",
+          "description": "Pressure pass started; advance to the pressure state where its verdict routes the next step.",
           "when": {
             "always": true
           },
@@ -328,6 +346,7 @@
     },
     {
       "id": "finalize_ready_pbc",
+      "description": "Pressure pass returned a ready verdict; finalize the PBC and close the task as finalized.",
       "from": {
         "status": "active",
         "phase": "pressure"
@@ -354,6 +373,7 @@
       "outcomes": [
         {
           "id": "finalized",
+          "description": "PBC accepted; transition to the terminal finalized state.",
           "when": {
             "always": true
           },
@@ -366,6 +386,7 @@
     },
     {
       "id": "request_patch_decision",
+      "description": "Pressure pass requested a patch; route to the product owner to accept, adjust, reject, or waive it.",
       "from": {
         "status": "active",
         "phase": "pressure"
@@ -386,6 +407,7 @@
       "outcomes": [
         {
           "id": "needs_decision",
+          "description": "A patch decision is required; move to the waiting state and open a blocking obligation on the product owner.",
           "when": {
             "always": true
           },
@@ -406,6 +428,7 @@
     },
     {
       "id": "revise_too_vague_pbc",
+      "description": "Pressure pass judged the PBC too vague; send it back to drafting without a product-owner decision.",
       "from": {
         "status": "active",
         "phase": "pressure"
@@ -427,6 +450,7 @@
       "outcomes": [
         {
           "id": "revise",
+          "description": "PBC needs more work; send it back to the draft state for another iteration.",
           "when": {
             "always": true
           },
@@ -439,6 +463,7 @@
     },
     {
       "id": "finalize_after_patch_decision",
+      "description": "Product owner chose to finalize after reviewing the pressure patch; finalize the PBC and close the task.",
       "from": {
         "status": "waiting",
         "phase": "patch_decision"
@@ -471,6 +496,7 @@
       "outcomes": [
         {
           "id": "finalized",
+          "description": "PBC accepted; transition to the terminal finalized state.",
           "when": {
             "always": true
           },
@@ -483,6 +509,7 @@
     },
     {
       "id": "revise_after_patch_decision",
+      "description": "Product owner chose revision after reviewing the pressure patch; send the PBC back to drafting.",
       "from": {
         "status": "waiting",
         "phase": "patch_decision"
@@ -510,6 +537,7 @@
       "outcomes": [
         {
           "id": "revise",
+          "description": "PBC needs more work; send it back to the draft state for another iteration.",
           "when": {
             "always": true
           },
@@ -522,6 +550,7 @@
     },
     {
       "id": "dispose_from_behavior_note",
+      "description": "Dispose the feedback directly from the Behavior Note state when a disposition decision closes it without a PBC.",
       "from": {
         "status": "active",
         "phase": "behavior_note"
@@ -540,6 +569,7 @@
       "outcomes": [
         {
           "id": "disposed",
+          "description": "Feedback closed without a finalized PBC; transition to the terminal disposed state.",
           "when": {
             "always": true
           },
@@ -552,6 +582,7 @@
     },
     {
       "id": "dispose_from_pbc_draft",
+      "description": "Dispose the feedback from the draft state when a disposition decision closes it without finalizing the PBC.",
       "from": {
         "status": "active",
         "phase": "pbc_draft"
@@ -570,6 +601,7 @@
       "outcomes": [
         {
           "id": "disposed",
+          "description": "Feedback closed without a finalized PBC; transition to the terminal disposed state.",
           "when": {
             "always": true
           },
@@ -582,6 +614,7 @@
     },
     {
       "id": "dispose_from_pressure",
+      "description": "Dispose the feedback from the pressure state when a disposition decision closes it instead of patching or finalizing.",
       "from": {
         "status": "active",
         "phase": "pressure"
@@ -600,6 +633,7 @@
       "outcomes": [
         {
           "id": "disposed",
+          "description": "Feedback closed without a finalized PBC; transition to the terminal disposed state.",
           "when": {
             "always": true
           },
