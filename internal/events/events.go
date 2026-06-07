@@ -13,6 +13,12 @@ type Writer struct {
 	db *sql.DB
 }
 
+// EventMetadata is the durable identity assigned by event_log.
+type EventMetadata struct {
+	ID        int64
+	Timestamp string
+}
+
 // NewWriter creates a new event writer
 func NewWriter(db *sql.DB) *Writer {
 	return &Writer{db: db}
@@ -20,18 +26,46 @@ func NewWriter(db *sql.DB) *Writer {
 
 // LogEvent writes an event to the event log
 func (w *Writer) LogEvent(tx *sql.Tx, event *domain.Event) error {
+	_, err := w.LogEventReturning(tx, event)
+	return err
+}
+
+// LogEventReturning writes an event and returns its event_log identity.
+func (w *Writer) LogEventReturning(tx *sql.Tx, event *domain.Event) (EventMetadata, error) {
 	query := `
 		INSERT INTO event_log (actor_uuid, resource_type, resource_uuid, event_type, etag, payload)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`
 
-	executor := w.getExecutor(tx)
-	_, err := executor.Exec(query, event.ActorUUID, event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
+	var (
+		res sql.Result
+		err error
+	)
+	if tx != nil {
+		res, err = tx.Exec(query, event.ActorUUID, event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
+	} else {
+		res, err = w.db.Exec(query, event.ActorUUID, event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to write event: %w", err)
+		return EventMetadata{}, fmt.Errorf("failed to write event: %w", err)
 	}
 
-	return nil
+	id, err := res.LastInsertId()
+	if err != nil {
+		return EventMetadata{}, fmt.Errorf("failed to read event id: %w", err)
+	}
+
+	var timestamp string
+	if tx != nil {
+		err = tx.QueryRow("SELECT timestamp FROM event_log WHERE id = ?", id).Scan(&timestamp)
+	} else {
+		err = w.db.QueryRow("SELECT timestamp FROM event_log WHERE id = ?", id).Scan(&timestamp)
+	}
+	if err != nil {
+		return EventMetadata{}, fmt.Errorf("failed to read event timestamp: %w", err)
+	}
+
+	return EventMetadata{ID: id, Timestamp: timestamp}, nil
 }
 
 // LogTaskCreated logs a task creation event
@@ -147,13 +181,19 @@ func (w *Writer) LogContainerDeleted(tx *sql.Tx, actorUUID string, containerUUID
 
 // LogCommentCreated logs a comment creation event
 func (w *Writer) LogCommentCreated(tx *sql.Tx, actorUUID string, comment *domain.Comment) error {
+	_, err := w.LogCommentCreatedReturning(tx, actorUUID, comment)
+	return err
+}
+
+// LogCommentCreatedReturning logs a comment creation event and returns event metadata.
+func (w *Writer) LogCommentCreatedReturning(tx *sql.Tx, actorUUID string, comment *domain.Comment) (EventMetadata, error) {
 	payload, err := json.Marshal(map[string]interface{}{
 		"task_id":    comment.TaskUUID,
 		"comment_id": comment.ID,
 		"actor_id":   comment.ActorUUID,
 	})
 	if err != nil {
-		return err
+		return EventMetadata{}, err
 	}
 
 	payloadStr := string(payload)
@@ -166,7 +206,7 @@ func (w *Writer) LogCommentCreated(tx *sql.Tx, actorUUID string, comment *domain
 		Payload:      &payloadStr,
 	}
 
-	return w.LogEvent(tx, event)
+	return w.LogEventReturning(tx, event)
 }
 
 // LogCommentDeleted logs a comment soft-delete event
@@ -215,14 +255,4 @@ func (w *Writer) LogCommentPurged(tx *sql.Tx, actorUUID string, commentUUID stri
 	}
 
 	return w.LogEvent(tx, event)
-}
-
-// getExecutor returns the appropriate executor (tx or db)
-func (w *Writer) getExecutor(tx *sql.Tx) interface {
-	Exec(query string, args ...interface{}) (sql.Result, error)
-} {
-	if tx != nil {
-		return tx
-	}
-	return w.db
 }

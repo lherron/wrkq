@@ -137,8 +137,156 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		if got.payload.CPRunID != nil || got.payload.SessionID != nil || got.payload.CPProjectID != nil {
 			t.Fatalf("unexpected run linkage payload: %+v", got.payload)
 		}
+		if got.payload.SchemaVersion != 2 {
+			t.Fatalf("unexpected schema_version: %d", got.payload.SchemaVersion)
+		}
+		if got.payload.Event != "updated" {
+			t.Fatalf("unexpected event: %s", got.payload.Event)
+		}
+		if got.payload.EventID == "" || got.payload.EventSeq == 0 || got.payload.OccurredAt == "" {
+			t.Fatalf("missing event identity fields: %+v", got.payload)
+		}
+		if got.payload.Origin.Actor != "human:test-actor" || got.payload.Origin.Via != "cli" {
+			t.Fatalf("unexpected origin: %+v", got.payload.Origin)
+		}
+		if got.payload.ProjectScopeID != "project" || got.payload.ContainerPath != "project" {
+			t.Fatalf("unexpected scope/container: %s / %s", got.payload.ProjectScopeID, got.payload.ContainerPath)
+		}
+		if got.payload.Transition == nil || got.payload.Transition.From == nil || *got.payload.Transition.From != "open" ||
+			got.payload.Transition.To == nil || *got.payload.Transition.To != "in_progress" {
+			t.Fatalf("unexpected transition: %+v", got.payload.Transition)
+		}
+		if len(got.payload.Changed) != 1 || got.payload.Changed[0] != "state" {
+			t.Fatalf("unexpected changed: %+v", got.payload.Changed)
+		}
+		if change, ok := got.payload.Changes["state"]; !ok || change.From != "open" || change.To != "in_progress" {
+			t.Fatalf("unexpected state change: %+v", got.payload.Changes["state"])
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for webhook")
+	}
+}
+
+func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
+	database := setupWebhookTestDB(t)
+	actorUUID := setupWebhookTestActor(t, database)
+	s := New(database)
+
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	if err != nil {
+		t.Fatalf("failed to create container: %v", err)
+	}
+
+	calls := make(chan webhooks.Payload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		body, _ := io.ReadAll(r.Body)
+		var payload webhooks.Payload
+		_ = json.Unmarshal(body, &payload)
+		calls <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
+	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
+		t.Fatalf("failed to set webhook urls: %v", err)
+	}
+
+	result, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "task",
+		Title:       "Task",
+		Description: "Test",
+		ProjectUUID: container.UUID,
+		State:       "open",
+		Priority:    2,
+		Labels:      `["alpha","beta"]`,
+	})
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	select {
+	case payload := <-calls:
+		if payload.TicketUUID != result.UUID || payload.Event != "created" || payload.SchemaVersion != 2 {
+			t.Fatalf("unexpected create payload: %+v", payload)
+		}
+		if payload.EventID == "" || payload.EventSeq == 0 || payload.OccurredAt == "" {
+			t.Fatalf("missing event identity: %+v", payload)
+		}
+		if payload.Transition == nil || payload.Transition.From != nil || payload.Transition.To == nil || *payload.Transition.To != "open" {
+			t.Fatalf("unexpected create transition: %+v", payload.Transition)
+		}
+		if len(payload.Labels) != 2 || payload.Labels[0] != "alpha" || payload.Labels[1] != "beta" {
+			t.Fatalf("unexpected labels: %+v", payload.Labels)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for webhook")
+	}
+}
+
+func TestTaskStoreMoveDispatchesWebhookV2(t *testing.T) {
+	database := setupWebhookTestDB(t)
+	actorUUID := setupWebhookTestActor(t, database)
+	s := New(database)
+
+	source, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "source"})
+	if err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+	dest, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "dest"})
+	if err != nil {
+		t.Fatalf("failed to create dest: %v", err)
+	}
+
+	task, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "task",
+		Title:       "Task",
+		Description: "Test",
+		ProjectUUID: source.UUID,
+		State:       "open",
+		Priority:    2,
+	})
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	calls := make(chan webhooks.Payload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		body, _ := io.ReadAll(r.Body)
+		var payload webhooks.Payload
+		_ = json.Unmarshal(body, &payload)
+		calls <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
+	if _, err := s.Containers.UpdateFields(actorUUID, dest.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
+		t.Fatalf("failed to set webhook urls: %v", err)
+	}
+
+	if _, err := s.Tasks.Move(actorUUID, task.UUID, dest.UUID, 0); err != nil {
+		t.Fatalf("failed to move task: %v", err)
+	}
+
+	select {
+	case payload := <-calls:
+		if payload.Event != "moved" {
+			t.Fatalf("unexpected move event: %s", payload.Event)
+		}
+		if payload.ProjectScopeID != "dest" || payload.ContainerPath != "dest" {
+			t.Fatalf("unexpected moved scope/container: %s / %s", payload.ProjectScopeID, payload.ContainerPath)
+		}
+		if payload.Transition != nil {
+			t.Fatalf("move should not report a state transition: %+v", payload.Transition)
+		}
+		if len(payload.Changed) != 2 || payload.Changed[0] != "container_path" || payload.Changed[1] != "project_uuid" {
+			t.Fatalf("unexpected changed fields: %+v", payload.Changed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for move webhook")
 	}
 }
 
@@ -241,6 +389,14 @@ func TestUnblockWebhookSingleBlocker(t *testing.T) {
 	// Verify we got webhook for task B (the unblocked task)
 	if _, ok := receivedWebhooks[taskB.UUID]; !ok {
 		t.Fatalf("did not receive webhook for unblocked task B")
+	} else if payload := receivedWebhooks[taskB.UUID]; payload.Event != "unblocked" {
+		t.Fatalf("unblocked task webhook has wrong event: %s", payload.Event)
+	} else if payload.Transition != nil {
+		t.Fatalf("unblocked task should not report a state transition: %+v", payload.Transition)
+	} else if payload.EventID == "" || payload.EventSeq == 0 {
+		t.Fatalf("unblocked task missing event identity: %+v", payload)
+	} else if len(payload.Changed) != 1 || payload.Changed[0] != "blocked_by" {
+		t.Fatalf("unblocked task changed fields = %+v", payload.Changed)
 	}
 }
 

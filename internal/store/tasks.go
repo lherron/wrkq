@@ -1,9 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +18,11 @@ import (
 // TaskStore handles task persistence operations.
 type TaskStore struct {
 	store *Store
+}
+
+type pendingWebhook struct {
+	taskUUID string
+	ctx      webhooks.EventContext
 }
 
 // CreateParams contains parameters for creating a new task.
@@ -41,6 +49,8 @@ type CreateParams struct {
 	Meta                 *string // JSON object
 	DueAt                string
 	StartAt              string
+	Via                  string // origin.via for webhooks; defaults to "cli"
+	CreatorScopeRef      string // full praesidium scopeRef of the creating agent; stored as created_by_scope_ref
 }
 
 // CreateResult contains the result of task creation.
@@ -50,9 +60,135 @@ type CreateResult struct {
 	ETag int64
 }
 
+func stringPtr(value string) *string {
+	return &value
+}
+
+func actorPtr(actorUUID string) *string {
+	return &actorUUID
+}
+
+// nullableScopeRef returns the scopeRef as a value suitable for a SQL bind,
+// mapping the empty string to NULL so unattributed creations don't store "".
+func nullableScopeRef(scopeRef string) interface{} {
+	if scopeRef == "" {
+		return nil
+	}
+	return scopeRef
+}
+
+func sortedFieldNames(fields map[string]interface{}) []string {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func summarizeWebhookValue(field string, value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	switch field {
+	case "description", "specification":
+		text, _ := value.(string)
+		sum := sha256.Sum256([]byte(text))
+		return map[string]interface{}{
+			"length": len(text),
+			"sha256": hex.EncodeToString(sum[:]),
+		}
+	case "labels":
+		if text, ok := value.(string); ok {
+			var labels []string
+			if err := json.Unmarshal([]byte(text), &labels); err == nil {
+				return labels
+			}
+		}
+	}
+	return value
+}
+
+func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[string]interface{}, error) {
+	values := make(map[string]interface{}, len(fields))
+	for _, field := range fields {
+		switch field {
+		case "priority", "etag":
+			var value int64
+			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
+				return nil, err
+			}
+			if field == "priority" {
+				values[field] = int(value)
+			} else {
+				values[field] = value
+			}
+		case "state", "slug", "title", "project_uuid", "kind", "run_status", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "requested_by_project_id", "assigned_project_id", "cp_project_id", "cp_work_item_id", "cp_run_id", "cp_session_id":
+			var value sql.NullString
+			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
+				return nil, err
+			}
+			if value.Valid {
+				values[field] = value.String
+			} else {
+				values[field] = nil
+			}
+		case "description", "specification":
+			var value string
+			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
+				return nil, err
+			}
+			values[field] = summarizeWebhookValue(field, value)
+		}
+	}
+	return values, nil
+}
+
+func buildWebhookChanges(oldValues map[string]interface{}, fields map[string]interface{}) map[string]webhooks.Change {
+	changes := make(map[string]webhooks.Change, len(fields))
+	for _, field := range sortedFieldNames(fields) {
+		changes[field] = webhooks.Change{
+			From: oldValues[field],
+			To:   summarizeWebhookValue(field, fields[field]),
+		}
+	}
+	return changes
+}
+
+func blockerInfosForTask(tx *sql.Tx, taskUUID string) ([]webhooks.BlockerInfo, error) {
+	rows, err := tx.Query(`
+		SELECT t.id, t.state
+		FROM task_relations r
+		JOIN tasks t ON r.from_task_uuid = t.uuid
+		WHERE r.to_task_uuid = ?
+		  AND r.kind = 'blocks'
+		  AND t.state NOT IN ('completed', 'archived', 'deleted', 'cancelled', 'idea')
+		ORDER BY t.id
+	`, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var blockers []webhooks.BlockerInfo
+	for rows.Next() {
+		var blocker webhooks.BlockerInfo
+		if err := rows.Scan(&blocker.ID, &blocker.State); err != nil {
+			return nil, err
+		}
+		blockers = append(blockers, blocker)
+	}
+	return blockers, rows.Err()
+}
+
 // Create creates a new task and logs a task.created event.
 func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResult, error) {
 	var result *CreateResult
+	var webhookCtx webhooks.EventContext
+	via := params.Via
+	if via == "" {
+		via = "cli"
+	}
 
 	// Default kind to "task" if not provided
 	kind := params.Kind
@@ -69,15 +205,15 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid, created_by_scope_ref)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			args = append(args, params.UUID)
 		} else {
 			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid, created_by_scope_ref)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -106,6 +242,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			params.StartAt,
 			actorUUID,
 			actorUUID,
+			nullableScopeRef(params.CreatorScopeRef),
 		)
 
 		res, err := tx.Exec(query, args...)
@@ -180,15 +317,30 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		}
 		payloadStr := string(payloadJSON)
 
-		if err := ew.LogEvent(tx, &domain.Event{
+		meta, err := ew.LogEventReturning(tx, &domain.Event{
 			ActorUUID:    &actorUUID,
 			ResourceType: "task",
 			ResourceUUID: &uuid,
 			EventType:    "task.created",
 			ETag:         &etag,
 			Payload:      &payloadStr,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		changed := sortedFieldNames(payload)
+		changes := make(map[string]webhooks.Change, len(payload))
+		for _, field := range changed {
+			changes[field] = webhooks.Change{From: nil, To: summarizeWebhookValue(field, payload[field])}
+		}
+		webhookCtx = webhooks.EventContext{
+			Metadata:   meta,
+			Event:      "created",
+			ActorUUID:  actorPtr(actorUUID),
+			Via:        via,
+			Transition: &webhooks.Transition{From: nil, To: stringPtr(params.State)},
+			Changed:    changed,
+			Changes:    changes,
 		}
 
 		result = &CreateResult{
@@ -200,7 +352,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 	})
 
 	if err == nil && result != nil {
-		webhooks.DispatchTask(ts.store.db, result.UUID)
+		webhooks.DispatchTaskEvent(ts.store.db, result.UUID, webhookCtx)
 	}
 
 	return result, err
@@ -209,8 +361,17 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 // UpdateFields updates specified fields on a task and logs a task.updated event.
 // Returns the new etag on success.
 func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]interface{}, ifMatch int64) (int64, error) {
+	return ts.UpdateFieldsWithVia(actorUUID, taskUUID, fields, ifMatch, "cli")
+}
+
+// UpdateFieldsWithVia updates fields and records the ingress surface in webhook origin.via.
+func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[string]interface{}, ifMatch int64, via string) (int64, error) {
+	if via == "" {
+		via = "cli"
+	}
 	var newETag int64
 	var unblockedTaskUUIDs []string
+	var webhooksToDispatch []pendingWebhook
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current etag and state
@@ -240,9 +401,15 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 		// Check if we're transitioning to a completion state (for unblock webhook logic)
 		newState, hasStateChange := fields["state"].(string)
 		transitioningToCompletion := hasStateChange && !isCompletionState(currentState) && isCompletionState(newState)
+		fieldNames := sortedFieldNames(fields)
+		oldValues, err := loadTaskFieldValues(tx, taskUUID, fieldNames)
+		if err != nil {
+			return fmt.Errorf("failed to load old task values: %w", err)
+		}
 
 		// If transitioning to completion, find tasks that might become unblocked
 		var potentiallyUnblockedUUIDs []string
+		blockersBefore := map[string][]webhooks.BlockerInfo{}
 		if transitioningToCompletion {
 			rows, err := tx.Query(`
 				SELECT to_task_uuid
@@ -260,6 +427,12 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 					return fmt.Errorf("failed to scan blocked task: %w", err)
 				}
 				potentiallyUnblockedUUIDs = append(potentiallyUnblockedUUIDs, uuid)
+				blockers, err := blockerInfosForTask(tx, uuid)
+				if err != nil {
+					_ = rows.Close()
+					return fmt.Errorf("failed to load blockers for task %s: %w", uuid, err)
+				}
+				blockersBefore[uuid] = blockers
 			}
 			_ = rows.Close()
 			if err := rows.Err(); err != nil {
@@ -330,27 +503,77 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 		changesStr := string(changesJSON)
 		newETag = currentETag + 1
 
-		if err := ew.LogEvent(tx, &domain.Event{
+		meta, err := ew.LogEventReturning(tx, &domain.Event{
 			ActorUUID:    &actorUUID,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.updated",
 			ETag:         &newETag,
 			Payload:      &changesStr,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		var transition *webhooks.Transition
+		if hasStateChange && currentState != newState {
+			transition = &webhooks.Transition{From: stringPtr(currentState), To: stringPtr(newState)}
+		}
+		webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
+			taskUUID: taskUUID,
+			ctx: webhooks.EventContext{
+				Metadata:   meta,
+				Event:      "updated",
+				ActorUUID:  actorPtr(actorUUID),
+				Via:        via,
+				Transition: transition,
+				Changed:    fieldNames,
+				Changes:    buildWebhookChanges(oldValues, fields),
+			},
+		})
+
+		for _, unblockedUUID := range unblockedTaskUUIDs {
+			blockersAfter, err := blockerInfosForTask(tx, unblockedUUID)
+			if err != nil {
+				return fmt.Errorf("failed to load updated blockers for task %s: %w", unblockedUUID, err)
+			}
+			payload := map[string]interface{}{
+				"cause_task_uuid": taskUUID,
+				"cause_state":     newState,
+			}
+			payloadJSON, _ := json.Marshal(payload)
+			payloadStr := string(payloadJSON)
+			unblockedMeta, err := ew.LogEventReturning(tx, &domain.Event{
+				ActorUUID:    &actorUUID,
+				ResourceType: "task",
+				ResourceUUID: &unblockedUUID,
+				EventType:    "task.unblocked",
+				Payload:      &payloadStr,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to log unblock event: %w", err)
+			}
+			webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
+				taskUUID: unblockedUUID,
+				ctx: webhooks.EventContext{
+					Metadata:   unblockedMeta,
+					Event:      "unblocked",
+					ActorUUID:  actorPtr(actorUUID),
+					Via:        via,
+					Transition: nil,
+					Changed:    []string{"blocked_by"},
+					Changes: map[string]webhooks.Change{
+						"blocked_by": {From: blockersBefore[unblockedUUID], To: blockersAfter},
+					},
+				},
+			})
 		}
 
 		return nil
 	})
 
 	if err == nil {
-		// Dispatch webhook for the updated task
-		webhooks.DispatchTask(ts.store.db, taskUUID)
-
-		// Dispatch webhooks for newly unblocked tasks
-		for _, unblockedUUID := range unblockedTaskUUIDs {
-			webhooks.DispatchTask(ts.store.db, unblockedUUID)
+		for _, pending := range webhooksToDispatch {
+			webhooks.DispatchTaskEvent(ts.store.db, pending.taskUUID, pending.ctx)
 		}
 	}
 
@@ -410,6 +633,7 @@ func validateParentAssignment(tx *sql.Tx, childUUID, parentUUID string) error {
 // Returns the new etag on success.
 func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch int64) (int64, error) {
 	var newETag int64
+	var webhookCtx webhooks.EventContext
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
@@ -427,6 +651,9 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
 		}
+		var oldContainerPath, newContainerPath string
+		_ = tx.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", oldProjectUUID).Scan(&oldContainerPath)
+		_ = tx.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", newProjectUUID).Scan(&newContainerPath)
 
 		// Update the task
 		_, err = tx.Exec(`
@@ -449,22 +676,35 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 		payloadStr := string(payloadJSON)
 		newETag = currentETag + 1
 
-		if err := ew.LogEvent(tx, &domain.Event{
+		meta, err := ew.LogEventReturning(tx, &domain.Event{
 			ActorUUID:    &actorUUID,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.moved",
 			ETag:         &newETag,
 			Payload:      &payloadStr,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		webhookCtx = webhooks.EventContext{
+			Metadata:   meta,
+			Event:      "moved",
+			ActorUUID:  actorPtr(actorUUID),
+			Via:        "cli",
+			Transition: nil,
+			Changed:    []string{"container_path", "project_uuid"},
+			Changes: map[string]webhooks.Change{
+				"container_path": {From: oldContainerPath, To: newContainerPath},
+				"project_uuid":   {From: oldProjectUUID, To: newProjectUUID},
+			},
 		}
 
 		return nil
 	})
 
 	if err == nil {
-		webhooks.DispatchTask(ts.store.db, taskUUID)
+		webhooks.DispatchTaskEvent(ts.store.db, taskUUID, webhookCtx)
 	}
 
 	return newETag, err
@@ -477,13 +717,23 @@ type ArchiveResult struct {
 
 // Archive soft-deletes a task by setting state to 'archived' and archived_at timestamp.
 func (ts *TaskStore) Archive(actorUUID, taskUUID string, ifMatch int64) (*ArchiveResult, error) {
+	return ts.ArchiveWithVia(actorUUID, taskUUID, ifMatch, "cli")
+}
+
+// ArchiveWithVia archives a task and records the ingress surface in webhook origin.via.
+func (ts *TaskStore) ArchiveWithVia(actorUUID, taskUUID string, ifMatch int64, via string) (*ArchiveResult, error) {
+	if via == "" {
+		via = "cli"
+	}
 	var result *ArchiveResult
+	var webhookCtx webhooks.EventContext
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
 		var currentETag int64
 		var slug string
-		err := tx.QueryRow("SELECT etag, slug FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &slug)
+		var currentState string
+		err := tx.QueryRow("SELECT etag, slug, state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &slug, &currentState)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("task not found: %s", taskUUID)
@@ -518,15 +768,28 @@ func (ts *TaskStore) Archive(actorUUID, taskUUID string, ifMatch int64) (*Archiv
 		payloadStr := string(payloadJSON)
 		newETag := currentETag + 1
 
-		if err := ew.LogEvent(tx, &domain.Event{
+		meta, err := ew.LogEventReturning(tx, &domain.Event{
 			ActorUUID:    &actorUUID,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.archived",
 			ETag:         &newETag,
 			Payload:      &payloadStr,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		webhookCtx = webhooks.EventContext{
+			Metadata:   meta,
+			Event:      "archived",
+			ActorUUID:  actorPtr(actorUUID),
+			Via:        via,
+			Transition: &webhooks.Transition{From: stringPtr(currentState), To: stringPtr("archived")},
+			Changed:    []string{"archived_at", "state"},
+			Changes: map[string]webhooks.Change{
+				"state":       {From: currentState, To: "archived"},
+				"archived_at": {From: nil, To: "now"},
+			},
 		}
 
 		result = &ArchiveResult{ETag: newETag}
@@ -534,7 +797,7 @@ func (ts *TaskStore) Archive(actorUUID, taskUUID string, ifMatch int64) (*Archiv
 	})
 
 	if err == nil && result != nil {
-		webhooks.DispatchTask(ts.store.db, taskUUID)
+		webhooks.DispatchTaskEvent(ts.store.db, taskUUID, webhookCtx)
 	}
 
 	return result, err
@@ -551,6 +814,7 @@ type PurgeResult struct {
 func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeResult, error) {
 	var result *PurgeResult
 	var webhookInfo *webhooks.TaskInfo
+	var webhookCtx webhooks.EventContext
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
@@ -570,13 +834,8 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		}
 
 		// Capture webhook payload info before deletion
-		var info webhooks.TaskInfo
-		if err := tx.QueryRow(`
-			SELECT t.id, t.project_uuid, c.id
-			FROM tasks t
-			JOIN containers c ON c.uuid = t.project_uuid
-			WHERE t.uuid = ?
-		`, taskUUID).Scan(&info.TaskID, &info.ProjectUUID, &info.ProjectID); err != nil {
+		info, err := webhooks.LookupTaskInfoWith(tx, taskUUID)
+		if err != nil {
 			return fmt.Errorf("failed to load webhook info: %w", err)
 		}
 		webhookInfo = &info
@@ -611,14 +870,24 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		payloadJSON, _ := json.Marshal(payload)
 		payloadStr := string(payloadJSON)
 
-		if err := ew.LogEvent(tx, &domain.Event{
+		meta, err := ew.LogEventReturning(tx, &domain.Event{
 			ActorUUID:    &actorUUID,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.purged",
 			Payload:      &payloadStr,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		webhookCtx = webhooks.EventContext{
+			Metadata:   meta,
+			Event:      "purged",
+			ActorUUID:  actorPtr(actorUUID),
+			Via:        "cli",
+			Transition: nil,
+			Changed:    []string{},
+			Changes:    map[string]webhooks.Change{},
 		}
 
 		// Hard delete (CASCADE will delete attachments and comments)
@@ -635,7 +904,7 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 	})
 
 	if err == nil && webhookInfo != nil {
-		webhooks.DispatchTaskInfo(ts.store.db, *webhookInfo)
+		webhooks.DispatchTaskInfoEvent(ts.store.db, *webhookInfo, webhookCtx)
 	}
 
 	return result, err

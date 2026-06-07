@@ -354,7 +354,7 @@ CREATE TABLE IF NOT EXISTS "tasks" (
   created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
   updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT
 , cp_work_item_id TEXT, specification TEXT NOT NULL DEFAULT '', workflow_preset TEXT, preset_version INTEGER, phase TEXT, risk_class TEXT
-  CHECK (risk_class IS NULL OR risk_class IN ('low','medium','high')));
+  CHECK (risk_class IS NULL OR risk_class IN ('low','medium','high')), created_by_scope_ref TEXT);
 CREATE UNIQUE INDEX tasks_unique_slug_in_container
   ON tasks(project_uuid, slug);
 CREATE INDEX tasks_state_due_idx ON tasks(state, due_at);

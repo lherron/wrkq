@@ -181,11 +181,12 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		comment:           restoreComment,
 	}
 
-	if err := restoreTaskWithOptions(database, opts); err != nil {
+	webhookCtx, err := restoreTaskWithOptions(database, opts)
+	if err != nil {
 		return fmt.Errorf("failed to restore task: %w", err)
 	}
 
-	webhooks.DispatchTask(database, taskUUID)
+	webhooks.DispatchTaskEvent(database, taskUUID, webhookCtx)
 
 	// Cascade restore subtasks
 	if err := cascadeRestoreSubtasks(database, actorUUID, taskUUID, targetState); err != nil {
@@ -210,44 +211,61 @@ type restoreTaskOptions struct {
 	comment           string
 }
 
-func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) error {
+func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.EventContext, error) {
 	tx, err := database.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return webhooks.EventContext{}, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var currentState string
+	if err := tx.QueryRow("SELECT state FROM tasks WHERE uuid = ?", opts.taskUUID).Scan(&currentState); err != nil {
+		return webhooks.EventContext{}, fmt.Errorf("failed to load current task state: %w", err)
+	}
 
 	// Build dynamic UPDATE query
 	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL, updated_by_actor_uuid = ?`
 	args := []interface{}{opts.targetState, opts.actorUUID}
+	fields := map[string]interface{}{
+		"state":       opts.targetState,
+		"archived_at": nil,
+		"deleted_at":  nil,
+	}
 
 	if opts.newProjectUUID != nil {
 		query += `, project_uuid = ?`
 		args = append(args, *opts.newProjectUUID)
+		fields["project_uuid"] = *opts.newProjectUUID
 	}
 	if opts.newSlug != nil {
 		query += `, slug = ?`
 		args = append(args, *opts.newSlug)
+		fields["slug"] = *opts.newSlug
 	}
 	if opts.newTitle != "" {
 		query += `, title = ?`
 		args = append(args, opts.newTitle)
+		fields["title"] = opts.newTitle
 	}
 	if opts.newDescription != "" {
 		query += `, description = ?`
 		args = append(args, opts.newDescription)
+		fields["description"] = map[string]interface{}{"length": len(opts.newDescription)}
 	}
 	if opts.newPriority != 0 {
 		query += `, priority = ?`
 		args = append(args, opts.newPriority)
+		fields["priority"] = opts.newPriority
 	}
 	if opts.newLabels != "" {
 		query += `, labels = ?`
 		args = append(args, opts.newLabels)
+		fields["labels"] = opts.newLabels
 	}
 	if opts.assigneeActorUUID != nil {
 		query += `, assignee_actor_uuid = ?`
 		args = append(args, *opts.assigneeActorUUID)
+		fields["assignee_actor_uuid"] = *opts.assigneeActorUUID
 	}
 
 	query += ` WHERE uuid = ?`
@@ -255,7 +273,7 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) error {
 
 	_, err = tx.Exec(query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to restore task: %w", err)
+		return webhooks.EventContext{}, fmt.Errorf("failed to restore task: %w", err)
 	}
 
 	// Log event
@@ -270,14 +288,15 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) error {
 	payloadJSON, _ := json.Marshal(payload)
 	payloadStr := string(payloadJSON)
 
-	if err := eventWriter.LogEvent(tx, &domain.Event{
+	eventMeta, err := eventWriter.LogEventReturning(tx, &domain.Event{
 		ActorUUID:    &opts.actorUUID,
 		ResourceType: "task",
 		ResourceUUID: &opts.taskUUID,
 		EventType:    "task.restored",
 		Payload:      &payloadStr,
-	}); err != nil {
-		return fmt.Errorf("failed to log event: %w", err)
+	})
+	if err != nil {
+		return webhooks.EventContext{}, fmt.Errorf("failed to log event: %w", err)
 	}
 
 	// Add comment if provided
@@ -286,13 +305,13 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) error {
 		var nextSeq int64
 		err := tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments").Scan(&nextSeq)
 		if err != nil {
-			return fmt.Errorf("failed to get comment sequence: %w", err)
+			return webhooks.EventContext{}, fmt.Errorf("failed to get comment sequence: %w", err)
 		}
 
 		// Update sequence table to stay in sync
 		_, err = tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", nextSeq)
 		if err != nil {
-			return fmt.Errorf("failed to update comment sequence: %w", err)
+			return webhooks.EventContext{}, fmt.Errorf("failed to update comment sequence: %w", err)
 		}
 
 		commentUUID := uuid.New().String()
@@ -303,11 +322,22 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) error {
 			VALUES (?, ?, ?, ?, ?, 1)
 		`, commentUUID, commentID, opts.taskUUID, opts.actorUUID, opts.comment)
 		if err != nil {
-			return fmt.Errorf("failed to add comment: %w", err)
+			return webhooks.EventContext{}, fmt.Errorf("failed to add comment: %w", err)
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return webhooks.EventContext{}, err
+	}
+	return webhooks.EventContext{
+		Metadata:   eventMeta,
+		Event:      "updated",
+		ActorUUID:  &opts.actorUUID,
+		Via:        "cli",
+		Transition: &webhooks.Transition{From: &currentState, To: &opts.targetState},
+		Changed:    sortedMapKeys(fields),
+		Changes:    mapChanges(fields, map[string]interface{}{"state": currentState}),
+	}, nil
 }
 
 func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetState string) error {
@@ -337,11 +367,12 @@ func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetSt
 			actorUUID:   actorUUID,
 			targetState: targetState,
 		}
-		if err := restoreTaskWithOptions(database, opts); err != nil {
+		webhookCtx, err := restoreTaskWithOptions(database, opts)
+		if err != nil {
 			return fmt.Errorf("failed to restore subtask %s: %w", subtaskUUID, err)
 		}
 
-		webhooks.DispatchTask(database, subtaskUUID)
+		webhooks.DispatchTaskEvent(database, subtaskUUID, webhookCtx)
 
 		// Recursively restore nested subtasks
 		if err := cascadeRestoreSubtasks(database, actorUUID, subtaskUUID, targetState); err != nil {

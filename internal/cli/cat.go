@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
@@ -37,6 +38,28 @@ func init() {
 	catCmd.Flags().BoolVar(&catJSON, "json", false, "Output as JSON")
 	catCmd.Flags().BoolVar(&catNDJSON, "ndjson", false, "Output as newline-delimited JSON")
 	catCmd.Flags().BoolVar(&catPorcelain, "porcelain", false, "Machine-readable output")
+}
+
+// scopeRefToHandle renders a canonical scopeRef as its compact handle form
+// (e.g. agent:clod:project:wrkq:task:primary -> clod@wrkq:primary). Non-scopeRef
+// values (a bare actor slug) are returned unchanged.
+func scopeRefToHandle(s string) string {
+	parsed, err := scope.ParseScopeRef(s)
+	if err != nil {
+		return s
+	}
+	return scope.FormatScopeHandle(parsed)
+}
+
+// createdByAttribution prefers the full agent scopeRef recorded at creation
+// over the bare actor slug, so created_by surfaces who-in-what-scope. Falls
+// back to the actor slug when no scopeRef was captured (human/CLI without
+// agent scope, or rows created before scope attribution existed).
+func createdByAttribution(scopeRef *string, actorSlug string) string {
+	if scopeRef != nil && *scopeRef != "" {
+		return *scopeRef
+	}
+	return actorSlug
 }
 
 func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -124,6 +147,8 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CompletedAt          *string         `json:"completed_at,omitempty"`
 		ArchivedAt           *string         `json:"archived_at,omitempty"`
 		CreatedBy            string          `json:"created_by"`
+		CreatedByActor       string          `json:"created_by_actor,omitempty"`
+		CreatedByScopeRef    *string         `json:"created_by_scope_ref,omitempty"`
 		UpdatedBy            string          `json:"updated_by"`
 		BlockedBy            []BlockerInfo   `json:"blocked_by,omitempty"`
 		Comments             []Comment       `json:"comments,omitempty"`
@@ -150,6 +175,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var createdAt, updatedAt string
 		var etag int64
 		var projectUUID, createdByUUID, updatedByUUID string
+		var createdByScopeRef *string
 
 		err = database.QueryRow(`
 			SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
@@ -159,7 +185,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
 			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status,
-			       created_by_actor_uuid, updated_by_actor_uuid
+			       created_by_actor_uuid, updated_by_actor_uuid, created_by_scope_ref
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
 			&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
@@ -168,7 +194,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
 			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus,
-			&createdByUUID, &updatedByUUID,
+			&createdByUUID, &updatedByUUID, &createdByScopeRef,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get task: %w", err)
@@ -245,7 +271,9 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			UpdatedAt:            updatedAt,
 			CompletedAt:          completedAt,
 			ArchivedAt:           archivedAt,
-			CreatedBy:            createdBySlug,
+			CreatedBy:            createdByAttribution(createdByScopeRef, createdBySlug),
+			CreatedByActor:       createdBySlug,
+			CreatedByScopeRef:    createdByScopeRef,
 			UpdatedBy:            updatedBySlug,
 		}
 
@@ -454,7 +482,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				if task.ArchivedAt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
+				createdByRendered := task.CreatedBy
+				if sel.Stable {
+					// Porcelain: render the compact scope handle rather than the
+					// long-form scopeRef.
+					createdByRendered = scopeRefToHandle(task.CreatedBy)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", createdByRendered)
 				fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
 				fmt.Fprintln(cmd.OutOrStdout(), "---")
 				fmt.Fprintln(cmd.OutOrStdout())

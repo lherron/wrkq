@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/events"
 )
 
 const (
@@ -27,44 +28,94 @@ type BlockerInfo struct {
 	State string `json:"state"`
 }
 
+// Origin describes the source of the mutation that produced the webhook.
+type Origin struct {
+	Actor string  `json:"actor"`
+	RunID *string `json:"run_id"`
+	Via   string  `json:"via"`
+}
+
+// Transition describes a task state transition. Nil endpoints encode JSON null.
+type Transition struct {
+	From *string `json:"from"`
+	To   *string `json:"to"`
+}
+
+// Change describes a single changed field.
+type Change struct {
+	From interface{} `json:"from,omitempty"`
+	To   interface{} `json:"to,omitempty"`
+}
+
+// EventContext carries event-specific data that cannot be reconstructed from
+// the post-mutation task row.
+type EventContext struct {
+	Metadata   events.EventMetadata
+	Event      string
+	ActorUUID  *string
+	Via        string
+	Transition *Transition
+	Changed    []string
+	Changes    map[string]Change
+}
+
 // Payload is the webhook payload for task updates.
 type Payload struct {
-	TicketID     string          `json:"ticket_id"`
-	TicketUUID   string          `json:"ticket_uuid"`
-	ProjectID    string          `json:"project_id"`
-	ProjectUUID  string          `json:"project_uuid"`
-	State        string          `json:"state"`
-	Priority     int             `json:"priority"`
-	Kind         string          `json:"kind"`
-	RunStatus    *string         `json:"run_status"`
-	Resolution   *string         `json:"resolution"`
-	Meta         json.RawMessage `json:"meta"`
-	ETag         int64           `json:"etag"`
-	CPProjectID  *string         `json:"cp_project_id"`
-	CPWorkItemID *string         `json:"cp_work_item_id"`
-	CPRunID      *string         `json:"cp_run_id"`
-	SessionID    *string         `json:"session_id"`
-	BlockedBy    []BlockerInfo   `json:"blocked_by,omitempty"`
+	SchemaVersion  int               `json:"schema_version"`
+	EventID        string            `json:"event_id"`
+	EventSeq       int64             `json:"event_seq"`
+	Event          string            `json:"event"`
+	OccurredAt     string            `json:"occurred_at"`
+	Origin         Origin            `json:"origin"`
+	TicketID       string            `json:"ticket_id"`
+	TicketUUID     string            `json:"ticket_uuid"`
+	ProjectID      string            `json:"project_id"`
+	ProjectUUID    string            `json:"project_uuid"`
+	ProjectScopeID string            `json:"project_scope_id"`
+	Transition     *Transition       `json:"transition"`
+	Changed        []string          `json:"changed"`
+	Changes        map[string]Change `json:"changes"`
+	Title          string            `json:"title"`
+	Slug           string            `json:"slug"`
+	ContainerPath  string            `json:"container_path"`
+	Labels         []string          `json:"labels"`
+	State          string            `json:"state"`
+	Priority       int               `json:"priority"`
+	Kind           string            `json:"kind"`
+	RunStatus      *string           `json:"run_status"`
+	Resolution     *string           `json:"resolution"`
+	Meta           json.RawMessage   `json:"meta"`
+	ETag           int64             `json:"etag"`
+	CPProjectID    *string           `json:"cp_project_id"`
+	CPWorkItemID   *string           `json:"cp_work_item_id"`
+	CPRunID        *string           `json:"cp_run_id"`
+	SessionID      *string           `json:"session_id"`
+	BlockedBy      []BlockerInfo     `json:"blocked_by,omitempty"`
 }
 
 // TaskInfo carries task metadata needed for webhook dispatch.
 type TaskInfo struct {
-	TaskID       string
-	TaskUUID     string
-	ProjectID    string
-	ProjectUUID  string
-	State        string
-	Priority     int
-	Kind         string
-	RunStatus    *string
-	Resolution   *string
-	Meta         *string
-	ETag         int64
-	CPProjectID  *string
-	CPWorkItemID *string
-	CPRunID      *string
-	CPSessionID  *string // internal name, exposed as session_id
-	BlockedBy    []BlockerInfo
+	TaskID         string
+	TaskUUID       string
+	ProjectID      string
+	ProjectUUID    string
+	ProjectScopeID string
+	Title          string
+	Slug           string
+	ContainerPath  string
+	Labels         *string
+	State          string
+	Priority       int
+	Kind           string
+	RunStatus      *string
+	Resolution     *string
+	Meta           *string
+	ETag           int64
+	CPProjectID    *string
+	CPWorkItemID   *string
+	CPRunID        *string
+	CPSessionID    *string // internal name, exposed as session_id
+	BlockedBy      []BlockerInfo
 }
 
 // DispatchTask resolves task info then dispatches webhooks.
@@ -79,29 +130,76 @@ func DispatchTask(database *db.DB, taskUUID string) {
 
 // DispatchTaskInfo dispatches webhooks using pre-fetched task info.
 func DispatchTaskInfo(database *db.DB, info TaskInfo) {
+	DispatchTaskInfoEvent(database, info, EventContext{
+		Metadata: events.EventMetadata{ID: 0, Timestamp: time.Now().UTC().Format(time.RFC3339)},
+		Event:    "updated",
+		Via:      "unknown",
+	})
+}
+
+// DispatchTaskEvent resolves task info then dispatches an event-aware webhook.
+func DispatchTaskEvent(database *db.DB, taskUUID string, ctx EventContext) {
+	info, err := LookupTaskInfo(database, taskUUID)
+	if err != nil {
+		log.Printf("webhooks: lookup task %s failed: %v", taskUUID, err)
+		return
+	}
+	DispatchTaskInfoEvent(database, info, ctx)
+}
+
+// DispatchTaskInfoEvent dispatches webhooks using pre-fetched task info and event context.
+func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 	meta := json.RawMessage(`{}`)
 	if info.Meta != nil && *info.Meta != "" {
 		if json.Valid([]byte(*info.Meta)) {
 			meta = json.RawMessage(*info.Meta)
 		}
 	}
+	labels := parseLabels(info.Labels)
+	origin := resolveOrigin(database, ctx.ActorUUID, ctx.Via, firstNonNil(info.CPRunID, info.CPSessionID))
+	eventID := ""
+	if ctx.Metadata.ID > 0 {
+		eventID = fmt.Sprintf("evt_%d", ctx.Metadata.ID)
+	}
+	changed := ctx.Changed
+	if changed == nil {
+		changed = []string{}
+	}
+	changes := ctx.Changes
+	if changes == nil {
+		changes = map[string]Change{}
+	}
 	payload := Payload{
-		TicketID:     info.TaskID,
-		TicketUUID:   info.TaskUUID,
-		ProjectID:    info.ProjectID,
-		ProjectUUID:  info.ProjectUUID,
-		State:        info.State,
-		Priority:     info.Priority,
-		Kind:         info.Kind,
-		RunStatus:    info.RunStatus,
-		Resolution:   info.Resolution,
-		Meta:         meta,
-		ETag:         info.ETag,
-		CPProjectID:  info.CPProjectID,
-		CPWorkItemID: info.CPWorkItemID,
-		CPRunID:      info.CPRunID,
-		SessionID:    info.CPSessionID,
-		BlockedBy:    info.BlockedBy,
+		SchemaVersion:  2,
+		EventID:        eventID,
+		EventSeq:       ctx.Metadata.ID,
+		Event:          ctx.Event,
+		OccurredAt:     ctx.Metadata.Timestamp,
+		Origin:         origin,
+		TicketID:       info.TaskID,
+		TicketUUID:     info.TaskUUID,
+		ProjectID:      info.ProjectID,
+		ProjectUUID:    info.ProjectUUID,
+		ProjectScopeID: info.ProjectScopeID,
+		Transition:     ctx.Transition,
+		Changed:        changed,
+		Changes:        changes,
+		Title:          info.Title,
+		Slug:           info.Slug,
+		ContainerPath:  info.ContainerPath,
+		Labels:         labels,
+		State:          info.State,
+		Priority:       info.Priority,
+		Kind:           info.Kind,
+		RunStatus:      info.RunStatus,
+		Resolution:     info.Resolution,
+		Meta:           meta,
+		ETag:           info.ETag,
+		CPProjectID:    info.CPProjectID,
+		CPWorkItemID:   info.CPWorkItemID,
+		CPRunID:        info.CPRunID,
+		SessionID:      info.CPSessionID,
+		BlockedBy:      info.BlockedBy,
 	}
 	urls, err := ResolveWebhookTargets(database, info.ProjectUUID, payload)
 	if err != nil {
@@ -109,6 +207,40 @@ func DispatchTaskInfo(database *db.DB, info TaskInfo) {
 		return
 	}
 	dispatchURLs(urls, payload)
+}
+
+func firstNonNil(values ...*string) *string {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func parseLabels(raw *string) []string {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return []string{}
+	}
+	var labels []string
+	if err := json.Unmarshal([]byte(*raw), &labels); err != nil {
+		return []string{}
+	}
+	return labels
+}
+
+func resolveOrigin(database *db.DB, actorUUID *string, via string, runID *string) Origin {
+	if via == "" {
+		via = "unknown"
+	}
+	if actorUUID == nil || *actorUUID == "" {
+		return Origin{Actor: "system", RunID: runID, Via: via}
+	}
+	var slug, role string
+	if err := database.QueryRow("SELECT slug, role FROM actors WHERE uuid = ?", *actorUUID).Scan(&slug, &role); err != nil {
+		return Origin{Actor: "system", RunID: runID, Via: via}
+	}
+	return Origin{Actor: role + ":" + slug, RunID: runID, Via: via}
 }
 
 // nullStringToPtr converts sql.NullString to *string.
@@ -121,30 +253,43 @@ func nullStringToPtr(ns sql.NullString) *string {
 
 // LookupTaskInfo fetches the task and project friendly IDs for dispatch.
 func LookupTaskInfo(database *db.DB, taskUUID string) (TaskInfo, error) {
+	return LookupTaskInfoWith(database, taskUUID)
+}
+
+type taskInfoQueryer interface {
+	QueryRow(query string, args ...interface{}) *sql.Row
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+}
+
+// LookupTaskInfoWith fetches task info using either a DB or an open transaction.
+func LookupTaskInfoWith(database taskInfoQueryer, taskUUID string) (TaskInfo, error) {
 	var info TaskInfo
-	var runStatus, resolution, meta sql.NullString
+	var runStatus, resolution, meta, labels sql.NullString
 	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID sql.NullString
 
 	err := database.QueryRow(`
-		SELECT t.id, t.uuid, t.project_uuid, c.id,
-		       t.state, t.priority, t.kind, t.run_status, t.resolution, t.meta, t.etag,
+		SELECT t.id, t.uuid, t.project_uuid, c.id, t.slug, t.title, cp.path,
+		       t.state, t.priority, t.kind, t.run_status, t.resolution, t.meta, t.labels, t.etag,
 		       t.cp_project_id, t.cp_work_item_id, t.cp_run_id, t.cp_session_id
 		FROM tasks t
 		JOIN containers c ON c.uuid = t.project_uuid
+		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
 		WHERE t.uuid = ?
 	`, taskUUID).Scan(
-		&info.TaskID, &info.TaskUUID, &info.ProjectUUID, &info.ProjectID,
+		&info.TaskID, &info.TaskUUID, &info.ProjectUUID, &info.ProjectID, &info.Slug, &info.Title, &info.ContainerPath,
 		&info.State, &info.Priority, &info.Kind,
-		&runStatus, &resolution, &meta, &info.ETag,
+		&runStatus, &resolution, &meta, &labels, &info.ETag,
 		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID,
 	)
 	if err != nil {
 		return TaskInfo{}, fmt.Errorf("lookup task info: %w", err)
 	}
 
+	info.ProjectScopeID = strings.Split(strings.Trim(info.ContainerPath, "/"), "/")[0]
 	info.RunStatus = nullStringToPtr(runStatus)
 	info.Resolution = nullStringToPtr(resolution)
 	info.Meta = nullStringToPtr(meta)
+	info.Labels = nullStringToPtr(labels)
 	info.CPProjectID = nullStringToPtr(cpProjectID)
 	info.CPWorkItemID = nullStringToPtr(cpWorkItemID)
 	info.CPRunID = nullStringToPtr(cpRunID)

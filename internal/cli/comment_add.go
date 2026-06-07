@@ -225,7 +225,8 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Log event
 	eventWriter := events.NewWriter(database.DB)
-	if err := eventWriter.LogCommentCreated(tx, actorUUID, &comment); err != nil {
+	eventMeta, err := eventWriter.LogCommentCreatedReturning(tx, actorUUID, &comment)
+	if err != nil {
 		return fmt.Errorf("failed to log event: %w", err)
 	}
 
@@ -233,7 +234,17 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	webhooks.DispatchTask(database, taskUUID)
+	webhooks.DispatchTaskEvent(database, taskUUID, webhooks.EventContext{
+		Metadata:   eventMeta,
+		Event:      "comment_added",
+		ActorUUID:  &actorUUID,
+		Via:        "cli",
+		Transition: nil,
+		Changed:    []string{"comments"},
+		Changes: map[string]webhooks.Change{
+			"comments": {From: nil, To: commentID},
+		},
+	})
 
 	// Output success
 	output := map[string]interface{}{

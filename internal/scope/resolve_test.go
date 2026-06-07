@@ -72,6 +72,26 @@ func TestResolve_OverrideNormalizesTaskToProject(t *testing.T) {
 	}
 }
 
+func TestResolvedScope_FullRefPreservesTaskAndRole(t *testing.T) {
+	clearScopeEnv(t)
+	r, _, err := Resolve("agent:clod:project:wrkq:task:primary")
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	// CanonicalRef drops the task for v1; FullRef must preserve it for
+	// durable attribution (created_by_scope_ref).
+	if got, want := r.FullRef(), "agent:clod:project:wrkq:task:primary"; got != want {
+		t.Errorf("FullRef()=%q, want %q", got, want)
+	}
+}
+
+func TestResolvedScope_FullRefEmptyWhenNoAgent(t *testing.T) {
+	var r ResolvedScope
+	if got := r.FullRef(); got != "" {
+		t.Errorf("FullRef() on zero value = %q, want empty", got)
+	}
+}
+
 func TestResolve_OverrideInvalid(t *testing.T) {
 	clearScopeEnv(t)
 	_, _, err := Resolve("has space")

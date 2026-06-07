@@ -354,13 +354,14 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	payloadJSON, _ := json.Marshal(payloadData)
 	payloadStr := string(payloadJSON)
 
-	if err := eventWriter.LogEvent(tx, &domain.Event{
+	eventMeta, err := eventWriter.LogEventReturning(tx, &domain.Event{
 		ActorUUID:    &actorUUID,
 		ResourceType: "task",
 		ResourceUUID: &newUUID,
 		EventType:    "task.copied",
 		Payload:      &payloadStr,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -368,7 +369,17 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 		return nil, err
 	}
 
-	webhooks.DispatchTask(database, newUUID)
+	webhooks.DispatchTaskEvent(database, newUUID, webhooks.EventContext{
+		Metadata:   eventMeta,
+		Event:      "created",
+		ActorUUID:  &actorUUID,
+		Via:        "cli",
+		Transition: &webhooks.Transition{From: nil, To: &state},
+		Changed:    []string{"source_uuid"},
+		Changes: map[string]webhooks.Change{
+			"source_uuid": {From: nil, To: sourceUUID},
+		},
+	})
 
 	// Get destination path
 	var destPath string

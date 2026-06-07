@@ -2,9 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 func TestCommentAdd(t *testing.T) {
@@ -17,6 +24,22 @@ func TestCommentAdd(t *testing.T) {
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create test task: %v", err)
+	}
+
+	calls := make(chan webhooks.Payload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		body, _ := io.ReadAll(r.Body)
+		var payload webhooks.Payload
+		_ = json.Unmarshal(body, &payload)
+		calls <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
+	if _, err := database.Exec("UPDATE containers SET webhook_urls = ? WHERE uuid = '00000000-0000-0000-0000-000000000002'", string(webhookURLs)); err != nil {
+		t.Fatalf("Failed to configure webhook: %v", err)
 	}
 
 	// Set environment variables
@@ -92,6 +115,24 @@ func TestCommentAdd(t *testing.T) {
 	}
 	if taskETag <= 1 {
 		t.Errorf("Expected comment add to advance task etag, got %d", taskETag)
+	}
+
+	select {
+	case payload := <-calls:
+		if payload.Event != "comment_added" {
+			t.Fatalf("Expected comment_added webhook, got %s", payload.Event)
+		}
+		if payload.EventID == "" || payload.EventSeq == 0 || payload.OccurredAt == "" {
+			t.Fatalf("Expected event identity fields, got %+v", payload)
+		}
+		if payload.Origin.Actor != "human:test-user" || payload.Origin.Via != "cli" {
+			t.Fatalf("Unexpected origin: %+v", payload.Origin)
+		}
+		if len(payload.Changed) != 1 || payload.Changed[0] != "comments" {
+			t.Fatalf("Unexpected changed fields: %+v", payload.Changed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for comment webhook")
 	}
 }
 

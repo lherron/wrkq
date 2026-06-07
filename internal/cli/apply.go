@@ -10,7 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/parse"
 	"github.com/lherron/wrkq/internal/selectors"
-	"github.com/lherron/wrkq/internal/webhooks"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +39,7 @@ Examples:
   wrkq apply T-00001 - --if-match 5              # Conditional update
 `,
 	Args: cobra.ExactArgs(2),
-	RunE: appctx.WithApp(appctx.DefaultOptions(), runApply),
+	RunE: appctx.WithApp(appctx.WithActor(), runApply),
 }
 
 var (
@@ -190,74 +190,47 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute update
-	return applyTaskUpdates(database, taskUUID, updates, !applyWithMetadata)
+	return applyTaskUpdates(database, app.ActorUUID, taskUUID, updates, !applyWithMetadata, applyIfMatch)
 }
 
-func applyTaskUpdates(database *db.DB, taskUUID string, updates *parse.TaskUpdate, bodyOnly bool) error {
-	// Build update query
-	var setClauses []string
-	var args []interface{}
-
+func applyTaskUpdates(database *db.DB, actorUUID, taskUUID string, updates *parse.TaskUpdate, bodyOnly bool, ifMatch int64) error {
+	fields := map[string]interface{}{}
 	if bodyOnly {
-		// Only update description/specification
 		if updates.Description != nil {
-			setClauses = append(setClauses, "description = ?")
-			args = append(args, *updates.Description)
+			fields["description"] = *updates.Description
 		}
 		if updates.Specification != nil {
-			setClauses = append(setClauses, "specification = ?")
-			args = append(args, *updates.Specification)
+			fields["specification"] = *updates.Specification
 		}
-		if len(setClauses) == 0 {
+		if len(fields) == 0 {
 			return fmt.Errorf("no description or specification provided in --body-only mode")
 		}
 	} else {
-		// Update all provided fields
 		if updates.Title != nil {
-			setClauses = append(setClauses, "title = ?")
-			args = append(args, *updates.Title)
+			fields["title"] = *updates.Title
 		}
 		if updates.State != nil {
-			setClauses = append(setClauses, "state = ?")
-			args = append(args, *updates.State)
+			fields["state"] = *updates.State
 		}
 		if updates.Priority != nil {
-			setClauses = append(setClauses, "priority = ?")
-			args = append(args, *updates.Priority)
+			fields["priority"] = *updates.Priority
 		}
 		if updates.DueAt != nil {
-			setClauses = append(setClauses, "due_at = ?")
-			args = append(args, *updates.DueAt)
+			fields["due_at"] = *updates.DueAt
 		}
 		if updates.Description != nil {
-			setClauses = append(setClauses, "description = ?")
-			args = append(args, *updates.Description)
+			fields["description"] = *updates.Description
 		}
 		if updates.Specification != nil {
-			setClauses = append(setClauses, "specification = ?")
-			args = append(args, *updates.Specification)
+			fields["specification"] = *updates.Specification
 		}
 	}
-
-	if len(setClauses) == 0 {
+	if len(fields) == 0 {
 		return fmt.Errorf("no fields to update")
 	}
-
-	// Add etag increment and updated_at
-	setClauses = append(setClauses, "etag = etag + 1")
-	setClauses = append(setClauses, "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')")
-
-	// Build and execute query
-	query := fmt.Sprintf("UPDATE tasks SET %s WHERE uuid = ?", strings.Join(setClauses, ", "))
-	args = append(args, taskUUID)
-
-	_, err := database.Exec(query, args...)
-	if err != nil {
+	if _, err := store.New(database).Tasks.UpdateFields(actorUUID, taskUUID, fields, ifMatch); err != nil {
 		return fmt.Errorf("failed to update task: %w", err)
 	}
-
-	webhooks.DispatchTask(database, taskUUID)
-
 	fmt.Printf("Updated task %s\n", taskUUID)
 	return nil
 }

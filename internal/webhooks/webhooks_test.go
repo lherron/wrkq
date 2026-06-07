@@ -2,8 +2,11 @@ package webhooks_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -23,6 +26,41 @@ func setupTestDB(t *testing.T) *db.DB {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	return database
+}
+
+func TestNoProductionContextFreeDispatchCallSites(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to resolve test path")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	searchRoots := []string{
+		filepath.Join(repoRoot, "internal", "cli"),
+		filepath.Join(repoRoot, "internal", "store"),
+	}
+
+	for _, root := range searchRoots {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			text := string(body)
+			if strings.Contains(text, "webhooks.DispatchTask(") || strings.Contains(text, "webhooks.DispatchTaskInfo(") {
+				t.Fatalf("context-free webhook dispatch call remains in %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("failed to scan %s: %v", root, err)
+		}
+	}
 }
 
 func setupTestActor(t *testing.T, database *db.DB) string {

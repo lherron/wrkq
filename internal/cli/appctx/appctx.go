@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,12 @@ type App struct {
 
 	// ActorID is the resolved actor friendly ID (e.g., "A-00001")
 	ActorID string
+
+	// ScopeRef is the full praesidium scopeRef of the invoking agent, resolved
+	// best-effort from the environment (ASP_SCOPE_REF / ASP_HANDLE / ...).
+	// Empty when no scope is resolvable (e.g. a human at a plain shell).
+	// Used to attribute task creation to the originating agent scope.
+	ScopeRef string
 }
 
 // Close releases resources held by the App.
@@ -144,6 +151,17 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 		}
 		app.ActorUUID = actorUUID
 		app.ActorID = actorID
+
+		// Best-effort: capture the invoking agent's full scopeRef so creation
+		// can be attributed to the scope. Honors a --scope override when the
+		// command defines one. Unresolvable scope is not an error here.
+		var scopeOverride string
+		if scopeFlag := cmd.Flag("scope"); scopeFlag != nil {
+			scopeOverride = scopeFlag.Value.String()
+		}
+		if resolved, _, scopeErr := scope.Resolve(scopeOverride); scopeErr == nil {
+			app.ScopeRef = resolved.FullRef()
+		}
 	}
 
 	return app, nil

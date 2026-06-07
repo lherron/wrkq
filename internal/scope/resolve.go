@@ -189,6 +189,28 @@ func Resolve(override string) (ResolvedScope, []Diagnostic, error) {
 	)
 }
 
+// FullRef returns the complete canonical scopeRef for the resolved scope,
+// preserving the task and role segments. Unlike CanonicalRef (which normalizes
+// to project kind and drops task/role for v1), FullRef is suitable for durable
+// attribution such as a task's created_by_scope_ref. Returns "" when no agent
+// is resolved.
+func (r ResolvedScope) FullRef() string {
+	if r.AgentID == "" {
+		return ""
+	}
+	ref := "agent:" + r.AgentID
+	if r.ProjectID != "" {
+		ref += ":project:" + r.ProjectID
+	}
+	if r.TaskID != "" {
+		ref += ":task:" + r.TaskID
+	}
+	if r.RoleName != "" {
+		ref += ":role:" + r.RoleName
+	}
+	return ref
+}
+
 // finalize builds a ResolvedScope from a parsed input, normalizing to project
 // kind for v1 (task/role dropped from the canonical ref but preserved in the
 // pre-normalization fields for diagnostics).

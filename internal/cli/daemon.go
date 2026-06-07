@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,6 +27,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
@@ -286,6 +288,20 @@ func (s *daemonServer) resolveActorUUID(r *http.Request) (string, error) {
 	}
 
 	return actor.UUID, nil
+}
+
+// scopeRefFromRequest extracts the invoking agent's full scopeRef from the
+// X-Wrkq-Scope-Ref header for creation attribution. Returns "" when the header
+// is absent or not a valid canonical scopeRef (best-effort; never an error).
+func scopeRefFromRequest(r *http.Request) string {
+	raw := strings.TrimSpace(r.Header.Get("X-Wrkq-Scope-Ref"))
+	if raw == "" {
+		return ""
+	}
+	if v := scope.ValidateScopeRef(raw); !v.OK {
+		return ""
+	}
+	return raw
 }
 
 func (s *daemonServer) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -610,6 +626,8 @@ func (s *daemonServer) handleTasksCreate(w http.ResponseWriter, r *http.Request)
 		Labels:            labels,
 		DueAt:             dueAt,
 		StartAt:           startAt,
+		Via:               "api",
+		CreatorScopeRef:   scopeRefFromRequest(r),
 	})
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
@@ -698,7 +716,7 @@ func (s *daemonServer) handleTasksUpdate(w http.ResponseWriter, r *http.Request)
 	}
 
 	svc := store.New(s.db)
-	if _, err := svc.Tasks.UpdateFields(actorUUID, taskUUID, fields, req.IfMatch); err != nil {
+	if _, err := svc.Tasks.UpdateFieldsWithVia(actorUUID, taskUUID, fields, req.IfMatch, "api"); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -749,7 +767,7 @@ func (s *daemonServer) handleTasksArchive(w http.ResponseWriter, r *http.Request
 	}
 
 	svc := store.New(s.db)
-	if _, err := svc.Tasks.Archive(actorUUID, taskUUID, req.IfMatch); err != nil {
+	if _, err := svc.Tasks.ArchiveWithVia(actorUUID, taskUUID, req.IfMatch, "api"); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -875,14 +893,15 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 	newETag := currentETag + 1
 	payloadJSON, _ := json.Marshal(fields)
 	payloadStr := string(payloadJSON)
-	if err := events.NewWriter(s.db.DB).LogEvent(tx, &domain.Event{
+	eventMeta, err := events.NewWriter(s.db.DB).LogEventReturning(tx, &domain.Event{
 		ActorUUID:    &actorUUID,
 		ResourceType: "task",
 		ResourceUUID: &taskUUID,
 		EventType:    "task.updated",
 		ETag:         &newETag,
 		Payload:      &payloadStr,
-	}); err != nil {
+	})
+	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -892,7 +911,17 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	webhooks.DispatchTask(s.db, taskUUID)
+	webhooks.DispatchTaskEvent(s.db, taskUUID, webhooks.EventContext{
+		Metadata:   eventMeta,
+		Event:      "updated",
+		ActorUUID:  &actorUUID,
+		Via:        "api",
+		Transition: &webhooks.Transition{From: &currentState, To: &targetState},
+		Changed:    sortedMapKeys(fields),
+		Changes: mapChanges(fields, map[string]interface{}{
+			"state": currentState,
+		}),
+	})
 
 	task, err := loadTaskDetail(s.db, taskUUID, true, true)
 	if err != nil {
@@ -1106,14 +1135,15 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 	}
 
 	payload := fmt.Sprintf(`{"task_id":"%s","comment_id":"%s","actor_id":"%s"}`, comment.TaskUUID, comment.ID, comment.ActorUUID)
-	if err := events.NewWriter(s.db.DB).LogEvent(tx, &domain.Event{
+	eventMeta, err := events.NewWriter(s.db.DB).LogEventReturning(tx, &domain.Event{
 		ActorUUID:    &actorUUID,
 		ResourceType: "comment",
 		ResourceUUID: &comment.UUID,
 		EventType:    "comment.created",
 		ETag:         &comment.ETag,
 		Payload:      &payload,
-	}); err != nil {
+	})
+	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -1123,7 +1153,17 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	webhooks.DispatchTask(s.db, taskUUID)
+	webhooks.DispatchTaskEvent(s.db, taskUUID, webhooks.EventContext{
+		Metadata:   eventMeta,
+		Event:      "comment_added",
+		ActorUUID:  &actorUUID,
+		Via:        "api",
+		Transition: nil,
+		Changed:    []string{"comments"},
+		Changes: map[string]webhooks.Change{
+			"comments": {From: nil, To: commentID},
+		},
+	})
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"comment": comment,
@@ -1852,6 +1892,23 @@ func getIntField(fields map[string]interface{}, key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func sortedMapKeys(fields map[string]interface{}) []string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func mapChanges(fields map[string]interface{}, oldValues map[string]interface{}) map[string]webhooks.Change {
+	changes := make(map[string]webhooks.Change, len(fields))
+	for _, key := range sortedMapKeys(fields) {
+		changes[key] = webhooks.Change{From: oldValues[key], To: fields[key]}
+	}
+	return changes
 }
 
 func getLabelsField(fields map[string]interface{}, key string) string {

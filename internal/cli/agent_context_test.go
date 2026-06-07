@@ -191,4 +191,3 @@ func TestAgentContext_DisagreementDiagnostic(t *testing.T) {
 		t.Errorf("expected ASP_SCOPE_REF_HANDLE_DISAGREE diagnostic, got %v", o.Diagnostics)
 	}
 }
-

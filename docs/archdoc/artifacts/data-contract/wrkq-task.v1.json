@@ -1,0 +1,1073 @@
+{
+  "schemaVersion": "artifact.kernel.v0",
+  "id": "artifact:wrkq/task-data-contract",
+  "profile": "data-contract.v1",
+  "title": "Task",
+  "summary": "Semantic DTO contract for the persisted wrkq task as exposed by domain.Task JSON tags.",
+  "scope": {
+    "system": "wrkq",
+    "boundedContext": "task management",
+    "module": "internal/domain",
+    "repository": "/Users/lherron/praesidium/wrkq",
+    "sourceRoot": "."
+  },
+  "perspective": {
+    "name": "implementation contract",
+    "purpose": "document the JSON DTO shape for a persisted wrkq task",
+    "stakeholder": "wrkq operator and integration engineer",
+    "abstractionLevel": "DTO"
+  },
+  "applicability": {
+    "assumptions": [
+      "JSON field names are taken from internal/domain.Task struct tags.",
+      "Optionality follows Go pointer fields and omitempty JSON tags.",
+      "Enum literals follow internal/domain validation helpers and current task-table CHECK constraints."
+    ],
+    "exclusions": [
+      "The deprecated sdk_session_id database column is intentionally absent because domain.Task marks it json:\"-\".",
+      "Related comments, task relations, attachments, evidence items, role assignments, and transitions are outside this standalone Task DTO contract."
+    ],
+    "temporal": "source snapshot at wrkq commit 86958ad on 2026-06-06",
+    "operationalMode": "normal wrkq task persistence and JSON rendering"
+  },
+  "coverage": {
+    "completeness": "substantial",
+    "includes": [
+      "identity",
+      "container placement",
+      "routing fields",
+      "lifecycle state",
+      "assignment",
+      "control-plane linkage",
+      "workflow metadata",
+      "content",
+      "audit timestamps"
+    ],
+    "excludes": [
+      "database-only sdk_session_id",
+      "non-Task DTOs",
+      "HTTP daemon response decorators such as comments and relations"
+    ],
+    "knownGaps": [
+      "Descriptions summarize current source semantics; they are not a formal public API guarantee."
+    ]
+  },
+  "maturity": "source-linked",
+  "epistemic": {
+    "modality": "descriptive",
+    "confidence": "high",
+    "disputeStatus": "undisputed",
+    "note": "Derived from current Go source, validators, and SQLite migrations."
+  },
+  "provenance": [
+    {
+      "id": "domain-task-struct",
+      "sourceType": "source_file",
+      "authority": "authoritative",
+      "locator": "internal/domain/types.go:92",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "domain.Task struct with JSON tags and database column mappings."
+    },
+    {
+      "id": "domain-validation",
+      "sourceType": "source_file",
+      "authority": "authoritative",
+      "locator": "internal/domain/validation.go",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Task state, kind, resolution, run_status, risk_class, priority, UUID, and timestamp validation helpers."
+    },
+    {
+      "id": "tasks-baseline",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000001_baseline.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Initial tasks table, task_seq friendly id trigger, timestamps, priorities, labels, and audit columns."
+    },
+    {
+      "id": "planning-layer",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000002_planning_layer.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Task kind, parent_task_uuid, assignee_actor_uuid, blocked and cancelled states, and one-level subtask invariant."
+    },
+    {
+      "id": "deleted-state",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000004_deleted_state.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Deleted lifecycle state and deleted_at triggers."
+    },
+    {
+      "id": "roundtrip-fields",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000005_roundtrip_minimal.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Cross-project routing, acknowledgement, and resolution columns."
+    },
+    {
+      "id": "async-run-linkage",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000006_async_run_linkage.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Control-plane run linkage and run_status constraint."
+    },
+    {
+      "id": "task-meta",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000008_task_meta.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Task meta JSON text column."
+    },
+    {
+      "id": "idea-state",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000009_idea_state.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Idea state and recreated task constraints."
+    },
+    {
+      "id": "cp-work-item",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000011_cp_work_item_id.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Stable control-plane WorkItem binding."
+    },
+    {
+      "id": "task-specification",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000012_task_specification.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Task specification text column."
+    },
+    {
+      "id": "task-workflow-schema",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000013_task_workflow_schema.sql",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Workflow preset/version/phase triple, risk_class constraint, and workflow task tables."
+    },
+    {
+      "id": "task-store",
+      "sourceType": "source_file",
+      "authority": "contextual",
+      "locator": "internal/store/tasks.go",
+      "observedAt": "2026-06-06T19:27:28Z",
+      "note": "Task creation, update, lookup, re-parenting, and cascade delete behavior."
+    }
+  ],
+  "refs": [
+    {
+      "target": "internal/domain/types.go",
+      "relation": "derived_from",
+      "direction": "outbound",
+      "confidence": "high",
+      "evidence": [
+        {
+          "sourceType": "source_file",
+          "locator": "internal/domain/types.go:92",
+          "authority": "authoritative"
+        }
+      ],
+      "note": "domain.Task is the JSON DTO source of truth."
+    },
+    {
+      "target": "internal/db/migrations",
+      "relation": "persists",
+      "direction": "outbound",
+      "confidence": "high",
+      "note": "Task fields are backed by the tasks table, except database-only sdk_session_id is not exposed in JSON."
+    }
+  ],
+  "visibility": "internal",
+  "revision": {
+    "profileVersion": "data-contract.v1",
+    "artifactVersion": "0.1.0",
+    "createdAt": "2026-06-06T19:27:28Z",
+    "updatedAt": "2026-06-06T19:27:28Z"
+  },
+  "payload": {
+    "name": "Task",
+    "contractKind": "dto",
+    "namespace": "wrkq.domain",
+    "version": "v1",
+    "description": "Persisted work item inside one wrkq container, carrying identity, path placement, lifecycle state, routing, workflow metadata, content, and audit stamps.",
+    "fields": [
+      {
+        "name": "uuid",
+        "type": "UUIDv4String",
+        "required": true,
+        "nullable": false,
+        "description": "Primary immutable task identity used by selectors, relations, comments, attachments, and persistence.",
+        "constraints": [
+          "lowercase UUIDv4 accepted by domain.ValidateUUID"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:94",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:11",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "id",
+        "type": "`T-${number}`",
+        "required": true,
+        "nullable": false,
+        "description": "Human-facing task id allocated from task_seq by the tasks_ai_friendly trigger.",
+        "constraints": [
+          "database id column is unique"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:95",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:147",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "slug",
+        "type": "Slug",
+        "required": true,
+        "nullable": false,
+        "description": "Lowercase path segment unique within the owning container.",
+        "constraints": [
+          "lowercase",
+          "matches [a-z0-9][a-z0-9-]*",
+          "length <= 255",
+          "unique with project_uuid"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:96",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:121",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "description": "Human-readable task title.",
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:97",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "project_uuid",
+        "type": "UUIDv4String",
+        "required": true,
+        "nullable": false,
+        "description": "Container UUID that owns this task's path placement.",
+        "constraints": [
+          "references containers(uuid)",
+          "delete restricted by database foreign key"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:98",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:124",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "requested_by_project_id",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Source project id when another project requested the task.",
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:99",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:5",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "assigned_project_id",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Destination project id for cross-project task routing.",
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:100",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:6",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "state",
+        "type": "'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted'",
+        "required": true,
+        "nullable": false,
+        "description": "Lifecycle or visibility state accepted by domain validation.",
+        "constraints": [
+          "validated by domain.ValidateState",
+          "database CHECK enforces the same current literals"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:101",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:20",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000009_idea_state.sql:36",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "priority",
+        "type": "1 | 2 | 3 | 4",
+        "required": true,
+        "nullable": false,
+        "description": "Relative priority where 1 is highest and 4 is lowest.",
+        "constraints": [
+          "validated by domain.ValidatePriority",
+          "database default is 3"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:102",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:30",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:126",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "kind",
+        "type": "'task' | 'subtask' | 'spike' | 'bug' | 'chore'",
+        "required": true,
+        "nullable": false,
+        "description": "Work-item category accepted by domain validation.",
+        "constraints": [
+          "database default is task"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:103",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:61",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000002_planning_layer.sql:147",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "parent_task_uuid",
+        "type": "UUIDv4String",
+        "required": false,
+        "nullable": true,
+        "description": "Parent task UUID when this task is represented as a subtask.",
+        "constraints": [
+          "parent and child must share a container on update",
+          "max subtask depth is 1",
+          "self-parenting is rejected"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:104",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/store/tasks.go:363",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000002_planning_layer.sql:149",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "assignee_actor_uuid",
+        "type": "UUIDv4String",
+        "required": false,
+        "nullable": true,
+        "description": "Actor UUID for the currently assigned human or agent.",
+        "constraints": [
+          "references actors(uuid)",
+          "set null on actor deletion"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:105",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000002_planning_layer.sql:151",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "acknowledged_at",
+        "type": "RFC3339Timestamp",
+        "required": false,
+        "nullable": true,
+        "description": "Timestamp marking acknowledgement of a routed request.",
+        "constraints": [
+          "serialized by Go time.Time as RFC3339-compatible JSON"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:106",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:7",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "resolution",
+        "type": "'done' | 'wont_do' | 'duplicate' | 'needs_info'",
+        "required": false,
+        "nullable": true,
+        "description": "Final or triage resolution accepted by domain validation.",
+        "constraints": [
+          "validated by domain.ValidateResolution"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:107",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:71",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:8",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "cp_project_id",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Control-plane project binding for async coordination.",
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:108",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000006_async_run_linkage.sql:5",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "cp_work_item_id",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Stable control-plane WorkItem binding across multiple runs.",
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:109",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000011_cp_work_item_id.sql:5",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "cp_run_id",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Control-plane run id for the current or latest async run.",
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:110",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000006_async_run_linkage.sql:6",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "session_id",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "JSON field backed by the cp_session_id database column.",
+        "constraints": [
+          "database column name is cp_session_id"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:111",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000006_async_run_linkage.sql:7",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "run_status",
+        "type": "'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'",
+        "required": false,
+        "nullable": true,
+        "description": "Async run status accepted by domain validation.",
+        "constraints": [
+          "validated by domain.ValidateRunStatus",
+          "database CHECK enforces the same literals"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:113",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:81",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000006_async_run_linkage.sql:9",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "workflow_preset",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Workflow preset name for ACP workflow handling.",
+        "constraints": [
+          "must be all null or all set with preset_version and phase"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:114",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000013_task_workflow_schema.sql:3",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "preset_version",
+        "type": "number",
+        "required": false,
+        "nullable": true,
+        "description": "Workflow preset version paired with workflow_preset and phase.",
+        "constraints": [
+          "must be all null or all set with workflow_preset and phase"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:115",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000013_task_workflow_schema.sql:4",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "phase",
+        "type": "string",
+        "required": false,
+        "nullable": true,
+        "description": "Workflow phase paired with workflow_preset and preset_version.",
+        "constraints": [
+          "must be all null or all set with workflow_preset and preset_version"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:116",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000013_task_workflow_schema.sql:5",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "risk_class",
+        "type": "'low' | 'medium' | 'high'",
+        "required": false,
+        "nullable": true,
+        "description": "Workflow risk classification accepted by domain validation.",
+        "constraints": [
+          "validated by domain.ValidateTaskRiskClass",
+          "database CHECK enforces the same literals when non-null"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:117",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/validation.go:105",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000013_task_workflow_schema.sql:6",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "start_at",
+        "type": "RFC3339Timestamp",
+        "required": false,
+        "nullable": true,
+        "description": "Planned or actual start timestamp.",
+        "constraints": [
+          "validated by domain.ValidateTimestamp when supplied through validation paths"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:118",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:127",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "due_at",
+        "type": "RFC3339Timestamp",
+        "required": false,
+        "nullable": true,
+        "description": "Due timestamp used for sorting and planning.",
+        "constraints": [
+          "validated by domain.ValidateTimestamp when supplied through validation paths"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:119",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:128",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "labels",
+        "type": "JSONText<unknown[]>",
+        "required": false,
+        "nullable": true,
+        "description": "JSON array stored as SQLite TEXT in the database/domain field.",
+        "constraints": [
+          "semantic shape is an array",
+          "stored as text"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:120",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:129",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "meta",
+        "type": "JSONText<Record<string, unknown>>",
+        "required": false,
+        "nullable": true,
+        "description": "JSON object stored as SQLite TEXT for tool or agent metadata.",
+        "constraints": [
+          "semantic shape is an object",
+          "stored as text"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:121",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000008_task_meta.sql:4",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "description": "Markdown task body used for context, acceptance criteria, and progress handoff.",
+        "constraints": [
+          "database default is empty string"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:122",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:130",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "specification",
+        "type": "string",
+        "required": true,
+        "nullable": false,
+        "description": "Additional specification text stored separately from the description.",
+        "constraints": [
+          "database default is empty string"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:123",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000012_task_specification.sql:2",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "etag",
+        "type": "number",
+        "required": true,
+        "nullable": false,
+        "description": "Optimistic concurrency token incremented on task mutation.",
+        "constraints": [
+          "database default is 1"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:124",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/store/tasks.go:283",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:131",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "created_at",
+        "type": "RFC3339Timestamp",
+        "required": true,
+        "nullable": false,
+        "description": "Timestamp when the task row was created.",
+        "constraints": [
+          "database default uses UTC strftime"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:125",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:132",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "updated_at",
+        "type": "RFC3339Timestamp",
+        "required": true,
+        "nullable": false,
+        "description": "Timestamp touched by updates for recency and audit views.",
+        "constraints": [
+          "database default uses UTC strftime",
+          "update paths touch this field"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:126",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:133",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000010_task_touch_triggers.sql:1",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "completed_at",
+        "type": "RFC3339Timestamp",
+        "required": false,
+        "nullable": true,
+        "description": "Timestamp set when state transitions to completed.",
+        "constraints": [
+          "managed by task state consistency trigger"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:127",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:134",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "archived_at",
+        "type": "RFC3339Timestamp",
+        "required": false,
+        "nullable": true,
+        "description": "Timestamp set when the task is archived.",
+        "constraints": [
+          "managed by task state consistency trigger"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:128",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:135",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "deleted_at",
+        "type": "RFC3339Timestamp",
+        "required": false,
+        "nullable": true,
+        "description": "Timestamp set on transition to deleted and cleared on restore.",
+        "constraints": [
+          "managed by deleted_at and undelete triggers"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:129",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000004_deleted_state.sql:49",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "created_by_actor_uuid",
+        "type": "UUIDv4String",
+        "required": true,
+        "nullable": false,
+        "description": "Actor UUID that created the task.",
+        "constraints": [
+          "references actors(uuid)",
+          "delete restricted by database foreign key"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:130",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:136",
+            "authority": "authoritative"
+          }
+        ]
+      },
+      {
+        "name": "updated_by_actor_uuid",
+        "type": "UUIDv4String",
+        "required": true,
+        "nullable": false,
+        "description": "Actor UUID responsible for the most recent mutation.",
+        "constraints": [
+          "references actors(uuid)",
+          "delete restricted by database foreign key"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:131",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/store/tasks.go:284",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000001_baseline.sql:137",
+            "authority": "authoritative"
+          }
+        ]
+      }
+    ],
+    "examples": [],
+    "unknowns": [
+      "No nested labels or meta schema is defined in the Task domain type."
+    ],
+    "notes": [
+      "required and nullable are independent dimensions.",
+      "Database-only sdk_session_id is omitted because the Task JSON tag is json:\"-\".",
+      "session_id is the JSON name for the cp_session_id database column."
+    ]
+  }
+}

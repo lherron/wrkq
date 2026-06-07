@@ -119,6 +119,52 @@ func TestTaskStore_Create(t *testing.T) {
 	}
 }
 
+func TestTaskStore_Create_CreatorScopeRef(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	containerUUID := setupTestContainer(t, database, actorUUID)
+	s := New(database)
+
+	// With a scopeRef: it is persisted verbatim.
+	withScope, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:            "scoped-task",
+		Title:           "Scoped",
+		ProjectUUID:     containerUUID,
+		State:           "open",
+		Priority:        2,
+		CreatorScopeRef: "agent:clod:project:wrkq:task:primary",
+	})
+	if err != nil {
+		t.Fatalf("Create (with scope) failed: %v", err)
+	}
+	var got *string
+	if err := database.QueryRow("SELECT created_by_scope_ref FROM tasks WHERE uuid = ?", withScope.UUID).Scan(&got); err != nil {
+		t.Fatalf("scan scope ref: %v", err)
+	}
+	if got == nil || *got != "agent:clod:project:wrkq:task:primary" {
+		t.Errorf("created_by_scope_ref = %v, want agent:clod:project:wrkq:task:primary", got)
+	}
+
+	// Without a scopeRef: column stays NULL (falls back to actor at display time).
+	noScope, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "unscoped-task",
+		Title:       "Unscoped",
+		ProjectUUID: containerUUID,
+		State:       "open",
+		Priority:    2,
+	})
+	if err != nil {
+		t.Fatalf("Create (no scope) failed: %v", err)
+	}
+	var none *string
+	if err := database.QueryRow("SELECT created_by_scope_ref FROM tasks WHERE uuid = ?", noScope.UUID).Scan(&none); err != nil {
+		t.Fatalf("scan scope ref: %v", err)
+	}
+	if none != nil {
+		t.Errorf("created_by_scope_ref = %q, want NULL", *none)
+	}
+}
+
 func TestTaskStore_UpdateFields(t *testing.T) {
 	database := setupTestDB(t)
 	actorUUID := setupTestActor(t, database)

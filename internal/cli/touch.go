@@ -280,8 +280,9 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				return nil
 			}(),
-			DueAt:   touchDueAt,
-			StartAt: touchStartAt,
+			DueAt:           touchDueAt,
+			StartAt:         touchStartAt,
+			CreatorScopeRef: app.ScopeRef,
 		})
 		if err != nil {
 			return err
