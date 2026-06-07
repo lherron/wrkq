@@ -942,19 +942,43 @@ func buildActorPayload(a sourceActor) map[string]any {
 	return payload
 }
 
+// mergeRootUUID resolves the singleton root container by kind. A nil "top-level"
+// parent in the merge model now means "child of the root".
+func mergeRootUUID(exec *mergeExecutor) (string, error) {
+	var u string
+	if err := exec.QueryRow(`SELECT uuid FROM containers WHERE kind = 'root'`).Scan(&u); err != nil {
+		return "", fmt.Errorf("resolve root container: %w", err)
+	}
+	return u, nil
+}
+
 func ensurePrefixChain(exec *mergeExecutor, writer *events.Writer, actorUUID string, prefix string, report *mergeReport, dryRun bool) (*string, string, error) {
 	segments := paths.SplitPath(prefix)
 	if len(segments) == 0 {
 		return nil, "", fmt.Errorf("invalid prefix")
 	}
+	rootUUID, err := mergeRootUUID(exec)
+	if err != nil {
+		return nil, "", err
+	}
 	var parentUUID *string
 	parentPath := ""
 
 	for idx, seg := range segments[:len(segments)-1] {
+		// A nil parent denotes a top-level segment, which is a project under the
+		// root; deeper segments are directories under their parent.
+		lookupParent := parentUUID
+		insertParent := parentUUID
+		segKind := "directory"
+		if parentUUID == nil {
+			lookupParent = &rootUUID
+			insertParent = &rootUUID
+			segKind = "project"
+		}
 		var existingUUID string
 		err := exec.QueryRow(`
 			SELECT uuid FROM containers WHERE parent_uuid IS ? AND slug = ?
-		`, parentUUID, seg).Scan(&existingUUID)
+		`, lookupParent, seg).Scan(&existingUUID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, "", fmt.Errorf("failed to lookup prefix container: %w", err)
 		}
@@ -965,12 +989,12 @@ func ensurePrefixChain(exec *mergeExecutor, writer *events.Writer, actorUUID str
 				_, err := exec.Exec(`
 					INSERT INTO containers (uuid, id, slug, title, description, parent_uuid, kind, sort_index,
 						created_by_actor_uuid, updated_by_actor_uuid)
-					VALUES (?, '', ?, ?, '', ?, 'project', 0, ?, ?)
-				`, newUUID, seg, title, parentUUID, actorUUID, actorUUID)
+					VALUES (?, '', ?, ?, '', ?, ?, 0, ?, ?)
+				`, newUUID, seg, title, insertParent, segKind, actorUUID, actorUUID)
 				if err != nil {
 					return nil, "", fmt.Errorf("failed to create prefix container: %w", err)
 				}
-				payload := map[string]any{"slug": seg, "title": title, "kind": "project"}
+				payload := map[string]any{"slug": seg, "title": title, "kind": segKind}
 				if err := logMergeEvent(exec, writer, actorUUID, "container", newUUID, "container.created", nil, payload); err != nil {
 					return nil, "", err
 				}
@@ -1097,8 +1121,19 @@ func mergeContainer(exec *mergeExecutor, writer *events.Writer, actorUUID string
 	updated := false
 	renamed := false
 
+	// A nil desired parent means "top-level", which under the root model is a
+	// child of the singleton root rather than a null-parent row.
+	effectiveParentUUID := desiredParentUUID
+	if effectiveParentUUID == nil {
+		rootUUID, err := mergeRootUUID(exec)
+		if err != nil {
+			return "", "", "", false, false, false, err
+		}
+		effectiveParentUUID = &rootUUID
+	}
+
 	resolveSlug := func() (string, bool, error) {
-		return ensureUniqueContainerSlug(exec, desiredParentUUID, c.UUID, desiredSlug)
+		return ensureUniqueContainerSlug(exec, effectiveParentUUID, c.UUID, desiredSlug)
 	}
 	_ = actualSlug // assigned below
 
@@ -1123,7 +1158,7 @@ func mergeContainer(exec *mergeExecutor, writer *events.Writer, actorUUID string
 				INSERT INTO containers (uuid, id, slug, title, description, parent_uuid, kind, section_uuid, sort_index,
 					etag, created_at, updated_at, archived_at, created_by_actor_uuid, updated_by_actor_uuid)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, c.UUID, idValue, actualSlug, c.Title, c.Description, desiredParentUUID, c.Kind,
+			`, c.UUID, idValue, actualSlug, c.Title, c.Description, effectiveParentUUID, c.Kind,
 				nullOrValue(c.SectionUUID), c.SortIndex, c.ETag, c.CreatedAt, c.UpdatedAt,
 				nullOrValue(c.ArchivedAt), mapActor(actorMap, c.CreatedBy), mapActor(actorMap, c.UpdatedBy))
 			if err != nil {
@@ -1149,7 +1184,7 @@ func mergeContainer(exec *mergeExecutor, writer *events.Writer, actorUUID string
 					SET slug = ?, parent_uuid = ?, title = ?, description = ?, kind = ?, section_uuid = ?, sort_index = ?,
 						etag = ?, archived_at = ?, updated_by_actor_uuid = ?
 					WHERE uuid = ?
-				`, actualSlug, desiredParentUUID, c.Title, c.Description, c.Kind, nullOrValue(c.SectionUUID), c.SortIndex,
+				`, actualSlug, effectiveParentUUID, c.Title, c.Description, c.Kind, nullOrValue(c.SectionUUID), c.SortIndex,
 					c.ETag, nullOrValue(c.ArchivedAt), mapActor(actorMap, c.UpdatedBy), c.UUID)
 				if err != nil {
 					return "", "", "", false, false, false, fmt.Errorf("failed to update container %s: %w", c.UUID, err)

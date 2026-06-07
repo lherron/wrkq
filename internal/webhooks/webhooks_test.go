@@ -84,9 +84,9 @@ func TestResolveWebhookTargets(t *testing.T) {
 	actorUUID := setupTestActor(t, database)
 	s := store.New(database)
 
-	root, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "root"})
+	root, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "proj", Kind: "project"})
 	if err != nil {
-		t.Fatalf("failed to create root container: %v", err)
+		t.Fatalf("failed to create project container: %v", err)
 	}
 	child, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "child", ParentUUID: &root.UUID})
 	if err != nil {
