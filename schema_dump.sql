@@ -8,7 +8,6 @@ CREATE TABLE container_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE task_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE attachment_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE event_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
-CREATE TABLE handoff_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE comment_sequences (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL DEFAULT 0
@@ -47,49 +46,6 @@ CREATE TRIGGER actors_au_touch
 AFTER UPDATE ON actors
 BEGIN
   UPDATE actors SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-   WHERE rowid = NEW.rowid;
-END;
-CREATE TABLE IF NOT EXISTS "containers" (
-  uuid TEXT NOT NULL PRIMARY KEY
-        DEFAULT (
-          lower(
-            hex(randomblob(4)) || '-' ||
-            hex(randomblob(2)) || '-' ||
-            '4' || substr(hex(randomblob(2)),2) || '-' ||
-            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
-            hex(randomblob(6))
-          )
-        ),
-  id   TEXT UNIQUE,
-  parent_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
-  slug TEXT NOT NULL
-       CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
-  title TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  etag INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  archived_at TEXT,
-  created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
-  updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT
-, kind TEXT NOT NULL DEFAULT 'project', sort_index INTEGER NOT NULL DEFAULT 0, section_uuid TEXT REFERENCES sections(uuid) ON DELETE SET NULL, webhook_urls TEXT);
-CREATE UNIQUE INDEX containers_unique_slug_in_parent
-  ON containers(parent_uuid, slug) WHERE parent_uuid IS NOT NULL;
-CREATE UNIQUE INDEX containers_unique_root_slug
-  ON containers(slug) WHERE parent_uuid IS NULL;
-CREATE TRIGGER containers_ai_friendly
-AFTER INSERT ON containers
-WHEN NEW.id IS NULL OR NEW.id = ''
-BEGIN
-  INSERT INTO container_seq (id) VALUES (NULL);
-  UPDATE containers
-     SET id = 'P-' || printf('%05d', last_insert_rowid())
-   WHERE rowid = NEW.rowid;
-END;
-CREATE TRIGGER containers_au_touch
-AFTER UPDATE ON containers
-BEGIN
-  UPDATE containers SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
    WHERE rowid = NEW.rowid;
 END;
 CREATE TABLE IF NOT EXISTS "attachments" (
@@ -150,70 +106,7 @@ CREATE TABLE comments (
 );
 CREATE INDEX idx_comments_task_created ON comments(task_uuid, created_at);
 CREATE INDEX idx_comments_actor_created ON comments(actor_uuid, created_at);
-CREATE TABLE event_log (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  actor_uuid    TEXT,
-  resource_type TEXT CHECK (resource_type IN ('task','container','attachment','actor','config','system','comment','handoff')),
-  resource_uuid TEXT,
-  event_type    TEXT NOT NULL,
-  etag          INTEGER,
-  payload       TEXT
-);
-CREATE INDEX event_log_resource_idx ON event_log(resource_type, resource_uuid, id DESC);
-CREATE TABLE handoffs (
-  uuid TEXT PRIMARY KEY,
-  id TEXT NOT NULL UNIQUE,
-  scope_ref TEXT NOT NULL,
-  scope_kind TEXT NOT NULL,
-  agent_id TEXT NOT NULL,
-  project_id TEXT NOT NULL,
-  agent_actor_uuid TEXT,
-  project_container_uuid TEXT,
-  created_by_agent_id TEXT NOT NULL,
-  created_by_actor_uuid TEXT,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending','acknowledged')),
-  idempotency_key TEXT,
-  acknowledged_at TEXT,
-  acknowledged_by_agent_id TEXT,
-  acknowledged_by_actor_uuid TEXT,
-  acknowledgement_note TEXT,
-  meta TEXT,
-  etag INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-
-  FOREIGN KEY (agent_actor_uuid) REFERENCES actors(uuid) ON DELETE SET NULL,
-  FOREIGN KEY (project_container_uuid) REFERENCES containers(uuid) ON DELETE SET NULL,
-  FOREIGN KEY (created_by_actor_uuid) REFERENCES actors(uuid) ON DELETE SET NULL,
-  FOREIGN KEY (acknowledged_by_actor_uuid) REFERENCES actors(uuid) ON DELETE SET NULL,
-
-  CHECK (length(id) > 0),
-  CHECK (length(title) > 0),
-  CHECK (length(body) > 0),
-  CHECK (etag >= 1),
-  CHECK (scope_kind IN ('agent','project','project-role','project-task','project-task-role'))
-);
-CREATE INDEX handoffs_scope_status_idx ON handoffs(scope_ref, status, created_at);
-CREATE INDEX handoffs_agent_idx ON handoffs(agent_id, project_id, status);
-CREATE INDEX handoffs_updated_idx ON handoffs(updated_at);
-CREATE UNIQUE INDEX handoffs_idempotency_idx ON handoffs(scope_ref, idempotency_key)
-  WHERE idempotency_key IS NOT NULL;
 CREATE TABLE section_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
-CREATE TRIGGER containers_kind_check_insert
-BEFORE INSERT ON containers
-WHEN NEW.kind NOT IN ('project', 'feature', 'area', 'misc')
-BEGIN
-  SELECT RAISE(ABORT, 'Invalid container kind: must be project, feature, area, or misc');
-END;
-CREATE TRIGGER containers_kind_check_update
-BEFORE UPDATE OF kind ON containers
-WHEN NEW.kind NOT IN ('project', 'feature', 'area', 'misc')
-BEGIN
-  SELECT RAISE(ABORT, 'Invalid container kind: must be project, feature, area, or misc');
-END;
 CREATE TABLE sections (
   uuid TEXT NOT NULL PRIMARY KEY
         DEFAULT (
@@ -269,7 +162,6 @@ BEGIN
 END;
 CREATE INDEX sections_project_idx ON sections(project_uuid);
 CREATE INDEX sections_role_idx ON sections(role);
-CREATE INDEX containers_section_idx ON containers(section_uuid) WHERE section_uuid IS NOT NULL;
 CREATE TABLE task_relations (
   from_task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
   to_task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
@@ -294,21 +186,6 @@ END;
 CREATE INDEX task_relations_to_idx ON task_relations(to_task_uuid);
 CREATE INDEX task_relations_from_idx ON task_relations(from_task_uuid);
 CREATE INDEX task_relations_kind_idx ON task_relations(kind);
-CREATE VIEW v_container_paths AS
-WITH RECURSIVE container_tree(uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level) AS (
-  SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, slug AS path, 0 AS level
-    FROM containers
-   WHERE parent_uuid IS NULL
-  UNION ALL
-  SELECT c.uuid, c.id, c.slug, c.title, c.parent_uuid, c.kind, c.section_uuid, c.sort_index,
-         ct.path || '/' || c.slug AS path,
-         ct.level + 1 AS level
-    FROM containers c
-    JOIN container_tree ct ON c.parent_uuid = ct.uuid
-)
-SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level
-  FROM container_tree
-/* v_container_paths(uuid,id,slug,title,parent_uuid,kind,section_uuid,sort_index,path,level) */;
 CREATE TABLE IF NOT EXISTS "tasks" (
   uuid TEXT PRIMARY KEY
        DEFAULT (
@@ -529,45 +406,6 @@ BEGIN
      SET id = 'TR-' || printf('%05d', last_insert_rowid())
    WHERE rowid = NEW.rowid;
 END;
-CREATE VIEW v_task_paths AS
-SELECT t.uuid,
-       t.id,
-       t.slug,
-       t.title,
-       t.state,
-       t.priority,
-       t.kind,
-       t.parent_task_uuid,
-       t.assignee_actor_uuid,
-       t.requested_by_project_id,
-       t.assigned_project_id,
-       t.acknowledged_at,
-       t.resolution,
-       t.cp_project_id,
-       t.cp_work_item_id,
-       t.cp_run_id,
-       t.cp_session_id,
-       t.sdk_session_id,
-       t.run_status,
-       t.workflow_preset,
-       t.preset_version,
-       t.phase,
-       t.risk_class,
-       t.start_at,
-       t.due_at,
-       t.labels,
-       t.meta,
-       t.etag,
-       t.created_at,
-       t.updated_at,
-       t.completed_at,
-       t.archived_at,
-       t.deleted_at,
-       t.project_uuid,
-       cp.path || '/' || t.slug AS path
-  FROM tasks t
-  JOIN v_container_paths cp ON cp.uuid = t.project_uuid
-/* v_task_paths(uuid,id,slug,title,state,priority,kind,parent_task_uuid,assignee_actor_uuid,requested_by_project_id,assigned_project_id,acknowledged_at,resolution,cp_project_id,cp_work_item_id,cp_run_id,cp_session_id,sdk_session_id,run_status,workflow_preset,preset_version,phase,risk_class,start_at,due_at,labels,meta,etag,created_at,updated_at,completed_at,archived_at,deleted_at,project_uuid,path) */;
 CREATE TABLE workflow_templates (
   id TEXT NOT NULL,
   version TEXT NOT NULL,
@@ -622,7 +460,7 @@ CREATE TABLE workflow_events (
   payload_json TEXT NOT NULL,
   prev_event_hash TEXT,
   event_hash TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')), request_hash TEXT, result_json TEXT,
   UNIQUE(instance_id, seq),
   UNIQUE(instance_id, idempotency_key)
 );
@@ -654,7 +492,7 @@ CREATE TABLE workflow_runs (
   started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   completed_at TEXT,
   terminal_result TEXT
-);
+, idempotency_key TEXT, request_hash TEXT);
 CREATE TABLE workflow_check_runs (
   id TEXT PRIMARY KEY,
   instance_id TEXT NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
@@ -680,10 +518,6 @@ CREATE TABLE workflow_evidence (
   kind TEXT NOT NULL,
   ref TEXT NOT NULL,
   summary TEXT,
-  facts_json TEXT CHECK (
-  facts_json IS NULL OR
-  (json_valid(facts_json) AND json_type(facts_json) = 'object')
-),
   data_json TEXT,
   source_json TEXT NOT NULL,
   actor TEXT,
@@ -691,7 +525,11 @@ CREATE TABLE workflow_evidence (
   run_id TEXT REFERENCES workflow_runs(id),
   task_etag_at_production TEXT,
   produced_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-);
+, facts_json TEXT
+CHECK (
+  facts_json IS NULL OR
+  (json_valid(facts_json) AND json_type(facts_json) = 'object')
+));
 CREATE TABLE workflow_check_run_evidence (
   check_run_id TEXT NOT NULL REFERENCES workflow_check_runs(id) ON DELETE CASCADE,
   evidence_id TEXT NOT NULL REFERENCES workflow_evidence(id) ON DELETE CASCADE,
@@ -725,4 +563,246 @@ CREATE TABLE workflow_effects (
   last_error TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+, lease_token TEXT);
+CREATE TABLE handoff_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TABLE handoffs (
+  uuid TEXT PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE,
+  scope_ref TEXT NOT NULL,
+  scope_kind TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  agent_actor_uuid TEXT,
+  project_container_uuid TEXT,
+  created_by_agent_id TEXT NOT NULL,
+  created_by_actor_uuid TEXT,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','acknowledged')),
+  idempotency_key TEXT,
+  acknowledged_at TEXT,
+  acknowledged_by_agent_id TEXT,
+  acknowledged_by_actor_uuid TEXT,
+  acknowledgement_note TEXT,
+  meta TEXT,
+  etag INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+
+  FOREIGN KEY (agent_actor_uuid) REFERENCES actors(uuid) ON DELETE SET NULL,
+  FOREIGN KEY (project_container_uuid) REFERENCES containers(uuid) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_actor_uuid) REFERENCES actors(uuid) ON DELETE SET NULL,
+  FOREIGN KEY (acknowledged_by_actor_uuid) REFERENCES actors(uuid) ON DELETE SET NULL,
+
+  CHECK (length(id) > 0),
+  CHECK (length(title) > 0),
+  CHECK (length(body) > 0),
+  CHECK (etag >= 1),
+  CHECK (scope_kind IN ('agent','project','project-role','project-task','project-task-role'))
 );
+CREATE INDEX handoffs_scope_status_idx ON handoffs(scope_ref, status, created_at);
+CREATE INDEX handoffs_agent_idx ON handoffs(agent_id, project_id, status);
+CREATE INDEX handoffs_updated_idx ON handoffs(updated_at);
+CREATE UNIQUE INDEX handoffs_idempotency_idx ON handoffs(scope_ref, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+CREATE TABLE event_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  actor_uuid    TEXT,
+  resource_type TEXT CHECK (resource_type IN ('task','container','attachment','actor','config','system','comment','handoff')),
+  resource_uuid TEXT,
+  event_type    TEXT NOT NULL,
+  etag          INTEGER,
+  payload       TEXT
+);
+CREATE INDEX event_log_resource_idx ON event_log(resource_type, resource_uuid, id DESC);
+CREATE TRIGGER comments_ai_touch_task
+AFTER INSERT ON comments
+BEGIN
+  UPDATE tasks
+     SET updated_by_actor_uuid = NEW.actor_uuid
+   WHERE uuid = NEW.task_uuid;
+END;
+CREATE TRIGGER comments_au_touch_task
+AFTER UPDATE ON comments
+BEGIN
+  UPDATE tasks
+     SET updated_by_actor_uuid = COALESCE(NEW.deleted_by_actor_uuid, NEW.actor_uuid)
+   WHERE uuid = NEW.task_uuid;
+END;
+CREATE TRIGGER comments_ad_touch_task
+AFTER DELETE ON comments
+BEGIN
+  UPDATE tasks
+     SET updated_by_actor_uuid = OLD.actor_uuid
+   WHERE uuid = OLD.task_uuid;
+END;
+CREATE TABLE IF NOT EXISTS "containers" (
+  uuid TEXT NOT NULL PRIMARY KEY
+        DEFAULT (
+          lower(
+            hex(randomblob(4)) || '-' ||
+            hex(randomblob(2)) || '-' ||
+            '4' || substr(hex(randomblob(2)),2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
+            hex(randomblob(6))
+          )
+        ),
+  id   TEXT UNIQUE,
+  parent_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
+  slug TEXT NOT NULL
+       CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  etag INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  archived_at TEXT,
+  created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid) ON DELETE RESTRICT,
+  kind TEXT NOT NULL DEFAULT 'directory',
+  sort_index INTEGER NOT NULL DEFAULT 0,
+  section_uuid TEXT REFERENCES sections(uuid) ON DELETE SET NULL,
+  webhook_urls TEXT
+);
+CREATE UNIQUE INDEX containers_unique_slug_in_parent
+  ON containers(parent_uuid, slug) WHERE parent_uuid IS NOT NULL;
+CREATE UNIQUE INDEX containers_unique_root_slug
+  ON containers(slug) WHERE parent_uuid IS NULL;
+CREATE INDEX containers_section_idx ON containers(section_uuid) WHERE section_uuid IS NOT NULL;
+CREATE TRIGGER containers_ai_friendly
+AFTER INSERT ON containers
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO container_seq (id) VALUES (NULL);
+  UPDATE containers
+     SET id = 'P-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER containers_au_touch
+AFTER UPDATE ON containers
+BEGIN
+  UPDATE containers SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+   WHERE rowid = NEW.rowid;
+END;
+CREATE VIEW v_task_paths AS
+SELECT t.uuid,
+       t.id,
+       t.slug,
+       t.title,
+       t.state,
+       t.priority,
+       t.kind,
+       t.parent_task_uuid,
+       t.assignee_actor_uuid,
+       t.requested_by_project_id,
+       t.assigned_project_id,
+       t.acknowledged_at,
+       t.resolution,
+       t.cp_project_id,
+       t.cp_work_item_id,
+       t.cp_run_id,
+       t.cp_session_id,
+       t.sdk_session_id,
+       t.run_status,
+       t.workflow_preset,
+       t.preset_version,
+       t.phase,
+       t.risk_class,
+       t.start_at,
+       t.due_at,
+       t.labels,
+       t.meta,
+       t.etag,
+       t.created_at,
+       t.updated_at,
+       t.completed_at,
+       t.archived_at,
+       t.deleted_at,
+       t.project_uuid,
+       cp.path || '/' || t.slug AS path
+  FROM tasks t
+  JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+/* v_task_paths(uuid,id,slug,title,state,priority,kind,parent_task_uuid,assignee_actor_uuid,requested_by_project_id,assigned_project_id,acknowledged_at,resolution,cp_project_id,cp_work_item_id,cp_run_id,cp_session_id,sdk_session_id,run_status,workflow_preset,preset_version,phase,risk_class,start_at,due_at,labels,meta,etag,created_at,updated_at,completed_at,archived_at,deleted_at,project_uuid,path) */;
+CREATE UNIQUE INDEX workflow_runs_instance_idempotency_key_unique
+ON workflow_runs(instance_id, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX workflow_runs_external_run_ref_unique
+ON workflow_runs(external_run_ref)
+WHERE external_run_ref IS NOT NULL AND external_run_ref <> '';
+CREATE TRIGGER containers_kind_check_insert
+BEFORE INSERT ON containers
+WHEN NEW.kind NOT IN ('project', 'directory', 'feature', 'area', 'root')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid container kind: must be project, directory, feature, area, or root');
+END;
+CREATE TRIGGER containers_kind_check_update
+BEFORE UPDATE OF kind ON containers
+WHEN NEW.kind NOT IN ('project', 'directory', 'feature', 'area', 'root')
+BEGIN
+  SELECT RAISE(ABORT, 'Invalid container kind: must be project, directory, feature, area, or root');
+END;
+CREATE VIEW v_container_paths AS
+WITH RECURSIVE container_tree(uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level) AS (
+  SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, slug AS path, 0 AS level
+    FROM containers
+   WHERE parent_uuid = '00000000-0000-4000-8000-000000000001'
+  UNION ALL
+  SELECT c.uuid, c.id, c.slug, c.title, c.parent_uuid, c.kind, c.section_uuid, c.sort_index,
+         ct.path || '/' || c.slug AS path,
+         ct.level + 1 AS level
+    FROM containers c
+    JOIN container_tree ct ON c.parent_uuid = ct.uuid
+)
+SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level
+  FROM container_tree
+/* v_container_paths(uuid,id,slug,title,parent_uuid,kind,section_uuid,sort_index,path,level) */;
+CREATE UNIQUE INDEX containers_single_root ON containers(kind) WHERE kind = 'root';
+CREATE TRIGGER containers_parent_kind_consistency_insert
+BEFORE INSERT ON containers
+WHEN NOT (
+  (NEW.kind = 'root'    AND NEW.parent_uuid IS NULL) OR
+  (NEW.kind = 'project' AND NEW.parent_uuid IS NOT NULL
+        AND NEW.parent_uuid = '00000000-0000-4000-8000-000000000001') OR
+  (NEW.kind NOT IN ('root', 'project') AND NEW.parent_uuid IS NOT NULL
+        AND NEW.parent_uuid <> '00000000-0000-4000-8000-000000000001')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'container parent/kind invariant: root=>null parent, project=>parent=root, other=>non-root non-null parent');
+END;
+CREATE TRIGGER containers_parent_kind_consistency_update
+BEFORE UPDATE OF kind, parent_uuid ON containers
+WHEN NOT (
+  (NEW.kind = 'root'    AND NEW.parent_uuid IS NULL) OR
+  (NEW.kind = 'project' AND NEW.parent_uuid IS NOT NULL
+        AND NEW.parent_uuid = '00000000-0000-4000-8000-000000000001') OR
+  (NEW.kind NOT IN ('root', 'project') AND NEW.parent_uuid IS NOT NULL
+        AND NEW.parent_uuid <> '00000000-0000-4000-8000-000000000001')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'container parent/kind invariant violated');
+END;
+CREATE TRIGGER containers_root_immutable_update
+BEFORE UPDATE OF parent_uuid, slug, kind, archived_at ON containers
+WHEN OLD.kind = 'root'
+BEGIN
+  SELECT RAISE(ABORT, 'root container is immutable (parent_uuid, slug, kind, archived_at)');
+END;
+CREATE TRIGGER containers_root_no_delete
+BEFORE DELETE ON containers
+WHEN OLD.kind = 'root'
+BEGIN
+  SELECT RAISE(ABORT, 'root container cannot be deleted');
+END;
+CREATE TRIGGER tasks_not_under_root_insert
+BEFORE INSERT ON tasks
+WHEN NEW.project_uuid = '00000000-0000-4000-8000-000000000001'
+BEGIN
+  SELECT RAISE(ABORT, 'tasks cannot be created directly under the root container');
+END;
+CREATE TRIGGER tasks_not_under_root_update
+BEFORE UPDATE OF project_uuid ON tasks
+WHEN NEW.project_uuid = '00000000-0000-4000-8000-000000000001'
+BEGIN
+  SELECT RAISE(ABORT, 'tasks cannot be moved directly under the root container');
+END;
