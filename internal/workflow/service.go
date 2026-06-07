@@ -71,6 +71,34 @@ func Hash(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+func previousEventHashTx(tx *sql.Tx, instanceID string) string {
+	var prev sql.NullString
+	_ = tx.QueryRow(`SELECT event_hash FROM workflow_events WHERE instance_id = ? ORDER BY seq DESC LIMIT 1`, instanceID).Scan(&prev)
+	if prev.Valid {
+		return prev.String
+	}
+	return ""
+}
+
+func chainedEventHash(prev string, payloadJSON []byte) string {
+	chainPayload, _ := json.Marshal(map[string]interface{}{
+		"prevEventHash": prev,
+		"payloadHash":   Hash(payloadJSON),
+	})
+	return Hash(chainPayload)
+}
+
+func canonicalHookCatalog(catalog *HookCatalog) ([]byte, string, error) {
+	if catalog == nil {
+		return nil, "", nil
+	}
+	canonical, err := json.Marshal(catalog)
+	if err != nil {
+		return nil, "", err
+	}
+	return canonical, Hash(canonical), nil
+}
+
 func (s *Service) ValidateTemplateFile(path string, catalog *HookCatalog) ValidateResult {
 	tpl, canonical, hash, err := LoadTemplateFile(path)
 	if err != nil {
@@ -163,6 +191,21 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			if req.Obligation != nil && tpl.ObligationKinds != nil && req.Obligation.Kind != "" {
 				if _, ok := tpl.ObligationKinds[req.Obligation.Kind]; !ok {
 					errs = append(errs, fmt.Sprintf("transition %s requires unknown obligation kind %s", tr.ID, req.Obligation.Kind))
+				}
+			}
+		}
+		if tr.SeparationOfDuty != nil && tpl.EvidenceKinds != nil {
+			for _, kind := range tr.SeparationOfDuty.DistinctActorFromEvidence {
+				if _, ok := tpl.EvidenceKinds[kind]; !ok {
+					errs = append(errs, fmt.Sprintf("transition %s SoD references unknown evidence kind %s", tr.ID, kind))
+				}
+			}
+			for _, pair := range tr.SeparationOfDuty.EvidenceActorPairsDistinct {
+				if _, ok := tpl.EvidenceKinds[pair.LeftKind]; !ok {
+					errs = append(errs, fmt.Sprintf("transition %s SoD references unknown evidence kind %s", tr.ID, pair.LeftKind))
+				}
+				if _, ok := tpl.EvidenceKinds[pair.RightKind]; !ok {
+					errs = append(errs, fmt.Sprintf("transition %s SoD references unknown evidence kind %s", tr.ID, pair.RightKind))
 				}
 			}
 		}
@@ -271,11 +314,23 @@ func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map
 	if errs := ValidateTemplate(tpl, canonical, catalog); len(errs) > 0 {
 		return nil, fmt.Errorf("invalid template: %s", strings.Join(errs, "; "))
 	}
-	var existingHash string
-	err = s.db.QueryRow(`SELECT hash FROM workflow_templates WHERE id = ? AND version = ?`, tpl.ID, tpl.Version).Scan(&existingHash)
+	catalogCanonical, catalogHash, err := canonicalHookCatalog(catalog)
+	if err != nil {
+		return nil, err
+	}
+	var existingHash, existingCatalogHash string
+	err = s.db.QueryRow(`SELECT hash, COALESCE(hook_catalog_hash, '') FROM workflow_templates WHERE id = ? AND version = ?`, tpl.ID, tpl.Version).Scan(&existingHash, &existingCatalogHash)
 	if err == nil {
 		if existingHash != hash {
 			return nil, fmt.Errorf("template %s@%s already installed with different hash", tpl.ID, tpl.Version)
+		}
+		if catalogHash != "" && existingCatalogHash != "" && existingCatalogHash != catalogHash {
+			return nil, fmt.Errorf("template %s@%s already installed with different hook catalog hash", tpl.ID, tpl.Version)
+		}
+		if catalogHash != "" && existingCatalogHash == "" {
+			if _, err := s.db.Exec(`UPDATE workflow_templates SET hook_catalog_json = ?, hook_catalog_hash = ? WHERE id = ? AND version = ?`, string(catalogCanonical), catalogHash, tpl.ID, tpl.Version); err != nil {
+				return nil, err
+			}
 		}
 		return map[string]interface{}{"id": tpl.ID, "version": tpl.Version, "hash": hash, "installed": false}, nil
 	}
@@ -283,9 +338,9 @@ func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map
 		return nil, err
 	}
 	_, err = s.db.Exec(`
-		INSERT INTO workflow_templates (id, version, hash, definition_json, installed_by)
-		VALUES (?, ?, ?, ?, ?)
-	`, tpl.ID, tpl.Version, hash, string(canonical), emptyToNil(actor))
+		INSERT INTO workflow_templates (id, version, hash, definition_json, installed_by, hook_catalog_json, hook_catalog_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, tpl.ID, tpl.Version, hash, string(canonical), emptyToNil(actor), nullIfEmpty(string(catalogCanonical)), nullIfEmpty(catalogHash))
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +383,21 @@ func (s *Service) ShowTemplate(ref string) (*Template, string, error) {
 	}
 	tpl, _, err := ParseTemplate([]byte(definition))
 	return tpl, hash, err
+}
+
+func (s *Service) storedHookCatalog(templateID, version string) (*HookCatalog, error) {
+	var raw sql.NullString
+	if err := s.db.QueryRow(`SELECT hook_catalog_json FROM workflow_templates WHERE id = ? AND version = ?`, templateID, version).Scan(&raw); err != nil {
+		return nil, err
+	}
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return nil, nil
+	}
+	var catalog HookCatalog
+	if err := json.Unmarshal([]byte(raw.String), &catalog); err != nil {
+		return nil, err
+	}
+	return &catalog, nil
 }
 
 func parseTemplateRef(ref string) (string, string, error) {
@@ -442,6 +512,39 @@ func loadTaskDoc(tx queryer, taskUUID string) (*taskDoc, error) {
 
 type queryer interface {
 	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
+type rowsQueryer interface {
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+}
+
+func taskRelationBlockers(q rowsQueryer, taskUUID string) ([]Blocker, error) {
+	rows, err := q.Query(`
+		SELECT b.id, b.state, COALESCE(b.title, '')
+		FROM task_relations r
+		JOIN tasks b ON b.uuid = r.from_task_uuid
+		WHERE r.to_task_uuid = ?
+		  AND r.kind = 'blocks'
+		  AND b.state NOT IN ('completed', 'cancelled', 'archived', 'deleted')
+		ORDER BY b.id
+	`, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var blockers []Blocker
+	for rows.Next() {
+		var id, state, title string
+		if err := rows.Scan(&id, &state, &title); err != nil {
+			return nil, err
+		}
+		msg := fmt.Sprintf("blocked by task %s in state %s", id, state)
+		if title != "" {
+			msg = fmt.Sprintf("blocked by task %s (%s) in state %s", id, title, state)
+		}
+		blockers = append(blockers, Blocker{Kind: "task_dependency", Ref: id, Message: msg})
+	}
+	return blockers, rows.Err()
 }
 
 func taskDocHash(t *taskDoc) string {
@@ -559,14 +662,15 @@ func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID strin
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
-	eventHash := Hash(payloadJSON)
+	prevHash := previousEventHashTx(tx, instanceID)
+	eventHash := chainedEventHash(prevHash, payloadJSON)
 	_, err = tx.Exec(`
 		INSERT INTO workflow_events (
 			id, instance_id, seq, schema_version, type, actor, role, run_id,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
-			idempotency_key, request_hash, result, result_json, payload_json, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?)
-	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), eventHash)
+			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	return id, err
 }
 
@@ -806,7 +910,11 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err != nil {
 			return err
 		}
-		source := map[string]interface{}{"type": "external_ref", "ref": params.Ref}
+		taskHashAtProduction := taskDocHash(task)
+		source := map[string]interface{}{"type": "external_ref", "ref": params.Ref, "taskHashAtProduction": taskHashAtProduction}
+		if len(dataRaw) > 0 {
+			source["dataHash"] = Hash(dataRaw)
+		}
 		sourceJSON, _ := json.Marshal(source)
 		var factsArg interface{}
 		var factsRaw json.RawMessage
@@ -816,9 +924,9 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		}
 		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
-			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, role, task_etag_at_production, produced_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.Actor), emptyToNil(params.Role), fmt.Sprint(task.ETag), now)
+			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, role, task_etag_at_production, task_hash_at_production, produced_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.Actor), emptyToNil(params.Role), fmt.Sprint(task.ETag), taskHashAtProduction, now)
 		if err != nil {
 			return err
 		}
@@ -866,7 +974,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.Actor); err != nil {
 			return err
 		}
-		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, TaskEtagAtProduction: fmt.Sprint(task.ETag), ProducedAt: now}
+		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
 		return nil
 	})
 	return ev, err
@@ -879,7 +987,7 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 	}
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, inst.ID)
 	if err != nil {
@@ -892,7 +1000,7 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
 	rows, err := tx.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, instanceID)
 	if err != nil {
@@ -905,7 +1013,7 @@ func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
 func (s *Service) ShowEvidence(id string) (*Evidence, error) {
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE id = ?
 	`, id)
 	if err != nil {
@@ -927,7 +1035,7 @@ func scanEvidenceRows(rows *sql.Rows) ([]Evidence, error) {
 	for rows.Next() {
 		var e Evidence
 		var facts, data, source string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &facts, &data, &source, &e.Actor, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.ProducedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &facts, &data, &source, &e.Actor, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.TaskHashAtProduction, &e.ProducedAt); err != nil {
 			return nil, err
 		}
 		if facts != "" {
@@ -1028,8 +1136,9 @@ func findTransition(tpl *Template, id string) (*TransitionSpec, error) {
 }
 
 func roleAllowed(role string, by []string) bool {
+	role = strings.TrimSpace(role)
 	if role == "" {
-		return true
+		return false
 	}
 	for _, b := range by {
 		if b == role {
@@ -1039,12 +1148,51 @@ func roleAllowed(role string, by []string) bool {
 	return false
 }
 
+func roleBindingAllowed(q queryer, inst *Instance, tpl *Template, role, actor string) bool {
+	role = strings.TrimSpace(role)
+	actor = strings.TrimSpace(actor)
+	if role == "" || actor == "" {
+		return false
+	}
+	if role == "system" || role == "supervisor" {
+		return true
+	}
+	if tpl != nil {
+		if spec, ok := tpl.Roles[role]; ok && len(spec.Actors) > 0 {
+			for _, allowed := range spec.Actors {
+				if allowed == "*" || allowed == actor {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	if inst == nil {
+		return false
+	}
+	var count int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM workflow_role_bindings WHERE instance_id = ? AND role = ?`, inst.ID, role).Scan(&count); err != nil {
+		return false
+	}
+	if count == 0 {
+		// Legacy/simple mode: require an authenticated actor and declared role, but do not
+		// require pre-binding until a binding exists for this role.
+		return true
+	}
+	var matched int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM workflow_role_bindings WHERE instance_id = ? AND role = ? AND actor = ?`, inst.ID, role, actor).Scan(&matched); err != nil {
+		return false
+	}
+	return matched > 0
+}
+
 type evalContext struct {
 	Evidence    []Evidence
 	Obligations []Obligation
 	Checks      map[string]CheckRun
 	Facts       map[string]interface{}
 	Task        *taskDoc
+	State       State
 }
 
 func evalPredicate(p Predicate, ctx evalContext) bool {
@@ -1112,6 +1260,14 @@ func resolveFact(ctx evalContext, path string) interface{} {
 		case "task.id":
 			return ctx.Task.ID
 		}
+	}
+	switch path {
+	case "workflow.status":
+		return ctx.State.Status
+	case "workflow.phase":
+		return ctx.State.Phase
+	case "workflow.outcome":
+		return ctx.State.Outcome
 	}
 	if ctx.Facts != nil {
 		return ctx.Facts[path]
@@ -1261,7 +1417,7 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: role, BlocksOn: []Blocker{{Kind: "role", Ref: role, Message: "role is not allowed for transition"}}})
 			continue
 		}
-		blockers := transitionBlockers(tr, ev, obl)
+		blockers := transitionBlockers(tr, ev, obl, taskDocHashOrEmpty(task))
 		if len(blockers) > 0 {
 			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: blockers})
 			for _, b := range blockers {
@@ -1274,7 +1430,13 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 			}
 			continue
 		}
-		checkBlockers := checkBlockers(tpl, tr, ev, facts, inst.ID, s.db)
+		checks := map[string]CheckRun{}
+		for _, checkID := range tr.Checks {
+			if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
+				checks[checkID] = latest
+			}
+		}
+		checkBlockers := checkCommitBlockers(tpl, tr, ev, facts, inst, task, ev, obl, checks, "", ownerRole, s.db)
 		if len(checkBlockers) > 0 {
 			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: checkBlockers})
 			addedEvidenceActions := map[string]bool{}
@@ -1287,21 +1449,64 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 					}
 					continue
 				}
-				if b.Kind == "check" {
+				if b.Kind == "check" || b.Kind == "stale_check" {
 					checkID := strings.TrimPrefix(b.Ref, "check:")
 					resp.Actions = append(resp.Actions, NextAction{ID: "run_check_" + checkID, Kind: "run_check", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 90, Why: b.Message, Unblocks: []string{tr.ID}, Command: fmt.Sprintf("wrkf check run %s %s", strings.TrimPrefix(inst.TaskRef, "wrkq:"), tr.ID), Guardrails: Guardrails{Hard: []string{"do not commit stale check results"}, Warnings: []string{}}})
 				}
 			}
 			continue
 		}
-		expected := tr.Outcomes[0].To
+		if sodBlockers := separationOfDutyBlockers(tr, ev, ""); len(sodBlockers) > 0 {
+			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: sodBlockers})
+			continue
+		}
+		ctx := evalContext{Evidence: ev, Obligations: obl, Checks: checks, Facts: facts, Task: task, State: inst.State()}
+		guardBlocked := false
+		for _, guard := range tr.Guards {
+			if !evalPredicate(guard, ctx) {
+				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "guard", Message: "transition guard failed"}}})
+				guardBlocked = true
+				break
+			}
+		}
+		if guardBlocked {
+			continue
+		}
+		var chosen *OutcomeCase
+		for i := range tr.Outcomes {
+			out := &tr.Outcomes[i]
+			if evalPredicate(out.When, ctx) {
+				chosen = out
+				break
+			}
+		}
+		if chosen == nil {
+			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}}})
+			continue
+		}
+		if chosen.To.Status == "closed" {
+			depBlockers, depErr := taskRelationBlockers(s.db, inst.TaskUUID)
+			if depErr != nil {
+				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "task_dependency", Message: depErr.Error()}}})
+				continue
+			}
+			if len(depBlockers) > 0 {
+				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: depBlockers})
+				continue
+			}
+		}
+		if postBlockers := postconditionBlockers(inst, tr, chosen, ev, obl, checks, task); len(postBlockers) > 0 {
+			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: postBlockers})
+			continue
+		}
+		expected := chosen.To
 		resp.Actions = append(resp.Actions, NextAction{ID: "transition_" + tr.ID, Kind: "transition", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 100, Why: "transition is legal and prerequisites are satisfied", Command: fmt.Sprintf("wrkf transition %s %s --role %s --expect-revision %d", strings.TrimPrefix(inst.TaskRef, "wrkq:"), tr.ID, ownerRole, inst.Revision), ExpectedState: &expected, Guardrails: Guardrails{Hard: []string{"provide expected revision"}, Warnings: []string{}}})
 	}
 	sort.SliceStable(resp.Actions, func(i, j int) bool { return resp.Actions[i].Rank > resp.Actions[j].Rank })
 	return resp, nil
 }
 
-func checkBlockers(tpl *Template, tr TransitionSpec, ev []Evidence, facts map[string]interface{}, instanceID string, database *db.DB) []Blocker {
+func checkCommitBlockers(tpl *Template, tr TransitionSpec, ev []Evidence, facts map[string]interface{}, inst *Instance, task *taskDoc, currentEv []Evidence, currentObl []Obligation, checks map[string]CheckRun, actor, role string, database *db.DB) []Blocker {
 	var blockers []Blocker
 	haveEvidence := map[string]bool{}
 	for _, e := range ev {
@@ -1318,10 +1523,20 @@ func checkBlockers(tpl *Template, tr TransitionSpec, ev []Evidence, facts map[st
 				blockers = append(blockers, Blocker{Kind: "check_input", Ref: "evidence:" + kind, Message: fmt.Sprintf("%s requires %s evidence before check %s can pass", tr.ID, kind, checkID)})
 			}
 		}
-		if len(blockers) > 0 {
+		cr, ok := checks[checkID]
+		if !ok && database != nil {
+			cr, ok = latestCheckFor(database, inst.ID, tr.ID, checkID)
+		}
+		if !ok {
+			blockers = append(blockers, Blocker{Kind: "check", Ref: "check:" + checkID, Message: fmt.Sprintf("%s requires latest %s check to pass", tr.ID, checkID)})
 			continue
 		}
-		if latest, ok := latestCheckFor(database, instanceID, tr.ID, checkID); !ok || latest.Verdict != "pass" {
+		currentHash := currentCheckInputHash(inst, &tr, cr.Actor, cr.Role, task, currentEv, currentObl)
+		if cr.InputHash != "" && currentHash != "" && cr.InputHash != currentHash {
+			blockers = append(blockers, Blocker{Kind: "stale_check", Ref: "check:" + checkID, Message: fmt.Sprintf("%s check %s was produced from stale inputs", tr.ID, checkID)})
+			continue
+		}
+		if cr.Verdict != "pass" {
 			blockers = append(blockers, Blocker{Kind: "check", Ref: "check:" + checkID, Message: fmt.Sprintf("%s requires latest %s check to pass", tr.ID, checkID)})
 		}
 	}
@@ -1435,7 +1650,55 @@ func factPathBool(facts map[string]interface{}, path string) bool {
 	return b
 }
 
-func transitionBlockers(tr TransitionSpec, ev []Evidence, obl []Obligation) []Blocker {
+func separationOfDutyBlockers(tr TransitionSpec, ev []Evidence, actor string) []Blocker {
+	if tr.SeparationOfDuty == nil {
+		return nil
+	}
+	var blockers []Blocker
+	for _, kind := range tr.SeparationOfDuty.DistinctActorFromEvidence {
+		latest, ok := latestEvidenceByKind(ev, kind)
+		if !ok || strings.TrimSpace(actor) == "" || strings.TrimSpace(latest.Actor) == "" {
+			continue
+		}
+		if latest.Actor == actor {
+			blockers = append(blockers, Blocker{Kind: "separation_of_duty", Ref: latest.ID, Message: fmt.Sprintf("transition actor must differ from %s evidence producer", kind)})
+		}
+	}
+	for _, pair := range tr.SeparationOfDuty.EvidenceActorPairsDistinct {
+		left, leftOK := latestEvidenceByKind(ev, pair.LeftKind)
+		right, rightOK := latestEvidenceByKind(ev, pair.RightKind)
+		if !leftOK || !rightOK || strings.TrimSpace(left.Actor) == "" || strings.TrimSpace(right.Actor) == "" {
+			continue
+		}
+		if left.Actor == right.Actor {
+			blockers = append(blockers, Blocker{Kind: "separation_of_duty", Ref: left.ID + ":" + right.ID, Message: fmt.Sprintf("%s and %s evidence must be produced by different actors", pair.LeftKind, pair.RightKind)})
+		}
+	}
+	return blockers
+}
+
+func postconditionBlockers(inst *Instance, tr TransitionSpec, chosen *OutcomeCase, ev []Evidence, obl []Obligation, checks map[string]CheckRun, task *taskDoc) []Blocker {
+	if chosen == nil || len(tr.Postconditions) == 0 {
+		return nil
+	}
+	ctx := evalContext{Evidence: ev, Obligations: obl, Checks: checks, Facts: taskFacts(task), Task: task, State: chosen.To}
+	var blockers []Blocker
+	for i, post := range tr.Postconditions {
+		if !evalPredicate(post, ctx) {
+			blockers = append(blockers, Blocker{Kind: "postcondition", Ref: fmt.Sprintf("%s:%d", tr.ID, i), Message: "transition postcondition failed"})
+		}
+	}
+	return blockers
+}
+
+func taskDocHashOrEmpty(task *taskDoc) string {
+	if task == nil {
+		return ""
+	}
+	return taskDocHash(task)
+}
+
+func transitionBlockers(tr TransitionSpec, ev []Evidence, obl []Obligation, currentTaskHash string) []Blocker {
 	var blockers []Blocker
 	for _, o := range obl {
 		if o.Blocking && o.Status == "open" {
@@ -1447,6 +1710,10 @@ func transitionBlockers(tr TransitionSpec, ev []Evidence, obl []Obligation) []Bl
 			match := matchEvidenceRequirement(ev, *req.Evidence)
 			if !match.OK {
 				blockers = append(blockers, Blocker{Kind: "evidence", Ref: req.Evidence.Kind, Message: match.Detail})
+				continue
+			}
+			if match.Latest != nil && evidenceStaleForTask(*match.Latest, currentTaskHash) {
+				blockers = append(blockers, Blocker{Kind: "stale_evidence", Ref: match.Latest.ID, Message: fmt.Sprintf("required evidence %s is stale for current task document", match.Latest.ID)})
 			}
 		}
 		if req.Obligation != nil {
@@ -1476,6 +1743,13 @@ func transitionBlockers(tr TransitionSpec, ev []Evidence, obl []Obligation) []Bl
 		}
 	}
 	return blockers
+}
+
+func evidenceStaleForTask(e Evidence, currentTaskHash string) bool {
+	if strings.TrimSpace(currentTaskHash) == "" || strings.TrimSpace(e.TaskHashAtProduction) == "" {
+		return false
+	}
+	return e.TaskHashAtProduction != currentTaskHash
 }
 
 func latestCheckFor(database *db.DB, instanceID, transitionID, checkID string) (CheckRun, bool) {
@@ -1581,13 +1855,16 @@ func (s *Service) RunSingleHook(taskSelector, transitionID, hookID, actor, role 
 	return s.executeCheck(inst, tr, hookID, check, actor, role, catalog, templateDir, false)
 }
 
-func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID string, check CheckSpec, actor, role string, catalog *HookCatalog, templateDir string, persist bool) (*CheckRun, error) {
-	task, _ := loadTaskDoc(s.db, inst.TaskUUID)
-	ev, _ := listEvidenceForInstance(s.db, inst.ID)
-	obl, _ := listObligationsForInstance(s.db, inst.ID, false)
+func buildCheckInput(inst *Instance, tr *TransitionSpec, actor, role string, task *taskDoc, ev []Evidence, obl []Obligation) ([]byte, map[string]interface{}) {
 	facts := taskFacts(task)
+	taskHash := ""
+	taskEtag := ""
+	if task != nil {
+		taskHash = taskDocHash(task)
+		taskEtag = fmt.Sprint(task.ETag)
+	}
 	input := map[string]interface{}{
-		"task":        map[string]interface{}{"ref": inst.TaskRef, "uuid": inst.TaskUUID, "etag": inst.TaskDocEtag, "hash": inst.TaskDocHash},
+		"task":        map[string]interface{}{"ref": inst.TaskRef, "uuid": inst.TaskUUID, "etag": taskEtag, "hash": taskHash},
 		"workflow":    map[string]interface{}{"instanceId": inst.ID, "state": inst.State(), "revision": inst.Revision, "contextHash": inst.ContextHash},
 		"transition":  map[string]interface{}{"id": tr.ID},
 		"actor":       map[string]interface{}{"id": actor},
@@ -1597,13 +1874,26 @@ func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID strin
 		"obligations": obl,
 	}
 	inputJSON, _ := json.Marshal(input)
+	return inputJSON, facts
+}
+
+func currentCheckInputHash(inst *Instance, tr *TransitionSpec, actor, role string, task *taskDoc, ev []Evidence, obl []Obligation) string {
+	inputJSON, _ := buildCheckInput(inst, tr, actor, role, task, ev, obl)
+	return Hash(inputJSON)
+}
+
+func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID string, check CheckSpec, actor, role string, catalog *HookCatalog, templateDir string, persist bool) (*CheckRun, error) {
+	task, _ := loadTaskDoc(s.db, inst.TaskUUID)
+	ev, _ := listEvidenceForInstance(s.db, inst.ID)
+	obl, _ := listObligationsForInstance(s.db, inst.ID, true)
+	inputJSON, facts := buildCheckInput(inst, tr, actor, role, task, ev, obl)
 	cr := &CheckRun{InstanceID: inst.ID, TransitionID: tr.ID, CheckID: checkID, HookID: check.HookID, InputHash: Hash(inputJSON), Verdict: "inconclusive", Actor: actor, Role: role, StartedAt: s.now().Format(time.RFC3339)}
 	switch check.Type {
 	case "predicate":
 		if check.Predicate == nil {
 			cr.Verdict = "error"
 			cr.Summary = "predicate check missing predicate"
-		} else if evalPredicate(*check.Predicate, evalContext{Evidence: ev, Obligations: obl, Checks: map[string]CheckRun{}, Facts: facts, Task: task}) {
+		} else if evalPredicate(*check.Predicate, evalContext{Evidence: ev, Obligations: obl, Checks: map[string]CheckRun{}, Facts: facts, Task: task, State: inst.State()}) {
 			cr.Verdict = "pass"
 			cr.Outcome = "passed"
 		} else {
@@ -1632,6 +1922,13 @@ func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID strin
 			cr.Summary = "unknown builtin check"
 		}
 	case "hook":
+		if catalog == nil {
+			stored, err := s.storedHookCatalog(inst.TemplateID, inst.TemplateVersion)
+			if err != nil {
+				return nil, err
+			}
+			catalog = stored
+		}
 		if catalog == nil {
 			return nil, fmt.Errorf("hook catalog is required for check %s", checkID)
 		}

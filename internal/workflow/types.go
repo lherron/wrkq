@@ -32,7 +32,8 @@ type Template struct {
 }
 
 type RoleSpec struct {
-	Description string `json:"description,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Actors      []string `json:"actors,omitempty"`
 }
 
 type KindSpec struct {
@@ -55,16 +56,28 @@ type FactProperty struct {
 }
 
 type TransitionSpec struct {
-	ID             string               `json:"id"`
-	Description    string               `json:"description,omitempty"`
-	From           State                `json:"from"`
-	By             []string             `json:"by"`
-	Responsibility *ResponsibilitySpec  `json:"responsibility,omitempty"`
-	Guards         []Predicate          `json:"guards,omitempty"`
-	Requires       []RequirementSpec    `json:"requires,omitempty"`
-	Checks         []string             `json:"checks,omitempty"`
-	Outcomes       []OutcomeCase        `json:"outcomes"`
-	Hooks          map[string][]HookRef `json:"hooks,omitempty"`
+	ID               string                `json:"id"`
+	Description      string                `json:"description,omitempty"`
+	From             State                 `json:"from"`
+	By               []string              `json:"by"`
+	Responsibility   *ResponsibilitySpec   `json:"responsibility,omitempty"`
+	Guards           []Predicate           `json:"guards,omitempty"`
+	Requires         []RequirementSpec     `json:"requires,omitempty"`
+	Checks           []string              `json:"checks,omitempty"`
+	Outcomes         []OutcomeCase         `json:"outcomes"`
+	Hooks            map[string][]HookRef  `json:"hooks,omitempty"`
+	Postconditions   []Predicate           `json:"postconditions,omitempty"`
+	SeparationOfDuty *SeparationOfDutySpec `json:"separationOfDuty,omitempty"`
+}
+
+type SeparationOfDutySpec struct {
+	DistinctActorFromEvidence  []string                    `json:"distinctActorFromEvidence,omitempty"`
+	EvidenceActorPairsDistinct []EvidenceActorDistinctPair `json:"evidenceActorPairsDistinct,omitempty"`
+}
+
+type EvidenceActorDistinctPair struct {
+	LeftKind  string `json:"leftKind"`
+	RightKind string `json:"rightKind"`
 }
 
 type ResponsibilitySpec struct {
@@ -120,18 +133,24 @@ type OutcomeCase struct {
 }
 
 type EffectSpec struct {
-	Kind   string                 `json:"kind"`
-	Role   string                 `json:"role,omitempty"`
-	Reason string                 `json:"reason,omitempty"`
-	Data   map[string]interface{} `json:"data,omitempty"`
+	Kind        string                 `json:"kind"`
+	Role        string                 `json:"role,omitempty"`
+	Reason      string                 `json:"reason,omitempty"`
+	SemanticKey string                 `json:"semanticKey,omitempty"`
+	Data        map[string]interface{} `json:"data,omitempty"`
 }
 
 type ObligationCreateSpec struct {
-	Kind       string `json:"kind"`
-	OwnerRole  string `json:"ownerRole,omitempty"`
-	OwnerActor string `json:"ownerActor,omitempty"`
-	Blocking   bool   `json:"blocking"`
-	Reason     string `json:"reason,omitempty"`
+	Kind         string `json:"kind"`
+	OwnerRole    string `json:"ownerRole,omitempty"`
+	OwnerActor   string `json:"ownerActor,omitempty"`
+	ObligeeRole  string `json:"obligeeRole,omitempty"`
+	ObligeeActor string `json:"obligeeActor,omitempty"`
+	WaiveRole    string `json:"waiveRole,omitempty"`
+	WaiveActor   string `json:"waiveActor,omitempty"`
+	NoSelfWaive  *bool  `json:"noSelfWaive,omitempty"`
+	Blocking     bool   `json:"blocking"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 type HookRef struct {
@@ -235,6 +254,7 @@ type Evidence struct {
 	Role                 string          `json:"role,omitempty"`
 	RunID                string          `json:"runId,omitempty"`
 	TaskEtagAtProduction string          `json:"taskEtagAtProduction,omitempty"`
+	TaskHashAtProduction string          `json:"taskHashAtProduction,omitempty"`
 	ProducedAt           string          `json:"producedAt"`
 }
 
@@ -255,11 +275,19 @@ type Obligation struct {
 	Kind                  string          `json:"kind"`
 	OwnerRole             string          `json:"ownerRole,omitempty"`
 	OwnerActor            string          `json:"ownerActor,omitempty"`
+	ObligeeRole           string          `json:"obligeeRole,omitempty"`
+	ObligeeActor          string          `json:"obligeeActor,omitempty"`
+	WaiveRole             string          `json:"waiveRole,omitempty"`
+	WaiveActor            string          `json:"waiveActor,omitempty"`
+	NoSelfWaive           bool            `json:"noSelfWaive,omitempty"`
 	Blocking              bool            `json:"blocking"`
 	Status                string          `json:"status"`
 	Reason                string          `json:"reason,omitempty"`
 	Data                  json.RawMessage `json:"data,omitempty"`
 	SatisfiedByEvidenceID string          `json:"satisfiedByEvidenceId,omitempty"`
+	ResolvedByActor       string          `json:"resolvedByActor,omitempty"`
+	ResolvedByRole        string          `json:"resolvedByRole,omitempty"`
+	ResolvedAt            string          `json:"resolvedAt,omitempty"`
 	CreatedAt             string          `json:"createdAt"`
 	UpdatedAt             string          `json:"updatedAt"`
 }
@@ -268,15 +296,18 @@ type Effect struct {
 	ID             string          `json:"id"`
 	InstanceID     string          `json:"instanceId,omitempty"`
 	Revision       int64           `json:"revision"`
+	Sequence       int64           `json:"sequence,omitempty"`
 	Kind           string          `json:"kind"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
 	Status         string          `json:"status"`
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+	SemanticKey    string          `json:"semanticKey,omitempty"`
 	Attempts       int64           `json:"attempts"`
 	LeasedBy       string          `json:"leasedBy,omitempty"`
 	LeasedUntil    string          `json:"leasedUntil,omitempty"`
 	DeliveredAt    string          `json:"deliveredAt,omitempty"`
 	LastError      string          `json:"lastError,omitempty"`
+	Receipt        json.RawMessage `json:"receipt,omitempty"`
 	CreatedAt      string          `json:"createdAt"`
 	UpdatedAt      string          `json:"updatedAt"`
 }

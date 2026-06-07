@@ -15,20 +15,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+mkdir -p "$tmpdir/home"
+export HOME="$tmpdir/home"
+
 src_db="$tmpdir/src.db"
 dest_db="$tmpdir/dest.db"
 src_attach="$tmpdir/src-attach"
 dest_attach="$tmpdir/dest-attach"
 
-(
-  cd "$tmpdir"
-  "$BIN/wrkqadm" init --db "$src_db" --attach-dir "$src_attach" --human-slug smoke-human --agent-slug smoke-agent >/dev/null
-  "$BIN/wrkqadm" init --db "$dest_db" --attach-dir "$dest_attach" --human-slug smoke-human --agent-slug smoke-agent >/dev/null
-)
+cd "$tmpdir"
+"$BIN/wrkqadm" init --db "$src_db" --attach-dir "$src_attach" --human-slug smoke-human --agent-slug smoke-agent >/dev/null
+"$BIN/wrkqadm" init --db "$dest_db" --attach-dir "$dest_attach" --human-slug smoke-human --agent-slug smoke-agent >/dev/null
 
 export WRKQ_DB_PATH="$src_db"
 export WRKQ_ATTACH_DIR="$src_attach"
 export WRKQ_ACTOR="smoke-human"
+unset ASP_PROJECT ASP_SCOPE_REF HRC_SESSION_REF WRKQ_PROJECT_ROOT
 
 "$BIN/wrkq" mkdir proj >/dev/null
 "$BIN/wrkq" mkdir proj/child >/dev/null

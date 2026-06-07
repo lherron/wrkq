@@ -138,6 +138,8 @@ type ObligationStatusParams struct {
 	ID           string `json:"id"`
 	EvidenceID   string `json:"evidenceId,omitempty"`
 	Reason       string `json:"reason,omitempty"`
+	Actor        string `json:"actor,omitempty"`
+	Role         string `json:"role,omitempty"`
 }
 
 type CheckRunParams struct {

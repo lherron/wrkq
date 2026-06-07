@@ -333,7 +333,16 @@ assert claim["effects"][0]["id"] == eff and claim["leaseToken"], claim
 acked = rpc("wrkf.effect.ack", {"effectId": eff, "leaseToken": claim["leaseToken"]})
 assert acked["status"] == "delivered", acked
 
-satisfied = rpc("wrkf.obligation.satisfy", {"task": "T-00001", "id": obl, "evidenceId": evidence[0]["id"]})
+satisfied = rpc(
+    "wrkf.obligation.satisfy",
+    {
+        "task": "T-00001",
+        "id": obl,
+        "evidenceId": evidence[0]["id"],
+        "actor": "human:local-human",
+        "role": "coordinator",
+    },
+)
 assert satisfied["status"] == "satisfied", satisfied
 
 hooks = rpc("wrkf.hook.list")
@@ -344,15 +353,6 @@ assert hook["id"] == "finish_hook", hook
 
 hook_run = rpc("wrkf.hook.run", {"task": "T-00001", "transition": "finish", "hookId": "finish_hook"})
 assert hook_run["verdict"] == "pass", hook_run
-
-check_run = rpc("wrkf.check.run", {"task": "T-00001", "transition": "finish"})
-assert check_run["runs"][0]["verdict"] == "pass", check_run
-
-check_show = rpc("wrkf.check.show", {"id": check_run["runs"][0]["id"]})
-assert check_show["id"] == check_run["runs"][0]["id"], check_show
-
-check_list = rpc("wrkf.check.list", {"task": "T-00001", "transition": "finish"})
-assert len(check_list) >= 1, check_list
 
 run = rpc(
     "wrkf.run.start",
@@ -375,11 +375,20 @@ assert bound["externalRunRef"] == "smoke/external/1", bound
 run_show = rpc("wrkf.run.show", {"id": run_id})
 assert run_show["status"] == "active", run_show
 
-finished = rpc("wrkf.run.finish", {"runId": run_id, "summary": "done"})
-assert finished["status"] == "completed", finished
-
 runs = rpc("wrkf.run.list", {"task": "T-00001"})
 assert len(runs) == 1, runs
+
+check_run = rpc(
+    "wrkf.check.run",
+    {"task": "T-00001", "transition": "finish", "actor": "human:local-human", "role": "coordinator"},
+)
+assert check_run["runs"][0]["verdict"] == "pass", check_run
+
+check_show = rpc("wrkf.check.show", {"id": check_run["runs"][0]["id"]})
+assert check_show["id"] == check_run["runs"][0]["id"], check_show
+
+check_list = rpc("wrkf.check.list", {"task": "T-00001", "transition": "finish"})
+assert len(check_list) >= 1, check_list
 
 closed = rpc(
     "wrkf.transition.apply",
@@ -387,12 +396,15 @@ closed = rpc(
         "task": "T-00001",
         "transition": "finish",
         "role": "coordinator",
+        "actor": "human:local-human",
         "expectRevision": 1,
-        "runChecks": True,
         "idempotencyKey": "finish",
     },
 )
 assert closed["state"]["outcome"] == "completed" and closed["revision"] == 2, closed
+
+finished = rpc("wrkf.run.finish", {"runId": run_id, "summary": "done"})
+assert finished["status"] == "completed", finished
 
 done = rpc("wrkf.next", {"task": "T-00001"})
 assert done["actions"] == [], done
@@ -412,9 +424,10 @@ PBC_ROLE, PBC_ACTOR = "agent", "human:local-human"
 
 def pbc_step(transition, evidence, want_phase):
     for kind, facts, ref in evidence:
+        actor = "human:pressure-reviewer" if kind == "pressure_pass" else PBC_ACTOR
         rpc(
             "wrkf.evidence.add",
-            {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts},
+            {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts, "actor": actor},
         )
     # re-read context before each transition: adding evidence rotates the contextHash
     cur = rpc("wrkf.task.inspect", {"task": "T-00002"})

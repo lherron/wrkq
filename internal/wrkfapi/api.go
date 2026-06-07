@@ -465,7 +465,7 @@ func (api *API) setObligationStatus(ctx context.Context, params ObligationStatus
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	obl, err := api.service.SetObligationStatus(params.TaskSelector, params.ID, status, params.EvidenceID, params.Reason)
+	obl, err := api.service.SetObligationStatusWithAuthority(params.TaskSelector, params.ID, status, params.EvidenceID, params.Reason, workflow.ObligationStatusOptions{Actor: params.Actor, Role: params.Role})
 	if err != nil {
 		return nil, normalizeError(err)
 	}

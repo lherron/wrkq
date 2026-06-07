@@ -467,7 +467,7 @@ func obligationCmd() *cobra.Command {
 			Use:  use + " TASK OBLIGATION",
 			Args: cobra.ExactArgs(2),
 			RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-				obl, err := a.service.SetObligationStatus(args[0], args[1], status, evidenceID, reason)
+				obl, err := a.service.SetObligationStatusWithAuthority(args[0], args[1], status, evidenceID, reason, workflow.ObligationStatusOptions{Actor: a.actor, Role: a.role})
 				if err != nil {
 					return err
 				}

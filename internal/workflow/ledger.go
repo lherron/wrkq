@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 func (s *Service) ListObligations(taskSelector string, includeClosed bool) ([]Obligation, error) {
@@ -82,8 +84,10 @@ func (s *Service) withDelegatedTaskClosureState(obl []Obligation, includeClosed 
 
 func listObligationsForInstance(database *db.DB, instanceID string, includeClosed bool) ([]Obligation, error) {
 	query := `
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''), blocking, status,
-		       COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''), created_at, updated_at
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
+		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE instance_id = ?`
 	if !includeClosed {
 		query += ` AND status = 'open'`
@@ -99,8 +103,10 @@ func listObligationsForInstance(database *db.DB, instanceID string, includeClose
 
 func listObligationsTx(tx *sql.Tx, instanceID string, includeClosed bool) ([]Obligation, error) {
 	query := `
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''), blocking, status,
-		       COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''), created_at, updated_at
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
+		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE instance_id = ?`
 	if !includeClosed {
 		query += ` AND status = 'open'`
@@ -119,10 +125,12 @@ func scanObligations(rows *sql.Rows) ([]Obligation, error) {
 	for rows.Next() {
 		var o Obligation
 		var blocking int
-		if err := rows.Scan(&o.ID, &o.InstanceID, &o.Kind, &o.OwnerRole, &o.OwnerActor, &blocking, &o.Status, &o.Reason, &o.SatisfiedByEvidenceID, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		var noSelfWaive int
+		if err := rows.Scan(&o.ID, &o.InstanceID, &o.Kind, &o.OwnerRole, &o.OwnerActor, &o.ObligeeRole, &o.ObligeeActor, &o.WaiveRole, &o.WaiveActor, &noSelfWaive, &blocking, &o.Status, &o.Reason, &o.SatisfiedByEvidenceID, &o.ResolvedByActor, &o.ResolvedByRole, &o.ResolvedAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		o.Blocking = blocking == 1
+		o.NoSelfWaive = noSelfWaive == 1
 		out = append(out, o)
 	}
 	return out, rows.Err()
@@ -692,8 +700,10 @@ func sanitizeIDPart(s string) string {
 
 func (s *Service) ShowObligation(id string) (*Obligation, error) {
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''), blocking, status,
-		       COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''), created_at, updated_at
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
+		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE id = ?
 	`, id)
 	if err != nil {
@@ -710,7 +720,16 @@ func (s *Service) ShowObligation(id string) (*Obligation, error) {
 	return &obl[0], nil
 }
 
+type ObligationStatusOptions struct {
+	Actor string
+	Role  string
+}
+
 func (s *Service) SetObligationStatus(taskSelector, id, status, evidenceID, reason string) (*Obligation, error) {
+	return s.SetObligationStatusWithAuthority(taskSelector, id, status, evidenceID, reason, ObligationStatusOptions{Actor: "system:wrkf", Role: "system"})
+}
+
+func (s *Service) SetObligationStatusWithAuthority(taskSelector, id, status, evidenceID, reason string, opts ObligationStatusOptions) (*Obligation, error) {
 	inst, err := s.LatestInstance(taskSelector)
 	if err != nil {
 		return nil, err
@@ -721,35 +740,79 @@ func (s *Service) SetObligationStatus(taskSelector, id, status, evidenceID, reas
 	now := s.now().Format(time.RFC3339)
 	var out *Obligation
 	err = withTx(s.db.DB, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`
+		current, err := selectObligationTx(tx, id, inst.ID)
+		if err != nil {
+			return err
+		}
+		if !obligationStatusAllowed(*current, status, opts.Actor, opts.Role) {
+			return roleDeniedError(inst.ID, "obligation:"+id+":"+status, opts.Role)
+		}
+		_, err = tx.Exec(`
 			UPDATE workflow_obligations
 			SET status = ?, satisfied_by_evidence_id = COALESCE(NULLIF(?, ''), satisfied_by_evidence_id),
-			    reason = COALESCE(NULLIF(?, ''), reason), updated_at = ?
+			    reason = COALESCE(NULLIF(?, ''), reason), resolved_by_actor = ?, resolved_by_role = ?, resolved_at = ?, updated_at = ?
 			WHERE id = ? AND instance_id = ?
-		`, status, evidenceID, reason, now, id, inst.ID)
+		`, status, evidenceID, reason, nullIfEmpty(opts.Actor), nullIfEmpty(opts.Role), now, now, id, inst.ID)
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(`
-			SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''), blocking, status,
-			       COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''), created_at, updated_at
-			FROM workflow_obligations WHERE id = ?
-		`, id)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = rows.Close() }()
-		list, err := scanObligations(rows)
-		if err != nil {
-			return err
-		}
-		if len(list) == 0 {
-			return fmt.Errorf("obligation not found: %s", id)
-		}
-		out = &list[0]
-		return nil
+		out, err = selectObligationTx(tx, id, inst.ID)
+		return err
 	})
 	return out, err
+}
+
+func selectObligationTx(tx *sql.Tx, id, instanceID string) (*Obligation, error) {
+	rows, err := tx.Query(`
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
+		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
+		FROM workflow_obligations WHERE id = ? AND instance_id = ?
+	`, id, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	list, err := scanObligations(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, fmt.Errorf("obligation not found: %s", id)
+	}
+	return &list[0], nil
+}
+
+func obligationStatusAllowed(o Obligation, status, actor, role string) bool {
+	actor = strings.TrimSpace(actor)
+	role = strings.TrimSpace(role)
+	if role == "system" || role == "supervisor" {
+		return true
+	}
+	switch status {
+	case "satisfied":
+		if o.OwnerActor != "" {
+			return actor != "" && actor == o.OwnerActor
+		}
+		if o.OwnerRole != "" {
+			return role == o.OwnerRole
+		}
+		return actor != ""
+	case "waived", "cancelled":
+		if o.NoSelfWaive && actor != "" && o.OwnerActor != "" && actor == o.OwnerActor {
+			return false
+		}
+		if o.WaiveActor != "" {
+			return actor != "" && actor == o.WaiveActor
+		}
+		if o.WaiveRole != "" {
+			return role == o.WaiveRole
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 func (s *Service) CreateObligation(taskSelector, kind, ownerRole, ownerActor string, blocking bool, reason string) (*Obligation, error) {
@@ -768,27 +831,16 @@ func (s *Service) CreateObligation(taskSelector, kind, ownerRole, ownerActor str
 			blockingInt = 1
 		}
 		_, err = tx.Exec(`
-			INSERT INTO workflow_obligations (id, instance_id, kind, owner_role, owner_actor, blocking, status, reason)
-			VALUES (?, ?, ?, ?, ?, ?, 'open', ?)
+			INSERT INTO workflow_obligations (
+				id, instance_id, kind, owner_role, owner_actor,
+				obligee_role, waive_role, no_self_waive, blocking, status, reason
+			) VALUES (?, ?, ?, ?, ?, 'workflow', 'system', 1, ?, 'open', ?)
 		`, id, inst.ID, kind, nullIfEmpty(ownerRole), nullIfEmpty(ownerActor), blockingInt, nullIfEmpty(reason))
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(`
-			SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''), blocking, status,
-			       COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''), created_at, updated_at
-			FROM workflow_obligations WHERE id = ?
-		`, id)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = rows.Close() }()
-		list, err := scanObligations(rows)
-		if err != nil {
-			return err
-		}
-		out = &list[0]
-		return nil
+		out, err = selectObligationTx(tx, id, inst.ID)
+		return err
 	})
 	return out, err
 }
@@ -803,14 +855,14 @@ func (s *Service) ListEffects(taskSelector string, all bool) ([]Effect, error) {
 
 func listEffectsForInstance(database *db.DB, instanceID string, all bool) ([]Effect, error) {
 	query := `
-		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
 		       created_at, updated_at
 		FROM workflow_effects WHERE instance_id = ?`
 	if !all {
 		query += ` AND status IN ('pending','leased','failed','delivered')`
 	}
-	query += ` ORDER BY created_at, id`
+	query += ` ORDER BY COALESCE(sequence, 9223372036854775807), created_at, id`
 	rows, err := database.Query(query, instanceID)
 	if err != nil {
 		return nil, err
@@ -821,14 +873,14 @@ func listEffectsForInstance(database *db.DB, instanceID string, all bool) ([]Eff
 
 func listEffectsTx(tx *sql.Tx, instanceID string, all bool) ([]Effect, error) {
 	query := `
-		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
 		       created_at, updated_at
 		FROM workflow_effects WHERE instance_id = ?`
 	if !all {
 		query += ` AND status IN ('pending','leased','failed','delivered')`
 	}
-	query += ` ORDER BY created_at, id`
+	query += ` ORDER BY COALESCE(sequence, 9223372036854775807), created_at, id`
 	rows, err := tx.Query(query, instanceID)
 	if err != nil {
 		return nil, err
@@ -841,12 +893,15 @@ func scanEffects(rows *sql.Rows) ([]Effect, error) {
 	var out []Effect
 	for rows.Next() {
 		var e Effect
-		var payload string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Revision, &e.Kind, &payload, &e.Status, &e.IdempotencyKey, &e.Attempts, &e.LeasedBy, &e.LeasedUntil, &e.DeliveredAt, &e.LastError, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		var payload, receipt string
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Revision, &e.Sequence, &e.Kind, &payload, &e.Status, &e.IdempotencyKey, &e.SemanticKey, &e.Attempts, &e.LeasedBy, &e.LeasedUntil, &e.DeliveredAt, &e.LastError, &receipt, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if payload != "" {
 			e.Payload = json.RawMessage(payload)
+		}
+		if receipt != "" {
+			e.Receipt = json.RawMessage(receipt)
 		}
 		out = append(out, e)
 	}
@@ -855,8 +910,8 @@ func scanEffects(rows *sql.Rows) ([]Effect, error) {
 
 func (s *Service) ShowEffect(id string) (*Effect, error) {
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
 		       created_at, updated_at
 		FROM workflow_effects WHERE id = ?
 	`, id)
@@ -920,7 +975,7 @@ func (s *Service) ClaimEffects(adapter string, limit int, leaseMs int64, taskSel
 			query += ` AND e.kind = ?`
 			args = append(args, kind)
 		}
-		query += ` ORDER BY e.created_at, e.id LIMIT ?`
+		query += ` ORDER BY COALESCE(e.sequence, 9223372036854775807), e.created_at, e.id LIMIT ?`
 		args = append(args, limit)
 
 		rows, err := tx.Query(query, args...)
@@ -979,12 +1034,12 @@ func (s *Service) ClaimEffects(adapter string, limit int, leaseMs int64, taskSel
 
 func effectsByLeaseTokenTx(tx *sql.Tx, token string) ([]Effect, error) {
 	rows, err := tx.Query(`
-		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
 		       created_at, updated_at
 		FROM workflow_effects
 		WHERE lease_token = ?
-		ORDER BY created_at, id
+		ORDER BY COALESCE(sequence, 9223372036854775807), created_at, id
 	`, token)
 	if err != nil {
 		return nil, err
@@ -1002,6 +1057,13 @@ func newLeaseToken() (string, error) {
 }
 
 func (s *Service) AckEffect(id, leaseToken string) (*Effect, error) {
+	return s.AckEffectWithReceipt(id, leaseToken, nil)
+}
+
+func (s *Service) AckEffectWithReceipt(id, leaseToken string, receipt json.RawMessage) (*Effect, error) {
+	if len(receipt) > 0 && !json.Valid(receipt) {
+		return nil, fmt.Errorf("invalid effect receipt JSON")
+	}
 	now := s.now().Format(time.RFC3339)
 	result, err := s.db.Exec(`
 		UPDATE workflow_effects
@@ -1012,12 +1074,13 @@ func (s *Service) AckEffect(id, leaseToken string) (*Effect, error) {
 		    leased_until = NULL,
 		    lease_token = NULL,
 		    last_error = NULL,
+		    receipt_json = COALESCE(NULLIF(?, ''), receipt_json),
 		    updated_at = ?
 		WHERE id = ?
 		  AND status = 'leased'
 		  AND lease_token = ?
 		  AND leased_until > ?
-	`, now, now, id, leaseToken, now)
+	`, now, string(receipt), now, id, leaseToken, now)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,6 +1129,20 @@ func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templa
 	}
 	if current.Status == "delivered" {
 		return &EffectDelivery{Effect: current}, nil
+	}
+	if current.Kind == "set_task_state" {
+		return s.deliverSetTaskStateEffect(current, adapter)
+	}
+	if catalog == nil {
+		instForCatalog, err := s.instanceByID(current.InstanceID)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := s.storedHookCatalog(instForCatalog.TemplateID, instForCatalog.TemplateVersion)
+		if err != nil {
+			return nil, err
+		}
+		catalog = stored
 	}
 	if catalog == nil {
 		return nil, fmt.Errorf("hook catalog is required for effect delivery")
@@ -1130,12 +1207,103 @@ func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templa
 		}
 		return out, fmt.Errorf("effect handler failed with exit %d: %s", exit, strings.TrimSpace(string(stderr)))
 	}
-	delivered, err := s.AckEffect(id, claim.LeaseToken)
+	delivered, err := s.AckEffectWithReceipt(id, claim.LeaseToken, out.Receipt)
 	if err != nil {
 		return nil, err
 	}
 	out.Effect = delivered
 	return out, nil
+}
+
+func (s *Service) deliverSetTaskStateEffect(current *Effect, adapter string) (*EffectDelivery, error) {
+	claim, err := s.claimEffectByID(current.ID, adapter, 60_000)
+	if err != nil {
+		return nil, err
+	}
+	if claim == nil || len(claim.Effects) == 0 {
+		return nil, leaseConflictError(current.ID, "")
+	}
+	eff := &claim.Effects[0]
+	if eff.Status == "delivered" {
+		return &EffectDelivery{Effect: eff}, nil
+	}
+	var spec EffectSpec
+	if err := json.Unmarshal(eff.Payload, &spec); err != nil {
+		failed, failErr := s.FailEffect(eff.ID, claim.LeaseToken, "invalid set_task_state payload: "+err.Error(), false)
+		if failErr != nil {
+			return nil, failErr
+		}
+		return &EffectDelivery{Effect: failed, ExitCode: 1}, err
+	}
+	target, _ := spec.Data["state"].(string)
+	target = strings.TrimSpace(target)
+	if err := domain.ValidateState(target); err != nil {
+		failed, failErr := s.FailEffect(eff.ID, claim.LeaseToken, err.Error(), false)
+		if failErr != nil {
+			return nil, failErr
+		}
+		return &EffectDelivery{Effect: failed, ExitCode: 1, Stderr: err.Error()}, err
+	}
+	inst, err := s.instanceByID(eff.InstanceID)
+	if err != nil {
+		return nil, err
+	}
+	before, err := loadTaskDoc(s.db, inst.TaskUUID)
+	if err != nil {
+		return nil, err
+	}
+	newETag := before.ETag
+	alreadyApplied := before.State == target
+	if !alreadyApplied {
+		actorUUID, err := s.ensureWorkflowSystemActor()
+		if err != nil {
+			return nil, err
+		}
+		newETag, err = store.New(s.db).Tasks.UpdateFieldsWithVia(actorUUID, inst.TaskUUID, map[string]interface{}{"state": target}, before.ETag, "wrkf.effect:set_task_state")
+		if err != nil {
+			failed, failErr := s.FailEffect(eff.ID, claim.LeaseToken, err.Error(), true)
+			if failErr != nil {
+				return nil, failErr
+			}
+			return &EffectDelivery{Effect: failed, ExitCode: 1, Stderr: err.Error()}, err
+		}
+	}
+	receiptMap := map[string]interface{}{
+		"kind":           "set_task_state.receipt",
+		"taskUuid":       inst.TaskUUID,
+		"taskRef":        inst.TaskRef,
+		"from":           before.State,
+		"to":             target,
+		"previousEtag":   before.ETag,
+		"newEtag":        newETag,
+		"alreadyApplied": alreadyApplied,
+		"effectId":       eff.ID,
+		"semanticKey":    eff.SemanticKey,
+	}
+	receipt, _ := json.Marshal(receiptMap)
+	delivered, err := s.AckEffectWithReceipt(eff.ID, claim.LeaseToken, json.RawMessage(receipt))
+	if err != nil {
+		return nil, err
+	}
+	return &EffectDelivery{Effect: delivered, Receipt: json.RawMessage(receipt), ExitCode: 0, Stdout: string(receipt)}, nil
+}
+
+func (s *Service) ensureWorkflowSystemActor() (string, error) {
+	var uuid string
+	err := s.db.QueryRow(`SELECT uuid FROM actors WHERE slug = 'wrkf-system'`).Scan(&uuid)
+	if err == nil {
+		return uuid, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", err
+	}
+	if _, err := s.db.Exec(`INSERT INTO actors (slug, display_name, role) VALUES ('wrkf-system', 'wrkf system', 'system')`); err != nil {
+		return "", err
+	}
+	if err := s.db.QueryRow(`SELECT uuid FROM actors WHERE slug = 'wrkf-system'`).Scan(&uuid); err != nil {
+		return "", err
+	}
+	return uuid, nil
 }
 
 func (s *Service) claimEffectByID(id, adapter string, leaseMs int64) (*EffectClaim, error) {
@@ -1205,8 +1373,8 @@ func (s *Service) claimEffectByID(id, adapter string, leaseMs int64) (*EffectCla
 
 func effectByIDTx(tx *sql.Tx, id string) ([]Effect, error) {
 	rows, err := tx.Query(`
-		SELECT id, instance_id, revision, kind, payload_json, status, idempotency_key, attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''),
+		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
+		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
 		       created_at, updated_at
 		FROM workflow_effects
 		WHERE id = ?
@@ -1249,6 +1417,38 @@ func effectRole(eff *Effect) string {
 	}
 	_ = json.Unmarshal(eff.Payload, &payload)
 	return payload.Role
+}
+
+func nextEffectSequenceTx(tx *sql.Tx, instanceID string) (int64, error) {
+	var seq int64
+	err := tx.QueryRow(`SELECT COALESCE(MAX(sequence), 0) + 1 FROM workflow_effects WHERE instance_id = ?`, instanceID).Scan(&seq)
+	return seq, err
+}
+
+func effectSemanticKey(inst Instance, outcomeID string, ef EffectSpec, sequence int64) string {
+	key := strings.TrimSpace(ef.SemanticKey)
+	if key == "" && ef.Data != nil {
+		if raw, ok := ef.Data["semanticKey"]; ok {
+			if s, ok := raw.(string); ok {
+				key = strings.TrimSpace(s)
+			}
+		}
+	}
+	if key == "" {
+		key = fmt.Sprintf("rev:%d:outcome:%s:seq:%d:kind:%s", inst.Revision, outcomeID, sequence, ef.Kind)
+	}
+	replacements := map[string]string{
+		"{instanceId}": inst.ID,
+		"{taskUuid}":   inst.TaskUUID,
+		"{revision}":   fmt.Sprint(inst.Revision),
+		"{outcome}":    outcomeID,
+		"{kind}":       ef.Kind,
+		"{sequence}":   fmt.Sprint(sequence),
+	}
+	for k, v := range replacements {
+		key = strings.ReplaceAll(key, k, v)
+	}
+	return key
 }
 
 func (s *Service) FailEffect(id, leaseToken, reason string, retryable bool) (*Effect, error) {
@@ -1345,10 +1545,14 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 		if !stateMatches(*inst, tr.From) {
 			return fmt.Errorf("transition %s cannot run from current state", transitionID)
 		}
-		if !roleAllowed(opts.Role, tr.By) {
+		if !roleAllowed(opts.Role, tr.By) || !roleBindingAllowed(tx, inst, tpl, opts.Role, opts.Actor) {
 			return roleDeniedError(inst.ID, transitionID, opts.Role)
 		}
-		ev, err := listEvidenceForInstance(s.db, inst.ID)
+		task, err := loadTaskDoc(tx, inst.TaskUUID)
+		if err != nil {
+			return err
+		}
+		ev, err := listEvidenceTx(tx, inst.ID)
 		if err != nil {
 			return err
 		}
@@ -1356,7 +1560,7 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 		if err != nil {
 			return err
 		}
-		blockers := transitionBlockers(*tr, ev, obl)
+		blockers := transitionBlockers(*tr, ev, obl, taskDocHash(task))
 		if len(blockers) > 0 {
 			return transitionBlockedError(inst.ID, transitionID, blockers)
 		}
@@ -1387,25 +1591,39 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 			}
 			checks[c.CheckID] = *c
 		}
-		task, err := loadTaskDoc(tx, inst.TaskUUID)
-		if err != nil {
-			return err
+		if blockers := checkCommitBlockers(tpl, *tr, ev, taskFacts(task), inst, task, ev, obl, checks, opts.Actor, opts.Role, s.db); len(blockers) > 0 {
+			return transitionBlockedError(inst.ID, transitionID, blockers)
+		}
+		if blockers := separationOfDutyBlockers(*tr, ev, opts.Actor); len(blockers) > 0 {
+			return transitionBlockedError(inst.ID, transitionID, blockers)
 		}
 		for _, guard := range tr.Guards {
-			if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task}) {
+			if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
 				return transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "guard", Message: "transition guard failed"}})
 			}
 		}
 		var chosen *OutcomeCase
 		for i := range tr.Outcomes {
 			out := &tr.Outcomes[i]
-			if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task}) {
+			if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
 				chosen = out
 				break
 			}
 		}
 		if chosen == nil {
 			return transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}})
+		}
+		if chosen.To.Status == "closed" {
+			depBlockers, err := taskRelationBlockers(tx, inst.TaskUUID)
+			if err != nil {
+				return err
+			}
+			if len(depBlockers) > 0 {
+				return transitionBlockedError(inst.ID, transitionID, depBlockers)
+			}
+		}
+		if blockers := postconditionBlockers(inst, *tr, chosen, ev, obl, checks, task); len(blockers) > 0 {
+			return transitionBlockedError(inst.ID, transitionID, blockers)
 		}
 		if opts.DryRun {
 			result = map[string]interface{}{"dryRun": true, "transition": transitionID, "outcome": chosen.ID, "state": chosen.To}
@@ -1466,16 +1684,35 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 			if ob.Blocking {
 				blocking = 1
 			}
+			noSelfWaive := true
+			if ob.NoSelfWaive != nil {
+				noSelfWaive = *ob.NoSelfWaive
+			}
+			noSelfWaiveInt := 0
+			if noSelfWaive {
+				noSelfWaiveInt = 1
+			}
+			obligeeRole := strings.TrimSpace(ob.ObligeeRole)
+			if obligeeRole == "" {
+				obligeeRole = "workflow"
+			}
+			waiveRole := strings.TrimSpace(ob.WaiveRole)
+			if waiveRole == "" && strings.TrimSpace(ob.WaiveActor) == "" {
+				waiveRole = "system"
+			}
 			_, err = tx.Exec(`
-				INSERT INTO workflow_obligations (id, instance_id, kind, owner_role, owner_actor, blocking, status, reason, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
-			`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerActor), blocking, nullIfEmpty(ob.Reason), now, now)
+				INSERT INTO workflow_obligations (
+					id, instance_id, kind, owner_role, owner_actor, obligee_role, obligee_actor,
+					waive_role, waive_actor, no_self_waive, blocking, status, reason, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+			`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerActor), nullIfEmpty(obligeeRole), nullIfEmpty(ob.ObligeeActor), nullIfEmpty(waiveRole), nullIfEmpty(ob.WaiveActor), noSelfWaiveInt, blocking, nullIfEmpty(ob.Reason), now, now)
 			if err != nil {
 				return err
 			}
 			createdObligations = append(createdObligations, Obligation{
 				ID: id, InstanceID: updated.ID, Kind: ob.Kind, OwnerRole: ob.OwnerRole, OwnerActor: ob.OwnerActor,
-				Blocking: ob.Blocking, Status: "open", Reason: ob.Reason, CreatedAt: now, UpdatedAt: now,
+				ObligeeRole: obligeeRole, ObligeeActor: ob.ObligeeActor, WaiveRole: waiveRole, WaiveActor: ob.WaiveActor,
+				NoSelfWaive: noSelfWaive, Blocking: ob.Blocking, Status: "open", Reason: ob.Reason, CreatedAt: now, UpdatedAt: now,
 			})
 		}
 		createdEffects := make([]Effect, 0, len(chosen.Effects))
@@ -1484,18 +1721,23 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 			if err != nil {
 				return err
 			}
+			seq, err := nextEffectSequenceTx(tx, updated.ID)
+			if err != nil {
+				return err
+			}
 			payload, _ := json.Marshal(ef)
-			key := fmt.Sprintf("%s:%d:%s:%s", updated.ID, updated.Revision, chosen.ID, id)
+			semanticKey := effectSemanticKey(updated, chosen.ID, ef, seq)
+			key := fmt.Sprintf("%s:%s", updated.ID, semanticKey)
 			_, err = tx.Exec(`
-				INSERT INTO workflow_effects (id, instance_id, revision, kind, payload_json, status, idempotency_key, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-			`, id, updated.ID, updated.Revision, ef.Kind, string(payload), key, now, now)
+				INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+			`, id, updated.ID, updated.Revision, seq, ef.Kind, string(payload), key, semanticKey, now, now)
 			if err != nil {
 				return err
 			}
 			createdEffects = append(createdEffects, Effect{
-				ID: id, InstanceID: updated.ID, Revision: updated.Revision, Kind: ef.Kind, Payload: json.RawMessage(payload),
-				Status: "pending", IdempotencyKey: key, CreatedAt: now, UpdatedAt: now,
+				ID: id, InstanceID: updated.ID, Revision: updated.Revision, Sequence: seq, Kind: ef.Kind, Payload: json.RawMessage(payload),
+				Status: "pending", IdempotencyKey: key, SemanticKey: semanticKey, CreatedAt: now, UpdatedAt: now,
 			})
 		}
 		eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
@@ -1606,14 +1848,15 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role string,
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
-	eventHash := Hash(payloadJSON)
+	prevHash := previousEventHashTx(tx, instanceID)
+	eventHash := chainedEventHash(prevHash, payloadJSON)
 	_, err := tx.Exec(`
 		INSERT INTO workflow_events (
 			id, instance_id, seq, schema_version, type, actor, role,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
-			idempotency_key, request_hash, result, result_json, payload_json, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?)
-	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), eventHash)
+			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	return err
 }
 
@@ -1691,7 +1934,7 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 func listEvidenceForInstance(database *db.DB, instanceID string) ([]Evidence, error) {
 	rows, err := database.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), produced_at
+		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, instanceID)
 	if err != nil {
@@ -1741,6 +1984,16 @@ func (s *Service) StartRun(taskSelector, role, actor string, opts StartRunOption
 			}
 			return err
 		}
+		_, err = tx.Exec(`
+			INSERT INTO workflow_role_bindings (instance_id, role, actor, delivery_ref, lane, binding_mode, bound_at)
+			VALUES (?, ?, ?, ?, ?, 'auto', ?)
+			ON CONFLICT(instance_id, role, actor) DO UPDATE SET
+				delivery_ref = COALESCE(excluded.delivery_ref, workflow_role_bindings.delivery_ref),
+				lane = COALESCE(excluded.lane, workflow_role_bindings.lane)
+		`, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), now)
+		if err != nil {
+			return err
+		}
 		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Status: "active", StartedAt: now}
 		return nil
 	})
@@ -1783,6 +2036,14 @@ func (s *Service) BindExternal(id, externalRunRef string, opts BindExternalOptio
 			if isRunUniqueConflict(err) {
 				return idempotencyMismatchError(opts.IdempotencyKey)
 			}
+			return err
+		}
+		_, err = tx.Exec(`
+			UPDATE workflow_role_bindings
+			SET delivery_ref = COALESCE(NULLIF(?, ''), delivery_ref), lane = COALESCE(NULLIF(?, ''), lane)
+			WHERE instance_id = ? AND role = ? AND actor = ?
+		`, deliveryRef, lane, current.InstanceID, current.Role, current.Actor)
+		if err != nil {
 			return err
 		}
 		current.ExternalRunRef = externalRunRef

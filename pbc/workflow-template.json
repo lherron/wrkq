@@ -14,6 +14,9 @@
     },
     "product_owner": {
       "description": "Answers the single highest-leverage clarification or patch decision when needed."
+    },
+    "system": {
+      "description": "System effect adapter and administrative workflow authority"
     }
   },
   "states": [
@@ -183,9 +186,25 @@
           "to": {
             "status": "active",
             "phase": "behavior_note"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:in_progress",
+              "data": {
+                "state": "in_progress"
+              },
+              "reason": "PBC transition normalize_feedback projects task state to in_progress"
+            }
+          ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "ask_clarification",
@@ -228,11 +247,30 @@
               "kind": "clarification_response",
               "ownerRole": "product_owner",
               "blocking": true,
-              "reason": "Answer the Behavior Note open question or accept the default recommendation."
+              "reason": "Answer the Behavior Note open question or accept the default recommendation.",
+              "obligeeRole": "workflow",
+              "waiveRole": "system",
+              "noSelfWaive": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              },
+              "reason": "PBC transition ask_clarification projects task state to blocked"
             }
           ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "draft_pbc",
@@ -270,9 +308,25 @@
           "to": {
             "status": "active",
             "phase": "pbc_draft"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:in_progress",
+              "data": {
+                "state": "in_progress"
+              },
+              "reason": "PBC transition draft_pbc projects task state to in_progress"
+            }
+          ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "answer_clarification",
@@ -308,9 +362,25 @@
           "to": {
             "status": "active",
             "phase": "pbc_draft"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:in_progress",
+              "data": {
+                "state": "in_progress"
+              },
+              "reason": "PBC transition answer_clarification projects task state to in_progress"
+            }
+          ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "product_owner",
+        "scope": "task",
+        "lane": "pbc-product-owner"
+      }
     },
     {
       "id": "run_pressure_pass",
@@ -340,9 +410,25 @@
           "to": {
             "status": "active",
             "phase": "pressure"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:in_progress",
+              "data": {
+                "state": "in_progress"
+              },
+              "reason": "PBC transition run_pressure_pass projects task state to in_progress"
+            }
+          ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-pressure"
+      }
     },
     {
       "id": "finalize_ready_pbc",
@@ -380,9 +466,41 @@
           "to": {
             "status": "closed",
             "phase": "finalized"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              },
+              "reason": "PBC transition finalize_ready_pbc projects task state to completed"
+            }
+          ]
+        }
+      ],
+      "postconditions": [
+        {
+          "factEquals": {
+            "path": "workflow.status",
+            "value": "closed"
           }
         }
-      ]
+      ],
+      "separationOfDuty": {
+        "evidenceActorPairsDistinct": [
+          {
+            "leftKind": "pbc_draft",
+            "rightKind": "pressure_pass"
+          }
+        ]
+      },
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "request_patch_decision",
@@ -420,11 +538,30 @@
               "kind": "patch_decision",
               "ownerRole": "product_owner",
               "blocking": true,
-              "reason": "Accept, adjust, reject, or waive the pressure-pass patch."
+              "reason": "Accept, adjust, reject, or waive the pressure-pass patch.",
+              "obligeeRole": "workflow",
+              "waiveRole": "system",
+              "noSelfWaive": true
+            }
+          ],
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              },
+              "reason": "PBC transition request_patch_decision projects task state to blocked"
             }
           ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "revise_too_vague_pbc",
@@ -457,9 +594,25 @@
           "to": {
             "status": "active",
             "phase": "pbc_draft"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:in_progress",
+              "data": {
+                "state": "in_progress"
+              },
+              "reason": "PBC transition revise_too_vague_pbc projects task state to in_progress"
+            }
+          ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "finalize_after_patch_decision",
@@ -503,9 +656,41 @@
           "to": {
             "status": "closed",
             "phase": "finalized"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              },
+              "reason": "PBC transition finalize_after_patch_decision projects task state to completed"
+            }
+          ]
+        }
+      ],
+      "postconditions": [
+        {
+          "factEquals": {
+            "path": "workflow.status",
+            "value": "closed"
           }
         }
-      ]
+      ],
+      "separationOfDuty": {
+        "evidenceActorPairsDistinct": [
+          {
+            "leftKind": "pbc_draft",
+            "rightKind": "pressure_pass"
+          }
+        ]
+      },
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "revise_after_patch_decision",
@@ -544,9 +729,25 @@
           "to": {
             "status": "active",
             "phase": "pbc_draft"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:in_progress",
+              "data": {
+                "state": "in_progress"
+              },
+              "reason": "PBC transition revise_after_patch_decision projects task state to in_progress"
+            }
+          ]
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "dispose_from_behavior_note",
@@ -576,9 +777,33 @@
           "to": {
             "status": "closed",
             "phase": "disposed"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
+              "data": {
+                "state": "cancelled"
+              },
+              "reason": "PBC transition dispose_from_behavior_note projects task state to cancelled"
+            }
+          ]
+        }
+      ],
+      "postconditions": [
+        {
+          "factEquals": {
+            "path": "workflow.status",
+            "value": "closed"
           }
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "dispose_from_pbc_draft",
@@ -608,9 +833,33 @@
           "to": {
             "status": "closed",
             "phase": "disposed"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
+              "data": {
+                "state": "cancelled"
+              },
+              "reason": "PBC transition dispose_from_pbc_draft projects task state to cancelled"
+            }
+          ]
+        }
+      ],
+      "postconditions": [
+        {
+          "factEquals": {
+            "path": "workflow.status",
+            "value": "closed"
           }
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     },
     {
       "id": "dispose_from_pressure",
@@ -640,9 +889,285 @@
           "to": {
             "status": "closed",
             "phase": "disposed"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
+              "data": {
+                "state": "cancelled"
+              },
+              "reason": "PBC transition dispose_from_pressure projects task state to cancelled"
+            }
+          ]
+        }
+      ],
+      "postconditions": [
+        {
+          "factEquals": {
+            "path": "workflow.status",
+            "value": "closed"
           }
         }
-      ]
+      ],
+      "responsibility": {
+        "role": "agent",
+        "scope": "task",
+        "lane": "pbc-refinement"
+      }
     }
-  ]
+  ],
+  "nextActionModel": {
+    "schemaVersion": "wrkf.next-action-model.v1",
+    "scope": {
+      "required": true,
+      "source": "participantRun.sessionRef.scopeRef",
+      "defaultShape": "agent:<agentId>:project:<projectId>:task:<taskId>:role:<role>",
+      "allowedKinds": [
+        "project-task-role",
+        "project-task",
+        "project-role"
+      ],
+      "laneDefault": "pbc-refinement",
+      "handoffPolicy": "same-scope-or-authorized-descendant"
+    },
+    "promptCatalog": {
+      "pbc.agent.base.v5": {
+        "kind": "workflow-guidance",
+        "summary": "Base instructions for agent-owned PBC refinement work.",
+        "templateRefs": [
+          "pbc/templates/behavior-note.md",
+          "pbc/templates/pbc.md",
+          "pbc/templates/pressure-pass.md"
+        ]
+      },
+      "pbc.product_owner.base.v5": {
+        "kind": "workflow-guidance",
+        "summary": "Base instructions for product-owner clarification and patch decisions."
+      }
+    },
+    "roles": {
+      "agent": {
+        "basePromptRef": "pbc.agent.base.v5",
+        "purpose": "Normalize one-line feedback into a Behavior Note, draft a compact PBC, pressure-test it, and record typed evidence.",
+        "hardRules": [
+          "Use wrkf next as the source of legal next actions.",
+          "Do not apply a transition unless its evidence and obligations are satisfied.",
+          "Record evidence before applying the transition that depends on it.",
+          "When blocked on product_owner, ask exactly one highest-leverage question or patch decision.",
+          "Do not invent product-owner answers.",
+          "Do not mutate workflow state outside wrkf transition.apply."
+        ]
+      },
+      "product_owner": {
+        "basePromptRef": "pbc.product_owner.base.v5",
+        "purpose": "Answer clarification or patch decision obligations with minimal decisive input.",
+        "hardRules": [
+          "Answer only the blocking decision requested by the workflow.",
+          "Prefer a crisp route or answer over broad redesign.",
+          "Do not mutate workflow state directly; provide evidence or obligation response."
+        ]
+      }
+    },
+    "phaseGuidance": {
+      "open/intake": {
+        "agentInstruction": "Extract the raw feedback, normalize the signal, infer likely type, and identify the candidate highest-leverage clarification question.",
+        "expectedEvidence": [
+          "intake_metadata"
+        ],
+        "avoid": [
+          "writing a full PBC before the feedback is normalized"
+        ]
+      },
+      "active/behavior_note": {
+        "agentInstruction": "Write or verify the Behavior Note, then decide whether one clarification is needed before drafting.",
+        "expectedEvidence": [
+          "behavior_note",
+          "pre_interview_analysis"
+        ],
+        "decisionFacts": {
+          "pre_interview_analysis.clarification_needed": [
+            true,
+            false
+          ]
+        },
+        "avoid": [
+          "asking multiple product-owner questions",
+          "drafting from unnormalized feedback"
+        ]
+      },
+      "waiting/clarification": {
+        "agentInstruction": "Do not continue drafting. Wait for product_owner clarification_response or an authorized waiver.",
+        "expectedEvidence": [
+          "clarification_response"
+        ],
+        "blockedBy": [
+          "clarification_response"
+        ],
+        "avoid": [
+          "inventing a product-owner answer"
+        ]
+      },
+      "active/pbc_draft": {
+        "agentInstruction": "Draft a compact PBC from current evidence and prepare it for pressure review.",
+        "expectedEvidence": [
+          "pbc_draft"
+        ],
+        "avoid": [
+          "expanding into implementation design"
+        ]
+      },
+      "active/pressure": {
+        "agentInstruction": "Run the pressure pass. Produce exactly one verdict: ready, needs_patch, or too_vague. Include tighten list and patch when applicable.",
+        "expectedEvidence": [
+          "pressure_pass",
+          "pbc_final when verdict is ready"
+        ],
+        "avoid": [
+          "finalizing without pressure_pass.verdict=ready",
+          "using a pressure pass from an old draft hash"
+        ]
+      },
+      "waiting/patch_decision": {
+        "agentInstruction": "Do not revise or finalize until product_owner records patch_decision.route as finalize or revise.",
+        "expectedEvidence": [
+          "patch_decision"
+        ],
+        "blockedBy": [
+          "patch_decision"
+        ],
+        "avoid": [
+          "choosing the route for the product owner"
+        ]
+      },
+      "closed/finalized": {
+        "agentInstruction": "No further PBC refinement action is legal. Use the finalized PBC as downstream seed material.",
+        "expectedEvidence": [
+          "pbc_final"
+        ],
+        "avoid": [
+          "reopening or mutating workflow state outside wrkf"
+        ]
+      },
+      "closed/disposed": {
+        "agentInstruction": "No further PBC refinement action is legal. Preserve the disposition_decision as the closure rationale.",
+        "expectedEvidence": [
+          "disposition_decision"
+        ],
+        "avoid": [
+          "continuing to draft or pressure-test disposed feedback"
+        ]
+      }
+    },
+    "transitionGuidance": {
+      "normalize_feedback": {
+        "prompt": "Normalize raw feedback into intake_metadata. Capture original wording, normalized signal, likely type, uncertainty, and candidate clarification question.",
+        "produceEvidence": [
+          "intake_metadata"
+        ],
+        "operatorHint": "Apply normalize_feedback only when revision and context are current."
+      },
+      "ask_clarification": {
+        "prompt": "If clarification_needed is true, ask exactly one highest-leverage question. Make the question answerable in one short response.",
+        "produceEvidence": [
+          "behavior_note",
+          "pre_interview_analysis"
+        ],
+        "operatorHint": "Apply ask_clarification to open the product_owner obligation."
+      },
+      "draft_pbc": {
+        "prompt": "Draft the smallest useful PBC. Include behavior, preconditions, boundaries, acceptance signal, and known uncertainty. Do not expand into implementation design.",
+        "produceEvidence": [
+          "behavior_note",
+          "pre_interview_analysis",
+          "pbc_draft"
+        ],
+        "operatorHint": "Apply draft_pbc after clarification_needed=false is recorded."
+      },
+      "answer_clarification": {
+        "prompt": "Record the product-owner answer or accepted default as clarification_response, satisfy the clarification_response obligation, then proceed to drafting.",
+        "produceEvidence": [
+          "clarification_response"
+        ],
+        "satisfyObligations": [
+          "clarification_response"
+        ],
+        "operatorHint": "Apply answer_clarification only after the product_owner obligation is satisfied."
+      },
+      "run_pressure_pass": {
+        "prompt": "Pressure-test the draft PBC against ambiguity, missing preconditions, overbreadth, unverifiable acceptance, and implementation leakage.",
+        "produceEvidence": [
+          "pbc_draft"
+        ],
+        "operatorHint": "Apply run_pressure_pass to enter the pressure phase."
+      },
+      "finalize_ready_pbc": {
+        "prompt": "Only finalize if pressure_pass.verdict is ready and the pbc_final artifact is derived from the current draft.",
+        "produceEvidence": [
+          "pressure_pass",
+          "pbc_final"
+        ],
+        "operatorHint": "Apply finalize_ready_pbc only with a pressure_pass actor distinct from the pbc_draft actor."
+      },
+      "request_patch_decision": {
+        "prompt": "Summarize the pressure patch and ask product_owner whether to finalize with patch or revise.",
+        "produceEvidence": [
+          "pressure_pass"
+        ],
+        "operatorHint": "Apply request_patch_decision to open the product_owner patch_decision obligation."
+      },
+      "revise_too_vague_pbc": {
+        "prompt": "Revise the PBC using the pressure pass. Preserve the behavioral contract; remove ambiguity before re-running pressure.",
+        "produceEvidence": [
+          "pressure_pass",
+          "pbc_draft"
+        ],
+        "operatorHint": "Apply revise_too_vague_pbc when pressure_pass.verdict is too_vague."
+      },
+      "finalize_after_patch_decision": {
+        "prompt": "Finalize only if patch_decision.route is finalize, the obligation was satisfied by an authorized product_owner, and pbc_final reflects the accepted patch.",
+        "produceEvidence": [
+          "patch_decision",
+          "pbc_final"
+        ],
+        "satisfyObligations": [
+          "patch_decision"
+        ],
+        "operatorHint": "Apply finalize_after_patch_decision only with current revision/context and satisfied patch_decision obligation."
+      },
+      "revise_after_patch_decision": {
+        "prompt": "Revise the draft according to patch_decision.route=revise. Cite the product-owner decision in the new draft evidence.",
+        "produceEvidence": [
+          "patch_decision",
+          "pbc_draft"
+        ],
+        "satisfyObligations": [
+          "patch_decision"
+        ],
+        "operatorHint": "Apply revise_after_patch_decision to return to pbc_draft."
+      },
+      "dispose_from_behavior_note": {
+        "prompt": "Record disposition_decision before closing feedback from behavior_note without a PBC.",
+        "produceEvidence": [
+          "disposition_decision"
+        ],
+        "operatorHint": "Apply dispose_from_behavior_note only when disposal is the intended terminal outcome."
+      },
+      "dispose_from_pbc_draft": {
+        "prompt": "Record disposition_decision before closing feedback from pbc_draft without a finalized PBC.",
+        "produceEvidence": [
+          "disposition_decision"
+        ],
+        "operatorHint": "Apply dispose_from_pbc_draft only when disposal is the intended terminal outcome."
+      },
+      "dispose_from_pressure": {
+        "prompt": "Record disposition_decision before closing feedback from pressure without patching or finalizing.",
+        "produceEvidence": [
+          "disposition_decision"
+        ],
+        "operatorHint": "Apply dispose_from_pressure only when disposal is the intended terminal outcome."
+      }
+    }
+  }
 }

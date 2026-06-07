@@ -92,7 +92,7 @@ do_request() {
 wait_health() {
   local base_url="$1"
   for _ in {1..50}; do
-    if do_request "GET" "$base_url" "/health" >/dev/null 2>&1; then
+    if curl -fsS -H "Content-Type: application/json" -H "X-Wrkq-Actor: smoke-agent" "$base_url/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.1

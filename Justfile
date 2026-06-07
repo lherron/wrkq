@@ -19,14 +19,6 @@ info:
 
 # --- Database tasks ---
 
-# Run migrations against local database
-db-migrate-local:
-  node scripts/db-migrate.mjs --dir db/migrations
-
-# Run migrations against remote database
-db-migrate-remote url:
-  node scripts/db-migrate.mjs --dir db/migrations --url "{{url}}"
-
 # Seed development data
 db-seed-dev:
   node scripts/db-seed.mjs --dir db/seeds/dev

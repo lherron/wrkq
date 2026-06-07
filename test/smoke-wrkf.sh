@@ -176,20 +176,20 @@ jq -e --arg eff "$EFF" '.effects[0].id == $eff and .effects[0].status == "leased
 "$BIN/wrkf" --db "$DB" effect ack "$EFF" --lease-token "$TOKEN" --json | jq -e '.status == "delivered" and (.leasedBy == null)' >/dev/null
 OBL="$("$BIN/wrkf" --db "$DB" obligation list T-00001 --json | jq -r '.obligations[0].id')"
 EV="$("$BIN/wrkf" --db "$DB" evidence list T-00001 --json | jq -r '.evidence[0].id')"
-"$BIN/wrkf" --db "$DB" obligation satisfy T-00001 "$OBL" --evidence "$EV" --json | jq -e '.status == "satisfied"' >/dev/null
+"$BIN/wrkf" --db "$DB" obligation satisfy T-00001 "$OBL" --role coordinator --evidence "$EV" --json | jq -e '.status == "satisfied"' >/dev/null
 
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" hook list --json | jq -e '.hooks[0].id == "finish_hook"' >/dev/null
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" hook show finish_hook --json | jq -e '.id == "finish_hook"' >/dev/null
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" hook run T-00001 finish --hook finish_hook --json | jq -e '.verdict == "pass"' >/dev/null
-"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check run T-00001 finish --json | jq -e '.checks[0].verdict == "pass"' >/dev/null
-"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check show chk_000001 --json | jq -e '.id == "chk_000001"' >/dev/null
 
 RUN="$("$BIN/wrkf" --db "$DB" run start T-00001 --role coordinator --actor human:local-human --json | jq -r '.id')"
 "$BIN/wrkf" --db "$DB" run show "$RUN" --json | jq -e '.status == "active"' >/dev/null
-"$BIN/wrkf" --db "$DB" run finish "$RUN" --summary "done" --json | jq -e '.status == "completed"' >/dev/null
 "$BIN/wrkf" --db "$DB" run list T-00001 --json | jq -e '.runs | length == 1' >/dev/null
+"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check run T-00001 finish --role coordinator --actor human:local-human --json | jq -e '.checks[0].verdict == "pass"' >/dev/null
+"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check show chk_000001 --json | jq -e '.id == "chk_000001"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" transition T-00001 finish --role coordinator --run-checks --expect-revision 1 --idempotency-key finish --json | jq -e '.state.outcome == "completed" and .revision == 2' >/dev/null
+"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" transition T-00001 finish --role coordinator --actor human:local-human --expect-revision 1 --idempotency-key finish --json | jq -e '.state.outcome == "completed" and .revision == 2' >/dev/null
+"$BIN/wrkf" --db "$DB" run finish "$RUN" --summary "done" --json | jq -e '.status == "completed"' >/dev/null
 "$BIN/wrkf" --db "$DB" next T-00001 --role coordinator --json | jq -e '.actions | length == 0' >/dev/null
 
 "$BIN/wrkf" --db "$DB" supervisor start T-00001 --actor human:local-human --json | jq -e '.role == "supervisor"' >/dev/null

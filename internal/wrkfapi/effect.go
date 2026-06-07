@@ -25,7 +25,7 @@ func (api *API) EffectAck(ctx context.Context, params EffectAckParams) (*workflo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	effect, err := api.service.AckEffect(params.EffectID, params.LeaseToken)
+	effect, err := api.service.AckEffectWithReceipt(params.EffectID, params.LeaseToken, params.Receipt)
 	if err != nil {
 		return nil, normalizeError(err)
 	}
