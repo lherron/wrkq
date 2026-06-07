@@ -78,11 +78,11 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var projects []Project
 	var hasMore bool
 
-	// Query all root containers (projects)
+	// Query all top-level project containers (direct children of the root)
 	query := `
 		SELECT uuid, id, slug, title
 		FROM containers
-		WHERE parent_uuid IS NULL
+		WHERE parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 	`
 	queryArgs := []interface{}{}
 

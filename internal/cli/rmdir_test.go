@@ -32,8 +32,8 @@ func TestRmdir(t *testing.T) {
 	t.Run("removes empty container", func(t *testing.T) {
 		slug := "empty-test"
 		_, err := database.Exec(`
-			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('', ?, 'Empty Test', ?, ?, 1)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('', ?, 'Empty Test', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
@@ -67,8 +67,8 @@ func TestRmdir(t *testing.T) {
 	t.Run("fails to remove non-empty container without force", func(t *testing.T) {
 		slug := "non-empty"
 		_, _ = database.Exec(`
-			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('', ?, 'Non Empty', ?, ?, 1)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('', ?, 'Non Empty', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 
 		// Get container UUID and ID
@@ -99,8 +99,8 @@ func TestRmdir(t *testing.T) {
 	t.Run("removes non-empty container with force", func(t *testing.T) {
 		slug := "force-test"
 		_, _ = database.Exec(`
-			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('', ?, 'Force Test', ?, ?, 1)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('', ?, 'Force Test', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 
 		// Get container UUID and ID
@@ -142,8 +142,8 @@ func TestRmdir(t *testing.T) {
 
 	t.Run("removes container with child containers when forced", func(t *testing.T) {
 		_, _ = database.Exec(`
-			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('', 'parent', 'Parent', ?, ?, 1)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('', 'parent', 'Parent', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, actorUUID, actorUUID)
 
 		var parentUUID, parentID string
@@ -179,8 +179,8 @@ func TestRmdir(t *testing.T) {
 	t.Run("logs container.deleted event", func(t *testing.T) {
 		slug := "event-test"
 		_, _ = database.Exec(`
-			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('', ?, 'Event Test', ?, ?, 1)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('', ?, 'Event Test', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, slug, actorUUID, actorUUID)
 
 		var containerUUID, containerID string
@@ -214,8 +214,8 @@ func TestRmdir(t *testing.T) {
 
 	t.Run("fails to remove container with child containers without force", func(t *testing.T) {
 		_, _ = database.Exec(`
-			INSERT INTO containers (id, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('', 'parent-nf', 'Parent No Force', ?, ?, 1)
+			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES ('', 'parent-nf', 'Parent No Force', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, actorUUID, actorUUID)
 
 		var parentUUID, parentID string

@@ -205,7 +205,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 	var containerArgs []interface{}
 
 	if parentUUID == nil {
-		containerQuery += `parent_uuid IS NULL`
+		containerQuery += `parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')`
 	} else {
 		containerQuery += `parent_uuid = ?`
 		containerArgs = append(containerArgs, *parentUUID)

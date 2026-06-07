@@ -604,8 +604,8 @@ func (s *daemonServer) handleTasksCreate(w http.ResponseWriter, r *http.Request)
 	if parentUUID != nil {
 		projectUUID = *parentUUID
 	} else {
-		if err := s.db.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID); err != nil {
-			s.writeError(w, http.StatusBadRequest, fmt.Errorf("no root container found"))
+		if err := s.db.QueryRow(`SELECT uuid FROM containers WHERE kind = 'project' LIMIT 1`).Scan(&projectUUID); err != nil {
+			s.writeError(w, http.StatusBadRequest, fmt.Errorf("no project found"))
 			return
 		}
 	}

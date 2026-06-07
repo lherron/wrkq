@@ -42,6 +42,8 @@ func insertContainer(t *testing.T, database *db.DB, uuid, id, slug, title, paren
 	kind := "project"
 	if parentUUID != "" {
 		kind = "directory"
+	} else {
+		parentUUID = "00000000-0000-4000-8000-000000000001"
 	}
 	_, err := database.Exec(`
 		INSERT INTO containers (uuid, id, slug, title, description, parent_uuid, kind, sort_index, etag,

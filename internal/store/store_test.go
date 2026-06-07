@@ -46,6 +46,7 @@ func setupTestContainer(t *testing.T, database *db.DB, actorUUID string) string 
 	s := New(database)
 	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{
 		Slug: "test-project",
+		Kind: "project",
 	})
 	if err != nil {
 		t.Fatalf("failed to create test container: %v", err)
@@ -312,17 +313,26 @@ func TestTaskStore_Move(t *testing.T) {
 	s := New(database)
 
 	// Create two containers
-	container1, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project-1"})
-	container2, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project-2"})
+	container1, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project-1", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create project-1: %v", err)
+	}
+	container2, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project-2", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create project-2: %v", err)
+	}
 
 	// Create a task in container1
-	taskResult, _ := s.Tasks.Create(actorUUID, CreateParams{
+	taskResult, err := s.Tasks.Create(actorUUID, CreateParams{
 		Slug:        "move-test",
 		Title:       "Move Test",
 		ProjectUUID: container1.UUID,
 		State:       "open",
 		Priority:    3,
 	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
 
 	// Move to container2
 	newETag, err := s.Tasks.Move(actorUUID, taskResult.UUID, container2.UUID, 0)
@@ -430,6 +440,7 @@ func TestContainerStore_Create(t *testing.T) {
 	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{
 		Slug:  "new-project",
 		Title: "New Project",
+		Kind:  "project",
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -456,6 +467,7 @@ func TestContainerStore_Create_DefaultInboxTitle(t *testing.T) {
 
 	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{
 		Slug: "inbox",
+		Kind: "project",
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -475,9 +487,13 @@ func TestContainerStore_UpdateFields(t *testing.T) {
 	actorUUID := setupTestActor(t, database)
 	s := New(database)
 
-	createResult, _ := s.Containers.Create(actorUUID, ContainerCreateParams{
+	createResult, err := s.Containers.Create(actorUUID, ContainerCreateParams{
 		Slug: "update-container",
+		Kind: "project",
 	})
+	if err != nil {
+		t.Fatalf("create container: %v", err)
+	}
 
 	newETag, err := s.Containers.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{
 		"slug": "renamed-container",
@@ -500,18 +516,32 @@ func TestContainerStore_Move(t *testing.T) {
 	actorUUID := setupTestActor(t, database)
 	s := New(database)
 
-	parent, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "parent"})
-	child, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "child"})
+	parent, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "parent", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	otherParent, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "other-parent", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create other parent: %v", err)
+	}
+	child, err := s.Containers.Create(actorUUID, ContainerCreateParams{
+		Slug:       "child",
+		ParentUUID: &parent.UUID,
+		Kind:       "directory",
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
 
-	// Move child under parent
-	_, err := s.Containers.Move(actorUUID, child.UUID, &parent.UUID, 0)
+	// Move child under another parent
+	_, err = s.Containers.Move(actorUUID, child.UUID, &otherParent.UUID, 0)
 	if err != nil {
 		t.Fatalf("Move failed: %v", err)
 	}
 
 	container, _ := s.Containers.GetByUUID(child.UUID)
-	if container.ParentUUID == nil || *container.ParentUUID != parent.UUID {
-		t.Error("expected child to be under parent")
+	if container.ParentUUID == nil || *container.ParentUUID != otherParent.UUID {
+		t.Error("expected child to be under other parent")
 	}
 }
 
@@ -520,9 +550,12 @@ func TestContainerStore_Delete(t *testing.T) {
 	actorUUID := setupTestActor(t, database)
 	s := New(database)
 
-	result, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "to-delete"})
+	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "to-delete", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create container: %v", err)
+	}
 
-	err := s.Containers.Delete(actorUUID, result.UUID, 0)
+	err = s.Containers.Delete(actorUUID, result.UUID, 0)
 	if err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
@@ -538,19 +571,25 @@ func TestContainerStore_DeleteNonEmpty(t *testing.T) {
 	actorUUID := setupTestActor(t, database)
 	s := New(database)
 
-	container, _ := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "non-empty"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "non-empty", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create container: %v", err)
+	}
 
 	// Create a task in the container
-	_, _ = s.Tasks.Create(actorUUID, CreateParams{
+	_, err = s.Tasks.Create(actorUUID, CreateParams{
 		Slug:        "child-task",
 		Title:       "Child Task",
 		ProjectUUID: container.UUID,
 		State:       "open",
 		Priority:    3,
 	})
+	if err != nil {
+		t.Fatalf("create child task: %v", err)
+	}
 
 	// Try to delete non-empty container
-	err := s.Containers.Delete(actorUUID, container.UUID, 0)
+	err = s.Containers.Delete(actorUUID, container.UUID, 0)
 	if err == nil {
 		t.Error("expected error for non-empty container")
 	}

@@ -10,6 +10,11 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 )
 
+// topLevelClause selects top-level project containers (direct children of the
+// singleton root). It replaces the legacy `parent_uuid IS NULL` test now that the
+// root is the only null-parent row. kind='root' is the authoritative root locator.
+const topLevelClause = "parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')"
+
 // PathResolution contains the result of resolving a container path
 type PathResolution struct {
 	UUID       string  // UUID of the resolved container (empty for root)
@@ -41,7 +46,7 @@ func WalkContainerPath(database *db.DB, path string) (string, string, error) {
 		query := `SELECT uuid, id FROM containers WHERE slug = ? AND `
 		args := []interface{}{slug}
 		if currentUUID == nil {
-			query += `parent_uuid IS NULL`
+			query += topLevelClause
 		} else {
 			query += `parent_uuid = ?`
 			args = append(args, *currentUUID)
@@ -106,7 +111,7 @@ func WalkContainerSegment(database *db.DB, slug string, parentUUID *string) (str
 	query := `SELECT uuid, id FROM containers WHERE slug = ? AND `
 	args := []interface{}{normalizedSlug}
 	if parentUUID == nil {
-		query += `parent_uuid IS NULL`
+		query += topLevelClause
 	} else {
 		query += `parent_uuid = ?`
 		args = append(args, *parentUUID)
@@ -135,7 +140,7 @@ func LookupContainerSegment(database *db.DB, slug string, parentUUID *string) (s
 	query := `SELECT uuid, id FROM containers WHERE slug = ? AND `
 	args := []interface{}{normalizedSlug}
 	if parentUUID == nil {
-		query += `parent_uuid IS NULL`
+		query += topLevelClause
 	} else {
 		query += `parent_uuid = ?`
 		args = append(args, *parentUUID)
@@ -183,7 +188,7 @@ func ResolveTaskByPath(database *db.DB, path string) (string, string, error) {
 		// Try to find in any root container
 		err = database.QueryRow(`
 			SELECT uuid, id FROM tasks WHERE slug = ? AND project_uuid IN (
-				SELECT uuid FROM containers WHERE parent_uuid IS NULL
+				SELECT uuid FROM containers WHERE kind = 'project'
 			) LIMIT 1
 		`, normalizedSlug).Scan(&taskUUID, &friendlyID)
 	} else {

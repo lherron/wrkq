@@ -98,16 +98,16 @@ func TestGlobalProjectFlag_OverridesConfig(t *testing.T) {
 
 	// Create two root projects: "alpha" and "beta"
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'alpha', 'Alpha Project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'alpha', 'Alpha Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create alpha project: %v", err)
 	}
 
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000011', 'P-00003', 'beta', 'Beta Project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000011', 'P-00003', 'beta', 'Beta Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create beta project: %v", err)
@@ -196,16 +196,16 @@ func TestGlobalProjectFlag_FindCommand(t *testing.T) {
 
 	// Create two root projects
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000030', 'P-00010', 'proj-one', 'Project One', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000030', 'P-00010', 'proj-one', 'Project One', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create proj-one: %v", err)
 	}
 
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000031', 'P-00011', 'proj-two', 'Project Two', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000031', 'P-00011', 'proj-two', 'Project Two', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create proj-two: %v", err)
@@ -260,8 +260,8 @@ func TestGlobalProjectFlag_ResolvesByPath(t *testing.T) {
 
 	// Create a nested project structure: parent/child
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000050', 'P-00020', 'parent', 'Parent', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000050', 'P-00020', 'parent', 'Parent', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create parent: %v", err)

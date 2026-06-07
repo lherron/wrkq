@@ -250,10 +250,10 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if parentUUID != nil {
 			projectUUID = *parentUUID
 		} else {
-			// Task at root - find "inbox" or any root container
-			err := database.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID)
+			// Task with no explicit project - drop it into any project container.
+			err := database.QueryRow(`SELECT uuid FROM containers WHERE kind = 'project' LIMIT 1`).Scan(&projectUUID)
 			if err != nil {
-				return fmt.Errorf("no root container found (create a project first with 'wrkq mkdir')")
+				return fmt.Errorf("no project found (create one first with 'wrkq mkdir --kind project')")
 			}
 		}
 

@@ -40,8 +40,8 @@ func TestCpCommand(t *testing.T) {
 	// Create test container
 	containerUUID := "test-container-uuid"
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'test-project', 'Test Project', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'test-project', 'Test Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 	if err != nil {
 		t.Fatalf("Failed to create container: %v", err)
@@ -50,8 +50,8 @@ func TestCpCommand(t *testing.T) {
 	// Create destination container
 	destUUID := "dest-container-uuid"
 	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'dest', 'Destination', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'dest', 'Destination', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, destUUID, actorUUID, actorUUID)
 
 	t.Run("copy single task creates new UUID", func(t *testing.T) {
@@ -332,14 +332,14 @@ func TestCpCommandEventLogging(t *testing.T) {
 
 	containerUUID := "source-container"
 	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'src', 'Source', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'src', 'Source', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 
 	destUUID := "dest-container"
 	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'dst', 'Dest', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'dst', 'Dest', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, destUUID, actorUUID, actorUUID)
 
 	// Create source task

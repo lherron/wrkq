@@ -19,7 +19,7 @@ func TestFindRecursesAndLsShowsChildRollups(t *testing.T) {
 	// Simulate a legacy nested project row that predates the root-project
 	// invariant. Phase 2 reclassifies these rows, but Phase 1 must keep them
 	// visible until that data repair runs.
-	if _, err := database.Exec(`DROP TRIGGER IF EXISTS containers_project_root_insert`); err != nil {
+	if _, err := database.Exec(`DROP TRIGGER IF EXISTS containers_parent_kind_consistency_insert`); err != nil {
 		t.Fatalf("drop legacy insert trigger: %v", err)
 	}
 
@@ -33,7 +33,7 @@ func TestFindRecursesAndLsShowsChildRollups(t *testing.T) {
 		   '00000000-0000-0000-0000-000000000100', 'directory', '2026-05-25T10:00:00Z', '2026-05-25T10:00:00Z',
 		   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1),
 		  ('00000000-0000-0000-0000-000000000102', 'P-00102', 'inbox-extra', 'Inbox Extra',
-		   NULL, 'directory', '2026-05-25T10:00:00Z', '2026-05-25T10:00:00Z',
+		   (SELECT uuid FROM containers WHERE kind = 'root'), 'project', '2026-05-25T10:00:00Z', '2026-05-25T10:00:00Z',
 		   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`); err != nil {
 		t.Fatalf("insert containers: %v", err)

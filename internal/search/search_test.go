@@ -296,7 +296,7 @@ func setupSearchDB(t *testing.T) (*db.DB, string, string) {
 	}
 
 	s := store.New(canonical)
-	container, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "inbox"})
+	container, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "inbox", Kind: "project"})
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}

@@ -154,11 +154,12 @@ func seedDatabaseAdm(database *db.DB, humanSlug, humanName, agentSlug, agentName
 		return fmt.Errorf("failed to normalize inbox slug: %w", err)
 	}
 
-	// Create inbox project (use human actor as creator)
+	// Create inbox project as a child of the singleton root (created by migration
+	// 000024). Projects must be top-level (children of root), never null-parent.
 	title := "Inbox"
 	_, err = database.Exec(`
-		INSERT INTO containers (id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('', ?, ?, NULL, ?, ?)
+		INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('', ?, ?, (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?)
 	`, inboxSlug, title, humanActor.UUID, humanActor.UUID)
 	if err != nil {
 		return fmt.Errorf("failed to create inbox project: %w", err)
