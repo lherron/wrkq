@@ -48,11 +48,28 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 	if err := domain.ValidateContainerKind(kind); err != nil {
 		return nil, err
 	}
-	if kind == string(domain.ContainerKindProject) && params.ParentUUID != nil {
-		return nil, fmt.Errorf("project containers must be created at the root")
+	rootUUID, err := RootContainerUUID(cs.store.db)
+	if err != nil {
+		return nil, err
+	}
+	if kind == string(domain.ContainerKindProject) {
+		// Projects are top-level: parent must be the root. A nil parent (the
+		// common `mkdir --kind project foo` case) is auto-anchored to the root.
+		switch {
+		case params.ParentUUID == nil:
+			params.ParentUUID = &rootUUID
+		case *params.ParentUUID != rootUUID:
+			return nil, fmt.Errorf("project containers must be top-level (child of root)")
+		}
+	} else {
+		// Non-project containers must be nested under a project/sub-container,
+		// never at the top level (which is reserved for projects).
+		if params.ParentUUID == nil || *params.ParentUUID == rootUUID {
+			return nil, fmt.Errorf("only project containers can be top-level; %q needs a parent container", kind)
+		}
 	}
 
-	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+	err = cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		res, err := tx.Exec(`
 			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
 			VALUES ('', ?, ?, ?, ?, ?, ?)
@@ -141,7 +158,11 @@ func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields m
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
 		}
-		if err := validateContainerKindUpdate(currentKind, currentParentUUID, fields); err != nil {
+		rootUUID, err := RootContainerUUID(tx)
+		if err != nil {
+			return err
+		}
+		if err := validateContainerKindUpdate(rootUUID, currentKind, currentParentUUID, fields); err != nil {
 			return err
 		}
 
@@ -215,8 +236,16 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
 		}
-		if kind == string(domain.ContainerKindProject) && newParentUUID != nil {
-			return fmt.Errorf("project containers must remain at the root")
+		rootUUID, err := RootContainerUUID(tx)
+		if err != nil {
+			return err
+		}
+		if kind == string(domain.ContainerKindProject) {
+			if newParentUUID == nil || *newParentUUID != rootUUID {
+				return fmt.Errorf("project containers must remain top-level (child of root)")
+			}
+		} else if newParentUUID == nil || *newParentUUID == rootUUID {
+			return fmt.Errorf("only project containers can be top-level")
 		}
 
 		// Update the container
@@ -260,7 +289,7 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 	return newETag, err
 }
 
-func validateContainerKindUpdate(currentKind string, currentParentUUID *string, fields map[string]interface{}) error {
+func validateContainerKindUpdate(rootUUID, currentKind string, currentParentUUID *string, fields map[string]interface{}) error {
 	nextKind := currentKind
 	if raw, ok := fields["kind"]; ok {
 		value, ok := raw.(string)
@@ -287,8 +316,17 @@ func validateContainerKindUpdate(currentKind string, currentParentUUID *string, 
 		}
 	}
 
-	if nextKind == string(domain.ContainerKindProject) && nextParentUUID != nil {
-		return fmt.Errorf("project containers must be root containers")
+	switch {
+	case nextKind == string(domain.ContainerKindRoot):
+		// The internal root legitimately keeps a null parent; nothing to validate.
+	case nextKind == string(domain.ContainerKindProject):
+		if nextParentUUID == nil || *nextParentUUID != rootUUID {
+			return fmt.Errorf("project containers must be top-level (child of root)")
+		}
+	default:
+		if nextParentUUID == nil || *nextParentUUID == rootUUID {
+			return fmt.Errorf("only project containers can be top-level")
+		}
 	}
 	return nil
 }
@@ -458,7 +496,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_actor_uuid, updated_by_actor_uuid
-			FROM containers WHERE slug = ? AND parent_uuid IS NULL
+			FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 		`
 		args = []interface{}{slug}
 	} else {

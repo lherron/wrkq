@@ -74,6 +74,7 @@ func runDoctorAdm(cmd *cobra.Command, args []string) error {
 		defer func() { _ = database.Close() }()
 		report.Checks = append(report.Checks, checkDatabasePragmasAdm(database)...)
 		report.Checks = append(report.Checks, checkSchemaAdm(database)...)
+		report.Checks = append(report.Checks, checkRootContainerAdm(database)...)
 		report.Checks = append(report.Checks, checkDataIntegrityAdm(database)...)
 		report.Checks = append(report.Checks, checkSequenceDriftAdm(database)...)
 		report.Checks = append(report.Checks, checkAttachmentsAdm(database, cfg.AttachDir)...)
@@ -247,6 +248,56 @@ func checkSchemaAdm(database *db.DB) []checkResultAdm {
 			Status:  "error",
 			Message: fmt.Sprintf("Missing tables: %v", missingTables),
 			Details: []string{"Run migrations to create missing tables"},
+		})
+	}
+
+	return results
+}
+
+// checkRootContainerAdm enforces the exactly-one-root invariant. SQLite can
+// express at-most-one (partial unique index) but not at-least-one, so the doctor
+// is the at-least-one backstop and must fail loudly when the root is missing.
+func checkRootContainerAdm(database *db.DB) []checkResultAdm {
+	var rootCount, nonRootNullParents int
+	if err := database.QueryRow("SELECT COUNT(*) FROM containers WHERE kind = 'root'").Scan(&rootCount); err != nil {
+		return []checkResultAdm{{
+			Name:    "root_container",
+			Status:  "error",
+			Message: fmt.Sprintf("Failed to count root containers: %v", err),
+		}}
+	}
+	_ = database.QueryRow("SELECT COUNT(*) FROM containers WHERE parent_uuid IS NULL AND kind != 'root'").Scan(&nonRootNullParents)
+
+	var results []checkResultAdm
+	switch rootCount {
+	case 1:
+		results = append(results, checkResultAdm{
+			Name:    "root_container",
+			Status:  "ok",
+			Message: "Exactly one root container present",
+		})
+	case 0:
+		results = append(results, checkResultAdm{
+			Name:    "root_container",
+			Status:  "error",
+			Message: "No root container found",
+			Details: []string{"Run 'wrkq adm migrate' to seed the root container"},
+		})
+	default:
+		results = append(results, checkResultAdm{
+			Name:    "root_container",
+			Status:  "error",
+			Message: fmt.Sprintf("Expected exactly one root container, found %d", rootCount),
+			Details: []string{"Manual intervention required: duplicate root rows break project resolution"},
+		})
+	}
+
+	if nonRootNullParents > 0 {
+		results = append(results, checkResultAdm{
+			Name:    "root_container",
+			Status:  "error",
+			Message: fmt.Sprintf("%d non-root container(s) have a NULL parent", nonRootNullParents),
+			Details: []string{"Only the root container may have a NULL parent; reparent these under the root"},
 		})
 	}
 
@@ -517,7 +568,7 @@ func printHumanReportAdm(cmd *cobra.Command, report *doctorReportAdm) {
 			categories["Database File"] = append(categories["Database File"], check)
 		case "wal_mode", "foreign_keys", "integrity_check":
 			categories["Database Health"] = append(categories["Database Health"], check)
-		case "schema_tables":
+		case "schema_tables", "root_container":
 			categories["Schema"] = append(categories["Schema"], check)
 		case "orphaned_tasks", "orphaned_attachments", "duplicate_slugs":
 			categories["Data Integrity"] = append(categories["Data Integrity"], check)

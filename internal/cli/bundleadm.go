@@ -326,16 +326,15 @@ func ensureContainerTx(tx *sql.Tx, ew *events.Writer, actorUUID string, path str
 			return createdAny, fmt.Errorf("invalid container slug %q: %w", segment, err)
 		}
 
+		// A nil parentUUID denotes a top-level segment, which now resolves to a
+		// child of the singleton root rather than a null-parent row.
 		query := `
 			SELECT uuid FROM containers
-			WHERE slug = ? AND (
-				(parent_uuid IS NULL AND ? IS NULL) OR
-				(parent_uuid = ?)
-			)
+			WHERE slug = ? AND parent_uuid = COALESCE(?, (SELECT uuid FROM containers WHERE kind = 'root'))
 		`
 
 		var uuid string
-		err = tx.QueryRow(query, slug, parentUUID, parentUUID).Scan(&uuid)
+		err = tx.QueryRow(query, slug, parentUUID).Scan(&uuid)
 		if err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
 				return createdAny, fmt.Errorf("failed to query container %s: %w", slug, err)
@@ -719,7 +718,7 @@ func resolveTaskByPathTx(tx *sql.Tx, path string) (string, string, error) {
 	if parentUUID == nil {
 		err = tx.QueryRow(`
 			SELECT uuid, id FROM tasks WHERE slug = ? AND project_uuid IN (
-				SELECT uuid FROM containers WHERE parent_uuid IS NULL
+				SELECT uuid FROM containers WHERE kind = 'project'
 			) LIMIT 1
 		`, normalizedSlug).Scan(&taskUUID, &taskID)
 	} else {
@@ -750,7 +749,7 @@ func walkContainerPathTx(tx *sql.Tx, path string) (string, error) {
 		query := `SELECT uuid FROM containers WHERE slug = ? AND `
 		args := []interface{}{slug}
 		if currentUUID == nil {
-			query += `parent_uuid IS NULL`
+			query += `parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')`
 		} else {
 			query += `parent_uuid = ?`
 			args = append(args, *currentUUID)
@@ -804,8 +803,8 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 	if parentUUID != nil {
 		projectUUID = *parentUUID
 	} else {
-		if err := tx.QueryRow(`SELECT uuid FROM containers WHERE parent_uuid IS NULL LIMIT 1`).Scan(&projectUUID); err != nil {
-			return fmt.Errorf("no root container found for %s", task.Path)
+		if err := tx.QueryRow(`SELECT uuid FROM containers WHERE kind = 'project' LIMIT 1`).Scan(&projectUUID); err != nil {
+			return fmt.Errorf("no project found for %s", task.Path)
 		}
 	}
 

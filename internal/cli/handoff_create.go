@@ -302,7 +302,7 @@ func lookupHandoffScopeRows(ctx context.Context, db *sql.DB, resolved scope.Reso
 	var containerUUID *string
 	if resolved.ProjectID != "" {
 		var uuid string
-		if err := db.QueryRowContext(ctx, `SELECT uuid FROM containers WHERE slug = ? AND parent_uuid IS NULL LIMIT 1`, resolved.ProjectID).Scan(&uuid); err == nil {
+		if err := db.QueryRowContext(ctx, `SELECT uuid FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root') LIMIT 1`, resolved.ProjectID).Scan(&uuid); err == nil {
 			containerUUID = &uuid
 		}
 	}

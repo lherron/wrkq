@@ -80,12 +80,19 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool,
 			}
 
 			// Use provided kind only for the final segment.
+			isFinal := i == len(segments)-1
 			segmentKind := string(domain.ContainerKindDirectory)
-			if i == len(segments)-1 && kind != "" {
+			if isFinal && kind != "" {
 				segmentKind = kind
 			}
-			if segmentKind == string(domain.ContainerKindProject) && parentUUID != nil {
-				return fmt.Errorf("--kind project is only valid for root containers")
+			if parentUUID == nil {
+				// Top-level containers must be projects (children of the root).
+				if isFinal && kind != "" && kind != string(domain.ContainerKindProject) {
+					return fmt.Errorf("top-level containers must be projects (got --kind %s)", kind)
+				}
+				segmentKind = string(domain.ContainerKindProject)
+			} else if segmentKind == string(domain.ContainerKindProject) {
+				return fmt.Errorf("--kind project is only valid for top-level containers")
 			}
 
 			// Create container using store
@@ -109,8 +116,14 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool,
 		// Wrap error to suggest -p flag
 		return fmt.Errorf("%w (use -p to create parents)", err)
 	}
-	if kind == string(domain.ContainerKindProject) && parentUUID != nil {
-		return fmt.Errorf("--kind project is only valid for root containers")
+	if parentUUID == nil {
+		// Top-level containers must be projects (children of the root).
+		if kind != "" && kind != string(domain.ContainerKindProject) {
+			return fmt.Errorf("top-level containers must be projects (got --kind %s)", kind)
+		}
+		kind = string(domain.ContainerKindProject)
+	} else if kind == string(domain.ContainerKindProject) {
+		return fmt.Errorf("--kind project is only valid for top-level containers")
 	}
 
 	// Create container using store

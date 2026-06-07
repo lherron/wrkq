@@ -105,12 +105,12 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	for _, path := range paths {
 		if path == "" {
-			// List root containers with SQL-based pagination
+			// List top-level project containers with SQL-based pagination
 			if lsType == "" || lsType == "p" {
 				query := `
 					SELECT uuid, id, slug, title, kind, created_at, updated_at
 					FROM containers
-					WHERE parent_uuid IS NULL
+					WHERE parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 				`
 				queryArgs := []interface{}{}
 

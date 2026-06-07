@@ -13,7 +13,16 @@ const (
 	ContainerKindDirectory ContainerKind = "directory"
 	ContainerKindFeature   ContainerKind = "feature"
 	ContainerKindArea      ContainerKind = "area"
+	// ContainerKindRoot is the single internal, path-invisible root container that
+	// parents every project. It is created only by migration/bootstrap, never by
+	// the CLI or store, and is excluded from path views and selectors.
+	ContainerKindRoot ContainerKind = "root"
 )
+
+// RootContainerUUID is the fixed sentinel identity of the singleton root
+// container (see migration 000024). The UUID is plumbing; kind='root' is the
+// authoritative meaning — prefer resolving the root by kind at runtime.
+const RootContainerUUID = "00000000-0000-4000-8000-000000000001"
 
 // TaskKind represents the type of task
 type TaskKind string

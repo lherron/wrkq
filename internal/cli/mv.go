@@ -233,7 +233,7 @@ func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, actorUUID, srcCon
 	query := `SELECT uuid FROM containers WHERE slug = ? AND `
 	args := []interface{}{normalizedSlug}
 	if newParentUUID == nil {
-		query += `parent_uuid IS NULL`
+		query += `parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')`
 	} else {
 		query += `parent_uuid = ?`
 		args = append(args, *newParentUUID)

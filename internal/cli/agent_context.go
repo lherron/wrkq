@@ -181,12 +181,12 @@ func tryDBLookups(cmd *cobra.Command, resolved scope.ResolvedScope, resolveErr e
 		// Silently ignore non-ENOENT lookup errors — best effort only.
 	}
 
-	// Container lookup: ProjectID slug → containers row at the root.
+	// Container lookup: ProjectID slug → top-level project container.
 	if resolved.ProjectID != "" {
 		var contUUID, contID string
 		err := database.QueryRow(
 			`SELECT uuid, id FROM containers
-			 WHERE slug = ? AND parent_uuid IS NULL
+			 WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 			 LIMIT 1`,
 			resolved.ProjectID,
 		).Scan(&contUUID, &contID)
