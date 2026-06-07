@@ -232,8 +232,8 @@ func TestDoctorDataIntegrityChecks(t *testing.T) {
 
 	containerUUID := "test-container"
 	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'proj', 'Project', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'proj', 'Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 
 	t.Run("no orphaned tasks in healthy database", func(t *testing.T) {
@@ -455,8 +455,8 @@ func TestDoctorAttachmentChecks(t *testing.T) {
 
 		containerUUID := "test-container"
 		_, _ = database.Exec(`
-			INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'proj', 'Project', ?, ?, 1)
+			INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+			VALUES (?, 'proj', 'Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 		`, containerUUID, actorUUID, actorUUID)
 
 		taskUUID := "task-with-att"
@@ -558,8 +558,8 @@ func TestDoctorPerformanceChecks(t *testing.T) {
 
 	containerUUID := "test-container"
 	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'proj', 'Project', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'proj', 'Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 
 	// Add some tasks

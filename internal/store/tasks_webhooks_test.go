@@ -48,7 +48,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -230,11 +230,11 @@ func TestTaskStoreMoveDispatchesWebhookV2(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	source, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "source"})
+	source, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "source", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create source: %v", err)
 	}
-	dest, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "dest"})
+	dest, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "dest", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create dest: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestUnblockWebhookSingleBlocker(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestUnblockWebhookMultipleBlockers(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestUnblockWebhookCancelledState(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -621,7 +621,7 @@ func TestNoUnblockWebhookWhenAlreadyCompleted(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -707,7 +707,7 @@ func TestWebhookPayloadIncludesBlockedBy(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
@@ -875,7 +875,7 @@ func TestWebhookPayloadBlockedByOmittedWhenEmpty(t *testing.T) {
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project"})
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}

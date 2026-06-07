@@ -39,8 +39,8 @@ func setupCheckTestDB(t *testing.T) (*db.DB, string, string, func()) {
 	// Create test container
 	containerUUID := "test-container-uuid"
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'test-project', 'Test Project', ?, ?, 1)
+		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES (?, 'test-project', 'Test Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
 	`, containerUUID, actorUUID, actorUUID)
 	if err != nil {
 		_ = database.Close()

@@ -134,8 +134,8 @@ func TestBuildTreeAlwaysShowsInbox(t *testing.T) {
 	database, _ := setupTestEnv(t)
 
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000601', 'P-00601', 'empty-project', 'Empty Project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000601', 'P-00601', 'empty-project', 'Empty Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to seed container: %v", err)

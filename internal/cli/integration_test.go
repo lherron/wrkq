@@ -43,8 +43,8 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 
 	// Seed inbox project
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000002', 'P-00001', 'inbox', 'Inbox', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000002', 'P-00001', 'inbox', 'Inbox', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		_ = database.Close()
@@ -219,8 +219,8 @@ func TestCheckInboxProjectRoot(t *testing.T) {
 
 	// Root project container "demo"
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'demo', 'Demo', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'demo', 'Demo', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to seed demo project: %v", err)

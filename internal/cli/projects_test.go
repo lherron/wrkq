@@ -14,16 +14,16 @@ func TestProjectsCommand_ListsAllRootProjects(t *testing.T) {
 
 	// Create additional root projects
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'project-alpha', 'Project Alpha', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000010', 'P-00002', 'project-alpha', 'Project Alpha', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create project-alpha: %v", err)
 	}
 
 	_, err = database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000011', 'P-00003', 'project-beta', 'Project Beta', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000011', 'P-00003', 'project-beta', 'Project Beta', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create project-beta: %v", err)
@@ -102,8 +102,8 @@ func TestProjectsCommand_IgnoresProjectRoot(t *testing.T) {
 
 	// Create two root projects
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000020', 'P-00002', 'demo', 'Demo Project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000020', 'P-00002', 'demo', 'Demo Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create demo project: %v", err)
@@ -154,8 +154,8 @@ func TestProjectsCommand_NDJSON(t *testing.T) {
 
 	// Create a project
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000030', 'P-00002', 'test-project', 'Test Project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000030', 'P-00002', 'test-project', 'Test Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create test-project: %v", err)
@@ -197,8 +197,8 @@ func TestProjectsCommand_ExcludesArchivedByDefault(t *testing.T) {
 
 	// Create an archived project
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, archived_at, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000040', 'P-00002', 'archived-project', 'Archived Project', datetime('now'), datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, archived_at, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000040', 'P-00002', 'archived-project', 'Archived Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create archived project: %v", err)
@@ -232,8 +232,8 @@ func TestProjectsCommand_IncludesArchivedWithFlag(t *testing.T) {
 
 	// Create an archived project
 	_, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, archived_at, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES ('00000000-0000-0000-0000-000000000050', 'P-00002', 'archived-project', 'Archived Project', datetime('now'), datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, archived_at, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000050', 'P-00002', 'archived-project', 'Archived Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create archived project: %v", err)

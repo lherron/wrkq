@@ -153,8 +153,8 @@ func setupCASFixture(t *testing.T) (*Service, string, *db.DB) {
 	// Insert a root project container. containers requires actor FKs + title + kind.
 	containerUUID := "aaaaaaaa-aaaa-4aaa-aaaa-000000000001"
 	if _, err := database.Exec(
-		`INSERT INTO containers (uuid, slug, title, kind, created_by_actor_uuid, updated_by_actor_uuid)
-		 VALUES (?, 'cas-project', 'CAS Project', 'project', ?, ?)`,
+		`INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		 VALUES (?, 'cas-project', 'CAS Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?)`,
 		containerUUID, actorUUID, actorUUID,
 	); err != nil {
 		t.Fatalf("insert container: %v", err)
@@ -275,19 +275,19 @@ func TestTransitionCASRace(t *testing.T) {
 
 // TestTransitionIdempotencyReplay verifies the replay semantics of §5.1:
 //
-//   same idempotencyKey + same request hash → return the ORIGINAL committed
-//   TransitionResult (same eventId), not a fresh event.
+//	same idempotencyKey + same request hash → return the ORIGINAL committed
+//	TransitionResult (same eventId), not a fresh event.
 //
 // RED TODAY on two counts:
 //
-//  a) The first successful call result does not carry "eventId" (contract §5.1
-//     requires TransitionResult.eventId to be set on every commit, not only
-//     on the replay path).
+//	a) The first successful call result does not carry "eventId" (contract §5.1
+//	   requires TransitionResult.eventId to be set on every commit, not only
+//	   on the replay path).
 //
-//  b) The CAS check (ExpectRevision) is performed BEFORE the idempotency check.
-//     The contract (§6 invariant 2 ordering: load → idempotency → CAS → …) requires
-//     the opposite.  Therefore a second call with the original ExpectRevision=0
-//     fails today with a "revision mismatch" error rather than replaying.
+//	b) The CAS check (ExpectRevision) is performed BEFORE the idempotency check.
+//	   The contract (§6 invariant 2 ordering: load → idempotency → CAS → …) requires
+//	   the opposite.  Therefore a second call with the original ExpectRevision=0
+//	   fails today with a "revision mismatch" error rather than replaying.
 func TestTransitionIdempotencyReplay(t *testing.T) {
 	svc, taskUUID, database := setupCASFixture(t)
 
@@ -381,11 +381,12 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 // (contract §3 error table, §5.1, §6 invariant 2).
 //
 // RED TODAY on two counts:
-//  a) State-match is checked BEFORE idempotency in the current code, so the call
-//     fails with "transition … cannot run from current state" (plain string error,
-//     not WRKF_IDEMPOTENCY_MISMATCH) rather than reaching the mismatch check.
-//  b) Even if ordering were correct, no request hash is stored alongside the
-//     idempotency key, so the mismatch would go undetected (idempotent=true, nil error).
+//
+//	a) State-match is checked BEFORE idempotency in the current code, so the call
+//	   fails with "transition … cannot run from current state" (plain string error,
+//	   not WRKF_IDEMPOTENCY_MISMATCH) rather than reaching the mismatch check.
+//	b) Even if ordering were correct, no request hash is stored alongside the
+//	   idempotency key, so the mismatch would go undetected (idempotent=true, nil error).
 func TestTransitionIdempotencyMismatch(t *testing.T) {
 	svc, taskUUID, _ := setupCASFixture(t)
 

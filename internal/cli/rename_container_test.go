@@ -38,6 +38,7 @@ func TestRenameContainer(t *testing.T) {
 		result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 			Slug:  "old-name",
 			Title: "Old Name",
+			Kind:  "project",
 		})
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
@@ -72,6 +73,7 @@ func TestRenameContainer(t *testing.T) {
 		result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 			Slug:  "test-container",
 			Title: "Test Container",
+			Kind:  "project",
 		})
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
@@ -106,6 +108,7 @@ func TestRenameContainer(t *testing.T) {
 		result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 			Slug:  "dry-run-test",
 			Title: "Dry Run Test",
+			Kind:  "project",
 		})
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
@@ -132,6 +135,7 @@ func TestRenameContainer(t *testing.T) {
 		result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 			Slug:  "etag-test",
 			Title: "ETag Test",
+			Kind:  "project",
 		})
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
@@ -159,6 +163,7 @@ func TestRenameContainer(t *testing.T) {
 		result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 			Slug:  "event-log-test",
 			Title: "Event Log Test",
+			Kind:  "project",
 		})
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
@@ -191,6 +196,7 @@ func TestRenameContainer(t *testing.T) {
 		result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
 			Slug:  "normalize-test",
 			Title: "Normalize Test",
+			Kind:  "project",
 		})
 		if err != nil {
 			t.Fatalf("Failed to create container: %v", err)
