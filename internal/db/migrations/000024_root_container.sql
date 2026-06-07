@@ -14,28 +14,30 @@
 --   root container:  uuid 00000000-0000-4000-8000-000000000001  id P-00000  slug wrkq-system-root
 --   system actor:    uuid 00000000-0000-4000-8000-0000000000a0  id A-00000  slug wrkq-system
 
--- 1. Drop old kind-check triggers (they reject any kind not in project/feature/area/misc)
---    and the old project-root triggers (they enforce project => parent_uuid IS NULL,
---    which the reparent in step 5 must violate). The new parent/kind consistency
---    triggers in step 7b supersede containers_project_root_*.
+-- 1. Drop old kind-check triggers (they reject any kind not in
+--    project/directory/feature/area) and the old project-root triggers (they
+--    enforce project => parent_uuid IS NULL, which the reparent in step 5 must
+--    violate). The new parent/kind consistency triggers in step 7b supersede
+--    containers_project_root_*.
 DROP TRIGGER IF EXISTS containers_kind_check_insert;
 DROP TRIGGER IF EXISTS containers_kind_check_update;
 DROP TRIGGER IF EXISTS containers_project_root_insert;
 DROP TRIGGER IF EXISTS containers_project_root_update;
 
--- 2. Recreate kind-check triggers with 'root' permitted. The CLI still refuses
---    --kind root; the DB permits it only so bootstrap/migration can seed the root.
+-- 2. Recreate kind-check triggers with 'root' added to the existing allowed set
+--    (project/directory/feature/area). The CLI still refuses --kind root; the DB
+--    permits it only so bootstrap/migration can seed the root.
 CREATE TRIGGER containers_kind_check_insert
 BEFORE INSERT ON containers
-WHEN NEW.kind NOT IN ('project', 'feature', 'area', 'misc', 'root')
+WHEN NEW.kind NOT IN ('project', 'directory', 'feature', 'area', 'root')
 BEGIN
-  SELECT RAISE(ABORT, 'Invalid container kind: must be project, feature, area, misc, or root');
+  SELECT RAISE(ABORT, 'Invalid container kind: must be project, directory, feature, area, or root');
 END;
 CREATE TRIGGER containers_kind_check_update
 BEFORE UPDATE OF kind ON containers
-WHEN NEW.kind NOT IN ('project', 'feature', 'area', 'misc', 'root')
+WHEN NEW.kind NOT IN ('project', 'directory', 'feature', 'area', 'root')
 BEGIN
-  SELECT RAISE(ABORT, 'Invalid container kind: must be project, feature, area, misc, or root');
+  SELECT RAISE(ABORT, 'Invalid container kind: must be project, directory, feature, area, or root');
 END;
 
 -- 3. Ensure the fixed internal system actor exists. Explicit non-empty id skips
@@ -86,11 +88,16 @@ CREATE UNIQUE INDEX containers_single_root ON containers(kind) WHERE kind = 'roo
 
 -- 7b. Parent/kind consistency. Subsumes the non-root-null guard and forbids
 --     directories directly under root: top-level visible containers are projects only.
+-- NOTE: each branch guards with IS NULL / IS NOT NULL BEFORE any '=' comparison.
+-- Otherwise `parent_uuid = '<root>'` with a NULL parent evaluates to NULL, the OR
+-- collapses to NULL, NOT NULL is not-true, and an invalid row (e.g. a null-parent
+-- project) would slip past the trigger. SQL three-valued logic, handled explicitly.
 CREATE TRIGGER containers_parent_kind_consistency_insert
 BEFORE INSERT ON containers
 WHEN NOT (
   (NEW.kind = 'root'    AND NEW.parent_uuid IS NULL) OR
-  (NEW.kind = 'project' AND NEW.parent_uuid = '00000000-0000-4000-8000-000000000001') OR
+  (NEW.kind = 'project' AND NEW.parent_uuid IS NOT NULL
+        AND NEW.parent_uuid = '00000000-0000-4000-8000-000000000001') OR
   (NEW.kind NOT IN ('root', 'project') AND NEW.parent_uuid IS NOT NULL
         AND NEW.parent_uuid <> '00000000-0000-4000-8000-000000000001')
 )
@@ -101,7 +108,8 @@ CREATE TRIGGER containers_parent_kind_consistency_update
 BEFORE UPDATE OF kind, parent_uuid ON containers
 WHEN NOT (
   (NEW.kind = 'root'    AND NEW.parent_uuid IS NULL) OR
-  (NEW.kind = 'project' AND NEW.parent_uuid = '00000000-0000-4000-8000-000000000001') OR
+  (NEW.kind = 'project' AND NEW.parent_uuid IS NOT NULL
+        AND NEW.parent_uuid = '00000000-0000-4000-8000-000000000001') OR
   (NEW.kind NOT IN ('root', 'project') AND NEW.parent_uuid IS NOT NULL
         AND NEW.parent_uuid <> '00000000-0000-4000-8000-000000000001')
 )

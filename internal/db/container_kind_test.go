@@ -19,48 +19,66 @@ func TestContainerDirectoryKindDefaultAndProjectRootInvariant(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
+	// Migration 000024 seeds exactly one path-invisible root container.
+	const rootUUID = "00000000-0000-4000-8000-000000000001"
+	var rootCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM containers WHERE kind = 'root'`).Scan(&rootCount); err != nil {
+		t.Fatalf("count roots: %v", err)
+	}
+	if rootCount != 1 {
+		t.Fatalf("root count=%d, want 1", rootCount)
+	}
+
 	if _, err := database.Exec(`
 		INSERT INTO actors (uuid, id, slug, display_name, role)
-		VALUES ('00000000-0000-4000-8000-000000000001', 'A-00001', 'tester', 'Tester', 'human')
+		VALUES ('00000000-0000-4000-8000-000000000002', 'A-10001', 'tester', 'Tester', 'human')
 	`); err != nil {
 		t.Fatalf("insert actor: %v", err)
 	}
 
+	// A project must be a child of the root.
 	if _, err := database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('00000000-0000-4000-8000-000000000010', 'P-00001', 'root', 'Root',
-		        '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001')
-	`); err != nil {
-		t.Fatalf("insert root container: %v", err)
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('00000000-0000-4000-8000-000000000010', 'P-10001', 'proj', 'Proj', ?, 'project',
+		        '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002')
+	`, rootUUID); err != nil {
+		t.Fatalf("project insert under root failed: %v", err)
 	}
 
+	// A nested container defaults to kind=directory.
+	if _, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('00000000-0000-4000-8000-000000000011', 'P-10002', 'nested', 'Nested',
+		        '00000000-0000-4000-8000-000000000010',
+		        '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002')
+	`); err != nil {
+		t.Fatalf("nested directory insert failed: %v", err)
+	}
 	var kind string
-	if err := database.QueryRow(`SELECT kind FROM containers WHERE id = 'P-00001'`).Scan(&kind); err != nil {
+	if err := database.QueryRow(`SELECT kind FROM containers WHERE id = 'P-10002'`).Scan(&kind); err != nil {
 		t.Fatalf("query kind: %v", err)
 	}
 	if kind != "directory" {
 		t.Fatalf("default kind=%q, want directory", kind)
 	}
 
-	_, err = database.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('00000000-0000-4000-8000-000000000011', 'P-00002', 'nested', 'Nested',
-		        '00000000-0000-4000-8000-000000000010', 'project',
-		        '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001')
-	`)
-	if err == nil {
-		t.Fatal("expected nested project insert to fail")
-	}
-	if !strings.Contains(err.Error(), "projects must be root containers") {
-		t.Fatalf("unexpected nested project error: %v", err)
-	}
-
+	// A project with a NULL parent is rejected: only the root may be null-parent.
 	if _, err := database.Exec(`
 		INSERT INTO containers (uuid, id, slug, title, kind, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('00000000-0000-4000-8000-000000000012', 'P-00003', 'real-project', 'Real Project', 'project',
-		        '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001')
-	`); err != nil {
-		t.Fatalf("root project insert failed: %v", err)
+		VALUES ('00000000-0000-4000-8000-000000000012', 'P-10003', 'rootless', 'Rootless', 'project',
+		        '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002')
+	`); err == nil {
+		t.Fatal("expected null-parent project insert to fail")
+	}
+
+	// A nested project (parent != root) is rejected.
+	if _, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('00000000-0000-4000-8000-000000000013', 'P-10004', 'nestedproj', 'NestedProj',
+		        '00000000-0000-4000-8000-000000000010', 'project',
+		        '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000002')
+	`); err == nil {
+		t.Fatal("expected nested project insert to fail")
 	}
 }
 
