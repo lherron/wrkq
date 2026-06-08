@@ -18,7 +18,7 @@ Update the wrkq task **before** using the TodoWrite tool. When using the TodoWri
 
 ## Naming Conventions
 1. One-off tasks should be created/tracked in the **inbox** container.
-3. Use short, descriptive slugs for tasks. (e.g. `login-auth-flow`, `logout-auth-flow`)
+2. Use short, descriptive slugs for tasks. (e.g. `login-auth-flow`, `logout-auth-flow`)
 
 ## Managing Containers
 wrkq mkdir myfeat
@@ -29,8 +29,9 @@ wrkq ls --project agent-spaces inbox          # List tasks in agent-spaces/inbox
 wrkq find --project myproject --state open     # Find open tasks in myproject
 
 ## Finding Tasks
-wrkq find 'myfeat/api-feature/**' --state open
+wrkq find inbox --state open
 wrkq find --sort updated_at --reverse --limit 5
+wrkq index update
 wrkq search 'query text' --ndjson
 wrkq search 'query text' --sort updated_at --reverse --limit 5
 wrkq tree myfeat --json
@@ -39,10 +40,10 @@ wrkq tree myfeat --json
 wrkq cat T-00001 --json
 
 ## List tasks
-wrkq ls myfeat/api-feature --type t --sort updated_at --reverse --limit 5
+wrkq ls inbox --type t --sort updated_at --reverse --limit 5
 
 ## Create task. Always use HEREDOC for description
-wrkq touch myfeat/feature/task-slug --state open --priority 2 -t "New Task" -d - <<'EOF'
+wrkq touch inbox/task-slug --state open --priority 2 -t "New Task" -d - <<'EOF'
 Multi-line markdown description goes here.
 
 - bullet one
@@ -51,17 +52,18 @@ EOF
 
 
 ## Deleting Tasks
-wrkq rm myfeat/api-feature/feature-slug
-wrkq rm myfeat/api-feature/feature-slug --purge --yes
+wrkq rm inbox/task-slug
+wrkq rm inbox/task-slug --purge --yes
 
 ## Set task state/priority/fields (quick updates)
 wrkq set T-00001 --state in_progress
 wrkq set T-00001 --title "New title" --due-at 2025-12-01
 wrkq set T-00001 --state in_progress --priority 1 --description "Starting work"
 
-Supported states: open, in_progress, completed, blocked, cancelled
+Supported states: idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted
 Priority: 1-4
-Supported fields: state, priority, title, slug, labels, due_at, start_at, description, specification
+Common fields: state, priority, title, labels, due_at, start_at, description, specification
+Run `wrkq set --help` for the full current field surface.
 
 ## Add comment
 wrkq comment add T-00001 -m "Starting implementation at 10:00am"

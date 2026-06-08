@@ -3,11 +3,8 @@
 > **Status:** P0 contract freeze. This document is the *machine contract* for the wrkf
 > JSON-RPC stdio substrate. It is authoritative for method names, DTO field names, error
 > codes, and the protocol/lifecycle shape. Implementation phases (wrkfapi, hardening, wrkfrpc,
-> @wrkf/client) must conform to this file. The design rationale and rejected alternatives live
-> in [`WRKF_RPC.md`](./WRKF_RPC.md); this file is the contract derived from it.
->
-> **Path casing decision:** `docs/WRKF_RPC.md` = rationale (why), `docs/wrkf-rpc.md` = frozen
-> contract (what). Both are kept. No rename.
+> @wrkf/client) must conform to this file. Design rationale now lives in git history and
+> tracked wrkq tasks; this file is the maintained contract.
 
 Protocol version string: **`2026-06-01`**.
 

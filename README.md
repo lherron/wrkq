@@ -90,6 +90,10 @@ The system ships four binaries:
 - **`wrkqd`** - Local daemon for shared database access
 - **`wrkf`** - Workflow engine CLI
 
+See [docs/SPEC.md](docs/SPEC.md) for the canonical product, domain, CLI, and
+daemon contract. The wrkf JSON-RPC stdio contract lives in
+[docs/wrkf-rpc.md](docs/wrkf-rpc.md).
+
 ## Core Concepts
 
 | Concept | Description |
@@ -102,7 +106,10 @@ The system ships four binaries:
 
 ### Task States
 
-`draft` → `open` → `in_progress` → `completed` | `blocked` | `cancelled`
+Common path: `idea` -> `draft` -> `open` -> `in_progress` -> `completed`.
+
+Supported states: `idea`, `draft`, `open`, `in_progress`, `blocked`,
+`completed`, `cancelled`, `archived`, `deleted`.
 
 ### Addressing
 

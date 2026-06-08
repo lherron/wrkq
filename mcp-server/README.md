@@ -6,10 +6,10 @@ MCP (Model Context Protocol) server for wrkq task management. Exposes wrkq CLI f
 
 ### Tools
 
-- **`wrkq_task_write`**: Update a task's body content
+- **`wrkq_update_description`**: Update a task's description content
   - Inputs:
     - `taskId` (string): Task identifier - friendly ID (T-00001), UUID, or path (project/task-slug)
-    - `taskBody` (string): New body content for the task (markdown supported)
+    - `taskDescription` (string): New description content for the task (markdown supported)
   - Uses wrkq's `apply` command under the hood
   - Automatically handles temp file creation and cleanup
 
@@ -94,7 +94,7 @@ The MCP server inherits environment variables from its parent process. You can c
 
 - `WRKQ_DB_PATH`: Path to wrkq database
 - `WRKQ_ACTOR`: Actor slug for mutations
-- `WRKQ_ACTOR_ID`: Actor UUID for mutations
+- `WRKQ_ACTOR_ID`: Actor friendly ID for mutations, such as `A-00001`
 
 See main project documentation for full configuration options.
 
@@ -121,9 +121,9 @@ mcp-server/
 ## How It Works
 
 1. The MCP server exposes wrkq functionality as JSON-RPC tools
-2. When `wrkq_task_write` is called:
+2. When `wrkq_update_description` is called:
    - Task body is written to a temp file in `/tmp/claude/`
-   - `wrkq apply <taskId> --file <tempfile>` is executed
+   - `wrkq apply <taskId> <tempfile> --format md` is executed
    - Temp file is cleaned up
    - Result is returned to the caller
 

@@ -22,13 +22,15 @@ wrkq set T-00001 --state completed      # Complete task
 ```
 
 ## States
-`draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled`
+`idea` | `draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled` | `archived` | `deleted`
 
 ## Project Scope
 ```bash
 wrkq projects                          # List all projects
 wrkq ls --project other inbox          # Work in different project
 ```
+
+## Search Freshness: run `wrkq index update` before search when freshness matters
 
 ## Output: Add `--json` or `--ndjson` to most commands
 </task_tracking_rules>

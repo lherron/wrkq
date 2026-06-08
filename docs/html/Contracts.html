@@ -1049,7 +1049,7 @@ type TaskRelationDTO = { // Directed relation between two task records.
   created_at: string // Relation creation timestamp.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md#json-fields-cat-json</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
             
             <article class="contract-object wrkq" id="container-dto">
@@ -1189,7 +1189,7 @@ type EventDTO = { // Append-only audit event returned by watch, history, and bun
   payload?: string | Record&lt;string, unknown&gt; // Event-specific JSON payload or raw encoded JSON.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md#handoffs-agent-session-continuity</span>, <span class="inline-code">internal/domain/types.go</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/cli/handoff.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
           </section>
 
@@ -1215,7 +1215,7 @@ type EventDTO = { // Append-only audit event returned by watch, history, and bun
   truncated: boolean // True when more records are available after this page.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">docs/CLI-REFERENCE.md#wrkq-handoff-list</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/cli/handoff_list.go</span>, <span class="inline-code">internal/cli/handoff_search.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
             
             <article class="contract-object ops" id="agent-context-dto">
@@ -1259,7 +1259,7 @@ type ActorDTO = { // Actor row used for attribution and diagnostics.
   role?: string // Optional actor role label.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">docs/CLI-REFERENCE.md#wrkq-agent-context</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/cli/agent_context.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
             
             <article class="contract-object ops" id="bundle-dto">
@@ -1731,7 +1731,7 @@ type HookSpecDTO = { // Executable hook constraints and IO contract.
               <article class="panel">
                 <span class="badge wrkq">wrkq</span>
                 <h3>Resource and CLI sources</h3>
-                <p class="minor"><span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/bundle/bundle.go</span>, <span class="inline-code">internal/cli/watch.go</span>, <span class="inline-code">docs/CLI-REFERENCE.md</span>, and <span class="inline-code">docs/SPEC.md</span>.</p>
+                <p class="minor"><span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/bundle/bundle.go</span>, <span class="inline-code">internal/cli/watch.go</span>, and <span class="inline-code">docs/SPEC.md</span>.</p>
               </article>
               <article class="panel">
                 <span class="badge wrkf">wrkf</span>

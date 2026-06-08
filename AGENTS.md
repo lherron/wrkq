@@ -76,7 +76,7 @@ Secrets: env vars or `_FILE` variants. Never commit SQLite files or attachment c
 - Typed selector: `t:T-00123`, `c:C-00012`
 - Globs: `*`, `?`, `**` (always quote: `wrkq ls 'portal/**/login-*'`)
 
-**Task states:** `open`, `in_progress`, `completed`, `blocked`, `cancelled`, `archived` (soft-delete via `archived_at`).
+**Task states:** `idea`, `draft`, `open`, `in_progress`, `completed`, `blocked`, `cancelled`, `archived`, `deleted`.
 
 **Slug rules:** lowercase `[a-z0-9-]`, must start with `[a-z0-9]`, max 255 bytes, unique among siblings. Source: `internal/domain/validation.go`.
 
@@ -92,7 +92,7 @@ Metadata in DB, bytes on disk at `<attach_dir>/tasks/<task_uuid>/...`. Paths are
 
 ## Comments
 
-Append-only. Soft delete via `deleted_at`; `--purge` for hard delete. The comments block emitted by `wrkq cat --include-comments` is **read-only** — `wrkq apply` does not parse it back.
+Append-only. Soft delete via `deleted_at`; `--purge` for hard delete. `wrkq cat` includes comments by default; use `--exclude-comments` to omit them. The emitted comments block is **read-only** — `wrkq apply` does not parse it back.
 
 ## Exit codes
 
@@ -159,8 +159,6 @@ If you have questions, number them for easier responses.
 
 ## Specs / further reading
 
-- `docs/SPEC.md` — product spec (source of truth for behavior)
-- `docs/ARCHITECTURE.md` — package layout and internals
-- `docs/DOMAIN-MODEL.md` — entity relationships
-- `docs/CLI-REFERENCE.md` — full CLI reference
+- `docs/SPEC.md` — canonical wrkq product/domain/CLI/daemon spec
+- `docs/wrkf-rpc.md` — frozen wrkf JSON-RPC stdio machine contract
 - `internal/cli/embedded/WRKQ-USAGE.md` — agent quick reference (embedded in binary)

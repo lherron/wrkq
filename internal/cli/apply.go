@@ -23,7 +23,7 @@ By default, only the description and specification fields are updated. Use --wit
 update title, state, priority, and due_at fields.
 
 For quick metadata-only updates, use 'wrkq set' instead:
-  wrkq set T-00001 state=in_progress priority=1
+  wrkq set T-00001 --state in_progress --priority 1
 
 Accepts:
 - Plain markdown (description only)

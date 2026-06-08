@@ -66,7 +66,7 @@ func init() {
 	touchCmd.Flags().StringVarP(&touchTitle, "title", "t", "", "Title for the task (defaults to slug)")
 	touchCmd.Flags().StringVarP(&touchDescription, "description", "d", "", "Description for the task (use @file.md for file or - for stdin)")
 	touchCmd.Flags().StringVar(&touchSpecification, "specification", "", "Specification for the task (use @file.md for file or - for stdin)")
-	touchCmd.Flags().StringVar(&touchState, "state", "open", "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled)")
+	touchCmd.Flags().StringVar(&touchState, "state", "open", "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted)")
 	touchCmd.Flags().IntVar(&touchPriority, "priority", 3, "Initial task priority (1-4)")
 	touchCmd.Flags().StringVar(&touchKind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
 	touchCmd.Flags().StringVar(&touchParentTask, "parent-task", "", "Parent task ID or path (for subtasks)")
