@@ -8,7 +8,7 @@ compose = ["space:defaults@dev", "space:praesidium-defaults@dev"]
 
 [targets.dev]
 description = "Default target"
-compose = ["space:defaults@stable"]
+compose = ["space:defaults@dev"]
 
 [targets.ralph-plan]
 description = "Ralph planning loop"
@@ -20,23 +20,23 @@ compose = ["space:ralph-build-loop@dev"]
 
 [targets.oracle]
 description = "Coordinator persona (hannibal)"
-compose = ["space:hannibal@dev", "space:defaults@stable"]
+compose = ["space:hannibal@dev", "space:defaults@dev"]
 
 [targets.smokey]
 description = "Smokey the e2e smoke tester"
-compose = ["space:smokey@dev", "space:defaults@stable", "space:praesidium-defaults@dev"]
+compose = ["space:smokey@dev", "space:defaults@dev", "space:praesidium-defaults@dev"]
 
 [targets.hannibal]
 description = "Coordinator persona (hannibal)"
-compose = ["space:hannibal@dev", "space:defaults@stable"]
+compose = ["space:hannibal@dev", "space:defaults@dev"]
 
 [targets.coordinator]
 description = "Coordination role"
-compose = ["space:defaults@stable"]
+compose = ["space:defaults@dev"]
 
 [targets.triager]
 description = "Triage role"
-compose = ["space:defaults@stable"]
+compose = ["space:defaults@dev"]
 
 [targets.architect]
 description = "Spec writing architect for workboard"
