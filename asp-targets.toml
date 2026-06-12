@@ -40,7 +40,7 @@ compose = ["space:defaults@dev"]
 
 [targets.architect]
 description = "Spec writing architect for workboard"
-compose = ["space:defaults@dev", "space:praesidium-defaults@dev", "space:praesidium-architect@dev" ]
+compose = ["space:defaults@dev", "space:praesidium-defaults@dev"]
 yolo = true
 
 [targets.ani]

@@ -2,12 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
@@ -79,6 +80,7 @@ Examples:
   wrkq tree portal             # Show tree under portal
   wrkq tree -L 2               # Limit depth to 2 levels
   wrkq tree --json             # Output as JSON
+  wrkq tree --ndjson           # Output as newline-delimited JSON
 `,
 	RunE: appctx.WithApp(appctx.DefaultOptions(), runTree),
 }
@@ -90,6 +92,7 @@ var (
 	treeFields          string
 	treePorcelain       bool
 	treeJSON            bool
+	treeNDJSON          bool
 )
 
 func init() {
@@ -101,6 +104,7 @@ func init() {
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
 	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
+	treeCmd.Flags().BoolVar(&treeNDJSON, "ndjson", false, "Output as newline-delimited JSON")
 }
 
 func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -114,8 +118,27 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 		rootPath = applyProjectRootToPath(app.Config, "", true)
 	}
 
+	// Preserve the original tab-separated tree porcelain format for explicit
+	// `wrkq tree --porcelain`.
+	outputFlagChanged := false
+	if outputFlag := cmd.Flag("output"); outputFlag != nil {
+		outputFlagChanged = outputFlag.Changed
+	}
+	legacyPorcelain := treePorcelain && !treeJSON && !treeNDJSON && !outputFlagChanged
+	sel := outputSelection{Mode: outputModeRaw}
+	if !legacyPorcelain {
+		var err error
+		sel, err = resolveOutputMode(cmd, app.Config, outputShapeList, outputResolveOptions{
+			Allow:      []outputMode{outputModeTable, outputModeHuman, outputModeJSON, outputModeNDJSON},
+			DefaultTTY: outputModeHuman,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
 	// Build and display tree
-	return displayTree(database, rootPath, treeDepth, treeIncludeArchived, treeOpenOnly, treePorcelain, treeJSON)
+	return displayTree(cmd.OutOrStdout(), database, rootPath, treeDepth, treeIncludeArchived, treeOpenOnly, sel, legacyPorcelain)
 }
 
 type treeNode struct {
@@ -125,6 +148,7 @@ type treeNode struct {
 	Title                string      `json:"title"`
 	State                string      `json:"state,omitempty"` // for tasks
 	UUID                 string      `json:"uuid"`
+	CreatedAt            string      `json:"-"`
 	RequestedByProjectID *string     `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID    *string     `json:"assigned_project_id,omitempty"`
 	AcknowledgedAt       *string     `json:"acknowledged_at,omitempty"`
@@ -140,37 +164,73 @@ type treeNode struct {
 	parentTaskUUID string // for tasks: nests under the parent task when present
 }
 
-func displayTree(database *db.DB, rootPath string, maxDepth int, includeArchived bool, openOnly bool, porcelain bool, jsonOutput bool) error {
+type treeOutput struct {
+	Path                         string      `json:"path"`
+	Children                     []*treeNode `json:"children"`
+	HiddenContainersNotDisplayed int         `json:"hidden_containers_not_displayed"`
+}
+
+type treeStreamEntry struct {
+	Type                 string  `json:"type"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Title                string  `json:"title"`
+	Path                 string  `json:"path"`
+	Depth                int     `json:"depth"`
+	ParentID             *string `json:"parent_id,omitempty"`
+	ParentPath           *string `json:"parent_path,omitempty"`
+	State                string  `json:"state,omitempty"`
+	OpenedAt             *string `json:"opened_at,omitempty"`
+	CreatedAt            string  `json:"created_at,omitempty"`
+	UUID                 string  `json:"uuid"`
+	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
+	Resolution           *string `json:"resolution,omitempty"`
+	IsArchived           bool    `json:"is_archived"`
+	IsDeleted            bool    `json:"is_deleted"`
+	AllTasksCompleted    bool    `json:"all_tasks_completed,omitempty"`
+}
+
+func displayTree(w io.Writer, database *db.DB, rootPath string, maxDepth int, includeArchived bool, openOnly bool, sel outputSelection, legacyPorcelain bool) error {
 	// Build tree structure
 	root, err := buildTree(database, rootPath, maxDepth, includeArchived, openOnly, !includeArchived, 0)
 	if err != nil {
 		return err
 	}
 
-	// Handle JSON output
-	if jsonOutput {
-		// Create a wrapper structure with metadata
-		output := map[string]interface{}{
-			"path":                            rootPath,
-			"children":                        root.Children,
-			"hidden_containers_not_displayed": root.HiddenContainerCount,
-		}
-		if rootPath == "" {
-			output["path"] = "."
-		}
-		return render.RenderJSON(output, false)
+	outputPath := rootPath
+	if outputPath == "" {
+		outputPath = "."
 	}
 
+	switch {
+	case legacyPorcelain:
+		return printTreeOutput(w, root, rootPath, true)
+	case sel.Mode == outputModeJSON:
+		return writeJSONOutput(w, sel, treeOutput{
+			Path:                         outputPath,
+			Children:                     root.Children,
+			HiddenContainersNotDisplayed: root.HiddenContainerCount,
+		})
+	case sel.Mode == outputModeNDJSON:
+		return writeNDJSONOutput(w, flattenTree(root, rootPath))
+	default:
+		return printTreeOutput(w, root, rootPath, false)
+	}
+}
+
+func printTreeOutput(w io.Writer, root *treeNode, rootPath string, porcelain bool) error {
 	// Print tree
 	if rootPath == "" {
-		fmt.Println(".")
+		fmt.Fprintln(w, ".")
 	} else {
-		fmt.Println(rootPath)
+		fmt.Fprintln(w, rootPath)
 	}
 
-	printTree(root, "", true, porcelain)
+	printTree(w, root, "", true, porcelain)
 	if root.HiddenContainerCount > 0 && !porcelain {
-		fmt.Println(paint(colDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", root.HiddenContainerCount)))
+		fmt.Fprintln(w, paint(colDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", root.HiddenContainerCount)))
 	}
 	return nil
 }
@@ -199,7 +259,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 	// Query child containers
 	containerQuery := `
-		SELECT uuid, id, slug, COALESCE(title, slug) as title, archived_at
+		SELECT uuid, id, slug, COALESCE(title, slug) as title, created_at, archived_at
 		FROM containers
 		WHERE `
 	var containerArgs []interface{}
@@ -226,7 +286,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		var node treeNode
 		var archivedAt *string
 
-		err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &archivedAt)
+		err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.CreatedAt, &archivedAt)
 		if err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("failed to scan container: %w", err)
@@ -269,7 +329,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 	// Query tasks at this level
 	if parentUUID != nil || path == "" {
 		taskQuery := `
-			SELECT uuid, id, slug, title, state, archived_at, deleted_at,
+			SELECT uuid, id, slug, title, state, created_at, archived_at, deleted_at,
 			       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 			       parent_task_uuid
 			FROM tasks
@@ -303,7 +363,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 			var archivedAt, deletedAt *string
 			var requestedBy, assignedProject, acknowledgedAt, resolution, parentTaskUUID *string
 
-			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &archivedAt, &deletedAt,
+			err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.CreatedAt, &archivedAt, &deletedAt,
 				&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &parentTaskUUID)
 			if err != nil {
 				_ = taskRows.Close()
@@ -400,7 +460,7 @@ func alwaysShowTreeContainer(node *treeNode) bool {
 	return node.Type == "container" && node.Slug == "inbox"
 }
 
-func printTree(node *treeNode, prefix string, isLast bool, porcelain bool) {
+func printTree(w io.Writer, node *treeNode, prefix string, isLast bool, porcelain bool) {
 	for i, child := range node.Children {
 		isLastChild := i == len(node.Children)-1
 
@@ -422,10 +482,10 @@ func printTree(node *treeNode, prefix string, isLast bool, porcelain bool) {
 
 		if porcelain {
 			// Porcelain: tab-separated values
-			fmt.Printf("%s%s\t%s\t%s\t%s\n", prefix, child.Type, child.ID, child.Slug, child.Title)
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", prefix, child.Type, child.ID, child.Slug, child.Title)
 		} else {
 			// Pretty tree
-			fmt.Printf("%s%s%s\n", prefix, connector, display)
+			fmt.Fprintf(w, "%s%s%s\n", prefix, connector, display)
 		}
 
 		// Print children recursively
@@ -440,9 +500,62 @@ func printTree(node *treeNode, prefix string, isLast bool, porcelain bool) {
 					newPrefix = prefix + paint(colDim, "│") + "   "
 				}
 			}
-			printTree(child, newPrefix, isLastChild, porcelain)
+			printTree(w, child, newPrefix, isLastChild, porcelain)
 		}
 	}
+}
+
+func flattenTree(root *treeNode, rootPath string) []treeStreamEntry {
+	var entries []treeStreamEntry
+	var walk func(nodes []*treeNode, parentID *string, parentPath string, depth int)
+	walk = func(nodes []*treeNode, parentID *string, parentPath string, depth int) {
+		for _, node := range nodes {
+			path := joinTreePath(parentPath, node.Slug)
+			entry := treeStreamEntry{
+				Type:                 node.Type,
+				ID:                   node.ID,
+				Slug:                 node.Slug,
+				Title:                node.Title,
+				Path:                 path,
+				Depth:                depth,
+				State:                node.State,
+				CreatedAt:            node.CreatedAt,
+				UUID:                 node.UUID,
+				RequestedByProjectID: node.RequestedByProjectID,
+				AssignedProjectID:    node.AssignedProjectID,
+				AcknowledgedAt:       node.AcknowledgedAt,
+				Resolution:           node.Resolution,
+				IsArchived:           node.IsArchived,
+				IsDeleted:            node.IsDeleted,
+				AllTasksCompleted:    node.AllTasksCompleted,
+			}
+			if parentID != nil {
+				entry.ParentID = parentID
+			}
+			if parentPath != "" {
+				parentPathCopy := parentPath
+				entry.ParentPath = &parentPathCopy
+			}
+			if node.Type == "task" && node.State == "open" && node.CreatedAt != "" {
+				openedAt := node.CreatedAt
+				entry.OpenedAt = &openedAt
+			}
+			entries = append(entries, entry)
+
+			nodeID := node.ID
+			walk(node.Children, &nodeID, path, depth+1)
+		}
+	}
+
+	walk(root.Children, nil, rootPath, 0)
+	return entries
+}
+
+func joinTreePath(parentPath, slug string) string {
+	if parentPath == "" || parentPath == "." {
+		return slug
+	}
+	return parentPath + "/" + slug
 }
 
 func formatNodeDisplay(node *treeNode, porcelain bool) string {
@@ -459,7 +572,7 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 			parts = append(parts, node.Title) // content stays plain
 		}
 		if node.State != "" {
-			parts = append(parts, paint(stateColor(node.State), fmt.Sprintf("<%s>", node.State)))
+			parts = append(parts, paint(stateColor(node.State), fmt.Sprintf("<%s>", formatTreeTaskState(node))))
 		}
 	} else {
 		displayTitle := node.Title
@@ -481,4 +594,73 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 	}
 
 	return strings.Join(parts, " ")
+}
+
+func formatTreeTaskState(node *treeNode) string {
+	if node.State != "open" {
+		return node.State
+	}
+
+	openedAge := formatTreeOpenedAge(node.CreatedAt, time.Now().UTC())
+	if openedAge == "" {
+		return node.State
+	}
+	return "opened " + openedAge + " ago"
+}
+
+func formatTreeOpenedAge(timestamp string, now time.Time) string {
+	createdAt, ok := parseTreeTimestamp(timestamp)
+	if !ok {
+		return ""
+	}
+
+	elapsed := now.Sub(createdAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	return formatTreeDuration(elapsed)
+}
+
+func parseTreeTimestamp(timestamp string) (time.Time, bool) {
+	for _, layout := range []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	} {
+		parsed, err := time.Parse(layout, timestamp)
+		if err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func formatTreeDuration(elapsed time.Duration) string {
+	type durationUnit struct {
+		name    string
+		seconds int64
+	}
+
+	units := []durationUnit{
+		{"year", 365 * 24 * 60 * 60},
+		{"month", 30 * 24 * 60 * 60},
+		{"week", 7 * 24 * 60 * 60},
+		{"day", 24 * 60 * 60},
+		{"hour", 60 * 60},
+		{"minute", 60},
+	}
+
+	elapsedSeconds := int64(elapsed.Seconds())
+	for _, unit := range units {
+		if elapsedSeconds >= unit.seconds {
+			value := elapsedSeconds / unit.seconds
+			name := unit.name
+			if value != 1 {
+				name += "s"
+			}
+			return fmt.Sprintf("%d %s", value, name)
+		}
+	}
+	return "less than a minute"
 }

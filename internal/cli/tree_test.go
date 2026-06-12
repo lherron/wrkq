@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildTreeShowsOnlyContainersWithDraftOpenTaskDescendants(t *testing.T) {
@@ -158,13 +161,51 @@ func TestBuildTreeAlwaysShowsInbox(t *testing.T) {
 	}
 }
 
+func TestDisplayTreeNDJSONFlattensVisibleNodes(t *testing.T) {
+	database, _ := setupTestEnv(t)
+
+	_, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000701', 'T-00701', 'open-task', 'Open Task', '00000000-0000-0000-0000-000000000002', 'open', 2, '', '2026-06-12T12:04:05Z', '2026-06-12T12:04:05Z', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed task: %v", err)
+	}
+
+	var out bytes.Buffer
+	err = displayTree(&out, database, "inbox", 0, false, true, outputSelection{Mode: outputModeNDJSON}, false)
+	if err != nil {
+		t.Fatalf("displayTree failed: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected one NDJSON line, got %d: %q", len(lines), out.String())
+	}
+
+	var got treeStreamEntry
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("NDJSON line was not valid JSON: %v\n%s", err, lines[0])
+	}
+	if got.ID != "T-00701" || got.Path != "inbox/open-task" || got.Depth != 0 || got.State != "open" {
+		t.Fatalf("Unexpected NDJSON entry: %+v", got)
+	}
+	if got.CreatedAt != "2026-06-12T12:04:05Z" {
+		t.Fatalf("Expected created_at in NDJSON entry, got %+v", got)
+	}
+	if got.OpenedAt == nil || *got.OpenedAt != "2026-06-12T12:04:05Z" {
+		t.Fatalf("Expected opened_at in NDJSON entry, got %+v", got)
+	}
+}
+
 func TestFormatNodeDisplayTaskShowsBareIDAndTitleWithoutSlug(t *testing.T) {
 	display := formatNodeDisplay(&treeNode{
-		Type:  "task",
-		ID:    "T-12345",
-		Slug:  "example-task",
-		Title: "Example Task",
-		State: "open",
+		Type:      "task",
+		ID:        "T-12345",
+		Slug:      "example-task",
+		Title:     "Example Task",
+		State:     "open",
+		CreatedAt: "2026-06-12T15:04:05Z",
 	}, false)
 
 	if !strings.HasPrefix(display, "T-12345 ") {
@@ -178,6 +219,72 @@ func TestFormatNodeDisplayTaskShowsBareIDAndTitleWithoutSlug(t *testing.T) {
 	}
 	if !strings.Contains(display, "Example Task") {
 		t.Fatalf("Expected task display to contain title, got %q", display)
+	}
+	if !strings.Contains(display, "<opened ") || !strings.Contains(display, " ago>") {
+		t.Fatalf("Expected open task display to contain opened duration, got %q", display)
+	}
+	if strings.Contains(display, "<open>") {
+		t.Fatalf("Expected open task display not to contain bare open state, got %q", display)
+	}
+	if strings.Contains(display, "opened on") {
+		t.Fatalf("Expected open task display not to contain opened date, got %q", display)
+	}
+}
+
+func TestFormatTreeTaskStateFallsBackToStateWithoutCreatedAt(t *testing.T) {
+	got := formatTreeTaskState(&treeNode{State: "open"})
+	if got != "open" {
+		t.Fatalf("Expected missing created_at to fall back to open, got %q", got)
+	}
+
+	got = formatTreeTaskState(&treeNode{State: "draft", CreatedAt: "2026-06-12T15:04:05Z"})
+	if got != "draft" {
+		t.Fatalf("Expected non-open state to remain unchanged, got %q", got)
+	}
+}
+
+func TestFormatTreeOpenedAge(t *testing.T) {
+	now := time.Date(2026, 6, 12, 15, 4, 5, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		timestamp string
+		want      string
+	}{
+		{
+			name:      "less than minute",
+			timestamp: "2026-06-12T15:03:30Z",
+			want:      "less than a minute",
+		},
+		{
+			name:      "minutes",
+			timestamp: "2026-06-12T14:59:05Z",
+			want:      "5 minutes",
+		},
+		{
+			name:      "singular hour",
+			timestamp: "2026-06-12T13:34:05Z",
+			want:      "1 hour",
+		},
+		{
+			name:      "sqlite datetime",
+			timestamp: "2026-06-12 12:04:05",
+			want:      "3 hours",
+		},
+		{
+			name:      "days",
+			timestamp: "2026-06-09T15:04:05Z",
+			want:      "3 days",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatTreeOpenedAge(tt.timestamp, now)
+			if got != tt.want {
+				t.Fatalf("formatTreeOpenedAge(%q) = %q, want %q", tt.timestamp, got, tt.want)
+			}
+		})
 	}
 }
 
