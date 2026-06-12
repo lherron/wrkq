@@ -3,6 +3,7 @@ package workflow
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -43,6 +44,8 @@ func validateFactsContracts(tpl *Template) []string {
 	var errs []string
 	for kind, spec := range tpl.EvidenceKinds {
 		errs = append(errs, validateFactsContract("evidence kind "+kind, spec.Facts)...)
+		errs = append(errs, validateProducibleBySpec(tpl, kind, spec)...)
+		errs = append(errs, validateLinkageRefSpec(tpl, kind, spec)...)
 	}
 	for _, tr := range tpl.Transitions {
 		for _, req := range tr.Requires {
@@ -61,6 +64,68 @@ func validateFactsContracts(tpl *Template) []string {
 	for checkID, check := range tpl.Checks {
 		if check.Predicate != nil {
 			errs = append(errs, validatePredicateFactSelectors(tpl, fmt.Sprintf("check %s predicate", checkID), *check.Predicate)...)
+		}
+	}
+	return errs
+}
+
+// validateProducibleBySpec validates E1 template declarations at install: each
+// producer entry must be non-empty and name a declared role or a reserved role
+// (system/supervisor).
+func validateProducibleBySpec(tpl *Template, kind string, spec KindSpec) []string {
+	if len(spec.ProducibleBy) == 0 {
+		return nil
+	}
+	var errs []string
+	seen := map[string]bool{}
+	for i, role := range spec.ProducibleBy {
+		trimmed := strings.TrimSpace(role)
+		if trimmed == "" {
+			errs = append(errs, fmt.Sprintf("evidence kind %s producibleBy[%d] is empty", kind, i))
+			continue
+		}
+		if seen[trimmed] {
+			errs = append(errs, fmt.Sprintf("evidence kind %s producibleBy lists %q more than once", kind, trimmed))
+		}
+		seen[trimmed] = true
+		if _, ok := tpl.Roles[trimmed]; !ok && trimmed != "system" && trimmed != "supervisor" {
+			errs = append(errs, fmt.Sprintf("evidence kind %s producibleBy references unknown role %q", kind, trimmed))
+		}
+	}
+	return errs
+}
+
+// validateLinkageRefSpec validates E3 template declarations at install: each
+// ref must declare a top-level JSON Pointer path and, when set, a declared
+// resolvesToKind.
+func validateLinkageRefSpec(tpl *Template, kind string, spec KindSpec) []string {
+	if len(spec.LinkageRefs) == 0 {
+		return nil
+	}
+	var errs []string
+	seen := map[string]bool{}
+	for i, ref := range spec.LinkageRefs {
+		path := strings.TrimSpace(ref.Path)
+		switch {
+		case path == "":
+			errs = append(errs, fmt.Sprintf("evidence kind %s linkageRefs[%d].path is required", kind, i))
+		case !strings.HasPrefix(path, "/"):
+			errs = append(errs, fmt.Sprintf("evidence kind %s linkageRefs[%d].path %q must be a JSON Pointer beginning with '/'", kind, i, path))
+		case strings.Count(path, "/") != 1:
+			errs = append(errs, fmt.Sprintf("evidence kind %s linkageRefs[%d].path %q must be a single top-level pointer (no nested segments)", kind, i, path))
+		default:
+			if seen[path] {
+				errs = append(errs, fmt.Sprintf("evidence kind %s linkageRefs declares path %q more than once", kind, path))
+			}
+			seen[path] = true
+		}
+		if ref.ResolvesToKind != "" {
+			if _, ok := tpl.EvidenceKinds[ref.ResolvesToKind]; !ok {
+				errs = append(errs, fmt.Sprintf("evidence kind %s linkageRefs[%d].resolvesToKind references unknown evidence kind %q", kind, i, ref.ResolvesToKind))
+			}
+		}
+		if ref.Latest && ref.ResolvesToKind == "" {
+			errs = append(errs, fmt.Sprintf("evidence kind %s linkageRefs[%d].latest requires resolvesToKind (latest of which kind?)", kind, i))
 		}
 	}
 	return errs
@@ -181,26 +246,23 @@ func parseAndValidateEvidenceFacts(kind string, input string, spec *KindSpec) (*
 		dec := json.NewDecoder(strings.NewReader(trimmed))
 		dec.UseNumber()
 		if err := dec.Decode(&fields); err != nil {
-			return nil, fmt.Errorf("evidence %s facts must be a JSON object", kind)
+			return nil, validationError("facts", fmt.Sprintf("evidence %s facts must be a JSON object%s", kind, jsonLocationSuffix(err)), "JSON object", nil, "pass --facts as a single JSON object, e.g. --facts '{\"verdict\":\"ready\"}'")
 		}
-		if dec.More() {
-			return nil, fmt.Errorf("evidence %s facts must contain one JSON object", kind)
-		}
-		if trailingToken(dec) {
-			return nil, fmt.Errorf("evidence %s facts must contain one JSON object", kind)
+		if dec.More() || trailingToken(dec) {
+			return nil, validationError("facts", fmt.Sprintf("evidence %s facts must contain one JSON object", kind), "single JSON object", nil, "remove any trailing tokens after the JSON object")
 		}
 		canonical, err := canonicalJSON([]byte(trimmed))
 		if err != nil {
-			return nil, fmt.Errorf("evidence %s facts must be valid JSON", kind)
+			return nil, validationError("facts", fmt.Sprintf("evidence %s facts must be valid JSON%s", kind, jsonLocationSuffix(err)), "valid JSON", nil, "fix the JSON syntax in --facts")
 		}
 		parsed = &parsedEvidenceFacts{Raw: canonical, Fields: fields}
 		for key, raw := range fields {
 			value, err := decodeJSONValue(raw)
 			if err != nil {
-				return nil, fmt.Errorf("evidence %s facts.%s must be valid JSON", kind, key)
+				return nil, validationError("facts."+key, fmt.Sprintf("evidence %s facts.%s must be valid JSON", kind, key), "valid JSON", nil, "")
 			}
 			if err := validateFlatFactValue(value); err != nil {
-				return nil, fmt.Errorf("evidence %s facts.%s %s", kind, key, err.Error())
+				return nil, validationError("facts."+key, fmt.Sprintf("evidence %s facts.%s %s", kind, key, err.Error()), "", nil, "")
 			}
 		}
 	}
@@ -213,7 +275,13 @@ func parseAndValidateEvidenceFacts(kind string, input string, spec *KindSpec) (*
 	}
 	for _, name := range spec.Facts.Required {
 		if _, ok := fields[name]; !ok {
-			return nil, fmt.Errorf("evidence %s missing required fact %s", kind, name)
+			prop := spec.Facts.Properties[name]
+			allowed := enumStrings(prop)
+			fix := fmt.Sprintf("add facts.%s", name)
+			if len(allowed) > 0 {
+				fix = fmt.Sprintf("add facts.%s, one of [%s]", name, strings.Join(allowed, "|"))
+			}
+			return nil, validationError("facts."+name, fmt.Sprintf("evidence %s missing required fact %s", kind, name), expectedForProp(prop), allowed, fix)
 		}
 	}
 	for name, raw := range fields {
@@ -223,13 +291,55 @@ func parseAndValidateEvidenceFacts(kind string, input string, spec *KindSpec) (*
 		}
 		value, err := decodeJSONValue(raw)
 		if err != nil {
-			return nil, fmt.Errorf("evidence %s facts.%s must be valid JSON", kind, name)
+			return nil, validationError("facts."+name, fmt.Sprintf("evidence %s facts.%s must be valid JSON", kind, name), "valid JSON", nil, "")
 		}
 		if err := validateFactPropertyValue(prop, value, raw, false); err != nil {
-			return nil, fmt.Errorf("evidence %s facts.%s %s", kind, name, err.Error())
+			allowed := enumStrings(prop)
+			fix := ""
+			if len(allowed) > 0 {
+				fix = fmt.Sprintf("set facts.%s to one of [%s]", name, strings.Join(allowed, "|"))
+			}
+			return nil, validationError("facts."+name, fmt.Sprintf("evidence %s facts.%s %s", kind, name, err.Error()), expectedForProp(prop), allowed, fix)
 		}
 	}
 	return parsed, nil
+}
+
+// jsonLocationSuffix returns a " at offset N" hint when err is a JSON syntax
+// error, so the agent can locate the malformed token (F4).
+func jsonLocationSuffix(err error) string {
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return fmt.Sprintf(" (at byte offset %d)", syn.Offset)
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Offset > 0 {
+		return fmt.Sprintf(" (at byte offset %d)", typeErr.Offset)
+	}
+	return ""
+}
+
+// enumStrings renders a fact property's enum as plain strings for fix hints.
+func enumStrings(prop FactProperty) []string {
+	out := make([]string, 0, len(prop.Enum))
+	for _, raw := range prop.Enum {
+		s := strings.TrimSpace(string(raw))
+		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+			s = s[1 : len(s)-1]
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func expectedForProp(prop FactProperty) string {
+	if prop.Type == "" {
+		return ""
+	}
+	if len(prop.Enum) > 0 {
+		return fmt.Sprintf("%s one of [%s]", prop.Type, strings.Join(enumStrings(prop), "|"))
+	}
+	return prop.Type
 }
 
 func trailingToken(dec *json.Decoder) bool {
@@ -352,6 +462,77 @@ func canonicalJSON(raw []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 	return json.RawMessage(out), nil
+}
+
+// validateProducibleBy enforces E1 supplied-role conformance: if the kind
+// declares producers, the supplied role must be one of them. An empty/unset
+// role is rejected when producers are declared. There is no implicit bypass —
+// "system" must be listed explicitly to be allowed.
+func validateProducibleBy(kind string, spec *KindSpec, role string) error {
+	if spec == nil || len(spec.ProducibleBy) == 0 {
+		return nil
+	}
+	r := strings.TrimSpace(role)
+	if r != "" {
+		for _, allowed := range spec.ProducibleBy {
+			if allowed == r {
+				return nil
+			}
+		}
+	}
+	return kindRoleDeniedError(kind, role, spec.ProducibleBy)
+}
+
+// validateLinkageRefs enforces E3: each declared linkage ref must resolve to a
+// live evidence id on the same instance (and of ResolvesToKind when set).
+func validateLinkageRefs(existing []Evidence, spec *KindSpec, dataRaw json.RawMessage) error {
+	if spec == nil || len(spec.LinkageRefs) == 0 {
+		return nil
+	}
+	dataObj := map[string]json.RawMessage{}
+	if len(dataRaw) > 0 {
+		// A non-object data doc simply yields no resolvable fields; required
+		// refs then fail below with a clear message.
+		_ = json.Unmarshal(dataRaw, &dataObj)
+	}
+	for _, ref := range spec.LinkageRefs {
+		key := strings.TrimPrefix(ref.Path, "/")
+		raw, present := dataObj[key]
+		if !present {
+			if ref.Required {
+				return linkageUnresolvedError(ref.Path, "", ref.ResolvesToKind, "")
+			}
+			continue
+		}
+		var id string
+		if err := json.Unmarshal(raw, &id); err != nil || strings.TrimSpace(id) == "" {
+			return linkageUnresolvedError(ref.Path, strings.Trim(string(raw), `"`), ref.ResolvesToKind, "is not a non-empty string evidence id")
+		}
+		match := findEvidenceByID(existing, id)
+		if match == nil {
+			return linkageUnresolvedError(ref.Path, id, ref.ResolvesToKind, "")
+		}
+		if ref.ResolvesToKind != "" && match.Kind != ref.ResolvesToKind {
+			return linkageUnresolvedError(ref.Path, id, ref.ResolvesToKind, fmt.Sprintf("resolves to kind %s, expected %s", match.Kind, ref.ResolvesToKind))
+		}
+		if ref.Latest {
+			// ResolvesToKind is guaranteed non-empty here (install-time check);
+			// the matched evidence is of that kind, so a latest always exists.
+			if latest, ok := latestEvidenceByKind(existing, ref.ResolvesToKind); ok && latest.ID != id {
+				return linkageStaleError(ref.Path, id, ref.ResolvesToKind, latest.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func findEvidenceByID(ev []Evidence, id string) *Evidence {
+	for i := range ev {
+		if ev[i].ID == id {
+			return &ev[i]
+		}
+	}
+	return nil
 }
 
 func latestEvidenceByKind(ev []Evidence, kind string) (Evidence, bool) {

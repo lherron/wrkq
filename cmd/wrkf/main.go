@@ -9,7 +9,9 @@ import (
 
 func main() {
 	if err := wrkfcli.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if !wrkfcli.IsReported(err) {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }

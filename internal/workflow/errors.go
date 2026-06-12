@@ -1,6 +1,10 @@
 package workflow
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 const (
 	wrkfCodeStaleRevision       = "WRKF_STALE_REVISION"
@@ -10,11 +14,47 @@ const (
 	wrkfCodeIdempotencyMismatch = "WRKF_IDEMPOTENCY_MISMATCH"
 	wrkfCodeLeaseConflict       = "WRKF_LEASE_CONFLICT"
 	wrkfCodeNotDeliverable      = "WRKF_EFFECT_NOT_DELIVERABLE"
+	wrkfCodeValidation          = "WRKF_VALIDATION"
+	wrkfCodeKindRoleDenied      = "WRKF_KIND_ROLE_DENIED"
+	wrkfCodeLinkageUnresolved   = "WRKF_LINKAGE_UNRESOLVED"
+	wrkfCodeLinkageStale        = "WRKF_LINKAGE_STALE"
 )
 
+// ErrorDetail is the single machine-parseable error shape carried by wrkf
+// domain/validation errors. CLI (--json envelope) and wrkfapi/RPC both map
+// from it so the contract stays uniform across surfaces.
+type ErrorDetail struct {
+	Code     string   `json:"code"`
+	Field    string   `json:"field,omitempty"`
+	Message  string   `json:"message"`
+	Expected string   `json:"expected,omitempty"`
+	Allowed  []string `json:"allowed,omitempty"`
+	Fix      string   `json:"fix,omitempty"`
+}
+
+// DetailedError is implemented by wrkf errors that carry an ErrorDetail.
+type DetailedError interface {
+	error
+	Code() string
+	Detail() ErrorDetail
+}
+
+// AsErrorDetail extracts a structured ErrorDetail from err when present.
+func AsErrorDetail(err error) (ErrorDetail, bool) {
+	var de DetailedError
+	if errors.As(err, &de) {
+		return de.Detail(), true
+	}
+	return ErrorDetail{}, false
+}
+
 type wrkfError struct {
-	code string
-	msg  string
+	code     string
+	msg      string
+	field    string
+	expected string
+	allowed  []string
+	fix      string
 }
 
 func (e *wrkfError) Error() string {
@@ -29,6 +69,66 @@ func (e *wrkfError) Code() string {
 		return ""
 	}
 	return e.code
+}
+
+func (e *wrkfError) Detail() ErrorDetail {
+	if e == nil {
+		return ErrorDetail{}
+	}
+	return ErrorDetail{Code: e.code, Field: e.field, Message: e.msg, Expected: e.expected, Allowed: e.allowed, Fix: e.fix}
+}
+
+// validationError builds a structured WRKF_VALIDATION error. The message is
+// the human-readable text; field/expected/allowed/fix feed the --json envelope
+// and RPC data so an agent can self-correct deterministically.
+func validationError(field, msg, expected string, allowed []string, fix string) error {
+	full := msg
+	if fix != "" {
+		full = msg + "; " + fix
+	}
+	return &wrkfError{code: wrkfCodeValidation, msg: full, field: field, expected: expected, allowed: allowed, fix: fix}
+}
+
+// kindRoleDeniedError reports that the supplied role is not declared as a
+// producer of the evidence kind. This is supplied-role conformance, not an
+// authenticated-actor authorization boundary.
+func kindRoleDeniedError(kind, role string, allowed []string) error {
+	roleLabel := role
+	if strings.TrimSpace(role) == "" {
+		roleLabel = "(empty)"
+	}
+	msg := fmt.Sprintf("evidence kind %s is not producible by role %s", kind, roleLabel)
+	fix := fmt.Sprintf("add evidence with --role one of [%s]", strings.Join(allowed, "|"))
+	return &wrkfError{code: wrkfCodeKindRoleDenied, msg: msg + "; " + fix, field: "role", expected: "one of declared producers", allowed: allowed, fix: fix}
+}
+
+// linkageUnresolvedError reports that a declared data linkage reference did not
+// resolve to a live evidence id on the same workflow instance.
+func linkageUnresolvedError(field, ref, resolvesToKind, detail string) error {
+	var msg string
+	switch {
+	case ref == "":
+		msg = fmt.Sprintf("data%s is required but missing", field)
+	case detail != "":
+		msg = fmt.Sprintf("data%s references %q which %s", field, ref, detail)
+	default:
+		msg = fmt.Sprintf("data%s references %q which does not resolve to a live evidence id on this instance", field, ref)
+	}
+	expected := "live evidence id on this instance"
+	if resolvesToKind != "" {
+		expected = fmt.Sprintf("live evidence id of kind %s on this instance", resolvesToKind)
+	}
+	fix := fmt.Sprintf("set data%s to an existing evidence id (see `wrkf evidence list`)", field)
+	return &wrkfError{code: wrkfCodeLinkageUnresolved, msg: msg + "; " + fix, field: "data" + field, expected: expected, fix: fix}
+}
+
+// linkageStaleError reports that a declared linkage ref points at a superseded
+// (non-latest) evidence of the expected kind.
+func linkageStaleError(field, ref, resolvesToKind, latestID string) error {
+	msg := fmt.Sprintf("data%s references %q but the latest %s on this instance is %s", field, ref, resolvesToKind, latestID)
+	fix := fmt.Sprintf("set data%s to %s (the latest %s)", field, latestID, resolvesToKind)
+	expected := fmt.Sprintf("latest %s id (%s)", resolvesToKind, latestID)
+	return &wrkfError{code: wrkfCodeLinkageStale, msg: msg + "; " + fix, field: "data" + field, expected: expected, fix: fix}
 }
 
 func staleRevisionError(instanceID string, expected, actual int64) error {

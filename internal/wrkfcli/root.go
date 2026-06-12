@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -102,8 +103,43 @@ func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*
 			a.db = database
 			a.service = workflow.NewService(database)
 		}
-		return fn(a, cmd, args)
+		runErr := fn(a, cmd, args)
+		if runErr != nil && flagJSON {
+			renderJSONErrorEnvelope(cmd, runErr)
+			return errReported
+		}
+		return runErr
 	}
+}
+
+// errReported signals that a command error has already been rendered (as a
+// --json envelope on stdout); main.go uses IsReported to avoid printing the
+// text "Error: ..." line to stderr while still exiting non-zero.
+var errReported = errors.New("wrkf: error reported")
+
+// IsReported reports whether err was already rendered to the user.
+func IsReported(err error) bool {
+	return errors.Is(err, errReported)
+}
+
+// renderJSONErrorEnvelope emits the structured {"error":{...}} envelope to
+// stdout (F1). It prefers the typed workflow ErrorDetail; otherwise it
+// synthesizes a best-effort envelope from any coded error.
+func renderJSONErrorEnvelope(cmd *cobra.Command, err error) {
+	detail, ok := workflow.AsErrorDetail(err)
+	if !ok {
+		detail = workflow.ErrorDetail{Code: codeFromError(err), Message: err.Error()}
+	}
+	b, _ := json.MarshalIndent(map[string]any{"error": detail}, "", "  ")
+	fmt.Fprintln(cmd.OutOrStdout(), string(b))
+}
+
+func codeFromError(err error) string {
+	var coded interface{ Code() string }
+	if errors.As(err, &coded) && coded.Code() != "" {
+		return coded.Code()
+	}
+	return "WRKF_ERROR"
 }
 
 func actorDefault() string {
@@ -381,6 +417,21 @@ func evidenceCmd() *cobra.Command {
 		}),
 	}
 	suggest.Flags().StringVar(&transition, "transition", "", "Transition id")
+	schema := &cobra.Command{
+		Use:  "schema TASK --kind KIND",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			if kind == "" {
+				return fmt.Errorf("--kind is required")
+			}
+			out, err := a.service.EvidenceSchema(args[0], kind)
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, out)
+		}),
+	}
+	schema.Flags().StringVar(&kind, "kind", "", "Evidence kind")
 	execCmd := &cobra.Command{
 		Use:  "exec TASK --kind KIND -- COMMAND...",
 		Args: cobra.MinimumNArgs(2),
@@ -431,7 +482,7 @@ func evidenceCmd() *cobra.Command {
 	execCmd.Flags().StringVar(&kind, "kind", "", "Evidence kind")
 	execCmd.Flags().StringVar(&summary, "summary", "", "Evidence summary")
 	execCmd.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object")
-	cmd.AddCommand(add, list, show, suggest, execCmd)
+	cmd.AddCommand(add, list, show, suggest, schema, execCmd)
 	return cmd
 }
 

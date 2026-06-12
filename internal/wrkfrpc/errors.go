@@ -27,6 +27,9 @@ var domainRPCCode = map[string]int{
 	wrkfapi.CodeEffectNotDeliverable: -32015,
 	wrkfapi.CodeHookFailed:           -32016,
 	wrkfapi.CodeDBMigrationRequired:  -32017,
+	wrkfapi.CodeKindRoleDenied:       -32018,
+	wrkfapi.CodeLinkageUnresolved:    -32019,
+	wrkfapi.CodeLinkageStale:         -32020,
 	wrkfapi.CodeInternal:             -32603,
 }
 

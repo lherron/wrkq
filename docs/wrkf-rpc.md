@@ -75,9 +75,14 @@ JSON-RPC `error` object. `data.code` is the stable contract; `message` is human-
 | `WRKF_EFFECT_NOT_DELIVERABLE` | -32015 | false | effect not in a deliverable state |
 | `WRKF_HOOK_FAILED` | -32016 | context-dependent; value supplied in `data.retryable` | hook/check execution failed |
 | `WRKF_DB_MIGRATION_REQUIRED` | -32017 | false | DB schema behind required migration |
+| `WRKF_KIND_ROLE_DENIED` | -32018 | false | evidence kind is not producible by the supplied role (template `producibleBy` conformance — supplied-role only, **not** an authenticated-actor boundary) |
+| `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | a declared evidence `data` linkage ref did not resolve to a live evidence id on the same instance (template `linkageRefs`) |
+| `WRKF_LINKAGE_STALE` | -32020 | false | a `linkageRefs` entry with `latest:true` points at a superseded (non-current) evidence of the expected kind; `data.fix` names the current id |
 | `WRKF_INTERNAL` | -32603 | false | unclassified internal error |
 
 `data.retryable` is **always a boolean** on every error instance (no `maybe`/absent). `data.code` is always present for WRKF_* domain errors.
+
+**Structured validation detail.** `WRKF_VALIDATION`, `WRKF_KIND_ROLE_DENIED`, `WRKF_LINKAGE_UNRESOLVED`, and `WRKF_LINKAGE_STALE` carry a uniform self-correction payload in `data`: `field`, `message`, and (when applicable) `expected`, `allowed` (array), and `fix`. The same shape is emitted by the `wrkf` CLI in `--json` mode as `{"error":{code,field,message,expected,allowed,fix}}` on **stdout** (exit non-zero); text-mode CLI errors stay on stderr. This lets an agent driving `wrkf` directly (`next` → `evidence add` → `transition`) parse one deterministic stream and self-correct in-turn.
 
 **Standard JSON-RPC protocol errors** — parse error (-32700), invalid request (-32600), method not found (-32601), invalid params (-32602 when not a domain `WRKF_VALIDATION`) — use the standard JSON-RPC codes and MAY omit `data.code`. Clients must treat a missing `data.code` as a transport/protocol-level error, not a domain error.
 

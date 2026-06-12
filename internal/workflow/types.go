@@ -40,6 +40,33 @@ type KindSpec struct {
 	Description string         `json:"description,omitempty"`
 	Class       string         `json:"class,omitempty"`
 	Facts       *FactsContract `json:"facts,omitempty"`
+	// ProducibleBy declares which roles may produce this evidence kind
+	// (supplied-role conformance, not an authenticated-actor boundary). When
+	// empty, all roles are allowed. To allow system-produced evidence, list
+	// "system" explicitly — there is no implicit admin bypass.
+	ProducibleBy []string `json:"producibleBy,omitempty"`
+	// LinkageRefs declares fields inside the evidence `data` document that must
+	// resolve to a live evidence id on the same workflow instance.
+	LinkageRefs []LinkageRef `json:"linkageRefs,omitempty"`
+}
+
+// LinkageRef declares a referential-integrity constraint on an evidence `data`
+// field: its string value must resolve to a live evidence id on the same
+// instance (optionally of a specific kind).
+type LinkageRef struct {
+	// Path is a top-level JSON Pointer into the evidence `data` object, e.g.
+	// "/basedOnBehaviorNoteId". Only single-segment top-level pointers are
+	// supported.
+	Path string `json:"path"`
+	// ResolvesToKind, when set, requires the referenced evidence to be of this
+	// kind.
+	ResolvesToKind string `json:"resolvesToKind,omitempty"`
+	// Required, when true, rejects an add whose `data` omits this path.
+	Required bool `json:"required,omitempty"`
+	// Latest, when true, additionally requires the referenced evidence to be
+	// the current (latest by production time) evidence of ResolvesToKind on the
+	// instance — a superseded earlier id is rejected. Requires ResolvesToKind.
+	Latest bool `json:"latest,omitempty"`
 }
 
 type FactsContract struct {
@@ -256,6 +283,17 @@ type Evidence struct {
 	TaskEtagAtProduction string          `json:"taskEtagAtProduction,omitempty"`
 	TaskHashAtProduction string          `json:"taskHashAtProduction,omitempty"`
 	ProducedAt           string          `json:"producedAt"`
+}
+
+// EvidenceSchema is the contract for an evidence kind, returned by
+// `wrkf evidence schema` so an agent can query requirements before adding (F3).
+type EvidenceSchema struct {
+	Kind         string         `json:"kind"`
+	Description  string         `json:"description,omitempty"`
+	Class        string         `json:"class,omitempty"`
+	Facts        *FactsContract `json:"facts,omitempty"`
+	ProducibleBy []string       `json:"producibleBy,omitempty"`
+	LinkageRefs  []LinkageRef   `json:"linkageRefs,omitempty"`
 }
 
 type AddEvidenceParams struct {

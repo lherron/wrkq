@@ -18,6 +18,9 @@ const (
 	CodeEffectNotDeliverable = "WRKF_EFFECT_NOT_DELIVERABLE"
 	CodeHookFailed           = "WRKF_HOOK_FAILED"
 	CodeDBMigrationRequired  = "WRKF_DB_MIGRATION_REQUIRED"
+	CodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"
+	CodeLinkageUnresolved    = "WRKF_LINKAGE_UNRESOLVED"
+	CodeLinkageStale         = "WRKF_LINKAGE_STALE"
 	CodeInternal             = "WRKF_INTERNAL"
 )
 
@@ -157,6 +160,17 @@ func NewDBMigrationRequiredError(have, want int) *DomainError {
 		Have int `json:"have"`
 		Want int `json:"want"`
 	}{Have: have, Want: want}, nil)
+}
+
+// NewDetailError wraps a structured workflow.ErrorDetail as a DomainError,
+// carrying the detail (field/expected/allowed/fix) as data so the RPC envelope
+// and CLI --json envelope expose the same parseable shape.
+func NewDetailError(detail workflow.ErrorDetail, retryable bool) *DomainError {
+	code := detail.Code
+	if code == "" {
+		code = CodeValidation
+	}
+	return newError(code, detail.Message, retryable, detail, nil)
 }
 
 func NewInternalError(err error) *DomainError {

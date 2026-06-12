@@ -1,7 +1,7 @@
 {
   "schemaVersion": "wrkf.workflow-template.v0",
   "id": "pbc-progressive-refinement",
-  "version": "5",
+  "version": "9",
   "kind": "agent_first_workflow",
   "description": "Progressively refine one-line feedback into a Behavior Note, finalized PBC, and downstream derivation seeds without multiplying product artifacts.",
   "initial": {
@@ -11,6 +11,9 @@
   "roles": {
     "agent": {
       "description": "Normalizes feedback, writes artifacts, runs pressure passes, and records evidence."
+    },
+    "pressure_reviewer": {
+      "description": "Reviews the drafted PBC under pressure and may finalize a ready PBC as the separation-of-duty reviewer."
     },
     "product_owner": {
       "description": "Answers the single highest-leverage clarification or patch decision when needed."
@@ -83,7 +86,10 @@
       }
     },
     "clarification_response": {
-      "description": "The product-owner answer to the single clarification question."
+      "description": "The product-owner answer to the single clarification question.",
+      "producibleBy": [
+        "product_owner"
+      ]
     },
     "pbc_draft": {
       "description": "The draft PBC stored in the wrkq task specification."
@@ -110,6 +116,9 @@
     "patch_decision": {
       "class": "decision",
       "description": "Product-owner decision after a pressure pass requests a patch.",
+      "producibleBy": [
+        "product_owner"
+      ],
       "facts": {
         "required": [
           "route"
@@ -439,6 +448,7 @@
       },
       "by": [
         "agent",
+        "pressure_reviewer",
         "product_owner"
       ],
       "requires": [
@@ -623,6 +633,7 @@
       },
       "by": [
         "agent",
+        "pressure_reviewer",
         "product_owner"
       ],
       "requires": [

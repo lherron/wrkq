@@ -887,6 +887,11 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
 		kindSpec = &spec
 	}
+	// E1 — supplied-role conformance: reject when the kind declares producers
+	// and the supplied role is not among them. Not an authenticated boundary.
+	if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
+		return nil, err
+	}
 	facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
 	if err != nil {
 		return nil, err
@@ -895,7 +900,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 	var dataRaw json.RawMessage
 	if strings.TrimSpace(params.Data) != "" {
 		if !json.Valid([]byte(params.Data)) {
-			return nil, fmt.Errorf("data must be valid JSON")
+			return nil, validationError("data", "data must be valid JSON"+jsonLocationSuffix(json.Unmarshal([]byte(params.Data), new(json.RawMessage))), "valid JSON", nil, "fix the JSON syntax in --data")
 		}
 		dataArg = params.Data
 		dataRaw = json.RawMessage(params.Data)
@@ -905,6 +910,17 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {
 			return err
+		}
+		// E3 — data-linkage correctness: declared refs must resolve to a live
+		// evidence id on this instance before the new row is written.
+		if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
+			existing, err := listEvidenceTx(tx, inst.ID)
+			if err != nil {
+				return err
+			}
+			if err := validateLinkageRefs(existing, kindSpec, dataRaw); err != nil {
+				return err
+			}
 		}
 		id, err := nextSeqID(tx, "workflow_evidence_seq", "ev")
 		if err != nil {
@@ -978,6 +994,41 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		return nil
 	})
 	return ev, err
+}
+
+// EvidenceSchema returns the declared contract for an evidence kind on the
+// task's active workflow instance (F3).
+func (s *Service) EvidenceSchema(taskSelector, kind string) (*EvidenceSchema, error) {
+	inst, err := s.LatestInstance(taskSelector)
+	if err != nil {
+		return nil, err
+	}
+	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
+	if err != nil {
+		return nil, err
+	}
+	spec, ok := tpl.EvidenceKinds[kind]
+	if !ok {
+		declared := declaredEvidenceKinds(tpl)
+		return nil, validationError("kind", fmt.Sprintf("evidence kind %s is not declared by template %s@%s", kind, tpl.ID, tpl.Version), "a declared evidence kind", declared, "use --kind with one of the declared kinds")
+	}
+	return &EvidenceSchema{
+		Kind:         kind,
+		Description:  spec.Description,
+		Class:        spec.Class,
+		Facts:        spec.Facts,
+		ProducibleBy: spec.ProducibleBy,
+		LinkageRefs:  spec.LinkageRefs,
+	}, nil
+}
+
+func declaredEvidenceKinds(tpl *Template) []string {
+	kinds := make([]string, 0, len(tpl.EvidenceKinds))
+	for k := range tpl.EvidenceKinds {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	return kinds
 }
 
 func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
@@ -1186,6 +1237,162 @@ func roleBindingAllowed(q queryer, inst *Instance, tpl *Template, role, actor st
 	return matched > 0
 }
 
+func (s *Service) transitionOwners(inst *Instance, tpl *Template, tr TransitionSpec, requestedRole string) ([]ActionOwner, []Blocker) {
+	roles, blockers := transitionCandidateRoles(tr, requestedRole)
+	if len(blockers) > 0 {
+		return nil, blockers
+	}
+	var owners []ActionOwner
+	var bindingBlockers []Blocker
+	seen := map[string]bool{}
+	for _, role := range roles {
+		roleOwners, err := s.ownersForRole(inst, tpl, role)
+		if err != nil {
+			bindingBlockers = append(bindingBlockers, Blocker{Kind: "role_binding", Ref: role, Message: err.Error()})
+			continue
+		}
+		if len(roleOwners) == 0 {
+			bindingBlockers = append(bindingBlockers, Blocker{Kind: "role_binding", Ref: role, Message: fmt.Sprintf("role %s has no eligible bound actors", role)})
+			continue
+		}
+		for _, owner := range roleOwners {
+			key := owner.Role + "\x00" + owner.Actor + "\x00" + owner.DeliveryRef + "\x00" + owner.Lane
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			owners = append(owners, owner)
+		}
+	}
+	if len(owners) == 0 && len(bindingBlockers) > 0 {
+		return nil, bindingBlockers
+	}
+	return owners, nil
+}
+
+func transitionCandidateRoles(tr TransitionSpec, requestedRole string) ([]string, []Blocker) {
+	requestedRole = strings.TrimSpace(requestedRole)
+	if requestedRole != "" {
+		if !roleAllowed(requestedRole, tr.By) {
+			return nil, []Blocker{{Kind: "role", Ref: requestedRole, Message: "role is not allowed for transition"}}
+		}
+		return []string{requestedRole}, nil
+	}
+	roles := make([]string, 0, len(tr.By))
+	seen := map[string]bool{}
+	add := func(role string) {
+		role = strings.TrimSpace(role)
+		if role == "" || seen[role] || !roleAllowed(role, tr.By) {
+			return
+		}
+		seen[role] = true
+		roles = append(roles, role)
+	}
+	if tr.Responsibility != nil {
+		add(tr.Responsibility.Role)
+	}
+	for _, role := range tr.By {
+		add(role)
+	}
+	return roles, nil
+}
+
+func (s *Service) ownersForRole(inst *Instance, tpl *Template, role string) ([]ActionOwner, error) {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return nil, fmt.Errorf("role is required")
+	}
+	if role == "system" || role == "supervisor" {
+		return []ActionOwner{{Role: role}}, nil
+	}
+	if tpl != nil {
+		if spec, ok := tpl.Roles[role]; ok && len(spec.Actors) > 0 {
+			owners := make([]ActionOwner, 0, len(spec.Actors))
+			for _, actor := range spec.Actors {
+				actor = strings.TrimSpace(actor)
+				if actor == "" {
+					continue
+				}
+				owner := ActionOwner{Role: role}
+				if actor != "*" {
+					owner.Actor = actor
+				}
+				owners = append(owners, owner)
+			}
+			return owners, nil
+		}
+	}
+	if inst == nil {
+		return nil, fmt.Errorf("workflow instance is required")
+	}
+	rows, err := s.db.Query(`
+		SELECT actor, COALESCE(delivery_ref,''), COALESCE(lane,'')
+		FROM workflow_role_bindings
+		WHERE instance_id = ? AND role = ?
+		ORDER BY bound_at DESC, actor
+	`, inst.ID, role)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var owners []ActionOwner
+	for rows.Next() {
+		var owner ActionOwner
+		owner.Role = role
+		if err := rows.Scan(&owner.Actor, &owner.DeliveryRef, &owner.Lane); err != nil {
+			return nil, err
+		}
+		owners = append(owners, owner)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(owners) == 0 {
+		// Legacy/simple mode matches roleBindingAllowed: no binding rows for this
+		// role means a declared role plus authenticated actor is sufficient.
+		return []ActionOwner{{Role: role}}, nil
+	}
+	return owners, nil
+}
+
+func transitionActionID(transitionID string, owner ActionOwner, ownerCount int) string {
+	id := "transition_" + transitionID
+	if ownerCount <= 1 {
+		return id
+	}
+	suffix := owner.Role
+	if owner.Actor != "" {
+		suffix += "_" + owner.Actor
+	}
+	return id + "_" + sanitizeActionID(suffix)
+}
+
+func sanitizeActionID(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func transitionCommand(taskRef, transitionID string, owner ActionOwner, revision int64) string {
+	cmd := fmt.Sprintf("wrkf transition %s %s --role %s", strings.TrimPrefix(taskRef, "wrkq:"), transitionID, owner.Role)
+	if owner.Actor != "" {
+		cmd += fmt.Sprintf(" --actor %s", owner.Actor)
+	}
+	cmd += fmt.Sprintf(" --expect-revision %d", revision)
+	return cmd
+}
+
 type evalContext struct {
 	Evidence    []Evidence
 	Obligations []Obligation
@@ -1285,7 +1492,7 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 		return nil, err
 	}
 	ev, _ := s.ListEvidence(taskSelector)
-	obl, _ := s.ListObligations(taskSelector, false)
+	obl, _ := s.ListObligations(taskSelector, true)
 	eff, _ := s.ListEffects(taskSelector, false)
 	openObl := filterOpenObligations(obl)
 	pendingEff := filterPendingEffects(eff)
@@ -1409,12 +1616,19 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 		if !stateMatches(*inst, tr.From) {
 			continue
 		}
-		ownerRole := role
-		if ownerRole == "" && len(tr.By) > 0 {
+		owners, ownerBlockers := s.transitionOwners(inst, tpl, tr, role)
+		ownerRole := ""
+		if len(owners) > 0 {
+			ownerRole = owners[0].Role
+		} else if role != "" {
+			ownerRole = role
+		} else if tr.Responsibility != nil && tr.Responsibility.Role != "" {
+			ownerRole = tr.Responsibility.Role
+		} else if len(tr.By) > 0 {
 			ownerRole = tr.By[0]
 		}
-		if role != "" && !roleAllowed(role, tr.By) {
-			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: role, BlocksOn: []Blocker{{Kind: "role", Ref: role, Message: "role is not allowed for transition"}}})
+		if len(ownerBlockers) > 0 {
+			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: ownerBlockers})
 			continue
 		}
 		blockers := transitionBlockers(tr, ev, obl, taskDocHashOrEmpty(task))
@@ -1500,7 +1714,13 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 			continue
 		}
 		expected := chosen.To
-		resp.Actions = append(resp.Actions, NextAction{ID: "transition_" + tr.ID, Kind: "transition", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 100, Why: "transition is legal and prerequisites are satisfied", Command: fmt.Sprintf("wrkf transition %s %s --role %s --expect-revision %d", strings.TrimPrefix(inst.TaskRef, "wrkq:"), tr.ID, ownerRole, inst.Revision), ExpectedState: &expected, Guardrails: Guardrails{Hard: []string{"provide expected revision"}, Warnings: []string{}}})
+		for _, owner := range owners {
+			if sodBlockers := separationOfDutyBlockers(tr, ev, owner.Actor); len(sodBlockers) > 0 {
+				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: owner.Role, BlocksOn: sodBlockers})
+				continue
+			}
+			resp.Actions = append(resp.Actions, NextAction{ID: transitionActionID(tr.ID, owner, len(owners)), Kind: "transition", Mode: "deterministic", Owner: owner, Rank: 100, Why: "transition is legal and prerequisites are satisfied", Command: transitionCommand(inst.TaskRef, tr.ID, owner, inst.Revision), ExpectedState: &expected, Guardrails: Guardrails{Hard: []string{"provide expected revision"}, Warnings: []string{}}})
+		}
 	}
 	sort.SliceStable(resp.Actions, func(i, j int) bool { return resp.Actions[i].Rank > resp.Actions[j].Rank })
 	return resp, nil
