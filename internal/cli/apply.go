@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/parse"
@@ -190,10 +191,10 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute update
-	return applyTaskUpdates(database, app.ActorUUID, taskUUID, updates, !applyWithMetadata, applyIfMatch)
+	return applyTaskUpdates(database, app.Attribution(), taskUUID, updates, !applyWithMetadata, applyIfMatch)
 }
 
-func applyTaskUpdates(database *db.DB, actorUUID, taskUUID string, updates *parse.TaskUpdate, bodyOnly bool, ifMatch int64) error {
+func applyTaskUpdates(database *db.DB, attr attribution.Attribution, taskUUID string, updates *parse.TaskUpdate, bodyOnly bool, ifMatch int64) error {
 	fields := map[string]interface{}{}
 	if bodyOnly {
 		if updates.Description != nil {
@@ -228,7 +229,7 @@ func applyTaskUpdates(database *db.DB, actorUUID, taskUUID string, updates *pars
 	if len(fields) == 0 {
 		return fmt.Errorf("no fields to update")
 	}
-	if _, err := store.New(database).Tasks.UpdateFields(actorUUID, taskUUID, fields, ifMatch); err != nil {
+	if _, err := store.New(database).Tasks.UpdateFieldsWithAttribution(attr, taskUUID, fields, ifMatch); err != nil {
 		return fmt.Errorf("failed to update task: %w", err)
 	}
 	fmt.Printf("Updated task %s\n", taskUUID)

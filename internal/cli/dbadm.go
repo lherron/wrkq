@@ -107,7 +107,7 @@ func runDBSnapshot(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "\nTo use this snapshot:\n")
 	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_DB_PATH=%s\n", dbSnapshotOut)
 	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_ATTACH_DIR=/path/to/branch/attachments\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_ACTOR=agent-branch-name\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  export WRKQ_PRINCIPAL_REF=agent:branch-name\n")
 
 	return nil
 }

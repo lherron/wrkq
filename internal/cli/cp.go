@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
@@ -78,7 +79,7 @@ type copyResult struct {
 func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 	cfg := app.Config
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Validate mutually exclusive flags
 	if cpWithAttachments && cpShallow {
@@ -161,7 +162,7 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	results := []copyResult{}
 	result := op.Execute(sourceTasks, func(taskUUID string) error {
-		res, err := copyTask(database, cfg.AttachDir, actorUUID, taskUUID, destUUID)
+		res, err := copyTaskWithAttribution(database, cfg.AttachDir, attr, taskUUID, destUUID)
 		if err == nil && res != nil {
 			results = append(results, *res)
 		}
@@ -258,6 +259,10 @@ func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, des
 }
 
 func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string) (*copyResult, error) {
+	return copyTaskWithAttribution(database, attachDir, attributionFromLegacyActor(actorUUID), sourceUUID, destUUID)
+}
+
+func copyTaskWithAttribution(database *db.DB, attachDir string, attr attribution.Attribution, sourceUUID, destUUID string) (*copyResult, error) {
 	tx, err := database.Begin()
 	if err != nil {
 		return nil, err
@@ -305,9 +310,10 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 		_, err = tx.Exec(`
 			UPDATE tasks SET title = ?, state = ?, priority = ?, description = ?, specification = ?, labels = ?,
 				start_at = ?, due_at = ?, updated_at = CURRENT_TIMESTAMP,
-				updated_by_actor_uuid = ?, etag = etag + 1
+				updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?, etag = etag + 1
 			WHERE uuid = ?
-		`, title, state, priority, description, specification, labels, startAt, dueAt, actorUUID, existingUUID)
+		`, title, state, priority, description, specification, labels, startAt, dueAt,
+			legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), existingUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -318,9 +324,12 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 		// Insert new task (omit id and uuid to let triggers generate them)
 		result, err := tx.Exec(`
 			INSERT INTO tasks (slug, title, project_uuid, state, priority, description, specification, labels,
-				start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, slug, title, destUUID, state, priority, description, specification, labels, startAt, dueAt, actorUUID, actorUUID)
+				start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid,
+				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, slug, title, destUUID, state, priority, description, specification, labels, startAt, dueAt,
+			legacyActorBind(attr), legacyActorBind(attr),
+			attr.PrincipalRef, attr.PrincipalRef, scopeBind(attr), scopeBind(attr))
 		if err != nil {
 			return nil, err
 		}
@@ -335,7 +344,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	// Handle attachments
 	var attachmentCount int
 	if !cpShallow {
-		attachmentCount, err = copyAttachments(tx, attachDir, sourceUUID, newUUID)
+		attachmentCount, err = copyAttachments(tx, attachDir, attr, sourceUUID, newUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -355,7 +364,9 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	payloadStr := string(payloadJSON)
 
 	eventMeta, err := eventWriter.LogEventReturning(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
 		ResourceUUID: &newUUID,
 		EventType:    "task.copied",
@@ -372,7 +383,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	webhooks.DispatchTaskEvent(database, newUUID, webhooks.EventContext{
 		Metadata:   eventMeta,
 		Event:      "created",
-		ActorUUID:  &actorUUID,
+		ActorUUID:  attr.LegacyActorUUID,
 		Via:        "cli",
 		Transition: &webhooks.Transition{From: nil, To: &state},
 		Changed:    []string{"source_uuid"},
@@ -396,7 +407,7 @@ func copyTask(database *db.DB, attachDir, actorUUID, sourceUUID, destUUID string
 	}, nil
 }
 
-func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string) (int, error) {
+func copyAttachments(tx *sql.Tx, attachDir string, attr attribution.Attribution, sourceTaskUUID, destTaskUUID string) (int, error) {
 	rows, err := tx.Query(`
 		SELECT uuid, filename, relative_path, mime_type, size_bytes, checksum
 		FROM attachments WHERE task_uuid = ?
@@ -450,9 +461,13 @@ func copyAttachments(tx *sql.Tx, attachDir, sourceTaskUUID, destTaskUUID string)
 
 		// Insert attachment metadata
 		_, err = tx.Exec(`
-			INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum)
-			VALUES ('', ?, ?, ?, ?, ?, ?)
-		`, destTaskUUID, filename, newRelativePath, mimeType, sizeBytes, checksum)
+			INSERT INTO attachments (
+				id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
+				created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			)
+			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, destTaskUUID, filename, newRelativePath, mimeType, sizeBytes, checksum,
+			legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
 		if err != nil {
 			return count, err
 		}

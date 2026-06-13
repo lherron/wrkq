@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 )
@@ -32,6 +33,14 @@ type ContainerCreateResult struct {
 
 // Create creates a new container and logs a container.created event.
 func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams) (*ContainerCreateResult, error) {
+	return cs.CreateWithAttribution(cs.store.attributionFromActorUUID(actorUUID), params)
+}
+
+// CreateWithAttribution creates a new container using canonical principal attribution.
+func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, params ContainerCreateParams) (*ContainerCreateResult, error) {
+	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
 	var result *ContainerCreateResult
 
 	// Default title to slug if not provided
@@ -71,9 +80,17 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 
 	err = cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		res, err := tx.Exec(`
-			INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
-			VALUES ('', ?, ?, ?, ?, ?, ?)
-		`, params.Slug, title, params.ParentUUID, kind, actorUUID, actorUUID)
+			INSERT INTO containers (
+				id, slug, title, parent_uuid, kind,
+				created_by_actor_uuid, updated_by_actor_uuid,
+				created_by_principal_ref, updated_by_principal_ref,
+				created_by_scope_ref, updated_by_scope_ref
+			)
+			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, params.Slug, title, params.ParentUUID, kind,
+			legacyActorSQL(attr), legacyActorSQL(attr),
+			attr.PrincipalRef, attr.PrincipalRef,
+			scopeSQL(attr), scopeSQL(attr))
 		if err != nil {
 			return fmt.Errorf("failed to create container: %w", err)
 		}
@@ -108,7 +125,9 @@ func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams)
 		payloadStr := string(payloadJSON)
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
 			ResourceUUID: &uuid,
 			EventType:    "container.created",
@@ -139,6 +158,14 @@ func defaultContainerTitle(slug string) string {
 // UpdateFields updates specified fields on a container and logs a container.updated event.
 // Returns the new etag on success.
 func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields map[string]interface{}, ifMatch int64) (int64, error) {
+	return cs.UpdateFieldsWithAttribution(cs.store.attributionFromActorUUID(actorUUID), containerUUID, fields, ifMatch)
+}
+
+// UpdateFieldsWithAttribution updates a container using canonical principal attribution.
+func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attribution, containerUUID string, fields map[string]interface{}, ifMatch int64) (int64, error) {
+	if err := requireAttribution(attr); err != nil {
+		return 0, err
+	}
 	var newETag int64
 
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
@@ -178,7 +205,9 @@ func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields m
 		// Increment etag and update actor
 		setClauses = append(setClauses, "etag = etag + 1")
 		setClauses = append(setClauses, "updated_by_actor_uuid = ?")
-		args = append(args, actorUUID)
+		setClauses = append(setClauses, "updated_by_principal_ref = ?")
+		setClauses = append(setClauses, "updated_by_scope_ref = ?")
+		args = append(args, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr))
 
 		// Add WHERE clause
 		args = append(args, containerUUID)
@@ -198,7 +227,9 @@ func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields m
 		newETag = currentETag + 1
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
 			ResourceUUID: &containerUUID,
 			EventType:    "container.updated",
@@ -217,6 +248,14 @@ func (cs *ContainerStore) UpdateFields(actorUUID, containerUUID string, fields m
 // Move moves a container to a different parent and logs a container.moved event.
 // Returns the new etag on success.
 func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *string, ifMatch int64) (int64, error) {
+	return cs.MoveWithAttribution(cs.store.attributionFromActorUUID(actorUUID), containerUUID, newParentUUID, ifMatch)
+}
+
+// MoveWithAttribution moves a container using canonical principal attribution.
+func (cs *ContainerStore) MoveWithAttribution(attr attribution.Attribution, containerUUID string, newParentUUID *string, ifMatch int64) (int64, error) {
+	if err := requireAttribution(attr); err != nil {
+		return 0, err
+	}
 	var newETag int64
 
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
@@ -253,9 +292,11 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 			UPDATE containers
 			SET parent_uuid = ?,
 				etag = etag + 1,
-				updated_by_actor_uuid = ?
+				updated_by_actor_uuid = ?,
+				updated_by_principal_ref = ?,
+				updated_by_scope_ref = ?
 			WHERE uuid = ?
-		`, newParentUUID, actorUUID, containerUUID)
+		`, newParentUUID, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), containerUUID)
 		if err != nil {
 			return fmt.Errorf("failed to move container: %w", err)
 		}
@@ -273,7 +314,9 @@ func (cs *ContainerStore) Move(actorUUID, containerUUID string, newParentUUID *s
 		newETag = currentETag + 1
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
 			ResourceUUID: &containerUUID,
 			EventType:    "container.moved",
@@ -333,6 +376,14 @@ func validateContainerKindUpdate(rootUUID, currentKind string, currentParentUUID
 
 // Archive soft-deletes a container by setting archived_at timestamp.
 func (cs *ContainerStore) Archive(actorUUID, containerUUID string, ifMatch int64) (int64, error) {
+	return cs.ArchiveWithAttribution(cs.store.attributionFromActorUUID(actorUUID), containerUUID, ifMatch)
+}
+
+// ArchiveWithAttribution archives a container using canonical principal attribution.
+func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, containerUUID string, ifMatch int64) (int64, error) {
+	if err := requireAttribution(attr); err != nil {
+		return 0, err
+	}
 	var newETag int64
 
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
@@ -357,9 +408,11 @@ func (cs *ContainerStore) Archive(actorUUID, containerUUID string, ifMatch int64
 			UPDATE containers
 			SET archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 				updated_by_actor_uuid = ?,
+				updated_by_principal_ref = ?,
+				updated_by_scope_ref = ?,
 				etag = etag + 1
 			WHERE uuid = ?
-		`, actorUUID, containerUUID)
+		`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), containerUUID)
 		if err != nil {
 			return fmt.Errorf("failed to archive container: %w", err)
 		}
@@ -374,7 +427,9 @@ func (cs *ContainerStore) Archive(actorUUID, containerUUID string, ifMatch int64
 		newETag = currentETag + 1
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
 			ResourceUUID: &containerUUID,
 			EventType:    "container.archived",
@@ -392,6 +447,14 @@ func (cs *ContainerStore) Archive(actorUUID, containerUUID string, ifMatch int64
 
 // Delete hard-deletes an empty container.
 func (cs *ContainerStore) Delete(actorUUID, containerUUID string, ifMatch int64) error {
+	return cs.DeleteWithAttribution(cs.store.attributionFromActorUUID(actorUUID), containerUUID, ifMatch)
+}
+
+// DeleteWithAttribution hard-deletes an empty container using canonical attribution.
+func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, containerUUID string, ifMatch int64) error {
+	if err := requireAttribution(attr); err != nil {
+		return err
+	}
 	return cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
 		var currentETag int64
@@ -427,13 +490,15 @@ func (cs *ContainerStore) Delete(actorUUID, containerUUID string, ifMatch int64)
 		// Log event BEFORE deleting
 		payload := map[string]interface{}{
 			"slug":       slug,
-			"deleted_by": actorUUID,
+			"deleted_by": attr.PrincipalRef,
 		}
 		payloadJSON, _ := json.Marshal(payload)
 		payloadStr := string(payloadJSON)
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
 			ResourceUUID: &containerUUID,
 			EventType:    "container.deleted",
@@ -459,17 +524,22 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 	var createdAt, updatedAt string
 	var archivedAt *string
 	var kind string
+	var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 
 	err := cs.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 			   created_at, updated_at, archived_at,
-			   created_by_actor_uuid, updated_by_actor_uuid
+			   created_by_actor_uuid, updated_by_actor_uuid,
+			   created_by_principal_ref, updated_by_principal_ref,
+			   created_by_scope_ref, updated_by_scope_ref
 		FROM containers WHERE uuid = ?
 	`, uuid).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
 		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
-		&container.CreatedByActorUUID, &container.UpdatedByActorUUID,
+		&createdByActor, &updatedByActor,
+		&createdByPrincipal, &updatedByPrincipal,
+		&createdByScope, &updatedByScope,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -478,6 +548,24 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 		return nil, fmt.Errorf("failed to get container: %w", err)
 	}
 	container.Kind = domain.ContainerKind(kind)
+	if createdByActor.Valid {
+		container.CreatedByActorUUID = createdByActor.String
+	}
+	if updatedByActor.Valid {
+		container.UpdatedByActorUUID = updatedByActor.String
+	}
+	if createdByPrincipal.Valid {
+		container.CreatedByPrincipalRef = createdByPrincipal.String
+	}
+	if updatedByPrincipal.Valid {
+		container.UpdatedByPrincipalRef = updatedByPrincipal.String
+	}
+	if createdByScope.Valid {
+		container.CreatedByScopeRef = createdByScope.String
+	}
+	if updatedByScope.Valid {
+		container.UpdatedByScopeRef = updatedByScope.String
+	}
 	return container, nil
 }
 
@@ -488,6 +576,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 	var createdAt, updatedAt string
 	var archivedAt *string
 	var kind string
+	var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 	var query string
 	var args []interface{}
 
@@ -495,7 +584,9 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		query = `
 			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
-				   created_by_actor_uuid, updated_by_actor_uuid
+				   created_by_actor_uuid, updated_by_actor_uuid,
+				   created_by_principal_ref, updated_by_principal_ref,
+				   created_by_scope_ref, updated_by_scope_ref
 			FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 		`
 		args = []interface{}{slug}
@@ -503,7 +594,9 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		query = `
 			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
-				   created_by_actor_uuid, updated_by_actor_uuid
+				   created_by_actor_uuid, updated_by_actor_uuid,
+				   created_by_principal_ref, updated_by_principal_ref,
+				   created_by_scope_ref, updated_by_scope_ref
 			FROM containers WHERE slug = ? AND parent_uuid = ?
 		`
 		args = []interface{}{slug, *parentUUID}
@@ -513,7 +606,9 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
 		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
-		&container.CreatedByActorUUID, &container.UpdatedByActorUUID,
+		&createdByActor, &updatedByActor,
+		&createdByPrincipal, &updatedByPrincipal,
+		&createdByScope, &updatedByScope,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -522,6 +617,24 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		return nil, fmt.Errorf("failed to lookup container: %w", err)
 	}
 	container.Kind = domain.ContainerKind(kind)
+	if createdByActor.Valid {
+		container.CreatedByActorUUID = createdByActor.String
+	}
+	if updatedByActor.Valid {
+		container.UpdatedByActorUUID = updatedByActor.String
+	}
+	if createdByPrincipal.Valid {
+		container.CreatedByPrincipalRef = createdByPrincipal.String
+	}
+	if updatedByPrincipal.Valid {
+		container.UpdatedByPrincipalRef = updatedByPrincipal.String
+	}
+	if createdByScope.Valid {
+		container.CreatedByScopeRef = createdByScope.String
+	}
+	if updatedByScope.Valid {
+		container.UpdatedByScopeRef = updatedByScope.String
+	}
 	return container, nil
 }
 
@@ -530,7 +643,9 @@ func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, err
 	query := `
 		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 		       created_at, updated_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid
+		       created_by_actor_uuid, updated_by_actor_uuid,
+		       created_by_principal_ref, updated_by_principal_ref,
+		       created_by_scope_ref, updated_by_scope_ref
 		FROM containers
 	`
 	if !includeArchived {
@@ -549,15 +664,36 @@ func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, err
 		var createdAt, updatedAt string
 		var archivedAt *string
 		var kind string
+		var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 		if err := rows.Scan(
 			&c.UUID, &c.ID, &c.Slug, &c.Title,
 			&c.ParentUUID, &kind, &c.SectionUUID, &c.SortIndex, &c.WebhookURLs, &c.ETag,
 			&createdAt, &updatedAt, &archivedAt,
-			&c.CreatedByActorUUID, &c.UpdatedByActorUUID,
+			&createdByActor, &updatedByActor,
+			&createdByPrincipal, &updatedByPrincipal,
+			&createdByScope, &updatedByScope,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan container: %w", err)
 		}
 		c.Kind = domain.ContainerKind(kind)
+		if createdByActor.Valid {
+			c.CreatedByActorUUID = createdByActor.String
+		}
+		if updatedByActor.Valid {
+			c.UpdatedByActorUUID = updatedByActor.String
+		}
+		if createdByPrincipal.Valid {
+			c.CreatedByPrincipalRef = createdByPrincipal.String
+		}
+		if updatedByPrincipal.Valid {
+			c.UpdatedByPrincipalRef = updatedByPrincipal.String
+		}
+		if createdByScope.Valid {
+			c.CreatedByScopeRef = createdByScope.String
+		}
+		if updatedByScope.Valid {
+			c.UpdatedByScopeRef = updatedByScope.String
+		}
 		containers = append(containers, c)
 	}
 	return containers, rows.Err()

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -40,26 +42,19 @@ func init() {
 	catCmd.Flags().BoolVar(&catPorcelain, "porcelain", false, "Machine-readable output")
 }
 
-// scopeRefToHandle renders a canonical scopeRef as its compact handle form
-// (e.g. agent:clod:project:wrkq:task:primary -> clod@wrkq:primary). Non-scopeRef
-// values (a bare actor slug) are returned unchanged.
-func scopeRefToHandle(s string) string {
-	parsed, err := scope.ParseScopeRef(s)
-	if err != nil {
-		return s
+func valueOrEmpty(value sql.NullString) string {
+	if !value.Valid {
+		return ""
 	}
-	return scope.FormatScopeHandle(parsed)
+	return value.String
 }
 
-// createdByAttribution prefers the full agent scopeRef recorded at creation
-// over the bare actor slug, so created_by surfaces who-in-what-scope. Falls
-// back to the actor slug when no scopeRef was captured (human/CLI without
-// agent scope, or rows created before scope attribution existed).
-func createdByAttribution(scopeRef *string, actorSlug string) string {
-	if scopeRef != nil && *scopeRef != "" {
-		return *scopeRef
+func scopeRefToHandle(scopeRef string) string {
+	parsed, err := scope.ParseScopeRef(scopeRef)
+	if err != nil {
+		return scopeRef
 	}
-	return actorSlug
+	return scope.FormatScopeHandle(parsed)
 }
 
 func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -86,11 +81,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Define structs for JSON output
 	type Comment struct {
-		ID        string `json:"id"`
-		CreatedAt string `json:"created_at"`
-		Body      string `json:"body"`
-		ActorSlug string `json:"actor_slug"`
-		ActorRole string `json:"actor_role"`
+		ID           string `json:"id"`
+		CreatedAt    string `json:"created_at"`
+		Body         string `json:"body"`
+		PrincipalRef string `json:"principal_ref,omitempty"`
+		ActorSlug    string `json:"actor_slug,omitempty"`
+		ActorRole    string `json:"actor_role,omitempty"`
 	}
 
 	type Relation struct {
@@ -111,48 +107,51 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	type Task struct {
-		ID                   string          `json:"id"`
-		UUID                 string          `json:"uuid"`
-		Path                 string          `json:"path"`
-		ArtifactDir          string          `json:"artifact_dir"`
-		ProjectID            string          `json:"project_id"`
-		ProjectUUID          string          `json:"project_uuid"`
-		RequestedByProjectID *string         `json:"requested_by_project_id,omitempty"`
-		AssignedProjectID    *string         `json:"assigned_project_id,omitempty"`
-		Slug                 string          `json:"slug"`
-		Title                string          `json:"title"`
-		State                string          `json:"state"`
-		Priority             int             `json:"priority"`
-		Kind                 string          `json:"kind"`
-		ParentTaskID         *string         `json:"parent_task_id,omitempty"`
-		ParentTaskUUID       *string         `json:"parent_task_uuid,omitempty"`
-		AssigneeSlug         *string         `json:"assignee,omitempty"`
-		AssigneeUUID         *string         `json:"assignee_uuid,omitempty"`
-		StartAt              *string         `json:"start_at,omitempty"`
-		DueAt                *string         `json:"due_at,omitempty"`
-		Labels               *string         `json:"labels,omitempty"`
-		Meta                 json.RawMessage `json:"meta"`
-		Description          string          `json:"description"`
-		Specification        string          `json:"specification"`
-		AcknowledgedAt       *string         `json:"acknowledged_at,omitempty"`
-		Resolution           *string         `json:"resolution,omitempty"`
-		CPProjectID          *string         `json:"cp_project_id,omitempty"`
-		CPWorkItemID         *string         `json:"cp_work_item_id,omitempty"`
-		CPRunID              *string         `json:"cp_run_id,omitempty"`
-		SessionID            *string         `json:"session_id,omitempty"`
-		RunStatus            *string         `json:"run_status,omitempty"`
-		Etag                 int64           `json:"etag"`
-		CreatedAt            string          `json:"created_at"`
-		UpdatedAt            string          `json:"updated_at"`
-		CompletedAt          *string         `json:"completed_at,omitempty"`
-		ArchivedAt           *string         `json:"archived_at,omitempty"`
-		CreatedBy            string          `json:"created_by"`
-		CreatedByActor       string          `json:"created_by_actor,omitempty"`
-		CreatedByScopeRef    *string         `json:"created_by_scope_ref,omitempty"`
-		UpdatedBy            string          `json:"updated_by"`
-		BlockedBy            []BlockerInfo   `json:"blocked_by,omitempty"`
-		Comments             []Comment       `json:"comments,omitempty"`
-		Relations            []Relation      `json:"relations,omitempty"`
+		ID                    string          `json:"id"`
+		UUID                  string          `json:"uuid"`
+		Path                  string          `json:"path"`
+		ArtifactDir           string          `json:"artifact_dir"`
+		ProjectID             string          `json:"project_id"`
+		ProjectUUID           string          `json:"project_uuid"`
+		RequestedByProjectID  *string         `json:"requested_by_project_id,omitempty"`
+		AssignedProjectID     *string         `json:"assigned_project_id,omitempty"`
+		Slug                  string          `json:"slug"`
+		Title                 string          `json:"title"`
+		State                 string          `json:"state"`
+		Priority              int             `json:"priority"`
+		Kind                  string          `json:"kind"`
+		ParentTaskID          *string         `json:"parent_task_id,omitempty"`
+		ParentTaskUUID        *string         `json:"parent_task_uuid,omitempty"`
+		AssigneeSlug          *string         `json:"assignee,omitempty"`
+		AssigneeUUID          *string         `json:"assignee_uuid,omitempty"`
+		AssigneePrincipalRef  *string         `json:"assignee_principal_ref,omitempty"`
+		StartAt               *string         `json:"start_at,omitempty"`
+		DueAt                 *string         `json:"due_at,omitempty"`
+		Labels                *string         `json:"labels,omitempty"`
+		Meta                  json.RawMessage `json:"meta"`
+		Description           string          `json:"description"`
+		Specification         string          `json:"specification"`
+		AcknowledgedAt        *string         `json:"acknowledged_at,omitempty"`
+		Resolution            *string         `json:"resolution,omitempty"`
+		CPProjectID           *string         `json:"cp_project_id,omitempty"`
+		CPWorkItemID          *string         `json:"cp_work_item_id,omitempty"`
+		CPRunID               *string         `json:"cp_run_id,omitempty"`
+		SessionID             *string         `json:"session_id,omitempty"`
+		RunStatus             *string         `json:"run_status,omitempty"`
+		Etag                  int64           `json:"etag"`
+		CreatedAt             string          `json:"created_at"`
+		UpdatedAt             string          `json:"updated_at"`
+		CompletedAt           *string         `json:"completed_at,omitempty"`
+		ArchivedAt            *string         `json:"archived_at,omitempty"`
+		CreatedBy             string          `json:"created_by"`
+		CreatedByPrincipalRef string          `json:"created_by_principal_ref,omitempty"`
+		CreatedByActor        string          `json:"created_by_actor,omitempty"`
+		CreatedByScopeRef     *string         `json:"created_by_scope_ref,omitempty"`
+		UpdatedBy             string          `json:"updated_by"`
+		UpdatedByPrincipalRef string          `json:"updated_by_principal_ref,omitempty"`
+		BlockedBy             []BlockerInfo   `json:"blocked_by,omitempty"`
+		Comments              []Comment       `json:"comments,omitempty"`
+		Relations             []Relation      `json:"relations,omitempty"`
 	}
 
 	var tasks []Task
@@ -171,30 +170,32 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
 		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
-		var parentTaskUUID, assigneeActorUUID *string
+		var parentTaskUUID, assigneeActorUUID, assigneePrincipalRef *string
 		var createdAt, updatedAt string
 		var etag int64
-		var projectUUID, createdByUUID, updatedByUUID string
+		var projectUUID string
+		var createdByUUID, updatedByUUID, createdByPrincipalRef, updatedByPrincipalRef sql.NullString
 		var createdByScopeRef *string
 
 		err = database.QueryRow(`
 			SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			       state, priority,
-			       kind, parent_task_uuid, assignee_actor_uuid,
+			       kind, parent_task_uuid, assignee_actor_uuid, assignee_principal_ref,
 			       start_at, due_at, labels, meta, description, specification, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
 			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status,
-			       created_by_actor_uuid, updated_by_actor_uuid, created_by_scope_ref
+			       created_by_actor_uuid, updated_by_actor_uuid,
+			       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
 			&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
-			&kind, &parentTaskUUID, &assigneeActorUUID,
+			&kind, &parentTaskUUID, &assigneeActorUUID, &assigneePrincipalRef,
 			&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
 			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus,
-			&createdByUUID, &updatedByUUID, &createdByScopeRef,
+			&createdByUUID, &updatedByUUID, &createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get task: %w", err)
@@ -202,8 +203,12 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Get actor slugs
 		var createdBySlug, updatedBySlug string
-		_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-		_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+		if createdByUUID.Valid {
+			_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID.String).Scan(&createdBySlug)
+		}
+		if updatedByUUID.Valid {
+			_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID.String).Scan(&updatedBySlug)
+		}
 
 		// Get project info
 		var projectID string
@@ -230,58 +235,74 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				assigneeSlug = &aSlug
 			}
 		}
+		if assigneePrincipalRef != nil {
+			display := attribution.PrincipalHandle(*assigneePrincipalRef)
+			assigneeSlug = &display
+		}
+		createdBy := createdBySlug
+		if createdByPrincipalRef.Valid {
+			createdBy = attribution.PrincipalHandle(createdByPrincipalRef.String)
+		}
+		updatedBy := updatedBySlug
+		if updatedByPrincipalRef.Valid {
+			updatedBy = attribution.PrincipalHandle(updatedByPrincipalRef.String)
+		}
 
 		metaValue := "{}"
 		if meta != nil && *meta != "" && json.Valid([]byte(*meta)) {
 			metaValue = *meta
 		}
 		task := Task{
-			ID:                   id,
-			UUID:                 taskUUID,
-			Path:                 taskPath,
-			ArtifactDir:          taskArtifactDir(id),
-			ProjectID:            projectID,
-			ProjectUUID:          projectUUID,
-			RequestedByProjectID: requestedBy,
-			AssignedProjectID:    assignedProject,
-			Slug:                 slug,
-			Title:                title,
-			State:                state,
-			Priority:             priority,
-			Kind:                 kind,
-			ParentTaskID:         parentTaskID,
-			ParentTaskUUID:       parentTaskUUID,
-			AssigneeSlug:         assigneeSlug,
-			AssigneeUUID:         assigneeActorUUID,
-			StartAt:              startAt,
-			DueAt:                dueAt,
-			Labels:               labels,
-			Meta:                 json.RawMessage(metaValue),
-			Description:          description,
-			Specification:        specification,
-			AcknowledgedAt:       acknowledgedAt,
-			Resolution:           resolution,
-			CPProjectID:          cpProjectID,
-			CPWorkItemID:         cpWorkItemID,
-			CPRunID:              cpRunID,
-			SessionID:            cpSessionID,
-			RunStatus:            runStatus,
-			Etag:                 etag,
-			CreatedAt:            createdAt,
-			UpdatedAt:            updatedAt,
-			CompletedAt:          completedAt,
-			ArchivedAt:           archivedAt,
-			CreatedBy:            createdByAttribution(createdByScopeRef, createdBySlug),
-			CreatedByActor:       createdBySlug,
-			CreatedByScopeRef:    createdByScopeRef,
-			UpdatedBy:            updatedBySlug,
+			ID:                    id,
+			UUID:                  taskUUID,
+			Path:                  taskPath,
+			ArtifactDir:           taskArtifactDir(id),
+			ProjectID:             projectID,
+			ProjectUUID:           projectUUID,
+			RequestedByProjectID:  requestedBy,
+			AssignedProjectID:     assignedProject,
+			Slug:                  slug,
+			Title:                 title,
+			State:                 state,
+			Priority:              priority,
+			Kind:                  kind,
+			ParentTaskID:          parentTaskID,
+			ParentTaskUUID:        parentTaskUUID,
+			AssigneeSlug:          assigneeSlug,
+			AssigneeUUID:          assigneeActorUUID,
+			AssigneePrincipalRef:  assigneePrincipalRef,
+			StartAt:               startAt,
+			DueAt:                 dueAt,
+			Labels:                labels,
+			Meta:                  json.RawMessage(metaValue),
+			Description:           description,
+			Specification:         specification,
+			AcknowledgedAt:        acknowledgedAt,
+			Resolution:            resolution,
+			CPProjectID:           cpProjectID,
+			CPWorkItemID:          cpWorkItemID,
+			CPRunID:               cpRunID,
+			SessionID:             cpSessionID,
+			RunStatus:             runStatus,
+			Etag:                  etag,
+			CreatedAt:             createdAt,
+			UpdatedAt:             updatedAt,
+			CompletedAt:           completedAt,
+			ArchivedAt:            archivedAt,
+			CreatedBy:             createdBy,
+			CreatedByPrincipalRef: valueOrEmpty(createdByPrincipalRef),
+			CreatedByActor:        createdBySlug,
+			CreatedByScopeRef:     createdByScopeRef,
+			UpdatedBy:             updatedBy,
+			UpdatedByPrincipalRef: valueOrEmpty(updatedByPrincipalRef),
 		}
 
 		// Include comments by default (unless excluded)
 		if !catExcludeComments {
 			// Query non-deleted comments for this task
 			rows, err := database.Query(`
-				SELECT c.id, c.created_at, c.body, a.slug as actor_slug, a.role as actor_role
+				SELECT c.id, c.created_at, c.body, c.created_by_principal_ref,
+				       a.slug as actor_slug, a.role as actor_role
 				FROM comments c
 				LEFT JOIN actors a ON c.actor_uuid = a.uuid
 				WHERE c.task_uuid = ? AND c.deleted_at IS NULL
@@ -294,9 +315,20 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			var comments []Comment
 			for rows.Next() {
 				var comment Comment
-				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &comment.ActorSlug, &comment.ActorRole); err != nil {
+				var principalRef, actorSlug, actorRole sql.NullString
+				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef, &actorSlug, &actorRole); err != nil {
 					_ = rows.Close()
 					return fmt.Errorf("failed to scan comment: %w", err)
+				}
+				if principalRef.Valid {
+					comment.PrincipalRef = principalRef.String
+					comment.ActorSlug = attribution.PrincipalHandle(principalRef.String)
+				}
+				if actorSlug.Valid && comment.ActorSlug == "" {
+					comment.ActorSlug = actorSlug.String
+				}
+				if actorRole.Valid {
+					comment.ActorRole = actorRole.String
 				}
 				comments = append(comments, comment)
 			}
@@ -318,10 +350,10 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		outgoingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
 			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-			       a.id AS created_by_id
+			       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
 			FROM task_relations r
 			JOIN tasks t ON r.to_task_uuid = t.uuid
-			JOIN actors a ON r.created_by_actor_uuid = a.uuid
+			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.from_task_uuid = ?
 			ORDER BY r.kind, t.id
 		`, taskUUID)
@@ -344,10 +376,10 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		incomingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
 			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-			       a.id AS created_by_id
+			       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
 			FROM task_relations r
 			JOIN tasks t ON r.from_task_uuid = t.uuid
-			JOIN actors a ON r.created_by_actor_uuid = a.uuid
+			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.to_task_uuid = ?
 			ORDER BY r.kind, t.id
 		`, taskUUID)
@@ -429,6 +461,9 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				if task.AssigneeUUID != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
 				}
+				if task.AssigneePrincipalRef != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "assignee_principal_ref: %s\n", *task.AssigneePrincipalRef)
+				}
 				if task.StartAt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "start_at: %s\n", *task.StartAt)
 				}
@@ -482,14 +517,17 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				if task.ArchivedAt != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "archived_at: %s\n", *task.ArchivedAt)
 				}
-				createdByRendered := task.CreatedBy
-				if sel.Stable {
-					// Porcelain: render the compact scope handle rather than the
-					// long-form scopeRef.
-					createdByRendered = scopeRefToHandle(task.CreatedBy)
+				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", task.CreatedBy)
+				if task.CreatedByPrincipalRef != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "created_by_principal_ref: %s\n", task.CreatedByPrincipalRef)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "created_by: %s\n", createdByRendered)
+				if task.CreatedByScopeRef != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "created_by_scope_ref: %s\n", *task.CreatedByScopeRef)
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "updated_by: %s\n", task.UpdatedBy)
+				if task.UpdatedByPrincipalRef != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "updated_by_principal_ref: %s\n", task.UpdatedByPrincipalRef)
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), "---")
 				fmt.Fprintln(cmd.OutOrStdout())
 			}

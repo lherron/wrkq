@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
@@ -33,7 +34,7 @@ func init() {
 
 func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 	args = applyProjectRootToPaths(app.Config, args, false)
 
 	// Validate kind if provided
@@ -48,7 +49,7 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Create each path
 	for _, path := range args {
-		if err := createContainer(s, actorUUID, path, mkdirParents, mkdirKind); err != nil {
+		if err := createContainer(s, attr, path, mkdirParents, mkdirKind); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", path)
@@ -57,7 +58,7 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func createContainer(s *store.Store, actorUUID, path string, createParents bool, kind string) error {
+func createContainer(s *store.Store, attr attribution.Attribution, path string, createParents bool, kind string) error {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		return fmt.Errorf("invalid path: %s", path)
@@ -96,7 +97,7 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool,
 			}
 
 			// Create container using store
-			result, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
+			result, err := s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
 				Slug:       slug,
 				ParentUUID: parentUUID,
 				Kind:       segmentKind,
@@ -127,7 +128,7 @@ func createContainer(s *store.Store, actorUUID, path string, createParents bool,
 	}
 
 	// Create container using store
-	_, err = s.Containers.Create(actorUUID, store.ContainerCreateParams{
+	_, err = s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
 		Slug:       slug,
 		ParentUUID: parentUUID,
 		Kind:       kind,

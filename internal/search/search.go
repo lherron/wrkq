@@ -23,21 +23,22 @@ type Service struct {
 }
 
 type Options struct {
-	Query          string
-	Paths          []string
-	State          string
-	Kind           string
-	AssigneeUUID   string
-	ResourceType   string
-	ScopeRef       string
-	Status         string
-	Offset         int
-	Limit          int
-	CandidateLimit int
-	Fresh          bool
-	Explain        bool
-	Sort           string
-	Reverse        bool
+	Query                string
+	Paths                []string
+	State                string
+	Kind                 string
+	AssigneeUUID         string // Deprecated: use AssigneePrincipalRef.
+	AssigneePrincipalRef string
+	ResourceType         string
+	ScopeRef             string
+	Status               string
+	Offset               int
+	Limit                int
+	CandidateLimit       int
+	Fresh                bool
+	Explain              bool
+	Sort                 string
+	Reverse              bool
 }
 
 type Result struct {
@@ -477,7 +478,7 @@ func handoffMatches(scopeRef, status string, opts Options) bool {
 func (s *Service) canonicalTaskMatches(taskUUID string, opts Options) bool {
 	var state, kind string
 	var assignee sql.NullString
-	err := s.Canonical.QueryRow(`SELECT state, kind, assignee_actor_uuid FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &kind, &assignee)
+	err := s.Canonical.QueryRow(`SELECT state, kind, assignee_principal_ref FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &kind, &assignee)
 	if err != nil {
 		return false
 	}
@@ -498,7 +499,11 @@ func (s *Service) canonicalTaskMatches(taskUUID string, opts Options) bool {
 	if opts.Kind != "" && kind != opts.Kind {
 		return false
 	}
-	if opts.AssigneeUUID != "" && (!assignee.Valid || assignee.String != opts.AssigneeUUID) {
+	assigneeFilter := opts.AssigneePrincipalRef
+	if assigneeFilter == "" {
+		assigneeFilter = opts.AssigneeUUID
+	}
+	if assigneeFilter != "" && (!assignee.Valid || assignee.String != assigneeFilter) {
 		return false
 	}
 	return true

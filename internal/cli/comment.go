@@ -114,6 +114,8 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		query := `
 			SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
 			       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
+			       c.created_by_principal_ref, c.created_by_scope_ref,
+			       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
 			       a.slug as actor_slug, a.role as actor_role,
 			       t.id as task_id
 			FROM comments c
@@ -148,13 +150,18 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		}
 
 		for rows.Next() {
-			var uuid, id, taskUUID, actorUUID, body, createdAt string
-			var actorSlug, actorRole, taskIDStr string
+			var uuid, id, taskUUID, body, createdAt string
+			var actorUUID, actorSlug, actorRole sql.NullString
+			var taskIDStr string
 			var meta, updatedAt, deletedAt, deletedByActorUUID sql.NullString
+			var createdByPrincipalRef, createdByScopeRef sql.NullString
+			var deletedByPrincipalRef, deletedByScopeRef sql.NullString
 			var etag int64
 
 			err := rows.Scan(&uuid, &id, &taskUUID, &actorUUID, &body, &meta, &etag,
 				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+				&createdByPrincipalRef, &createdByScopeRef,
+				&deletedByPrincipalRef, &deletedByScopeRef,
 				&actorSlug, &actorRole, &taskIDStr)
 			if err != nil {
 				_ = rows.Close()
@@ -166,12 +173,24 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 				"id":         id,
 				"task_uuid":  taskUUID,
 				"task_id":    taskIDStr,
-				"actor_uuid": actorUUID,
-				"actor_slug": actorSlug,
-				"actor_role": actorRole,
 				"body":       body,
 				"etag":       etag,
 				"created_at": createdAt,
+			}
+			if actorUUID.Valid {
+				comment["actor_uuid"] = actorUUID.String
+			}
+			if actorSlug.Valid {
+				comment["actor_slug"] = actorSlug.String
+			}
+			if actorRole.Valid {
+				comment["actor_role"] = actorRole.String
+			}
+			if createdByPrincipalRef.Valid {
+				comment["created_by_principal_ref"] = createdByPrincipalRef.String
+			}
+			if createdByScopeRef.Valid {
+				comment["created_by_scope_ref"] = createdByScopeRef.String
 			}
 
 			if meta.Valid && meta.String != "" {
@@ -185,6 +204,12 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 			}
 			if deletedByActorUUID.Valid {
 				comment["deleted_by_actor_uuid"] = deletedByActorUUID.String
+			}
+			if deletedByPrincipalRef.Valid {
+				comment["deleted_by_principal_ref"] = deletedByPrincipalRef.String
+			}
+			if deletedByScopeRef.Valid {
+				comment["deleted_by_scope_ref"] = deletedByScopeRef.String
 			}
 
 			allComments = append(allComments, comment)

@@ -53,6 +53,8 @@ type watchEvent struct {
 	ActorUUID    *string `json:"actor_uuid,omitempty"`
 	ActorSlug    *string `json:"actor_slug,omitempty"`
 	ActorID      *string `json:"actor_id,omitempty"`
+	PrincipalRef *string `json:"principal_ref,omitempty"`
+	ScopeRef     *string `json:"scope_ref,omitempty"`
 	ResourceType string  `json:"resource_type"`
 	ResourceUUID *string `json:"resource_uuid,omitempty"`
 	ResourceID   *string `json:"resource_id,omitempty"`
@@ -68,7 +70,8 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 	for {
 		// Query new events
 		query := `
-			SELECT e.id, e.timestamp, e.actor_uuid, e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
+			SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
+			       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
 			       a.slug as actor_slug, a.id as actor_id,
 			       CASE e.resource_type
 			           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
@@ -96,6 +99,8 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 				&e.ID,
 				&e.Timestamp,
 				&e.ActorUUID,
+				&e.PrincipalRef,
+				&e.ScopeRef,
 				&e.ResourceType,
 				&e.ResourceUUID,
 				&e.EventType,
@@ -160,7 +165,9 @@ func printWatchEvent(e watchEvent) {
 	timestamp := e.Timestamp
 
 	actor := "system"
-	if e.ActorSlug != nil {
+	if e.PrincipalRef != nil {
+		actor = *e.PrincipalRef
+	} else if e.ActorSlug != nil {
 		actorDisplay := *e.ActorSlug
 		if e.ActorID != nil {
 			actorDisplay += fmt.Sprintf(" (%s)", *e.ActorID)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
@@ -79,7 +80,7 @@ func init() {
 func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	cfg := app.Config
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Create store
 	s := store.New(database)
@@ -162,7 +163,7 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	results := []rmResult{}
 	result := op.Execute(targetKeys, func(key string) error {
 		target := targetsByKey[key]
-		res, err := removeTarget(s, cfg.AttachDir, actorUUID, target)
+		res, err := removeTarget(s, cfg.AttachDir, attr, target)
 		if err == nil && res != nil {
 			results = append(results, *res)
 		}
@@ -324,14 +325,18 @@ func confirmPurge(cmd *cobra.Command, database *db.DB, targets []rmTarget) error
 	return nil
 }
 
-func removeTarget(s *store.Store, attachDir, actorUUID string, target rmTarget) (*rmResult, error) {
+func removeTarget(s *store.Store, attachDir string, attr attribution.Attribution, target rmTarget) (*rmResult, error) {
 	if target.Type == "container" {
-		return removeContainerTarget(s, actorUUID, target.UUID)
+		return removeContainerTargetWithAttribution(s, attr, target.UUID)
 	}
-	return removeTask(s, attachDir, actorUUID, target.UUID)
+	return removeTaskWithAttribution(s, attachDir, attr, target.UUID)
 }
 
 func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResult, error) {
+	return removeTaskWithAttribution(s, attachDir, attributionFromLegacyActor(actorUUID), taskUUID)
+}
+
+func removeTaskWithAttribution(s *store.Store, attachDir string, attr attribution.Attribution, taskUUID string) (*rmResult, error) {
 	// Get task info
 	task, err := s.Tasks.GetByUUID(taskUUID)
 	if err != nil {
@@ -355,7 +360,7 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 		}
 
 		// Purge task from database (handles event logging)
-		purgeResult, err := s.Tasks.Purge(actorUUID, taskUUID, 0)
+		purgeResult, err := s.Tasks.PurgeWithAttribution(attr, taskUUID, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -377,7 +382,7 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 		_ = os.RemoveAll(taskDir) // Ignore errors, directory might not exist
 	} else {
 		// Archive task (soft delete)
-		_, err := s.Tasks.Archive(actorUUID, taskUUID, 0)
+		_, err := s.Tasks.ArchiveWithAttribution(attr, taskUUID, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -386,7 +391,7 @@ func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResul
 	return result, nil
 }
 
-func removeContainerTarget(s *store.Store, actorUUID, containerUUID string) (*rmResult, error) {
+func removeContainerTargetWithAttribution(s *store.Store, attr attribution.Attribution, containerUUID string) (*rmResult, error) {
 	container, err := s.Containers.GetByUUID(containerUUID)
 	if err != nil {
 		return nil, fmt.Errorf("container not found: %w", err)
@@ -402,11 +407,11 @@ func removeContainerTarget(s *store.Store, actorUUID, containerUUID string) (*rm
 	}
 
 	if rmPurge {
-		if err := s.Containers.Delete(actorUUID, containerUUID, 0); err != nil {
+		if err := s.Containers.DeleteWithAttribution(attr, containerUUID, 0); err != nil {
 			return nil, err
 		}
 	} else {
-		if _, err := s.Containers.Archive(actorUUID, containerUUID, 0); err != nil {
+		if _, err := s.Containers.ArchiveWithAttribution(attr, containerUUID, 0); err != nil {
 			return nil, err
 		}
 	}

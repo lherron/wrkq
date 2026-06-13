@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -43,13 +44,13 @@ type ackCounts struct {
 
 func runAck(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	for i, arg := range args {
 		args[i] = applyProjectRootToSelector(app.Config, arg, false)
 	}
 
-	counts, err := ackTasks(database, actorUUID, args, ackForce)
+	counts, err := ackTasksWithAttribution(database, attr, args, ackForce)
 	if err != nil {
 		return err
 	}
@@ -68,6 +69,10 @@ func runAck(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 func ackTasks(database *db.DB, actorUUID string, refs []string, force bool) (ackCounts, error) {
+	return ackTasksWithAttribution(database, attributionFromLegacyActor(actorUUID), refs, force)
+}
+
+func ackTasksWithAttribution(database *db.DB, attr attribution.Attribution, refs []string, force bool) (ackCounts, error) {
 	counts := ackCounts{Total: len(refs)}
 	s := store.New(database)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -96,7 +101,7 @@ func ackTasks(database *db.DB, actorUUID string, refs []string, force bool) (ack
 			return counts, fmt.Errorf("cannot ack %s: state is %s (requires completed or cancelled)", ref, state)
 		}
 
-		_, err = s.Tasks.UpdateFields(actorUUID, taskUUID, map[string]interface{}{"acknowledged_at": now}, 0)
+		_, err = s.Tasks.UpdateFieldsWithAttribution(attr, taskUUID, map[string]interface{}{"acknowledged_at": now}, 0)
 		if err != nil {
 			return counts, err
 		}

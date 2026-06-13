@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
@@ -15,7 +16,7 @@ var commentRmCmd = &cobra.Command{
 	Use:   "rm <comment-id|c:token>...",
 	Short: "Remove comment(s)",
 	Long: `Remove one or more comments.
-By default, performs a soft-delete (sets deleted_at and deleted_by_actor_uuid).
+By default, performs a soft-delete (sets deleted_at and deleted_by_principal_ref).
 Use --purge for hard delete (removes from database entirely).
 
 Use c:<token> for typed comment selector (c:C-00012, c:uuid, etc).`,
@@ -41,7 +42,7 @@ func init() {
 
 func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	for _, commentRef := range args {
 		// Remove c: prefix if present
@@ -136,7 +137,16 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 
 			// Log purge event
-			if err := eventWriter.LogCommentPurged(tx, actorUUID, commentUUID, commentID, taskUUID); err != nil {
+			payload := fmt.Sprintf(`{"task_id":"%s","comment_id":"%s","hard_delete":true}`, taskUUID, commentID)
+			if err := eventWriter.LogEvent(tx, &domain.Event{
+				ActorUUID:    attr.LegacyActorUUID,
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
+				ResourceType: "comment",
+				ResourceUUID: &commentUUID,
+				EventType:    "comment.purged",
+				Payload:      &payload,
+			}); err != nil {
 				return fmt.Errorf("failed to log purge event: %w", err)
 			}
 
@@ -151,9 +161,11 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 				UPDATE comments
 				SET deleted_at = datetime('now'),
 				    deleted_by_actor_uuid = ?,
+				    deleted_by_principal_ref = ?,
+				    deleted_by_scope_ref = ?,
 				    etag = etag + 1
 				WHERE uuid = ?
-			`, actorUUID, commentUUID)
+			`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), commentUUID)
 			if err != nil {
 				return fmt.Errorf("failed to soft-delete comment %s: %w", commentID, err)
 			}
@@ -196,14 +208,19 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 			// We need to call LogCommentDeleted with a proper domain.Comment
 			// Let me create a minimal helper or just inline the event logging
-			payload := fmt.Sprintf(`{"task_id":"%s","comment_id":"%s","deleted_by_actor_id":"%s","soft_delete":true}`,
-				taskUUID, commentID, actorUUID)
+			payload := fmt.Sprintf(`{"task_id":"%s","comment_id":"%s","deleted_by_principal_ref":"%s","soft_delete":true}`,
+				taskUUID, commentID, attr.PrincipalRef)
 			eventPayload := payload
-			_, err = tx.Exec(`
-				INSERT INTO event_log (actor_uuid, resource_type, resource_uuid, event_type, etag, payload)
-				VALUES (?, 'comment', ?, 'comment.deleted', ?, ?)
-			`, actorUUID, commentUUID, commentDomain.ETag, eventPayload)
-			if err != nil {
+			if err := eventWriter.LogEvent(tx, &domain.Event{
+				ActorUUID:    attr.LegacyActorUUID,
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
+				ResourceType: "comment",
+				ResourceUUID: &commentUUID,
+				EventType:    "comment.deleted",
+				ETag:         &commentDomain.ETag,
+				Payload:      &eventPayload,
+			}); err != nil {
 				return fmt.Errorf("failed to log delete event: %w", err)
 			}
 

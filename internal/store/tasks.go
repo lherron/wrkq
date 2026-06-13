@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/webhooks"
@@ -38,6 +39,7 @@ type CreateParams struct {
 	Kind                 string  // task, subtask, spike, bug, chore - defaults to "task"
 	ParentTaskUUID       *string // for subtasks
 	AssigneeActorUUID    *string // task assignment
+	AssigneePrincipalRef *string // canonical task assignment
 	RequestedByProjectID *string
 	AssignedProjectID    *string
 	Resolution           *string
@@ -62,10 +64,6 @@ type CreateResult struct {
 
 func stringPtr(value string) *string {
 	return &value
-}
-
-func actorPtr(actorUUID string) *string {
-	return &actorUUID
 }
 
 // nullableScopeRef returns the scopeRef as a value suitable for a SQL bind,
@@ -123,7 +121,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "state", "slug", "title", "project_uuid", "kind", "run_status", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "requested_by_project_id", "assigned_project_id", "cp_project_id", "cp_work_item_id", "cp_run_id", "cp_session_id":
+		case "state", "slug", "title", "project_uuid", "kind", "run_status", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "cp_project_id", "cp_work_item_id", "cp_run_id", "cp_session_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err
@@ -183,6 +181,15 @@ func blockerInfosForTask(tx *sql.Tx, taskUUID string) ([]webhooks.BlockerInfo, e
 
 // Create creates a new task and logs a task.created event.
 func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResult, error) {
+	return ts.CreateWithAttribution(ts.store.attributionFromActorUUID(actorUUID), params)
+}
+
+// CreateWithAttribution creates a task using canonical external principal
+// attribution. Legacy actor UUIDs are optional display/cache metadata only.
+func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params CreateParams) (*CreateResult, error) {
+	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
 	var result *CreateResult
 	var webhookCtx webhooks.EventContext
 	via := params.Via
@@ -195,6 +202,11 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 	if kind == "" {
 		kind = "task"
 	}
+	legacyActor := legacyActorSQL(attr)
+	creatorScope := attr.ScopeRef
+	if params.CreatorScopeRef != "" {
+		creatorScope = params.CreatorScopeRef
+	}
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Build query - include uuid column only if forcing a specific UUID
@@ -203,17 +215,19 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 
 		if params.UUID != "" {
 			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
-				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+				parent_task_uuid, assignee_actor_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid, created_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid,
+				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			args = append(args, params.UUID)
 		} else {
 			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
-				parent_task_uuid, assignee_actor_uuid, requested_by_project_id, assigned_project_id, resolution,
+				parent_task_uuid, assignee_actor_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid, created_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid,
+				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -229,6 +243,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			kind,
 			params.ParentTaskUUID,
 			params.AssigneeActorUUID,
+			params.AssigneePrincipalRef,
 			params.RequestedByProjectID,
 			params.AssignedProjectID,
 			params.Resolution,
@@ -240,9 +255,12 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 			params.Meta,
 			params.DueAt,
 			params.StartAt,
-			actorUUID,
-			actorUUID,
-			nullableScopeRef(params.CreatorScopeRef),
+			legacyActor,
+			legacyActor,
+			attr.PrincipalRef,
+			attr.PrincipalRef,
+			nullableScopeRef(creatorScope),
+			scopeSQL(attr),
 		)
 
 		res, err := tx.Exec(query, args...)
@@ -276,6 +294,9 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		}
 		if params.AssigneeActorUUID != nil {
 			payload["assignee_actor_uuid"] = *params.AssigneeActorUUID
+		}
+		if params.AssigneePrincipalRef != nil {
+			payload["assignee_principal_ref"] = *params.AssigneePrincipalRef
 		}
 		if params.RequestedByProjectID != nil {
 			payload["requested_by_project_id"] = *params.RequestedByProjectID
@@ -318,7 +339,9 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		payloadStr := string(payloadJSON)
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &uuid,
 			EventType:    "task.created",
@@ -336,7 +359,7 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 		webhookCtx = webhooks.EventContext{
 			Metadata:   meta,
 			Event:      "created",
-			ActorUUID:  actorPtr(actorUUID),
+			ActorUUID:  actorUUIDPtr(attr),
 			Via:        via,
 			Transition: &webhooks.Transition{From: nil, To: stringPtr(params.State)},
 			Changed:    changed,
@@ -366,6 +389,19 @@ func (ts *TaskStore) UpdateFields(actorUUID, taskUUID string, fields map[string]
 
 // UpdateFieldsWithVia updates fields and records the ingress surface in webhook origin.via.
 func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[string]interface{}, ifMatch int64, via string) (int64, error) {
+	return ts.UpdateFieldsWithViaAttribution(ts.store.attributionFromActorUUID(actorUUID), taskUUID, fields, ifMatch, via)
+}
+
+// UpdateFieldsWithAttribution updates fields with canonical principal attribution.
+func (ts *TaskStore) UpdateFieldsWithAttribution(attr attribution.Attribution, taskUUID string, fields map[string]interface{}, ifMatch int64) (int64, error) {
+	return ts.UpdateFieldsWithViaAttribution(attr, taskUUID, fields, ifMatch, "cli")
+}
+
+// UpdateFieldsWithViaAttribution updates fields and records the ingress surface.
+func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution, taskUUID string, fields map[string]interface{}, ifMatch int64, via string) (int64, error) {
+	if err := requireAttribution(attr); err != nil {
+		return 0, err
+	}
 	if via == "" {
 		via = "cli"
 	}
@@ -452,7 +488,14 @@ func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[
 		// Increment etag and update actor
 		setClauses = append(setClauses, "etag = etag + 1")
 		setClauses = append(setClauses, "updated_by_actor_uuid = ?")
-		args = append(args, actorUUID)
+		setClauses = append(setClauses, "updated_by_principal_ref = ?")
+		setClauses = append(setClauses, "updated_by_scope_ref = ?")
+		args = append(args, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr))
+		if newState, ok := fields["state"]; ok && newState == "deleted" {
+			setClauses = append(setClauses, "deleted_by_principal_ref = ?")
+			setClauses = append(setClauses, "deleted_by_scope_ref = ?")
+			args = append(args, attr.PrincipalRef, scopeSQL(attr))
+		}
 
 		// Add WHERE clause
 		args = append(args, taskUUID)
@@ -465,7 +508,7 @@ func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[
 
 		// Cascade delete subtasks if state is being set to 'deleted'
 		if newState, ok := fields["state"]; ok && newState == "deleted" {
-			if err := cascadeDeleteSubtasks(tx, ew, actorUUID, taskUUID); err != nil {
+			if err := cascadeDeleteSubtasks(tx, ew, attr, taskUUID); err != nil {
 				return fmt.Errorf("failed to cascade delete subtasks: %w", err)
 			}
 		}
@@ -504,7 +547,9 @@ func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[
 		newETag = currentETag + 1
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.updated",
@@ -523,7 +568,7 @@ func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[
 			ctx: webhooks.EventContext{
 				Metadata:   meta,
 				Event:      "updated",
-				ActorUUID:  actorPtr(actorUUID),
+				ActorUUID:  actorUUIDPtr(attr),
 				Via:        via,
 				Transition: transition,
 				Changed:    fieldNames,
@@ -543,7 +588,9 @@ func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[
 			payloadJSON, _ := json.Marshal(payload)
 			payloadStr := string(payloadJSON)
 			unblockedMeta, err := ew.LogEventReturning(tx, &domain.Event{
-				ActorUUID:    &actorUUID,
+				ActorUUID:    eventActorUUID(attr),
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
 				ResourceType: "task",
 				ResourceUUID: &unblockedUUID,
 				EventType:    "task.unblocked",
@@ -557,7 +604,7 @@ func (ts *TaskStore) UpdateFieldsWithVia(actorUUID, taskUUID string, fields map[
 				ctx: webhooks.EventContext{
 					Metadata:   unblockedMeta,
 					Event:      "unblocked",
-					ActorUUID:  actorPtr(actorUUID),
+					ActorUUID:  actorUUIDPtr(attr),
 					Via:        via,
 					Transition: nil,
 					Changed:    []string{"blocked_by"},
@@ -632,6 +679,14 @@ func validateParentAssignment(tx *sql.Tx, childUUID, parentUUID string) error {
 // Move moves a task to a different container and logs a task.updated event.
 // Returns the new etag on success.
 func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch int64) (int64, error) {
+	return ts.MoveWithAttribution(ts.store.attributionFromActorUUID(actorUUID), taskUUID, newProjectUUID, ifMatch)
+}
+
+// MoveWithAttribution moves a task using canonical principal attribution.
+func (ts *TaskStore) MoveWithAttribution(attr attribution.Attribution, taskUUID, newProjectUUID string, ifMatch int64) (int64, error) {
+	if err := requireAttribution(attr); err != nil {
+		return 0, err
+	}
 	var newETag int64
 	var webhookCtx webhooks.EventContext
 
@@ -660,9 +715,11 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 			UPDATE tasks
 			SET project_uuid = ?,
 				etag = etag + 1,
-				updated_by_actor_uuid = ?
+				updated_by_actor_uuid = ?,
+				updated_by_principal_ref = ?,
+				updated_by_scope_ref = ?
 			WHERE uuid = ?
-		`, newProjectUUID, actorUUID, taskUUID)
+		`, newProjectUUID, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), taskUUID)
 		if err != nil {
 			return fmt.Errorf("failed to move task: %w", err)
 		}
@@ -677,7 +734,9 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 		newETag = currentETag + 1
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.moved",
@@ -690,7 +749,7 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 		webhookCtx = webhooks.EventContext{
 			Metadata:   meta,
 			Event:      "moved",
-			ActorUUID:  actorPtr(actorUUID),
+			ActorUUID:  actorUUIDPtr(attr),
 			Via:        "cli",
 			Transition: nil,
 			Changed:    []string{"container_path", "project_uuid"},
@@ -722,6 +781,19 @@ func (ts *TaskStore) Archive(actorUUID, taskUUID string, ifMatch int64) (*Archiv
 
 // ArchiveWithVia archives a task and records the ingress surface in webhook origin.via.
 func (ts *TaskStore) ArchiveWithVia(actorUUID, taskUUID string, ifMatch int64, via string) (*ArchiveResult, error) {
+	return ts.ArchiveWithViaAttribution(ts.store.attributionFromActorUUID(actorUUID), taskUUID, ifMatch, via)
+}
+
+// ArchiveWithAttribution archives a task with canonical principal attribution.
+func (ts *TaskStore) ArchiveWithAttribution(attr attribution.Attribution, taskUUID string, ifMatch int64) (*ArchiveResult, error) {
+	return ts.ArchiveWithViaAttribution(attr, taskUUID, ifMatch, "cli")
+}
+
+// ArchiveWithViaAttribution archives a task and records the ingress surface.
+func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, taskUUID string, ifMatch int64, via string) (*ArchiveResult, error) {
+	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
 	if via == "" {
 		via = "cli"
 	}
@@ -752,9 +824,11 @@ func (ts *TaskStore) ArchiveWithVia(actorUUID, taskUUID string, ifMatch int64, v
 			SET state = 'archived',
 				archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 				updated_by_actor_uuid = ?,
+				updated_by_principal_ref = ?,
+				updated_by_scope_ref = ?,
 				etag = etag + 1
 			WHERE uuid = ?
-		`, actorUUID, taskUUID)
+		`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), taskUUID)
 		if err != nil {
 			return fmt.Errorf("failed to archive task: %w", err)
 		}
@@ -769,7 +843,9 @@ func (ts *TaskStore) ArchiveWithVia(actorUUID, taskUUID string, ifMatch int64, v
 		newETag := currentETag + 1
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.archived",
@@ -782,7 +858,7 @@ func (ts *TaskStore) ArchiveWithVia(actorUUID, taskUUID string, ifMatch int64, v
 		webhookCtx = webhooks.EventContext{
 			Metadata:   meta,
 			Event:      "archived",
-			ActorUUID:  actorPtr(actorUUID),
+			ActorUUID:  actorUUIDPtr(attr),
 			Via:        via,
 			Transition: &webhooks.Transition{From: stringPtr(currentState), To: stringPtr("archived")},
 			Changed:    []string{"archived_at", "state"},
@@ -812,6 +888,14 @@ type PurgeResult struct {
 // Purge hard-deletes a task. The caller must handle attachment file cleanup.
 // Returns the purge result including attachment statistics.
 func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeResult, error) {
+	return ts.PurgeWithAttribution(ts.store.attributionFromActorUUID(actorUUID), taskUUID, ifMatch)
+}
+
+// PurgeWithAttribution hard-deletes a task with canonical principal attribution.
+func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID string, ifMatch int64) (*PurgeResult, error) {
+	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
 	var result *PurgeResult
 	var webhookInfo *webhooks.TaskInfo
 	var webhookCtx webhooks.EventContext
@@ -861,7 +945,7 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		// Log event BEFORE deleting (so we can still reference the task)
 		payload := map[string]interface{}{
 			"slug":      slug,
-			"purged_by": actorUUID,
+			"purged_by": attr.PrincipalRef,
 		}
 		if attachmentCount > 0 {
 			payload["attachment_count"] = attachmentCount
@@ -871,7 +955,9 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		payloadStr := string(payloadJSON)
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &taskUUID,
 			EventType:    "task.purged",
@@ -883,7 +969,7 @@ func (ts *TaskStore) Purge(actorUUID, taskUUID string, ifMatch int64) (*PurgeRes
 		webhookCtx = webhooks.EventContext{
 			Metadata:   meta,
 			Event:      "purged",
-			ActorUUID:  actorPtr(actorUUID),
+			ActorUUID:  actorUUIDPtr(attr),
 			Via:        "cli",
 			Transition: nil,
 			Changed:    []string{},
@@ -945,6 +1031,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	var workflowPreset, phase, riskClass *string
 	var presetVersion sql.NullInt64
 	var createdAt, updatedAt string
+	var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 
 	err := ts.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
@@ -954,7 +1041,9 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
 			   cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
-			   created_by_actor_uuid, updated_by_actor_uuid
+			   created_by_actor_uuid, updated_by_actor_uuid,
+			   created_by_principal_ref, updated_by_principal_ref,
+			   created_by_scope_ref, updated_by_scope_ref
 		FROM tasks WHERE uuid = ?
 	`, uuid).Scan(
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
@@ -964,7 +1053,9 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
-		&task.CreatedByActorUUID, &task.UpdatedByActorUUID,
+		&createdByActor, &updatedByActor,
+		&createdByPrincipal, &updatedByPrincipal,
+		&createdByScope, &updatedByScope,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -986,6 +1077,24 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.WorkflowPreset = workflowPreset
 	task.Phase = phase
 	task.RiskClass = riskClass
+	if createdByActor.Valid {
+		task.CreatedByActorUUID = createdByActor.String
+	}
+	if updatedByActor.Valid {
+		task.UpdatedByActorUUID = updatedByActor.String
+	}
+	if createdByPrincipal.Valid {
+		task.CreatedByPrincipalRef = createdByPrincipal.String
+	}
+	if updatedByPrincipal.Valid {
+		task.UpdatedByPrincipalRef = updatedByPrincipal.String
+	}
+	if createdByScope.Valid {
+		task.CreatedByScopeRef = createdByScope.String
+	}
+	if updatedByScope.Valid {
+		task.UpdatedByScopeRef = updatedByScope.String
+	}
 	if presetVersion.Valid {
 		value := int(presetVersion.Int64)
 		task.PresetVersion = &value
@@ -1112,7 +1221,7 @@ func isCompletionState(state string) bool {
 
 // cascadeDeleteSubtasks deletes all subtasks when a parent task is deleted.
 // This is called within a transaction when a task's state is set to 'deleted'.
-func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskUUID string) error {
+func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
 	// Find all subtasks (not already deleted)
 	rows, err := tx.Query(`
 		SELECT uuid FROM tasks
@@ -1138,9 +1247,13 @@ func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskU
 		_, err := tx.Exec(`
 			UPDATE tasks
 			SET state = 'deleted',
-			    updated_by_actor_uuid = ?
+			    updated_by_actor_uuid = ?,
+			    updated_by_principal_ref = ?,
+			    updated_by_scope_ref = ?,
+			    deleted_by_principal_ref = ?,
+			    deleted_by_scope_ref = ?
 			WHERE uuid = ?
-		`, actorUUID, subtaskUUID)
+		`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr), subtaskUUID)
 		if err != nil {
 			return fmt.Errorf("failed to delete subtask %s: %w", subtaskUUID, err)
 		}
@@ -1148,7 +1261,9 @@ func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskU
 		// Log event
 		payload := `{"action":"cascade_deleted","parent_deleted":true}`
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &subtaskUUID,
 			EventType:    "task.deleted",
@@ -1158,7 +1273,7 @@ func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskU
 		}
 
 		// Recursively delete nested subtasks
-		if err := cascadeDeleteSubtasks(tx, ew, actorUUID, subtaskUUID); err != nil {
+		if err := cascadeDeleteSubtasks(tx, ew, attr, subtaskUUID); err != nil {
 			return err
 		}
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
@@ -53,7 +54,7 @@ var relationRmCmd = &cobra.Command{
 Examples:
   wrkq relation rm T-00001 blocks T-00002`,
 	Args: cobra.ExactArgs(3),
-	RunE: appctx.WithApp(appctx.DefaultOptions(), runRelationRm),
+	RunE: appctx.WithApp(appctx.WithActor(), runRelationRm),
 }
 
 var relationLsCmd = &cobra.Command{
@@ -87,7 +88,7 @@ func init() {
 
 func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	fromRef := args[0]
 	kind := args[1]
@@ -118,12 +119,36 @@ func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Insert the relation
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, ?, ?)
-	`, fromTaskUUID, toTaskUUID, kind, actorUUID)
+	tx, err := database.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.Exec(`
+		INSERT INTO task_relations (
+			from_task_uuid, to_task_uuid, kind,
+			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+		)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, fromTaskUUID, toTaskUUID, kind, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
 	if err != nil {
 		return fmt.Errorf("failed to create relation: %w", err)
+	}
+	payload := fmt.Sprintf(`{"from_task_uuid":"%s","to_task_uuid":"%s","kind":"%s"}`, fromTaskUUID, toTaskUUID, kind)
+	if err := events.NewWriter(database.DB).LogEvent(tx, &domain.Event{
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "task",
+		ResourceUUID: &fromTaskUUID,
+		EventType:    "task.relation.created",
+		Payload:      &payload,
+	}); err != nil {
+		return fmt.Errorf("failed to log relation event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit relation: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Created relation: %s %s %s\n", fromTaskID, kind, toTaskID)
@@ -132,6 +157,7 @@ func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
+	attr := app.Attribution()
 
 	fromRef := args[0]
 	kind := args[1]
@@ -157,7 +183,13 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Delete the relation
-	result, err := database.Exec(`
+	tx, err := database.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.Exec(`
 		DELETE FROM task_relations
 		WHERE from_task_uuid = ? AND to_task_uuid = ? AND kind = ?
 	`, fromTaskUUID, toTaskUUID, kind)
@@ -168,6 +200,22 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		return fmt.Errorf("relation not found: %s %s %s", fromTaskID, kind, toTaskID)
+	}
+	payload := fmt.Sprintf(`{"from_task_uuid":"%s","to_task_uuid":"%s","kind":"%s","deleted_by_principal_ref":"%s"}`,
+		fromTaskUUID, toTaskUUID, kind, attr.PrincipalRef)
+	if err := events.NewWriter(database.DB).LogEvent(tx, &domain.Event{
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "task",
+		ResourceUUID: &fromTaskUUID,
+		EventType:    "task.relation.deleted",
+		Payload:      &payload,
+	}); err != nil {
+		return fmt.Errorf("failed to log relation delete event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit relation delete: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Removed relation: %s %s %s\n", fromTaskID, kind, toTaskID)
@@ -203,10 +251,10 @@ func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	outgoingRows, err := database.Query(`
 		SELECT r.kind, r.created_at,
 		       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-		       a.id AS created_by_id
+		       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
 		FROM task_relations r
 		JOIN tasks t ON r.to_task_uuid = t.uuid
-		JOIN actors a ON r.created_by_actor_uuid = a.uuid
+		LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 		WHERE r.from_task_uuid = ?
 		ORDER BY r.kind, t.id
 	`, taskUUID)
@@ -229,10 +277,10 @@ func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	incomingRows, err := database.Query(`
 		SELECT r.kind, r.created_at,
 		       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-		       a.id AS created_by_id
+		       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
 		FROM task_relations r
 		JOIN tasks t ON r.from_task_uuid = t.uuid
-		JOIN actors a ON r.created_by_actor_uuid = a.uuid
+		LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 		WHERE r.to_task_uuid = ?
 		ORDER BY r.kind, t.id
 	`, taskUUID)

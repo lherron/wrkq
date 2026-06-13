@@ -21,8 +21,8 @@ Goals:
 - Use familiar verbs: `ls`, `cat`, `touch`, `mkdir`, `mv`, `rm`, `tree`, `find`.
 - Keep all durable state local by default: SQLite for metadata, filesystem for
   attachment bytes, sidecar SQLite for search.
-- Attribute every mutation to an actor without pretending to provide
-  multi-user authentication.
+- Attribute every mutation to an external principal ref, with runtime scope
+  provenance recorded separately, without pretending to provide authn/authz.
 - Support concurrent CLIs and agents through WAL, transactions, busy timeouts,
   and optimistic `etag` checks.
 - Provide stable JSON, NDJSON, and porcelain output for scripts, MCP, daemon
@@ -85,8 +85,9 @@ Key variables:
 | --- | --- |
 | `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Canonical database path. |
 | `WRKQ_ATTACH_DIR` | Attachment byte storage root. |
-| `WRKQ_ACTOR_ID` | Friendly actor ID for mutations, such as `A-00001`. |
-| `WRKQ_ACTOR` | Actor slug for mutations. |
+| `WRKQ_PRINCIPAL_REF` | Canonical mutation principal, exactly `agent:<id>`. |
+| `WRKQ_ACTOR_ID` | Compatibility alias; best-effort translated to an `agent:<id>` principal. |
+| `WRKQ_ACTOR` | Compatibility alias; bare slugs normalize to `agent:<slug>`. |
 | `WRKQ_PROJECT_ROOT` | Default project/container path for relative task paths. |
 | `ASP_PROJECT` | Runtime project fallback when `WRKQ_PROJECT_ROOT` is not explicitly exported. |
 | `WRKQ_OUTPUT` | Default output mode. |
@@ -107,15 +108,20 @@ Project-root precedence:
 3. `ASP_PROJECT`.
 4. `.env.local` or config file project root.
 
-Actor resolution for mutating commands:
+Principal attribution for mutating commands:
 
-1. `--as <actor>` flag.
-2. `WRKQ_ACTOR_ID`.
-3. `WRKQ_ACTOR`.
-4. `default_actor` in config.
+1. `--as <ref>` flag. Accepts canonical `agent:<id>` or a bare compat slug.
+2. `WRKQ_PRINCIPAL_REF`. Must be canonical `agent:<id>`.
+3. `WRKQ_ACTOR`. Compatibility alias; bare slugs normalize to `agent:<slug>`.
+4. `WRKQ_ACTOR_ID`. Compatibility alias; if a legacy actor row exists it uses
+   that slug, otherwise it normalizes the literal value.
+5. A validated ASP scope (`ASP_SCOPE_REF`, `ASP_HANDLE`, or
+   `ASP_AGENT_ID`+`ASP_PROJECT`) reduced to `agent:<agentId>`.
+6. `default_actor` in config, as a compatibility fallback.
 
-The actor may be an actor friendly ID, UUID, or slug. Actor resolution is
-attribution only; wrkq does not implement authz/authn.
+wrkq validates principal syntax but never creates actors or requires an actor
+row for ordinary writes. Full scope refs are persisted as scope provenance and
+are not valid principal refs.
 
 ## 5. Domain Model
 
@@ -205,7 +211,7 @@ Subtasks cannot have subtasks.
 ### Comments
 
 Comments are append-only task notes. They can be soft-deleted with
-`deleted_at` and `deleted_by_actor_uuid`, or purged. Default comment listings
+`deleted_at` and `deleted_by_principal_ref`, or purged. Default comment listings
 and `wrkq cat` output exclude deleted comments.
 
 `wrkq cat` includes comments by default. Use `--exclude-comments` to omit them.
@@ -295,7 +301,7 @@ Quote globs in shells.
 Common root flags:
 
 - `--db <path>`
-- `--as <actor>`
+- `--as <principal-ref|compat-slug>`
 - `--project <container>`
 - `--output table|human|json|ndjson|porcelain|yaml|tsv|raw`
 
@@ -423,9 +429,9 @@ Current route surface:
 | `/v1/relations/list` | List relations. |
 | `/v1/relations/create` | Create relation. |
 | `/v1/relations/delete` | Delete relation. |
-| `/v1/actors/list` | List actors. |
-| `/v1/actors/create` | Create actor. |
-| `/v1/actors/update` | Update actor. |
+| `/v1/actors/list` | List legacy actor display-cache rows. |
+| `/v1/actors/create` | Explicit legacy/admin actor-cache creation; not required for writes. |
+| `/v1/actors/update` | Update legacy actor display-cache rows. |
 | `/v1/bundle/create` | Create bundle. |
 | `/v1/bundle/apply` | Apply bundle. |
 
@@ -441,8 +447,9 @@ Mutable rows carry `etag INTEGER`. Mutating commands that expose `--if-match`
 must reject stale writes when the current etag differs from the expected etag.
 
 Events are appended to `event_log` with resource type, UUID, event type, etag,
-actor UUID, timestamp, and JSON payload. The event log is an audit trail, not a
-hash-chain ledger.
+`principal_ref`, optional `scope_ref`, legacy actor UUID when available,
+timestamp, and JSON payload. The event log is an audit trail, not a hash-chain
+ledger.
 
 `state export`, `state import`, and `state verify` provide canonical snapshot
 operations. `bundle create` and `bundle apply` support git-ops style state

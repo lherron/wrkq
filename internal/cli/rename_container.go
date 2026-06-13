@@ -46,7 +46,7 @@ func init() {
 
 func runRenameContainer(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Apply project root to the container selector
 	containerSelector := applyProjectRootToSelector(app.Config, args[0], false)
@@ -94,7 +94,7 @@ func runRenameContainer(app *appctx.App, cmd *cobra.Command, args []string) erro
 		"slug":  normalizedSlug,
 		"title": newTitle,
 	}
-	_, err = s.Containers.UpdateFields(actorUUID, containerUUID, fields, renameContainerIfMatch)
+	_, err = s.Containers.UpdateFieldsWithAttribution(attr, containerUUID, fields, renameContainerIfMatch)
 	if err != nil {
 		return err
 	}

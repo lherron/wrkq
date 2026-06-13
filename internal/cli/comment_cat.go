@@ -48,13 +48,15 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var commentUUID string
 		var commentID string
 		var taskUUID string
-		var actorUUID string
 		var body string
 		var meta sql.NullString
 		var etag int64
 		var createdAt string
-		var updatedAt, deletedAt sql.NullString
-		var actorSlug, actorRole, taskID string
+		var updatedAt, deletedAt, deletedByActorUUID sql.NullString
+		var actorUUID, actorSlug, actorRole sql.NullString
+		var createdByPrincipalRef, createdByScopeRef sql.NullString
+		var deletedByPrincipalRef, deletedByScopeRef sql.NullString
+		var taskID string
 
 		// Determine if ref is UUID, friendly ID, or path
 		isUUID := id.IsUUID(ref)
@@ -62,7 +64,9 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		query := `
 			SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
-			       c.created_at, c.updated_at, c.deleted_at,
+			       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
+			       c.created_by_principal_ref, c.created_by_scope_ref,
+			       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
 			       a.slug as actor_slug, a.role as actor_role,
 			       t.id as task_id
 			FROM comments c
@@ -75,13 +79,19 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			query += " WHERE c.uuid = ?"
 			queryErr = database.QueryRow(query, ref).Scan(
 				&commentUUID, &commentID, &taskUUID, &actorUUID, &body, &meta, &etag,
-				&createdAt, &updatedAt, &deletedAt, &actorSlug, &actorRole, &taskID,
+				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+				&createdByPrincipalRef, &createdByScopeRef,
+				&deletedByPrincipalRef, &deletedByScopeRef,
+				&actorSlug, &actorRole, &taskID,
 			)
 		} else if isFriendlyID {
 			query += " WHERE c.id = ?"
 			queryErr = database.QueryRow(query, ref).Scan(
 				&commentUUID, &commentID, &taskUUID, &actorUUID, &body, &meta, &etag,
-				&createdAt, &updatedAt, &deletedAt, &actorSlug, &actorRole, &taskID,
+				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+				&createdByPrincipalRef, &createdByScopeRef,
+				&deletedByPrincipalRef, &deletedByScopeRef,
+				&actorSlug, &actorRole, &taskID,
 			)
 		} else {
 			return fmt.Errorf("invalid comment reference: %s (expected friendly ID like C-00001 or UUID)", commentRef)
@@ -99,12 +109,24 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			"id":         commentID,
 			"task_uuid":  taskUUID,
 			"task_id":    taskID,
-			"actor_uuid": actorUUID,
-			"actor_slug": actorSlug,
-			"actor_role": actorRole,
 			"body":       body,
 			"etag":       etag,
 			"created_at": createdAt,
+		}
+		if actorUUID.Valid {
+			comment["actor_uuid"] = actorUUID.String
+		}
+		if actorSlug.Valid {
+			comment["actor_slug"] = actorSlug.String
+		}
+		if actorRole.Valid {
+			comment["actor_role"] = actorRole.String
+		}
+		if createdByPrincipalRef.Valid {
+			comment["created_by_principal_ref"] = createdByPrincipalRef.String
+		}
+		if createdByScopeRef.Valid {
+			comment["created_by_scope_ref"] = createdByScopeRef.String
 		}
 
 		if meta.Valid && meta.String != "" {
@@ -115,6 +137,15 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 		if deletedAt.Valid {
 			comment["deleted_at"] = deletedAt.String
+		}
+		if deletedByActorUUID.Valid {
+			comment["deleted_by_actor_uuid"] = deletedByActorUUID.String
+		}
+		if deletedByPrincipalRef.Valid {
+			comment["deleted_by_principal_ref"] = deletedByPrincipalRef.String
+		}
+		if deletedByScopeRef.Valid {
+			comment["deleted_by_scope_ref"] = deletedByScopeRef.String
 		}
 
 		comments = append(comments, comment)

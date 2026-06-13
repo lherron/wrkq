@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ Comment text can come from:
   - A file path (use -f/--file)
   - stdin (use '-')
 
-Comments are immutable and attributed to the current actor.`,
+Comments are immutable and attributed to the current principal.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: appctx.WithApp(appctx.WithActor(), runCommentAdd),
 }
@@ -55,7 +56,7 @@ func init() {
 
 func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Reset flag values after execution to prevent test contamination
 	defer func() {
@@ -148,7 +149,7 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	if commentAddDryRun {
 		fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would add comment to task %s:\n", taskID)
-		fmt.Fprintf(cmd.OutOrStdout(), "  Actor: %s\n", app.ActorID)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Principal: %s\n", attr.PrincipalRef)
 		fmt.Fprintf(cmd.OutOrStdout(), "  Body: %s\n", body)
 		if metaStr != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "  Meta: %s\n", *metaStr)
@@ -196,9 +197,13 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Insert comment
 	_, err = tx.Exec(`
-		INSERT INTO comments (uuid, id, task_uuid, actor_uuid, body, meta, etag)
-		VALUES (?, ?, ?, ?, ?, ?, 1)
-	`, commentUUID, commentID, taskUUID, actorUUID, body, metaStr)
+		INSERT INTO comments (
+			uuid, id, task_uuid, actor_uuid, created_by_principal_ref,
+			created_by_scope_ref, body, meta, etag
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+	`, commentUUID, commentID, taskUUID, legacyActorBind(attr),
+		attr.PrincipalRef, scopeBind(attr), body, metaStr)
 	if err != nil {
 		return fmt.Errorf("failed to insert comment: %w", err)
 	}
@@ -206,11 +211,14 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Fetch the created comment for event logging
 	var comment domain.Comment
 	var createdAtStr string
+	var actorUUID, createdByPrincipal, createdByScope sql.NullString
 	err = tx.QueryRow(`
-		SELECT uuid, id, task_uuid, actor_uuid, body, meta, etag, created_at
+		SELECT uuid, id, task_uuid, actor_uuid, created_by_principal_ref, created_by_scope_ref,
+		       body, meta, etag, created_at
 		FROM comments WHERE uuid = ?
 	`, commentUUID).Scan(
-		&comment.UUID, &comment.ID, &comment.TaskUUID, &comment.ActorUUID,
+		&comment.UUID, &comment.ID, &comment.TaskUUID,
+		&actorUUID, &createdByPrincipal, &createdByScope,
 		&comment.Body, &comment.Meta, &comment.ETag, &createdAtStr,
 	)
 	if err != nil {
@@ -222,10 +230,37 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse created_at: %w", err)
 	}
+	if actorUUID.Valid {
+		comment.ActorUUID = actorUUID.String
+	}
+	if createdByPrincipal.Valid {
+		comment.CreatedByPrincipalRef = createdByPrincipal.String
+	}
+	if createdByScope.Valid {
+		comment.CreatedByScopeRef = createdByScope.String
+	}
 
 	// Log event
 	eventWriter := events.NewWriter(database.DB)
-	eventMeta, err := eventWriter.LogCommentCreatedReturning(tx, actorUUID, &comment)
+	payload, err := json.Marshal(map[string]interface{}{
+		"task_id":       comment.TaskUUID,
+		"comment_id":    comment.ID,
+		"principal_ref": attr.PrincipalRef,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal event payload: %w", err)
+	}
+	payloadStr := string(payload)
+	eventMeta, err := eventWriter.LogEventReturning(tx, &domain.Event{
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "comment",
+		ResourceUUID: &comment.UUID,
+		EventType:    "comment.created",
+		ETag:         &comment.ETag,
+		Payload:      &payloadStr,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to log event: %w", err)
 	}
@@ -237,7 +272,7 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	webhooks.DispatchTaskEvent(database, taskUUID, webhooks.EventContext{
 		Metadata:   eventMeta,
 		Event:      "comment_added",
-		ActorUUID:  &actorUUID,
+		ActorUUID:  attr.LegacyActorUUID,
 		Via:        "cli",
 		Transition: nil,
 		Changed:    []string{"comments"},
@@ -248,12 +283,12 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Output success
 	output := map[string]interface{}{
-		"id":         commentID,
-		"uuid":       commentUUID,
-		"task_id":    taskID,
-		"actor_id":   app.ActorID,
-		"created_at": comment.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		"etag":       comment.ETag,
+		"id":            commentID,
+		"uuid":          commentUUID,
+		"task_id":       taskID,
+		"principal_ref": attr.PrincipalRef,
+		"created_at":    comment.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"etag":          comment.ETag,
 	}
 
 	// Check for --json flag from parent command or direct
