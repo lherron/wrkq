@@ -254,6 +254,10 @@ layer-boundary:
 rot-sensor:
   go run ./cmd/rot-sensor --root .
 
+# Fail on new wrkf.* RPC surfaces registered without test/smoke evidence or a governed ARCH-EXCEPTION
+surface-guard:
+  go run ./cmd/surface-guard --root .
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -264,8 +268,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor)
-verify: suppression-lint layer-boundary lint test rot-sensor
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard)
+verify: suppression-lint layer-boundary lint test rot-sensor surface-guard
   @echo "✓ All checks passed"
 
 # --- Documentation tasks ---
