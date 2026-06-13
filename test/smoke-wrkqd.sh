@@ -21,17 +21,19 @@ fi
 
 TMP_DIR="$(mktemp -d -t wrkqd-smoke-XXXXXX)"
 PID1=""
-PID2=""
+# bundle apply disabled (unused) — see T-04371
+# PID2=""
 
 cleanup() {
   if [[ -n "$PID1" ]]; then
     kill "$PID1" >/dev/null 2>&1 || true
     wait "$PID1" >/dev/null 2>&1 || true
   fi
-  if [[ -n "$PID2" ]]; then
-    kill "$PID2" >/dev/null 2>&1 || true
-    wait "$PID2" >/dev/null 2>&1 || true
-  fi
+  # bundle apply disabled (unused) — see T-04371
+  # if [[ -n "$PID2" ]]; then
+  #   kill "$PID2" >/dev/null 2>&1 || true
+  #   wait "$PID2" >/dev/null 2>&1 || true
+  # fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
@@ -234,38 +236,39 @@ kill "$PID1" >/dev/null 2>&1 || true
 wait "$PID1" >/dev/null 2>&1 || true
 PID1=""
 
-DB2_DIR="$TMP_DIR/db2"
-mkdir -p "$DB2_DIR"
-DB2_PATH="$(init_db "$DB2_DIR" "wrkq2.db")"
-
-PORT2="$(free_port)"
-ADDR2="127.0.0.1:$PORT2"
-BASE2="http://$ADDR2/v1"
-"$BIN_DIR/wrkqd" --addr "$ADDR2" --db "$DB2_PATH" >/dev/null 2>&1 &
-PID2=$!
-
-wait_health "$BASE2"
-
-APPLY_JSON=$(do_request "POST" "$BASE2" "/bundle/apply" "$(cat <<JSON
-{
-  "from": "$BUNDLE_DIR",
-  "dry_run": false,
-  "continue_on_error": false
-}
-JSON
-)")
-
-python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("success") is True, data' <<<"$APPLY_JSON"
-
-TASKS_AFTER_JSON=$(do_request "POST" "$BASE2" "/tasks/list" "$(cat <<'JSON'
-{
-  "project": "inbox",
-  "filter": "all",
-  "limit": 20
-}
-JSON
-)")
-
-python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("tasks"), "expected tasks after bundle apply"' <<<"$TASKS_AFTER_JSON"
+# bundle apply disabled (unused) — see T-04371
+# DB2_DIR="$TMP_DIR/db2"
+# mkdir -p "$DB2_DIR"
+# DB2_PATH="$(init_db "$DB2_DIR" "wrkq2.db")"
+#
+# PORT2="$(free_port)"
+# ADDR2="127.0.0.1:$PORT2"
+# BASE2="http://$ADDR2/v1"
+# "$BIN_DIR/wrkqd" --addr "$ADDR2" --db "$DB2_PATH" >/dev/null 2>&1 &
+# PID2=$!
+#
+# wait_health "$BASE2"
+#
+# APPLY_JSON=$(do_request "POST" "$BASE2" "/bundle/apply" "$(cat <<JSON
+# {
+#   "from": "$BUNDLE_DIR",
+#   "dry_run": false,
+#   "continue_on_error": false
+# }
+# JSON
+# )")
+#
+# python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("success") is True, data' <<<"$APPLY_JSON"
+#
+# TASKS_AFTER_JSON=$(do_request "POST" "$BASE2" "/tasks/list" "$(cat <<'JSON'
+# {
+#   "project": "inbox",
+#   "filter": "all",
+#   "limit": 20
+# }
+# JSON
+# )")
+#
+# python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("tasks"), "expected tasks after bundle apply"' <<<"$TASKS_AFTER_JSON"
 
 echo "wrkqd smoke test: PASS"

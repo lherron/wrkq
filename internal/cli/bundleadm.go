@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -30,23 +27,25 @@ var bundleAdmCmd = &cobra.Command{
 	Long:  `Commands for applying PR bundles into the canonical database. Part of the Git-ops workflow.`,
 }
 
-var bundleApplyCmd = &cobra.Command{
-	Use:   "apply",
-	Short: "Apply a bundle into the current database",
-	Long: `Apply a PR bundle into the canonical database with conflict detection.
+// bundle apply disabled (unused) - see T-04371
+// var bundleApplyCmd = &cobra.Command{
+// 	Use:   "apply",
+// 	Short: "Apply a bundle into the current database",
+// 	Long: `Apply a PR bundle into the canonical database with conflict detection.
+//
+// Reads manifest.json, ensures containers exist, applies task documents with
+// etag checking, and re-hydrates attachments. Exit code 4 on conflicts.`,
+// 	RunE: runBundleApply,
+// }
 
-Reads manifest.json, ensures containers exist, applies task documents with
-etag checking, and re-hydrates attachments. Exit code 4 on conflicts.`,
-	RunE: runBundleApply,
-}
-
-var (
-	bundleApplyFrom      string
-	bundleApplyDryRun    bool
-	bundleApplyContinue  bool
-	bundleApplyJSON      bool
-	bundleApplyPorcelain bool
-)
+// bundle apply disabled (unused) - see T-04371
+// var (
+// 	bundleApplyFrom      string
+// 	bundleApplyDryRun    bool
+// 	bundleApplyContinue  bool
+// 	bundleApplyJSON      bool
+// 	bundleApplyPorcelain bool
+// )
 
 type applyResult struct {
 	Success          bool            `json:"success"`
@@ -77,14 +76,18 @@ type applyFieldChange struct {
 
 func init() {
 	rootAdmCmd.AddCommand(bundleAdmCmd)
-	bundleAdmCmd.AddCommand(bundleApplyCmd)
-
-	bundleApplyCmd.Flags().StringVar(&bundleApplyFrom, "from", ".wrkq", "Bundle directory path")
-	bundleApplyCmd.Flags().BoolVar(&bundleApplyDryRun, "dry-run", false, "Validate without writing")
-	bundleApplyCmd.Flags().BoolVar(&bundleApplyContinue, "continue-on-error", false, "Continue after errors")
-	bundleApplyCmd.Flags().BoolVar(&bundleApplyJSON, "json", false, "Output as JSON")
-	bundleApplyCmd.Flags().BoolVar(&bundleApplyPorcelain, "porcelain", false, "Machine-readable output")
+	// bundle apply disabled (unused) - see T-04371
+	// bundleAdmCmd.AddCommand(bundleApplyCmd)
+	//
+	// bundleApplyCmd.Flags().StringVar(&bundleApplyFrom, "from", ".wrkq", "Bundle directory path")
+	// bundleApplyCmd.Flags().BoolVar(&bundleApplyDryRun, "dry-run", false, "Validate without writing")
+	// bundleApplyCmd.Flags().BoolVar(&bundleApplyContinue, "continue-on-error", false, "Continue after errors")
+	// bundleApplyCmd.Flags().BoolVar(&bundleApplyJSON, "json", false, "Output as JSON")
+	// bundleApplyCmd.Flags().BoolVar(&bundleApplyPorcelain, "porcelain", false, "Machine-readable output")
 }
+
+/*
+bundle apply disabled (unused) - see T-04371
 
 func runBundleApply(cmd *cobra.Command, args []string) error {
 	// Load configuration
@@ -290,6 +293,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+*/
 
 // ensureContainer creates a container hierarchy if it doesn't exist (mkdir -p)
 func ensureContainer(database *db.DB, attr attribution.Attribution, path string, dryRun bool) (bool, error) {
@@ -1168,6 +1172,9 @@ func conflictFromError(err error) *applyConflict {
 	return nil
 }
 
+/*
+bundle apply disabled (unused) - see T-04371
+
 // reattachFiles re-attaches files from the bundle's attachments directory
 func reattachFiles(cmd *cobra.Command, cfg *config.Config, attachmentsDir string, attr attribution.Attribution) (int, error) {
 	count := 0
@@ -1222,6 +1229,7 @@ func reattachFiles(cmd *cobra.Command, cfg *config.Config, attachmentsDir string
 
 	return count, nil
 }
+*/
 
 // conflictError represents an etag mismatch or merge conflict
 type conflictError struct {
