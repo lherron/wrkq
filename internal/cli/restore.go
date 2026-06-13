@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
@@ -64,7 +64,7 @@ func init() {
 
 func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 	arg := args[0]
 	arg = applyProjectRootToSelector(app.Config, arg, false)
 	if restoreTo != "" {
@@ -99,14 +99,13 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve assignee if provided
-	var assigneeActorUUID *string
+	var assigneePrincipalRef *string
 	if restoreAssignee != "" {
-		resolver := actors.NewResolver(database.DB)
-		uuid, err := resolver.Resolve(restoreAssignee)
+		principalRef, err := attribution.NormalizeCompat(restoreAssignee)
 		if err != nil {
 			return fmt.Errorf("failed to resolve assignee: %w", err)
 		}
-		assigneeActorUUID = &uuid
+		assigneePrincipalRef = &principalRef
 	}
 
 	// Try to resolve as task first
@@ -119,7 +118,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		// Restore container
-		if err := restoreContainer(database, actorUUID, containerUUID); err != nil {
+		if err := restoreContainer(database, attr, containerUUID); err != nil {
 			return fmt.Errorf("failed to restore container: %w", err)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
@@ -168,17 +167,17 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Restore the task with updates
 	opts := restoreTaskOptions{
-		taskUUID:          taskUUID,
-		actorUUID:         actorUUID,
-		targetState:       targetState,
-		newProjectUUID:    newProjectUUID,
-		newSlug:           newSlug,
-		newTitle:          restoreTitle,
-		newDescription:    restoreDescription,
-		newPriority:       restorePriority,
-		newLabels:         restoreLabels,
-		assigneeActorUUID: assigneeActorUUID,
-		comment:           restoreComment,
+		taskUUID:             taskUUID,
+		attr:                 attr,
+		targetState:          targetState,
+		newProjectUUID:       newProjectUUID,
+		newSlug:              newSlug,
+		newTitle:             restoreTitle,
+		newDescription:       restoreDescription,
+		newPriority:          restorePriority,
+		newLabels:            restoreLabels,
+		assigneePrincipalRef: assigneePrincipalRef,
+		comment:              restoreComment,
 	}
 
 	webhookCtx, err := restoreTaskWithOptions(database, opts)
@@ -189,7 +188,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 	webhooks.DispatchTaskEvent(database, taskUUID, webhookCtx)
 
 	// Cascade restore subtasks
-	if err := cascadeRestoreSubtasks(database, actorUUID, taskUUID, targetState); err != nil {
+	if err := cascadeRestoreSubtasks(database, attr, taskUUID, targetState); err != nil {
 		return fmt.Errorf("failed to restore subtasks: %w", err)
 	}
 
@@ -198,17 +197,17 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 type restoreTaskOptions struct {
-	taskUUID          string
-	actorUUID         string
-	targetState       string
-	newProjectUUID    *string
-	newSlug           *string
-	newTitle          string
-	newDescription    string
-	newPriority       int
-	newLabels         string
-	assigneeActorUUID *string
-	comment           string
+	taskUUID             string
+	attr                 attribution.Attribution
+	targetState          string
+	newProjectUUID       *string
+	newSlug              *string
+	newTitle             string
+	newDescription       string
+	newPriority          int
+	newLabels            string
+	assigneePrincipalRef *string
+	comment              string
 }
 
 func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.EventContext, error) {
@@ -224,8 +223,10 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 	}
 
 	// Build dynamic UPDATE query
-	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL, updated_by_actor_uuid = ?`
-	args := []interface{}{opts.targetState, opts.actorUUID}
+	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL,
+		deleted_by_principal_ref = NULL, deleted_by_scope_ref = NULL,
+		updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?`
+	args := []interface{}{opts.targetState, legacyActorBind(opts.attr), opts.attr.PrincipalRef, scopeBind(opts.attr)}
 	fields := map[string]interface{}{
 		"state":       opts.targetState,
 		"archived_at": nil,
@@ -262,10 +263,10 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 		args = append(args, opts.newLabels)
 		fields["labels"] = opts.newLabels
 	}
-	if opts.assigneeActorUUID != nil {
-		query += `, assignee_actor_uuid = ?`
-		args = append(args, *opts.assigneeActorUUID)
-		fields["assignee_actor_uuid"] = *opts.assigneeActorUUID
+	if opts.assigneePrincipalRef != nil {
+		query += `, assignee_principal_ref = ?`
+		args = append(args, *opts.assigneePrincipalRef)
+		fields["assignee_principal_ref"] = *opts.assigneePrincipalRef
 	}
 
 	query += ` WHERE uuid = ?`
@@ -289,7 +290,9 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 	payloadStr := string(payloadJSON)
 
 	eventMeta, err := eventWriter.LogEventReturning(tx, &domain.Event{
-		ActorUUID:    &opts.actorUUID,
+		ActorUUID:    opts.attr.LegacyActorUUID,
+		PrincipalRef: opts.attr.PrincipalRef,
+		ScopeRef:     opts.attr.ScopeRef,
 		ResourceType: "task",
 		ResourceUUID: &opts.taskUUID,
 		EventType:    "task.restored",
@@ -318,9 +321,13 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 		commentID := id.FormatComment(int(nextSeq))
 
 		_, err = tx.Exec(`
-			INSERT INTO comments (uuid, id, task_uuid, actor_uuid, body, etag)
-			VALUES (?, ?, ?, ?, ?, 1)
-		`, commentUUID, commentID, opts.taskUUID, opts.actorUUID, opts.comment)
+			INSERT INTO comments (
+				uuid, id, task_uuid, actor_uuid, created_by_principal_ref,
+				created_by_scope_ref, body, etag
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+		`, commentUUID, commentID, opts.taskUUID, legacyActorBind(opts.attr),
+			opts.attr.PrincipalRef, scopeBind(opts.attr), opts.comment)
 		if err != nil {
 			return webhooks.EventContext{}, fmt.Errorf("failed to add comment: %w", err)
 		}
@@ -332,7 +339,7 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 	return webhooks.EventContext{
 		Metadata:   eventMeta,
 		Event:      "updated",
-		ActorUUID:  &opts.actorUUID,
+		ActorUUID:  opts.attr.LegacyActorUUID,
 		Via:        "cli",
 		Transition: &webhooks.Transition{From: &currentState, To: &opts.targetState},
 		Changed:    sortedMapKeys(fields),
@@ -340,7 +347,7 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 	}, nil
 }
 
-func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetState string) error {
+func cascadeRestoreSubtasks(database *db.DB, attr attribution.Attribution, parentTaskUUID, targetState string) error {
 	// Find all subtasks that are archived or deleted
 	rows, err := database.Query(`
 		SELECT uuid FROM tasks
@@ -364,7 +371,7 @@ func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetSt
 	for _, subtaskUUID := range subtaskUUIDs {
 		opts := restoreTaskOptions{
 			taskUUID:    subtaskUUID,
-			actorUUID:   actorUUID,
+			attr:        attr,
 			targetState: targetState,
 		}
 		webhookCtx, err := restoreTaskWithOptions(database, opts)
@@ -375,7 +382,7 @@ func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetSt
 		webhooks.DispatchTaskEvent(database, subtaskUUID, webhookCtx)
 
 		// Recursively restore nested subtasks
-		if err := cascadeRestoreSubtasks(database, actorUUID, subtaskUUID, targetState); err != nil {
+		if err := cascadeRestoreSubtasks(database, attr, subtaskUUID, targetState); err != nil {
 			return err
 		}
 	}
@@ -383,7 +390,7 @@ func cascadeRestoreSubtasks(database *db.DB, actorUUID, parentTaskUUID, targetSt
 	return nil
 }
 
-func restoreContainer(database *db.DB, actorUUID, containerUUID string) error {
+func restoreContainer(database *db.DB, attr attribution.Attribution, containerUUID string) error {
 	tx, err := database.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -393,9 +400,11 @@ func restoreContainer(database *db.DB, actorUUID, containerUUID string) error {
 	_, err = tx.Exec(`
 		UPDATE containers
 		SET archived_at = NULL,
-		    updated_by_actor_uuid = ?
+		    updated_by_actor_uuid = ?,
+		    updated_by_principal_ref = ?,
+		    updated_by_scope_ref = ?
 		WHERE uuid = ?
-	`, actorUUID, containerUUID)
+	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), containerUUID)
 	if err != nil {
 		return fmt.Errorf("failed to restore container: %w", err)
 	}
@@ -404,7 +413,9 @@ func restoreContainer(database *db.DB, actorUUID, containerUUID string) error {
 	eventWriter := events.NewWriter(database.DB)
 	payload := `{"action":"restored"}`
 	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
 		ResourceType: "container",
 		ResourceUUID: &containerUUID,
 		EventType:    "container.restored",

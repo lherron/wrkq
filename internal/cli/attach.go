@@ -120,9 +120,8 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Query attachments with SQL-based pagination
 	query := `
 		SELECT a.uuid, a.id, a.filename, a.relative_path, a.mime_type, a.size_bytes,
-		       a.checksum, a.created_at, ac.slug as created_by
+		       a.checksum, a.created_at, a.created_by_principal_ref
 		FROM attachments a
-		LEFT JOIN actors ac ON a.created_by_actor_uuid = ac.uuid
 		WHERE a.task_uuid = ?
 	`
 	queryArgs := []interface{}{taskUUID}
@@ -151,11 +150,11 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	attachments := []map[string]interface{}{}
 	for rows.Next() {
 		var uuid, id, filename, relativePath, createdAt string
-		var mimeType, checksum, createdBy sql.NullString
+		var mimeType, checksum, createdByPrincipal sql.NullString
 		var sizeBytes int64
 
 		err := rows.Scan(&uuid, &id, &filename, &relativePath, &mimeType, &sizeBytes,
-			&checksum, &createdAt, &createdBy)
+			&checksum, &createdAt, &createdByPrincipal)
 		if err != nil {
 			return fmt.Errorf("failed to scan attachment: %w", err)
 		}
@@ -174,8 +173,8 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if checksum.Valid {
 			att["checksum"] = checksum.String
 		}
-		if createdBy.Valid {
-			att["created_by"] = createdBy.String
+		if createdByPrincipal.Valid {
+			att["created_by_principal_ref"] = createdByPrincipal.String
 		}
 
 		attachments = append(attachments, att)
@@ -250,7 +249,7 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	cfg := app.Config
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Resolve task
 	taskRef := applyProjectRootToSelector(app.Config, args[0], false)
@@ -329,9 +328,13 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.Exec(`
-		INSERT INTO attachments (id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum, created_by_actor_uuid)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?)
-	`, taskUUID, filename, relativePath, mimeType, size, checksum, actorUUID)
+		INSERT INTO attachments (
+			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
+			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+		)
+		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, taskUUID, filename, relativePath, mimeType, size, checksum,
+		legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
 	if err != nil {
 		_ = os.Remove(absPath) // Clean up file
 		return fmt.Errorf("failed to insert attachment: %w", err)
@@ -360,7 +363,9 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	payloadStr := string(payloadJSON)
 
 	event := &domain.Event{
-		ActorUUID:    &actorUUID,
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
 		ResourceType: "attachment",
 		ResourceUUID: &attachUUID,
 		EventType:    "attachment.created",
@@ -424,7 +429,7 @@ func runAttachGet(app *appctx.App, cmd *cobra.Command, args []string) error {
 func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	cfg := app.Config
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	for _, attachmentRef := range args {
 		// Resolve attachment
@@ -479,7 +484,9 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		payloadStr := string(payloadJSON)
 
 		event := &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    attr.LegacyActorUUID,
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "attachment",
 			ResourceUUID: &attachUUID,
 			EventType:    "attachment.deleted",

@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
@@ -112,7 +112,7 @@ func init() {
 	setCmd.Flags().StringVar(&setKind, "kind", "", "Update task kind (task, subtask, spike, bug, chore)")
 	setCmd.Flags().StringVar(&setParentTask, "parent-task", "", "Set parent task ID or path (empty to clear); sets kind=subtask unless --kind given")
 	setCmd.Flags().StringVar(&setParentID, "parent-id", "", "Alias for --parent-task")
-	setCmd.Flags().StringVar(&setAssignee, "assignee", "", "Update task assignee (actor slug or ID)")
+	setCmd.Flags().StringVar(&setAssignee, "assignee", "", "Update task assignee (principal ref or bare agent slug)")
 	setCmd.Flags().StringVar(&setRequestedBy, "requested-by", "", "Update requester project ID")
 	setCmd.Flags().StringVar(&setAssignedProject, "assigned-project", "", "Update assignee project ID")
 	setCmd.Flags().StringVar(&setResolution, "resolution", "", "Update task resolution (done, wont_do, duplicate, needs_info)")
@@ -125,7 +125,7 @@ func init() {
 
 func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// All args are task refs now (no more key=value parsing)
 	taskRefs := args
@@ -182,7 +182,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		_, err = s.Tasks.UpdateFields(actorUUID, taskUUID, fields, setIfMatch)
+		_, err = s.Tasks.UpdateFieldsWithAttribution(attr, taskUUID, fields, setIfMatch)
 		return err
 	})
 
@@ -339,13 +339,11 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 
 	// Handle assignee
 	if setAssignee != "" {
-		// db.DB embeds *sql.DB, so we can access it directly
-		resolver := actors.NewResolver(database.DB)
-		actorUUID, err := resolver.Resolve(setAssignee)
+		principalRef, err := attribution.NormalizeCompat(setAssignee)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve assignee: %w", err)
 		}
-		fields["assignee_actor_uuid"] = actorUUID
+		fields["assignee_principal_ref"] = principalRef
 	}
 
 	// Handle requested_by_project_id

@@ -111,7 +111,7 @@ func mutateGlobalWebhooks(app *appctx.App, cmd *cobra.Command, add, remove []str
 		return fmt.Errorf("failed to encode webhook urls: %w", err)
 	}
 	fields := map[string]interface{}{"webhook_urls": string(payload)}
-	if _, err := s.Containers.UpdateFields(app.ActorUUID, rootUUID, fields, 0); err != nil {
+	if _, err := s.Containers.UpdateFieldsWithAttribution(app.Attribution(), rootUUID, fields, 0); err != nil {
 		return err
 	}
 

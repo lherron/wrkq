@@ -22,5 +22,5 @@ func ExecuteAdmin() error {
 func init() {
 	// Global flags for wrkqadm
 	rootAdmCmd.PersistentFlags().String("db", "", "Path to database file (overrides WRKQ_DB_PATH)")
-	rootAdmCmd.PersistentFlags().String("as", "", "Actor to perform action as (slug or friendly ID)")
+	rootAdmCmd.PersistentFlags().String("as", "", "Principal ref or compat actor slug for write attribution")
 }

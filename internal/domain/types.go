@@ -100,63 +100,74 @@ type Actor struct {
 
 // Container represents a project or subproject
 type Container struct {
-	UUID               string        `json:"uuid" db:"uuid"`
-	ID                 string        `json:"id" db:"id"`
-	Slug               string        `json:"slug" db:"slug"`
-	Title              *string       `json:"title,omitempty" db:"title"`
-	ParentUUID         *string       `json:"parent_uuid,omitempty" db:"parent_uuid"`
-	Kind               ContainerKind `json:"kind" db:"kind"`
-	SectionUUID        *string       `json:"section_uuid,omitempty" db:"section_uuid"`
-	SortIndex          int           `json:"sort_index" db:"sort_index"`
-	WebhookURLs        *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
-	ETag               int64         `json:"etag" db:"etag"`
-	CreatedAt          time.Time     `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time     `json:"updated_at" db:"updated_at"`
-	ArchivedAt         *time.Time    `json:"archived_at,omitempty" db:"archived_at"`
-	CreatedByActorUUID string        `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
-	UpdatedByActorUUID string        `json:"updated_by_actor_uuid" db:"updated_by_actor_uuid"`
+	UUID                  string        `json:"uuid" db:"uuid"`
+	ID                    string        `json:"id" db:"id"`
+	Slug                  string        `json:"slug" db:"slug"`
+	Title                 *string       `json:"title,omitempty" db:"title"`
+	ParentUUID            *string       `json:"parent_uuid,omitempty" db:"parent_uuid"`
+	Kind                  ContainerKind `json:"kind" db:"kind"`
+	SectionUUID           *string       `json:"section_uuid,omitempty" db:"section_uuid"`
+	SortIndex             int           `json:"sort_index" db:"sort_index"`
+	WebhookURLs           *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
+	ETag                  int64         `json:"etag" db:"etag"`
+	CreatedAt             time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time     `json:"updated_at" db:"updated_at"`
+	ArchivedAt            *time.Time    `json:"archived_at,omitempty" db:"archived_at"`
+	CreatedByActorUUID    string        `json:"created_by_actor_uuid,omitempty" db:"created_by_actor_uuid"`
+	UpdatedByActorUUID    string        `json:"updated_by_actor_uuid,omitempty" db:"updated_by_actor_uuid"`
+	CreatedByPrincipalRef string        `json:"created_by_principal_ref,omitempty" db:"created_by_principal_ref"`
+	UpdatedByPrincipalRef string        `json:"updated_by_principal_ref,omitempty" db:"updated_by_principal_ref"`
+	CreatedByScopeRef     string        `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
+	UpdatedByScopeRef     string        `json:"updated_by_scope_ref,omitempty" db:"updated_by_scope_ref"`
 }
 
 // Task represents a task
 type Task struct {
-	UUID                 string     `json:"uuid" db:"uuid"`
-	ID                   string     `json:"id" db:"id"`
-	Slug                 string     `json:"slug" db:"slug"`
-	Title                string     `json:"title" db:"title"`
-	ProjectUUID          string     `json:"project_uuid" db:"project_uuid"`
-	RequestedByProjectID *string    `json:"requested_by_project_id,omitempty" db:"requested_by_project_id"`
-	AssignedProjectID    *string    `json:"assigned_project_id,omitempty" db:"assigned_project_id"`
-	State                string     `json:"state" db:"state"`       // idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted
-	Priority             int        `json:"priority" db:"priority"` // 1-4, 1 is highest
-	Kind                 TaskKind   `json:"kind" db:"kind"`         // task, subtask, spike, bug, chore
-	ParentTaskUUID       *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
-	AssigneeActorUUID    *string    `json:"assignee_actor_uuid,omitempty" db:"assignee_actor_uuid"`
-	AcknowledgedAt       *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
-	Resolution           *string    `json:"resolution,omitempty" db:"resolution"`
-	CPProjectID          *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
-	CPWorkItemID         *string    `json:"cp_work_item_id,omitempty" db:"cp_work_item_id"`
-	CPRunID              *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
-	CPSessionID          *string    `json:"session_id,omitempty" db:"cp_session_id"`
-	SDKSessionID         *string    `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null
-	RunStatus            *string    `json:"run_status,omitempty" db:"run_status"`
-	WorkflowPreset       *string    `json:"workflow_preset,omitempty" db:"workflow_preset"`
-	PresetVersion        *int       `json:"preset_version,omitempty" db:"preset_version"`
-	Phase                *string    `json:"phase,omitempty" db:"phase"`
-	RiskClass            *string    `json:"risk_class,omitempty" db:"risk_class"`
-	StartAt              *time.Time `json:"start_at,omitempty" db:"start_at"`
-	DueAt                *time.Time `json:"due_at,omitempty" db:"due_at"`
-	Labels               *string    `json:"labels,omitempty" db:"labels"` // JSON array
-	Meta                 *string    `json:"meta,omitempty" db:"meta"`     // JSON object
-	Description          string     `json:"description" db:"description"`
-	Specification        string     `json:"specification" db:"specification"`
-	ETag                 int64      `json:"etag" db:"etag"`
-	CreatedAt            time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at" db:"updated_at"`
-	CompletedAt          *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-	ArchivedAt           *time.Time `json:"archived_at,omitempty" db:"archived_at"`
-	DeletedAt            *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
-	CreatedByActorUUID   string     `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
-	UpdatedByActorUUID   string     `json:"updated_by_actor_uuid" db:"updated_by_actor_uuid"`
+	UUID                  string     `json:"uuid" db:"uuid"`
+	ID                    string     `json:"id" db:"id"`
+	Slug                  string     `json:"slug" db:"slug"`
+	Title                 string     `json:"title" db:"title"`
+	ProjectUUID           string     `json:"project_uuid" db:"project_uuid"`
+	RequestedByProjectID  *string    `json:"requested_by_project_id,omitempty" db:"requested_by_project_id"`
+	AssignedProjectID     *string    `json:"assigned_project_id,omitempty" db:"assigned_project_id"`
+	State                 string     `json:"state" db:"state"`       // idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted
+	Priority              int        `json:"priority" db:"priority"` // 1-4, 1 is highest
+	Kind                  TaskKind   `json:"kind" db:"kind"`         // task, subtask, spike, bug, chore
+	ParentTaskUUID        *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
+	AssigneeActorUUID     *string    `json:"assignee_actor_uuid,omitempty" db:"assignee_actor_uuid"`
+	AssigneePrincipalRef  *string    `json:"assignee_principal_ref,omitempty" db:"assignee_principal_ref"`
+	AcknowledgedAt        *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
+	Resolution            *string    `json:"resolution,omitempty" db:"resolution"`
+	CPProjectID           *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
+	CPWorkItemID          *string    `json:"cp_work_item_id,omitempty" db:"cp_work_item_id"`
+	CPRunID               *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
+	CPSessionID           *string    `json:"session_id,omitempty" db:"cp_session_id"`
+	SDKSessionID          *string    `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null
+	RunStatus             *string    `json:"run_status,omitempty" db:"run_status"`
+	WorkflowPreset        *string    `json:"workflow_preset,omitempty" db:"workflow_preset"`
+	PresetVersion         *int       `json:"preset_version,omitempty" db:"preset_version"`
+	Phase                 *string    `json:"phase,omitempty" db:"phase"`
+	RiskClass             *string    `json:"risk_class,omitempty" db:"risk_class"`
+	StartAt               *time.Time `json:"start_at,omitempty" db:"start_at"`
+	DueAt                 *time.Time `json:"due_at,omitempty" db:"due_at"`
+	Labels                *string    `json:"labels,omitempty" db:"labels"` // JSON array
+	Meta                  *string    `json:"meta,omitempty" db:"meta"`     // JSON object
+	Description           string     `json:"description" db:"description"`
+	Specification         string     `json:"specification" db:"specification"`
+	ETag                  int64      `json:"etag" db:"etag"`
+	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+	CompletedAt           *time.Time `json:"completed_at,omitempty" db:"completed_at"`
+	ArchivedAt            *time.Time `json:"archived_at,omitempty" db:"archived_at"`
+	DeletedAt             *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
+	CreatedByActorUUID    string     `json:"created_by_actor_uuid,omitempty" db:"created_by_actor_uuid"`
+	UpdatedByActorUUID    string     `json:"updated_by_actor_uuid,omitempty" db:"updated_by_actor_uuid"`
+	CreatedByPrincipalRef string     `json:"created_by_principal_ref,omitempty" db:"created_by_principal_ref"`
+	UpdatedByPrincipalRef string     `json:"updated_by_principal_ref,omitempty" db:"updated_by_principal_ref"`
+	DeletedByPrincipalRef *string    `json:"deleted_by_principal_ref,omitempty" db:"deleted_by_principal_ref"`
+	CreatedByScopeRef     string     `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
+	UpdatedByScopeRef     string     `json:"updated_by_scope_ref,omitempty" db:"updated_by_scope_ref"`
+	DeletedByScopeRef     *string    `json:"deleted_by_scope_ref,omitempty" db:"deleted_by_scope_ref"`
 }
 
 // Section represents a kanban column/lane in a project
@@ -178,38 +189,42 @@ type Section struct {
 
 // TaskRelation represents a dependency or relationship between tasks
 type TaskRelation struct {
-	FromTaskUUID       string           `json:"from_task_uuid" db:"from_task_uuid"`
-	ToTaskUUID         string           `json:"to_task_uuid" db:"to_task_uuid"`
-	Kind               TaskRelationKind `json:"kind" db:"kind"`
-	Meta               *string          `json:"meta,omitempty" db:"meta"` // JSON
-	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
-	CreatedByActorUUID string           `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
+	FromTaskUUID          string           `json:"from_task_uuid" db:"from_task_uuid"`
+	ToTaskUUID            string           `json:"to_task_uuid" db:"to_task_uuid"`
+	Kind                  TaskRelationKind `json:"kind" db:"kind"`
+	Meta                  *string          `json:"meta,omitempty" db:"meta"` // JSON
+	CreatedAt             time.Time        `json:"created_at" db:"created_at"`
+	CreatedByActorUUID    string           `json:"created_by_actor_uuid,omitempty" db:"created_by_actor_uuid"`
+	CreatedByPrincipalRef string           `json:"created_by_principal_ref,omitempty" db:"created_by_principal_ref"`
+	CreatedByScopeRef     string           `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
 }
 
 // TaskRoleAssignment represents an actor bound to a workflow role on a task.
 type TaskRoleAssignment struct {
-	UUID       string    `json:"uuid" db:"uuid"`
-	TaskUUID   string    `json:"task_uuid" db:"task_uuid"`
-	Role       TaskRole  `json:"role" db:"role"`
-	ActorUUID  string    `json:"actor_uuid" db:"actor_uuid"`
-	AssignedAt time.Time `json:"assigned_at" db:"assigned_at"`
+	UUID         string    `json:"uuid" db:"uuid"`
+	TaskUUID     string    `json:"task_uuid" db:"task_uuid"`
+	Role         TaskRole  `json:"role" db:"role"`
+	ActorUUID    string    `json:"actor_uuid,omitempty" db:"actor_uuid"`
+	PrincipalRef string    `json:"principal_ref,omitempty" db:"principal_ref"`
+	AssignedAt   time.Time `json:"assigned_at" db:"assigned_at"`
 }
 
 // EvidenceItem represents workflow evidence attached to a task.
 type EvidenceItem struct {
-	UUID                string    `json:"uuid" db:"uuid"`
-	ID                  string    `json:"id" db:"id"`
-	TaskUUID            string    `json:"task_uuid" db:"task_uuid"`
-	Kind                string    `json:"kind" db:"kind"`
-	Ref                 string    `json:"ref" db:"ref"`
-	ContentHash         *string   `json:"content_hash,omitempty" db:"content_hash"`
-	ProducedByActorUUID string    `json:"produced_by_actor_uuid" db:"produced_by_actor_uuid"`
-	ProducedByRole      string    `json:"produced_by_role" db:"produced_by_role"`
-	BuildID             *string   `json:"build_id,omitempty" db:"build_id"`
-	BuildVersion        *string   `json:"build_version,omitempty" db:"build_version"`
-	BuildEnv            *string   `json:"build_env,omitempty" db:"build_env"`
-	ProducedAt          time.Time `json:"produced_at" db:"produced_at"`
-	Meta                *string   `json:"meta,omitempty" db:"meta"`
+	UUID                   string    `json:"uuid" db:"uuid"`
+	ID                     string    `json:"id" db:"id"`
+	TaskUUID               string    `json:"task_uuid" db:"task_uuid"`
+	Kind                   string    `json:"kind" db:"kind"`
+	Ref                    string    `json:"ref" db:"ref"`
+	ContentHash            *string   `json:"content_hash,omitempty" db:"content_hash"`
+	ProducedByActorUUID    string    `json:"produced_by_actor_uuid,omitempty" db:"produced_by_actor_uuid"`
+	ProducedByPrincipalRef string    `json:"produced_by_principal_ref,omitempty" db:"produced_by_principal_ref"`
+	ProducedByRole         string    `json:"produced_by_role" db:"produced_by_role"`
+	BuildID                *string   `json:"build_id,omitempty" db:"build_id"`
+	BuildVersion           *string   `json:"build_version,omitempty" db:"build_version"`
+	BuildEnv               *string   `json:"build_env,omitempty" db:"build_env"`
+	ProducedAt             time.Time `json:"produced_at" db:"produced_at"`
+	Meta                   *string   `json:"meta,omitempty" db:"meta"`
 }
 
 // TaskTransition represents a workflow phase transition recorded for a task.
@@ -221,7 +236,8 @@ type TaskTransition struct {
 	ToPhase            string    `json:"to_phase" db:"to_phase"`
 	FromLifecycleState *string   `json:"from_lifecycle_state,omitempty" db:"from_lifecycle_state"`
 	ToLifecycleState   *string   `json:"to_lifecycle_state,omitempty" db:"to_lifecycle_state"`
-	ActorUUID          string    `json:"actor_uuid" db:"actor_uuid"`
+	ActorUUID          string    `json:"actor_uuid,omitempty" db:"actor_uuid"`
+	PrincipalRef       string    `json:"principal_ref,omitempty" db:"principal_ref"`
 	ActorRole          string    `json:"actor_role" db:"actor_role"`
 	EvidenceItemUUIDs  *string   `json:"evidence_item_uuids,omitempty" db:"evidence_item_uuids"`
 	TransitionedAt     time.Time `json:"transitioned_at" db:"transitioned_at"`
@@ -230,31 +246,37 @@ type TaskTransition struct {
 
 // Comment represents a comment on a task
 type Comment struct {
-	UUID               string     `json:"uuid" db:"uuid"`
-	ID                 string     `json:"id" db:"id"`
-	TaskUUID           string     `json:"task_uuid" db:"task_uuid"`
-	ActorUUID          string     `json:"actor_uuid" db:"actor_uuid"`
-	Body               string     `json:"body" db:"body"`
-	Meta               *string    `json:"meta,omitempty" db:"meta"` // JSON optional metadata for agents/tools
-	ETag               int64      `json:"etag" db:"etag"`
-	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt          *time.Time `json:"updated_at,omitempty" db:"updated_at"`                       // nullable; reserved for future editable comments
-	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`                       // nullable; soft delete timestamp
-	DeletedByActorUUID *string    `json:"deleted_by_actor_uuid,omitempty" db:"deleted_by_actor_uuid"` // nullable; actor who soft-deleted
+	UUID                  string     `json:"uuid" db:"uuid"`
+	ID                    string     `json:"id" db:"id"`
+	TaskUUID              string     `json:"task_uuid" db:"task_uuid"`
+	ActorUUID             string     `json:"actor_uuid,omitempty" db:"actor_uuid"`
+	CreatedByPrincipalRef string     `json:"created_by_principal_ref,omitempty" db:"created_by_principal_ref"`
+	CreatedByScopeRef     string     `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
+	Body                  string     `json:"body" db:"body"`
+	Meta                  *string    `json:"meta,omitempty" db:"meta"` // JSON optional metadata for agents/tools
+	ETag                  int64      `json:"etag" db:"etag"`
+	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt             *time.Time `json:"updated_at,omitempty" db:"updated_at"`                       // nullable; reserved for future editable comments
+	DeletedAt             *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`                       // nullable; soft delete timestamp
+	DeletedByActorUUID    *string    `json:"deleted_by_actor_uuid,omitempty" db:"deleted_by_actor_uuid"` // nullable; legacy actor who soft-deleted
+	DeletedByPrincipalRef *string    `json:"deleted_by_principal_ref,omitempty" db:"deleted_by_principal_ref"`
+	DeletedByScopeRef     *string    `json:"deleted_by_scope_ref,omitempty" db:"deleted_by_scope_ref"`
 }
 
 // Attachment represents a file attachment
 type Attachment struct {
-	UUID               string    `json:"uuid" db:"uuid"`
-	ID                 string    `json:"id" db:"id"`
-	TaskUUID           string    `json:"task_uuid" db:"task_uuid"`
-	Filename           string    `json:"filename" db:"filename"`
-	RelativePath       string    `json:"relative_path" db:"relative_path"`
-	MimeType           *string   `json:"mime_type,omitempty" db:"mime_type"`
-	SizeBytes          int64     `json:"size_bytes" db:"size_bytes"`
-	Checksum           *string   `json:"checksum,omitempty" db:"checksum"`
-	CreatedAt          time.Time `json:"created_at" db:"created_at"`
-	CreatedByActorUUID string    `json:"created_by_actor_uuid" db:"created_by_actor_uuid"`
+	UUID                  string    `json:"uuid" db:"uuid"`
+	ID                    string    `json:"id" db:"id"`
+	TaskUUID              string    `json:"task_uuid" db:"task_uuid"`
+	Filename              string    `json:"filename" db:"filename"`
+	RelativePath          string    `json:"relative_path" db:"relative_path"`
+	MimeType              *string   `json:"mime_type,omitempty" db:"mime_type"`
+	SizeBytes             int64     `json:"size_bytes" db:"size_bytes"`
+	Checksum              *string   `json:"checksum,omitempty" db:"checksum"`
+	CreatedAt             time.Time `json:"created_at" db:"created_at"`
+	CreatedByActorUUID    string    `json:"created_by_actor_uuid,omitempty" db:"created_by_actor_uuid"`
+	CreatedByPrincipalRef string    `json:"created_by_principal_ref,omitempty" db:"created_by_principal_ref"`
+	CreatedByScopeRef     string    `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
 }
 
 // Event represents an event in the event log
@@ -262,6 +284,8 @@ type Event struct {
 	ID           int64     `json:"id" db:"id"`
 	Timestamp    time.Time `json:"timestamp" db:"timestamp"`
 	ActorUUID    *string   `json:"actor_uuid,omitempty" db:"actor_uuid"`
+	PrincipalRef string    `json:"principal_ref,omitempty" db:"principal_ref"`
+	ScopeRef     string    `json:"scope_ref,omitempty" db:"scope_ref"`
 	ResourceType string    `json:"resource_type" db:"resource_type"`
 	ResourceUUID *string   `json:"resource_uuid,omitempty" db:"resource_uuid"`
 	EventType    string    `json:"event_type" db:"event_type"`

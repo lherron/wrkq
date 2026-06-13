@@ -11,13 +11,14 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bundle"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/pmezard/go-difflib/difflib"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -131,9 +132,8 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	// Resolve actor for container creation
-	// Bundle apply should attribute changes to the actor who applied the bundle
-	actorUUID, err := resolveBundleActor(database, cmd, cfg)
+	// Bundle apply attributes changes to the principal who applied the bundle.
+	attr, err := resolveBundleAttribution(database, cmd, cfg)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 	if bundleApplyContinue {
 		// Non-transactional apply (partial mode)
 		for _, containerPath := range b.Containers {
-			created, err := ensureContainer(database, actorUUID, containerPath, bundleApplyDryRun)
+			created, err := ensureContainer(database, attr, containerPath, bundleApplyDryRun)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", containerPath, err))
 				result.Success = false
@@ -153,7 +153,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, task := range b.Tasks {
-			if err := applyTaskDocumentWithDB(database, actorUUID, task, bundleApplyDryRun); err != nil {
+			if err := applyTaskDocumentWithDB(database, attr, task, bundleApplyDryRun); err != nil {
 				result.TasksFailed++
 				result.Success = false
 				if conflict := conflictFromError(err); conflict != nil {
@@ -177,7 +177,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 		ew := events.NewWriter(database.DB)
 
 		for _, containerPath := range b.Containers {
-			created, err := ensureContainerTx(tx, ew, actorUUID, containerPath, bundleApplyDryRun)
+			created, err := ensureContainerTx(tx, ew, attr, containerPath, bundleApplyDryRun)
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", containerPath, err))
 				result.Success = false
@@ -194,7 +194,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 		}
 
 		for _, task := range b.Tasks {
-			if err := applyTaskDocumentTx(tx, ew, actorUUID, task, bundleApplyDryRun); err != nil {
+			if err := applyTaskDocumentTx(tx, ew, attr, task, bundleApplyDryRun); err != nil {
 				result.TasksFailed++
 				result.Success = false
 				if conflict := conflictFromError(err); conflict != nil {
@@ -223,7 +223,7 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 	if !bundleApplyDryRun && b.Manifest.WithAttachments && result.Success {
 		attachmentsDir := filepath.Join(b.Dir, "attachments")
 		if _, err := os.Stat(attachmentsDir); err == nil {
-			attached, err := reattachFiles(cmd, cfg, attachmentsDir)
+			attached, err := reattachFiles(cmd, cfg, attachmentsDir, attr)
 			if err != nil {
 				if !bundleApplyContinue {
 					return fmt.Errorf("failed to reattach files: %w", err)
@@ -292,14 +292,14 @@ func runBundleApply(cmd *cobra.Command, args []string) error {
 }
 
 // ensureContainer creates a container hierarchy if it doesn't exist (mkdir -p)
-func ensureContainer(database *db.DB, actorUUID string, path string, dryRun bool) (bool, error) {
+func ensureContainer(database *db.DB, attr attribution.Attribution, path string, dryRun bool) (bool, error) {
 	tx, err := database.Begin()
 	if err != nil {
 		return false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	created, err := ensureContainerTx(tx, events.NewWriter(database.DB), actorUUID, path, dryRun)
+	created, err := ensureContainerTx(tx, events.NewWriter(database.DB), attr, path, dryRun)
 	if err != nil {
 		return false, err
 	}
@@ -315,7 +315,7 @@ func ensureContainer(database *db.DB, actorUUID string, path string, dryRun bool
 	return created, nil
 }
 
-func ensureContainerTx(tx *sql.Tx, ew *events.Writer, actorUUID string, path string, dryRun bool) (bool, error) {
+func ensureContainerTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, path string, dryRun bool) (bool, error) {
 	segments := paths.SplitPath(path)
 	var parentUUID *string
 	createdAny := false
@@ -349,9 +349,17 @@ func ensureContainerTx(tx *sql.Tx, ew *events.Writer, actorUUID string, path str
 
 			title := strings.ToUpper(slug[:1]) + slug[1:]
 			res, err := tx.Exec(`
-				INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
-				VALUES ('', ?, ?, ?, 'project', ?, ?)
-			`, slug, title, parentUUID, actorUUID, actorUUID)
+				INSERT INTO containers (
+					id, slug, title, parent_uuid, kind,
+					created_by_actor_uuid, updated_by_actor_uuid,
+					created_by_principal_ref, updated_by_principal_ref,
+					created_by_scope_ref, updated_by_scope_ref
+				)
+				VALUES ('', ?, ?, ?, 'project', ?, ?, ?, ?, ?, ?)
+			`, slug, title, parentUUID,
+				legacyActorBind(attr), legacyActorBind(attr),
+				attr.PrincipalRef, attr.PrincipalRef,
+				scopeBind(attr), scopeBind(attr))
 			if err != nil {
 				return createdAny, fmt.Errorf("failed to create container %s: %w", slug, err)
 			}
@@ -374,7 +382,9 @@ func ensureContainerTx(tx *sql.Tx, ew *events.Writer, actorUUID string, path str
 			payloadStr := string(payload)
 
 			if err := ew.LogEvent(tx, &domain.Event{
-				ActorUUID:    &actorUUID,
+				ActorUUID:    attr.LegacyActorUUID,
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
 				ResourceType: "container",
 				ResourceUUID: &uuid,
 				EventType:    "container.created",
@@ -391,32 +401,28 @@ func ensureContainerTx(tx *sql.Tx, ew *events.Writer, actorUUID string, path str
 	return createdAny, nil
 }
 
+func resolveBundleAttribution(database *db.DB, cmd *cobra.Command, cfg *config.Config) (attribution.Attribution, error) {
+	var resolvedScope *scope.ResolvedScope
+	if resolved, _, err := scope.Resolve(""); err == nil {
+		resolvedScope = &resolved
+	}
+	return attribution.Resolve(attribution.ResolveOptions{
+		DB:            database.DB,
+		Config:        cfg,
+		Command:       cmd,
+		ResolvedScope: resolvedScope,
+	})
+}
+
 func resolveBundleActor(database *db.DB, cmd *cobra.Command, cfg *config.Config) (string, error) {
-	actorIdentifier := cmd.Flag("as").Value.String()
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
+	attr, err := resolveBundleAttribution(database, cmd, cfg)
+	if err != nil {
+		return "", err
 	}
-	if actorIdentifier == "" {
-		return "", fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
+	if attr.LegacyActorUUID == nil || *attr.LegacyActorUUID == "" {
+		return "", fmt.Errorf("legacy actor cache not found for %s", attr.PrincipalRef)
 	}
-
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err == nil {
-		return actorUUID, nil
-	}
-
-	normalized, normErr := paths.NormalizeSlug(actorIdentifier)
-	if normErr != nil {
-		return "", fmt.Errorf("failed to resolve actor: %w", err)
-	}
-
-	actor, createErr := resolver.Create(normalized, "", "agent")
-	if createErr != nil {
-		return "", fmt.Errorf("failed to resolve actor: %w", err)
-	}
-
-	return actor.UUID, nil
+	return *attr.LegacyActorUUID, nil
 }
 
 type bundleTaskUpdate struct {
@@ -448,14 +454,14 @@ type bundleTaskCurrent struct {
 	ProjectUUID   string
 }
 
-func applyTaskDocumentWithDB(database *db.DB, actorUUID string, task *bundle.TaskDocument, dryRun bool) error {
+func applyTaskDocumentWithDB(database *db.DB, attr attribution.Attribution, task *bundle.TaskDocument, dryRun bool) error {
 	tx, err := database.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := applyTaskDocumentTx(tx, events.NewWriter(database.DB), actorUUID, task, dryRun); err != nil {
+	if err := applyTaskDocumentTx(tx, events.NewWriter(database.DB), attr, task, dryRun); err != nil {
 		return err
 	}
 
@@ -470,7 +476,7 @@ func applyTaskDocumentWithDB(database *db.DB, actorUUID string, task *bundle.Tas
 	return nil
 }
 
-func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.TaskDocument, dryRun bool) error {
+func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, task *bundle.TaskDocument, dryRun bool) error {
 	content := task.OriginalContent
 	if content == "" {
 		content = task.Description
@@ -510,7 +516,7 @@ func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *
 					return &conflictError{detail: conflict}
 				}
 			}
-			return createTaskTx(tx, ew, actorUUID, task, update, dryRun)
+			return createTaskTx(tx, ew, attr, task, update, dryRun)
 		}
 	case task.Path != "":
 		taskUUID, _, err = resolveTaskByPathTx(tx, task.Path)
@@ -518,7 +524,7 @@ func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *
 			return err
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return createTaskTx(tx, ew, actorUUID, task, update, dryRun)
+			return createTaskTx(tx, ew, attr, task, update, dryRun)
 		}
 		current, err = fetchTaskCurrentTx(tx, taskUUID)
 		if err != nil {
@@ -537,7 +543,7 @@ func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *
 		return &conflictError{detail: conflict}
 	}
 
-	return updateTaskTx(tx, ew, actorUUID, current, update, dryRun)
+	return updateTaskTx(tx, ew, attr, current, update, dryRun)
 }
 
 func parseBundleTaskContent(content string) (*bundleTaskUpdate, error) {
@@ -789,7 +795,7 @@ func resolveParentContainerTx(tx *sql.Tx, path string) (*string, string, error) 
 	return &parentUUID, slug, nil
 }
 
-func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.TaskDocument, update *bundleTaskUpdate, dryRun bool) error {
+func createTaskTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, task *bundle.TaskDocument, update *bundleTaskUpdate, dryRun bool) error {
 	if dryRun {
 		return nil
 	}
@@ -864,16 +870,28 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 		res, errIns = tx.Exec(`
 			INSERT INTO tasks (
 				uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-			) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
-		`, task.UUID, slug, title, description, specification, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
+				labels, meta, due_at, start_at,
+				created_by_actor_uuid, updated_by_actor_uuid,
+				created_by_principal_ref, updated_by_principal_ref,
+				created_by_scope_ref, updated_by_scope_ref
+			) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, task.UUID, slug, title, description, specification, projectUUID, state, priority, labels, meta, dueAt, startAt,
+			legacyActorBind(attr), legacyActorBind(attr),
+			attr.PrincipalRef, attr.PrincipalRef,
+			scopeBind(attr), scopeBind(attr))
 	} else {
 		res, errIns = tx.Exec(`
 			INSERT INTO tasks (
 				id, slug, title, description, specification, project_uuid, state, priority, kind,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid
-			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?)
-		`, slug, title, description, specification, projectUUID, state, priority, labels, meta, dueAt, startAt, actorUUID, actorUUID)
+				labels, meta, due_at, start_at,
+				created_by_actor_uuid, updated_by_actor_uuid,
+				created_by_principal_ref, updated_by_principal_ref,
+				created_by_scope_ref, updated_by_scope_ref
+			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, slug, title, description, specification, projectUUID, state, priority, labels, meta, dueAt, startAt,
+			legacyActorBind(attr), legacyActorBind(attr),
+			attr.PrincipalRef, attr.PrincipalRef,
+			scopeBind(attr), scopeBind(attr))
 	}
 	if errIns != nil {
 		return fmt.Errorf("failed to create task %s: %w", task.Path, errIns)
@@ -904,7 +922,9 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 	payloadStr := string(payloadJSON)
 
 	if err := ew.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
 		ResourceUUID: &uuid,
 		EventType:    "task.created",
@@ -918,7 +938,7 @@ func createTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, task *bundle.
 	return nil
 }
 
-func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bundleTaskCurrent, update *bundleTaskUpdate, dryRun bool) error {
+func updateTaskTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, current *bundleTaskCurrent, update *bundleTaskUpdate, dryRun bool) error {
 	fields := map[string]interface{}{}
 
 	if update.Title != nil {
@@ -970,7 +990,9 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bund
 
 	setClauses = append(setClauses, "etag = etag + 1")
 	setClauses = append(setClauses, "updated_by_actor_uuid = ?")
-	args = append(args, actorUUID)
+	setClauses = append(setClauses, "updated_by_principal_ref = ?")
+	setClauses = append(setClauses, "updated_by_scope_ref = ?")
+	args = append(args, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
 	args = append(args, current.UUID)
 
 	query := fmt.Sprintf("UPDATE tasks SET %s WHERE uuid = ?", strings.Join(setClauses, ", "))
@@ -983,7 +1005,9 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bund
 	payloadStr := string(payloadJSON)
 
 	if err := ew.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
 		ResourceUUID: &current.UUID,
 		EventType:    "task.updated",
@@ -994,7 +1018,7 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bund
 	}
 
 	if update.State != nil && *update.State == "deleted" {
-		if err := cascadeDeleteSubtasksTx(tx, ew, actorUUID, current.UUID); err != nil {
+		if err := cascadeDeleteSubtasksTx(tx, ew, attr, current.UUID); err != nil {
 			return err
 		}
 	}
@@ -1002,7 +1026,7 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, actorUUID string, current *bund
 	return nil
 }
 
-func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, actorUUID, parentTaskUUID string) error {
+func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
 	rows, err := tx.Query(`
 		SELECT uuid FROM tasks
 		WHERE parent_task_uuid = ? AND state != 'deleted'
@@ -1025,15 +1049,19 @@ func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, actorUUID, parentTas
 		if _, err := tx.Exec(`
 			UPDATE tasks
 			SET state = 'deleted',
-			    updated_by_actor_uuid = ?
+			    updated_by_actor_uuid = ?,
+			    updated_by_principal_ref = ?,
+			    updated_by_scope_ref = ?
 			WHERE uuid = ?
-		`, actorUUID, subtaskUUID); err != nil {
+		`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), subtaskUUID); err != nil {
 			return fmt.Errorf("failed to delete subtask %s: %w", subtaskUUID, err)
 		}
 
 		payload := `{"action":"cascade_deleted","parent_deleted":true}`
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    &actorUUID,
+			ActorUUID:    attr.LegacyActorUUID,
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
 			ResourceUUID: &subtaskUUID,
 			EventType:    "task.deleted",
@@ -1042,7 +1070,7 @@ func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, actorUUID, parentTas
 			return fmt.Errorf("failed to log subtask delete: %w", err)
 		}
 
-		if err := cascadeDeleteSubtasksTx(tx, ew, actorUUID, subtaskUUID); err != nil {
+		if err := cascadeDeleteSubtasksTx(tx, ew, attr, subtaskUUID); err != nil {
 			return err
 		}
 	}
@@ -1141,7 +1169,7 @@ func conflictFromError(err error) *applyConflict {
 }
 
 // reattachFiles re-attaches files from the bundle's attachments directory
-func reattachFiles(cmd *cobra.Command, cfg *config.Config, attachmentsDir string) (int, error) {
+func reattachFiles(cmd *cobra.Command, cfg *config.Config, attachmentsDir string, attr attribution.Attribution) (int, error) {
 	count := 0
 
 	// Walk through attachments/<task_uuid>/ directories
@@ -1175,9 +1203,11 @@ func reattachFiles(cmd *cobra.Command, cfg *config.Config, attachmentsDir string
 			attachCmd := exec.Command("wrkq", "attach", "put", "t:"+taskUUID, filePath)
 			attachCmd.Env = os.Environ()
 			attachCmd.Env = append(attachCmd.Env, "WRKQ_DB_PATH="+cfg.DBPath)
-			actorIdentifier := cfg.GetActorID()
-			if actorIdentifier != "" {
-				attachCmd.Env = append(attachCmd.Env, "WRKQ_ACTOR="+actorIdentifier)
+			if attr.PrincipalRef != "" {
+				attachCmd.Env = append(attachCmd.Env, "WRKQ_PRINCIPAL_REF="+attr.PrincipalRef)
+			}
+			if attr.ScopeRef != "" {
+				attachCmd.Env = append(attachCmd.Env, "ASP_SCOPE_REF="+attr.ScopeRef)
 			}
 
 			output, err := attachCmd.CombinedOutput()

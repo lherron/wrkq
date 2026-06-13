@@ -28,28 +28,31 @@ type handoffCreateOutput struct {
 }
 
 type handoffJSON struct {
-	UUID                    string     `json:"uuid"`
-	ID                      string     `json:"id"`
-	ScopeRef                string     `json:"scope_ref"`
-	ScopeKind               string     `json:"scope_kind"`
-	AgentID                 string     `json:"agent_id"`
-	ProjectID               string     `json:"project_id"`
-	AgentActorUUID          *string    `json:"agent_actor_uuid"`
-	ProjectContainerUUID    *string    `json:"project_container_uuid"`
-	CreatedByAgentID        string     `json:"created_by_agent_id"`
-	CreatedByActorUUID      *string    `json:"created_by_actor_uuid"`
-	Title                   string     `json:"title"`
-	Body                    string     `json:"body"`
-	Status                  string     `json:"status"`
-	IdempotencyKey          *string    `json:"idempotency_key"`
-	AcknowledgedAt          *time.Time `json:"acknowledged_at"`
-	AcknowledgedByAgentID   *string    `json:"acknowledged_by_agent_id"`
-	AcknowledgedByActorUUID *string    `json:"acknowledged_by_actor_uuid"`
-	AcknowledgementNote     *string    `json:"acknowledgement_note"`
-	Meta                    *string    `json:"meta"`
-	ETag                    int64      `json:"etag"`
-	CreatedAt               time.Time  `json:"created_at"`
-	UpdatedAt               time.Time  `json:"updated_at"`
+	UUID                       string     `json:"uuid"`
+	ID                         string     `json:"id"`
+	ScopeRef                   string     `json:"scope_ref"`
+	ScopeKind                  string     `json:"scope_kind"`
+	AgentID                    string     `json:"agent_id"`
+	ProjectID                  string     `json:"project_id"`
+	AgentActorUUID             *string    `json:"agent_actor_uuid"`
+	AgentPrincipalRef          *string    `json:"agent_principal_ref,omitempty"`
+	ProjectContainerUUID       *string    `json:"project_container_uuid"`
+	CreatedByAgentID           string     `json:"created_by_agent_id"`
+	CreatedByActorUUID         *string    `json:"created_by_actor_uuid"`
+	CreatedByPrincipalRef      string     `json:"created_by_principal_ref,omitempty"`
+	Title                      string     `json:"title"`
+	Body                       string     `json:"body"`
+	Status                     string     `json:"status"`
+	IdempotencyKey             *string    `json:"idempotency_key"`
+	AcknowledgedAt             *time.Time `json:"acknowledged_at"`
+	AcknowledgedByAgentID      *string    `json:"acknowledged_by_agent_id"`
+	AcknowledgedByActorUUID    *string    `json:"acknowledged_by_actor_uuid"`
+	AcknowledgedByPrincipalRef *string    `json:"acknowledged_by_principal_ref,omitempty"`
+	AcknowledgementNote        *string    `json:"acknowledgement_note"`
+	Meta                       *string    `json:"meta"`
+	ETag                       int64      `json:"etag"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
 }
 
 type handoffErrorOutput struct {
@@ -137,19 +140,22 @@ func runHandoffCreate(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = database.Close() }()
 
 	agentActorUUID, projectContainerUUID := lookupHandoffScopeRows(cmd.Context(), database.DB, resolved)
+	agentPrincipalRef := "agent:" + resolved.AgentID
 	args := store.CreateHandoffArgs{
-		ScopeRef:             resolved.CanonicalRef,
-		ScopeKind:            string(scope.KindProject),
-		AgentID:              resolved.AgentID,
-		ProjectID:            resolved.ProjectID,
-		CreatedByAgentID:     resolved.AgentID,
-		Title:                title,
-		Body:                 body,
-		IdempotencyKey:       idemKey,
-		Meta:                 meta,
-		AgentActorUUID:       agentActorUUID,
-		ProjectContainerUUID: projectContainerUUID,
-		CreatedByActorUUID:   agentActorUUID,
+		ScopeRef:              resolved.CanonicalRef,
+		ScopeKind:             string(scope.KindProject),
+		AgentID:               resolved.AgentID,
+		ProjectID:             resolved.ProjectID,
+		CreatedByAgentID:      resolved.AgentID,
+		Title:                 title,
+		Body:                  body,
+		IdempotencyKey:        idemKey,
+		Meta:                  meta,
+		AgentActorUUID:        agentActorUUID,
+		AgentPrincipalRef:     &agentPrincipalRef,
+		ProjectContainerUUID:  projectContainerUUID,
+		CreatedByActorUUID:    agentActorUUID,
+		CreatedByPrincipalRef: agentPrincipalRef,
 	}
 
 	var result store.CreateHandoffResult
@@ -317,24 +323,26 @@ func projectedHandoff(ctx context.Context, db *sql.DB, args store.CreateHandoffA
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	return store.Handoff{
-		UUID:                 uuid.New().String(),
-		ID:                   nextID,
-		ScopeRef:             args.ScopeRef,
-		ScopeKind:            args.ScopeKind,
-		AgentID:              args.AgentID,
-		ProjectID:            args.ProjectID,
-		AgentActorUUID:       args.AgentActorUUID,
-		ProjectContainerUUID: args.ProjectContainerUUID,
-		CreatedByAgentID:     args.CreatedByAgentID,
-		CreatedByActorUUID:   args.CreatedByActorUUID,
-		Title:                args.Title,
-		Body:                 args.Body,
-		Status:               store.HandoffStatusPending,
-		IdempotencyKey:       args.IdempotencyKey,
-		Meta:                 args.Meta,
-		ETag:                 1,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+		UUID:                  uuid.New().String(),
+		ID:                    nextID,
+		ScopeRef:              args.ScopeRef,
+		ScopeKind:             args.ScopeKind,
+		AgentID:               args.AgentID,
+		ProjectID:             args.ProjectID,
+		AgentActorUUID:        args.AgentActorUUID,
+		AgentPrincipalRef:     args.AgentPrincipalRef,
+		ProjectContainerUUID:  args.ProjectContainerUUID,
+		CreatedByAgentID:      args.CreatedByAgentID,
+		CreatedByActorUUID:    args.CreatedByActorUUID,
+		CreatedByPrincipalRef: args.CreatedByPrincipalRef,
+		Title:                 args.Title,
+		Body:                  args.Body,
+		Status:                store.HandoffStatusPending,
+		IdempotencyKey:        args.IdempotencyKey,
+		Meta:                  args.Meta,
+		ETag:                  1,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 }
 
@@ -393,27 +401,30 @@ func writeHandoffCreateError(stderr io.Writer, mode handoffOutputMode, exitCode 
 
 func toHandoffJSON(h store.Handoff) handoffJSON {
 	return handoffJSON{
-		UUID:                    h.UUID,
-		ID:                      h.ID,
-		ScopeRef:                h.ScopeRef,
-		ScopeKind:               h.ScopeKind,
-		AgentID:                 h.AgentID,
-		ProjectID:               h.ProjectID,
-		AgentActorUUID:          h.AgentActorUUID,
-		ProjectContainerUUID:    h.ProjectContainerUUID,
-		CreatedByAgentID:        h.CreatedByAgentID,
-		CreatedByActorUUID:      h.CreatedByActorUUID,
-		Title:                   h.Title,
-		Body:                    h.Body,
-		Status:                  h.Status,
-		IdempotencyKey:          h.IdempotencyKey,
-		AcknowledgedAt:          h.AcknowledgedAt,
-		AcknowledgedByAgentID:   h.AcknowledgedByAgentID,
-		AcknowledgedByActorUUID: h.AcknowledgedByActorUUID,
-		AcknowledgementNote:     h.AcknowledgementNote,
-		Meta:                    h.Meta,
-		ETag:                    h.ETag,
-		CreatedAt:               h.CreatedAt,
-		UpdatedAt:               h.UpdatedAt,
+		UUID:                       h.UUID,
+		ID:                         h.ID,
+		ScopeRef:                   h.ScopeRef,
+		ScopeKind:                  h.ScopeKind,
+		AgentID:                    h.AgentID,
+		ProjectID:                  h.ProjectID,
+		AgentActorUUID:             h.AgentActorUUID,
+		AgentPrincipalRef:          h.AgentPrincipalRef,
+		ProjectContainerUUID:       h.ProjectContainerUUID,
+		CreatedByAgentID:           h.CreatedByAgentID,
+		CreatedByActorUUID:         h.CreatedByActorUUID,
+		CreatedByPrincipalRef:      h.CreatedByPrincipalRef,
+		Title:                      h.Title,
+		Body:                       h.Body,
+		Status:                     h.Status,
+		IdempotencyKey:             h.IdempotencyKey,
+		AcknowledgedAt:             h.AcknowledgedAt,
+		AcknowledgedByAgentID:      h.AcknowledgedByAgentID,
+		AcknowledgedByActorUUID:    h.AcknowledgedByActorUUID,
+		AcknowledgedByPrincipalRef: h.AcknowledgedByPrincipalRef,
+		AcknowledgementNote:        h.AcknowledgementNote,
+		Meta:                       h.Meta,
+		ETag:                       h.ETag,
+		CreatedAt:                  h.CreatedAt,
+		UpdatedAt:                  h.UpdatedAt,
 	}
 }

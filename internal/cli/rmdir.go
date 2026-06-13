@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
@@ -37,12 +38,12 @@ func init() {
 
 func runRmdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 	args = applyProjectRootToPaths(app.Config, args, false)
 
 	// Process each path
 	for _, path := range args {
-		if err := removeContainer(cmd, database, actorUUID, path); err != nil {
+		if err := removeContainerWithAttribution(cmd, database, attr, path); err != nil {
 			return err
 		}
 	}
@@ -51,6 +52,10 @@ func runRmdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 }
 
 func removeContainer(cmd *cobra.Command, database *db.DB, actorUUID, path string) error {
+	return removeContainerWithAttribution(cmd, database, attributionFromLegacyActor(actorUUID), path)
+}
+
+func removeContainerWithAttribution(cmd *cobra.Command, database *db.DB, attr attribution.Attribution, path string) error {
 	// Resolve container path or ID to UUID
 	containerUUID, id, err := selectors.ResolveContainer(database, path)
 	if err != nil {
@@ -142,7 +147,9 @@ func removeContainer(cmd *cobra.Command, database *db.DB, actorUUID, path string
 	payload := fmt.Sprintf(`{"slug":"%s","path":"%s","force":%t}`, slug, path, rmdirForce)
 	payloadStr := payload
 	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    &actorUUID,
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
 		ResourceType: "container",
 		ResourceUUID: &containerUUID,
 		EventType:    "container.deleted",

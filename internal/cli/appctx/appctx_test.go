@@ -3,6 +3,7 @@ package appctx
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -129,6 +130,8 @@ func TestBootstrap_DBFlagOverride(t *testing.T) {
 }
 
 func TestBootstrap_WithActor(t *testing.T) {
+	clearAttributionEnv(t)
+
 	// Create temp directory for test database
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -152,10 +155,8 @@ func TestBootstrap_WithActor(t *testing.T) {
 	_ = database.Close()
 
 	// Set environment for test
-	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-actor")
-	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	t.Setenv("WRKQ_DB_PATH", dbPath)
+	t.Setenv("WRKQ_ACTOR", "test-actor")
 
 	// Create a test command
 	cmd := &cobra.Command{}
@@ -175,9 +176,60 @@ func TestBootstrap_WithActor(t *testing.T) {
 	if app.ActorID != "A-00001" {
 		t.Errorf("ActorID should be 'A-00001', got %q", app.ActorID)
 	}
+	if app.PrincipalRef != "agent:test-actor" {
+		t.Errorf("PrincipalRef should be 'agent:test-actor', got %q", app.PrincipalRef)
+	}
 }
 
-func TestBootstrap_ActorNotConfigured(t *testing.T) {
+func TestBootstrap_WithScopeOnlyAttribution(t *testing.T) {
+	clearAttributionEnv(t)
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
+	}
+	_ = database.Close()
+
+	oldCwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldCwd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	t.Setenv("WRKQ_DB_PATH", dbPath)
+	t.Setenv("ASP_SCOPE_REF", "agent:scope-cody:project:wrkq:task:primary")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("db", "", "Database path")
+	cmd.Flags().String("as", "", "Principal")
+	cmd.Flags().String("scope", "", "Scope")
+
+	app, err := Bootstrap(cmd, WithActor())
+	if err != nil {
+		t.Fatalf("Bootstrap failed: %v", err)
+	}
+	defer app.Close()
+
+	if app.PrincipalRef != "agent:scope-cody" {
+		t.Errorf("PrincipalRef should be derived from scope, got %q", app.PrincipalRef)
+	}
+	if app.ScopeRef != "agent:scope-cody:project:wrkq:task:primary" {
+		t.Errorf("ScopeRef should preserve full scope, got %q", app.ScopeRef)
+	}
+	if app.ActorUUID != "" {
+		t.Errorf("ActorUUID should not gate scope-only attribution, got %q", app.ActorUUID)
+	}
+}
+
+func TestBootstrap_PrincipalNotConfigured(t *testing.T) {
+	clearAttributionEnv(t)
+
 	// Create temp directory for test database
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -199,11 +251,8 @@ func TestBootstrap_ActorNotConfigured(t *testing.T) {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
-	// Set DB path but NOT actor
-	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Unsetenv("WRKQ_ACTOR")
-	_ = os.Unsetenv("WRKQ_ACTOR_ID")
-	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
+	// Set DB path but NOT actor/principal/scope.
+	t.Setenv("WRKQ_DB_PATH", dbPath)
 
 	// Create a test command
 	cmd := &cobra.Command{}
@@ -213,11 +262,11 @@ func TestBootstrap_ActorNotConfigured(t *testing.T) {
 	// Bootstrap with actor should fail
 	_, err = Bootstrap(cmd, WithActor())
 	if err == nil {
-		t.Fatal("Expected error when actor is not configured")
+		t.Fatal("Expected error when principal is not configured")
 	}
 
-	expectedMsg := "no actor configured"
-	if !containsSubstring(err.Error(), expectedMsg) {
+	expectedMsg := "no principal configured"
+	if !strings.Contains(err.Error(), expectedMsg) {
 		t.Errorf("Error message should contain %q, got %q", expectedMsg, err.Error())
 	}
 }
@@ -249,15 +298,17 @@ func TestApp_Close_Multiple(t *testing.T) {
 	app.Close() // Should not panic
 }
 
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstringHelper(s, substr))
-}
-
-func containsSubstringHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func clearAttributionEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"WRKQ_PRINCIPAL_REF",
+		"WRKQ_ACTOR",
+		"WRKQ_ACTOR_ID",
+		"ASP_SCOPE_REF",
+		"ASP_HANDLE",
+		"ASP_AGENT_ID",
+		"ASP_PROJECT",
+	} {
+		t.Setenv(key, "")
 	}
-	return false
 }

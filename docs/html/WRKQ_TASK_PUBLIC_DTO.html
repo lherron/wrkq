@@ -1,0 +1,1277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wrkq Task Public DTO Contract</title>
+    <style>
+:root {
+  --paper: #fafaf7;
+  --ink: #151515;
+  --muted: #5f6567;
+  --quiet: #8b9190;
+  --line: #d6dbd9;
+  --line-strong: #aeb8b6;
+  --panel: #ffffff;
+  --domain-a: #b1281e;
+  --domain-a-soft: #ffe8e4;
+  --domain-b: #007274;
+  --domain-b-soft: #dff5f2;
+  --domain-c: #a06d00;
+  --domain-c-soft: #fff2c9;
+  --domain-d: #5b5f97;
+  --domain-d-soft: #ededff;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(90deg, rgba(21, 21, 21, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(0deg, rgba(21, 21, 21, 0.026) 1px, transparent 1px) 0 0 / 28px 28px,
+    var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+a {
+  color: var(--domain-b);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
+
+.page {
+  display: grid;
+  grid-template-columns: 292px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: rgba(250, 250, 247, 0.94);
+  backdrop-filter: blur(14px);
+  padding: 28px 20px;
+}
+
+.brand {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 26px;
+}
+
+.brand-kicker {
+  color: var(--domain-a);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brand-title {
+  font-family: var(--serif);
+  font-size: 29px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.brand-subtitle,
+.sidebar-note,
+.section-intro,
+.minor,
+.source-note {
+  color: var(--muted);
+}
+
+.brand-subtitle,
+.sidebar-note {
+  font-size: 13px;
+}
+
+.nav {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 28px;
+}
+
+.nav a {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 10px 11px;
+  text-decoration: none;
+}
+
+.nav a:hover,
+.nav a:focus {
+  border-color: var(--line-strong);
+  background: var(--panel);
+}
+
+.sidebar-note {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+main {
+  min-width: 0;
+}
+
+.content {
+  width: min(1220px, calc(100vw - 292px));
+  max-width: 100%;
+  padding: 42px 48px 76px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.48fr);
+  gap: 28px;
+  align-items: stretch;
+  margin-bottom: 28px;
+}
+
+.hero-copy {
+  border-top: 10px solid var(--domain-a);
+  padding-top: 26px;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: 0;
+}
+
+h1 {
+  font-family: var(--serif);
+  font-size: clamp(42px, 5.6vw, 68px);
+  line-height: 0.95;
+  margin: 0 0 18px;
+  max-width: 900px;
+}
+
+h2 {
+  align-items: end;
+  border-top: 2px solid var(--ink);
+  display: flex;
+  font-family: var(--serif);
+  font-size: clamp(30px, 4vw, 45px);
+  gap: 14px;
+  line-height: 1;
+  margin: 44px 0 20px;
+  padding-top: 18px;
+}
+
+h2 .section-num {
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h3 {
+  font-family: var(--serif);
+  font-size: 23px;
+  line-height: 1.12;
+  margin: 0 0 10px;
+}
+
+p {
+  margin: 0 0 14px;
+}
+
+.lead {
+  color: #323637;
+  font-family: var(--serif);
+  font-size: clamp(21px, 2.4vw, 28px);
+  line-height: 1.2;
+  max-width: 860px;
+}
+
+.hero-board,
+.panel,
+.callout,
+.contract-object {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.hero-board {
+  border-top: 10px solid var(--domain-b);
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.route-card {
+  padding: 19px 20px;
+}
+
+.route-card + .route-card {
+  border-top: 1px solid var(--line);
+}
+
+.route-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.route-title {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.08;
+  margin-bottom: 7px;
+}
+
+.route-copy {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inline-code {
+  background: rgba(0, 0, 0, 0.055);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  padding: 0.04em 0.3em;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.panel,
+.callout {
+  overflow: auto;
+  padding: 20px;
+}
+
+.panel {
+  border-top: 10px solid var(--line-strong);
+  box-shadow: 0 8px 22px rgba(27, 31, 33, 0.045);
+}
+
+.callout {
+  border-left: 8px solid var(--domain-a);
+  margin: 22px 0;
+}
+
+.callout strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.badge {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 7px 9px;
+  text-transform: uppercase;
+}
+
+.badge.domain-a,
+.badge.compiler,
+.badge.api {
+  background: var(--domain-a-soft);
+  color: var(--domain-a);
+}
+
+.badge.domain-b,
+.badge.control,
+.badge.client {
+  background: var(--domain-b-soft);
+  color: var(--domain-b);
+}
+
+.badge.domain-c,
+.badge.broker,
+.badge.server {
+  background: var(--domain-c-soft);
+  color: var(--domain-c);
+}
+
+.badge.domain-d,
+.badge.runtime,
+.badge.event {
+  background: var(--domain-d-soft);
+  color: var(--domain-d);
+}
+
+.method-ledger {
+  border-top: 1px solid var(--line);
+  display: grid;
+}
+
+.method-row {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(170px, 0.7fr) minmax(190px, 0.8fr) minmax(0, 1.2fr);
+  min-width: 0;
+  padding: 15px 18px;
+}
+
+.method-row.two-col {
+  grid-template-columns: minmax(190px, 0.7fr) minmax(0, 1.3fr);
+}
+
+.method-row.four-col {
+  grid-template-columns: minmax(160px, 0.7fr) minmax(170px, 0.72fr) minmax(170px, 0.72fr) minmax(0, 1.25fr);
+}
+
+.method-row > * {
+  min-width: 0;
+}
+
+.method-row + .method-row {
+  border-top: 1px solid var(--line);
+}
+
+.method-row:hover {
+  background: rgba(var(--contract-accent-rgb), 0.045);
+}
+
+.method-row.header {
+  background: linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.075), transparent 52%);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.method-name {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.method-copy {
+  color: #333839;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.contract-pair {
+  display: grid;
+  gap: 6px;
+}
+
+.pair-line {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+.pair-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  padding-top: 2px;
+  text-transform: uppercase;
+}
+
+.contract-object {
+  --contract-accent: var(--domain-b);
+  --contract-accent-rgb: 0, 114, 116;
+  box-shadow: 0 8px 22px rgba(27, 31, 33, 0.055);
+  margin-top: 28px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.contract-object.domain-a,
+.contract-object.compiler,
+.contract-object.api {
+  --contract-accent: var(--domain-a);
+  --contract-accent-rgb: 177, 40, 30;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.domain-b,
+.contract-object.control,
+.contract-object.client {
+  --contract-accent: var(--domain-b);
+  --contract-accent-rgb: 0, 114, 116;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.domain-c,
+.contract-object.broker,
+.contract-object.server {
+  --contract-accent: var(--domain-c);
+  --contract-accent-rgb: 160, 109, 0;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object.domain-d,
+.contract-object.runtime,
+.contract-object.event {
+  --contract-accent: var(--domain-d);
+  --contract-accent-rgb: 91, 95, 151;
+  border-top: 10px solid var(--contract-accent);
+}
+
+.contract-object-head {
+  align-items: start;
+  background:
+    linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.055), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #fbfcfa 100%);
+  display: grid;
+  gap: 28px;
+  grid-template-columns: minmax(0, 0.72fr) minmax(190px, 0.28fr);
+  min-height: 128px;
+  padding: 30px 28px 28px;
+}
+
+.contract-object-head > div:first-child {
+  max-width: 760px;
+}
+
+.contract-object-head .badge {
+  margin-bottom: 14px;
+}
+
+.contract-object-head p {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 760px;
+}
+
+.object-chip-row {
+  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.code-panel {
+  background:
+    linear-gradient(90deg, rgba(var(--contract-accent-rgb), 0.075) 0 54px, transparent 54px),
+    linear-gradient(180deg, #fffdf7 0%, #f8fbfa 100%);
+  border-top: 1px solid var(--line);
+  color: #18201f;
+  overflow: visible;
+  padding: 0;
+}
+
+.contract-object .code-panel pre {
+  font-size: 13px;
+  line-height: 1.52;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
+  white-space: normal;
+}
+
+.contract-object .code-panel code {
+  display: block;
+}
+
+.schema-line {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-width: 0;
+  padding: 2px 18px 2px 0;
+}
+
+.schema-line:hover {
+  background: rgba(var(--contract-accent-rgb), 0.06);
+}
+
+.schema-line-no {
+  color: #8c9a98;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding-top: 1px;
+  text-align: right;
+  user-select: none;
+}
+
+.schema-code {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(330px, 0.92fr) minmax(260px, 1.08fr);
+  min-width: 0;
+}
+
+.schema-code.no-comment {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.schema-code-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.schema-code.has-comment .schema-code-text {
+  padding-right: 4px;
+}
+
+.schema-comment {
+  border-left: 2px solid rgba(0, 114, 116, 0.18);
+  color: #5f6d68;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.45;
+  min-width: 0;
+  padding-left: 12px;
+  white-space: normal;
+}
+
+.schema-comment strong {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.schema-comment.block-comment {
+  border-left-color: rgba(177, 40, 30, 0.72);
+  color: #7e2d28;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.comment-marker {
+  color: #9bacaa;
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 800;
+  margin-right: 8px;
+}
+
+.syntax-field {
+  color: var(--domain-b);
+  font-weight: 800;
+}
+
+.syntax-keyword {
+  color: var(--domain-a);
+  font-weight: 800;
+}
+
+.syntax-string {
+  color: #8b5d00;
+  font-weight: 700;
+}
+
+.syntax-comment {
+  color: #5f6d68;
+}
+
+.contract-legend {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 18px;
+}
+
+.legend-item {
+  align-items: center;
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 11px;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 9px;
+  width: 9px;
+}
+
+.legend-swatch.field {
+  background: var(--domain-b);
+}
+
+.legend-swatch.comment {
+  background: #7f918d;
+}
+
+.legend-swatch.type {
+  background: var(--domain-a);
+}
+
+.legend-swatch.literal {
+  background: var(--domain-c);
+}
+
+.source-note {
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  padding: 12px 18px;
+}
+
+.footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 48px;
+  padding-top: 18px;
+}
+
+@media (max-width: 900px) {
+  .page {
+    display: block;
+  }
+
+  .sidebar {
+    height: auto;
+    position: relative;
+  }
+
+  .content {
+    width: 100%;
+    padding: 28px 18px 56px;
+  }
+
+  .hero,
+  .grid.two,
+  .grid.three,
+  .contract-object-head {
+    grid-template-columns: 1fr;
+  }
+
+  .schema-line {
+    gap: 9px;
+    grid-template-columns: 32px minmax(0, 1fr);
+    padding-right: 12px;
+  }
+
+  .schema-code {
+    gap: 5px;
+    grid-template-columns: 1fr;
+  }
+
+  .schema-comment {
+    border-left: 2px solid rgba(0, 114, 116, 0.2);
+    margin-left: 1.5ch;
+    padding-left: 10px;
+  }
+
+  .method-row,
+  .method-row.two-col,
+  .method-row.four-col {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 13px 16px;
+  }
+
+  .pair-line {
+    grid-template-columns: 1fr;
+    gap: 1px;
+  }
+
+  .method-row.header {
+    display: none;
+  }
+
+  .object-chip-row {
+    justify-content: flex-start;
+  }
+}
+
+      .callout-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+      .callout-list li { border-left: 3px solid var(--domain-b); padding-left: 12px; color: var(--muted); }
+      .source-list { display: grid; gap: 8px; margin: 0; padding-left: 18px; }
+      .contract-object.deprecated { border-top: 6px solid var(--domain-c); }
+      .contract-object.public { border-top: 6px solid var(--domain-b); }
+      .contract-object.persistence { border-top: 6px solid var(--domain-a); }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <aside class="sidebar" aria-label="Document navigation">
+        <div class="brand">
+          <div class="brand-kicker">wrkq contract</div>
+          <div class="brand-title">Task DTO</div>
+          <div class="brand-subtitle">Public task data object, compatibility fields, and read decorators.</div>
+        </div>
+        <nav class="nav" aria-label="Sections">
+          <a href="#overview">Overview</a>
+          <a href="#surfaces">Surfaces</a>
+          <a href="#task">Task DTO</a>
+          <a href="#scalars">Scalars</a>
+          <a href="#deprecated">Deprecated</a>
+          <a href="#sources">Sources</a>
+        </nav>
+        <p class="sidebar-note">Field names follow JSON tags and public read structs. Deprecated persistence fields are shown separately when they are not serialized.</p>
+      </aside>
+
+      <main>
+        <div class="content">
+          <section class="hero" id="overview" aria-labelledby="title">
+            <div class="hero-copy">
+              <div class="eyebrow">Go source -> JSON DTO -> CLI and daemon reads</div>
+              <h1 id="title">wrkq Task Public DTO Contract</h1>
+              <p class="lead">The canonical task object is the JSON projection of <span class="inline-code">domain.Task</span>; public read commands add path, display, comment, and relation decorators around that persisted shape.</p>
+            </div>
+            <div class="hero-board" aria-label="Contract route summary">
+              <div class="route-card">
+                <div class="route-label">First read surface</div>
+                <div class="route-title">porcelain-rendered fields</div>
+                <div class="route-copy">Resolved paths, artifact dirs, display handles, comments, and relations are shown before raw persistence fields.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">Source of truth</div>
+                <div class="route-title">internal/domain.Task</div>
+                <div class="route-copy">JSON tags define the persisted task DTO field names and omit rules.</div>
+              </div>
+              <div class="route-card">
+                <div class="route-label">Compatibility</div>
+                <div class="route-title">legacy actor + SDK session</div>
+                <div class="route-copy">Actor UUID caches still serialize when populated; <span class="inline-code">sdk_session_id</span> is retained only in storage and views.</div>
+              </div>
+            </div>
+          </section>
+
+          <section id="surfaces" aria-labelledby="surfaces-title">
+            <h2 id="surfaces-title"><span class="section-num">01</span> Public Surfaces</h2>
+            <p class="section-intro">The object below separates the canonical persisted JSON contract from read-only enrichment so callers can tell stable storage fields from convenience projections.</p>
+
+            <article class="contract-object api" id="surface-ledger">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge api">Ledger</span>
+                  <h3>Task object surfaces</h3>
+                  <p>Where the fields are produced, serialized, or expanded.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge control">domain</span>
+                  <span class="badge runtime">cli</span>
+                  <span class="badge server">daemon</span>
+                </div>
+              </div>
+              <div class="method-ledger">
+                <div class="method-row header">
+                  <span>Surface</span>
+                  <span>Contract</span>
+                  <span>Purpose</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">wrkq cat --json / wrkqd</span>
+                  <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">result</span><span>Task</span></span></span>
+                  <span class="method-copy">Porcelain-facing task DTO with read-rendered fields listed before persisted fields.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">domain.Task</span>
+                  <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">json</span><span>Task</span></span></span>
+                  <span class="method-copy">Canonical persisted task JSON shape, including current principal and scope attribution fields.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">tasks table / v_task_paths</span>
+                  <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">db</span><span>TaskDeprecatedCompatibilityFields</span></span></span>
+                  <span class="method-copy">Storage and view compatibility fields, including deprecated <span class="inline-code">sdk_session_id</span>.</span>
+                </div>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">internal/cli/daemon.go</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
+            </article>
+          </section>
+
+          <section id="task" aria-labelledby="task-title">
+            <h2 id="task-title"><span class="section-num">02</span> Task DTO</h2>
+            <p class="section-intro">The public task object starts with porcelain/read-rendered fields, then groups the persisted fields by identity, routing, lifecycle, workflow, content, created attribution, updated attribution, deletion, and deprecated compatibility.</p>
+            <article class="contract-object public" id="task-dto">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge runtime">Public DTO</span>
+                  <h3><span class="inline-code">Task</span></h3>
+                  <p>A single wrkq work item with porcelain fields first and persisted fields grouped by role.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge server">porcelain</span>
+                  <span class="badge control">identity</span>
+                  <span class="badge api">audit</span>
+                </div>
+              </div>
+              <div class="code-panel"><pre><code>type Task = { // Full public wrkq task DTO with porcelain fields first and persisted fields grouped by role.
+  // Porcelain-rendered placement and display fields
+  path?: string // Resolved container/task path from v_task_paths.
+  artifact_dir?: string // Local artifact directory derived from the task id for generated task outputs.
+  project_id?: `P-${number}` | string // Friendly id of the owning project/container.
+  parent_task_id?: `T-${number}` | string // Friendly id of the parent task when parent_task_uuid is present.
+  assignee?: string // Display handle resolved from assignee_principal_ref or &lt;strong&gt;Legacy&lt;/strong&gt; actor slug.
+  assignee_uuid?: UUIDv4String // &lt;strong&gt;Legacy&lt;/strong&gt; actor UUID alias exposed by read DTOs for local actor-backed assignments.
+  created_by?: string // Display handle resolved from created_by_principal_ref or &lt;strong&gt;Legacy&lt;/strong&gt; creator actor slug.
+  created_by_actor?: string // &lt;strong&gt;Legacy&lt;/strong&gt; creator actor slug exposed by wrkq cat --json.
+  updated_by?: string // Display handle resolved from updated_by_principal_ref or &lt;strong&gt;Legacy&lt;/strong&gt; updater actor slug.
+  blocked_by?: { // Incomplete blocking tasks included by richer CLI reads.
+    id: `T-${number}` | string // Friendly id of an incomplete blocking task.
+    state: TaskState // Lifecycle state of that blocking task.
+  }[]
+  comments?: CommentReadDTO[] // Non-deleted task comments included unless comments are explicitly excluded.
+  relations?: TaskRelationReadDTO[] // Task relations included by rich reads when relation data is loaded.
+
+  // Identity and placement fields
+  uuid: UUIDv4String // Immutable task identity used by selectors, comments, attachments, relations, events, and storage joins.
+  id: `T-${number}` | string // Human-facing task id allocated by task_seq and the tasks_ai_friendly trigger.
+  slug: Slug // Task path segment unique inside the owning project/container.
+  title: string // Human-readable task title stored directly on the task row.
+  project_uuid: UUIDv4String // Owning container UUID that places the task in the container hierarchy.
+
+  // Routing and assignment fields
+  requested_by_project_id?: string // Source project id when the task was requested from another project.
+  assigned_project_id?: string // Destination project id when cross-project routing assigns the task elsewhere.
+  parent_task_uuid?: UUIDv4String // Parent task UUID when this task is modeled as a subtask.
+  assignee_actor_uuid?: UUIDv4String // &lt;strong&gt;Legacy&lt;/strong&gt; local actor assignment cache; prefer assignee_principal_ref for canonical ownership.
+  assignee_principal_ref?: PrincipalRef // Canonical assignee principal for current agent or external-principal ownership.
+  acknowledged_at?: RFC3339Timestamp // Time a routed request or assignment was acknowledged.
+
+  // Lifecycle and schedule fields
+  state: TaskState // Current lifecycle state used for filtering, visibility, and lifecycle timestamps.
+  priority: 1 | 2 | 3 | 4 // Relative priority where 1 is highest and 4 is lowest.
+  kind: TaskKind // Work-item classification used for filtering, display, and subtask invariants.
+  resolution?: TaskResolution // Optional outcome classification such as done, duplicate, or needs_info.
+  start_at?: RFC3339Timestamp // Planned or actual start timestamp used by scheduling and planning views.
+  due_at?: RFC3339Timestamp // Due timestamp used for sorting, filtering, and planning views.
+
+  // Control-plane run fields
+  cp_project_id?: string // Control-plane project binding for async coordination.
+  cp_work_item_id?: string // Stable control-plane WorkItem binding that can survive multiple runs.
+  cp_run_id?: string // Control-plane run id for the current or latest async run.
+  session_id?: string // Public JSON field backed by the cp_session_id database column.
+  run_status?: TaskRunStatus // Current or terminal async run status tracked on the task.
+
+  // Workflow fields
+  workflow_preset?: string // Workflow preset name; must be set together with preset_version and phase or all three must be absent.
+  preset_version?: number // Workflow preset version paired with workflow_preset and phase.
+  phase?: string // Current workflow phase paired with workflow_preset and preset_version.
+  risk_class?: TaskRiskClass // Workflow risk classification when workflow metadata is active.
+
+  // Content and metadata fields
+  labels?: JSONText&lt;string[]&gt; // JSON array stored as SQLite TEXT in the domain field.
+  meta?: JSONText&lt;Record&lt;string, unknown&gt;&gt; // JSON object stored as SQLite TEXT for tool or agent metadata.
+  description: string // Main markdown task body containing context, acceptance criteria, and handoff details.
+  specification: string // Additional specification text stored separately from description.
+  etag: number // Optimistic concurrency token incremented on task mutation.
+
+  // Created fields
+  created_at: RFC3339Timestamp // Timestamp when the task row was created.
+  created_by_actor_uuid?: UUIDv4String // &lt;strong&gt;Legacy&lt;/strong&gt; local creator actor cache retained for compatibility with older actor-backed data.
+  created_by_principal_ref?: PrincipalRef // Canonical principal that created the task after external principal attribution.
+  created_by_scope_ref?: ScopeRef // Runtime scope that created the task when available.
+
+  // Updated fields
+  updated_at: RFC3339Timestamp // Timestamp touched by updates for recency and audit views.
+  updated_by_actor_uuid?: UUIDv4String // &lt;strong&gt;Legacy&lt;/strong&gt; local updater actor cache retained for compatibility with older actor-backed data.
+  updated_by_principal_ref?: PrincipalRef // Canonical principal responsible for the latest task mutation.
+  updated_by_scope_ref?: ScopeRef // Runtime scope responsible for the latest mutation when available.
+
+  // Deleted and archived fields
+  completed_at?: RFC3339Timestamp // Timestamp set when state transitions to completed.
+  archived_at?: RFC3339Timestamp // Timestamp set when state transitions to archived.
+  deleted_at?: RFC3339Timestamp // Timestamp set when state transitions to deleted and cleared on restore.
+  deleted_by_principal_ref?: PrincipalRef // Canonical principal that soft-deleted the task, cleared when restored.
+  deleted_by_scope_ref?: ScopeRef // Runtime scope that soft-deleted the task, cleared when restored.
+
+  // Deprecated compatibility fields
+  sdk_session_id?: string | null // Deprecated database-only SDK session column; domain.Task marks it json:'-' and callers should use session_id instead.
+}
+
+type CommentReadDTO = { // Minimal comment shape embedded in task read responses.
+  id: string // Friendly comment id.
+  created_at: RFC3339Timestamp // Comment creation timestamp.
+  body: string // Markdown comment body.
+  principal_ref?: PrincipalRef // Canonical comment author principal when available.
+  scope_ref?: ScopeRef // Runtime scope that created the comment when available.
+  actor_slug?: string // &lt;strong&gt;Legacy&lt;/strong&gt; author actor slug when principal attribution is unavailable.
+  actor_role?: 'human' | 'agent' | 'system' // &lt;strong&gt;Legacy&lt;/strong&gt; actor-table role for display and filtering.
+}
+
+type TaskRelationReadDTO = { // Task relation shape embedded in richer task read responses.
+  kind: 'blocks' | 'relates_to' | 'duplicates' | string // Relation kind recorded for the directed edge.
+  direction?: 'outgoing' | 'incoming' | string // Direction relative to the task being read when the caller asks for relations.
+  task_id?: `T-${number}` | string // Friendly id of the related task when loaded for display.
+  task_uuid?: UUIDv4String // Stable UUID of the related task when loaded for joins.
+  task_slug?: string // Slug of the related task when loaded for display.
+  task_title?: string // Title of the related task when loaded for display.
+  created_by_id?: string // Principal handle or &lt;strong&gt;Legacy&lt;/strong&gt; actor id that created the relation.
+}</code></pre></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">internal/cli/daemon.go</span>, <span class="inline-code">internal/db/migrations/000006_async_run_linkage.sql</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
+            </article>
+          </section>
+
+          <section id="scalars" aria-labelledby="scalars-title">
+            <h2 id="scalars-title"><span class="section-num">03</span> Scalars And Enums</h2>
+            <p class="section-intro">Shared aliases make the main DTO block easier to scan while preserving source enum literals.</p>
+            <article class="contract-object public" id="task-scalars">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge control">Types</span>
+                  <h3><span class="inline-code">TaskScalarTypes</span></h3>
+                  <p>Scalar aliases and literal unions used by the task object.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge api">validation</span>
+                  <span class="badge event">enum</span>
+                </div>
+              </div>
+              <div class="code-panel"><pre><code>type UUIDv4String = string // Lowercase UUIDv4 accepted by domain.ValidateUUID.
+type RFC3339Timestamp = string // Timestamp serialized by Go time.Time or stored as UTC ISO/RFC3339 text.
+type Slug = string // Lowercase path segment matching [a-z0-9][a-z0-9-]* with max length 255.
+type PrincipalRef = `agent:${string}` // Canonical external principal ref validated by attribution migration checks.
+type ScopeRef = string // Praesidium scope reference carried for provenance and runtime attribution.
+type JSONText&lt;T&gt; = string // SQLite TEXT containing JSON with the semantic shape T.
+type TaskState = 'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted' // Lifecycle states accepted by domain validation and task-table CHECK constraints.
+type TaskKind = 'task' | 'subtask' | 'spike' | 'bug' | 'chore' // Work-item categories accepted by domain validation.
+type TaskResolution = 'done' | 'wont_do' | 'duplicate' | 'needs_info' // Resolution values accepted when a task is closed or triaged.
+type TaskRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' // Async control-plane run statuses accepted by domain validation.
+type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted when workflow metadata is present.</code></pre></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/validation.go</span>, <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
+            </article>
+          </section>
+
+          <section id="deprecated" aria-labelledby="deprecated-title">
+            <h2 id="deprecated-title"><span class="section-num">04</span> Deprecated Compatibility Fields</h2>
+            <div class="grid two">
+              <article class="callout">
+                <h3>Public but legacy</h3>
+                <ul class="callout-list">
+                  <li><span class="inline-code">assignee_actor_uuid</span>, <span class="inline-code">created_by_actor_uuid</span>, and <span class="inline-code">updated_by_actor_uuid</span> remain visible when populated.</li>
+                  <li>Principal refs are the canonical attribution fields after migration <span class="inline-code">000026</span>.</li>
+                </ul>
+              </article>
+              <article class="callout">
+                <h3>Storage only</h3>
+                <ul class="callout-list">
+                  <li><span class="inline-code">sdk_session_id</span> is selected by store/view code but is marked <span class="inline-code">json:"-"</span> on <span class="inline-code">domain.Task</span>.</li>
+                  <li>The public replacement is <span class="inline-code">session_id</span>, backed by <span class="inline-code">cp_session_id</span>.</li>
+                </ul>
+              </article>
+            </div>
+            <article class="contract-object deprecated" id="deprecated-fields">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge event">Compatibility</span>
+                  <h3><span class="inline-code">TaskDeprecatedCompatibilityFields</span></h3>
+                  <p>Fields to understand for compatibility, migration reads, and older actor-backed data.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge event">deprecated</span>
+                  <span class="badge control">legacy</span>
+                </div>
+              </div>
+              <div class="code-panel"><pre><code>type TaskDeprecatedCompatibilityFields = { // Deprecated or &lt;strong&gt;Legacy&lt;/strong&gt; task fields retained for read compatibility and migration safety.
+  sdk_session_id?: string | null // Deprecated database-only SDK session column; domain.Task marks it json:'-' and callers should use session_id instead.
+  assignee_actor_uuid?: UUIDv4String | null // &lt;strong&gt;Legacy&lt;/strong&gt; actor UUID assignment cache still serialized by domain.Task; prefer assignee_principal_ref.
+  created_by_actor_uuid?: UUIDv4String | null // &lt;strong&gt;Legacy&lt;/strong&gt; creator actor UUID cache still serialized when non-empty; prefer created_by_principal_ref.
+  updated_by_actor_uuid?: UUIDv4String | null // &lt;strong&gt;Legacy&lt;/strong&gt; updater actor UUID cache still serialized when non-empty; prefer updated_by_principal_ref.
+}</code></pre></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span> <span class="inline-code">SDKSessionID</span>; <span class="inline-code">internal/db/migrations/000006_async_run_linkage.sql</span>; <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
+            </article>
+          </section>
+
+          <section id="sources" aria-labelledby="sources-title">
+            <h2 id="sources-title"><span class="section-num">05</span> Sources</h2>
+            <div class="grid two">
+              <article class="panel">
+                <h3>Source map</h3>
+                <ul class="source-list minor">
+                  <li><span class="inline-code">internal/domain/types.go</span> for <span class="inline-code">Task</span> JSON tags and deprecated <span class="inline-code">SDKSessionID</span>.</li>
+                  <li><span class="inline-code">internal/domain/validation.go</span> for state, priority, kind, resolution, run status, risk class, UUID, and timestamp validation.</li>
+                  <li><span class="inline-code">internal/db/migrations/000006_async_run_linkage.sql</span> for CP run/session fields and deprecated <span class="inline-code">sdk_session_id</span>.</li>
+                  <li><span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span> for canonical principal/scope attribution and legacy actor UUID cache semantics.</li>
+                  <li><span class="inline-code">internal/cli/cat.go</span> and <span class="inline-code">internal/cli/daemon.go</span> for public read decorators.</li>
+                </ul>
+              </article>
+              <article class="panel">
+                <h3>Scope notes</h3>
+                <p class="minor">This artifact is source-linked to the current worktree, which contains uncommitted principal attribution changes. It documents the public task object as implemented locally, not the older generated <span class="inline-code">WRKQ_TASK_CONTRACT.html</span> snapshot.</p>
+              </article>
+            </div>
+          </section>
+
+          <footer class="footer">Generated for wrkq task public DTO contract from current source, including deprecated compatibility fields.</footer>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      window.DTO_CONTRACT_KEYWORDS = ['Task', 'TaskState', 'TaskKind', 'TaskResolution', 'TaskRunStatus', 'TaskRiskClass', 'UUIDv4String', 'RFC3339Timestamp', 'PrincipalRef', 'ScopeRef', 'JSONText', 'CommentReadDTO', 'TaskRelationReadDTO']
+    </script>
+    <script>
+;(() => {
+  const rendererVersion = 'safe-highlighter/v2'
+
+  const escapeHtml = (value) =>
+    String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+  const allowedCommentTags = new Set(['STRONG', 'B', 'EM', 'I', 'CODE'])
+
+  const renderCommentHtml = (value) => {
+    const template = document.createElement('template')
+    template.innerHTML = String(value)
+    const sanitize = (node) => {
+      for (const child of [...node.childNodes]) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          if (!allowedCommentTags.has(child.tagName)) {
+            child.replaceWith(document.createTextNode(child.textContent || ''))
+            continue
+          }
+          for (const attr of [...child.attributes]) child.removeAttribute(attr.name)
+          sanitize(child)
+          continue
+        }
+        if (child.nodeType === Node.COMMENT_NODE) child.remove()
+      }
+    }
+    sanitize(template.content)
+    return template.innerHTML
+  }
+
+  const wrapSyntax = (className, html) => `<span class="${className}">${html}</span>`
+
+  const baseKeywords = [
+    'type',
+    'interface',
+    'export',
+    'const',
+    'extends',
+    'readonly',
+    'Promise',
+    'Record',
+    'Extract',
+    'Partial',
+    'Pick',
+    'Omit',
+    'Map',
+    'Set',
+    'List',
+    'Dict',
+    'Optional',
+    'Union',
+    'Any',
+    'unknown',
+    'null',
+    'true',
+    'false',
+  ]
+
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  const configuredKeywords = Array.isArray(window.DTO_CONTRACT_KEYWORDS)
+    ? window.DTO_CONTRACT_KEYWORDS
+    : []
+  const keywords = [...new Set([...baseKeywords, ...configuredKeywords])].filter(Boolean)
+  const keywordPattern = keywords.length
+    ? new RegExp(`\\b(${keywords.map(escapeRegExp).join('|')})\\b`, 'g')
+    : null
+
+  const findCommentIndex = (line) => {
+    let quote = null
+    let escaped = false
+    for (let index = 0; index < line.length - 1; index += 1) {
+      const char = line[index]
+      const next = line[index + 1]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (quote) {
+        if (char === quote) quote = null
+        continue
+      }
+      if (char === '"' || char === "'" || char === '`') {
+        quote = char
+        continue
+      }
+      if (char === '/' && next === '/') return index
+    }
+    return -1
+  }
+
+  const highlightPlainCode = (value) => {
+    let html = escapeHtml(value)
+    html = html.replace(
+      /\b([A-Za-z_][A-Za-z0-9_]*\??)(?=\s*:)/g,
+      '<span class="syntax-field">$1</span>'
+    )
+    if (keywordPattern) {
+      html = html.replace(keywordPattern, '<span class="syntax-keyword">$1</span>')
+    }
+    return html || '&nbsp;'
+  }
+
+  const readStringLiteral = (value, startIndex) => {
+    const quote = value[startIndex]
+    let escaped = false
+    for (let index = startIndex + 1; index < value.length; index += 1) {
+      const char = value[index]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === quote) {
+        return { literal: value.slice(startIndex, index + 1), nextIndex: index + 1 }
+      }
+    }
+    return { literal: value.slice(startIndex), nextIndex: value.length }
+  }
+
+  const highlightCode = (value) => {
+    const source = String(value)
+    const parts = []
+    let chunkStart = 0
+    let index = 0
+
+    while (index < source.length) {
+      const char = source[index]
+      if (char === "'" || char === '"' || char === '`') {
+        if (index > chunkStart) {
+          parts.push(highlightPlainCode(source.slice(chunkStart, index)))
+        }
+        const { literal, nextIndex } = readStringLiteral(source, index)
+        parts.push(wrapSyntax('syntax-string', escapeHtml(literal)))
+        index = nextIndex
+        chunkStart = nextIndex
+        continue
+      }
+      index += 1
+    }
+
+    if (chunkStart < source.length) {
+      parts.push(highlightPlainCode(source.slice(chunkStart)))
+    }
+
+    return parts.join('') || '&nbsp;'
+  }
+
+  const isBlockCommentLine = (codePart, hasComment) => {
+    if (!hasComment) return false
+    const trimmedCode = codePart.trim()
+    return (
+      trimmedCode.endsWith('{') ||
+      /^type\s+/.test(trimmedCode) ||
+      /^export\s+(interface|type)\s+/.test(trimmedCode) ||
+      /^interface\s+/.test(trimmedCode) ||
+      /^class\s+/.test(trimmedCode)
+    )
+  }
+
+  const renderLine = (line, index) => {
+    const commentIndex = findCommentIndex(line)
+    const hasComment = commentIndex >= 0
+    const codePart = hasComment ? line.slice(0, commentIndex).replace(/\s+$/, '') : line
+    const commentPart = hasComment ? line.slice(commentIndex + 2).trim() : ''
+    const codeClass = hasComment ? 'schema-code has-comment' : 'schema-code no-comment'
+    const isBlockComment = isBlockCommentLine(codePart, hasComment)
+    const commentClass = isBlockComment ? 'schema-comment block-comment' : 'schema-comment'
+    const markerHtml = isBlockComment ? '' : '<span class="comment-marker">//</span>'
+    const commentHtml = hasComment
+      ? `<span class="${commentClass}">${markerHtml}${renderCommentHtml(commentPart)}</span>`
+      : ''
+    return `<span class="schema-line"><span class="schema-line-no">${index + 1}</span><span class="${codeClass}"><span class="schema-code-text">${highlightCode(codePart)}</span>${commentHtml}</span></span>`
+  }
+
+  const legendHtml = `<div class="contract-legend" aria-label="Contract notation color legend">
+    <span class="legend-item"><span class="legend-swatch field"></span>fields</span>
+    <span class="legend-item"><span class="legend-swatch type"></span>types</span>
+    <span class="legend-item"><span class="legend-swatch literal"></span>literals</span>
+    <span class="legend-item"><span class="legend-swatch comment"></span>comments</span>
+  </div>`
+
+  document.querySelectorAll('.contract-object code').forEach((code) => {
+    if (code.dataset.highlighted === 'true') return
+    if (code.dataset.contractNoRender === 'true') return
+    const raw = code.textContent || ''
+    code.innerHTML = raw.split('\n').map(renderLine).join('')
+    code.dataset.highlighted = 'true'
+  })
+
+  document.querySelectorAll('.contract-object').forEach((object) => {
+    if (!object.querySelector('code')) return
+    if (object.querySelector('.contract-legend')) return
+    const sourceNote = object.querySelector('.source-note')
+    if (sourceNote) {
+      sourceNote.insertAdjacentHTML('beforebegin', legendHtml)
+    }
+  })
+
+  document.documentElement.dataset.dtoContractRenderer = rendererVersion
+})()
+
+    </script>
+  </body>
+</html>

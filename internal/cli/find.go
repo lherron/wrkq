@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
@@ -70,7 +70,7 @@ func init() {
 	findCmd.Flags().StringVar(&findDueBefore, "due-before", "", "Filter tasks due before date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findDueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	findCmd.Flags().StringVar(&findKind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
-	findCmd.Flags().StringVar(&findAssignee, "assignee", "", "Filter by assignee (actor slug or ID)")
+	findCmd.Flags().StringVar(&findAssignee, "assignee", "", "Filter by assignee principal ref or bare agent slug")
 	findCmd.Flags().StringVar(&findParentTask, "parent-task", "", "Filter subtasks of a specific parent task (ID or path)")
 	findCmd.Flags().StringVar(&findRequestedBy, "requested-by", "", "Filter by requester project ID")
 	findCmd.Flags().StringVar(&findAssignedProject, "assigned-project", "", "Filter by assignee project ID")
@@ -89,15 +89,14 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	args = applyProjectRootToPaths(app.Config, args, true)
 
-	// Resolve assignee to UUID if provided
-	var assigneeUUID string
+	// Normalize assignee to a principal ref if provided.
+	var assigneePrincipalRef string
 	if findAssignee != "" {
-		resolver := actors.NewResolver(database.DB)
-		uuid, err := resolver.Resolve(findAssignee)
+		principalRef, err := attribution.NormalizeCompat(findAssignee)
 		if err != nil {
 			return fmt.Errorf("failed to resolve assignee: %w", err)
 		}
-		assigneeUUID = uuid
+		assigneePrincipalRef = principalRef
 	}
 
 	// Resolve parent task to UUID if provided
@@ -125,7 +124,7 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 		dueBefore:            findDueBefore,
 		dueAfter:             findDueAfter,
 		kind:                 findKind,
-		assigneeUUID:         assigneeUUID,
+		assigneePrincipalRef: assigneePrincipalRef,
 		parentTaskUUID:       parentTaskUUID,
 		requestedByProjectID: findRequestedBy,
 		assignedProjectID:    findAssignedProject,
@@ -222,7 +221,7 @@ type findOptions struct {
 	dueBefore            string
 	dueAfter             string
 	kind                 string
-	assigneeUUID         string
+	assigneePrincipalRef string
 	parentTaskUUID       string
 	requestedByProjectID string
 	assignedProjectID    string
@@ -244,7 +243,8 @@ type findResult struct {
 	State                *string `json:"state,omitempty"`                   // tasks only
 	Priority             *int    `json:"priority,omitempty"`                // tasks only
 	Kind                 *string `json:"kind,omitempty"`                    // tasks only
-	Assignee             *string `json:"assignee,omitempty"`                // tasks only (actor slug)
+	Assignee             *string `json:"assignee,omitempty"`                // tasks only (principal display)
+	AssigneePrincipalRef *string `json:"assignee_principal_ref,omitempty"`  // tasks only
 	ParentTaskID         *string `json:"parent_task_id,omitempty"`          // subtasks only
 	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"` // tasks only
 	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`     // tasks only
@@ -323,7 +323,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 
 	query := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
-		       t.assignee_actor_uuid, t.parent_task_uuid, t.requested_by_project_id,
+		       t.assignee_principal_ref, t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
 		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at
 		FROM tasks t
@@ -351,9 +351,9 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	}
 
 	// Filter by assignee
-	if opts.assigneeUUID != "" {
-		query += " AND t.assignee_actor_uuid = ?"
-		args = append(args, opts.assigneeUUID)
+	if opts.assigneePrincipalRef != "" {
+		query += " AND t.assignee_principal_ref = ?"
+		args = append(args, opts.assigneePrincipalRef)
 	}
 
 	// Filter by parent task
@@ -467,12 +467,12 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	for rows.Next() {
 		var r findResult
 		var specification string
-		var state, kind, assigneeUUID, parentTaskUUID, dueAt sql.NullString
+		var state, kind, assigneePrincipalRef, parentTaskUUID, dueAt sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var priority sql.NullInt64
 
 		err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
-			&assigneeUUID, &parentTaskUUID, &requestedBy, &assignedProject,
+			&assigneePrincipalRef, &parentTaskUUID, &requestedBy, &assignedProject,
 			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt)
 		if err != nil {
 			return nil, false, fmt.Errorf("scan failed: %w", err)
@@ -490,12 +490,10 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 		if kind.Valid {
 			r.Kind = &kind.String
 		}
-		if assigneeUUID.Valid {
-			// Resolve assignee UUID to slug
-			var slug string
-			if err := database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", assigneeUUID.String).Scan(&slug); err == nil {
-				r.Assignee = &slug
-			}
+		if assigneePrincipalRef.Valid {
+			r.AssigneePrincipalRef = &assigneePrincipalRef.String
+			display := attribution.PrincipalHandle(assigneePrincipalRef.String)
+			r.Assignee = &display
 		}
 		if parentTaskUUID.Valid {
 			// Get parent task ID

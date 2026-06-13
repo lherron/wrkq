@@ -116,6 +116,8 @@ type logEvent struct {
 	ActorUUID    *string   `json:"actor_uuid,omitempty"`
 	ActorSlug    *string   `json:"actor_slug,omitempty"`
 	ActorID      *string   `json:"actor_id,omitempty"`
+	PrincipalRef *string   `json:"principal_ref,omitempty"`
+	ScopeRef     *string   `json:"scope_ref,omitempty"`
 	ResourceType string    `json:"resource_type"`
 	ResourceUUID string    `json:"resource_uuid"`
 	EventType    string    `json:"event_type"`
@@ -199,7 +201,8 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 	}
 
 	query := `
-		SELECT e.id, e.timestamp, e.actor_uuid, e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
+		SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
+		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
 		       a.slug as actor_slug, a.id as actor_id
 		FROM event_log e
 		LEFT JOIN actors a ON a.uuid = e.actor_uuid
@@ -257,6 +260,8 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 			&e.ID,
 			&timestampStr,
 			&e.ActorUUID,
+			&e.PrincipalRef,
+			&e.ScopeRef,
 			&e.ResourceType,
 			&e.ResourceUUID,
 			&e.EventType,
@@ -324,7 +329,9 @@ func renderEventsJSON(events []logEvent) error {
 func renderEventsOneline(events []logEvent) error {
 	for _, e := range events {
 		actor := "system"
-		if e.ActorSlug != nil {
+		if e.PrincipalRef != nil {
+			actor = *e.PrincipalRef
+		} else if e.ActorSlug != nil {
 			actor = *e.ActorSlug
 		}
 
@@ -344,9 +351,15 @@ func renderEventsDetailed(events []logEvent, showPatch bool) error {
 		fmt.Printf("\033[33mEvent %d\033[0m - %s\n", e.ID, e.EventType)
 		fmt.Printf("  Timestamp:  %s\n", e.Timestamp.Format(time.RFC3339))
 
+		if e.PrincipalRef != nil {
+			fmt.Printf("  Principal:  %s\n", *e.PrincipalRef)
+			if e.ScopeRef != nil {
+				fmt.Printf("  Scope:      %s\n", *e.ScopeRef)
+			}
+		}
 		if e.ActorSlug != nil && e.ActorID != nil {
 			fmt.Printf("  Actor:      %s (%s)\n", *e.ActorSlug, *e.ActorID)
-		} else {
+		} else if e.PrincipalRef == nil {
 			fmt.Printf("  Actor:      system\n")
 		}
 

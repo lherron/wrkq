@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
@@ -26,14 +27,17 @@ type Handoff struct {
 	ScopeRef, ScopeKind                  string
 	AgentID, ProjectID                   string
 	AgentActorUUID, ProjectContainerUUID *string
+	AgentPrincipalRef                    *string
 	CreatedByAgentID                     string
 	CreatedByActorUUID                   *string
+	CreatedByPrincipalRef                string
 	Title, Body                          string
 	Status                               string
 	IdempotencyKey                       *string
 	AcknowledgedAt                       *time.Time
 	AcknowledgedByAgentID                *string
 	AcknowledgedByActorUUID              *string
+	AcknowledgedByPrincipalRef           *string
 	AcknowledgementNote                  *string
 	Meta                                 *string
 	ETag                                 int64
@@ -48,8 +52,10 @@ type CreateHandoffArgs struct {
 	IdempotencyKey                          *string
 	Meta                                    *string
 	AgentActorUUID                          *string
+	AgentPrincipalRef                       *string
 	ProjectContainerUUID                    *string
 	CreatedByActorUUID                      *string
+	CreatedByPrincipalRef                   string
 }
 
 // CreateHandoffResult reports whether CreateHandoff inserted or replayed an idempotent request.
@@ -71,6 +77,8 @@ type AcknowledgeHandoffArgs struct {
 	Note         *string
 	ActorAgentID string
 	ActorUUID    *string
+	PrincipalRef string
+	ScopeRef     string
 	DryRun       bool
 	IfMatch      int64
 }
@@ -105,6 +113,14 @@ func CreateHandoff(ctx context.Context, tx *sql.Tx, args CreateHandoffArgs) (Cre
 	if err := validateCreateHandoffArgs(args); err != nil {
 		return CreateHandoffResult{}, err
 	}
+	agentPrincipalRef, err := handoffPrincipalRef(firstNonEmptyPtr(args.AgentPrincipalRef, args.AgentID))
+	if err != nil {
+		return CreateHandoffResult{}, err
+	}
+	createdByPrincipalRef, err := handoffPrincipalRef(firstNonEmpty(args.CreatedByPrincipalRef, args.CreatedByAgentID))
+	if err != nil {
+		return CreateHandoffResult{}, err
+	}
 
 	if args.IdempotencyKey != nil {
 		existing, found, err := getHandoffByIdempotencyKey(ctx, tx, args.ScopeRef, *args.IdempotencyKey)
@@ -137,12 +153,14 @@ func CreateHandoff(ctx context.Context, tx *sql.Tx, args CreateHandoffArgs) (Cre
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO handoffs (
 			uuid, id, scope_ref, scope_kind, agent_id, project_id,
-			agent_actor_uuid, project_container_uuid, created_by_agent_id, created_by_actor_uuid,
+			agent_actor_uuid, agent_principal_ref, project_container_uuid,
+			created_by_agent_id, created_by_actor_uuid, created_by_principal_ref,
 			title, body, status, idempotency_key, meta, etag
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 1)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 1)
 	`, handoffUUID, handoffID, args.ScopeRef, args.ScopeKind, args.AgentID, args.ProjectID,
-		args.AgentActorUUID, args.ProjectContainerUUID, args.CreatedByAgentID, args.CreatedByActorUUID,
+		args.AgentActorUUID, agentPrincipalRef, args.ProjectContainerUUID,
+		args.CreatedByAgentID, args.CreatedByActorUUID, createdByPrincipalRef,
 		args.Title, args.Body, args.IdempotencyKey, args.Meta); err != nil {
 		return CreateHandoffResult{}, fmt.Errorf("failed to insert handoff: %w", err)
 	}
@@ -151,7 +169,7 @@ func CreateHandoff(ctx context.Context, tx *sql.Tx, args CreateHandoffArgs) (Cre
 	if err != nil {
 		return CreateHandoffResult{}, err
 	}
-	if err := logHandoffEvent(ctx, tx, args.CreatedByActorUUID, handoff.UUID, "handoff.created", handoff.ETag, map[string]interface{}{
+	if err := logHandoffEvent(ctx, tx, args.CreatedByActorUUID, createdByPrincipalRef, handoff.ScopeRef, handoff.UUID, "handoff.created", handoff.ETag, map[string]interface{}{
 		"id":                  handoff.ID,
 		"scope_ref":           handoff.ScopeRef,
 		"scope_kind":          handoff.ScopeKind,
@@ -237,11 +255,16 @@ func AcknowledgeHandoff(ctx context.Context, database *db.DB, idOrUUID string, a
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
+	ackPrincipalRef, err := handoffPrincipalRef(firstNonEmpty(args.PrincipalRef, args.ActorAgentID))
+	if err != nil {
+		return Handoff{}, err
+	}
 	if args.DryRun {
 		handoff.Status = HandoffStatusAcknowledged
 		handoff.AcknowledgedAt = &now
 		handoff.AcknowledgedByAgentID = &args.ActorAgentID
 		handoff.AcknowledgedByActorUUID = args.ActorUUID
+		handoff.AcknowledgedByPrincipalRef = &ackPrincipalRef
 		handoff.AcknowledgementNote = args.Note
 		handoff.ETag++
 		handoff.UpdatedAt = now
@@ -254,11 +277,12 @@ func AcknowledgeHandoff(ctx context.Context, database *db.DB, idOrUUID string, a
 			acknowledged_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 			acknowledged_by_agent_id = ?,
 			acknowledged_by_actor_uuid = ?,
+			acknowledged_by_principal_ref = ?,
 			acknowledgement_note = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 			etag = etag + 1
 		WHERE uuid = ?
-	`, args.ActorAgentID, args.ActorUUID, args.Note, handoff.UUID); err != nil {
+	`, args.ActorAgentID, args.ActorUUID, ackPrincipalRef, args.Note, handoff.UUID); err != nil {
 		return Handoff{}, fmt.Errorf("failed to acknowledge handoff: %w", err)
 	}
 
@@ -266,7 +290,7 @@ func AcknowledgeHandoff(ctx context.Context, database *db.DB, idOrUUID string, a
 	if err != nil {
 		return Handoff{}, err
 	}
-	if err := logHandoffEvent(ctx, tx, args.ActorUUID, acknowledged.UUID, "handoff.acknowledged", acknowledged.ETag, map[string]interface{}{
+	if err := logHandoffEvent(ctx, tx, args.ActorUUID, ackPrincipalRef, args.ScopeRef, acknowledged.UUID, "handoff.acknowledged", acknowledged.ETag, map[string]interface{}{
 		"id":                       acknowledged.ID,
 		"acknowledged_by_agent_id": args.ActorAgentID,
 		"acknowledgement_note":     args.Note,
@@ -477,9 +501,11 @@ func getHandoffByUUIDTx(ctx context.Context, tx *sql.Tx, handoffUUID string) (Ha
 func handoffSelectSQL() string {
 	return `
 		SELECT uuid, id, scope_ref, scope_kind, agent_id, project_id,
-		       agent_actor_uuid, project_container_uuid, created_by_agent_id, created_by_actor_uuid,
+		       agent_actor_uuid, agent_principal_ref, project_container_uuid,
+		       created_by_agent_id, created_by_actor_uuid, created_by_principal_ref,
 		       title, body, status, idempotency_key,
-		       acknowledged_at, acknowledged_by_agent_id, acknowledged_by_actor_uuid, acknowledgement_note,
+		       acknowledged_at, acknowledged_by_agent_id, acknowledged_by_actor_uuid,
+		       acknowledged_by_principal_ref, acknowledgement_note,
 		       meta, etag, created_at, updated_at
 		FROM handoffs`
 }
@@ -490,16 +516,17 @@ type handoffScanner interface {
 
 func scanHandoff(scanner handoffScanner) (Handoff, error) {
 	var handoff Handoff
-	var agentActorUUID, projectContainerUUID, createdByActorUUID sql.NullString
-	var idempotencyKey, acknowledgedAt, acknowledgedByAgentID, acknowledgedByActorUUID, acknowledgementNote sql.NullString
+	var agentActorUUID, agentPrincipalRef, projectContainerUUID, createdByActorUUID, createdByPrincipalRef sql.NullString
+	var idempotencyKey, acknowledgedAt, acknowledgedByAgentID, acknowledgedByActorUUID, acknowledgedByPrincipalRef, acknowledgementNote sql.NullString
 	var meta sql.NullString
 	var createdAt, updatedAt string
 
 	err := scanner.Scan(
 		&handoff.UUID, &handoff.ID, &handoff.ScopeRef, &handoff.ScopeKind, &handoff.AgentID, &handoff.ProjectID,
-		&agentActorUUID, &projectContainerUUID, &handoff.CreatedByAgentID, &createdByActorUUID,
+		&agentActorUUID, &agentPrincipalRef, &projectContainerUUID,
+		&handoff.CreatedByAgentID, &createdByActorUUID, &createdByPrincipalRef,
 		&handoff.Title, &handoff.Body, &handoff.Status, &idempotencyKey,
-		&acknowledgedAt, &acknowledgedByAgentID, &acknowledgedByActorUUID, &acknowledgementNote,
+		&acknowledgedAt, &acknowledgedByAgentID, &acknowledgedByActorUUID, &acknowledgedByPrincipalRef, &acknowledgementNote,
 		&meta, &handoff.ETag, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -507,11 +534,14 @@ func scanHandoff(scanner handoffScanner) (Handoff, error) {
 	}
 
 	handoff.AgentActorUUID = nullStringPtr(agentActorUUID)
+	handoff.AgentPrincipalRef = nullStringPtr(agentPrincipalRef)
 	handoff.ProjectContainerUUID = nullStringPtr(projectContainerUUID)
 	handoff.CreatedByActorUUID = nullStringPtr(createdByActorUUID)
+	handoff.CreatedByPrincipalRef = nullStringValue(createdByPrincipalRef)
 	handoff.IdempotencyKey = nullStringPtr(idempotencyKey)
 	handoff.AcknowledgedByAgentID = nullStringPtr(acknowledgedByAgentID)
 	handoff.AcknowledgedByActorUUID = nullStringPtr(acknowledgedByActorUUID)
+	handoff.AcknowledgedByPrincipalRef = nullStringPtr(acknowledgedByPrincipalRef)
 	handoff.AcknowledgementNote = nullStringPtr(acknowledgementNote)
 	handoff.Meta = nullStringPtr(meta)
 	handoff.AcknowledgedAt = parseTimeNullString(acknowledgedAt)
@@ -564,7 +594,7 @@ func parseStoreTimestamp(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse timestamp: %s", value)
 }
 
-func logHandoffEvent(ctx context.Context, tx *sql.Tx, actorUUID *string, resourceUUID, eventType string, etag int64, payload map[string]interface{}) error {
+func logHandoffEvent(ctx context.Context, tx *sql.Tx, actorUUID *string, principalRef, scopeRef, resourceUUID, eventType string, etag int64, payload map[string]interface{}) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal handoff event payload: %w", err)
@@ -572,6 +602,8 @@ func logHandoffEvent(ctx context.Context, tx *sql.Tx, actorUUID *string, resourc
 	payloadStr := string(payloadJSON)
 	event := &domain.Event{
 		ActorUUID:    actorUUID,
+		PrincipalRef: principalRef,
+		ScopeRef:     scopeRef,
 		ResourceType: "handoff",
 		ResourceUUID: &resourceUUID,
 		EventType:    eventType,
@@ -579,10 +611,35 @@ func logHandoffEvent(ctx context.Context, tx *sql.Tx, actorUUID *string, resourc
 		Payload:      &payloadStr,
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_log (actor_uuid, resource_type, resource_uuid, event_type, etag, payload)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, event.ActorUUID, event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload); err != nil {
+		INSERT INTO event_log (actor_uuid, principal_ref, scope_ref, resource_type, resource_uuid, event_type, etag, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, event.ActorUUID, principalSQL(attribution.Attribution{PrincipalRef: event.PrincipalRef}), scopeSQL(attribution.Attribution{ScopeRef: event.ScopeRef}),
+		event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload); err != nil {
 		return fmt.Errorf("failed to log handoff event: %w", err)
 	}
 	return nil
+}
+
+func handoffPrincipalRef(value string) (string, error) {
+	principalRef, err := attribution.NormalizeCompat(value)
+	if err != nil {
+		return "", err
+	}
+	return principalRef, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyPtr(value *string, fallback string) string {
+	if value != nil && strings.TrimSpace(*value) != "" {
+		return strings.TrimSpace(*value)
+	}
+	return strings.TrimSpace(fallback)
 }

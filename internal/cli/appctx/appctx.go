@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/scope"
@@ -24,16 +24,39 @@ type App struct {
 	DB *db.DB
 
 	// ActorUUID is the resolved actor UUID (empty if NeedsActor is false)
+	// Deprecated: legacy actor-table display/cache metadata only.
 	ActorUUID string
 
 	// ActorID is the resolved actor friendly ID (e.g., "A-00001")
+	// Deprecated: legacy actor-table display/cache metadata only.
 	ActorID string
+
+	// PrincipalRef is the canonical externally issued principal reference used
+	// for new write attribution. It is non-empty when NeedsActor/WithActor is used.
+	PrincipalRef string
 
 	// ScopeRef is the full praesidium scopeRef of the invoking agent, resolved
 	// best-effort from the environment (ASP_SCOPE_REF / ASP_HANDLE / ...).
 	// Empty when no scope is resolvable (e.g. a human at a plain shell).
 	// Used to attribute task creation to the originating agent scope.
 	ScopeRef string
+}
+
+// Attribution returns the canonical write attribution resolved during bootstrap.
+func (a *App) Attribution() attribution.Attribution {
+	principalRef := a.PrincipalRef
+	if principalRef == "" && a.ActorUUID != "" {
+		principalRef = "agent:" + a.ActorUUID
+	}
+	attr := attribution.Attribution{
+		PrincipalRef:  principalRef,
+		ScopeRef:      a.ScopeRef,
+		LegacyActorID: a.ActorID,
+	}
+	if a.ActorUUID != "" {
+		attr.LegacyActorUUID = &a.ActorUUID
+	}
+	return attr
 }
 
 // Close releases resources held by the App.
@@ -137,65 +160,44 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 		}
 	}
 
-	// Resolve actor if needed
+	// Resolve attribution if needed.
 	if opts.NeedsActor {
 		if app.DB == nil {
 			app.Close()
-			return nil, fmt.Errorf("actor resolution requires database (set NeedsDB: true)")
+			return nil, fmt.Errorf("attribution resolution requires database (set NeedsDB: true)")
 		}
 
-		actorUUID, actorID, err := resolveActor(app.DB, app.Config, cmd)
+		resolvedScope := resolveScopeForCommand(cmd)
+		attr, err := attribution.Resolve(attribution.ResolveOptions{
+			DB:            app.DB.DB,
+			Config:        app.Config,
+			Command:       cmd,
+			ResolvedScope: resolvedScope,
+		})
 		if err != nil {
 			app.Close()
 			return nil, err
 		}
-		app.ActorUUID = actorUUID
-		app.ActorID = actorID
-
-		// Best-effort: capture the invoking agent's full scopeRef so creation
-		// can be attributed to the scope. Honors a --scope override when the
-		// command defines one. Unresolvable scope is not an error here.
-		var scopeOverride string
-		if scopeFlag := cmd.Flag("scope"); scopeFlag != nil {
-			scopeOverride = scopeFlag.Value.String()
+		app.PrincipalRef = attr.PrincipalRef
+		app.ScopeRef = attr.ScopeRef
+		if attr.LegacyActorUUID != nil {
+			app.ActorUUID = *attr.LegacyActorUUID
 		}
-		if resolved, _, scopeErr := scope.Resolve(scopeOverride); scopeErr == nil {
-			app.ScopeRef = resolved.FullRef()
-		}
+		app.ActorID = attr.LegacyActorID
 	}
 
 	return app, nil
 }
 
-// resolveActor resolves the current actor from flags, env, or config.
-func resolveActor(database *db.DB, cfg *config.Config, cmd *cobra.Command) (uuid, friendlyID string, err error) {
-	// Get actor identifier from --as flag or config
-	var actorIdentifier string
-	if asFlag := cmd.Flag("as"); asFlag != nil {
-		actorIdentifier = asFlag.Value.String()
+func resolveScopeForCommand(cmd *cobra.Command) *scope.ResolvedScope {
+	var scopeOverride string
+	if scopeFlag := cmd.Flag("scope"); scopeFlag != nil {
+		scopeOverride = scopeFlag.Value.String()
 	}
-	if actorIdentifier == "" {
-		actorIdentifier = cfg.GetActorID()
+	if resolved, _, err := scope.Resolve(scopeOverride); err == nil {
+		return &resolved
 	}
-	if actorIdentifier == "" {
-		return "", "", fmt.Errorf("no actor configured (set WRKQ_ACTOR, WRKQ_ACTOR_ID, or use --as flag)")
-	}
-
-	// Resolve actor UUID
-	resolver := actors.NewResolver(database.DB)
-	actorUUID, err := resolver.Resolve(actorIdentifier)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to resolve actor: %w", err)
-	}
-
-	// Get actor friendly ID
-	var actorID string
-	err = database.QueryRow("SELECT id FROM actors WHERE uuid = ?", actorUUID).Scan(&actorID)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get actor ID: %w", err)
-	}
-
-	return actorUUID, actorID, nil
+	return nil
 }
 
 // resolveProjectFlag resolves a project selector (path, slug, or ID) to a project path.

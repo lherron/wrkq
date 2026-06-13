@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/search"
@@ -49,7 +49,7 @@ func init() {
 	rootCmd.AddCommand(searchCmd)
 	searchCmd.Flags().StringVar(&searchState, "state", "", "Filter by state (default open, use all for non-deleted states)")
 	searchCmd.Flags().StringVar(&searchKind, "kind", "", "Filter by task kind")
-	searchCmd.Flags().StringVar(&searchAssignee, "assignee", "", "Filter by assignee actor")
+	searchCmd.Flags().StringVar(&searchAssignee, "assignee", "", "Filter by assignee principal ref or bare agent slug")
 	searchCmd.Flags().IntVar(&searchLimit, "limit", 20, "Maximum number of task results")
 	searchCmd.Flags().IntVar(&searchCandidateLimit, "candidate-limit", 300, "Candidate chunks to retrieve before aggregation")
 	searchCmd.Flags().StringVar(&searchSort, "sort", "relevance", "Sort by relevance, updated_at, or created_at")
@@ -66,14 +66,13 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	query := args[0]
 	paths := applyProjectRootToPaths(app.Config, args[1:], true)
 
-	var assigneeUUID string
+	var assigneePrincipalRef string
 	if searchAssignee != "" {
-		resolver := actors.NewResolver(app.DB.DB)
-		uuid, err := resolver.Resolve(searchAssignee)
+		principalRef, err := attribution.NormalizeCompat(searchAssignee)
 		if err != nil {
 			return fmt.Errorf("failed to resolve assignee: %w", err)
 		}
-		assigneeUUID = uuid
+		assigneePrincipalRef = principalRef
 	}
 
 	idx, err := openSearchIndex(app.Config)
@@ -87,17 +86,17 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	resp, err := svc.Search(ctx, search.Options{
-		Query:          query,
-		Paths:          paths,
-		State:          searchState,
-		Kind:           searchKind,
-		AssigneeUUID:   assigneeUUID,
-		Limit:          searchLimit,
-		CandidateLimit: searchCandidateLimit,
-		Fresh:          searchFresh,
-		Explain:        searchExplain,
-		Sort:           searchSort,
-		Reverse:        searchReverse,
+		Query:                query,
+		Paths:                paths,
+		State:                searchState,
+		Kind:                 searchKind,
+		AssigneePrincipalRef: assigneePrincipalRef,
+		Limit:                searchLimit,
+		CandidateLimit:       searchCandidateLimit,
+		Fresh:                searchFresh,
+		Explain:              searchExplain,
+		Sort:                 searchSort,
+		Reverse:              searchReverse,
 	})
 	if err != nil {
 		return err

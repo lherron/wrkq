@@ -62,16 +62,19 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 			"--if-match must be a non-negative etag value", handoffAckExample)
 	}
 
-	// Resolve the acting agent from runtime env. Acknowledging requires an
-	// actor agent id so the store can log handoff.acknowledged and attribute
-	// the transition.
-	env := scope.ReadEnv()
-	actorAgentID := strings.TrimSpace(env.ASPAgentID)
-	if actorAgentID == "" {
+	// Resolve the acting agent from runtime env. Acknowledging requires a
+	// principal derived from a validated runtime scope.
+	resolved, _, resolveErr := scope.Resolve("")
+	if resolveErr != nil || strings.TrimSpace(resolved.AgentID) == "" {
+		message := "actor agent id not resolved; set ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID/ASP_PROJECT in runtime env"
+		if resolveErr != nil {
+			message = resolveErr.Error()
+		}
 		return writeHandoffAckError(stderr, mode, 1, "validation_error", idOrUUID,
-			"actor agent id not resolved; set ASP_AGENT_ID or ASP_SCOPE_REF in runtime env",
-			handoffAckExample)
+			message, handoffAckExample)
 	}
+	actorAgentID := resolved.AgentID
+	principalRef := "agent:" + resolved.AgentID
 
 	database, err := openHandoffCreateDB(cmd)
 	if err != nil {
@@ -94,6 +97,8 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 		Note:         note,
 		ActorAgentID: actorAgentID,
 		ActorUUID:    actorUUID,
+		PrincipalRef: principalRef,
+		ScopeRef:     resolved.FullRef(),
 		DryRun:       handoffAckDryRun,
 		IfMatch:      handoffAckIfMatch,
 	}

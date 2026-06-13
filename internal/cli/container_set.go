@@ -50,7 +50,7 @@ func init() {
 
 func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 	s := store.New(database)
 
 	hasAddRemove := len(containerSetAddWebhookURL) > 0 || len(containerSetRemWebhookURL) > 0
@@ -86,7 +86,7 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to encode webhook urls: %w", err)
 			}
 			fields := map[string]interface{}{"webhook_urls": string(payload)}
-			if _, err := s.Containers.UpdateFields(actorUUID, c.UUID, fields, 0); err != nil {
+			if _, err := s.Containers.UpdateFieldsWithAttribution(attr, c.UUID, fields, 0); err != nil {
 				return fmt.Errorf("failed to update container %s: %w", c.ID, err)
 			}
 			updated++
@@ -140,7 +140,7 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		"webhook_urls": string(payload),
 	}
 
-	_, err = s.Containers.UpdateFields(actorUUID, containerUUID, fields, containerSetIfMatch)
+	_, err = s.Containers.UpdateFieldsWithAttribution(attr, containerUUID, fields, containerSetIfMatch)
 	if err != nil {
 		return err
 	}

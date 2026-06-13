@@ -63,6 +63,8 @@ func Load() (*Config, error) {
 	// shared global-default .env.local. See project-root precedence below.
 	explicitProjectRoot := os.Getenv("WRKQ_PROJECT_ROOT")
 	aspProject := os.Getenv("ASP_PROJECT")
+	explicitActor := os.Getenv("WRKQ_ACTOR")
+	explicitActorID := os.Getenv("WRKQ_ACTOR_ID")
 
 	// Load .env.local if it exists (walking up parent directories)
 	if envPath := findEnvLocal(); envPath != "" {
@@ -90,6 +92,15 @@ func Load() (*Config, error) {
 	}
 	if defaultActor := os.Getenv("WRKQ_ACTOR"); defaultActor != "" {
 		cfg.DefaultActor = defaultActor
+	}
+	if actorID := os.Getenv("WRKQ_ACTOR_ID"); actorID != "" && cfg.DefaultActor == "" {
+		cfg.DefaultActor = actorID
+	}
+	if explicitActor == "" {
+		_ = os.Unsetenv("WRKQ_ACTOR")
+	}
+	if explicitActorID == "" {
+		_ = os.Unsetenv("WRKQ_ACTOR_ID")
 	}
 	// Project-root precedence (high -> low):
 	//   1. --project flag             (applied later, in appctx)

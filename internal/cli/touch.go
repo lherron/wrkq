@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/actors"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/render"
@@ -70,7 +70,7 @@ func init() {
 	touchCmd.Flags().IntVar(&touchPriority, "priority", 3, "Initial task priority (1-4)")
 	touchCmd.Flags().StringVar(&touchKind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
 	touchCmd.Flags().StringVar(&touchParentTask, "parent-task", "", "Parent task ID or path (for subtasks)")
-	touchCmd.Flags().StringVar(&touchAssignee, "assignee", "", "Assignee actor slug or ID")
+	touchCmd.Flags().StringVar(&touchAssignee, "assignee", "", "Assignee principal ref or bare agent slug")
 	touchCmd.Flags().StringVar(&touchRequestedBy, "requested-by", "", "Requester project ID (return-to target)")
 	touchCmd.Flags().StringVar(&touchAssignedProject, "assigned-project", "", "Assignee project ID")
 	touchCmd.Flags().StringVar(&touchResolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
@@ -85,7 +85,7 @@ func init() {
 
 func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Apply project root (from config or --project flag override)
 	args = applyProjectRootToPaths(app.Config, args, false)
@@ -154,14 +154,13 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve assignee if provided
-	var assigneeActorUUID *string
+	var assigneePrincipalRef *string
 	if touchAssignee != "" {
-		resolver := actors.NewResolver(database.DB)
-		uuid, err := resolver.Resolve(touchAssignee)
+		principalRef, err := attribution.NormalizeCompat(touchAssignee)
 		if err != nil {
 			return fmt.Errorf("failed to resolve assignee: %w", err)
 		}
-		assigneeActorUUID = &uuid
+		assigneePrincipalRef = &principalRef
 	}
 
 	var requestedByProjectID *string
@@ -258,7 +257,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		// Create the task using the store
-		result, err := s.Tasks.Create(actorUUID, store.CreateParams{
+		result, err := s.Tasks.CreateWithAttribution(attr, store.CreateParams{
 			UUID:                 touchForceUUID,
 			Slug:                 normalizedSlug,
 			Title:                title,
@@ -269,7 +268,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 			Priority:             priority,
 			Kind:                 touchKind,
 			ParentTaskUUID:       parentTaskUUID,
-			AssigneeActorUUID:    assigneeActorUUID,
+			AssigneePrincipalRef: assigneePrincipalRef,
 			RequestedByProjectID: requestedByProjectID,
 			AssignedProjectID:    assignedProjectID,
 			Resolution:           resolution,
@@ -280,9 +279,8 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				return nil
 			}(),
-			DueAt:           touchDueAt,
-			StartAt:         touchStartAt,
-			CreatorScopeRef: app.ScopeRef,
+			DueAt:   touchDueAt,
+			StartAt: touchStartAt,
 		})
 		if err != nil {
 			return err

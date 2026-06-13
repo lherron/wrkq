@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -47,7 +48,7 @@ func init() {
 
 func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
-	actorUUID := app.ActorUUID
+	attr := app.Attribution()
 
 	// Create store
 	s := store.New(database)
@@ -67,7 +68,7 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 
 		for _, src := range sources {
-			if err := moveToContainer(cmd, s, actorUUID, src, dstContainerUUID, dst); err != nil {
+			if err := moveToContainer(cmd, s, attr, src, dstContainerUUID, dst); err != nil {
 				return err
 			}
 		}
@@ -81,7 +82,7 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	dstContainerUUID, _, dstErr := selectors.ResolveContainer(database, dst)
 	if dstErr == nil {
 		// Destination is an existing container - move into it
-		return moveToContainer(cmd, s, actorUUID, src, dstContainerUUID, dst)
+		return moveToContainer(cmd, s, attr, src, dstContainerUUID, dst)
 	}
 
 	// Destination doesn't exist as container - could be rename
@@ -89,19 +90,19 @@ func runMv(app *appctx.App, cmd *cobra.Command, args []string) error {
 	srcTaskUUID, _, taskErr := selectors.ResolveTask(database, src)
 	if taskErr == nil {
 		// Source is a task - rename or move to new parent
-		return renameOrMoveTask(cmd, s, actorUUID, srcTaskUUID, src, dst)
+		return renameOrMoveTask(cmd, s, attr, srcTaskUUID, src, dst)
 	}
 
 	srcContainerUUID, _, containerErr := selectors.ResolveContainer(database, src)
 	if containerErr == nil {
 		// Source is a container - rename or move to new parent
-		return renameOrMoveContainer(cmd, s, actorUUID, srcContainerUUID, src, dst)
+		return renameOrMoveContainer(cmd, s, attr, srcContainerUUID, src, dst)
 	}
 
 	return fmt.Errorf("source not found: %s", src)
 }
 
-func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstContainerUUID, dstPath string) error {
+func moveToContainer(cmd *cobra.Command, s *store.Store, attr attribution.Attribution, src, dstContainerUUID, dstPath string) error {
 	// Try as task first
 	srcTaskUUID, srcPath, taskErr := selectors.ResolveTask(s.DB(), src)
 	if taskErr == nil {
@@ -111,7 +112,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 		}
 
 		// Move task to destination container using store
-		_, err := s.Tasks.Move(actorUUID, srcTaskUUID, dstContainerUUID, mvIfMatch)
+		_, err := s.Tasks.MoveWithAttribution(attr, srcTaskUUID, dstContainerUUID, mvIfMatch)
 		if err != nil {
 			return err
 		}
@@ -129,7 +130,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 		}
 
 		// Move container to destination container using store
-		_, err := s.Containers.Move(actorUUID, srcContainerUUID, &dstContainerUUID, mvIfMatch)
+		_, err := s.Containers.MoveWithAttribution(attr, srcContainerUUID, &dstContainerUUID, mvIfMatch)
 		if err != nil {
 			return err
 		}
@@ -141,7 +142,7 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, actorUUID, src, dstCont
 	return fmt.Errorf("source not found: %s", src)
 }
 
-func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID, srcPath, dstPath string) error {
+func renameOrMoveTask(cmd *cobra.Command, s *store.Store, attr attribution.Attribution, srcTaskUUID, srcPath, dstPath string) error {
 	database := s.DB()
 
 	// Use shared resolver to determine destination parent and slug
@@ -178,7 +179,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID
 		if mvDryRun {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would overwrite task at %s\n", dstPath)
 		} else {
-			_, err := s.Tasks.Purge(actorUUID, existingTaskUUID, 0)
+			_, err := s.Tasks.PurgeWithAttribution(attr, existingTaskUUID, 0)
 			if err != nil {
 				return fmt.Errorf("failed to delete existing task: %w", err)
 			}
@@ -195,7 +196,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID
 		"slug":         normalizedSlug,
 		"project_uuid": *newParentUUID,
 	}
-	_, err = s.Tasks.UpdateFields(actorUUID, srcTaskUUID, fields, mvIfMatch)
+	_, err = s.Tasks.UpdateFieldsWithAttribution(attr, srcTaskUUID, fields, mvIfMatch)
 	if err != nil {
 		return err
 	}
@@ -204,7 +205,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, actorUUID, srcTaskUUID
 	return nil
 }
 
-func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, actorUUID, srcContainerUUID, srcPath, dstPath string) error {
+func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, attr attribution.Attribution, srcContainerUUID, srcPath, dstPath string) error {
 	database := s.DB()
 
 	// Use shared resolver to determine destination parent and slug
@@ -256,7 +257,7 @@ func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, actorUUID, srcCon
 		"slug":        normalizedSlug,
 		"parent_uuid": newParentUUID,
 	}
-	_, err = s.Containers.UpdateFields(actorUUID, srcContainerUUID, fields, mvIfMatch)
+	_, err = s.Containers.UpdateFieldsWithAttribution(attr, srcContainerUUID, fields, mvIfMatch)
 	if err != nil {
 		return err
 	}
