@@ -132,6 +132,9 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		if err := launchctlKickstart(owner, false); err != nil {
 			return err
 		}
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeServerLifecycleJSON(cmd, "started", "launchd", collectWrkqServerStatus())
+		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon started via launchd (%s)\n", owner.serviceTarget)
 		return nil
 	}
@@ -140,6 +143,9 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	}
 	if err := daemonizeWrkqServer(time.Duration(serverTimeoutMS) * time.Millisecond); err != nil {
 		return err
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeServerLifecycleJSON(cmd, "started", mode, collectWrkqServerStatus())
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon started")
 	return nil
@@ -157,6 +163,9 @@ func runServerServe(cmd *cobra.Command, args []string) error {
 func runServerStop(cmd *cobra.Command, args []string) error {
 	status := collectWrkqServerStatus()
 	if !status.Running && status.PID == nil {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeServerLifecycleJSON(cmd, "not_running", "", status)
+		}
 		fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon is not running")
 		return nil
 	}
@@ -165,6 +174,9 @@ func runServerStop(cmd *cobra.Command, args []string) error {
 	}
 	if err := stopWrkqServerProcess(time.Duration(serverTimeoutMS)*time.Millisecond, serverForce); err != nil {
 		return err
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeServerLifecycleJSON(cmd, "stopped", "", collectWrkqServerStatus())
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon stopped")
 	return nil
@@ -180,6 +192,9 @@ func runServerRestart(cmd *cobra.Command, args []string) error {
 		if err := launchctlKickstart(owner, true); err != nil {
 			return err
 		}
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeServerLifecycleJSON(cmd, "restarted", "launchd", collectWrkqServerStatus())
+		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon restarted via launchd (%s)\n", owner.serviceTarget)
 		return nil
 	}
@@ -192,13 +207,16 @@ func runServerRestart(cmd *cobra.Command, args []string) error {
 	if err := daemonizeWrkqServer(time.Duration(serverTimeoutMS) * time.Millisecond); err != nil {
 		return err
 	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeServerLifecycleJSON(cmd, "restarted", mode, collectWrkqServerStatus())
+	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon restarted")
 	return nil
 }
 
 func runServerStatus(cmd *cobra.Command, args []string) error {
 	status := collectWrkqServerStatus()
-	if serverJSON {
+	if serverJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(status)
@@ -222,8 +240,22 @@ func runServerHealth(cmd *cobra.Command, args []string) error {
 	if err := checkWrkqServerHealth(2 * time.Second); err != nil {
 		return err
 	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"status": "ok"})
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "ok")
 	return nil
+}
+
+func writeServerLifecycleJSON(cmd *cobra.Command, action, mode string, status serverRuntimeStatus) error {
+	payload := map[string]interface{}{
+		"action": action,
+		"status": status,
+	}
+	if mode != "" {
+		payload["mode"] = mode
+	}
+	return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, payload)
 }
 
 func serveWrkqServer() error {

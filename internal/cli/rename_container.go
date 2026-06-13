@@ -76,15 +76,26 @@ func runRenameContainer(app *appctx.App, cmd *cobra.Command, args []string) erro
 	if err != nil {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
+	oldTitle := container.Slug
+	if container.Title != nil && *container.Title != "" {
+		oldTitle = *container.Title
+	}
 
 	if renameContainerDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+				"dry_run":        true,
+				"container_uuid": containerUUID,
+				"container_path": containerPath,
+				"old_slug":       container.Slug,
+				"new_slug":       normalizedSlug,
+				"old_title":      oldTitle,
+				"new_title":      newTitle,
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Would rename container:\n")
 		fmt.Fprintf(cmd.OutOrStdout(), "  Path:  %s\n", containerPath)
 		fmt.Fprintf(cmd.OutOrStdout(), "  Slug:  %s -> %s\n", container.Slug, normalizedSlug)
-		oldTitle := container.Slug // fallback
-		if container.Title != nil {
-			oldTitle = *container.Title
-		}
 		fmt.Fprintf(cmd.OutOrStdout(), "  Title: %s -> %s\n", oldTitle, newTitle)
 		return nil
 	}
@@ -99,6 +110,17 @@ func runRenameContainer(app *appctx.App, cmd *cobra.Command, args []string) erro
 		return err
 	}
 
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"container_uuid": containerUUID,
+			"container_path": containerPath,
+			"old_slug":       container.Slug,
+			"new_slug":       normalizedSlug,
+			"old_title":      oldTitle,
+			"new_title":      newTitle,
+			"renamed":        true,
+		})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Renamed container: %s -> %s\n", containerPath, normalizedSlug)
 	return nil
 }

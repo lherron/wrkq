@@ -86,12 +86,12 @@ func (op *Operation) executeSequential(items []string, fn ItemFunc) *Result {
 				return result
 			}
 
-			if !isatty(os.Stdout) {
+			if op.ShowProgress && !isatty(os.Stdout) {
 				fmt.Fprintf(os.Stderr, "%s: error: %v\n", item, err)
 			}
 		} else {
 			result.Succeeded++
-			if !isatty(os.Stdout) {
+			if op.ShowProgress && !isatty(os.Stdout) {
 				fmt.Fprintf(os.Stderr, "%s: success\n", item)
 			}
 		}
@@ -181,12 +181,12 @@ func (op *Operation) executeParallel(items []string, fn ItemFunc, workers int) *
 						atomic.StoreInt32(&stopSignal, 1)
 					}
 
-					if !isatty(os.Stdout) {
+					if op.ShowProgress && !isatty(os.Stdout) {
 						fmt.Fprintf(os.Stderr, "%s: error: %v\n", item, err)
 					}
 				} else {
 					atomic.AddInt32(&succeeded, 1)
-					if !isatty(os.Stdout) {
+					if op.ShowProgress && !isatty(os.Stdout) {
 						fmt.Fprintf(os.Stderr, "%s: success\n", item)
 					}
 				}

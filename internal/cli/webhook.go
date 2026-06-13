@@ -70,6 +70,15 @@ func runWebhookList(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 	urls := decodeWebhookURLs(container.WebhookURLs)
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		for _, u := range urls {
+			if err := encoder.Encode(map[string]string{"url": u}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	for _, u := range urls {
 		fmt.Fprintln(cmd.OutOrStdout(), u)
 	}
@@ -102,6 +111,14 @@ func mutateGlobalWebhooks(app *appctx.App, cmd *cobra.Command, add, remove []str
 
 	newURLs, changed := applyWebhookDelta(container.WebhookURLs, add, remove)
 	if !changed {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{
+				"changed":      false,
+				"webhook_urls": newURLs,
+			})
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), "No change")
 		return nil
 	}
@@ -116,6 +133,16 @@ func mutateGlobalWebhooks(app *appctx.App, cmd *cobra.Command, add, remove []str
 	}
 
 	target := strings.Join(append(add, remove...), ", ")
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]interface{}{
+			"changed":      true,
+			"target":       target,
+			"webhook_urls": newURLs,
+			"count":        len(newURLs),
+		})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s global webhook: %s\n", verb, target)
 	fmt.Fprintf(cmd.OutOrStdout(), "Global webhook URLs: %d\n", len(newURLs))
 	return nil

@@ -17,8 +17,9 @@ import (
 var catCmd = &cobra.Command{
 	Use:     "cat <path|id>...",
 	Aliases: []string{"show"},
-	Short:   "Print tasks as markdown",
-	Long: `Prints one or more tasks as markdown with YAML front matter.
+	Short:   "Show task detail",
+	Long: `Shows one or more tasks. On a TTY, cat prints markdown with YAML front matter.
+When stdout is not a TTY, cat defaults to JSON. Use --output raw to force markdown.
 Comments are included by default. Use --exclude-comments to omit them.
 If the argument resolves to a container, exits with error code 2.`,
 	Args: cobra.MinimumNArgs(1),
@@ -60,8 +61,9 @@ func scopeRefToHandle(scopeRef string) string {
 func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	sel, err := resolveOutputMode(cmd, app.Config, outputShapeContent, outputResolveOptions{
-		Allow:      []outputMode{outputModeRaw, outputModeJSON, outputModeNDJSON},
-		DefaultTTY: outputModeRaw,
+		Allow:         []outputMode{outputModeRaw, outputModeJSON, outputModeNDJSON},
+		DefaultTTY:    outputModeRaw,
+		DefaultNonTTY: outputModeJSON,
 	})
 	if err != nil {
 		return err
@@ -422,6 +424,40 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		// For JSON output, collect tasks
 		if sel.Mode == outputModeJSON || sel.Mode == outputModeNDJSON {
 			tasks = append(tasks, task)
+		} else if sel.Mode == outputModeRaw && !sel.Stable && colorEnabled {
+			// Styled interactive view (TTY only). Pipes and --porcelain fall
+			// through to the byte-stable raw markdown branch below.
+			if taskCount > 0 {
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
+			taskCount++
+			var styledComments []styledComment
+			if !catExcludeComments {
+				for _, c := range task.Comments {
+					styledComments = append(styledComments, styledComment{
+						ID:        c.ID,
+						CreatedAt: c.CreatedAt,
+						Actor:     c.ActorSlug,
+						Role:      c.ActorRole,
+						Body:      c.Body,
+					})
+				}
+			}
+			renderStyledTask(cmd.OutOrStdout(), styledTask{
+				ID:            task.ID,
+				Path:          task.Path,
+				Title:         task.Title,
+				State:         task.State,
+				Priority:      task.Priority,
+				Assignee:      task.AssigneeSlug,
+				Labels:        task.Labels,
+				DueAt:         task.DueAt,
+				UpdatedAt:     task.UpdatedAt,
+				BlockedCount:  len(task.BlockedBy),
+				Description:   task.Description,
+				Specification: task.Specification,
+				NoFrontmatter: catNoFrontmatter,
+			}, styledComments)
 		} else {
 			// Original markdown output
 			if taskCount > 0 {

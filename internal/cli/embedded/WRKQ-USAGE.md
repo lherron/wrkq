@@ -78,6 +78,6 @@ wrkq log T-00001 --patch      # Show detailed changes
 - `--output MODE` - table, human, json, ndjson, porcelain, yaml, tsv, raw
 - `--porcelain` - Stable modifier; mirrors next_cursor on stderr where applicable
 
-Defaults: non-TTY list/search/history commands use NDJSON, singleton and mutation commands use JSON, and `cat` stays raw markdown unless explicitly overridden.
+Defaults: non-TTY list/search/history commands use NDJSON; singleton, detail, mutation, and content commands use JSON. Use `--output raw` when a pipeline needs raw markdown from `cat`.
 
 </task_tracking_rules>

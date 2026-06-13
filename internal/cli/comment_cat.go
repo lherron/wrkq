@@ -152,7 +152,7 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Output
-	if commentCatJSON {
+	if commentCatJSON || (!isStdoutTTY(cmd.OutOrStdout()) && !commentCatRaw && !commentCatNDJSON) {
 		data, err := json.MarshalIndent(comments, "", "  ")
 		if err != nil {
 			return err

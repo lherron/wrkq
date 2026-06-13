@@ -16,7 +16,6 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/webhooks"
 	"github.com/spf13/cobra"
@@ -154,10 +153,11 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute copy operation
+	machineJSON := cpJSON || (!isStdoutTTY(cmd.OutOrStdout()) && !cpNDJSON && !cpPorcelain && !cpOne && !cpZero)
 	op := &bulk.Operation{
 		Jobs:            cpJobs,
 		ContinueOnError: cpContinueOnError,
-		ShowProgress:    !cpJSON && !cpNDJSON && !cpPorcelain,
+		ShowProgress:    isStdoutTTY(cmd.OutOrStdout()) && !cpJSON && !cpNDJSON && !cpPorcelain,
 	}
 
 	results := []copyResult{}
@@ -170,16 +170,11 @@ func runCp(app *appctx.App, cmd *cobra.Command, args []string) error {
 	})
 
 	// Output results
-	if cpJSON {
-		return render.RenderJSON(results, false)
+	if machineJSON {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, results)
 	}
 	if cpNDJSON {
-		// Convert to []interface{} for NDJSON rendering
-		items := make([]interface{}, len(results))
-		for i, r := range results {
-			items[i] = r
-		}
-		return render.RenderNDJSON(items)
+		return writeNDJSONOutput(cmd.OutOrStdout(), results)
 	}
 	if cpPorcelain || cpOne || cpZero {
 		delimiter := "\n"
@@ -216,6 +211,28 @@ func resolveDestinationContainer(database *db.DB, dest string) (string, error) {
 func showCopyPlan(cmd *cobra.Command, database *db.DB, sourceTasks []string, destUUID string) error {
 	var totalAttachments int
 	var totalFiles int64
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		entries := make([]map[string]interface{}, 0, len(sourceTasks))
+		for _, taskUUID := range sourceTasks {
+			var sourceID, slug string
+			if err := database.QueryRow("SELECT id, slug FROM tasks WHERE uuid = ?", taskUUID).Scan(&sourceID, &slug); err != nil {
+				continue
+			}
+			var destPath string
+			_ = database.QueryRow("SELECT path FROM container_paths WHERE uuid = ?", destUUID).Scan(&destPath)
+			entry := map[string]interface{}{
+				"source_id":   sourceID,
+				"source_uuid": taskUUID,
+				"dest_path":   destPath + "/" + slug,
+				"would_copy":  true,
+			}
+			entries = append(entries, entry)
+		}
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"dry_run": true,
+			"copies":  entries,
+		})
+	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Would copy %d task(s):\n\n", len(sourceTasks))
 

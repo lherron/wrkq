@@ -91,6 +91,14 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 			updated++
 		}
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{
+				"updated": updated,
+				"all":     true,
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Updated %d containers\n", updated)
 		return nil
 	}
@@ -145,6 +153,17 @@ func runContainerSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]interface{}{
+			"container_uuid": containerUUID,
+			"container_path": containerPath,
+			"webhook_urls":   webhookURLs,
+			"count":          len(webhookURLs),
+			"updated":        true,
+		})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated container: %s\n", containerPath)
 	fmt.Fprintf(cmd.OutOrStdout(), "Webhook URLs: %d\n", len(webhookURLs))
 	return nil

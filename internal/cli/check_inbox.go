@@ -207,7 +207,7 @@ func runCheckInbox(app *appctx.App, cmd *cobra.Command, args []string) error {
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(results)
 	}
-	if checkInboxNDJSON {
+	if checkInboxNDJSON || checkInboxPorcelain || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		for _, entry := range results {
 			if err := encoder.Encode(entry); err != nil {

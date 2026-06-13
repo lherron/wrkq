@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -42,10 +43,22 @@ func runRmdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	args = applyProjectRootToPaths(app.Config, args, false)
 
 	// Process each path
+	results := []map[string]interface{}{}
 	for _, path := range args {
 		if err := removeContainerWithAttribution(cmd, database, attr, path); err != nil {
 			return err
 		}
+		results = append(results, map[string]interface{}{
+			"path":    path,
+			"removed": true,
+			"forced":  rmdirForce,
+		})
+	}
+
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(results)
 	}
 
 	return nil
@@ -168,6 +181,8 @@ func removeContainerWithAttribution(cmd *cobra.Command, database *db.DB, attr at
 		return fmt.Errorf("failed to commit: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "✓ Removed: %s (%s)\n", id, path)
+	if isStdoutTTY(cmd.OutOrStdout()) {
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Removed: %s (%s)\n", id, path)
+	}
 	return nil
 }

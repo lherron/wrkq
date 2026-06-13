@@ -36,7 +36,7 @@ func init() {
 }
 
 func runUsage(cmd *cobra.Command, args []string) error {
-	if usageJSON {
+	if usageJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		output := map[string]interface{}{
 			"content": wrkqUsageContent,
 		}
@@ -50,7 +50,7 @@ func runUsage(cmd *cobra.Command, args []string) error {
 }
 
 func runAgentInfo(cmd *cobra.Command, args []string) error {
-	if agentInfoJSON {
+	if agentInfoJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		output := map[string]interface{}{
 			"content": agentUsageContent,
 		}

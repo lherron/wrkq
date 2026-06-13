@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/webhooks"
+	"github.com/spf13/cobra"
 )
 
 func TestCommentAdd(t *testing.T) {
@@ -467,14 +468,18 @@ func TestCatWithIncludeComments(t *testing.T) {
 	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
 
 	// Test cat with comments included by default
-	cmd := rootCmd
-	cmd.SetArgs([]string{"cat", "T-00001"})
+	app := createTestApp(t, database, dbPath)
+	resetCatGlobals()
+	defer resetCatGlobals()
+	catNoFrontmatter = true
+	catPorcelain = true
 
 	var out bytes.Buffer
+	cmd := &cobra.Command{}
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 
-	if err := cmd.Execute(); err != nil {
+	if err := runCat(app, cmd, []string{"T-00001"}); err != nil {
 		t.Fatalf("Command failed: %v", err)
 	}
 
@@ -513,14 +518,14 @@ func TestCatWithIncludeComments(t *testing.T) {
 	}
 
 	// Test cat with --exclude-comments
-	cmd = rootCmd
-	cmd.SetArgs([]string{"cat", "T-00001", "--exclude-comments"})
+	catExcludeComments = true
 
 	var out2 bytes.Buffer
+	cmd = &cobra.Command{}
 	cmd.SetOut(&out2)
 	cmd.SetErr(&out2)
 
-	if err := cmd.Execute(); err != nil {
+	if err := runCat(app, cmd, []string{"T-00001"}); err != nil {
 		t.Fatalf("Command failed: %v", err)
 	}
 

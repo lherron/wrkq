@@ -100,7 +100,7 @@ Results are bounded and paginated. Use --limit and --cursor to page through
 larger result sets; the response includes a next_cursor token when more
 results are available.
 
-Output defaults to human-readable on a TTY and JSON when piped. Use --json,
+Output defaults to human-readable on a TTY and NDJSON when piped. Use --json,
 --ndjson, or --human to force a mode.
 
 Alias: 'wrkq handoff ls'.`,
@@ -181,7 +181,7 @@ The query is matched against title and body content; --scope and --status
 narrow the result set further. Results are bounded and paginated via
 --limit and --cursor.
 
-Output defaults to human-readable on a TTY and JSON when piped. Use --json,
+Output defaults to human-readable on a TTY and NDJSON when piped. Use --json,
 --ndjson, or --human to force a mode.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runHandoffSearch,

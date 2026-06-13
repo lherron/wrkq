@@ -387,7 +387,7 @@ func runIndexStatus(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if indexStatusJSON {
+	if indexStatusJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(status)
@@ -436,6 +436,12 @@ func runIndexRebuild(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 	status, _ := ix.Status()
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"rebuilt": true,
+			"status":  status,
+		})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "rebuilt search index: %d chunks, last event %d\n", status.SearchableChunkCount, status.LastIndexedEventID)
 	if status.LastError != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "dense indexing warning: %s\n", *status.LastError)
@@ -464,6 +470,12 @@ func runIndexUpdate(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	}
 	status, _ := ix.Status()
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"updated": true,
+			"status":  status,
+		})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "updated search index: %d chunks, last event %d\n", status.SearchableChunkCount, status.LastIndexedEventID)
 	if status.LastError != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "dense indexing warning: %s\n", *status.LastError)
@@ -480,6 +492,11 @@ func runIndexVacuum(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if _, err := idx.Exec(`VACUUM`); err != nil {
 		return err
 	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"vacuumed": true,
+		})
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "vacuumed search index")
 	return nil
 }
@@ -493,6 +510,11 @@ func runIndexPause(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err := idx.SetState("status", "paused"); err != nil {
 		return err
 	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"status": "paused",
+		})
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "paused search indexing")
 	return nil
 }
@@ -505,6 +527,11 @@ func runIndexResume(app *appctx.App, cmd *cobra.Command, args []string) error {
 	defer func() { _ = idx.Close() }()
 	if err := idx.SetState("status", "ready"); err != nil {
 		return err
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"status": "ready",
+		})
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "resumed search indexing")
 	return nil

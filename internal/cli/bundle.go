@@ -129,6 +129,12 @@ func runBundleCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	if bundleCreateDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+				"dry_run": true,
+				"options": opts,
+			})
+		}
 		// TODO: Implement dry-run preview
 		fmt.Fprintf(cmd.OutOrStdout(), "Dry run - would create bundle with:\n")
 		fmt.Fprintf(cmd.OutOrStdout(), "  Output: %s\n", opts.OutputDir)
@@ -162,13 +168,13 @@ func runBundleCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output results
-	if bundleCreateJSON {
-		result := map[string]interface{}{
-			"bundle_dir":       b.Dir,
-			"tasks_count":      len(b.Tasks),
-			"containers_count": len(b.Containers),
-			"manifest":         b.Manifest,
-		}
+	result := map[string]interface{}{
+		"bundle_dir":       b.Dir,
+		"tasks_count":      len(b.Tasks),
+		"containers_count": len(b.Containers),
+		"manifest":         b.Manifest,
+	}
+	if bundleCreateJSON || (!bundleCreatePorcelain && !isStdoutTTY(cmd.OutOrStdout())) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(result)

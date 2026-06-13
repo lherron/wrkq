@@ -166,35 +166,44 @@ func runApply(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Apply updates
 	if applyDryRun {
-		fmt.Printf("Would update task %s (%s)\n", friendlyID, taskUUID)
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+				"dry_run":   true,
+				"id":        friendlyID,
+				"uuid":      taskUUID,
+				"updates":   updates,
+				"body_only": !applyWithMetadata,
+			})
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Would update task %s (%s)\n", friendlyID, taskUUID)
 		if updates.Description != nil {
-			fmt.Printf("  description: %s\n", *updates.Description)
+			fmt.Fprintf(cmd.OutOrStdout(), "  description: %s\n", *updates.Description)
 		}
 		if updates.Specification != nil {
-			fmt.Printf("  specification: %s\n", *updates.Specification)
+			fmt.Fprintf(cmd.OutOrStdout(), "  specification: %s\n", *updates.Specification)
 		}
 		if applyWithMetadata {
 			if updates.Title != nil {
-				fmt.Printf("  title: %s\n", *updates.Title)
+				fmt.Fprintf(cmd.OutOrStdout(), "  title: %s\n", *updates.Title)
 			}
 			if updates.State != nil {
-				fmt.Printf("  state: %s\n", *updates.State)
+				fmt.Fprintf(cmd.OutOrStdout(), "  state: %s\n", *updates.State)
 			}
 			if updates.Priority != nil {
-				fmt.Printf("  priority: %d\n", *updates.Priority)
+				fmt.Fprintf(cmd.OutOrStdout(), "  priority: %d\n", *updates.Priority)
 			}
 			if updates.DueAt != nil {
-				fmt.Printf("  due_at: %s\n", *updates.DueAt)
+				fmt.Fprintf(cmd.OutOrStdout(), "  due_at: %s\n", *updates.DueAt)
 			}
 		}
 		return nil
 	}
 
 	// Execute update
-	return applyTaskUpdates(database, app.Attribution(), taskUUID, updates, !applyWithMetadata, applyIfMatch)
+	return applyTaskUpdates(cmd, database, app.Attribution(), taskUUID, updates, !applyWithMetadata, applyIfMatch)
 }
 
-func applyTaskUpdates(database *db.DB, attr attribution.Attribution, taskUUID string, updates *parse.TaskUpdate, bodyOnly bool, ifMatch int64) error {
+func applyTaskUpdates(cmd *cobra.Command, database *db.DB, attr attribution.Attribution, taskUUID string, updates *parse.TaskUpdate, bodyOnly bool, ifMatch int64) error {
 	fields := map[string]interface{}{}
 	if bodyOnly {
 		if updates.Description != nil {
@@ -232,6 +241,13 @@ func applyTaskUpdates(database *db.DB, attr attribution.Attribution, taskUUID st
 	if _, err := store.New(database).Tasks.UpdateFieldsWithAttribution(attr, taskUUID, fields, ifMatch); err != nil {
 		return fmt.Errorf("failed to update task: %w", err)
 	}
-	fmt.Printf("Updated task %s\n", taskUUID)
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"uuid":    taskUUID,
+			"updated": true,
+			"fields":  fields,
+		})
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Updated task %s\n", taskUUID)
 	return nil
 }

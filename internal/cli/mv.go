@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -107,6 +108,11 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, attr attribution.Attrib
 	srcTaskUUID, srcPath, taskErr := selectors.ResolveTask(s.DB(), src)
 	if taskErr == nil {
 		if mvDryRun {
+			if !isStdoutTTY(cmd.OutOrStdout()) {
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				return encoder.Encode(map[string]interface{}{"type": "task", "source": srcPath, "destination": dstPath, "dry_run": true})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Would move task %s -> %s\n", srcPath, dstPath)
 			return nil
 		}
@@ -117,6 +123,11 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, attr attribution.Attrib
 			return err
 		}
 
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{"type": "task", "source": srcPath, "destination": dstPath, "moved": true})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Moved task: %s -> %s\n", srcPath, dstPath)
 		return nil
 	}
@@ -125,6 +136,11 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, attr attribution.Attrib
 	srcContainerUUID, _, containerErr := selectors.ResolveContainer(s.DB(), src)
 	if containerErr == nil {
 		if mvDryRun {
+			if !isStdoutTTY(cmd.OutOrStdout()) {
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				return encoder.Encode(map[string]interface{}{"type": "container", "source": src, "destination": dstPath, "dry_run": true})
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Would move container %s -> %s\n", src, dstPath)
 			return nil
 		}
@@ -135,6 +151,11 @@ func moveToContainer(cmd *cobra.Command, s *store.Store, attr attribution.Attrib
 			return err
 		}
 
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{"type": "container", "source": src, "destination": dstPath, "moved": true})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Moved container: %s -> %s\n", src, dstPath)
 		return nil
 	}
@@ -166,6 +187,7 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, attr attribution.Attri
 	}
 
 	// Check if destination already exists
+	wouldOverwrite := false
 	var existingTaskUUID string
 	err = database.QueryRow(`
 		SELECT uuid FROM tasks WHERE slug = ? AND project_uuid = ?
@@ -175,9 +197,12 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, attr attribution.Attri
 		if !mvOverwriteTask {
 			return fmt.Errorf("destination task already exists: %s (use --overwrite-task to replace)", dstPath)
 		}
+		wouldOverwrite = true
 		// Delete existing task
 		if mvDryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "Would overwrite task at %s\n", dstPath)
+			if isStdoutTTY(cmd.OutOrStdout()) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Would overwrite task at %s\n", dstPath)
+			}
 		} else {
 			_, err := s.Tasks.PurgeWithAttribution(attr, existingTaskUUID, 0)
 			if err != nil {
@@ -187,6 +212,17 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, attr attribution.Attri
 	}
 
 	if mvDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{
+				"type":            "task",
+				"source":          srcPath,
+				"destination":     dstPath,
+				"dry_run":         true,
+				"would_overwrite": wouldOverwrite,
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Would rename/move task %s -> %s\n", srcPath, dstPath)
 		return nil
 	}
@@ -201,6 +237,11 @@ func renameOrMoveTask(cmd *cobra.Command, s *store.Store, attr attribution.Attri
 		return err
 	}
 
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]interface{}{"type": "task", "source": srcPath, "destination": dstPath, "moved": true})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed task: %s -> %s\n", srcPath, dstPath)
 	return nil
 }
@@ -248,6 +289,11 @@ func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, attr attribution.
 	}
 
 	if mvDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{"type": "container", "source": srcPath, "destination": dstPath, "dry_run": true})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Would rename/move container %s -> %s\n", srcPath, dstPath)
 		return nil
 	}
@@ -262,6 +308,11 @@ func renameOrMoveContainer(cmd *cobra.Command, s *store.Store, attr attribution.
 		return err
 	}
 
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]interface{}{"type": "container", "source": srcPath, "destination": dstPath, "moved": true})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Moved/renamed container: %s -> %s\n", srcPath, dstPath)
 	return nil
 }

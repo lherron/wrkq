@@ -2,6 +2,7 @@ package cli
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -43,6 +44,7 @@ func init() {
 func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+	results := []map[string]interface{}{}
 
 	for _, commentRef := range args {
 		// Remove c: prefix if present
@@ -98,6 +100,15 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			if commentRmPurge {
 				action = "purge"
 			}
+			if !isStdoutTTY(cmd.OutOrStdout()) {
+				results = append(results, map[string]interface{}{
+					"id":      commentID,
+					"task_id": taskID,
+					"action":  action,
+					"dry_run": true,
+				})
+				continue
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would %s comment %s (task %s): %s\n",
 				action, commentID, taskID, bodyPreview)
 			continue
@@ -111,7 +122,7 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 			// Capitalize first letter of action (avoiding deprecated strings.Title)
 			actionTitle := strings.ToUpper(action[:1]) + action[1:]
-			fmt.Fprintf(cmd.OutOrStdout(), "%s comment %s (task %s)? [y/N]: ",
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s comment %s (task %s)? [y/N]: ",
 				actionTitle, commentID, taskID)
 			var response string
 			_, _ = fmt.Scanln(&response)
@@ -154,7 +165,15 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Purged: %s\n", commentID)
+			results = append(results, map[string]interface{}{
+				"id":      commentID,
+				"uuid":    commentUUID,
+				"task_id": taskID,
+				"purged":  true,
+			})
+			if isStdoutTTY(cmd.OutOrStdout()) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Purged: %s\n", commentID)
+			}
 		} else {
 			// Soft delete
 			_, err = tx.Exec(`
@@ -228,8 +247,22 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("failed to commit transaction: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s\n", commentID)
+			results = append(results, map[string]interface{}{
+				"id":      commentID,
+				"uuid":    commentUUID,
+				"task_id": taskID,
+				"deleted": true,
+			})
+			if isStdoutTTY(cmd.OutOrStdout()) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s\n", commentID)
+			}
 		}
+	}
+
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(results)
 	}
 
 	return nil

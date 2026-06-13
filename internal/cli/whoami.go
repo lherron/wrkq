@@ -26,7 +26,7 @@ func runWhoami(app *appctx.App, cmd *cobra.Command, args []string) error {
 	cfg := app.Config
 	attr := app.Attribution()
 
-	if whoamiJSON {
+	if whoamiJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		output := map[string]interface{}{
 			"principal_ref": attr.PrincipalRef,
 			"scope_ref":     attr.ScopeRef,

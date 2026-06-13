@@ -354,10 +354,20 @@ func TestHandoffListOutputModes(t *testing.T) {
 
 	seedHandoff(t, database, "curly", "wrkq", "single", "body")
 
-	// Piped (bytes.Buffer is not a TTY) → JSON
-	jsonDefault := runHandoffListCLI(t, []string{"handoff", "list"})
-	if jsonDefault.code != 0 || !strings.HasPrefix(strings.TrimSpace(jsonDefault.stdout), "{") {
-		t.Fatalf("default piped output should be JSON: code=%d stdout=%s", jsonDefault.code, jsonDefault.stdout)
+	// Piped (bytes.Buffer is not a TTY) -> NDJSON
+	ndjsonDefault := runHandoffListCLI(t, []string{"handoff", "list"})
+	if ndjsonDefault.code != 0 {
+		t.Fatalf("default piped output should be NDJSON: code=%d stdout=%s", ndjsonDefault.code, ndjsonDefault.stdout)
+	}
+	defaultLines := strings.Split(strings.TrimSpace(ndjsonDefault.stdout), "\n")
+	if len(defaultLines) != 2 {
+		t.Fatalf("default piped NDJSON should write 1 entry + 1 footer line, got %d lines: %q", len(defaultLines), ndjsonDefault.stdout)
+	}
+	for i, line := range defaultLines {
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Fatalf("default NDJSON line %d not valid JSON: %v\n%s", i, err, line)
+		}
 	}
 
 	// --human forces a table header even when piped

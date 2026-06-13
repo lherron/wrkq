@@ -34,9 +34,11 @@ const (
 )
 
 type outputResolveOptions struct {
-	Allow            []outputMode
-	DefaultTTY       outputMode
-	DefaultTTYStable bool
+	Allow               []outputMode
+	DefaultTTY          outputMode
+	DefaultTTYStable    bool
+	DefaultNonTTY       outputMode
+	DefaultNonTTYStable bool
 }
 
 type outputSelection struct {
@@ -89,6 +91,10 @@ func resolveOutputMode(cmd *cobra.Command, cfg *config.Config, shape outputShape
 		mode, stable := defaultTTYOutputMode(shape)
 		mode, err := requireAllowedOutput(mode, allowed)
 		return outputSelection{Mode: mode, Stable: stable}, err
+	}
+	if opts.DefaultNonTTY != "" {
+		mode, err := requireAllowedOutput(opts.DefaultNonTTY, allowed)
+		return outputSelection{Mode: mode, Stable: opts.DefaultNonTTYStable}, err
 	}
 	mode, err := requireAllowedOutput(defaultNonTTYOutputMode(shape), allowed)
 	return outputSelection{Mode: mode}, err

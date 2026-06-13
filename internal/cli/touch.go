@@ -7,7 +7,6 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
@@ -199,6 +198,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Create store
 	s := store.New(database)
+	machineOutput := touchJSON || !isStdoutTTY(cmd.OutOrStdout())
 
 	type touchResult struct {
 		ID          string `json:"id"`
@@ -289,7 +289,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to create artifact directory %s: %v\n", artifactDir, err)
 		}
-		if touchJSON {
+		if machineOutput {
 			results = append(results, touchResult{
 				ID:          result.ID,
 				UUID:        result.UUID,
@@ -306,8 +306,8 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "Created task: %s (%s)\n", result.ID, path)
 	}
 
-	if touchJSON {
-		return render.RenderJSON(results, false)
+	if machineOutput {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, results)
 	}
 
 	return nil

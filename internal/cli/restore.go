@@ -121,6 +121,14 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err := restoreContainer(database, attr, containerUUID); err != nil {
 			return fmt.Errorf("failed to restore container: %w", err)
 		}
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+				"type":     "container",
+				"selector": arg,
+				"uuid":     containerUUID,
+				"restored": true,
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
 		return nil
 	}
@@ -192,6 +200,17 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to restore subtasks: %w", err)
 	}
 
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+			"type":          "task",
+			"id":            taskID,
+			"uuid":          taskUUID,
+			"restored":      true,
+			"state":         targetState,
+			"moved":         newProjectUUID != nil || newSlug != nil,
+			"comment_added": restoreComment != "",
+		})
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Restored task: %s\n", taskID)
 	return nil
 }

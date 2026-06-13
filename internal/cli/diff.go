@@ -3,7 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
@@ -73,11 +73,11 @@ func runDiff(app *appctx.App, cmd *cobra.Command, args []string) error {
 	diff := compareTasksDetailed(taskA, taskB)
 
 	// Render output
-	if diffJSON {
-		return renderDiffJSON(diff)
+	if diffJSON || !isStdoutTTY(cmd.OutOrStdout()) {
+		return renderDiffJSON(cmd.OutOrStdout(), diff)
 	}
 
-	return renderDiffHuman(diff, taskA, taskB)
+	return renderDiffHuman(cmd.OutOrStdout(), diff, taskA, taskB)
 }
 
 type taskData struct {
@@ -221,26 +221,26 @@ func compareTasksDetailed(a, b *taskData) *taskDiff {
 	return diff
 }
 
-func renderDiffJSON(diff *taskDiff) error {
-	encoder := json.NewEncoder(os.Stdout)
+func renderDiffJSON(w io.Writer, diff *taskDiff) error {
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(diff)
 }
 
-func renderDiffHuman(diff *taskDiff, a, b *taskData) error {
+func renderDiffHuman(w io.Writer, diff *taskDiff, a, b *taskData) error {
 	if len(diff.FieldsChanged) == 0 {
-		fmt.Printf("No differences between %s and %s\n", a.ID, b.ID)
+		fmt.Fprintf(w, "No differences between %s and %s\n", a.ID, b.ID)
 		return nil
 	}
 
-	fmt.Printf("Comparing %s (%s) vs %s (%s)\n\n", a.ID, a.Slug, b.ID, b.Slug)
-	fmt.Printf("%d field(s) changed:\n\n", len(diff.FieldsChanged))
+	fmt.Fprintf(w, "Comparing %s (%s) vs %s (%s)\n\n", a.ID, a.Slug, b.ID, b.Slug)
+	fmt.Fprintf(w, "%d field(s) changed:\n\n", len(diff.FieldsChanged))
 
 	for _, field := range diff.FieldsChanged {
 		change := diff.Changes[field]
-		fmt.Printf("\033[33m%s:\033[0m\n", field)
-		fmt.Printf("  \033[31m- %v\033[0m\n", change.Old)
-		fmt.Printf("  \033[32m+ %v\033[0m\n\n", change.New)
+		fmt.Fprintf(w, "\033[33m%s:\033[0m\n", field)
+		fmt.Fprintf(w, "  \033[31m- %v\033[0m\n", change.Old)
+		fmt.Fprintf(w, "  \033[32m+ %v\033[0m\n\n", change.New)
 	}
 
 	return nil

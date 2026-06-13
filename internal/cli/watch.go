@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"time"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
@@ -44,7 +44,7 @@ func runWatch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
 	// Watch events
-	return watchEvents(database, watchSince, watchNDJSON, watchFollow)
+	return watchEvents(cmd.OutOrStdout(), database, watchSince, watchNDJSON || !isStdoutTTY(cmd.OutOrStdout()), watchFollow)
 }
 
 type watchEvent struct {
@@ -63,9 +63,9 @@ type watchEvent struct {
 	Payload      *string `json:"payload,omitempty"`
 }
 
-func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error {
+func watchEvents(stdout io.Writer, database *db.DB, sinceID int64, ndjson bool, follow bool) error {
 	currentID := sinceID
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(stdout)
 
 	for {
 		// Query new events
@@ -132,7 +132,7 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 					return fmt.Errorf("encode failed: %w", err)
 				}
 			} else {
-				printWatchEvent(e)
+				printWatchEvent(stdout, e)
 			}
 
 			currentID = e.ID
@@ -160,7 +160,7 @@ func watchEvents(database *db.DB, sinceID int64, ndjson bool, follow bool) error
 	return nil
 }
 
-func printWatchEvent(e watchEvent) {
+func printWatchEvent(stdout io.Writer, e watchEvent) {
 	// Human-readable format
 	timestamp := e.Timestamp
 
@@ -182,11 +182,11 @@ func printWatchEvent(e watchEvent) {
 		resource += fmt.Sprintf(" %s", (*e.ResourceUUID)[:8])
 	}
 
-	fmt.Printf("[%s] %s: %s by %s\n", timestamp, resource, e.EventType, actor)
+	fmt.Fprintf(stdout, "[%s] %s: %s by %s\n", timestamp, resource, e.EventType, actor)
 
 	// Print payload if present
 	if e.Payload != nil && *e.Payload != "" {
-		fmt.Printf("  %s\n", formatPayloadOneLine(*e.Payload))
+		fmt.Fprintf(stdout, "  %s\n", formatPayloadOneLine(*e.Payload))
 	}
 }
 

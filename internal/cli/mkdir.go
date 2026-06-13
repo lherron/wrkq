@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -46,13 +47,27 @@ func runMkdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Create store
 	s := store.New(database)
+	results := []map[string]interface{}{}
 
 	// Create each path
 	for _, path := range args {
 		if err := createContainer(s, attr, path, mkdirParents, mkdirKind); err != nil {
 			return err
 		}
+		results = append(results, map[string]interface{}{
+			"path":    path,
+			"created": true,
+		})
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			continue
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", path)
+	}
+
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(results)
 	}
 
 	return nil

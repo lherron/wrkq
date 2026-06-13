@@ -112,7 +112,7 @@ func runStat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Output
-	if statJSON {
+	if statJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(results)

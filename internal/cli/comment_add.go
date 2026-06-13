@@ -148,6 +148,16 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if commentAddDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+				"dry_run":       true,
+				"task_id":       taskID,
+				"task_uuid":     taskUUID,
+				"principal_ref": attr.PrincipalRef,
+				"body":          body,
+				"meta":          metaStr,
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "[DRY RUN] Would add comment to task %s:\n", taskID)
 		fmt.Fprintf(cmd.OutOrStdout(), "  Principal: %s\n", attr.PrincipalRef)
 		fmt.Fprintf(cmd.OutOrStdout(), "  Body: %s\n", body)
@@ -297,12 +307,12 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 		jsonFlag, _ = cmd.Flags().GetBool("json")
 	}
 
-	if jsonFlag {
-		data, err := json.MarshalIndent(output, "", "  ")
-		if err != nil {
+	if jsonFlag || !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(output); err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), string(data))
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "Comment created: %s\n", commentID)
 	}

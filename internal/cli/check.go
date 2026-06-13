@@ -101,24 +101,24 @@ func runCheckBlocked(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// JSON output
-	if checkBlockedJSON {
-		result := BlockedResult{
-			TaskID:    taskID,
-			TaskUUID:  taskUUID,
-			IsBlocked: isBlocked,
-			Blockers:  make([]BlockerEntry, len(blockers)),
+	result := BlockedResult{
+		TaskID:    taskID,
+		TaskUUID:  taskUUID,
+		IsBlocked: isBlocked,
+		Blockers:  make([]BlockerEntry, len(blockers)),
+	}
+	for i, b := range blockers {
+		result.Blockers[i] = BlockerEntry{
+			ID:    b.ID,
+			UUID:  b.UUID,
+			Slug:  b.Slug,
+			Title: b.Title,
+			State: b.State,
 		}
-		for i, b := range blockers {
-			result.Blockers[i] = BlockerEntry{
-				ID:    b.ID,
-				UUID:  b.UUID,
-				Slug:  b.Slug,
-				Title: b.Title,
-				State: b.State,
-			}
-		}
+	}
 
+	// JSON output
+	if checkBlockedJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(result); err != nil {

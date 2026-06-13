@@ -159,6 +159,15 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Dry run handling
 	if setDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(map[string]interface{}{
+				"dry_run": true,
+				"targets": taskRefs,
+				"fields":  fields,
+			})
+		}
 		for _, ref := range taskRefs {
 			fmt.Fprintf(cmd.OutOrStdout(), "Would update task %s: %+v\n", ref, fields)
 		}
@@ -173,7 +182,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		Jobs:            setJobs,
 		ContinueOnError: setContinueOnError,
 		Ordered:         setOrdered,
-		ShowProgress:    true,
+		ShowProgress:    isStdoutTTY(cmd.OutOrStdout()),
 	}
 
 	result := op.Execute(taskRefs, func(ref string) error {
@@ -186,8 +195,28 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return err
 	})
 
-	// Print summary
-	result.PrintSummary(cmd.OutOrStdout())
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		errorsOut := make([]map[string]string, len(result.Errors))
+		for i, itemErr := range result.Errors {
+			errorsOut[i] = map[string]string{
+				"item":  itemErr.Item,
+				"error": itemErr.Error.Error(),
+			}
+		}
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(map[string]interface{}{
+			"total":     result.TotalItems,
+			"succeeded": result.Succeeded,
+			"failed":    result.Failed,
+			"errors":    errorsOut,
+		}); err != nil {
+			return err
+		}
+	} else {
+		// Print summary
+		result.PrintSummary(cmd.OutOrStdout())
+	}
 
 	// Exit with appropriate code
 	os.Exit(result.ExitCode())

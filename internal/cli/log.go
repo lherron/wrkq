@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"time"
 
@@ -88,19 +88,23 @@ func runLog(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Output next_cursor to stderr in porcelain mode
 	if logPorcelain && nextCursorStr != "" {
-		fmt.Fprintf(os.Stderr, "next_cursor=%s\n", nextCursorStr)
+		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
 	// Render output
 	if logJSON {
-		return renderEventsJSON(events)
+		return renderEventsJSON(cmd.OutOrStdout(), events)
+	}
+
+	if logPorcelain || (!isStdoutTTY(cmd.OutOrStdout()) && !logOneline && !logPatch) {
+		return renderEventsNDJSON(cmd.OutOrStdout(), events)
 	}
 
 	if logOneline {
-		return renderEventsOneline(events)
+		return renderEventsOneline(cmd.OutOrStdout(), events)
 	}
 
-	return renderEventsDetailed(events, logPatch)
+	return renderEventsDetailed(cmd.OutOrStdout(), events, logPatch)
 }
 
 type logOptions struct {
@@ -320,13 +324,23 @@ func parseTimeFilter(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time format: %s (use YYYY-MM-DD or RFC3339)", value)
 }
 
-func renderEventsJSON(events []logEvent) error {
-	encoder := json.NewEncoder(os.Stdout)
+func renderEventsJSON(w io.Writer, events []logEvent) error {
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(events)
 }
 
-func renderEventsOneline(events []logEvent) error {
+func renderEventsNDJSON(w io.Writer, events []logEvent) error {
+	encoder := json.NewEncoder(w)
+	for _, event := range events {
+		if err := encoder.Encode(event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renderEventsOneline(w io.Writer, events []logEvent) error {
 	for _, e := range events {
 		actor := "system"
 		if e.PrincipalRef != nil {
@@ -336,50 +350,50 @@ func renderEventsOneline(events []logEvent) error {
 		}
 
 		timestamp := e.Timestamp.Format("2006-01-02 15:04")
-		fmt.Printf("%s  %s  %s  by %s\n", timestamp, e.EventType, formatEventSummary(e), actor)
+		fmt.Fprintf(w, "%s  %s  %s  by %s\n", timestamp, e.EventType, formatEventSummary(e), actor)
 	}
 	return nil
 }
 
-func renderEventsDetailed(events []logEvent, showPatch bool) error {
+func renderEventsDetailed(w io.Writer, events []logEvent, showPatch bool) error {
 	for i, e := range events {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 
 		// Header
-		fmt.Printf("\033[33mEvent %d\033[0m - %s\n", e.ID, e.EventType)
-		fmt.Printf("  Timestamp:  %s\n", e.Timestamp.Format(time.RFC3339))
+		fmt.Fprintf(w, "\033[33mEvent %d\033[0m - %s\n", e.ID, e.EventType)
+		fmt.Fprintf(w, "  Timestamp:  %s\n", e.Timestamp.Format(time.RFC3339))
 
 		if e.PrincipalRef != nil {
-			fmt.Printf("  Principal:  %s\n", *e.PrincipalRef)
+			fmt.Fprintf(w, "  Principal:  %s\n", *e.PrincipalRef)
 			if e.ScopeRef != nil {
-				fmt.Printf("  Scope:      %s\n", *e.ScopeRef)
+				fmt.Fprintf(w, "  Scope:      %s\n", *e.ScopeRef)
 			}
 		}
 		if e.ActorSlug != nil && e.ActorID != nil {
-			fmt.Printf("  Actor:      %s (%s)\n", *e.ActorSlug, *e.ActorID)
+			fmt.Fprintf(w, "  Actor:      %s (%s)\n", *e.ActorSlug, *e.ActorID)
 		} else if e.PrincipalRef == nil {
-			fmt.Printf("  Actor:      system\n")
+			fmt.Fprintf(w, "  Actor:      system\n")
 		}
 
 		if e.ETag != nil {
-			fmt.Printf("  ETag:       %d\n", *e.ETag)
+			fmt.Fprintf(w, "  ETag:       %d\n", *e.ETag)
 		}
 
 		// Payload summary
-		fmt.Printf("  Summary:    %s\n", formatEventSummary(e))
+		fmt.Fprintf(w, "  Summary:    %s\n", formatEventSummary(e))
 
 		// Detailed payload if requested
 		if showPatch && e.Payload != nil {
-			fmt.Println("  Changes:")
+			fmt.Fprintln(w, "  Changes:")
 			var payload map[string]interface{}
 			if err := json.Unmarshal([]byte(*e.Payload), &payload); err == nil {
 				for key, value := range payload {
-					fmt.Printf("    %s: %v\n", key, value)
+					fmt.Fprintf(w, "    %s: %v\n", key, value)
 				}
 			} else {
-				fmt.Printf("    %s\n", *e.Payload)
+				fmt.Fprintf(w, "    %s\n", *e.Payload)
 			}
 		}
 	}

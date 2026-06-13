@@ -2,9 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -78,7 +78,13 @@ func TestTouchCreatesArtifactDirAndCatShowsHint(t *testing.T) {
 		t.Fatalf("runCat failed: %v", err)
 	}
 
-	if !strings.Contains(catBuf.String(), "artifact_dir: "+expectedDir) {
+	var catTasks []struct {
+		ArtifactDir string `json:"artifact_dir"`
+	}
+	if err := json.Unmarshal(catBuf.Bytes(), &catTasks); err != nil {
+		t.Fatalf("cat output should be JSON: %v\n%s", err, catBuf.String())
+	}
+	if len(catTasks) != 1 || catTasks[0].ArtifactDir != expectedDir {
 		t.Fatalf("cat output missing artifact_dir hint %q:\n%s", expectedDir, catBuf.String())
 	}
 }

@@ -85,6 +85,30 @@ func TestResolveOutputModeDefaultsByShape(t *testing.T) {
 	}
 }
 
+func TestResolveOutputModeCommandNonTTYDefault(t *testing.T) {
+	cmd := newOutputTestCommand(t)
+	sel, err := resolveOutputMode(cmd, &config.Config{}, outputShapeContent, outputResolveOptions{
+		DefaultNonTTY: outputModeJSON,
+	})
+	if err != nil {
+		t.Fatalf("resolve content override: %v", err)
+	}
+	if sel.Mode != outputModeJSON {
+		t.Fatalf("non-TTY content override = %s, want json", sel.Mode)
+	}
+
+	cmd = newOutputTestCommand(t, "--output", "raw")
+	sel, err = resolveOutputMode(cmd, &config.Config{}, outputShapeContent, outputResolveOptions{
+		DefaultNonTTY: outputModeJSON,
+	})
+	if err != nil {
+		t.Fatalf("resolve explicit raw: %v", err)
+	}
+	if sel.Mode != outputModeRaw {
+		t.Fatalf("explicit raw should beat non-TTY override, got %s", sel.Mode)
+	}
+}
+
 func TestResolveOutputModePorcelainIsModifier(t *testing.T) {
 	cmd := newOutputTestCommand(t, "--json", "--porcelain")
 	sel, err := resolveOutputMode(cmd, &config.Config{}, outputShapeList, outputResolveOptions{})

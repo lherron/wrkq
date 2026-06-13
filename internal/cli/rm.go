@@ -12,7 +12,6 @@ import (
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
@@ -143,6 +142,9 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Dry run with details
 	if rmDryRun {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return showRemovalPlanJSON(cmd, database, targets)
+		}
 		return showRemovalPlan(cmd, database, targets)
 	}
 
@@ -157,7 +159,7 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	op := &bulk.Operation{
 		Jobs:            rmJobs,
 		ContinueOnError: rmContinueOnError,
-		ShowProgress:    !rmJSON && !rmNDJSON && !rmPorcelain,
+		ShowProgress:    isStdoutTTY(cmd.OutOrStdout()) && !rmJSON && !rmNDJSON && !rmPorcelain,
 	}
 
 	results := []rmResult{}
@@ -171,15 +173,11 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	})
 
 	// Output results
-	if rmJSON {
-		return render.RenderJSON(results, false)
+	if rmJSON || (!isStdoutTTY(cmd.OutOrStdout()) && !rmNDJSON && !rmPorcelain) {
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, results)
 	}
 	if rmNDJSON {
-		items := make([]interface{}, len(results))
-		for i, r := range results {
-			items[i] = r
-		}
-		return render.RenderNDJSON(items)
+		return writeNDJSONOutput(cmd.OutOrStdout(), results)
 	}
 	if rmPorcelain {
 		for _, r := range results {
@@ -289,6 +287,49 @@ func showRemovalPlan(cmd *cobra.Command, database *db.DB, targets []rmTarget) er
 	}
 
 	return nil
+}
+
+func showRemovalPlanJSON(cmd *cobra.Command, database *db.DB, targets []rmTarget) error {
+	entries := make([]map[string]interface{}, 0, len(targets))
+	for _, target := range targets {
+		entry := map[string]interface{}{
+			"type":  target.Type,
+			"uuid":  target.UUID,
+			"purge": rmPurge,
+		}
+		if target.Type == "container" {
+			var id, slug, title, kind string
+			if err := database.QueryRow(`
+				SELECT id, slug, COALESCE(title, ''), kind
+				FROM containers
+				WHERE uuid = ?
+			`, target.UUID).Scan(&id, &slug, &title, &kind); err == nil {
+				entry["id"] = id
+				entry["slug"] = slug
+				entry["title"] = title
+				entry["kind"] = kind
+			}
+		} else {
+			var id, slug, title, state string
+			var priority int
+			if err := database.QueryRow(`
+				SELECT id, slug, COALESCE(title, ''), state, priority
+				FROM tasks
+				WHERE uuid = ?
+			`, target.UUID).Scan(&id, &slug, &title, &state, &priority); err == nil {
+				entry["id"] = id
+				entry["slug"] = slug
+				entry["title"] = title
+				entry["state"] = state
+				entry["priority"] = priority
+			}
+		}
+		entries = append(entries, entry)
+	}
+	return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+		"dry_run": true,
+		"targets": entries,
+	})
 }
 
 func confirmPurge(cmd *cobra.Command, database *db.DB, targets []rmTarget) error {

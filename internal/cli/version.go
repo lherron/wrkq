@@ -29,7 +29,7 @@ func init() {
 }
 
 func runVersion(cmd *cobra.Command, args []string) error {
-	if versionJSON {
+	if versionJSON || !isStdoutTTY(cmd.OutOrStdout()) {
 		output := map[string]interface{}{
 			"version":                   Version,
 			"commit":                    GitCommit,

@@ -273,9 +273,19 @@ func TestHandoffSearchOutputModes(t *testing.T) {
 
 	seedHandoff(t, database, "larry", "wrkq", "mode needle", "body")
 
-	jsonDefault := runHandoffSearchCLI(t, []string{"handoff", "search", "needle"})
-	if jsonDefault.code != 0 || !strings.HasPrefix(strings.TrimSpace(jsonDefault.stdout), "{") {
-		t.Fatalf("default piped output should be JSON: code=%d stdout=%s stderr=%s", jsonDefault.code, jsonDefault.stdout, jsonDefault.stderr)
+	ndjsonDefault := runHandoffSearchCLI(t, []string{"handoff", "search", "needle"})
+	if ndjsonDefault.code != 0 {
+		t.Fatalf("default piped output should be NDJSON: code=%d stdout=%s stderr=%s", ndjsonDefault.code, ndjsonDefault.stdout, ndjsonDefault.stderr)
+	}
+	defaultLines := strings.Split(strings.TrimSpace(ndjsonDefault.stdout), "\n")
+	if len(defaultLines) != 2 {
+		t.Fatalf("default piped NDJSON should write 1 entry + 1 footer line, got %d lines: %q", len(defaultLines), ndjsonDefault.stdout)
+	}
+	for i, line := range defaultLines {
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Fatalf("default NDJSON line %d not valid JSON: %v\n%s", i, err, line)
+		}
 	}
 
 	human := runHandoffSearchCLI(t, []string{"handoff", "search", "needle", "--human"})

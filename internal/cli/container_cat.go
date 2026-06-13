@@ -150,9 +150,9 @@ func runContainerCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// JSON output
-	if containerCatJSON || containerCatNDJSON {
+	if containerCatJSON || containerCatNDJSON || containerCatPorcelain || (!isStdoutTTY(cmd.OutOrStdout()) && !containerCatNoFrontmatter) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
-		if containerCatJSON && !containerCatPorcelain {
+		if !containerCatNDJSON && !containerCatPorcelain {
 			encoder.SetIndent("", "  ")
 		}
 		return encoder.Encode(container)

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -53,6 +54,16 @@ func runAck(app *appctx.App, cmd *cobra.Command, args []string) error {
 	counts, err := ackTasksWithAttribution(database, attr, args, ackForce)
 	if err != nil {
 		return err
+	}
+
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]int{
+			"total":        counts.Total,
+			"acknowledged": counts.Acknowledged,
+			"skipped":      counts.Skipped,
+		})
 	}
 
 	if counts.Acknowledged > 0 {

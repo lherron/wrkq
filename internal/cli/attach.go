@@ -209,16 +209,11 @@ func runAttachLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Output
 	if attachLsJSON {
-		return render.RenderJSON(attachments, false)
+		return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, attachments)
 	}
 
-	if attachLsNDJSON {
-		// Convert to []interface{}
-		items := make([]interface{}, len(attachments))
-		for i, att := range attachments {
-			items[i] = att
-		}
-		return render.RenderNDJSON(items)
+	if attachLsNDJSON || attachLsPorcelain || !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeNDJSONOutput(cmd.OutOrStdout(), attachments)
 	}
 
 	// Table output
@@ -382,6 +377,22 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	resultOut := map[string]interface{}{
+		"id":            attachID,
+		"uuid":          attachUUID,
+		"task_id":       taskID,
+		"task_uuid":     taskUUID,
+		"filename":      filename,
+		"relative_path": relativePath,
+		"mime_type":     mimeType,
+		"size_bytes":    size,
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(resultOut)
+	}
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", attachID, filename, size)
 	return nil
 }
@@ -393,11 +404,11 @@ func runAttachGet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	attachmentRef := args[0]
 
 	// Resolve attachment (ID or UUID)
-	var attachUUID, relativePath, filename string
+	var attachUUID, attachID, relativePath, filename string
 	err := database.QueryRow(`
-		SELECT uuid, relative_path, filename FROM attachments
+		SELECT uuid, id, relative_path, filename FROM attachments
 		WHERE id = ? OR uuid = ?
-	`, attachmentRef, attachmentRef).Scan(&attachUUID, &relativePath, &filename)
+	`, attachmentRef, attachmentRef).Scan(&attachUUID, &attachID, &relativePath, &filename)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("attachment not found: %s", attachmentRef)
 	}
@@ -420,6 +431,15 @@ func runAttachGet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if dstPath != "-" {
+		if !isStdoutTTY(cmd.OutOrStdout()) {
+			return writeJSONOutput(cmd.OutOrStdout(), outputSelection{}, map[string]interface{}{
+				"id":       attachID,
+				"uuid":     attachUUID,
+				"filename": filename,
+				"path":     dstPath,
+				"copied":   true,
+			})
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", filename, dstPath)
 	}
 
@@ -430,6 +450,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	cfg := app.Config
 	database := app.DB
 	attr := app.Attribution()
+	results := []map[string]interface{}{}
 
 	for _, attachmentRef := range args {
 		// Resolve attachment
@@ -448,7 +469,7 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 		// Confirm deletion
 		if !attachRmYes {
-			fmt.Fprintf(cmd.OutOrStdout(), "Delete attachment %s (%s)? [y/N]: ", attachID, filename)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Delete attachment %s (%s)? [y/N]: ", attachID, filename)
 			var response string
 			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
@@ -501,7 +522,21 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to commit transaction: %w", err)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s (%s)\n", attachID, filename)
+		results = append(results, map[string]interface{}{
+			"id":       attachID,
+			"uuid":     attachUUID,
+			"filename": filename,
+			"deleted":  true,
+		})
+		if isStdoutTTY(cmd.OutOrStdout()) {
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted: %s (%s)\n", attachID, filename)
+		}
+	}
+
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(results)
 	}
 
 	return nil

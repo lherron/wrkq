@@ -315,8 +315,7 @@ Non-TTY defaults:
 | Shape | Default |
 | --- | --- |
 | list/search/history stream | NDJSON |
-| singleton/mutation | JSON |
-| content, such as `cat` | raw markdown |
+| singleton/detail/mutation/content | JSON |
 
 TTY defaults vary by command. Porcelain is a stability modifier: compact,
 machine-oriented output and no width/ANSI formatting where applicable.
@@ -337,7 +336,8 @@ Important behavior:
 - `set` updates task fields and supports bulk operation over refs or stdin.
 - `apply` updates description/specification from markdown, YAML, JSON, or stdin.
   Metadata in input is ignored unless `--with-metadata` is passed.
-- `cat` prints markdown with YAML front matter and comments by default.
+- `cat` prints markdown with YAML front matter and comments on a TTY; when
+  piped, it defaults to JSON. Use `--output raw` for markdown in pipelines.
 - `rm` archives by default; `--purge --yes` permanently deletes.
 - `restore` restores archived/deleted tasks to `open` by default or to a
   provided non-archived/non-deleted state.

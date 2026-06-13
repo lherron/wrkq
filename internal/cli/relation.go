@@ -151,6 +151,20 @@ func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to commit relation: %w", err)
 	}
 
+	resultOut := map[string]interface{}{
+		"from_task_id":   fromTaskID,
+		"from_task_uuid": fromTaskUUID,
+		"kind":           kind,
+		"to_task_id":     toTaskID,
+		"to_task_uuid":   toTaskUUID,
+		"created":        true,
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(resultOut)
+	}
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Created relation: %s %s %s\n", fromTaskID, kind, toTaskID)
 	return nil
 }
@@ -216,6 +230,20 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit relation delete: %w", err)
+	}
+
+	resultOut := map[string]interface{}{
+		"from_task_id":   fromTaskID,
+		"from_task_uuid": fromTaskUUID,
+		"kind":           kind,
+		"to_task_id":     toTaskID,
+		"to_task_uuid":   toTaskUUID,
+		"removed":        true,
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		encoder := json.NewEncoder(cmd.OutOrStdout())
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(resultOut)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Removed relation: %s %s %s\n", fromTaskID, kind, toTaskID)
@@ -308,7 +336,7 @@ func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 		return encoder.Encode(relations)
 	}
 
-	if relationNDJSON {
+	if relationNDJSON || relationPorcelain || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		for _, rel := range relations {
 			if err := encoder.Encode(rel); err != nil {

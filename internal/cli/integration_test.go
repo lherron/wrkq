@@ -654,14 +654,20 @@ func TestCatCommand_BlockedBy(t *testing.T) {
 		t.Fatalf("Command failed: %v", err)
 	}
 
-	output := out.String()
-
-	// Verify output contains blocked_by with blocker task
-	if !strings.Contains(output, "blocked_by:") {
-		t.Errorf("Output should contain 'blocked_by:' field when task is blocked")
+	var tasks []struct {
+		BlockedBy []struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		} `json:"blocked_by"`
 	}
-	if !strings.Contains(output, "T-00001 (in_progress)") {
-		t.Errorf("Output should contain blocker task ID and state 'T-00001 (in_progress)'")
+	if err := json.Unmarshal(out.Bytes(), &tasks); err != nil {
+		t.Fatalf("default cat output should be JSON: %v\n%s", err, out.String())
+	}
+	if len(tasks) != 1 || len(tasks[0].BlockedBy) != 1 {
+		t.Fatalf("expected one blocker in JSON output, got: %s", out.String())
+	}
+	if tasks[0].BlockedBy[0].ID != "T-00001" || tasks[0].BlockedBy[0].State != "in_progress" {
+		t.Errorf("unexpected blocker: %+v", tasks[0].BlockedBy[0])
 	}
 }
 
@@ -713,11 +719,20 @@ func TestCatCommand_BlockedBy_CompletedBlockerNotShown(t *testing.T) {
 		t.Fatalf("Command failed: %v", err)
 	}
 
-	output := out.String()
-
-	// Verify output does NOT contain blocked_by (blocker is completed)
-	if strings.Contains(output, "blocked_by:") {
-		t.Errorf("Output should NOT contain 'blocked_by:' when blocker is completed, got: %s", output)
+	var tasks []struct {
+		BlockedBy []struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		} `json:"blocked_by"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &tasks); err != nil {
+		t.Fatalf("default cat output should be JSON: %v\n%s", err, out.String())
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one task in JSON output, got: %s", out.String())
+	}
+	if len(tasks[0].BlockedBy) != 0 {
+		t.Errorf("Output should not include blockers when blocker is completed, got: %+v", tasks[0].BlockedBy)
 	}
 }
 
