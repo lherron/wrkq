@@ -246,6 +246,10 @@ lint:
 suppression-lint:
   go run ./cmd/suppression-lint --root . --exclude vendor --exclude testdata
 
+# Fail on forbidden transitive Go layer-boundary imports and report governed exceptions
+layer-boundary:
+  go run ./cmd/layer-boundary --root . --exclude vendor --exclude testdata
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -256,8 +260,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + lint + test)
-verify: suppression-lint lint test
+# Verify code quality (suppression meta-lint + layer boundary + lint + test)
+verify: suppression-lint layer-boundary lint test
   @echo "✓ All checks passed"
 
 # --- Documentation tasks ---
