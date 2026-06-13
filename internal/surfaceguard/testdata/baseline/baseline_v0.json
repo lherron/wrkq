@@ -1,0 +1,8 @@
+{
+  "methods": [
+    {"method": "wrkf.initialize"},
+    {"method": "wrkf.next"},
+    {"method": "wrkf.task.attach"},
+    {"method": "wrkf.task.inspect"}
+  ]
+}
