@@ -1,28 +1,25 @@
 package workflow
 
-// transition_cas_test.go — RED tests for T-01901 (wrkf-rpc Phase C).
+// transition_cas_test.go — regression tests for T-01901 (wrkf-rpc Phase C).
 //
-// These tests are intentionally FAILING today. They describe the required
-// behaviour for Service.Transition once the P2 hardening lands:
+// These tests guard the implemented Service.Transition hardening:
 //
 //   1. CAS race:         two goroutines race with the same ExpectRevision →
 //                        exactly ONE commits; the loser gets WRKF_STALE_REVISION.
-//                        RED TODAY: both succeed (preflight-only CAS, no atomic WHERE clause).
+//                        CAS is enforced by the atomic update path.
 //
 //   2. Idempotency replay ordering:
 //                        a second call with the same idempotencyKey+same params
 //                        (even with a now-stale ExpectRevision) must replay the
 //                        original committed result rather than error.
-//                        RED TODAY: CAS check fires before idempotency check so the
-//                        second call returns a "revision mismatch" error instead of
-//                        replaying. Also, the first call result does not contain
-//                        eventId (contract §5.1 requires it).
+//                        idempotency replay wins before stale-revision checks
+//                        and returns the original eventId.
 //
 //   3. Idempotency mismatch:
 //                        same idempotencyKey + different actor (different request
 //                        hash) → WRKF_IDEMPOTENCY_MISMATCH.
-//                        RED TODAY: no request-hash stored; always returns
-//                        idempotent=true with no error.
+//                        request-hash comparison detects mismatches for a
+//                        reused key.
 //
 // Contract reference: docs/wrkf-rpc.md §5.1, §6 invariants 1 & 2.
 
@@ -188,14 +185,8 @@ func setupCASFixture(t *testing.T) (*Service, string, *db.DB) {
 // same transition with the same ExpectRevision exactly ONE succeeds and every
 // other fails with WRKF_STALE_REVISION (contract §6 invariant 1).
 //
-// RED TODAY:
-//   - The current implementation performs the revision check as a preflight
-//     (outside the transaction) and does NOT use a "WHERE revision = ?" clause
-//     in the UPDATE.  As a result multiple goroutines can pass the preflight and
-//     all commit, so successCount > 1.
-//   - Even if only one goroutine commits (due to SQLite serialisation), the
-//     failing goroutines return a plain fmt.Errorf string, not a typed error that
-//     implements wrkfCoder with code "WRKF_STALE_REVISION".
+// Regression guard: revision matching must happen in the transactional update,
+// and stale losers must surface the typed WRKF_STALE_REVISION code.
 func TestTransitionCASRace(t *testing.T) {
 	svc, taskUUID, _ := setupCASFixture(t)
 
@@ -278,16 +269,13 @@ func TestTransitionCASRace(t *testing.T) {
 //	same idempotencyKey + same request hash → return the ORIGINAL committed
 //	TransitionResult (same eventId), not a fresh event.
 //
-// RED TODAY on two counts:
+// Regression guard:
 //
-//	a) The first successful call result does not carry "eventId" (contract §5.1
-//	   requires TransitionResult.eventId to be set on every commit, not only
-//	   on the replay path).
+//	a) The first successful call result carries "eventId" as required by
+//	   TransitionResult.
 //
-//	b) The CAS check (ExpectRevision) is performed BEFORE the idempotency check.
-//	   The contract (§6 invariant 2 ordering: load → idempotency → CAS → …) requires
-//	   the opposite.  Therefore a second call with the original ExpectRevision=0
-//	   fails today with a "revision mismatch" error rather than replaying.
+//	b) The idempotency check runs before CAS, so a second call with the original
+//	   ExpectRevision=0 replays instead of being rejected as stale.
 func TestTransitionIdempotencyReplay(t *testing.T) {
 	svc, taskUUID, database := setupCASFixture(t)
 
@@ -306,7 +294,6 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 	}
 
 	// Contract §5.1: TransitionResult must include eventId.
-	// RED TODAY: the success path does not include "eventId" in the returned map.
 	eventID1, _ := result1["eventId"].(string)
 	if eventID1 == "" {
 		t.Errorf("first transition result missing eventId (contract §5.1); full result: %v", result1)
@@ -339,8 +326,6 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 	// ------ Second call: same params including now-stale ExpectRevision=0 ------
 	// Contract (§6 invariant 2, load order): idempotency is checked BEFORE CAS.
 	// Therefore the replay must succeed even though the instance is now at revision=1.
-	// RED TODAY: current code checks CAS before idempotency; the call will return
-	// a "revision mismatch" error instead of the replay result.
 	result2, err := svc.Transition(taskUUID, "complete", TransitionOptions{
 		Actor:          "human:test-actor",
 		Role:           "coordinator",
@@ -380,13 +365,11 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 // idempotencyKey with a different request payload returns WRKF_IDEMPOTENCY_MISMATCH
 // (contract §3 error table, §5.1, §6 invariant 2).
 //
-// RED TODAY on two counts:
+// Regression guard:
 //
-//	a) State-match is checked BEFORE idempotency in the current code, so the call
-//	   fails with "transition … cannot run from current state" (plain string error,
-//	   not WRKF_IDEMPOTENCY_MISMATCH) rather than reaching the mismatch check.
-//	b) Even if ordering were correct, no request hash is stored alongside the
-//	   idempotency key, so the mismatch would go undetected (idempotent=true, nil error).
+//	a) Idempotency mismatch detection runs before state-match rejection.
+//	b) The stored request hash is compared for reused keys so mismatches do not
+//	   replay silently.
 func TestTransitionIdempotencyMismatch(t *testing.T) {
 	svc, taskUUID, _ := setupCASFixture(t)
 
@@ -414,7 +397,6 @@ func TestTransitionIdempotencyMismatch(t *testing.T) {
 		IdempotencyKey: idemKey,
 		// No ExpectRevision: let idempotency check reach mismatch detection.
 	})
-	// RED TODAY: fails with "transition … cannot run from current state" (wrong order)
-	// rather than WRKF_IDEMPOTENCY_MISMATCH (idempotency check not reached; no hash stored).
+	// Idempotency mismatch must surface the typed conflict code.
 	requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
 }

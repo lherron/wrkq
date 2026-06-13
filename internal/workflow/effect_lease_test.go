@@ -1,21 +1,18 @@
 package workflow
 
-// effect_lease_test.go — RED tests for T-01903 (wrkf-rpc Phase E: effect claim/lease).
+// effect_lease_test.go — regression tests for T-01903 (wrkf-rpc Phase E: effect claim/lease).
 //
-// These tests are intentionally FAILING today. They describe the required
-// behaviour for Service.ClaimEffects / AckEffect / FailEffect once Phase E
-// hardening lands:
+// These tests guard the implemented Service.ClaimEffects / AckEffect /
+// FailEffect contracts:
 //
-//   1. ClaimEffects: EffectClaim type + ClaimEffects method do not exist
-//      → compile failure (primary red for all tests in this file).
+//   1. ClaimEffects: EffectClaim results are leased atomically with no
+//      duplicate effect claims across concurrent callers.
 //
-//   2. FailEffect: signature changes from (id, reason string) to
-//      (id, leaseToken, reason string, retryable bool)
-//      → compile failure (wrong arity).
+//   2. FailEffect: terminal/retry paths require the lease token and retryable
+//      flag, and must clear lease metadata when moving an effect terminal.
 //
-//   3. AckEffect: current impl (id, adapter string) does not validate the
-//      lease token → runtime failure once compile errors are resolved
-//      (wrong-token call succeeds instead of returning WRKF_LEASE_CONFLICT).
+//   3. AckEffect: correct tokens succeed, while wrong or expired tokens return
+//      WRKF_LEASE_CONFLICT.
 //
 // Contract reference: docs/wrkf-rpc.md §5.1, §6 invariant 4.
 //
@@ -29,8 +26,7 @@ import (
 	"time"
 )
 
-// EffectClaim is referenced below. The type must be added to the workflow
-// package as part of Phase E. Currently it does NOT exist → compile failure.
+// EffectClaim is the workflow DTO returned by ClaimEffects.
 //
 // Expected definition (frozen by docs/wrkf-rpc.md §5.1):
 //
@@ -81,7 +77,7 @@ func setupEffectFixture(t *testing.T, n int) *Service {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1 — Concurrent claim → disjoint effect sets (compile red: EffectClaim missing)
+// Test 1 — Concurrent claim → disjoint effect sets
 // ---------------------------------------------------------------------------
 
 // TestClaimEffectsAtomicity verifies that when N goroutines concurrently call
@@ -93,9 +89,8 @@ func setupEffectFixture(t *testing.T, n int) *Service {
 //    status='leased', leased_by, leased_until, lease_token."
 //   Two concurrent claimers → disjoint effect sets.
 //
-// RED TODAY:
-//   - EffectClaim type does not exist → compile failure.
-//   - ClaimEffects method does not exist → compile failure.
+// Regression guard: ClaimEffects must keep this atomic selection/update as one
+// indivisible operation so concurrent adapters cannot lease the same effect.
 func TestClaimEffectsAtomicity(t *testing.T) {
 	const totalEffects = 6
 	const racers = 3
@@ -153,7 +148,7 @@ func TestClaimEffectsAtomicity(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2 — Claim respects the limit argument (compile red: ClaimEffects missing)
+// Test 2 — Claim respects the limit argument
 // ---------------------------------------------------------------------------
 
 // TestClaimEffectsLimit verifies that ClaimEffects never returns more effects
@@ -163,7 +158,8 @@ func TestClaimEffectsAtomicity(t *testing.T) {
 // Contract §5.1:
 //   "wrkf.effect.claim params: { adapter, limit, leaseMs, task?, kind? } → EffectClaim"
 //
-// RED TODAY: ClaimEffects + EffectClaim do not exist → compile failure.
+// Regression guard: the returned EffectClaim must respect the caller's limit
+// and expose enough lease metadata for subsequent ack/fail calls.
 func TestClaimEffectsLimit(t *testing.T) {
 	const totalEffects = 8
 	const limit = 3
@@ -210,7 +206,7 @@ func TestClaimEffectsLimit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3 — AckEffect with correct token succeeds (runtime red: no token check)
+// Test 3 — AckEffect with correct token succeeds
 // ---------------------------------------------------------------------------
 
 // TestAckEffectCorrectToken verifies that AckEffect(effectID, leaseToken)
@@ -219,11 +215,8 @@ func TestClaimEffectsLimit(t *testing.T) {
 // Contract §5.1:
 //   "wrkf.effect.ack params: { effectId, leaseToken, receipt? }"
 //
-// RED TODAY:
-//   - ClaimEffects does not exist → compile failure.
-//   - After compile errors are resolved: current AckEffect does not validate
-//     the lease token; it will succeed with any token (including a wrong one),
-//     so the wrong-token test below will fail at runtime.
+// Regression guard: AckEffect must validate the supplied lease token and clear
+// lease metadata when delivery succeeds.
 func TestAckEffectCorrectToken(t *testing.T) {
 	svc := setupEffectFixture(t, 2)
 
@@ -254,7 +247,7 @@ func TestAckEffectCorrectToken(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 4 — AckEffect with wrong token → WRKF_LEASE_CONFLICT (runtime red)
+// Test 4 — AckEffect with wrong token → WRKF_LEASE_CONFLICT
 // ---------------------------------------------------------------------------
 
 // TestAckEffectWrongToken verifies that AckEffect returns WRKF_LEASE_CONFLICT
@@ -263,10 +256,8 @@ func TestAckEffectCorrectToken(t *testing.T) {
 // Contract §5.1 / §3 error table:
 //   "Wrong/expired token → WRKF_LEASE_CONFLICT"  (data.code, retryable=true)
 //
-// RED TODAY:
-//   - ClaimEffects does not exist → compile failure.
-//   - After compile errors are resolved: current AckEffect does not check the
-//     token; it will succeed silently instead of returning WRKF_LEASE_CONFLICT.
+// Regression guard: AckEffect must reject a token that does not match the
+// stored lease token.
 func TestAckEffectWrongToken(t *testing.T) {
 	svc := setupEffectFixture(t, 2)
 
@@ -277,12 +268,12 @@ func TestAckEffectWrongToken(t *testing.T) {
 	effectID := claim.Effects[0].ID
 
 	_, err = svc.AckEffect(effectID, "totally-wrong-lease-token")
-	// RED TODAY: current impl does not check the token — returns nil error.
+	// Wrong tokens are rejected with the lease-conflict code.
 	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
 }
 
 // ---------------------------------------------------------------------------
-// Test 5 — AckEffect with expired token → WRKF_LEASE_CONFLICT (runtime red)
+// Test 5 — AckEffect with expired token → WRKF_LEASE_CONFLICT
 // ---------------------------------------------------------------------------
 
 // TestAckEffectExpiredToken verifies that AckEffect returns WRKF_LEASE_CONFLICT
@@ -293,9 +284,8 @@ func TestAckEffectWrongToken(t *testing.T) {
 //   "ack/fail MUST update only WHERE id=? AND status='leased' AND
 //    lease_token=? AND leased_until > now (else WRKF_LEASE_CONFLICT)"
 //
-// RED TODAY: compile failure (ClaimEffects missing). After compile errors are
-// resolved: current AckEffect does not check leased_until → succeeds instead of
-// returning WRKF_LEASE_CONFLICT.
+// Regression guard: AckEffect must enforce leased_until, not only token
+// equality.
 func TestAckEffectExpiredToken(t *testing.T) {
 	svc := setupEffectFixture(t, 2)
 
@@ -311,12 +301,12 @@ func TestAckEffectExpiredToken(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	_, err = svc.AckEffect(effectID, token)
-	// RED TODAY: current impl never checks leased_until — returns nil error.
+	// Expired leases are rejected with the lease-conflict code.
 	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
 }
 
 // ---------------------------------------------------------------------------
-// Test 6 — FailEffect with wrong token → WRKF_LEASE_CONFLICT (compile red)
+// Test 6 — FailEffect with wrong token → WRKF_LEASE_CONFLICT
 // ---------------------------------------------------------------------------
 
 // TestFailEffectWrongToken verifies that FailEffect returns WRKF_LEASE_CONFLICT
@@ -326,9 +316,8 @@ func TestAckEffectExpiredToken(t *testing.T) {
 //   "wrkf.effect.fail params: { effectId, leaseToken, reason, retryable? }"
 //   "Wrong/expired token → WRKF_LEASE_CONFLICT"
 //
-// RED TODAY (compile): FailEffect currently takes (id, reason string) — two args.
-// The tests call FailEffect(id, leaseToken, reason, retryable) — four args
-// → compile error.
+// Regression guard: FailEffect must require the lease token and reject
+// mismatches before mutating the effect.
 func TestFailEffectWrongToken(t *testing.T) {
 	svc := setupEffectFixture(t, 2)
 
@@ -339,13 +328,12 @@ func TestFailEffectWrongToken(t *testing.T) {
 	effectID := claim.Effects[0].ID
 
 	// Wrong token + retryable=false.
-	// RED TODAY (compile): FailEffect does not have this signature.
 	_, err = svc.FailEffect(effectID, "wrong-lease-token", "deliberate test failure", false)
 	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
 }
 
 // ---------------------------------------------------------------------------
-// Test 7 — FailEffect with correct token clears lease fields (compile red)
+// Test 7 — FailEffect with correct token clears lease fields
 // ---------------------------------------------------------------------------
 
 // TestFailEffectCorrectToken verifies that FailEffect(id, leaseToken, reason,
@@ -355,7 +343,8 @@ func TestFailEffectWrongToken(t *testing.T) {
 // Contract §6 inv 4:
 //   "terminal/retry paths MUST clear lease_token/leased_by/leased_until."
 //
-// RED TODAY (compile): FailEffect does not accept leaseToken + retryable args.
+// Regression guard: FailEffect must accept the token/retryable contract and
+// clear lease metadata on successful terminal failure.
 func TestFailEffectCorrectToken(t *testing.T) {
 	svc := setupEffectFixture(t, 2)
 

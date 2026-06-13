@@ -1,9 +1,8 @@
 package workflow
 
-// run_binding_test.go — RED tests for T-01902 (wrkf-rpc Phase D).
+// run_binding_test.go — regression tests for T-01902 (wrkf-rpc Phase D).
 //
-// These tests are intentionally FAILING today. They describe required behaviour
-// for the Service run layer once Phase D hardening lands:
+// These tests guard the implemented Service run-layer contracts:
 //
 //   1. StartRun idempotency: same idempotencyKey + same params → same Run (replay),
 //      not a second row.
@@ -16,11 +15,10 @@ package workflow
 //   4. FinishRun conflict    (leg b): FinishRun with a DIFFERENT terminal payload on
 //      an already-terminal run → WRKF_IDEMPOTENCY_MISMATCH.
 //
-// RED TODAY:
-//   - StartRunOptions, BindExternalOptions types and BindExternal method do not exist
-//     → compile failure (primary red signal).
-//   - FinishRun has no terminal-state idempotency or conflict detection
-//     → runtime failure once compile errors are resolved.
+// Regression focus:
+//   - StartRunOptions and BindExternalOptions preserve idempotency metadata.
+//   - BindExternal prevents conflicting external refs.
+//   - FinishRun handles terminal-state replay and conflict detection.
 //
 // Contract reference: docs/wrkf-rpc.md §5.1, §6 invariant 3.
 //
@@ -54,7 +52,7 @@ func setupRunFixture(t *testing.T) (*Service, string) {
 // Contract §5.1 / §6 invariant 3:
 //   same key → same Run (replay).
 //
-// RED TODAY: StartRunOptions type does not exist → compile failure.
+// Regression guard: StartRunOptions.IdempotencyKey must replay the original run.
 func TestStartRunIdempotency(t *testing.T) {
 	svc, taskUUID := setupRunFixture(t)
 
@@ -109,7 +107,8 @@ func TestStartRunIdempotency(t *testing.T) {
 // Contract §5.1 / §6 invariant 3:
 //   same key + different role/task → conflict (WRKF_IDEMPOTENCY_MISMATCH).
 //
-// RED TODAY: StartRunOptions type does not exist → compile failure.
+// Regression guard: a reused idempotency key with different run identity must
+// return WRKF_IDEMPOTENCY_MISMATCH.
 func TestStartRunIdempotencyMismatch(t *testing.T) {
 	svc, taskUUID := setupRunFixture(t)
 
@@ -124,7 +123,6 @@ func TestStartRunIdempotencyMismatch(t *testing.T) {
 	}
 
 	// Second call: SAME key, DIFFERENT role → must return WRKF_IDEMPOTENCY_MISMATCH.
-	// RED TODAY: StartRunOptions does not exist → compile failure.
 	_, err = svc.StartRun(taskUUID, "implementor", "human:tester", StartRunOptions{
 		IdempotencyKey: idemKey,
 	})
@@ -143,7 +141,8 @@ func TestStartRunIdempotencyMismatch(t *testing.T) {
 //   wrkf.run.bindExternal sets external_run_ref (unique when non-empty).
 //   Second bind with different non-empty ref → conflict.
 //
-// RED TODAY: BindExternal method and BindExternalOptions type do not exist → compile failure.
+// Regression guard: BindExternalOptions participates in the external-run
+// binding contract, and conflicting refs must remain rejected.
 func TestBindExternal(t *testing.T) {
 	svc, taskUUID := setupRunFixture(t)
 
@@ -188,7 +187,6 @@ func TestBindExternal(t *testing.T) {
 		t.Fatalf("second BindExternal with different ref: expected conflict error, got nil")
 	}
 	// Uniqueness violation on external_run_ref is surfaced as WRKF_IDEMPOTENCY_MISMATCH.
-	// RED TODAY: method does not exist → compile failure (runtime check here for clarity).
 	code := wrkfCode(err)
 	if code != "WRKF_IDEMPOTENCY_MISMATCH" {
 		t.Errorf("second BindExternal conflict: expected WRKF_IDEMPOTENCY_MISMATCH, got %q (err: %v)", code, err)
@@ -210,9 +208,8 @@ func TestBindExternal(t *testing.T) {
 //   "Repeated terminal with identical payload → existing terminal Run;
 //    conflicting terminal payload → conflict."
 //
-// RED TODAY (compile): StartRunOptions type does not exist → compile failure.
-// RED TODAY (runtime, leg b): FinishRun does not detect conflicting terminal
-// payload; second call silently overwrites instead of returning WRKF_IDEMPOTENCY_MISMATCH.
+// Regression guard: StartRunOptions creates distinct runs for the two legs, and
+// FinishRun must reject a conflicting terminal payload instead of overwriting it.
 func TestFinishRunIdempotency(t *testing.T) {
 	svc, taskUUID := setupRunFixture(t)
 
@@ -269,7 +266,6 @@ func TestFinishRunIdempotency(t *testing.T) {
 	}
 
 	// Different summary on an already-terminal run → must conflict.
-	// RED TODAY: current FinishRun silently overwrites; no error is returned.
 	_, err = svc.FinishRun(run2.ID, termStatus, otherSummary)
 	requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
 }

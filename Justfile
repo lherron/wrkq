@@ -250,6 +250,10 @@ suppression-lint:
 layer-boundary:
   go run ./cmd/layer-boundary --root . --exclude vendor --exclude testdata
 
+# Fail on stale TDD-phase comments in first-party test files (rot sensor)
+rot-sensor:
+  go run ./cmd/rot-sensor --root .
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -260,8 +264,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test)
-verify: suppression-lint layer-boundary lint test
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor)
+verify: suppression-lint layer-boundary lint test rot-sensor
   @echo "✓ All checks passed"
 
 # --- Documentation tasks ---
