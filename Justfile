@@ -242,6 +242,10 @@ lint:
   golangci-lint run
   @echo "✓ Golang linting complete"
 
+# Fail on ungoverned nolint suppressions and report governed counts by rule
+suppression-lint:
+  go run ./cmd/suppression-lint --root . --exclude vendor --exclude testdata
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -252,8 +256,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (lint + test)
-verify: lint test
+# Verify code quality (suppression meta-lint + lint + test)
+verify: suppression-lint lint test
   @echo "✓ All checks passed"
 
 # --- Documentation tasks ---
