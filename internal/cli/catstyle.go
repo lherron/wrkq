@@ -53,10 +53,10 @@ func renderStyledTask(w io.Writer, t styledTask, comments []styledComment) {
 			return
 		}
 		if wrote {
-			io.WriteString(w, "\n")
+			_, _ = io.WriteString(w, "\n")
 		}
-		io.WriteString(w, paint(colSection, label)+"\n")
-		io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n\n")
+		_, _ = io.WriteString(w, paint(colSection, label)+"\n")
+		_, _ = io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n\n")
 		renderMarkdown(w, body, bodyIndent)
 		wrote = true
 	}
@@ -87,7 +87,7 @@ func renderHeader(w io.Writer, t styledTask) {
 	if t.Path != "" {
 		meta = append(meta, paint(colDim, t.Path))
 	}
-	io.WriteString(w, indent+strings.Join(meta, sep)+"\n")
+	_, _ = io.WriteString(w, indent+strings.Join(meta, sep)+"\n")
 
 	var trailer []string
 	if t.UpdatedAt != "" {
@@ -110,16 +110,16 @@ func renderHeader(w io.Writer, t styledTask) {
 		trailer = append(trailer, paint(colStateStop, fmt.Sprintf("%d blocked", t.BlockedCount)))
 	}
 	if len(trailer) > 0 {
-		io.WriteString(w, indent+strings.Join(trailer, sep)+"\n")
+		_, _ = io.WriteString(w, indent+strings.Join(trailer, sep)+"\n")
 	}
 
-	io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
+	_, _ = io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
 }
 
 // renderComments prints the comment thread under a counted heading.
 func renderComments(w io.Writer, comments []styledComment) {
-	io.WriteString(w, "\n"+paint(colSection, fmt.Sprintf("Comments (%d)", len(comments)))+"\n")
-	io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
+	_, _ = io.WriteString(w, "\n"+paint(colSection, fmt.Sprintf("Comments (%d)", len(comments)))+"\n")
+	_, _ = io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
 
 	bar := paint(colRule, "▏ ")
 	for _, c := range comments {
@@ -130,15 +130,15 @@ func renderComments(w io.Writer, comments []styledComment) {
 		if c.Role != "" {
 			head += paint(colDim, " ("+c.Role+")")
 		}
-		io.WriteString(w, bar+head+"\n")
+		_, _ = io.WriteString(w, bar+head+"\n")
 		for _, line := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
 			if strings.TrimSpace(line) == "" {
-				io.WriteString(w, bar+"\n")
+				_, _ = io.WriteString(w, bar+"\n")
 				continue
 			}
 			emitFlow(w, bar, bar, line)
 		}
-		io.WriteString(w, "\n")
+		_, _ = io.WriteString(w, "\n")
 	}
 }
 

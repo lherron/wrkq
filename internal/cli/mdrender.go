@@ -16,12 +16,12 @@ import (
 // quote bars) and scaffolding recedes. Prose itself stays uncolored so it reads
 // like text, not a syntax dump.
 const (
-	colHeading = "1"     // bold — inline emphasis fallback
-	colSection = "1;35"  // bold magenta — section headers (the body's landmarks)
-	colCode    = "36"    // cyan — inline code & fenced blocks
-	colLink    = "4"     // underline — link text
-	colRule    = "2"     // faint — horizontal rules, quote bars
-	colMarker  = "33"    // amber — list bullets/numbers (structure, like tree)
+	colHeading = "1"    // bold — inline emphasis fallback
+	colSection = "1;35" // bold magenta — section headers (the body's landmarks)
+	colCode    = "36"   // cyan — inline code & fenced blocks
+	colLink    = "4"    // underline — link text
+	colRule    = "2"    // faint — horizontal rules, quote bars
+	colMarker  = "33"   // amber — list bullets/numbers (structure, like tree)
 )
 
 var (
@@ -51,19 +51,19 @@ func renderMarkdown(w io.Writer, md, indent string) {
 		// Fenced code blocks: emit verbatim in code color, no inline parsing.
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inFence = !inFence
-			io.WriteString(w, indent+paint(colRule, "│ ")+"\n")
+			_, _ = io.WriteString(w, indent+paint(colRule, "│ ")+"\n")
 			wrote = true
 			continue
 		}
 		if inFence {
-			io.WriteString(w, indent+paint(colRule, "│ ")+paint(colCode, line)+"\n")
+			_, _ = io.WriteString(w, indent+paint(colRule, "│ ")+paint(colCode, line)+"\n")
 			wrote = true
 			continue
 		}
 
 		// Horizontal rule.
 		if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-			io.WriteString(w, indent+paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
+			_, _ = io.WriteString(w, indent+paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
 			wrote = true
 			continue
 		}
@@ -77,11 +77,11 @@ func renderMarkdown(w io.Writer, md, indent string) {
 				code = "1;2" // deeper headings recede (bold + faint)
 			}
 			if wrote {
-				io.WriteString(w, "\n")
+				_, _ = io.WriteString(w, "\n")
 			}
-			io.WriteString(w, indent+paint(code, text)+"\n")
+			_, _ = io.WriteString(w, indent+paint(code, text)+"\n")
 			if level == 1 {
-				io.WriteString(w, indent+paint(colRule, strings.Repeat("─", min(ruleWidth, len(stripANSI(text)))))+"\n")
+				_, _ = io.WriteString(w, indent+paint(colRule, strings.Repeat("─", min(ruleWidth, len(stripANSI(text)))))+"\n")
 			}
 			wrote = true
 			continue
@@ -116,7 +116,7 @@ func renderMarkdown(w io.Writer, md, indent string) {
 
 		// Standalone "Section:" label — promote to a colored section header.
 		if line == trimmed && !strings.ContainsRune(trimmed, '`') && mdLabel.MatchString(trimmed) {
-			io.WriteString(w, indent+paint(colSection, trimmed)+"\n")
+			_, _ = io.WriteString(w, indent+paint(colSection, trimmed)+"\n")
 			wrote = true
 			continue
 		}
@@ -124,7 +124,7 @@ func renderMarkdown(w io.Writer, md, indent string) {
 		// Plain paragraph / blank line.
 		if trimmed == "" {
 			if wrote {
-				io.WriteString(w, "\n")
+				_, _ = io.WriteString(w, "\n")
 			}
 			continue
 		}
@@ -251,7 +251,7 @@ func emitFlow(w io.Writer, firstPrefix, contPrefix, raw string) {
 		if i == 0 {
 			prefix = firstPrefix
 		}
-		io.WriteString(w, prefix+line+"\n")
+		_, _ = io.WriteString(w, prefix+line+"\n")
 	}
 }
 
