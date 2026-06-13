@@ -272,6 +272,10 @@ test-verbose:
 verify: suppression-lint layer-boundary lint test rot-sensor surface-guard
   @echo "✓ All checks passed"
 
+# Run the full slow backstop tier (fast verify + smoke + RPC verification)
+verify-full: verify smoke verify-rpc
+  @echo "✓ Full verification passed"
+
 # --- Documentation tasks ---
 
 # Serve standalone HTML docs from docs/html
