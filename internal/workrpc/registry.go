@@ -7,6 +7,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/wrkfapi"
+	"github.com/lherron/wrkq/internal/wrkqapi"
 )
 
 type RegistryOptions struct {
@@ -194,15 +195,11 @@ var dtoCatalog = []string{
 }
 
 func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
+	// Methods not yet implemented (deferred to later phases of T-04424).
 	stubbed := []string{
-		"wrkq.task.show",
-		"wrkq.task.list",
-		"wrkq.task.update",
 		"wrkq.task.acknowledge",
 		"wrkq.task.delete",
 		"wrkq.task.restore",
-		"wrkq.comment.add",
-		"wrkq.comment.list",
 		"wrkq.comment.show",
 		"wrkq.comment.delete",
 		"wrkq.attachment.add",
@@ -218,43 +215,35 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	for _, method := range stubbed {
 		s.Register(method, stubHandler(method))
 	}
-	s.Register("wrkq.task.create", apiHandler(func(ctx context.Context, p wrkqTaskCreateParams) (any, error) {
-		if p.Title == "" {
-			return nil, NewValidationError("title is required", map[string]any{
-				"field":    "title",
-				"expected": "non-empty string",
-			})
-		}
-		return map[string]any{
-			"id":          "",
-			"title":       p.Title,
-			"description": p.Description,
-			"state":       defaultString(p.State, "open"),
-			"priority":    p.Priority,
-			"meta":        p.Meta,
-		}, nil
+
+	wq := wrkqapi.New(opts.Database, api, opts.DefaultActor)
+
+	s.Register("wrkq.task.create", apiHandler(func(ctx context.Context, p wrkqapi.TaskCreateParams) (any, error) {
+		return wq.TaskCreate(ctx, p)
 	}))
-	s.Register("wrkq.workflow.attach", apiHandler(func(ctx context.Context, p taskAttachParams) (any, error) {
-		if api == nil {
-			return nil, NewDomainError(CodeWorkRPCInternal, "workflow API is unavailable", false, nil)
-		}
-		inst, err := api.TaskAttach(ctx, p.TaskSelector, p.Workflow, defaultString(p.Actor, opts.DefaultActor))
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"task": p.TaskSelector, "instance": inst, "attached": true}, nil
+	s.Register("wrkq.task.show", apiHandler(func(ctx context.Context, p wrkqapi.TaskShowParams) (any, error) {
+		return wq.TaskShow(ctx, p)
 	}))
-	s.Register("wrkq.workflow.inspect", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
-		if api == nil {
-			return nil, NewDomainError(CodeWorkRPCInternal, "workflow API is unavailable", false, nil)
-		}
-		return api.TaskInspect(ctx, p.TaskSelector)
+	s.Register("wrkq.task.list", apiHandler(func(ctx context.Context, p wrkqapi.TaskListParams) (any, error) {
+		return wq.TaskList(ctx, p)
 	}))
-	s.Register("wrkq.workflow.timeline", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
-		if api == nil {
-			return nil, NewDomainError(CodeWorkRPCInternal, "workflow API is unavailable", false, nil)
-		}
-		return api.TaskTimeline(ctx, p.TaskSelector)
+	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
+		return wq.TaskUpdate(ctx, p)
+	}))
+	s.Register("wrkq.comment.add", apiHandler(func(ctx context.Context, p wrkqapi.CommentAddParams) (any, error) {
+		return wq.CommentAdd(ctx, p)
+	}))
+	s.Register("wrkq.comment.list", apiHandler(func(ctx context.Context, p wrkqapi.CommentListParams) (any, error) {
+		return wq.CommentList(ctx, p)
+	}))
+	s.Register("wrkq.workflow.attach", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowAttachParams) (any, error) {
+		return wq.WorkflowAttach(ctx, p)
+	}))
+	s.Register("wrkq.workflow.inspect", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
+		return wq.WorkflowInspect(ctx, p)
+	}))
+	s.Register("wrkq.workflow.timeline", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
+		return wq.WorkflowTimeline(ctx, p)
 	}))
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
 		if api == nil {
@@ -456,14 +445,6 @@ func defaultString(value, fallback string) string {
 
 type emptyParams struct{}
 
-type wrkqTaskCreateParams struct {
-	Title       string         `json:"title"`
-	Description string         `json:"description,omitempty"`
-	State       string         `json:"state,omitempty"`
-	Priority    int            `json:"priority,omitempty"`
-	Meta        map[string]any `json:"meta,omitempty"`
-}
-
 type workflowPathParams struct {
 	Path string `json:"path"`
 }
@@ -488,12 +469,6 @@ type taskParams struct {
 
 type taskActorParams struct {
 	TaskSelector string `json:"task"`
-	Actor        string `json:"actor,omitempty"`
-}
-
-type taskAttachParams struct {
-	TaskSelector string `json:"task"`
-	Workflow     string `json:"workflow"`
 	Actor        string `json:"actor,omitempty"`
 }
 
