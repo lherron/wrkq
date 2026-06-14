@@ -312,7 +312,7 @@ jq -e '.effects[0].status == "leased"' <<<"$CLAIM" >/dev/null
 
 # timeline: exactly 4 transition events
 "$BIN/wrkf" --db "$DB" task timeline T-00001 --json \
-  | jq -e '[.events[] | select(.kind == "transition")] | length == 4' >/dev/null
+  | jq -e '[.events[] | select(.type == "workflow.transitioned")] | length == 4' >/dev/null
 
 # no further actions (workflow closed)
 "$BIN/wrkf" --db "$DB" next T-00001 --role reviewer --json \

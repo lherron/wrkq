@@ -1,0 +1,407 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "wrkq-code-change",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "description": "Linear wrkq repository code-change workflow with implementer, tester, reviewer, and system separation of duties.",
+  "initial": {
+    "status": "open",
+    "phase": "intake"
+  },
+  "roles": {
+    "implementer": {
+      "description": "Implements the scoped code change and records the green verification evidence."
+    },
+    "tester": {
+      "description": "Authors or confirms red coverage, then supplies independent full verification evidence."
+    },
+    "reviewer": {
+      "description": "Performs code review, installed-binary manual validation, and final signoff."
+    },
+    "system": {
+      "description": "System effect adapter and administrative workflow authority."
+    }
+  },
+  "states": [
+    {
+      "status": "open",
+      "phase": "intake",
+      "description": "The code-change workflow is attached but no red evidence has been accepted."
+    },
+    {
+      "status": "active",
+      "phase": "red",
+      "description": "Tester-supplied red evidence exists and implementation may begin."
+    },
+    {
+      "status": "active",
+      "phase": "verify",
+      "description": "Implementation evidence is present and awaits independent full verification."
+    },
+    {
+      "status": "active",
+      "phase": "review",
+      "description": "Full verification passed and reviewer signoff plus installed-binary evidence are required."
+    },
+    {
+      "status": "closed",
+      "phase": "done",
+      "description": "Terminal success: reviewer signoff is complete and the task-completion effect is pending or delivered."
+    }
+  ],
+  "evidenceKinds": {
+    "red_test": {
+      "class": "test",
+      "description": "Tester evidence that the lifecycle contract or regression test fails for the expected reason before implementation.",
+      "producibleBy": [
+        "tester"
+      ],
+      "facts": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "red",
+              "fails_expected"
+            ]
+          }
+        }
+      }
+    },
+    "verify": {
+      "class": "verify",
+      "description": "Implementer evidence that the scoped change passes the normal verification gate.",
+      "producibleBy": [
+        "implementer"
+      ],
+      "facts": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass"
+            ]
+          }
+        }
+      }
+    },
+    "verify_full": {
+      "class": "verify",
+      "description": "Tester evidence that full verification, including smoke coverage, passes independently of implementation.",
+      "producibleBy": [
+        "tester"
+      ],
+      "facts": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass"
+            ]
+          }
+        }
+      }
+    },
+    "installed_binary": {
+      "class": "manual",
+      "description": "Reviewer evidence from exercising the installed binary or equivalent real executable path.",
+      "producibleBy": [
+        "reviewer"
+      ],
+      "facts": {
+        "required": [
+          "verdict",
+          "binary"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass"
+            ]
+          },
+          "binary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "review_signoff": {
+      "class": "review",
+      "description": "Reviewer approval that scope, verification evidence, and manual installed-binary evidence are acceptable.",
+      "producibleBy": [
+        "reviewer"
+      ],
+      "facts": {
+        "required": [
+          "verdict"
+        ],
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "approved"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "obligationKinds": {
+    "review_signoff": {
+      "description": "Blocking reviewer obligation opened after independent full verification."
+    }
+  },
+  "transitions": [
+    {
+      "id": "author_red",
+      "description": "Accept tester red evidence and move the workflow into implementation.",
+      "from": {
+        "status": "open",
+        "phase": "intake"
+      },
+      "by": [
+        "tester"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "red_test"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "red_recorded",
+          "description": "Red evidence is recorded; implementation may proceed.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "red"
+          }
+        }
+      ],
+      "responsibility": {
+        "role": "tester",
+        "scope": "task",
+        "lane": "test"
+      }
+    },
+    {
+      "id": "implement",
+      "description": "Accept implementer verification after red evidence from a distinct actor.",
+      "from": {
+        "status": "active",
+        "phase": "red"
+      },
+      "by": [
+        "implementer"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "verify",
+            "facts": {
+              "verdict": "pass"
+            }
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "implemented",
+          "description": "Implementation verification passed; independent full verification is next.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "verify"
+          }
+        }
+      ],
+      "separationOfDuty": {
+        "evidenceActorPairsDistinct": [
+          {
+            "leftKind": "red_test",
+            "rightKind": "verify"
+          }
+        ]
+      },
+      "responsibility": {
+        "role": "implementer",
+        "scope": "task",
+        "lane": "implementation"
+      }
+    },
+    {
+      "id": "full_verify",
+      "description": "Accept tester full verification after implementer verification from a distinct actor.",
+      "from": {
+        "status": "active",
+        "phase": "verify"
+      },
+      "by": [
+        "tester"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "verify_full",
+            "facts": {
+              "verdict": "pass"
+            }
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "verified",
+          "description": "Full verification passed; open blocking reviewer signoff.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "review"
+          },
+          "obligations": [
+            {
+              "kind": "review_signoff",
+              "ownerRole": "reviewer",
+              "blocking": true,
+              "reason": "Review the implementation, inspect verification evidence, and record final approval.",
+              "obligeeRole": "workflow",
+              "waiveRole": "system",
+              "noSelfWaive": true
+            }
+          ]
+        }
+      ],
+      "separationOfDuty": {
+        "evidenceActorPairsDistinct": [
+          {
+            "leftKind": "verify",
+            "rightKind": "verify_full"
+          }
+        ]
+      },
+      "responsibility": {
+        "role": "tester",
+        "scope": "task",
+        "lane": "test"
+      }
+    },
+    {
+      "id": "sign_off",
+      "description": "Accept reviewer installed-binary evidence and review approval, then close the workflow.",
+      "from": {
+        "status": "active",
+        "phase": "review"
+      },
+      "by": [
+        "reviewer"
+      ],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "installed_binary",
+            "facts": {
+              "verdict": "pass"
+            }
+          }
+        },
+        {
+          "evidence": {
+            "kind": "review_signoff",
+            "facts": {
+              "verdict": "approved"
+            }
+          }
+        },
+        {
+          "obligation": {
+            "kind": "review_signoff",
+            "status": "satisfied"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "done",
+          "description": "Reviewer signoff is complete; close the workflow and request task completion.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              },
+              "reason": "wrkq-code-change sign_off projects task state to completed"
+            }
+          ]
+        }
+      ],
+      "postconditions": [
+        {
+          "factEquals": {
+            "path": "workflow.status",
+            "value": "closed"
+          }
+        }
+      ],
+      "separationOfDuty": {
+        "evidenceActorPairsDistinct": [
+          {
+            "leftKind": "verify",
+            "rightKind": "review_signoff"
+          },
+          {
+            "leftKind": "verify",
+            "rightKind": "installed_binary"
+          },
+          {
+            "leftKind": "verify_full",
+            "rightKind": "review_signoff"
+          },
+          {
+            "leftKind": "verify_full",
+            "rightKind": "installed_binary"
+          },
+          {
+            "leftKind": "red_test",
+            "rightKind": "review_signoff"
+          },
+          {
+            "leftKind": "red_test",
+            "rightKind": "installed_binary"
+          }
+        ]
+      },
+      "responsibility": {
+        "role": "reviewer",
+        "scope": "task",
+        "lane": "review"
+      }
+    }
+  ]
+}
