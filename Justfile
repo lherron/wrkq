@@ -323,7 +323,13 @@ smoke: build
   test/smoke-wrkf.sh
   test/smoke-wrkf-rpc.sh
   test/smoke-wrkf-wrkq-code-change.sh
+  test/smoke-wrkf-adoption.sh
   @echo "✓ Smoke test passed"
+
+# Probe the canonical wrkf adoption signal. This is intentionally standalone;
+# it fails until the real canonical wrkq-code-change adoption run exists.
+check-wrkf-adoption:
+  scripts/check-wrkf-adoption.sh
 
 # --- @wrkf/client TS package (quarantined; not part of `just build`/`just install`) ---
 
