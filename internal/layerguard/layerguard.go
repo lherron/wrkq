@@ -64,6 +64,14 @@ type PackageEntry struct {
 	Files      []string
 }
 
+// ImportGraph is the source import graph for a module.
+type ImportGraph struct {
+	Packages []PackageEntry
+	Edges    map[string][]Hop
+
+	exceptionEdges map[string][]edge
+}
+
 // CheckPackages evaluates boundary rules against a supplied set of packages.
 // It parses Go files in each entry's Dir using go/parser (no go list),
 // builds the direct-import graph with file:line annotation per edge,
@@ -85,7 +93,7 @@ func CheckPackages(packages []PackageEntry, cfg Config) (Result, error) {
 // then go/parser for file:line edge mapping. vendor/ and testdata/ are excluded
 // from governed sources.
 func Check(root string, cfg Config, buildTags []string) (Result, error) {
-	packages, err := listPackages(root, buildTags)
+	importGraph, err := BuildImportGraph(root, buildTags)
 	if err != nil {
 		return Result{}, err
 	}
@@ -93,11 +101,21 @@ func Check(root string, cfg Config, buildTags []string) (Result, error) {
 	if len(excludes) == 0 {
 		excludes = []string{"vendor", "testdata"}
 	}
-	graph, err := buildGraph(packages, excludes)
+	return checkGraph(importGraph.internalGraph(excludes), cfg), nil
+}
+
+// BuildImportGraph lists a module's packages with go list -deps and parses
+// direct imports once for reuse by layer-boundary checks and discovery tools.
+func BuildImportGraph(root string, buildTags []string) (ImportGraph, error) {
+	packages, err := listPackages(root, buildTags)
 	if err != nil {
-		return Result{}, err
+		return ImportGraph{}, err
 	}
-	return checkGraph(graph, cfg), nil
+	graph, err := buildGraph(packages, nil)
+	if err != nil {
+		return ImportGraph{}, err
+	}
+	return newImportGraph(graph), nil
 }
 
 type edge struct {
@@ -133,6 +151,36 @@ func buildGraph(packages []PackageEntry, excludes []string) (graph, error) {
 		g.edges[pkg.ImportPath] = edges
 	}
 	return g, nil
+}
+
+func newImportGraph(g graph) ImportGraph {
+	edges := make(map[string][]Hop, len(g.edges))
+	for from, internalEdges := range g.edges {
+		hops := make([]Hop, 0, len(internalEdges))
+		for _, internalEdge := range internalEdges {
+			hops = append(hops, internalEdge.Hop)
+		}
+		edges[from] = hops
+	}
+	return ImportGraph{
+		Packages:       append([]PackageEntry(nil), g.entries...),
+		Edges:          edges,
+		exceptionEdges: g.edges,
+	}
+}
+
+func (g ImportGraph) internalGraph(excludes []string) graph {
+	internal := graph{
+		entries: append([]PackageEntry(nil), g.Packages...),
+		edges:   make(map[string][]edge, len(g.exceptionEdges)),
+	}
+	for _, pkg := range g.Packages {
+		if shouldExclude(pkg.Dir, excludes) {
+			continue
+		}
+		internal.edges[pkg.ImportPath] = append([]edge(nil), g.exceptionEdges[pkg.ImportPath]...)
+	}
+	return internal
 }
 
 func parsePackageEdges(pkg PackageEntry) ([]edge, error) {

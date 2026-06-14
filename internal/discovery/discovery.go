@@ -1,19 +1,17 @@
 package discovery
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/lherron/wrkq/internal/layerguard"
 )
 
 type Hit struct {
@@ -27,27 +25,6 @@ type Area struct {
 	Dependents   []string
 	Dependencies []string
 	Exports      []string
-}
-
-type packageEntry struct {
-	ImportPath string
-	Dir        string
-	Files      []string
-}
-
-type listedPackage struct {
-	ImportPath string
-	Dir        string
-	Standard   bool
-	GoFiles    []string
-	CgoFiles   []string
-}
-
-type importEdge struct {
-	From string
-	To   string
-	File string
-	Line int
 }
 
 // FindEntryPoints computes source locations that expose or define a topic.
@@ -100,18 +77,14 @@ func ExplainArea(root, path string) (Area, error) {
 		return Area{}, err
 	}
 
-	packages, err := listPackages(root)
+	importGraph, err := layerguard.BuildImportGraph(root, []string{"sqlite_fts5"})
 	if err != nil {
 		return Area{}, err
 	}
+	packages := importGraph.Packages
 	targetPkgs := packagesForTarget(packages, target)
 	if len(targetPkgs) == 0 {
 		return Area{}, fmt.Errorf("no Go package found for %s", path)
-	}
-
-	edges, err := buildImportEdges(packages)
-	if err != nil {
-		return Area{}, err
 	}
 
 	targetSet := make(map[string]bool, len(targetPkgs))
@@ -121,12 +94,14 @@ func ExplainArea(root, path string) (Area, error) {
 
 	depSet := map[string]bool{}
 	dependentSet := map[string]bool{}
-	for _, edge := range edges {
-		if targetSet[edge.From] && !targetSet[edge.To] && isRepoPackage(root, edge.To, packages) {
-			depSet[edge.To] = true
-		}
-		if targetSet[edge.To] && !targetSet[edge.From] {
-			dependentSet[edge.From] = true
+	for from, edges := range importGraph.Edges {
+		for _, edge := range edges {
+			if targetSet[from] && !targetSet[edge.To] && isRepoPackage(root, edge.To, packages) {
+				depSet[edge.To] = true
+			}
+			if targetSet[edge.To] && !targetSet[from] {
+				dependentSet[from] = true
+			}
 		}
 	}
 
@@ -375,8 +350,8 @@ func resolveTarget(root, path string) (string, error) {
 	return path, nil
 }
 
-func packagesForTarget(packages []packageEntry, target string) []packageEntry {
-	var matched []packageEntry
+func packagesForTarget(packages []layerguard.PackageEntry, target string) []layerguard.PackageEntry {
+	var matched []layerguard.PackageEntry
 	target = filepath.Clean(target)
 	for _, pkg := range packages {
 		dir := filepath.Clean(pkg.Dir)
@@ -390,44 +365,7 @@ func packagesForTarget(packages []packageEntry, target string) []packageEntry {
 	return matched
 }
 
-func buildImportEdges(packages []packageEntry) ([]importEdge, error) {
-	var edges []importEdge
-	for _, pkg := range packages {
-		for _, file := range pkg.Files {
-			if strings.HasSuffix(file, "_test.go") {
-				continue
-			}
-			fset := token.NewFileSet()
-			parsed, err := parser.ParseFile(fset, file, nil, 0)
-			if err != nil {
-				return nil, fmt.Errorf("parse %s: %w", file, err)
-			}
-			for _, spec := range parsed.Imports {
-				importPath, err := strconv.Unquote(spec.Path.Value)
-				if err != nil {
-					return nil, fmt.Errorf("parse import path in %s: %w", file, err)
-				}
-				pos := fset.Position(spec.Path.Pos())
-				edges = append(edges, importEdge{From: pkg.ImportPath, To: importPath, File: pos.Filename, Line: pos.Line})
-			}
-		}
-	}
-	sort.Slice(edges, func(i, j int) bool {
-		if edges[i].From != edges[j].From {
-			return edges[i].From < edges[j].From
-		}
-		if edges[i].To != edges[j].To {
-			return edges[i].To < edges[j].To
-		}
-		if edges[i].File != edges[j].File {
-			return edges[i].File < edges[j].File
-		}
-		return edges[i].Line < edges[j].Line
-	})
-	return edges, nil
-}
-
-func exportsForPackages(packages []packageEntry) ([]string, error) {
+func exportsForPackages(packages []layerguard.PackageEntry) ([]string, error) {
 	exportSet := map[string]bool{}
 	for _, pkg := range packages {
 		for _, file := range pkg.Files {
@@ -466,7 +404,7 @@ func exportsForPackages(packages []packageEntry) ([]string, error) {
 	return sortedKeys(exportSet), nil
 }
 
-func areaRole(root string, packages []packageEntry, exports []string) string {
+func areaRole(root string, packages []layerguard.PackageEntry, exports []string) string {
 	var parts []string
 	for _, pkg := range packages {
 		rel, err := filepath.Rel(root, pkg.Dir)
@@ -476,47 +414,6 @@ func areaRole(root string, packages []packageEntry, exports []string) string {
 		parts = append(parts, filepath.ToSlash(rel))
 	}
 	return fmt.Sprintf("go package area: %s (%d package(s), %d export(s))", strings.Join(parts, ", "), len(packages), len(exports))
-}
-
-func listPackages(root string) ([]packageEntry, error) {
-	args := []string{"list", "-json", "-deps", "-tags", "sqlite_fts5", "./..."}
-	cmd := exec.Command("go", args...)
-	cmd.Dir = root
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("go %s: %w\n%s", strings.Join(args, " "), err, stderr.String())
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(out))
-	entriesByPath := map[string]packageEntry{}
-	for {
-		var pkg listedPackage
-		if err := decoder.Decode(&pkg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		if pkg.Standard || pkg.ImportPath == "" || pkg.Dir == "" || excludedPath(pkg.Dir) {
-			continue
-		}
-		entriesByPath[pkg.ImportPath] = packageEntry{
-			ImportPath: pkg.ImportPath,
-			Dir:        pkg.Dir,
-			Files:      packageFiles(pkg.Dir, pkg.GoFiles, pkg.CgoFiles),
-		}
-	}
-
-	entries := make([]packageEntry, 0, len(entriesByPath))
-	for _, entry := range entriesByPath {
-		entries = append(entries, entry)
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].ImportPath < entries[j].ImportPath
-	})
-	return entries, nil
 }
 
 func goFiles(root string) ([]string, error) {
@@ -540,18 +437,7 @@ func goFiles(root string) ([]string, error) {
 	return files, err
 }
 
-func packageFiles(dir string, fileLists ...[]string) []string {
-	var files []string
-	for _, fileList := range fileLists {
-		for _, file := range fileList {
-			files = append(files, filepath.Join(dir, file))
-		}
-	}
-	sort.Strings(files)
-	return files
-}
-
-func isRepoPackage(root, importPath string, packages []packageEntry) bool {
+func isRepoPackage(root, importPath string, packages []layerguard.PackageEntry) bool {
 	for _, pkg := range packages {
 		if pkg.ImportPath == importPath {
 			return isSubpath(root, pkg.Dir) || filepath.Clean(pkg.Dir) == filepath.Clean(root)
