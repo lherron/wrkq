@@ -270,20 +270,10 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.WorkflowInstall(ctx, p.Path, defaultString(p.Actor, opts.DefaultActor))
 	}))
 	s.Register("wrkf.instance.show", apiHandler(func(ctx context.Context, p instanceParams) (any, error) {
-		if p.TaskSelector == "" {
-			return nil, NewDomainError(wrkfapi.CodeValidation, "task selector is required in P1", false, map[string]any{
-				"field": "task",
-			})
-		}
-		return api.TaskInspect(ctx, p.TaskSelector)
+		return api.InstanceShow(ctx, p.TaskSelector, p.InstanceID)
 	}))
 	s.Register("wrkf.instance.next", apiHandler(func(ctx context.Context, p instanceNextParams) (any, error) {
-		if p.TaskSelector == "" {
-			return nil, NewDomainError(wrkfapi.CodeValidation, "task selector is required in P1", false, map[string]any{
-				"field": "task",
-			})
-		}
-		return api.Next(ctx, p.TaskSelector, defaultString(p.Role, opts.DefaultRole))
+		return api.InstanceNext(ctx, p.TaskSelector, p.InstanceID, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.evidence.add", apiHandler(func(ctx context.Context, p wrkfapi.EvidenceAddParams) (any, error) {
 		p.Actor = defaultString(p.Actor, opts.DefaultActor)

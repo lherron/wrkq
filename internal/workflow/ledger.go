@@ -1509,16 +1509,20 @@ func (s *Service) RetryEffect(id string) (*Effect, error) {
 }
 
 func (s *Service) Transition(taskSelector, transitionID string, opts TransitionOptions) (map[string]interface{}, error) {
-	taskUUID, _, err := selectors.ResolveTask(s.db, taskSelector)
-	if err != nil {
-		return nil, err
-	}
-	requestHash := transitionRequestHash(taskSelector, transitionID, opts)
+	return s.TransitionForSelectors(taskSelector, "", transitionID, opts)
+}
+
+func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID string, opts TransitionOptions) (map[string]interface{}, error) {
+	requestHash := transitionRequestHash(taskSelector, instanceID, transitionID, opts)
 	var result map[string]interface{}
-	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
-		inst, err := latestInstanceByTaskUUIDTx(tx, taskUUID)
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
 		if err != nil {
 			return err
+		}
+		resultTaskSelector := taskSelector
+		if strings.TrimSpace(resultTaskSelector) == "" {
+			resultTaskSelector = inst.TaskRef
 		}
 		if opts.IdempotencyKey != "" {
 			replayed, err := replayTransitionResult(tx, inst.ID, opts.IdempotencyKey, requestHash)
@@ -1747,6 +1751,7 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 			return err
 		}
 		result = transitionResultMap(taskSelector, updated, eventID, createdEffects, createdObligations)
+		result["task"] = resultTaskSelector
 		result["idempotent"] = false
 		result["transition"] = transitionID
 		result["outcome"] = chosen.ID
@@ -1767,27 +1772,16 @@ type revisionContext struct {
 	contextHash string
 }
 
-func latestInstanceByTaskUUIDTx(tx *sql.Tx, taskUUID string) (*Instance, error) {
-	row := tx.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
-		FROM workflow_instances
-		WHERE task_uuid = ?
-		ORDER BY created_at DESC LIMIT 1
-	`, taskUUID)
-	return scanInstance(row)
-}
-
 func instanceRevisionContextTx(tx *sql.Tx, instanceID string) (revisionContext, error) {
 	var out revisionContext
 	err := tx.QueryRow(`SELECT revision, context_hash FROM workflow_instances WHERE id = ?`, instanceID).Scan(&out.revision, &out.contextHash)
 	return out, err
 }
 
-func transitionRequestHash(taskSelector, transitionID string, opts TransitionOptions) string {
+func transitionRequestHash(taskSelector, instanceID, transitionID string, opts TransitionOptions) string {
 	req := struct {
 		Task           string   `json:"task"`
+		InstanceID     string   `json:"instanceId,omitempty"`
 		Transition     string   `json:"transition"`
 		Actor          string   `json:"actor,omitempty"`
 		Role           string   `json:"role,omitempty"`
@@ -1798,7 +1792,7 @@ func transitionRequestHash(taskSelector, transitionID string, opts TransitionOpt
 		RunChecks      bool     `json:"runChecks,omitempty"`
 		DryRun         bool     `json:"dryRun,omitempty"`
 	}{
-		Task: taskSelector, Transition: transitionID, Actor: opts.Actor, Role: opts.Role,
+		Task: taskSelector, InstanceID: instanceID, Transition: transitionID, Actor: opts.Actor, Role: opts.Role,
 		ExpectRevision: opts.ExpectRevision, IdempotencyKey: opts.IdempotencyKey, ContextHash: opts.ContextHash,
 		CheckIDs: append([]string(nil), opts.CheckIDs...), RunChecks: opts.RunChecks, DryRun: opts.DryRun,
 	}
@@ -1947,13 +1941,17 @@ func listEvidenceForInstance(database *db.DB, instanceID string) ([]Evidence, er
 }
 
 func (s *Service) StartRun(taskSelector, role, actor string, opts StartRunOptions) (*Run, error) {
-	inst, err := s.LatestInstance(taskSelector)
-	if err != nil {
-		return nil, err
-	}
-	requestHash := runStartRequestHash(inst.ID, role, actor, opts)
+	return s.StartRunForSelectors(taskSelector, "", role, actor, opts)
+}
+
+func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor string, opts StartRunOptions) (*Run, error) {
 	var run *Run
-	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
+		if err != nil {
+			return err
+		}
+		requestHash := runStartRequestHash(inst.ID, role, actor, opts)
 		if opts.IdempotencyKey != "" {
 			existing, existingHash, err := selectRunByInstanceIdempotencyKey(tx, inst.ID, opts.IdempotencyKey)
 			if err != nil {

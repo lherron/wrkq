@@ -12,6 +12,7 @@ import (
 
 type TransitionApplyParams struct {
 	TaskSelector   string   `json:"task"`
+	InstanceID     string   `json:"instanceId,omitempty"`
 	Transition     string   `json:"transition"`
 	Role           string   `json:"role,omitempty"`
 	Actor          string   `json:"actor,omitempty"`
@@ -27,7 +28,7 @@ func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParam
 	if err := ctx.Err(); err != nil {
 		return TransitionResult{}, err
 	}
-	out, err := api.service.Transition(params.TaskSelector, params.Transition, workflow.TransitionOptions{
+	out, err := api.service.TransitionForSelectors(params.TaskSelector, params.InstanceID, params.Transition, workflow.TransitionOptions{
 		Actor:          params.Actor,
 		Role:           params.Role,
 		ExpectRevision: params.ExpectRevision,

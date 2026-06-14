@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/rpcidem"
 	"github.com/lherron/wrkq/internal/selectors"
 )
 
@@ -874,39 +877,233 @@ func (s *Service) instanceByID(id string) (*Instance, error) {
 	return scanInstance(row)
 }
 
-func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
-	inst, err := s.LatestInstance(params.TaskSelector)
-	if err != nil {
-		return nil, err
+func (s *Service) ResolveInstance(taskSelector, instanceID string) (*Instance, error) {
+	return resolveInstanceSelectors(s.db, taskSelector, instanceID)
+}
+
+func resolveInstanceSelectors(q queryer, taskSelector, instanceID string) (*Instance, error) {
+	taskSelector = strings.TrimSpace(taskSelector)
+	instanceID = strings.TrimSpace(instanceID)
+	if taskSelector == "" && instanceID == "" {
+		return nil, validationError("selector", "task or instanceId is required", "task or instanceId", nil, "supply task or instanceId")
 	}
-	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
-	if err != nil {
-		return nil, err
-	}
-	var kindSpec *KindSpec
-	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
-		kindSpec = &spec
-	}
-	// E1 — supplied-role conformance: reject when the kind declares producers
-	// and the supplied role is not among them. Not an authenticated boundary.
-	if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
-		return nil, err
-	}
-	facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
-	if err != nil {
-		return nil, err
-	}
-	var dataArg interface{}
-	var dataRaw json.RawMessage
-	if strings.TrimSpace(params.Data) != "" {
-		if !json.Valid([]byte(params.Data)) {
-			return nil, validationError("data", "data must be valid JSON"+jsonLocationSuffix(json.Unmarshal([]byte(params.Data), new(json.RawMessage))), "valid JSON", nil, "fix the JSON syntax in --data")
+
+	var taskInst *Instance
+	if taskSelector != "" {
+		taskUUID, err := resolveTaskUUIDQuery(q, taskSelector)
+		if err != nil {
+			return nil, err
 		}
-		dataArg = params.Data
-		dataRaw = json.RawMessage(params.Data)
+		inst, err := latestInstanceByTaskUUIDQuery(q, taskUUID)
+		if err != nil {
+			return nil, err
+		}
+		taskInst = inst
 	}
+	if instanceID == "" {
+		return taskInst, nil
+	}
+
+	instanceInst, err := instanceByIDQuery(q, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if taskInst != nil && taskInst.ID != instanceInst.ID {
+		return nil, validationError("instanceId", "task and instanceId resolve to different workflow instances", "matching task and instanceId", nil, "retry with selectors for the same workflow instance")
+	}
+	return instanceInst, nil
+}
+
+func resolveTaskUUIDQuery(q queryer, selector string) (string, error) {
+	parsed := selectors.Parse(selector)
+	if parsed.Type != selectors.TypeTask && parsed.Type != selectors.TypeAuto {
+		return "", fmt.Errorf("expected task selector (t:), got %s selector", parsed.Type)
+	}
+	token := parsed.Token
+	if expanded, ok := id.ExpandTaskID(token); ok {
+		token = expanded
+	}
+	if strings.HasPrefix(token, "T-") {
+		var uuid string
+		err := q.QueryRow("SELECT uuid FROM tasks WHERE id = ?", token).Scan(&uuid)
+		if err == nil {
+			return uuid, nil
+		}
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("task not found: %s", token)
+		}
+		return "", fmt.Errorf("database error: %w", err)
+	}
+	if len(token) == 36 && strings.Count(token, "-") == 4 {
+		var uuid string
+		err := q.QueryRow("SELECT uuid FROM tasks WHERE uuid = ?", token).Scan(&uuid)
+		if err == nil {
+			return uuid, nil
+		}
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("task not found: %s", token)
+		}
+		return "", fmt.Errorf("database error: %w", err)
+	}
+	return resolveTaskUUIDByPathQuery(q, token)
+}
+
+func resolveTaskUUIDByPathQuery(q queryer, path string) (string, error) {
+	segments := paths.SplitPath(path)
+	if len(segments) == 0 {
+		return "", fmt.Errorf("invalid path: empty")
+	}
+	var parentUUID *string
+	if len(segments) > 1 {
+		uuid, err := walkContainerPathQuery(q, paths.JoinPath(segments[:len(segments)-1]...))
+		if err != nil {
+			return "", err
+		}
+		parentUUID = &uuid
+	}
+	normalizedSlug, err := paths.NormalizeSlug(segments[len(segments)-1])
+	if err != nil {
+		return "", fmt.Errorf("invalid task slug %q: %w", segments[len(segments)-1], err)
+	}
+	var taskUUID string
+	if parentUUID == nil {
+		err = q.QueryRow(`
+			SELECT uuid FROM tasks WHERE slug = ? AND project_uuid IN (
+				SELECT uuid FROM containers WHERE kind = 'project'
+			) LIMIT 1
+		`, normalizedSlug).Scan(&taskUUID)
+	} else {
+		err = q.QueryRow(`SELECT uuid FROM tasks WHERE slug = ? AND project_uuid = ?`, normalizedSlug, *parentUUID).Scan(&taskUUID)
+	}
+	if err == nil {
+		return taskUUID, nil
+	}
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("task not found: %s", path)
+	}
+	return "", fmt.Errorf("database error: %w", err)
+}
+
+func walkContainerPathQuery(q queryer, path string) (string, error) {
+	segments := paths.SplitPath(path)
+	if len(segments) == 0 {
+		return "", nil
+	}
+	var currentUUID *string
+	for i, segment := range segments {
+		slug, err := paths.NormalizeSlug(segment)
+		if err != nil {
+			return "", fmt.Errorf("invalid slug %q: %w", segment, err)
+		}
+		query := `SELECT uuid FROM containers WHERE slug = ? AND `
+		args := []interface{}{slug}
+		if currentUUID == nil {
+			query += `parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')`
+		} else {
+			query += `parent_uuid = ?`
+			args = append(args, *currentUUID)
+		}
+		var uuid string
+		err = q.QueryRow(query, args...).Scan(&uuid)
+		if err == nil {
+			currentUUID = &uuid
+			continue
+		}
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("container not found: %s", paths.JoinPath(segments[:i+1]...))
+		}
+		return "", fmt.Errorf("database error: %w", err)
+	}
+	return *currentUUID, nil
+}
+
+func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error) {
+	row := q.QueryRow(`
+		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		FROM workflow_instances
+		WHERE task_uuid = ?
+		ORDER BY created_at DESC LIMIT 1
+	`, taskUUID)
+	return scanInstance(row)
+}
+
+func instanceByIDQuery(q queryer, instanceID string) (*Instance, error) {
+	row := q.QueryRow(`
+		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		FROM workflow_instances WHERE id = ?
+	`, instanceID)
+	return scanInstance(row)
+}
+
+func showTemplateTx(q queryer, ref string) (*Template, string, error) {
+	id, version, err := parseTemplateRef(ref)
+	if err != nil {
+		return nil, "", err
+	}
+	var definition, hash string
+	if err := q.QueryRow(`SELECT definition_json, hash FROM workflow_templates WHERE id = ? AND version = ?`, id, version).Scan(&definition, &hash); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, "", fmt.Errorf("template not found: %s", ref)
+		}
+		return nil, "", err
+	}
+	tpl, _, err := ParseTemplate([]byte(definition))
+	return tpl, hash, err
+}
+
+func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 	var ev *Evidence
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, params.TaskSelector, params.InstanceID)
+		if err != nil {
+			return err
+		}
+		tpl, _, err := showTemplateTx(tx, inst.TemplateID+"@"+inst.TemplateVersion)
+		if err != nil {
+			return err
+		}
+		var kindSpec *KindSpec
+		if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
+			kindSpec = &spec
+		}
+		// E1 — supplied-role conformance: reject when the kind declares producers
+		// and the supplied role is not among them. Not an authenticated boundary.
+		if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
+			return err
+		}
+		facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
+		if err != nil {
+			return err
+		}
+		var dataArg interface{}
+		var dataRaw json.RawMessage
+		if strings.TrimSpace(params.Data) != "" {
+			if !json.Valid([]byte(params.Data)) {
+				return validationError("data", "data must be valid JSON"+jsonLocationSuffix(json.Unmarshal([]byte(params.Data), new(json.RawMessage))), "valid JSON", nil, "fix the JSON syntax in --data")
+			}
+			dataArg = params.Data
+			dataRaw = json.RawMessage(params.Data)
+		}
+		var factsRaw json.RawMessage
+		if facts != nil {
+			factsRaw = facts.Raw
+		}
+		requestHash := ""
+		if params.IdempotencyKey != "" {
+			requestHash = evidenceAddRequestHash(params, factsRaw, dataRaw)
+			replayed, err := replayEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash)
+			if err != nil {
+				return err
+			}
+			if replayed != nil {
+				ev = replayed
+				return nil
+			}
+		}
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {
 			return err
@@ -933,16 +1130,14 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		}
 		sourceJSON, _ := json.Marshal(source)
 		var factsArg interface{}
-		var factsRaw json.RawMessage
 		if facts != nil {
 			factsArg = string(facts.Raw)
-			factsRaw = facts.Raw
 		}
 		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
-			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, role, task_etag_at_production, task_hash_at_production, produced_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.Actor), emptyToNil(params.Role), fmt.Sprint(task.ETag), taskHashAtProduction, now)
+			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.Actor), emptyToNil(params.Role), emptyToNil(params.RunID), fmt.Sprint(task.ETag), taskHashAtProduction, now)
 		if err != nil {
 			return err
 		}
@@ -990,10 +1185,67 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.Actor); err != nil {
 			return err
 		}
-		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, RunID: params.RunID, TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+		if params.IdempotencyKey != "" {
+			if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return ev, err
+}
+
+func evidenceAddRequestHash(params AddEvidenceParams, factsRaw, dataRaw json.RawMessage) string {
+	req := struct {
+		Kind    string          `json:"kind"`
+		Ref     string          `json:"ref"`
+		Summary string          `json:"summary,omitempty"`
+		Facts   json.RawMessage `json:"facts,omitempty"`
+		Data    json.RawMessage `json:"data,omitempty"`
+		Actor   string          `json:"actor,omitempty"`
+		Role    string          `json:"role,omitempty"`
+		RunID   string          `json:"runId,omitempty"`
+	}{
+		Kind: params.Kind, Ref: params.Ref, Summary: params.Summary,
+		Facts: factsRaw, Data: dataRaw, Actor: params.Actor, Role: params.Role, RunID: params.RunID,
+	}
+	return rpcidem.CanonicalRequestHash(req)
+}
+
+func replayEvidenceResult(tx *sql.Tx, instanceID, key, requestHash string) (*Evidence, error) {
+	var storedHash, resultJSON string
+	err := tx.QueryRow(`
+		SELECT request_hash, result_json
+		FROM workflow_evidence_idempotency
+		WHERE instance_id = ? AND idempotency_key = ?
+	`, instanceID, key).Scan(&storedHash, &resultJSON)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if storedHash != requestHash {
+		return nil, idempotencyMismatchError(key)
+	}
+	var ev Evidence
+	if err := json.Unmarshal([]byte(resultJSON), &ev); err != nil {
+		return nil, err
+	}
+	return &ev, nil
+}
+
+func storeEvidenceResult(tx *sql.Tx, instanceID, key, requestHash string, ev *Evidence) error {
+	resultJSON, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
+		INSERT INTO workflow_evidence_idempotency (instance_id, idempotency_key, request_hash, result_json, evidence_id)
+		VALUES (?, ?, ?, ?, ?)
+	`, instanceID, key, requestHash, string(resultJSON), ev.ID)
+	return err
 }
 
 // EvidenceSchema returns the declared contract for an evidence kind on the

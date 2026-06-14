@@ -8,6 +8,7 @@ import (
 
 type RunStartParams struct {
 	TaskSelector   string `json:"task"`
+	InstanceID     string `json:"instanceId,omitempty"`
 	Role           string `json:"role"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"idempotencyKey,omitempty"`
@@ -39,7 +40,7 @@ func (api *API) RunStart(ctx context.Context, params RunStartParams) (Run, error
 	if err := ctx.Err(); err != nil {
 		return Run{}, err
 	}
-	run, err := api.service.StartRun(params.TaskSelector, params.Role, params.Actor, workflow.StartRunOptions{
+	run, err := api.service.StartRunForSelectors(params.TaskSelector, params.InstanceID, params.Role, params.Actor, workflow.StartRunOptions{
 		IdempotencyKey: params.IdempotencyKey,
 		DeliveryRef:    params.DeliveryRef,
 		Lane:           params.Lane,

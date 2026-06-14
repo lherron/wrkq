@@ -123,14 +123,17 @@ type HookShowResult struct {
 }
 
 type EvidenceAddParams struct {
-	TaskSelector string          `json:"task"`
-	Kind         string          `json:"kind"`
-	Ref          string          `json:"ref"`
-	Summary      string          `json:"summary,omitempty"`
-	Facts        json.RawMessage `json:"facts,omitempty"`
-	Data         json.RawMessage `json:"data,omitempty"`
-	Actor        string          `json:"actor,omitempty"`
-	Role         string          `json:"role,omitempty"`
+	TaskSelector   string          `json:"task"`
+	InstanceID     string          `json:"instanceId,omitempty"`
+	Kind           string          `json:"kind"`
+	Ref            string          `json:"ref"`
+	Summary        string          `json:"summary,omitempty"`
+	Facts          json.RawMessage `json:"facts,omitempty"`
+	Data           json.RawMessage `json:"data,omitempty"`
+	Actor          string          `json:"actor,omitempty"`
+	Role           string          `json:"role,omitempty"`
+	RunID          string          `json:"runId,omitempty"`
+	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
 }
 
 type ObligationStatusParams struct {
@@ -159,14 +162,17 @@ type HookRunParams struct {
 
 func (p EvidenceAddParams) workflowParams() workflow.AddEvidenceParams {
 	return workflow.AddEvidenceParams{
-		TaskSelector: p.TaskSelector,
-		Kind:         p.Kind,
-		Ref:          p.Ref,
-		Summary:      p.Summary,
-		Facts:        rawString(p.Facts),
-		Data:         rawString(p.Data),
-		Actor:        p.Actor,
-		Role:         p.Role,
+		TaskSelector:   p.TaskSelector,
+		InstanceID:     p.InstanceID,
+		Kind:           p.Kind,
+		Ref:            p.Ref,
+		Summary:        p.Summary,
+		Facts:          rawString(p.Facts),
+		Data:           rawString(p.Data),
+		Actor:          p.Actor,
+		Role:           p.Role,
+		RunID:          p.RunID,
+		IdempotencyKey: p.IdempotencyKey,
 	}
 }
 

@@ -151,6 +151,17 @@ func (api *API) TaskInspect(ctx context.Context, taskSelector string) (*workflow
 	return inst, nil
 }
 
+func (api *API) InstanceShow(ctx context.Context, taskSelector, instanceID string) (*workflow.Instance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	inst, err := api.service.ResolveInstance(taskSelector, instanceID)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return inst, nil
+}
+
 func (api *API) TaskTimeline(ctx context.Context, taskSelector string) ([]workflow.Event, error) {
 	return api.Timeline(ctx, taskSelector)
 }
@@ -205,6 +216,17 @@ func (api *API) Next(ctx context.Context, taskSelector, role string) (*workflow.
 		return nil, normalizeError(err)
 	}
 	return resp, nil
+}
+
+func (api *API) InstanceNext(ctx context.Context, taskSelector, instanceID, role string) (*workflow.NextActionResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	inst, err := api.service.ResolveInstance(taskSelector, instanceID)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return api.Next(ctx, inst.TaskRef, role)
 }
 
 func (api *API) EvidenceAdd(ctx context.Context, params EvidenceAddParams) (*workflow.Evidence, error) {

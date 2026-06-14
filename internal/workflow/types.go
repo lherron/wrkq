@@ -297,14 +297,17 @@ type EvidenceSchema struct {
 }
 
 type AddEvidenceParams struct {
-	TaskSelector string
-	Kind         string
-	Ref          string
-	Summary      string
-	Facts        string
-	Data         string
-	Actor        string
-	Role         string
+	TaskSelector   string
+	InstanceID     string
+	Kind           string
+	Ref            string
+	Summary        string
+	Facts          string
+	Data           string
+	Actor          string
+	Role           string
+	RunID          string
+	IdempotencyKey string
 }
 
 type Obligation struct {

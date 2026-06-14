@@ -1,15 +1,14 @@
 package wrkqapi
 
 import (
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/rpcidem"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
@@ -73,20 +72,7 @@ func (a *API) attributionFor(actor string) attribution.Attribution {
 // key itself is excluded from the hash. Do not hand-roll per-call marshaling
 // elsewhere — route through here.
 func canonicalRequestHash(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
-	var norm any
-	if err := json.Unmarshal(b, &norm); err != nil {
-		return ""
-	}
-	nb, err := json.Marshal(norm)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(nb)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return rpcidem.CanonicalRequestHash(v)
 }
 
 // ─── idempotency ledger (wrkq_rpc_idempotency) ───────────────────────────────
