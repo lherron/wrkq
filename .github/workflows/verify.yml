@@ -1,10 +1,14 @@
 name: Verify
 
+# DISABLED: verification now runs locally via the pre-push git hook (`just verify`).
+# Kept as manual-only (workflow_dispatch) so it can be re-enabled by restoring the
+# push/pull_request triggers below.
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+  # pull_request:
 
 jobs:
   verify:
