@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sort"
 	"sync"
 
 	"github.com/lherron/wrkq/internal/wrkfapi"
@@ -41,6 +42,17 @@ func NewServer(out io.Writer) *Server {
 
 func (s *Server) Register(method string, handler Handler) {
 	s.handlers[method] = handler
+}
+
+// RegisteredMethods returns the sorted list of method names currently registered
+// with this server. This is an introspection seam intended for contract tests only.
+func (s *Server) RegisteredMethods() []string {
+	methods := make([]string, 0, len(s.handlers))
+	for m := range s.handlers {
+		methods = append(methods, m)
+	}
+	sort.Strings(methods)
+	return methods
 }
 
 func (s *Server) Serve(ctx context.Context, in io.Reader) error {
