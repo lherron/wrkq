@@ -11,6 +11,17 @@ var (
 	maxSlugLen  = 255
 )
 
+// Slug is a validated slug wire value.
+type Slug string
+
+// NewSlug validates and wraps an already-normalized slug.
+func NewSlug(s string) (Slug, error) {
+	if err := ValidateSlug(s); err != nil {
+		return "", err
+	}
+	return Slug(s), nil
+}
+
 // NormalizeSlug normalizes a string to a valid slug
 // Rules:
 // - Always lower-case

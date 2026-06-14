@@ -492,9 +492,12 @@ func applyTaskDocumentTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribu
 	}
 
 	if update.State != nil {
-		if err := domain.ValidateState(*update.State); err != nil {
+		state, err := domain.ParseState(*update.State)
+		if err != nil {
 			return err
 		}
+		stateString := string(state)
+		update.State = &stateString
 	}
 	if update.Priority != nil {
 		if err := domain.ValidatePriority(*update.Priority); err != nil {

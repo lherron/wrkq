@@ -19,12 +19,8 @@ func ValidateUUID(uuid string) error {
 
 // ValidateState validates a task state
 func ValidateState(state string) error {
-	switch state {
-	case "idea", "draft", "open", "in_progress", "completed", "blocked", "cancelled", "archived", "deleted":
-		return nil
-	default:
-		return fmt.Errorf("invalid state: must be one of: idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted")
-	}
+	_, err := ParseState(state)
+	return err
 }
 
 // ValidatePriority validates a task priority

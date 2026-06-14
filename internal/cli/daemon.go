@@ -583,6 +583,11 @@ func (s *daemonServer) handleTasksCreate(w http.ResponseWriter, r *http.Request)
 	description := getStringField(fields, "description", "")
 	specification := getStringField(fields, "specification", "")
 	state := getStringField(fields, "state", "open")
+	parsedState, err := domain.ParseState(state)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	priority := getIntField(fields, "priority", 3)
 	kind := getStringField(fields, "kind", "")
 	labels := getLabelsField(fields, "labels")
@@ -627,7 +632,7 @@ func (s *daemonServer) handleTasksCreate(w http.ResponseWriter, r *http.Request)
 		Description:          description,
 		Specification:        specification,
 		ProjectUUID:          projectUUID,
-		State:                state,
+		State:                parsedState,
 		Priority:             priority,
 		Kind:                 kind,
 		ParentTaskUUID:       parentTaskUUID,
@@ -832,11 +837,12 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 	if targetState == "" {
 		targetState = "open"
 	}
-	if err := domain.ValidateState(targetState); err != nil {
+	parsedTargetState, err := domain.ParseState(targetState)
+	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if targetState == "archived" || targetState == "deleted" {
+	if parsedTargetState == domain.StateArchived || parsedTargetState == domain.StateDeleted {
 		s.writeError(w, http.StatusBadRequest, fmt.Errorf("cannot restore to %s state", targetState))
 		return
 	}
@@ -866,7 +872,7 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 	}
 
 	fields := map[string]interface{}{
-		"state":       targetState,
+		"state":       string(parsedTargetState),
 		"archived_at": nil,
 		"deleted_at":  nil,
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
@@ -90,10 +91,13 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	args = applyProjectRootToPaths(app.Config, args, false)
 
 	// Validate state
+	touchParsedState := domain.StateOpen
 	if touchState != "" {
-		if err := domain.ValidateState(touchState); err != nil {
+		state, err := domain.ParseState(touchState)
+		if err != nil {
 			return err
 		}
+		touchParsedState = state
 	}
 
 	// Validate priority
@@ -225,18 +229,19 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		slug, err := paths.NewSlug(normalizedSlug)
+		if err != nil {
+			return err
+		}
+		slugString := string(slug)
 
 		// Default title to slug if not provided
 		title := touchTitle
 		if title == "" {
-			title = normalizedSlug
+			title = slugString
 		}
 
-		// Default state to "open" if not provided
-		state := touchState
-		if state == "" {
-			state = "open"
-		}
+		state := touchParsedState
 
 		// Default priority to 3 if not provided
 		priority := touchPriority
@@ -259,7 +264,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		// Create the task using the store
 		result, err := s.Tasks.CreateWithAttribution(attr, store.CreateParams{
 			UUID:                 touchForceUUID,
-			Slug:                 normalizedSlug,
+			Slug:                 slugString,
 			Title:                title,
 			Description:          description,
 			Specification:        specification,
@@ -293,10 +298,10 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 			results = append(results, touchResult{
 				ID:          result.ID,
 				UUID:        result.UUID,
-				Slug:        normalizedSlug,
+				Slug:        slugString,
 				Path:        path,
 				Title:       title,
-				State:       state,
+				State:       string(state),
 				Priority:    priority,
 				Kind:        defaultKind,
 				ArtifactDir: artifactDir,

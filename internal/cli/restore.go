@@ -74,13 +74,14 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// Validate state if provided
 	targetState := "open"
 	if restoreState != "" {
-		if err := domain.ValidateState(restoreState); err != nil {
+		state, err := domain.ParseState(restoreState)
+		if err != nil {
 			return err
 		}
-		if restoreState == "archived" || restoreState == "deleted" {
+		if state == domain.StateArchived || state == domain.StateDeleted {
 			return fmt.Errorf("cannot restore to %s state", restoreState)
 		}
-		targetState = restoreState
+		targetState = string(state)
 	}
 
 	// Validate priority if provided

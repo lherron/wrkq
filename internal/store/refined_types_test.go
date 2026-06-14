@@ -34,8 +34,10 @@ func TestNewSlug_CompileProof(t *testing.T) {
 		t.Errorf("string(slug) = %q, want \"test-slug\"", string(slug))
 	}
 	// Type assertion: slug must be paths.Slug (not an alias of string).
-	var _ paths.Slug = slug
+	requirePathSlug(slug)
 }
+
+func requirePathSlug(paths.Slug) {}
 
 // TestDBRoundTrip_StateTextColumn verifies that a task created with domain.StateOpen
 // is stored in the SQLite TEXT column as the bare string "open" and reads back as

@@ -34,7 +34,7 @@ type CreateParams struct {
 	Description          string
 	Specification        string
 	ProjectUUID          string
-	State                string
+	State                domain.State
 	Priority             int
 	Kind                 string  // task, subtask, spike, bug, chore - defaults to "task"
 	ParentTaskUUID       *string // for subtasks
@@ -105,6 +105,31 @@ func summarizeWebhookValue(field string, value interface{}) interface{} {
 		}
 	}
 	return value
+}
+
+func normalizeStateValue(value interface{}) (domain.State, error) {
+	switch v := value.(type) {
+	case domain.State:
+		return domain.ParseState(string(v))
+	case string:
+		return domain.ParseState(v)
+	default:
+		return "", fmt.Errorf("invalid state value type %T", value)
+	}
+}
+
+func normalizeStateField(fields map[string]interface{}) (string, bool, error) {
+	value, ok := fields["state"]
+	if !ok {
+		return "", false, nil
+	}
+	state, err := normalizeStateValue(value)
+	if err != nil {
+		return "", true, err
+	}
+	stateString := string(state)
+	fields["state"] = stateString
+	return stateString, true, nil
 }
 
 func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[string]interface{}, error) {
@@ -238,7 +263,7 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			params.Description,
 			params.Specification,
 			params.ProjectUUID,
-			params.State,
+			string(params.State),
 			params.Priority,
 			kind,
 			params.ParentTaskUUID,
@@ -285,7 +310,7 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		payload := map[string]interface{}{
 			"slug":     params.Slug,
 			"title":    params.Title,
-			"state":    params.State,
+			"state":    string(params.State),
 			"priority": params.Priority,
 			"kind":     kind,
 		}
@@ -361,7 +386,7 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			Event:      "created",
 			ActorUUID:  actorUUIDPtr(attr),
 			Via:        via,
-			Transition: &webhooks.Transition{From: nil, To: stringPtr(params.State)},
+			Transition: &webhooks.Transition{From: nil, To: stringPtr(string(params.State))},
 			Changed:    changed,
 			Changes:    changes,
 		}
@@ -404,6 +429,9 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 	}
 	if via == "" {
 		via = "cli"
+	}
+	if _, _, err := normalizeStateField(fields); err != nil {
+		return 0, err
 	}
 	var newETag int64
 	var unblockedTaskUUIDs []string

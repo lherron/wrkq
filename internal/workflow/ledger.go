@@ -1237,7 +1237,8 @@ func (s *Service) deliverSetTaskStateEffect(current *Effect, adapter string) (*E
 	}
 	target, _ := spec.Data["state"].(string)
 	target = strings.TrimSpace(target)
-	if err := domain.ValidateState(target); err != nil {
+	targetState, err := domain.ParseState(target)
+	if err != nil {
 		failed, failErr := s.FailEffect(eff.ID, claim.LeaseToken, err.Error(), false)
 		if failErr != nil {
 			return nil, failErr
@@ -1253,6 +1254,7 @@ func (s *Service) deliverSetTaskStateEffect(current *Effect, adapter string) (*E
 		return nil, err
 	}
 	newETag := before.ETag
+	target = string(targetState)
 	alreadyApplied := before.State == target
 	if !alreadyApplied {
 		actorUUID, err := s.ensureWorkflowSystemActor()

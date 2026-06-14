@@ -57,8 +57,10 @@ func TestNewSlug_Accepts(t *testing.T) {
 				t.Errorf("string(NewSlug(%q)) = %q, want %q (NewSlug must not normalise)", input, string(s), input)
 			}
 			// Type proof: paths.Slug is a named type, not an alias.
-			// This assignment only compiles if s is exactly paths.Slug.
-			var _ Slug = s
+			// This call only compiles if s is assignable to paths.Slug.
+			requireSlug(s)
 		})
 	}
 }
+
+func requireSlug(Slug) {}

@@ -247,10 +247,11 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 
 	// Handle state
 	if setState != "" {
-		if err := domain.ValidateState(setState); err != nil {
+		state, err := domain.ParseState(setState)
+		if err != nil {
 			return nil, err
 		}
-		fields["state"] = setState
+		fields["state"] = state
 	}
 
 	// Handle priority
@@ -272,7 +273,11 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 		if err != nil {
 			return nil, fmt.Errorf("invalid slug: %w", err)
 		}
-		fields["slug"] = normalized
+		slug, err := paths.NewSlug(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("invalid slug: %w", err)
+		}
+		fields["slug"] = string(slug)
 	}
 
 	// Handle labels

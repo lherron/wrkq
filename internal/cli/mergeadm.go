@@ -403,7 +403,7 @@ func resolveDestPrefix(selector, override, sourcePath string) (string, error) {
 	}
 	segments := paths.SplitPath(prefix)
 	for _, seg := range segments {
-		if err := paths.ValidateSlug(seg); err != nil {
+		if _, err := paths.NewSlug(seg); err != nil {
 			return "", fmt.Errorf("invalid path prefix segment %q: %w", seg, err)
 		}
 	}
