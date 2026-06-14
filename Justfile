@@ -262,6 +262,10 @@ rot-sensor:
 surface-guard:
   go run ./cmd/surface-guard --root .
 
+# Fail on unreachable links and repo paths in router/canonical docs
+doc-links:
+  go run ./cmd/doc-link-check --root .
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -272,8 +276,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard)
-verify: suppression-lint layer-boundary lint test rot-sensor surface-guard
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links)
+verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links
   @echo "✓ All checks passed"
 
 # Run the full slow backstop tier (fast verify + smoke + RPC verification)

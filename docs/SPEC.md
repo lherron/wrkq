@@ -7,7 +7,7 @@ surface, configuration, and validation rules. Supporting docs may explain how to
 use or operate the system, but when they conflict with this file, this file wins.
 
 The wrkf JSON-RPC stdio contract is intentionally separate at
-[`docs/wrkf-rpc.md`](wrkf-rpc.md) because source files and tests reference it as
+[`docs/wrkf-rpc.md`](docs/wrkf-rpc.md) because source files and tests reference it as
 a machine contract.
 
 ## 1. Purpose
@@ -499,8 +499,8 @@ Canonical markdown that remains:
 | `internal/cli/embedded/WRKQ-USAGE.md` | Embedded full agent usage block. |
 | `internal/cli/embedded/AGENT-WRKQ-USAGE.md` | Embedded compact quick reference. |
 | `mcp-server/README.md` | Local package README for the MCP stdio wrapper. |
-| `pbc/templates/*.md` | Workflow artifact templates used by the PBC sample preset. |
-| `vendor/**/*.md` | Third-party vendored documentation; not a wrkq spec surface. |
+| `pbc/templates/` | Workflow artifact templates used by the PBC sample preset. |
+| `vendor/` | Third-party vendored documentation; not a wrkq spec surface. |
 
 Historical scratch/proposal markdown should live in git history or wrkq tasks,
 not as top-level repo docs.
