@@ -128,3 +128,37 @@ describe("entrypoint equivalence", () => {
     expect(task.state).toBe("open");
   });
 });
+
+// ── initialize-shape (daedalus acceptance) ────────────────────────────────────
+//
+// Asserts the rpc.initialize response layout (spec §3, contract §4):
+//   - protocolSchemaHash is a top-level non-empty string
+//   - database.migrationHash exists under database{}
+//   - NO legacy top-level schemaHash field
+//
+describe("initialize result shape", () => {
+  test("protocolSchemaHash top-level, database.migrationHash nested, no legacy top-level schemaHash", async () => {
+    const client = await createClient({
+      command: WRKQ,
+      dbPath: mkdb(),
+      actor: "human:local-human",
+      cwd: tmpdir(),
+      autoInitialize: false,
+      env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
+    });
+    const init = await client.rpc.initialize();
+    await client.close().catch(() => {});
+
+    // protocolSchemaHash must be a top-level non-empty string.
+    expect(typeof init.protocolSchemaHash).toBe("string");
+    expect(init.protocolSchemaHash.length).toBeGreaterThan(0);
+
+    // migrationHash must live under database{}, not at top level.
+    expect(typeof init.database?.migrationHash).toBe("string");
+    expect(init.database.migrationHash.length).toBeGreaterThan(0);
+
+    // No legacy top-level schemaHash field (spec §3).
+    const raw = init as unknown as Record<string, unknown>;
+    expect(raw["schemaHash"]).toBeUndefined();
+  });
+});
