@@ -1,0 +1,40 @@
+{
+  "name": "@wrkq/client",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wrkq": {
+      "types": "./dist/wrkq/index.d.ts",
+      "import": "./dist/wrkq/index.js"
+    },
+    "./wrkf": {
+      "types": "./dist/wrkf/index.d.ts",
+      "import": "./dist/wrkf/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "bun x tsc -p tsconfig.build.json",
+    "typecheck": "bun x tsc --noEmit",
+    "test": "bun test",
+    "test:unit": "bun test test/fake-transport.test.ts test/namespace-contract.test.ts",
+    "test:integration": "bun test test/lifecycle.integration.test.ts test/rpc-entrypoint-equivalence.integration.test.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
+  }
+}

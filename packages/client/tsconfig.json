@@ -8,6 +8,7 @@
     "rootDir": ".",
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
     "types": ["bun"]
   },
   "include": ["src/**/*", "test/**/*"],

@@ -3,14 +3,15 @@
  *
  * Stream-agnostic: it is handed a `write(line)` sink and fed raw stdout chunks
  * via `feed()`. It owns the pending-request map, line buffering, and protocol
- * corruption detection. It knows nothing about child processes — StdioTransport
+ * corruption detection. It knows nothing about subprocesses — StdioTransport
  * wires the streams.
  *
- * Contract: docs/wrkf-rpc.md §1 — "stdout: JSON-RPC frames ONLY. A single stray
- * log/print line corrupts the protocol." Non-JSON on stdout => hard failure.
+ * Contract: docs/wrkq-wrkf-rpc.md §1 — "stdout: JSON-RPC frames only". A single
+ * stray log/print line corrupts the protocol; non-JSON on stdout => hard
+ * failure.
  */
 
-import type { JsonRpcRequest, JsonRpcResponse } from "./transport";
+import type { JsonRpcRequest, JsonRpcResponse } from "./transport.js";
 
 interface Pending {
   resolve: (resp: JsonRpcResponse) => void;
@@ -34,7 +35,7 @@ export class JsonRpcChannel {
   /** Register a pending request and write its frame. Resolves on the matching response. */
   send(frame: JsonRpcRequest): Promise<JsonRpcResponse> {
     if (this.closed) {
-      return Promise.reject(new Error("wrkf rpc channel is closed"));
+      return Promise.reject(new Error("work rpc channel is closed"));
     }
     if (this.pending.has(frame.id)) {
       return Promise.reject(new Error(`duplicate JSON-RPC id: ${String(frame.id)}`));
@@ -66,7 +67,7 @@ export class JsonRpcChannel {
       } catch {
         // §1: a non-JSON line on stdout is protocol corruption — fatal.
         const err = new Error(
-          `wrkf rpc protocol corruption: non-JSON frame on stdout: ${truncate(line, 200)}`,
+          `work rpc protocol corruption: non-JSON frame on stdout: ${truncate(line, 200)}`,
         );
         this.onProtocolError(err);
         this.rejectAll(err);

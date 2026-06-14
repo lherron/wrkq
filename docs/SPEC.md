@@ -65,7 +65,7 @@ Important implementation packages:
 | `internal/selectors`, `internal/paths` | Friendly IDs, UUIDs, typed selectors, paths, slug normalization. |
 | `internal/search` | Sidecar search service over task, comment, and handoff chunks. |
 | `internal/workflow`, `internal/wrkfapi`, `internal/wrkfrpc`, `internal/wrkfcli` | wrkf workflow engine, API layer, RPC, and CLI. |
-| `packages/wrkf-client` | TypeScript client for the wrkf JSON-RPC contract. |
+| `packages/client` | Unified Bun TypeScript client (`@wrkq/client`) for the wrkq/wrkf JSON-RPC contract. |
 | `mcp-server` | MCP stdio server exposing selected wrkq operations. |
 | `pbc/` | Sample wrkf workflow preset and artifact templates. |
 
