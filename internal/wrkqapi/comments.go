@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/cursor"
+	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
 )
 
@@ -194,6 +196,96 @@ func (a *API) taskFriendlyID(taskUUID string) (string, error) {
 		return "", NewInternalError(err)
 	}
 	return taskID, nil
+}
+
+// CommentShow returns the WrkqComment DTO for a comment id or uuid.
+func (a *API) CommentShow(ctx context.Context, p CommentShowParams) (*WrkqComment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(p.ID) == "" {
+		return nil, NewValidationError("comment id is required", map[string]any{"field": "id"})
+	}
+	commentUUID, taskUUID, err := a.resolveComment(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	taskID, err := a.taskFriendlyID(taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	return a.loadComment(commentUUID, taskID)
+}
+
+// CommentDelete soft-deletes a comment (sets deleted_at) and returns the updated
+// WrkqComment DTO. Mirrors internal/cli/comment_rm.go default (non-purge).
+func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqComment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(p.ID) == "" {
+		return nil, NewValidationError("comment id is required", map[string]any{"field": "id"})
+	}
+	commentUUID, taskUUID, err := a.resolveComment(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	taskID, err := a.taskFriendlyID(taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	attr := a.attributionFor(p.Actor)
+
+	tx, err := a.db.Begin()
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, eerr := tx.Exec(`
+		UPDATE comments
+		SET deleted_at = datetime('now'),
+		    deleted_by_actor_uuid = ?,
+		    deleted_by_principal_ref = ?,
+		    deleted_by_scope_ref = ?,
+		    etag = etag + 1
+		WHERE uuid = ?
+	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), commentUUID); eerr != nil {
+		return nil, NewInternalError(eerr)
+	}
+
+	payload := `{"task_id":"` + taskID + `","comment_id":"` + commentUUID + `","soft_delete":true}`
+	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "comment",
+		ResourceUUID: &commentUUID,
+		EventType:    "comment.deleted",
+		Payload:      &payload,
+	}); eerr != nil {
+		return nil, NewInternalError(eerr)
+	}
+	if cerr := tx.Commit(); cerr != nil {
+		return nil, NewInternalError(cerr)
+	}
+
+	return a.loadComment(commentUUID, taskID)
+}
+
+// resolveComment resolves a comment id or uuid to (commentUUID, taskUUID).
+func (a *API) resolveComment(ref string) (commentUUID, taskUUID string, err error) {
+	scanErr := a.db.QueryRow(
+		"SELECT uuid, task_uuid FROM comments WHERE id = ? OR uuid = ? LIMIT 1",
+		ref, ref,
+	).Scan(&commentUUID, &taskUUID)
+	if scanErr == sql.ErrNoRows {
+		return "", "", NewNotFoundError(ref, "comment")
+	}
+	if scanErr != nil {
+		return "", "", NewInternalError(scanErr)
+	}
+	return commentUUID, taskUUID, nil
 }
 
 func (a *API) loadComment(commentUUID, taskID string) (*WrkqComment, error) {

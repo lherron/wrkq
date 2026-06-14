@@ -11,13 +11,15 @@ import (
 )
 
 type RegistryOptions struct {
-	Database      *db.DB
-	DatabasePath  string
-	MigrationHash string
-	ServerVersion string
-	Entrypoint    string
-	DefaultActor  string
-	DefaultRole   string
+	Database         *db.DB
+	DatabasePath     string
+	MigrationHash    string
+	ServerVersion    string
+	Entrypoint       string
+	DefaultActor     string
+	DefaultRole      string
+	AttachDir        string
+	AttachmentsMaxMB int
 }
 
 func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
@@ -195,28 +197,7 @@ var dtoCatalog = []string{
 }
 
 func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
-	// Methods not yet implemented (deferred to later phases of T-04424).
-	stubbed := []string{
-		"wrkq.task.acknowledge",
-		"wrkq.task.delete",
-		"wrkq.task.restore",
-		"wrkq.comment.show",
-		"wrkq.comment.delete",
-		"wrkq.attachment.add",
-		"wrkq.attachment.list",
-		"wrkq.attachment.show",
-		"wrkq.attachment.remove",
-		"wrkq.relation.add",
-		"wrkq.relation.list",
-		"wrkq.relation.remove",
-		"wrkq.container.show",
-		"wrkq.container.list",
-	}
-	for _, method := range stubbed {
-		s.Register(method, stubHandler(method))
-	}
-
-	wq := wrkqapi.New(opts.Database, api, opts.DefaultActor)
+	wq := wrkqapi.New(opts.Database, api, opts.DefaultActor, opts.AttachDir, opts.AttachmentsMaxMB)
 
 	s.Register("wrkq.task.create", apiHandler(func(ctx context.Context, p wrkqapi.TaskCreateParams) (any, error) {
 		return wq.TaskCreate(ctx, p)
@@ -230,11 +211,53 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)
 	}))
+	s.Register("wrkq.task.acknowledge", apiHandler(func(ctx context.Context, p wrkqapi.TaskAcknowledgeParams) (any, error) {
+		return wq.TaskAcknowledge(ctx, p)
+	}))
+	s.Register("wrkq.task.delete", apiHandler(func(ctx context.Context, p wrkqapi.TaskDeleteParams) (any, error) {
+		return wq.TaskDelete(ctx, p)
+	}))
+	s.Register("wrkq.task.restore", apiHandler(func(ctx context.Context, p wrkqapi.TaskRestoreParams) (any, error) {
+		return wq.TaskRestore(ctx, p)
+	}))
 	s.Register("wrkq.comment.add", apiHandler(func(ctx context.Context, p wrkqapi.CommentAddParams) (any, error) {
 		return wq.CommentAdd(ctx, p)
 	}))
 	s.Register("wrkq.comment.list", apiHandler(func(ctx context.Context, p wrkqapi.CommentListParams) (any, error) {
 		return wq.CommentList(ctx, p)
+	}))
+	s.Register("wrkq.comment.show", apiHandler(func(ctx context.Context, p wrkqapi.CommentShowParams) (any, error) {
+		return wq.CommentShow(ctx, p)
+	}))
+	s.Register("wrkq.comment.delete", apiHandler(func(ctx context.Context, p wrkqapi.CommentDeleteParams) (any, error) {
+		return wq.CommentDelete(ctx, p)
+	}))
+	s.Register("wrkq.attachment.add", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentAddParams) (any, error) {
+		return wq.AttachmentAdd(ctx, p)
+	}))
+	s.Register("wrkq.attachment.list", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentListParams) (any, error) {
+		return wq.AttachmentList(ctx, p)
+	}))
+	s.Register("wrkq.attachment.show", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentShowParams) (any, error) {
+		return wq.AttachmentShow(ctx, p)
+	}))
+	s.Register("wrkq.attachment.remove", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentRemoveParams) (any, error) {
+		return wq.AttachmentRemove(ctx, p)
+	}))
+	s.Register("wrkq.relation.add", apiHandler(func(ctx context.Context, p wrkqapi.RelationAddParams) (any, error) {
+		return wq.RelationAdd(ctx, p)
+	}))
+	s.Register("wrkq.relation.list", apiHandler(func(ctx context.Context, p wrkqapi.RelationListParams) (any, error) {
+		return wq.RelationList(ctx, p)
+	}))
+	s.Register("wrkq.relation.remove", apiHandler(func(ctx context.Context, p wrkqapi.RelationRemoveParams) (any, error) {
+		return wq.RelationRemove(ctx, p)
+	}))
+	s.Register("wrkq.container.show", apiHandler(func(ctx context.Context, p wrkqapi.ContainerShowParams) (any, error) {
+		return wq.ContainerShow(ctx, p)
+	}))
+	s.Register("wrkq.container.list", apiHandler(func(ctx context.Context, p wrkqapi.ContainerListParams) (any, error) {
+		return wq.ContainerList(ctx, p)
 	}))
 	s.Register("wrkq.workflow.attach", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowAttachParams) (any, error) {
 		return wq.WorkflowAttach(ctx, p)
@@ -375,14 +398,6 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		p.Adapter = defaultString(p.Adapter, opts.DefaultActor)
 		return api.EffectDeliver(ctx, p)
 	}))
-}
-
-func stubHandler(method string) HandlerFunc {
-	return apiHandler(func(context.Context, emptyParams) (any, error) {
-		return nil, NewValidationError("method is registered but not implemented in P1", map[string]any{
-			"method": method,
-		})
-	})
 }
 
 func apiHandler[P any](fn func(context.Context, P) (any, error)) HandlerFunc {

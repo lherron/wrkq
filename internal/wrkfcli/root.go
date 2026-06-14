@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/config"
@@ -922,20 +923,56 @@ func rpcCmd() *cobra.Command {
 				wrkfapi.WithHookCatalog(a.hookCatalog),
 				wrkfapi.WithTemplateDir(workflow.HookCatalogDir(a.hookPath)),
 			)
+			// Load the real wrkq config so the wrkf rpc entrypoint serves
+			// attachments with the SAME attach dir / size limit as the wrkq
+			// entrypoint (T-04448 entrypoint equivalence).
+			attachDir := ""
+			attachMaxMB := 0
+			if cfg, cerr := config.Load(); cerr == nil {
+				attachDir = rpcAttachDir(cfg.AttachDir)
+				attachMaxMB = cfg.AttachmentsMaxMB
+			}
 			srv := workrpc.NewServer(os.Stdout)
 			workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
-				Database:      a.db,
-				DatabasePath:  a.db.Path(),
-				ServerVersion: "dev",
-				Entrypoint:    "wrkf",
-				DefaultActor:  a.actor,
-				DefaultRole:   a.role,
+				Database:         a.db,
+				DatabasePath:     a.db.Path(),
+				ServerVersion:    "dev",
+				Entrypoint:       "wrkf",
+				DefaultActor:     a.actor,
+				DefaultRole:      a.role,
+				AttachDir:        attachDir,
+				AttachmentsMaxMB: attachMaxMB,
 			})
 			return srv.Serve(context.Background(), os.Stdin)
 		}),
 	}
 	cmd.Flags().BoolVar(&stdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")
 	return cmd
+}
+
+// rpcAttachDir resolves the attachment storage directory for the RPC server,
+// returning only an explicitly-configured directory (WRKQ_ATTACH_DIR, or a
+// config.yaml attach_dir that differs from the cwd/home auto-default). An empty
+// result makes attachment.add report WRKQ_VALIDATION rather than silently
+// writing to the per-user default. Mirrors internal/cli.rpcAttachDir so both
+// entrypoints behave identically.
+func rpcAttachDir(configured string) string {
+	if env := os.Getenv("WRKQ_ATTACH_DIR"); env != "" {
+		return env
+	}
+	if configured != "" && configured != defaultAttachDir() {
+		return configured
+	}
+	return ""
+}
+
+// defaultAttachDir mirrors config.Load's home auto-default.
+func defaultAttachDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "wrkq", "attachments")
 }
 
 func supervisorCmd() *cobra.Command {

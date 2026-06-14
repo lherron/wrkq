@@ -81,6 +81,12 @@ func Load() (*Config, error) {
 	if attachDir := os.Getenv("WRKQ_ATTACH_DIR"); attachDir != "" {
 		cfg.AttachDir = attachDir
 	}
+	if maxMB := os.Getenv("WRKQ_ATTACH_MAX_MB"); maxMB != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(maxMB, "%d", &parsed); err == nil && parsed >= 0 {
+			cfg.AttachmentsMaxMB = parsed
+		}
+	}
 	if logLevel := os.Getenv("WRKQ_LOG_LEVEL"); logLevel != "" {
 		cfg.LogLevel = logLevel
 	}

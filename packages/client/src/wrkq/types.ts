@@ -76,17 +76,18 @@ export interface WrkqTaskUpdateParams {
 
 export interface WrkqTaskAcknowledgeParams {
   task: string;
-  idempotencyKey?: string;
+  /** Allow ack on non-terminal tasks (mirrors `wrkq ack --force`). */
+  force?: boolean;
 }
 
 export interface WrkqTaskDeleteParams {
   task: string;
-  idempotencyKey?: string;
 }
 
 export interface WrkqTaskRestoreParams {
   task: string;
-  idempotencyKey?: string;
+  /** Target state (default "open"); archived/deleted targets are rejected. */
+  state?: string;
 }
 
 export interface WrkqTask {
@@ -108,13 +109,14 @@ export interface WrkqTask {
   completedAt?: string;
   archivedAt?: string;
   deletedAt?: string;
+  acknowledgedAt?: string;
   createdByPrincipalRef?: string;
   updatedByPrincipalRef?: string;
 }
 
 export interface WrkqTaskListResult {
   items: WrkqTask[];
-  cursor?: string;
+  nextCursor?: string;
 }
 
 // ── Comments ─────────────────────────────────────────────────────────────────
@@ -139,7 +141,6 @@ export interface WrkqCommentShowParams {
 
 export interface WrkqCommentDeleteParams {
   id: string;
-  idempotencyKey?: string;
 }
 
 export interface WrkqComment {
@@ -157,7 +158,7 @@ export interface WrkqComment {
 
 export interface WrkqCommentListResult {
   items: WrkqComment[];
-  cursor?: string;
+  nextCursor?: string;
 }
 
 // ── Attachments ──────────────────────────────────────────────────────────────
@@ -172,6 +173,8 @@ export interface WrkqAttachmentAddParams {
 
 export interface WrkqAttachmentListParams {
   task: string;
+  limit?: number;
+  cursor?: string;
 }
 
 export interface WrkqAttachmentShowParams {
@@ -180,24 +183,25 @@ export interface WrkqAttachmentShowParams {
 
 export interface WrkqAttachmentRemoveParams {
   id: string;
-  idempotencyKey?: string;
 }
 
 export interface WrkqAttachment {
   uuid: string;
   id: string;
-  task: string;
+  taskUuid: string;
   filename: string;
+  relativePath?: string;
   mimeType?: string;
-  sizeBytes?: number;
-  sha256?: string;
+  sizeBytes: number;
+  /** Content checksum (DB/CLI field name; not "sha256"). */
+  checksum?: string;
   createdAt: string;
   createdByPrincipalRef?: string;
-  [k: string]: unknown;
 }
 
 export interface WrkqAttachmentListResult {
   items: WrkqAttachment[];
+  nextCursor?: string;
 }
 
 // ── Relations ────────────────────────────────────────────────────────────────
@@ -214,17 +218,18 @@ export interface WrkqRelationListParams {
 }
 
 export interface WrkqRelationRemoveParams {
-  id: string;
-  idempotencyKey?: string;
+  fromTask: string;
+  kind: "blocks" | "relates_to" | "duplicates" | string;
+  toTask: string;
 }
 
 export interface WrkqRelation {
-  id: string;
   fromTask: string;
   toTask: string;
   kind: string;
+  /** "outgoing" or "incoming" relative to the queried task. */
+  direction?: string;
   createdAt?: string;
-  [k: string]: unknown;
 }
 
 export interface WrkqRelationListResult {
@@ -240,6 +245,7 @@ export interface WrkqContainerShowParams {
 
 export interface WrkqContainerListParams {
   project?: string;
+  includeArchived?: boolean;
   limit?: number;
   cursor?: string;
 }
@@ -247,14 +253,20 @@ export interface WrkqContainerListParams {
 export interface WrkqContainer {
   uuid: string;
   id: string;
+  slug: string;
+  title: string;
+  kind: string;
+  parentUuid?: string;
   path: string;
-  title?: string;
-  [k: string]: unknown;
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
 }
 
 export interface WrkqContainerListResult {
   items: WrkqContainer[];
-  cursor?: string;
+  nextCursor?: string;
 }
 
 // ── Task-workflow binding ────────────────────────────────────────────────────

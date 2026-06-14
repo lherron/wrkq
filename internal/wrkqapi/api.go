@@ -21,16 +21,23 @@ type API struct {
 	store        *store.Store
 	wf           *wrkfapi.API
 	defaultActor string
+	attachDir    string
+	attachMaxMB  int
 }
 
 // New constructs a wrkq API over the given database. wf provides workflow
 // instance/timeline access for the wrkq.workflow.* verbs (may be nil).
-func New(database *db.DB, wf *wrkfapi.API, defaultActor string) *API {
+// attachDir/attachMaxMB carry the explicitly-configured attachment storage
+// settings; an empty attachDir disables attachment writes (attachment.add
+// returns WRKQ_VALIDATION rather than silently writing relative to cwd).
+func New(database *db.DB, wf *wrkfapi.API, defaultActor, attachDir string, attachMaxMB int) *API {
 	return &API{
 		db:           database,
 		store:        store.New(database),
 		wf:           wf,
 		defaultActor: defaultActor,
+		attachDir:    attachDir,
+		attachMaxMB:  attachMaxMB,
 	}
 }
 

@@ -358,6 +358,7 @@ interface WrkqTask {
   completedAt?: string;
   archivedAt?: string;
   deletedAt?: string;
+  acknowledgedAt?: string; // RFC3339; set by wrkq.task.acknowledge
   createdByPrincipalRef?: string;
   updatedByPrincipalRef?: string;
 }
@@ -365,7 +366,34 @@ interface WrkqTask {
 type WrkqTaskState =
   | "idea" | "draft" | "open" | "in_progress"
   | "completed" | "blocked" | "cancelled" | "archived" | "deleted";
+
+interface WrkqTaskAcknowledgeParams {
+  task: string;
+  force?: boolean; // allow ack on non-terminal tasks (mirrors `wrkq ack --force`)
+}
+
+interface WrkqTaskDeleteParams { task: string }
+
+interface WrkqTaskRestoreParams {
+  task: string;
+  state?: string; // target state (default "open"); archived/deleted rejected
+}
 ```
+
+`wrkq.task.acknowledge` records a terminal-state receipt (`acknowledgedAt`).
+The task must be `completed` or `cancelled` unless `force: true`
+(else `WRKQ_VALIDATION`). An already-acknowledged task is a no-op: the current
+`WrkqTask` is returned with its stable `acknowledgedAt` and no etag bump.
+
+`wrkq.task.delete` is a **reversible** delete: it sets `state="deleted"` +
+`deletedAt` (never `archivedAt`) and cascade-deletes subtasks. Re-deleting an
+already-deleted task is a no-op. Hard delete/purge is CLI-only — there is no
+purge RPC method.
+
+`wrkq.task.restore` is the inverse: the current state must be `archived` or
+`deleted` (else `WRKQ_VALIDATION`); it clears `archivedAt`/`deletedAt`/
+`deletedBy`, restores to `state` (default `open`, archived/deleted targets
+rejected), and cascade-restores subtasks.
 
 #### Comment methods
 
@@ -422,10 +450,36 @@ interface WrkqAttachmentAddParams {
   mimeType?: string;
   idempotencyKey?: string;
 }
+
+interface WrkqAttachmentListParams { task: string; limit?: number; cursor?: string }
+interface WrkqAttachmentShowParams { id: string }
+interface WrkqAttachmentRemoveParams { id: string }
+
+interface WrkqAttachment {
+  uuid: string;
+  id: string;
+  taskUuid: string;
+  filename: string;
+  relativePath?: string;
+  mimeType?: string;
+  sizeBytes: number;
+  checksum?: string;     // content checksum (DB/CLI field name; not "sha256")
+  createdAt: string;
+  createdByPrincipalRef?: string;
+}
 ```
 
 Binary attachment contents are not streamed in v1. The server stores/copies
 from a local path and returns metadata.
+
+Attachment storage config (attach dir + max size) is sourced from the SAME wrkq
+configuration on both the `wrkq` and `wrkf` rpc entrypoints. When no attach dir
+is explicitly configured (`WRKQ_ATTACH_DIR` unset and no `attach_dir` in config),
+`wrkq.attachment.add` returns `WRKQ_VALIDATION` rather than writing to the
+per-user default. A duplicate filename for a task → `WRKQ_CONFLICT`; size over
+the limit → `WRKQ_VALIDATION` (the partial file is cleaned up). `idempotencyKey`
+is enforced (replay on match, `WRKQ_CONFLICT` on hash mismatch, no duplicate file
+or row).
 
 #### Relation methods
 
@@ -442,7 +496,30 @@ interface WrkqRelationAddParams {
   toTask: string;
   idempotencyKey?: string;
 }
+
+interface WrkqRelationListParams { task: string }
+
+interface WrkqRelationRemoveParams {
+  fromTask: string;
+  kind: "blocks" | "relates_to" | "duplicates" | string;
+  toTask: string;
+}
+
+interface WrkqRelation {
+  fromTask: string;
+  toTask: string;
+  kind: string;
+  direction?: string;   // "outgoing" | "incoming" relative to the queried task
+  createdAt?: string;
+}
 ```
+
+Relations are identified by the composite key `(fromTask, kind, toTask)` — there
+is no synthetic `id`. `relation.add` validates the kind, rejects self-relations
+(`WRKQ_VALIDATION`), maps unknown tasks to `WRKQ_NOT_FOUND`, maps a duplicate to
+`WRKQ_CONFLICT`, and enforces `idempotencyKey`. `relation.list` returns both
+outgoing and incoming relations, each tagged with `direction`. `relation.remove`
+deletes by composite key; a 0-row delete → `WRKQ_NOT_FOUND`.
 
 #### Container/project methods
 
@@ -450,6 +527,34 @@ interface WrkqRelationAddParams {
 wrkq.container.show
 wrkq.container.list
 ```
+
+```ts
+interface WrkqContainerShowParams { path?: string; project?: string }
+interface WrkqContainerListParams {
+  project?: string;
+  includeArchived?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+interface WrkqContainer {
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+  kind: string;
+  parentUuid?: string;
+  path: string;          // computed full container path
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+interface WrkqContainerListResult { items: WrkqContainer[]; nextCursor?: string }
+```
+
+`container.show` resolves by `path` or `project`; a miss → `WRKQ_NOT_FOUND`.
 
 #### Task-workflow methods
 

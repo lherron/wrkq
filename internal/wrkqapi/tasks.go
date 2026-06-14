@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -242,7 +245,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	}
 
 	query := "SELECT uuid, id, slug, title, project_uuid, state, priority, kind, description, specification, " +
-		"labels, meta, etag, created_at, updated_at, completed_at, archived_at, deleted_at, " +
+		"labels, meta, etag, created_at, updated_at, completed_at, archived_at, deleted_at, acknowledged_at, " +
 		"assignee_principal_ref, created_by_principal_ref, updated_by_principal_ref FROM tasks"
 	if page.WhereClause != "" {
 		where = append(where, page.WhereClause)
@@ -336,6 +339,213 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	return a.loadTask(uuid)
 }
 
+// TaskAcknowledge records a terminal-state receipt (acknowledged_at). It mirrors
+// internal/cli/ack.go: state must be completed|cancelled unless force is set.
+// An already-acknowledged task is a no-op — the current DTO is returned with its
+// stable acknowledgedAt and no new write / etag bump.
+func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*WrkqTask, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	uuid, err := a.resolveTaskUUID(p.Task)
+	if err != nil {
+		return nil, err
+	}
+
+	var state string
+	var acknowledgedAt sql.NullString
+	if scanErr := a.db.QueryRow("SELECT state, acknowledged_at FROM tasks WHERE uuid = ?", uuid).Scan(&state, &acknowledgedAt); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
+			return nil, NewNotFoundError(p.Task, "task")
+		}
+		return nil, NewInternalError(scanErr)
+	}
+
+	// Already acknowledged → no-op (mirror ack.go:106-115).
+	if acknowledgedAt.Valid && strings.TrimSpace(acknowledgedAt.String) != "" {
+		return a.loadTask(uuid)
+	}
+
+	if !p.Force && state != string(domain.StateCompleted) && state != string(domain.StateCancelled) {
+		return nil, NewValidationError(
+			"cannot acknowledge task: state is "+state+" (requires completed or cancelled)",
+			map[string]any{"field": "state", "state": state},
+		)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	attr := a.attributionFor(p.Actor)
+	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{"acknowledged_at": now}, 0, "rpc"); uerr != nil {
+		return nil, mapStoreError(uerr, p.Task)
+	}
+	return a.loadTask(uuid)
+}
+
+// TaskDelete performs a reversible delete: state='deleted' + deleted_at=now,
+// cascading to subtasks. It never sets archived_at and never purges. Re-deleting
+// an already-deleted task is a no-op return of the current task.
+func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	uuid, err := a.resolveTaskUUID(p.Task)
+	if err != nil {
+		return nil, err
+	}
+
+	var state string
+	if scanErr := a.db.QueryRow("SELECT state FROM tasks WHERE uuid = ?", uuid).Scan(&state); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
+			return nil, NewNotFoundError(p.Task, "task")
+		}
+		return nil, NewInternalError(scanErr)
+	}
+
+	// Re-delete is a no-op (no etag bump).
+	if state == string(domain.StateDeleted) {
+		return a.loadTask(uuid)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	attr := a.attributionFor(p.Actor)
+	// Setting state=deleted triggers cascade-delete of subtasks in the store.
+	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{
+		"state":      string(domain.StateDeleted),
+		"deleted_at": now,
+	}, 0, "rpc"); uerr != nil {
+		return nil, mapStoreError(uerr, p.Task)
+	}
+	return a.loadTask(uuid)
+}
+
+// TaskRestore reverses delete/archive: current state must be archived or deleted,
+// the target defaults to open (archived/deleted targets rejected), archived_at /
+// deleted_at / deleted_by are cleared, and subtasks are cascade-restored. Mirrors
+// internal/cli/restore.go.
+func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	uuid, err := a.resolveTaskUUID(p.Task)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate target state.
+	targetState := string(domain.StateOpen)
+	if strings.TrimSpace(p.State) != "" {
+		parsed, perr := domain.ParseState(p.State)
+		if perr != nil {
+			return nil, NewValidationError(perr.Error(), map[string]any{"field": "state"})
+		}
+		if parsed == domain.StateArchived || parsed == domain.StateDeleted {
+			return nil, NewValidationError("cannot restore to "+p.State+" state", map[string]any{"field": "state"})
+		}
+		targetState = string(parsed)
+	}
+
+	var currentState string
+	if scanErr := a.db.QueryRow("SELECT state FROM tasks WHERE uuid = ?", uuid).Scan(&currentState); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
+			return nil, NewNotFoundError(p.Task, "task")
+		}
+		return nil, NewInternalError(scanErr)
+	}
+	if currentState != string(domain.StateArchived) && currentState != string(domain.StateDeleted) {
+		return nil, NewValidationError(
+			"task is not deleted or archived (current state: "+currentState+")",
+			map[string]any{"field": "state", "state": currentState},
+		)
+	}
+
+	attr := a.attributionFor(p.Actor)
+	if rerr := a.restoreTaskTx(uuid, targetState, attr); rerr != nil {
+		return nil, rerr
+	}
+	if rerr := a.cascadeRestoreSubtasks(uuid, targetState, attr); rerr != nil {
+		return nil, rerr
+	}
+	return a.loadTask(uuid)
+}
+
+// restoreTaskTx clears the archived/deleted markers and sets the target state for
+// a single task within a transaction, logging a task.restored event.
+func (a *API) restoreTaskTx(taskUUID, targetState string, attr attribution.Attribution) error {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return NewInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentState string
+	if scanErr := tx.QueryRow("SELECT state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentState); scanErr != nil {
+		return NewInternalError(scanErr)
+	}
+
+	if _, eerr := tx.Exec(`
+		UPDATE tasks
+		SET state = ?, archived_at = NULL, deleted_at = NULL,
+		    deleted_by_principal_ref = NULL, deleted_by_scope_ref = NULL,
+		    etag = etag + 1,
+		    updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?
+		WHERE uuid = ?
+	`, targetState, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), taskUUID); eerr != nil {
+		return NewInternalError(eerr)
+	}
+
+	payload := `{"action":"restored","target_state":"` + targetState + `"}`
+	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "task",
+		ResourceUUID: &taskUUID,
+		EventType:    "task.restored",
+		Payload:      &payload,
+	}); eerr != nil {
+		return NewInternalError(eerr)
+	}
+
+	if cerr := tx.Commit(); cerr != nil {
+		return NewInternalError(cerr)
+	}
+	return nil
+}
+
+// cascadeRestoreSubtasks restores all archived/deleted subtasks of a parent.
+func (a *API) cascadeRestoreSubtasks(parentTaskUUID, targetState string, attr attribution.Attribution) error {
+	rows, err := a.db.Query(
+		"SELECT uuid FROM tasks WHERE parent_task_uuid = ? AND state IN ('archived', 'deleted')",
+		parentTaskUUID,
+	)
+	if err != nil {
+		return NewInternalError(err)
+	}
+	var subtaskUUIDs []string
+	for rows.Next() {
+		var u string
+		if serr := rows.Scan(&u); serr != nil {
+			_ = rows.Close()
+			return NewInternalError(serr)
+		}
+		subtaskUUIDs = append(subtaskUUIDs, u)
+	}
+	_ = rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return NewInternalError(rerr)
+	}
+
+	for _, subtaskUUID := range subtaskUUIDs {
+		if rerr := a.restoreTaskTx(subtaskUUID, targetState, attr); rerr != nil {
+			return rerr
+		}
+		if rerr := a.cascadeRestoreSubtasks(subtaskUUID, targetState, attr); rerr != nil {
+			return rerr
+		}
+	}
+	return nil
+}
+
 // patchFields converts a TaskPatch into the store field map (DB column names).
 func patchFields(patch TaskPatch) (map[string]any, error) {
 	fields := map[string]any{}
@@ -405,7 +615,7 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
 		"SELECT uuid, id, slug, title, project_uuid, state, priority, kind, description, specification, "+
-			"labels, meta, etag, created_at, updated_at, completed_at, archived_at, deleted_at, "+
+			"labels, meta, etag, created_at, updated_at, completed_at, archived_at, deleted_at, acknowledged_at, "+
 			"assignee_principal_ref, created_by_principal_ref, updated_by_principal_ref FROM tasks WHERE uuid = ?",
 		uuid,
 	)
@@ -433,12 +643,12 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		priority                                                                    int
 		etag                                                                        int64
 		createdAt, updatedAt                                                        string
-		completedAt, archivedAt, deletedAt                                          sql.NullString
+		completedAt, archivedAt, deletedAt, acknowledgedAt                          sql.NullString
 		assignee, createdByPrincipal, updatedByPrincipal                            sql.NullString
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &state, &priority, &kind, &description, &specification,
-		&labels, &meta, &etag, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt,
+		&labels, &meta, &etag, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
 		&assignee, &createdByPrincipal, &updatedByPrincipal,
 	); err != nil {
 		return nil, "", err
@@ -462,6 +672,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		CompletedAt:           toRFC3339(completedAt.String),
 		ArchivedAt:            toRFC3339(archivedAt.String),
 		DeletedAt:             toRFC3339(deletedAt.String),
+		AcknowledgedAt:        toRFC3339(acknowledgedAt.String),
 		AssigneePrincipalRef:  assignee.String,
 		CreatedByPrincipalRef: createdByPrincipal.String,
 		UpdatedByPrincipalRef: updatedByPrincipal.String,
