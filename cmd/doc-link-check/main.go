@@ -15,6 +15,7 @@ var trackedDocs = []string{
 	"internal/domain/README.md",
 	"docs/SPEC.md",
 	"docs/wrkf-rpc.md",
+	"docs/change-validation.md",
 	"internal/cli/embedded/WRKQ-USAGE.md",
 }
 
