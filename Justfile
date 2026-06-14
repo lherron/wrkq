@@ -284,12 +284,12 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links)
-verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + @wrkq/client unit+integration RPC)
+verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links verify-rpc
   @echo "✓ All checks passed"
 
-# Run the full slow backstop tier (fast verify + smoke + RPC verification)
-verify-full: verify smoke verify-rpc
+# Run the full slow backstop tier (verify [incl. RPC] + smoke)
+verify-full: verify smoke
   @echo "✓ Full verification passed"
 
 # --- Documentation tasks ---
