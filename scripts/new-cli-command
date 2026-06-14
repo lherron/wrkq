@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: scripts/new-cli-command <name>" >&2
+  exit 2
+fi
+
+name="$1"
+if [[ "$name" == name=* ]]; then
+  name="${name#name=}"
+fi
+out_dir="${OUT_DIR:-internal/cli}"
+
+if [[ ! "$name" =~ ^[a-z][a-z0-9]*$ ]]; then
+  echo "command name must match ^[a-z][a-z0-9]*$" >&2
+  exit 2
+fi
+
+first_char="$(printf '%s' "${name:0:1}" | tr '[:lower:]' '[:upper:]')"
+run_name="${first_char}${name:1}"
+impl_file="$out_dir/$name.go"
+test_file="$out_dir/${name}_test.go"
+
+mkdir -p "$out_dir"
+
+cat >"$impl_file" <<EOF
+package cli
+
+import (
+	"github.com/lherron/wrkq/internal/cli/appctx"
+	"github.com/spf13/cobra"
+)
+
+var ${name}Cmd = &cobra.Command{
+	Use:   "$name",
+	Short: "TODO: describe $name",
+	Long:  "TODO: describe $name.",
+	Args:  cobra.NoArgs,
+	RunE:  appctx.WithApp(appctx.WithActor(), run${run_name}),
+}
+
+func init() {
+	rootCmd.AddCommand(${name}Cmd)
+}
+
+func run${run_name}(app *appctx.App, cmd *cobra.Command, args []string) error {
+	if _, err := resolveOutputMode(cmd, app.Config, outputShapeMutation, outputResolveOptions{
+		Allow: []outputMode{outputModeJSON, outputModeNDJSON},
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+EOF
+
+cat >"$test_file" <<EOF
+package cli
+
+import "testing"
+
+func Test${run_name}(t *testing.T) {
+	t.Helper()
+	// TODO: add command behavior tests.
+}
+EOF
+
+gofmt -w "$impl_file" "$test_file"
+
+echo "generated $impl_file"
+echo "generated $test_file"

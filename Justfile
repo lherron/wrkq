@@ -79,6 +79,10 @@ agent-build:
 run *args:
   go run ./cmd/wrkq {{args}}
 
+# Scaffold a new Cobra CLI command in internal/cli
+new-command name:
+  scripts/new-cli-command "{{name}}"
+
 # Run the wrkqadm CLI
 wrkqadm-run *args:
   go run ./cmd/wrkqadm {{args}}
