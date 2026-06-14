@@ -314,6 +314,7 @@ smoke: build
   test/smoke-mergeadm.sh
   test/smoke-wrkf.sh
   test/smoke-wrkf-rpc.sh
+  test/smoke-wrkf-wrkq-code-change.sh
   @echo "✓ Smoke test passed"
 
 # --- @wrkf/client TS package (quarantined; not part of `just build`/`just install`) ---
