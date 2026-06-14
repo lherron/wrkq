@@ -157,6 +157,15 @@ func p2AssertHasItems(t *testing.T, result map[string]any, label string) {
 	}
 }
 
+// mapKeys returns the keys of a map as a slice (for error messages).
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // p2WorkflowTemplatePath returns the path to the canonical wrkq-code-change template.
 func p2WorkflowTemplatePath(t *testing.T) string {
 	t.Helper()
@@ -796,8 +805,20 @@ func TestWrkqWorkflowAttach_ReturnsAttachResult(t *testing.T) {
 	p2ResultOrFail(t, frames[1], "wrkf.workflow.install")
 	attachResult := p2ResultOrFail(t, frames[2], "wrkq.workflow.attach must return WrkqWorkflowAttachResult")
 
-	// WrkqWorkflowAttachResult fields (§6.2).
-	p2AssertStr(t, attachResult, "task")
+	// WrkqWorkflowAttachResult.task must be a WrkqTask DTO object (not a string ID).
+	// RED: P1 returns task as a string ID; P2 must return the full DTO.
+	taskDTO, ok := attachResult["task"].(map[string]any)
+	if !ok {
+		t.Errorf("wrkq.workflow.attach result field \"task\" must be a WrkqTask DTO object, got: %T=%v", attachResult["task"], attachResult["task"])
+	} else {
+		// Verify required WrkqTask fields are present on the embedded DTO.
+		p2AssertStr(t, taskDTO, "uuid")
+		p2AssertStr(t, taskDTO, "id")
+		p2AssertStr(t, taskDTO, "slug")
+		p2AssertStr(t, taskDTO, "projectUuid")
+		p2AssertEtag(t, taskDTO)
+	}
+
 	if attachResult["attached"] != true {
 		t.Errorf("first attach: expected attached=true, got %v", attachResult["attached"])
 	}
@@ -908,20 +929,11 @@ func TestWrkqWorkflowInspect_ReturnsTypedDTO(t *testing.T) {
 	p2ResultOrFail(t, frames[2], "attach")
 	inspectResult := p2ResultOrFail(t, frames[3], "wrkq.workflow.inspect must return typed DTO")
 
-	// WrkqWorkflowInspectResult must expose an "instance" object.
-	// (If the current impl returns the raw workflow.Instance at the top level,
-	// it must at minimum have the required WrkfInstance fields.)
+	// WrkqWorkflowInspectResult must be wrapped: {"instance": {...}}.
+	// RED: P1 returns the raw workflow.Instance at the top level (not wrapped).
 	inst, ok := inspectResult["instance"].(map[string]any)
 	if !ok {
-		// Accept the case where the top-level IS the instance (current P1 behavior).
-		// But the P2 contract requires it to be wrapped. Pin both paths.
-		// Check if top-level has "id" (raw Instance) or "instance" (wrapped).
-		if _, hasID := inspectResult["id"]; hasID {
-			t.Log("WARN: wrkq.workflow.inspect returns raw instance (not wrapped in WrkqWorkflowInspectResult)")
-			inst = inspectResult
-		} else {
-			t.Fatalf("wrkq.workflow.inspect result has neither \"instance\" object nor direct WrkfInstance shape: %v", inspectResult)
-		}
+		t.Fatalf("wrkq.workflow.inspect result must be {\"instance\": WrkfInstanceDTO}, got top-level keys: %v", mapKeys(inspectResult))
 	}
 
 	// WrkfInstance required fields (camelCase).
