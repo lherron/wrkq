@@ -79,6 +79,14 @@ agent-build:
 run *args:
   go run ./cmd/wrkq {{args}}
 
+# Find source entry points for a topic
+find-entry-points topic:
+  @go run ./cmd/find-entry-points --root . "{{topic}}"
+
+# Explain source area exports and import relationships
+explain-area path:
+  @go run ./cmd/explain-area --root . "{{path}}"
+
 # Scaffold a new Cobra CLI command in internal/cli
 new-command name:
   scripts/new-cli-command "{{name}}"
