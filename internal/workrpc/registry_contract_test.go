@@ -3,32 +3,16 @@ package workrpc_test
 // registry_contract_test.go — RED gate for the unified wrkq/wrkf RPC method registry.
 //
 // These tests define the method-registration contract for protocol version 2026-06-14.
-// They run against the CURRENT registry (internal/wrkfrpc) and MUST FAIL for the
-// following reasons:
-//
-//   FORBIDDEN methods still registered in wrkfrpc:
-//     - wrkf.task.attach, wrkf.task.inspect, wrkf.task.timeline,
-//       wrkf.task.refresh, wrkf.task.syncMeta, wrkf.workflow.attach,
-//       wrkf.initialize
-//
-//   REQUIRED methods NOT yet registered in wrkfrpc:
-//     - rpc.initialize, wrkq.task.create, wrkq.workflow.attach,
-//       wrkf.workflow.install, wrkf.transition.apply,
-//       wrkf.instance.show, wrkf.instance.next
-//
-// These tests turn GREEN when internal/workrpc is implemented (P1–P3 of T-04424).
-// At that point the test helper below should be updated to build the new registry
-// instead of delegating to wrkfrpc.RegisterAPI.
+// They run against the unified registry implemented in internal/workrpc.
 //
 // Ownership invariant (§2 of docs/wrkq-wrkf-rpc.md):
 //   wrkq.* owns task records and all direct task mutation.
 //   wrkf.* must never expose direct task mutation or workflow attachment.
 
 import (
-	"io"
 	"testing"
 
-	"github.com/lherron/wrkq/internal/wrkfrpc"
+	"github.com/lherron/wrkq/internal/workrpc"
 )
 
 // forbiddenMethods are method names that MUST NOT appear in the unified RPC
@@ -62,15 +46,10 @@ var requiredMethods = []string{
 	"wrkf.instance.next",
 }
 
-// buildCurrentRegistry constructs the method set that the current wrkfrpc
-// registry exposes. Replace this helper with a call to workrpc.NewRegistry()
-// once the unified server is implemented (P1).
+// buildCurrentRegistry constructs the method set exposed by the unified registry.
 func buildCurrentRegistry(t *testing.T) map[string]bool {
 	t.Helper()
-	srv := wrkfrpc.NewServer(io.Discard)
-	// RegisterAPI accepts a nil *wrkfapi.API safely: handlers close over the
-	// pointer but are never invoked here — only the method names are inspected.
-	wrkfrpc.RegisterAPI(srv, nil, wrkfrpc.RegistryOptions{})
+	srv := workrpc.NewRegistry(nil, workrpc.RegistryOptions{})
 	set := make(map[string]bool)
 	for _, m := range srv.RegisteredMethods() {
 		set[m] = true
@@ -79,8 +58,7 @@ func buildCurrentRegistry(t *testing.T) map[string]bool {
 }
 
 // TestForbiddenMethodsAreAbsent asserts that none of the forbidden methods
-// appear in the unified registry. This test FAILS against wrkfrpc because
-// wrkf.task.*, wrkf.workflow.attach, and wrkf.initialize are still registered.
+// appear in the unified registry.
 func TestForbiddenMethodsAreAbsent(t *testing.T) {
 	registered := buildCurrentRegistry(t)
 	for _, method := range forbiddenMethods {
@@ -95,9 +73,7 @@ func TestForbiddenMethodsAreAbsent(t *testing.T) {
 }
 
 // TestRequiredMethodsArePresent asserts that all required methods appear in
-// the unified registry. This test FAILS against wrkfrpc because rpc.initialize,
-// wrkq.task.create, wrkq.workflow.attach, wrkf.instance.show, and
-// wrkf.instance.next are not yet registered.
+// the unified registry.
 func TestRequiredMethodsArePresent(t *testing.T) {
 	registered := buildCurrentRegistry(t)
 	for _, method := range requiredMethods {
@@ -112,14 +88,13 @@ func TestRequiredMethodsArePresent(t *testing.T) {
 }
 
 // TestProtocolVersionContract asserts that the current registry reports the
-// new unified protocol version. This test FAILS because wrkfrpc exports
-// ProtocolVersion = "2026-06-01".
+// unified protocol version.
 func TestProtocolVersionContract(t *testing.T) {
 	const want = "2026-06-14"
-	if wrkfrpc.ProtocolVersion != want {
+	if workrpc.ProtocolVersion != want {
 		t.Errorf(
-			"wrkfrpc.ProtocolVersion = %q; unified protocol requires %q (§5.1)",
-			wrkfrpc.ProtocolVersion, want,
+			"workrpc.ProtocolVersion = %q; unified protocol requires %q (§5.1)",
+			workrpc.ProtocolVersion, want,
 		)
 	}
 }

@@ -13,8 +13,8 @@ import (
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/workflow"
+	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/wrkfapi"
-	"github.com/lherron/wrkq/internal/wrkfrpc"
 	"github.com/spf13/cobra"
 )
 
@@ -922,11 +922,12 @@ func rpcCmd() *cobra.Command {
 				wrkfapi.WithHookCatalog(a.hookCatalog),
 				wrkfapi.WithTemplateDir(workflow.HookCatalogDir(a.hookPath)),
 			)
-			srv := wrkfrpc.NewServer(os.Stdout)
-			wrkfrpc.RegisterAPI(srv, api, wrkfrpc.RegistryOptions{
+			srv := workrpc.NewServer(os.Stdout)
+			workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
+				Database:      a.db,
 				DatabasePath:  a.db.Path(),
-				SchemaHash:    wrkfrpc.SchemaHash(a.db),
 				ServerVersion: "dev",
+				Entrypoint:    "wrkf",
 				DefaultActor:  a.actor,
 				DefaultRole:   a.role,
 			})
