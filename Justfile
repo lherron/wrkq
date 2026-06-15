@@ -348,3 +348,23 @@ client-integration: install
 # Full RPC verification: Go build/install unaffected + TS unit + TS integration
 verify-rpc: client-test client-integration
   @echo "✓ verify-rpc passed (@wrkq/client unit + integration green)"
+
+# Build @wrkq/client dist (tsc → dist/{index,wrkq,wrkf,testing})
+client-build:
+  cd packages/client && bun run build
+
+# Publish @wrkq/client to local Verdaccio at its package.json version (e.g. 0.1.0) tagged latest
+client-publish-dev: client-build
+  cd packages/client && bun scripts/publish-local-verdaccio.ts --source-versions
+
+# Validate packing of the source-version package without publishing
+client-publish-dev-dry-run: client-build
+  cd packages/client && bun scripts/publish-local-verdaccio.ts --source-versions --dry-run
+
+# Publish @wrkq/client at an explicit semver (e.g. `just client-publish-semver 0.1.1`)
+client-publish-semver version tag="latest" force="": client-build
+  cd packages/client && bun scripts/publish-local-verdaccio.ts --version "{{version}}" --tag "{{tag}}" {{force}}
+
+# Validate packing of an explicit semver without publishing
+client-publish-semver-dry-run version tag="latest": client-build
+  cd packages/client && bun scripts/publish-local-verdaccio.ts --version "{{version}}" --tag "{{tag}}" --dry-run
