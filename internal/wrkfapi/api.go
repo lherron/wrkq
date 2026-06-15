@@ -226,7 +226,10 @@ func (api *API) InstanceNext(ctx context.Context, taskSelector, instanceID, role
 	if err != nil {
 		return nil, normalizeError(err)
 	}
-	return api.Next(ctx, inst.TaskRef, role)
+	// Resolve onward by the instance's bare task UUID, not inst.TaskRef:
+	// task_ref is a project-qualified display ref (e.g. "wrkq:T-00001") that
+	// selectors.ResolveTask cannot parse, whereas the UUID always resolves.
+	return api.Next(ctx, inst.TaskUUID, role)
 }
 
 func (api *API) EvidenceAdd(ctx context.Context, params EvidenceAddParams) (*workflow.Evidence, error) {
