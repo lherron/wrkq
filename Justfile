@@ -353,13 +353,18 @@ verify-rpc: client-test client-integration
 client-build:
   cd packages/client && bun run build
 
-# Publish @wrkq/client to local Verdaccio at its package.json version (e.g. 0.1.0) tagged latest
+# Publish @wrkq/client to local Verdaccio as a timestamped dev build
+# (<base>-dev.YYYYMMDDHHMMSS) tagged latest — matches the agent-spaces convention.
 client-publish-dev: client-build
-  cd packages/client && bun scripts/publish-local-verdaccio.ts --source-versions
+  cd packages/client && bun scripts/publish-local-verdaccio.ts
 
-# Validate packing of the source-version package without publishing
+# Validate packing of the timestamped dev build without publishing
 client-publish-dev-dry-run: client-build
-  cd packages/client && bun scripts/publish-local-verdaccio.ts --source-versions --dry-run
+  cd packages/client && bun scripts/publish-local-verdaccio.ts --dry-run
+
+# Publish @wrkq/client at its exact package.json version (e.g. 0.1.0); use for tagged releases
+client-publish-source: client-build
+  cd packages/client && bun scripts/publish-local-verdaccio.ts --source-versions
 
 # Publish @wrkq/client at an explicit semver (e.g. `just client-publish-semver 0.1.1`)
 client-publish-semver version tag="latest" force="": client-build
