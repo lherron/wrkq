@@ -704,7 +704,7 @@ func validateParentAssignment(tx *sql.Tx, childUUID, parentUUID string) error {
 	return nil
 }
 
-// Move moves a task to a different container and logs a task.updated event.
+// Move moves a task to a different container and logs task.moved events.
 // Returns the new etag on success.
 func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch int64) (int64, error) {
 	return ts.MoveWithAttribution(ts.store.attributionFromActorUUID(actorUUID), taskUUID, newProjectUUID, ifMatch)
@@ -712,17 +712,36 @@ func (ts *TaskStore) Move(actorUUID, taskUUID, newProjectUUID string, ifMatch in
 
 // MoveWithAttribution moves a task using canonical principal attribution.
 func (ts *TaskStore) MoveWithAttribution(attr attribution.Attribution, taskUUID, newProjectUUID string, ifMatch int64) (int64, error) {
+	return ts.MoveWithViaAttribution(attr, taskUUID, newProjectUUID, ifMatch, "cli")
+}
+
+// MoveWithViaAttribution moves a task subtree and records the ingress surface.
+func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUUID, newProjectUUID string, ifMatch int64, via string) (int64, error) {
 	if err := requireAttribution(attr); err != nil {
 		return 0, err
 	}
+	if via == "" {
+		via = "cli"
+	}
 	var newETag int64
-	var webhookCtx webhooks.EventContext
+	var webhooksToDispatch []pendingWebhook
 
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		// Get current state
-		var currentETag int64
-		var oldProjectUUID string
-		err := tx.QueryRow("SELECT etag, project_uuid FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &oldProjectUUID)
+		type moveTask struct {
+			uuid             string
+			currentETag      int64
+			oldProjectUUID   string
+			parentTaskUUID   sql.NullString
+			oldContainerPath string
+		}
+
+		var root moveTask
+		err := tx.QueryRow(`
+			SELECT t.uuid, t.etag, t.project_uuid, t.parent_task_uuid, COALESCE(cp.path, '')
+			FROM tasks t
+			LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+			WHERE t.uuid = ?
+		`, taskUUID).Scan(&root.uuid, &root.currentETag, &root.oldProjectUUID, &root.parentTaskUUID, &root.oldContainerPath)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("task not found: %s", taskUUID)
@@ -730,68 +749,130 @@ func (ts *TaskStore) MoveWithAttribution(attr attribution.Attribution, taskUUID,
 			return fmt.Errorf("failed to get task: %w", err)
 		}
 
-		// Check etag if ifMatch was provided
-		if err := checkETag(currentETag, ifMatch); err != nil {
+		if err := checkETag(root.currentETag, ifMatch); err != nil {
 			return err
 		}
-		var oldContainerPath, newContainerPath string
-		_ = tx.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", oldProjectUUID).Scan(&oldContainerPath)
+
+		if root.parentTaskUUID.Valid && root.oldProjectUUID != newProjectUUID {
+			return fmt.Errorf("cannot move subtask across containers independently; move the root task instead")
+		}
+
+		rows, err := tx.Query(`
+			WITH RECURSIVE subtree(uuid) AS (
+				SELECT uuid FROM tasks WHERE uuid = ?
+				UNION ALL
+				SELECT t.uuid
+				  FROM tasks t
+				  JOIN subtree s ON t.parent_task_uuid = s.uuid
+			)
+			SELECT t.uuid, t.etag, t.project_uuid, t.parent_task_uuid, COALESCE(cp.path, '')
+			  FROM tasks t
+			  JOIN subtree s ON s.uuid = t.uuid
+			  LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+			 ORDER BY CASE WHEN t.uuid = ? THEN 0 ELSE 1 END, t.id
+		`, taskUUID, taskUUID)
+		if err != nil {
+			return fmt.Errorf("failed to load task subtree: %w", err)
+		}
+		moveSet := []moveTask{}
+		for rows.Next() {
+			var mt moveTask
+			if err := rows.Scan(&mt.uuid, &mt.currentETag, &mt.oldProjectUUID, &mt.parentTaskUUID, &mt.oldContainerPath); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("failed to scan task subtree: %w", err)
+			}
+			moveSet = append(moveSet, mt)
+		}
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("failed to close task subtree rows: %w", err)
+		}
+		if len(moveSet) == 0 {
+			return fmt.Errorf("task not found: %s", taskUUID)
+		}
+
+		allAlreadyInTarget := true
+		for _, mt := range moveSet {
+			if mt.oldProjectUUID != newProjectUUID {
+				allAlreadyInTarget = false
+				break
+			}
+		}
+		if allAlreadyInTarget {
+			newETag = root.currentETag
+			return nil
+		}
+
+		var newContainerPath string
 		_ = tx.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", newProjectUUID).Scan(&newContainerPath)
 
-		// Update the task
-		_, err = tx.Exec(`
-			UPDATE tasks
-			SET project_uuid = ?,
-				etag = etag + 1,
-				updated_by_actor_uuid = ?,
-				updated_by_principal_ref = ?,
-				updated_by_scope_ref = ?
-			WHERE uuid = ?
-		`, newProjectUUID, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), taskUUID)
-		if err != nil {
-			return fmt.Errorf("failed to move task: %w", err)
-		}
+		for _, mt := range moveSet {
+			if _, err := tx.Exec(`
+				UPDATE tasks
+				SET project_uuid = ?,
+					etag = etag + 1,
+					updated_by_actor_uuid = ?,
+					updated_by_principal_ref = ?,
+					updated_by_scope_ref = ?
+				WHERE uuid = ?
+			`, newProjectUUID, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), mt.uuid); err != nil {
+				return fmt.Errorf("failed to move task: %w", err)
+			}
 
-		// Log event with structured payload
-		payload := map[string]interface{}{
-			"old_project_uuid": oldProjectUUID,
-			"new_project_uuid": newProjectUUID,
-		}
-		payloadJSON, _ := json.Marshal(payload)
-		payloadStr := string(payloadJSON)
-		newETag = currentETag + 1
+			taskETag := mt.currentETag + 1
+			if mt.uuid == taskUUID {
+				newETag = taskETag
+			}
+			payload := map[string]interface{}{
+				"oldContainerUuid": mt.oldProjectUUID,
+				"newContainerUuid": newProjectUUID,
+				"oldContainerPath": mt.oldContainerPath,
+				"newContainerPath": newContainerPath,
+				"old_project_uuid": mt.oldProjectUUID,
+				"new_project_uuid": newProjectUUID,
+			}
+			if mt.uuid != taskUUID {
+				payload["cascadeRootTaskUuid"] = taskUUID
+			}
+			payloadJSON, _ := json.Marshal(payload)
+			payloadStr := string(payloadJSON)
 
-		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "task",
-			ResourceUUID: &taskUUID,
-			EventType:    "task.moved",
-			ETag:         &newETag,
-			Payload:      &payloadStr,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
+			resourceUUID := mt.uuid
+			meta, err := ew.LogEventReturning(tx, &domain.Event{
+				ActorUUID:    eventActorUUID(attr),
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
+				ResourceType: "task",
+				ResourceUUID: &resourceUUID,
+				EventType:    "task.moved",
+				ETag:         &taskETag,
+				Payload:      &payloadStr,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to log event: %w", err)
+			}
+			webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
+				taskUUID: mt.uuid,
+				ctx: webhooks.EventContext{
+					Metadata:   meta,
+					Event:      "moved",
+					ActorUUID:  actorUUIDPtr(attr),
+					Via:        via,
+					Transition: nil,
+					Changed:    []string{"container_path", "project_uuid"},
+					Changes: map[string]webhooks.Change{
+						"container_path": {From: mt.oldContainerPath, To: newContainerPath},
+						"project_uuid":   {From: mt.oldProjectUUID, To: newProjectUUID},
+					},
+				},
+			})
 		}
-		webhookCtx = webhooks.EventContext{
-			Metadata:   meta,
-			Event:      "moved",
-			ActorUUID:  actorUUIDPtr(attr),
-			Via:        "cli",
-			Transition: nil,
-			Changed:    []string{"container_path", "project_uuid"},
-			Changes: map[string]webhooks.Change{
-				"container_path": {From: oldContainerPath, To: newContainerPath},
-				"project_uuid":   {From: oldProjectUUID, To: newProjectUUID},
-			},
-		}
-
 		return nil
 	})
 
 	if err == nil {
-		webhooks.DispatchTaskEvent(ts.store.db, taskUUID, webhookCtx)
+		for _, pending := range webhooksToDispatch {
+			webhooks.DispatchTaskEvent(ts.store.db, pending.taskUUID, pending.ctx)
+		}
 	}
 
 	return newETag, err

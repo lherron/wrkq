@@ -103,6 +103,7 @@ class WorkClientImpl implements WorkClient {
       show: (p) => this.call("wrkq.task.show", p),
       list: (p) => this.call("wrkq.task.list", p ?? {}),
       update: (p) => this.call("wrkq.task.update", p),
+      move: (p) => this.call("wrkq.task.move", p),
       acknowledge: (p) => this.call("wrkq.task.acknowledge", p),
       delete: (p) => this.call("wrkq.task.delete", p),
       restore: (p) => this.call("wrkq.task.restore", p),

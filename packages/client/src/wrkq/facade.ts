@@ -46,6 +46,7 @@ import type {
   WrkqTaskDeleteParams,
   WrkqTaskListParams,
   WrkqTaskListResult,
+  WrkqTaskMoveParams,
   WrkqTaskRestoreParams,
   WrkqTaskShowParams,
   WrkqTaskUpdateParams,
@@ -63,6 +64,7 @@ export interface WrkqTaskFacade {
   show(params: WrkqTaskShowParams): Promise<WrkqTask>;
   list(params?: WrkqTaskListParams): Promise<WrkqTaskListResult>;
   update(params: WrkqTaskUpdateParams): Promise<WrkqTask>;
+  move(params: WrkqTaskMoveParams): Promise<WrkqTask>;
   acknowledge(params: WrkqTaskAcknowledgeParams): Promise<WrkqTask>;
   delete(params: WrkqTaskDeleteParams): Promise<WrkqTask>;
   restore(params: WrkqTaskRestoreParams): Promise<WrkqTask>;

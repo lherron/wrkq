@@ -153,6 +153,14 @@ type TaskUpdateParams struct {
 	IdempotencyKey string    `json:"idempotencyKey,omitempty"`
 }
 
+// TaskMoveParams mirrors WrkqTaskMoveParams.
+type TaskMoveParams struct {
+	Task       string `json:"task"`
+	TargetPath string `json:"targetPath"`
+	ExpectEtag *int64 `json:"expectEtag,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
 // TaskPatch is the mutable subset of a task.
 type TaskPatch struct {
 	Title                *string         `json:"title,omitempty"`

@@ -84,6 +84,13 @@ export interface WrkqTaskUpdateParams {
   idempotencyKey?: string;
 }
 
+export interface WrkqTaskMoveParams {
+  task: string;
+  targetPath: string;
+  /** Root task CAS precondition. */
+  expectEtag?: number;
+}
+
 export interface WrkqTaskAcknowledgeParams {
   task: string;
   /** Allow ack on non-terminal tasks (mirrors `wrkq ack --force`). */

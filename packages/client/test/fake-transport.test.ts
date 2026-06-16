@@ -180,6 +180,32 @@ describe("wrkq namespace", () => {
     });
   });
 
+  test("task.move forwards targetPath and root expectEtag CAS precondition", async () => {
+    const transport = new FakeTransport().onResult("wrkq.task.move", {
+      ...MOCK_TASK,
+      projectUuid: "p-2",
+      path: "done/my-task",
+      etag: 3,
+    });
+    const client = await clientWith(transport);
+
+    const moved = await client.wrkq.task.move({
+      task: "T-00001",
+      targetPath: "done",
+      expectEtag: 2,
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.task.move");
+    expect(frame.params).toMatchObject({
+      task: "T-00001",
+      targetPath: "done",
+      expectEtag: 2,
+    });
+    expect(moved.path).toBe("done/my-task");
+    expect(moved.etag).toBe(3);
+  });
+
   test("task.list returns the items envelope", async () => {
     const transport = new FakeTransport().onResult("wrkq.task.list", { items: [MOCK_TASK] });
     const client = await clientWith(transport);

@@ -452,6 +452,48 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	return a.loadTask(uuid)
 }
 
+// TaskMove moves a root task subtree to an existing target container.
+func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	uuid, err := a.resolveTaskUUID(p.Task)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(p.TargetPath) == "" {
+		return nil, NewValidationError("targetPath is required", map[string]any{"field": "targetPath"})
+	}
+	targetUUID, _, rerr := selectors.ResolveContainer(a.db, p.TargetPath)
+	if rerr != nil {
+		return nil, NewNotFoundError(p.TargetPath, "container")
+	}
+
+	var currentEtag int64
+	if scanErr := a.db.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", uuid).Scan(&currentEtag); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
+			return nil, NewNotFoundError(p.Task, "task")
+		}
+		return nil, NewInternalError(scanErr)
+	}
+	if p.ExpectEtag != nil && *p.ExpectEtag != currentEtag {
+		return nil, NewConflictError("task move conflict", map[string]any{
+			"expectEtag":  *p.ExpectEtag,
+			"currentEtag": currentEtag,
+		})
+	}
+
+	ifMatch := int64(0)
+	if p.ExpectEtag != nil {
+		ifMatch = currentEtag
+	}
+	attr := a.attributionFor(p.Actor)
+	if _, merr := a.store.Tasks.MoveWithViaAttribution(attr, uuid, targetUUID, ifMatch, "rpc"); merr != nil {
+		return nil, mapStoreError(merr, p.Task)
+	}
+	return a.loadTask(uuid)
+}
+
 // TaskAcknowledge records a terminal-state receipt (acknowledged_at). It mirrors
 // internal/cli/ack.go: state must be completed|cancelled unless force is set.
 // An already-acknowledged task is a no-op — the current DTO is returned with its
@@ -839,7 +881,7 @@ func mapStoreError(err error, selector string) error {
 		return NewNotFoundError(selector, "task")
 	case strings.Contains(lower, "unique") || strings.Contains(lower, "constraint"):
 		return NewConflictError(msg, nil)
-	case strings.Contains(lower, "invalid") || strings.Contains(lower, "required") || strings.Contains(lower, "must "):
+	case strings.Contains(lower, "invalid") || strings.Contains(lower, "required") || strings.Contains(lower, "must ") || strings.Contains(lower, "cannot "):
 		return NewValidationError(msg, nil)
 	default:
 		return NewInternalError(err)

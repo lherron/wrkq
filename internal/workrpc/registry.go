@@ -111,6 +111,7 @@ var methodCatalog = []string{
 	"wrkq.task.show",
 	"wrkq.task.list",
 	"wrkq.task.update",
+	"wrkq.task.move",
 	"wrkq.task.acknowledge",
 	"wrkq.task.delete",
 	"wrkq.task.restore",
@@ -227,6 +228,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)
+	}))
+	s.Register("wrkq.task.move", apiHandler(func(ctx context.Context, p wrkqapi.TaskMoveParams) (any, error) {
+		return wq.TaskMove(ctx, p)
 	}))
 	s.Register("wrkq.task.acknowledge", apiHandler(func(ctx context.Context, p wrkqapi.TaskAcknowledgeParams) (any, error) {
 		return wq.TaskAcknowledge(ctx, p)
