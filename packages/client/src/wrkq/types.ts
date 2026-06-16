@@ -118,6 +118,7 @@ export interface WrkqTask {
   archivedAt?: string;
   deletedAt?: string;
   acknowledgedAt?: string;
+  assigneePrincipalRef?: string;
   createdByPrincipalRef?: string;
   updatedByPrincipalRef?: string;
 }

@@ -33,6 +33,7 @@ const MOCK_TASK: WrkqTask = {
   meta: {},
   riskClass: "medium",
   etag: 2,
+  assigneePrincipalRef: "agent:larry",
   createdAt: "2026-06-14T00:00:00Z",
   updatedAt: "2026-06-14T00:00:00Z",
 };
@@ -144,6 +145,7 @@ describe("wrkq namespace", () => {
     expect(task.id).toBe("T-00001");
     expect(task.riskClass).toBe("medium");
     expect(task.etag).toBe(2);
+    expect(task.assigneePrincipalRef).toBe("agent:larry");
   });
 
   test("task.update forwards expectEtag CAS precondition verbatim", async () => {
