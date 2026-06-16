@@ -113,7 +113,7 @@ func parseMonitorNDJSON(t *testing.T, stdout string) []map[string]interface{} {
 // ─── Test group 1: Selector resolution ───────────────────────────────────────
 
 // TestMonitorWatch_ValidIDSelector verifies that a valid friendly-ID (T-XXXXX)
-// selector resolves and streaming starts (at minimum a terminal line is emitted).
+// selector resolves and an already-satisfied condition exits with a terminal line.
 // RED: stub returns errMonitorUnimplemented → no output, exit code = 1, not 0.
 func TestMonitorWatch_ValidIDSelector(t *testing.T) {
 	database, dbPath := setupTestEnv(t)
@@ -130,17 +130,9 @@ func TestMonitorWatch_ValidIDSelector(t *testing.T) {
 		t.Errorf("valid selector: expected exit code 0, got %d (err=%v)", res.code, res.err)
 	}
 
-	// stdout must contain at least one wrkq.monitor.event line.
+	// Already-satisfied --until conditions evaluate the authoritative task row
+	// before choosing a replay cursor, so no historical event is required.
 	objs := parseMonitorNDJSON(t, res.stdout)
-	var hasEventLine bool
-	for _, obj := range objs {
-		if obj["type"] == "wrkq.monitor.event" {
-			hasEventLine = true
-		}
-	}
-	if !hasEventLine {
-		t.Errorf("expected ≥1 wrkq.monitor.event on stdout; got: %q", res.stdout)
-	}
 
 	// stdout must contain exactly one wrkq.monitor.terminal line.
 	var termCount int
