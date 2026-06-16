@@ -563,6 +563,7 @@ wrkq.task.create
 wrkq.task.show
 wrkq.task.list
 wrkq.task.update
+wrkq.task.move
 wrkq.task.acknowledge
 wrkq.task.delete
 wrkq.task.restore
@@ -608,6 +609,11 @@ interface WrkqTaskListParams {
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
+
+  // Additive ordering + subtree (T-04851 / gap4).
+  sort?: "created_at" | "updated_at" | "priority" | "id" | "path"; // default created_at
+  direction?: "asc" | "desc"; // default asc
+  recursive?: boolean; // default false
 }
 
 interface WrkqTaskUpdateParams {
@@ -639,6 +645,7 @@ interface WrkqTask {
   slug: string;
   title: string;
   projectUuid: string;
+  path: string;
   state: WrkqTaskState;
   priority: number;
   kind: string;
@@ -658,6 +665,39 @@ interface WrkqTask {
 ```
 
 Use camelCase JSON field names for the new RPC DTOs. Do not leak DB column names such as `project_uuid` into the new RPC surface.
+
+**Canonical `path` is server-derived (daedalus standing condition).** `WrkqTask.path` is the authoritative container path of the task, computed by the server from the container tree (`v_container_paths`) and returned on every task DTO (`task.create`, `task.show`, `task.list`, `task.update`, `task.move`). Clients consume `task.path` verbatim and must never reconstruct it from `projectUuid`, slugs, or any client-side container model. The same rule holds for `WrkqContainer.path`.
+
+##### `wrkq.task.list` sort / direction / recursive (gap4)
+
+- `sort` selects the ordering field from the whitelist `created_at` (default), `updated_at`, `priority`, `id`, `path`. Any non-whitelisted value is rejected with `WRKQ_VALIDATION` (`error.data.field = "sort"`).
+- `direction` is `asc` (default) or `desc`, matched case-sensitively. An empty value preserves the default; any other value is rejected with `WRKQ_VALIDATION` (`error.data.field = "direction"`).
+- `recursive` (default `false`) keeps the historical direct-container-only filter. When `true`, the `path` filter includes tasks in containers nested under `path` (the whole subtree).
+- **Cursor identity rule.** `nextCursor` encodes the active `(sort, direction)` tuple. A cursor may only be replayed under the *same* sort field and direction it was produced with. Reusing a cursor with a different `sort` or `direction` (e.g. a `direction=asc` cursor submitted with `direction=desc`) is rejected with `WRKQ_VALIDATION` (`error.data.field = "cursor"`). A malformed/undecodable cursor is likewise `WRKQ_VALIDATION`.
+
+#### `wrkq.task.move` (gap5)
+
+Cross-container / cross-project move of a task by canonical path.
+
+```ts
+interface WrkqTaskMoveParams {
+  task: string;        // selector for the ROOT task to move
+  targetPath: string;  // existing destination container path
+  expectEtag?: number; // optional CAS on the root task only
+  actor?: string;
+}
+// → WrkqTask (the moved root, with server-derived canonical `path`)
+```
+
+Contract (daedalus HIGH-risk ruling, T-04847 C-04823 §2):
+
+- `targetPath` must resolve to an **existing** container; an unknown destination is `WRKQ_NOT_FOUND` (`kind = "container"`). The move does not create containers.
+- **Descendant cascade in one transaction.** Moving a root task moves *every* descendant subtask in the same DB transaction. Each moved task gets the new `project_uuid`, a bumped `etag`, an updated attribution, and its own `task.moved` event. The invariant `child.project_uuid == parent.project_uuid` is preserved.
+- `expectEtag` is a CAS on the **root task only**; a stale value is `WRKQ_CONFLICT` (carrying `expectEtag` + the current etag). Descendants are not individually CAS-checked.
+- Moving an **independent subtask** across containers (one whose parent would end up in a different container) is rejected with `WRKQ_VALIDATION` — only whole subtrees move coherently.
+- A **same-container move is a stable no-op** (idempotent; no spurious etag churn beyond the contract).
+- Move origin metadata is honest: events/attribution record origin `rpc` (never `cli`).
+- The `task.moved` event payload carries the old/new container uuid + path and, for cascaded descendants, the `cascadeRootTaskUuid` (the tests also accept `cascade_root_task_uuid`).
 
 #### Comment methods
 
@@ -746,14 +786,101 @@ interface WrkqRelationAddParams {
 
 #### Container/project methods
 
-Expose only the subset needed for task creation and resolution in v1:
+Read + full mutation surface (container mutation shipped in T-04849 / gap1):
 
 ```text
 wrkq.container.show
 wrkq.container.list
+wrkq.container.create
+wrkq.container.delete
+wrkq.container.deleteRecursive
 ```
 
-Task creation may take a `path` or `project` selector. Full container mutation can be added after the initial client is green.
+Task creation may take a `path` or `project` selector to resolve the destination container.
+
+The container DTO (also returned by mutations) is:
+
+```ts
+interface WrkqContainer {
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+  kind: string;          // "project" | "directory" | ...
+  parentUuid?: string;
+  path: string;          // server-derived canonical path
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+```
+
+##### `wrkq.container.create`
+
+```ts
+interface WrkqContainerCreateParams {
+  // Either give a full `path`, or `parentPath` + `slug`. `project` selects the
+  // project subtree when resolving a relative path.
+  path?: string;
+  project?: string;
+  parentPath?: string;
+  slug?: string;
+  title?: string;
+  kind?: string;         // default "directory"; "project" only directly under root
+  actor?: string;
+}
+// → WrkqContainer
+```
+
+A duplicate slug under the same parent is `WRKQ_CONFLICT`; an invalid kind/placement (e.g. a `project` nested under a non-root container) is `WRKQ_VALIDATION`.
+
+##### `wrkq.container.delete` (empty-only HARD delete)
+
+```ts
+interface WrkqContainerDeleteParams {
+  container?: string;    // selector; or use path (+ project)
+  path?: string;
+  project?: string;
+  expectEtag?: number;   // optional CAS
+  actor?: string;
+}
+// → { deleted: true }
+```
+
+This is a **hard delete restricted to empty containers**. A non-empty container is rejected with `WRKQ_VALIDATION` ("not empty"); a stale `expectEtag` is `WRKQ_CONFLICT` (carrying `currentEtag`); the root container can never be deleted (`WRKQ_VALIDATION`); unknown selector is `WRKQ_NOT_FOUND`.
+
+##### `wrkq.container.deleteRecursive` (destructive subtree purge)
+
+Two-phase: **preflight** (`dryRun: true`) returns the impact; **commit** requires the caller to echo that impact back as `expected` (an impact CAS).
+
+```ts
+interface WrkqContainerDeleteRecursiveParams {
+  container?: string;
+  path?: string;
+  project?: string;
+  dryRun?: boolean;
+  expectEtag?: number;   // optional CAS on the root container
+  expected?: {           // REQUIRED on commit (dryRun=false)
+    containers: number;
+    tasks: number;
+    attachments: number;
+    bytes: number;
+  };
+  actor?: string;
+}
+
+// dryRun=true  → { container, containers, tasks, attachments, bytes }
+// dryRun=false → { deleted, containersDeleted, tasksDeleted,
+//                  attachmentsDeleted, bytesFreed, fileCleanupErrors? }
+```
+
+Contract (daedalus, T-04847 C-04823 §3):
+
+- Commit recomputes the true impact inside the purge transaction after the root `expectEtag` check. If it differs from `expected`, the call fails `WRKQ_CONFLICT` carrying the *current* impact under `error.data.current` — the client re-previews and retries.
+- `expected` is required on commit; omitting it is `WRKQ_VALIDATION`.
+- Removal order: emit `task.purged` (per contained task) + `container.deleted` events, delete tasks then containers leaf-to-root in one transaction; attachment **files** are removed *after* the DB commit, and any file-removal failures are reported (non-fatally) in `fileCleanupErrors`.
+- A path-invisible / root container is rejected (`WRKQ_VALIDATION`).
 
 #### Task workflow methods
 
@@ -806,6 +933,56 @@ interface WrkqWorkflowTimelineParams {
 `wrkq.workflow.refresh` may update wrkf instance context from the current task document. It must not be exposed as `wrkf.task.refresh`.
 
 There must be no public `syncMeta` verb. Projection from workflow state to task fields should happen through `wrkf.transition.apply` or explicit wrkq task updates.
+
+#### Legacy actor admin methods
+
+Actor records are a **legacy read-only display cache**, NOT task-write authority — task writes work with a `principalRef` and no actor row. Per daedalus (T-04847 C-04823 §1) the only actor mutation surface is the explicit admin namespace `wrkq.admin.legacyActor.*` (there is intentionally **no** `wrkq.actor.create` / `wrkq.actor.update`):
+
+```text
+wrkq.admin.legacyActor.list
+wrkq.admin.legacyActor.create
+wrkq.admin.legacyActor.update
+```
+
+```ts
+interface WrkqLegacyActor {
+  uuid: string;
+  id: string;
+  slug: string;
+  displayName?: string;
+  role: string;
+  meta?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  // NOTE: no principalRef — principal identity is not an actor field.
+}
+
+interface WrkqLegacyActorListParams {}            // → { items: WrkqLegacyActor[] }
+
+interface WrkqLegacyActorCreateParams {
+  slug: string;
+  displayName?: string;
+  role?: string;                                  // default "agent"
+  meta?: Record<string, unknown>;
+  idempotencyKey?: string;
+}                                                 // → WrkqLegacyActor
+
+interface WrkqLegacyActorUpdateParams {
+  actor: string;                                  // selector
+  patch: {                                        // only these keys are mutable
+    displayName?: string;
+    role?: string;
+    meta?: Record<string, unknown> | null;        // null clears meta
+  };
+  expectUpdatedAt?: string;                       // optimistic concurrency
+  idempotencyKey?: string;
+}                                                 // → WrkqLegacyActor
+```
+
+- `slug`, `id`, `uuid`, `createdAt` are immutable; an unknown patch key is `WRKQ_VALIDATION`.
+- A duplicate slug on create is `WRKQ_CONFLICT`; a stale `expectUpdatedAt` on update is `WRKQ_CONFLICT`.
+- `meta: null` in a patch clears meta (distinct from omitting the key).
+- Mutations emit `actor.created` / `actor.updated` audit events.
 
 ### 6.3 wrkf namespace
 
@@ -1008,6 +1185,24 @@ Effect leasing invariants:
 - wrong or expired leaseToken returns WRKF_LEASE_CONFLICT
 - terminal paths clear lease fields
 ```
+
+### 6.4 Live event feed — monitor-ndjson bridge (no streaming RPC)
+
+The unified RPC protocol is **stdio request/response only**. It will **not** add a streaming JSON-RPC method in v1 (daedalus, T-04847 C-04823 §4). A consumer that needs a live task feed (e.g. Taskboard's SSE) sources it by spawning the wrkq CLI as a child process:
+
+```text
+wrkq monitor watch --ndjson [--since <id> | --last <n>] [--event-type <t,...>] [TASK...]
+```
+
+Contract:
+
+- **Events are invalidation, not state.** Each NDJSON line (`{"type":"wrkq.monitor.event","id":<int>,"event_type":"task.created|task.moved|task.purged|...","resource_id":"T-...","resource_uuid":"...","payload":"..."}`) tells the bridge *what changed*; the bridge then **refetches the canonical DTO via request/response RPC** (`wrkq.task.show`, `wrkq.task.list`, `wrkq.container.list`). The event payload is a hint and must never be treated as the authoritative record.
+- **Feed scope.** `monitor watch` surfaces `task.*` and `comment.*` events only. Container-level mutations are observed through their task-scoped side effects — e.g. a `container.deleteRecursive` surfaces a `task.purged` event for each contained task; the bridge then refetches the container listing. (`container.created` / `container.deleted` are emitted to the event log but are not part of the typed monitor feed.)
+- **Resume.** `--since <id>` replays strictly events with `id > cursor` (exclusive — no duplicates, no gaps); `--last <n>` replays the tail of the log then follows. After a disconnect the bridge resumes from the last id it durably handled.
+- **Lifecycle.** With no `--until`, the child follows indefinitely. The bridge owns teardown: when its consumer disconnects it cancels/kills the child process (e.g. `exec.CommandContext` cancel), and the child is reaped promptly.
+- The TypeScript `@wrkq/client` exposes this, if at all, as a **monitor child-process helper** — never as a JSON-RPC streaming method.
+
+This contract is proven end-to-end by `internal/workrpc/event_bridge_e2e_test.go` (mutate → observe event → refetch DTO; `--since`/`--last` resume; child reaped on disconnect).
 
 ---
 
