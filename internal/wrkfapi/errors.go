@@ -16,6 +16,7 @@ const (
 	CodeIdempotencyMismatch  = "WRKF_IDEMPOTENCY_MISMATCH"
 	CodeLeaseConflict        = "WRKF_LEASE_CONFLICT"
 	CodeEffectNotDeliverable = "WRKF_EFFECT_NOT_DELIVERABLE"
+	CodeEffectDeliveryFailed = "WRKF_EFFECT_DELIVERY_FAILED"
 	CodeHookFailed           = "WRKF_HOOK_FAILED"
 	CodeDBMigrationRequired  = "WRKF_DB_MIGRATION_REQUIRED"
 	CodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"

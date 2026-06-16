@@ -249,6 +249,7 @@ func TestWrkqTaskCreate_ReturnsNamedDTO(t *testing.T) {
 	p2AssertStr(t, result, "slug")
 	p2AssertStr(t, result, "title")
 	p2AssertStr(t, result, "projectUuid") // must be camelCase, NOT project_uuid
+	p2AssertStr(t, result, "path")
 	p2AssertStr(t, result, "state")
 	p2AssertStr(t, result, "kind")
 	p2AssertStr(t, result, "createdAt")
@@ -312,6 +313,79 @@ func TestWrkqTaskCreate_Persists(t *testing.T) {
 	showResult := p2ResultOrFail(t, showFrames[1], "wrkq.task.show must return the created task")
 	p2AssertStr(t, showResult, "uuid")
 	p2AssertFieldEq(t, showResult, "title", "Persist Test Task")
+}
+
+func TestWrkqTaskRiskClass_CreateUpdateShowListAndValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	frames := p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.task.create", map[string]any{
+			"title":     "Risk Class Task",
+			"kind":      "task",
+			"riskClass": "medium",
+		}),
+		mkRPC("badCreate", "wrkq.task.create", map[string]any{
+			"title":     "Bad Risk Class Task",
+			"kind":      "task",
+			"riskClass": "critical",
+		}),
+	)
+	created := p2ResultOrFail(t, frames[1], "wrkq.task.create with riskClass")
+	if got, _ := created["riskClass"].(string); got != "medium" {
+		t.Fatalf("create riskClass: want medium, got %q", got)
+	}
+	if code := p2ErrCode(frames[2]); code != "WRKQ_VALIDATION" {
+		t.Fatalf("invalid create riskClass: want WRKQ_VALIDATION, got %q", code)
+	}
+	taskID, _ := created["id"].(string)
+	etag, _ := created["etag"].(float64)
+
+	frames = p2Run(t, dbPath,
+		mkRPC("u1", "wrkq.task.update", map[string]any{
+			"task":       taskID,
+			"patch":      map[string]any{"riskClass": "high"},
+			"expectEtag": etag,
+		}),
+		mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}),
+		mkRPC("l1", "wrkq.task.list", map[string]any{"state": "open"}),
+		mkRPC("badUpdate", "wrkq.task.update", map[string]any{
+			"task":  taskID,
+			"patch": map[string]any{"riskClass": "critical"},
+		}),
+		mkRPC("badLegacy", "wrkq.task.update", map[string]any{
+			"task":  taskID,
+			"patch": map[string]any{"phase": "done", "workflowPreset": "legacy", "presetVersion": "1"},
+		}),
+	)
+	updated := p2ResultOrFail(t, frames[1], "wrkq.task.update riskClass")
+	if got, _ := updated["riskClass"].(string); got != "high" {
+		t.Fatalf("update riskClass: want high, got %q", got)
+	}
+	shown := p2ResultOrFail(t, frames[2], "wrkq.task.show riskClass")
+	if got, _ := shown["riskClass"].(string); got != "high" {
+		t.Fatalf("show riskClass: want high, got %q", got)
+	}
+	listed := p2ResultOrFail(t, frames[3], "wrkq.task.list riskClass")
+	items, _ := listed["items"].([]any)
+	var found bool
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item["id"] == taskID && item["riskClass"] == "high" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("task.list did not include updated riskClass for %s: %#v", taskID, items)
+	}
+	if code := p2ErrCode(frames[4]); code != "WRKQ_VALIDATION" {
+		t.Fatalf("invalid update riskClass: want WRKQ_VALIDATION, got %q", code)
+	}
+	if code := p2ErrCode(frames[5]); code != "WRKQ_VALIDATION" {
+		t.Fatalf("legacy phase/preset patch must reject: want WRKQ_VALIDATION, got %q", code)
+	}
 }
 
 // ─── Idempotency ────────────────────────────────────────────────────────────
@@ -436,6 +510,7 @@ func TestWrkqTaskShow_ReturnsWrkqTask(t *testing.T) {
 	p2AssertStr(t, result, "id")
 	p2AssertStr(t, result, "slug")
 	p2AssertStr(t, result, "projectUuid")
+	p2AssertStr(t, result, "path")
 	p2AssertFieldEq(t, result, "title", "Show Test")
 	p2AssertStr(t, result, "kind")
 	p2AssertStr(t, result, "state")
@@ -449,6 +524,51 @@ func TestWrkqTaskShow_ReturnsWrkqTask(t *testing.T) {
 }
 
 // ─── wrkq.task.list ─────────────────────────────────────────────────────────
+
+// TestWrkqTaskPath_CreateShowListConsistent verifies that wrkq RPC, not a
+// downstream adapter, owns the canonical task path exposed on WrkqTask.
+func TestWrkqTaskPath_CreateShowListConsistent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	cf := p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.task.create", map[string]any{
+			"title": "Canonical Path Test",
+			"kind":  "task",
+			"state": "open",
+		}),
+	)
+	created := p2ResultOrFail(t, cf[1], "create")
+	taskID, _ := created["id"].(string)
+	createPath, _ := created["path"].(string)
+	if taskID == "" || createPath == "" {
+		t.Fatalf("create returned id/path = %q/%q", taskID, createPath)
+	}
+
+	frames := p2Run(t, dbPath,
+		mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}),
+		mkRPC("l1", "wrkq.task.list", map[string]any{"state": "open", "limit": 100}),
+	)
+	shown := p2ResultOrFail(t, frames[1], "show")
+	if shown["path"] != createPath {
+		t.Fatalf("show path mismatch: create=%q show=%q", createPath, shown["path"])
+	}
+
+	listed := p2ResultOrFail(t, frames[2], "list")
+	items, _ := listed["items"].([]any)
+	for _, item := range items {
+		m, _ := item.(map[string]any)
+		if m["id"] == taskID {
+			if m["path"] != createPath {
+				t.Fatalf("list path mismatch: create=%q list=%q", createPath, m["path"])
+			}
+			return
+		}
+	}
+	t.Fatalf("task.list did not include created task %s; items=%#v", taskID, items)
+}
 
 // TestWrkqTaskList_ReturnsItemsArray verifies that wrkq.task.list returns a
 // result with an "items" array (not an error).
@@ -993,6 +1113,67 @@ func TestWrkqWorkflowTimeline_ReturnsItems(t *testing.T) {
 	if !hasEvents {
 		t.Error("wrkq.workflow.timeline result must have \"events\" or \"items\" array")
 	}
+}
+
+func TestWrkqWorkflowTimeline_TransitionEventPayload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	tplPath := p2WorkflowTemplatePath(t)
+
+	taskID := p2SeedTask(t, dbPath,
+		"d1000000-0000-4000-8000-000000000002",
+		"wf-timeline-transition-test", "Workflow Timeline Transition Test Task")
+
+	frames := p2Run(t, dbPath,
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
+			"task":     taskID,
+			"workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("e1", "wrkf.evidence.add", map[string]any{
+			"task":  taskID,
+			"kind":  "red_test",
+			"ref":   "test/smokey/p2/timeline-transition-red",
+			"actor": "agent:tester",
+			"role":  "tester",
+			"facts": p3RedFacts(),
+		}),
+		mkRPC("tr1", "wrkf.transition.apply", map[string]any{
+			"task":           taskID,
+			"transition":     "author_red",
+			"actor":          "agent:tester",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "timeline-transition-author-red",
+		}),
+		mkRPC("tl1", "wrkq.workflow.timeline", map[string]any{"task": taskID}),
+	)
+	p2ResultOrFail(t, frames[1], "install")
+	p2ResultOrFail(t, frames[2], "attach")
+	p2ResultOrFail(t, frames[3], "add evidence")
+	p2ResultOrFail(t, frames[4], "transition apply")
+	timeline := p2ResultOrFail(t, frames[5], "timeline")
+
+	events, _ := timeline["events"].([]any)
+	for _, raw := range events {
+		event, _ := raw.(map[string]any)
+		if event["type"] != "workflow.transitioned" {
+			continue
+		}
+		payload, _ := event["payload"].(map[string]any)
+		if payload["transition"] == "author_red" && payload["outcome"] == "red_recorded" {
+			if _, ok := payload["from"].(map[string]any); !ok {
+				t.Fatalf("workflow.transitioned payload missing structured from state: %#v", payload)
+			}
+			if _, ok := payload["to"].(map[string]any); !ok {
+				t.Fatalf("workflow.transitioned payload missing structured to state: %#v", payload)
+			}
+			return
+		}
+	}
+	t.Fatalf("timeline missing typed workflow.transitioned event for author_red: %#v", events)
 }
 
 // ─── WRKQ_NOT_FOUND contract ─────────────────────────────────────────────────

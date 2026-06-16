@@ -1,6 +1,11 @@
 package wrkqapi
 
-import "github.com/lherron/wrkq/internal/workflow"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/lherron/wrkq/internal/workflow"
+)
 
 // ─── DTOs (camelCase JSON; no DB column names leak) ──────────────────────────
 
@@ -11,9 +16,11 @@ type WrkqTask struct {
 	Slug                  string         `json:"slug"`
 	Title                 string         `json:"title"`
 	ProjectUUID           string         `json:"projectUuid"`
+	Path                  string         `json:"path"`
 	State                 string         `json:"state"`
 	Priority              int            `json:"priority"`
 	Kind                  string         `json:"kind"`
+	RiskClass             string         `json:"riskClass,omitempty"`
 	Description           string         `json:"description"`
 	Specification         string         `json:"specification"`
 	Labels                []string       `json:"labels"`
@@ -95,6 +102,7 @@ type TaskCreateParams struct {
 	Kind           string         `json:"kind,omitempty"`
 	Priority       int            `json:"priority,omitempty"`
 	State          string         `json:"state,omitempty"`
+	RiskClass      string         `json:"riskClass,omitempty"`
 	ParentTask     string         `json:"parentTask,omitempty"`
 	Labels         []string       `json:"labels,omitempty"`
 	Meta           map[string]any `json:"meta,omitempty"`
@@ -138,11 +146,36 @@ type TaskPatch struct {
 	State                *string         `json:"state,omitempty"`
 	Priority             *int            `json:"priority,omitempty"`
 	Kind                 *string         `json:"kind,omitempty"`
+	RiskClass            *string         `json:"riskClass,omitempty"`
 	Labels               *[]string       `json:"labels,omitempty"`
 	Meta                 *map[string]any `json:"meta,omitempty"`
 	AssigneePrincipalRef *string         `json:"assigneePrincipalRef,omitempty"`
 	DueAt                *string         `json:"dueAt,omitempty"`
 	StartAt              *string         `json:"startAt,omitempty"`
+}
+
+func (p *TaskPatch) UnmarshalJSON(b []byte) error {
+	type taskPatch TaskPatch
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	allowed := map[string]bool{
+		"title": true, "description": true, "specification": true, "state": true,
+		"priority": true, "kind": true, "riskClass": true, "labels": true, "meta": true,
+		"assigneePrincipalRef": true, "dueAt": true, "startAt": true,
+	}
+	for key := range raw {
+		if !allowed[key] {
+			return fmt.Errorf("unsupported task patch field %q", key)
+		}
+	}
+	var out taskPatch
+	if err := json.Unmarshal(b, &out); err != nil {
+		return err
+	}
+	*p = TaskPatch(out)
+	return nil
 }
 
 // CommentAddParams mirrors WrkqCommentAddParams.

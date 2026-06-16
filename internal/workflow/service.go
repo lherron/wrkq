@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
@@ -806,6 +807,193 @@ func (s *Service) Timeline(taskSelector string) ([]Event, error) {
 	return out, rows.Err()
 }
 
+func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error) {
+	eventType := strings.TrimSpace(params.EventType)
+	if eventType == "" {
+		eventType = "workflow.transitioned"
+	}
+	if eventType != "workflow.transitioned" {
+		return EventQueryResult{}, validationError("eventType", "only workflow.transitioned is queryable", "workflow.transitioned", []string{"workflow.transitioned"}, "set eventType to workflow.transitioned")
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	page, err := cursor.Apply(params.Cursor, cursor.ApplyOptions{
+		SortFields: []string{"created_at"},
+		SQLFields:  []string{"e.created_at"},
+		Descending: []bool{false},
+		IDField:    "e.id",
+		Limit:      limit,
+	})
+	if err != nil {
+		return EventQueryResult{}, validationError("cursor", "invalid cursor", "cursor returned by previous event query page", nil, "retry without cursor or with a cursor from this query")
+	}
+
+	where := []string{"e.type = ?"}
+	args := []interface{}{eventType}
+	if project := strings.TrimSpace(params.Project); project != "" {
+		where = append(where, "(wi.project_id = ? OR p.uuid = ? OR p.id = ? OR p.slug = ?)")
+		args = append(args, project, project, project, project)
+	}
+	if fromPhase := strings.TrimSpace(params.FromPhase); fromPhase != "" {
+		where = append(where, "COALESCE(json_extract(e.payload_json, '$.from.phase'), '') = ?")
+		args = append(args, fromPhase)
+	}
+	if toPhase := strings.TrimSpace(params.ToPhase); toPhase != "" {
+		where = append(where, "COALESCE(json_extract(e.payload_json, '$.to.phase'), '') = ?")
+		args = append(args, toPhase)
+	}
+	if classes := compactStrings(append(params.RiskClasses, params.RiskClass)); len(classes) > 0 {
+		ph := placeholders(len(classes))
+		where = append(where, "COALESCE(t.risk_class, '') IN ("+ph+")")
+		for _, class := range classes {
+			args = append(args, class)
+		}
+	}
+	if classes := compactStrings(append(params.ExcludeRiskClasses, params.ExcludeRiskClass)); len(classes) > 0 {
+		ph := placeholders(len(classes))
+		where = append(where, "COALESCE(t.risk_class, '') NOT IN ("+ph+")")
+		for _, class := range classes {
+			args = append(args, class)
+		}
+	}
+	boundRole := strings.TrimSpace(params.BoundRole)
+	if boundRole != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM workflow_role_bindings rb WHERE rb.instance_id = e.instance_id AND rb.role = ?)")
+		args = append(args, boundRole)
+	}
+	if page.WhereClause != "" {
+		where = append(where, page.WhereClause)
+		args = append(args, page.Params...)
+	}
+
+	query := `
+		SELECT e.id, e.instance_id, e.seq, e.type, COALESCE(e.actor,''), COALESCE(e.role,''),
+		       e.payload_json, e.created_at, wi.task_ref,
+		       t.uuid, t.id, t.slug, t.project_uuid, COALESCE(t.risk_class,''),
+		       COALESCE(p.id,''), COALESCE(p.slug,'')
+		FROM workflow_events e
+		JOIN workflow_instances wi ON wi.id = e.instance_id
+		JOIN tasks t ON t.uuid = wi.task_uuid
+		LEFT JOIN containers p ON p.uuid = t.project_uuid
+		WHERE ` + strings.Join(where, " AND ") + `
+		` + page.OrderByClause
+	if page.LimitClause != "" {
+		query += "\n\t\t" + page.LimitClause
+		args = append(args, *page.LimitParam)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return EventQueryResult{}, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	items := []TransitionEvent{}
+	for rows.Next() {
+		var item TransitionEvent
+		var payload string
+		if err := rows.Scan(
+			&item.ID, &item.InstanceID, &item.Seq, &item.EventType, &item.Actor, &item.ActorRole,
+			&payload, &item.TransitionedAt, &item.Task.Ref,
+			&item.Task.UUID, &item.Task.ID, &item.Task.Slug, &item.Task.ProjectUUID, &item.Task.RiskClass,
+			&item.Task.ProjectID, &item.Task.ProjectSlug,
+		); err != nil {
+			return EventQueryResult{}, err
+		}
+		item.Payload = json.RawMessage(payload)
+		applyTransitionPayload(&item)
+		if boundRole != "" {
+			bindings, err := listRoleBindingsForInstanceRole(s.db, item.InstanceID, boundRole)
+			if err != nil {
+				return EventQueryResult{}, err
+			}
+			if bindings == nil {
+				bindings = []RoleBinding{}
+			}
+			item.MatchingRoleBindings = bindings
+		}
+		if params.IncludeRoleBindings {
+			bindings, err := listRoleBindingsForInstance(s.db, item.InstanceID)
+			if err != nil {
+				return EventQueryResult{}, err
+			}
+			if bindings == nil {
+				bindings = []RoleBinding{}
+			}
+			item.RoleBindings = bindings
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return EventQueryResult{}, err
+	}
+
+	result := EventQueryResult{Items: items}
+	if len(items) > limit {
+		result.Items = items[:limit]
+		result.HasMore = true
+		anchor := result.Items[limit-1]
+		next, cerr := cursor.BuildNextCursor([]string{"created_at"}, []any{anchor.TransitionedAt}, anchor.ID)
+		if cerr == nil {
+			result.NextCursor = next
+		}
+	}
+	return result, nil
+}
+
+func applyTransitionPayload(item *TransitionEvent) {
+	if item == nil || len(item.Payload) == 0 {
+		return
+	}
+	var payload struct {
+		Transition string `json:"transition"`
+		Outcome    string `json:"outcome"`
+		From       State  `json:"from"`
+		To         State  `json:"to"`
+	}
+	if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		return
+	}
+	item.Transition = payload.Transition
+	item.Outcome = payload.Outcome
+	item.From = payload.From
+	item.To = payload.To
+	item.FromPhase = payload.From.Phase
+	item.ToPhase = payload.To.Phase
+}
+
+func compactStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ",")
+}
+
 func (s *Service) Refresh(taskSelector, actor string) (*Instance, error) {
 	inst, err := s.LatestInstance(taskSelector)
 	if err != nil {
@@ -912,6 +1100,193 @@ func resolveInstanceSelectors(q queryer, taskSelector, instanceID string) (*Inst
 		return nil, validationError("instanceId", "task and instanceId resolve to different workflow instances", "matching task and instanceId", nil, "retry with selectors for the same workflow instance")
 	}
 	return instanceInst, nil
+}
+
+func (s *Service) ListRoleBindings(taskSelector, instanceID string) ([]RoleBinding, error) {
+	inst, err := s.ResolveInstance(taskSelector, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return listRoleBindingsForInstance(s.db, inst.ID)
+}
+
+type RoleBindOptions struct {
+	TaskSelector string
+	InstanceID   string
+	Role         string
+	Actor        string
+	DeliveryRef  string
+	Lane         string
+	BindingMode  string
+}
+
+func (s *Service) BindRole(opts RoleBindOptions) (*RoleBinding, error) {
+	if err := validateRoleBindingInput(opts.Role, opts.Actor, opts.BindingMode); err != nil {
+		return nil, err
+	}
+	mode := strings.TrimSpace(opts.BindingMode)
+	if mode == "" {
+		mode = "required"
+	}
+	var out *RoleBinding
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, opts.TaskSelector, opts.InstanceID)
+		if err != nil {
+			return err
+		}
+		now := s.now().Format(time.RFC3339)
+		_, err = tx.Exec(`
+			INSERT INTO workflow_role_bindings (instance_id, role, actor, delivery_ref, lane, binding_mode, bound_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(instance_id, role, actor) DO UPDATE SET
+				delivery_ref = excluded.delivery_ref,
+				lane = excluded.lane,
+				binding_mode = excluded.binding_mode,
+				bound_at = excluded.bound_at
+		`, inst.ID, strings.TrimSpace(opts.Role), strings.TrimSpace(opts.Actor), nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), mode, now)
+		if err != nil {
+			return err
+		}
+		binding, err := getRoleBindingTx(tx, inst.ID, strings.TrimSpace(opts.Role), strings.TrimSpace(opts.Actor))
+		if err != nil {
+			return err
+		}
+		out = binding
+		return nil
+	})
+	return out, err
+}
+
+func (s *Service) UnbindRole(taskSelector, instanceID, role, actor string) ([]RoleBinding, error) {
+	role = strings.TrimSpace(role)
+	actor = strings.TrimSpace(actor)
+	if role == "" {
+		return nil, validationError("role", "role is required", "non-empty role", nil, "supply role")
+	}
+	var out []RoleBinding
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
+		if err != nil {
+			return err
+		}
+		if actor == "" {
+			_, err = tx.Exec(`DELETE FROM workflow_role_bindings WHERE instance_id = ? AND role = ?`, inst.ID, role)
+		} else {
+			_, err = tx.Exec(`DELETE FROM workflow_role_bindings WHERE instance_id = ? AND role = ? AND actor = ?`, inst.ID, role, actor)
+		}
+		if err != nil {
+			return err
+		}
+		out, err = listRoleBindingsForInstance(tx, inst.ID)
+		return err
+	})
+	return out, err
+}
+
+func (s *Service) SetRoleBindings(taskSelector, instanceID string, roleMap map[string]string) ([]RoleBinding, error) {
+	if roleMap == nil {
+		roleMap = map[string]string{}
+	}
+	for role, actor := range roleMap {
+		if err := validateRoleBindingInput(role, actor, "required"); err != nil {
+			return nil, err
+		}
+	}
+	var out []RoleBinding
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM workflow_role_bindings WHERE instance_id = ?`, inst.ID); err != nil {
+			return err
+		}
+		now := s.now().Format(time.RFC3339)
+		for role, actor := range roleMap {
+			_, err := tx.Exec(`
+				INSERT INTO workflow_role_bindings (instance_id, role, actor, binding_mode, bound_at)
+				VALUES (?, ?, ?, 'required', ?)
+			`, inst.ID, strings.TrimSpace(role), strings.TrimSpace(actor), now)
+			if err != nil {
+				return err
+			}
+		}
+		out, err = listRoleBindingsForInstance(tx, inst.ID)
+		return err
+	})
+	return out, err
+}
+
+func validateRoleBindingInput(role, actor, mode string) error {
+	if strings.TrimSpace(role) == "" {
+		return validationError("role", "role is required", "non-empty role", nil, "supply role")
+	}
+	if strings.TrimSpace(actor) == "" {
+		return validationError("actor", "actor is required", "non-empty actor", nil, "supply actor")
+	}
+	switch strings.TrimSpace(mode) {
+	case "", "required", "optional", "auto":
+		return nil
+	default:
+		return validationError("bindingMode", "bindingMode must be required, optional, or auto", "required|optional|auto", []string{"required", "optional", "auto"}, "use a supported bindingMode")
+	}
+}
+
+func listRoleBindingsForInstance(q rowsQueryer, instanceID string) ([]RoleBinding, error) {
+	rows, err := q.Query(`
+		SELECT instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
+		FROM workflow_role_bindings
+		WHERE instance_id = ?
+		ORDER BY role, actor
+	`, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []RoleBinding
+	for rows.Next() {
+		var binding RoleBinding
+		if err := rows.Scan(&binding.InstanceID, &binding.Role, &binding.Actor, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
+			return nil, err
+		}
+		out = append(out, binding)
+	}
+	return out, rows.Err()
+}
+
+func listRoleBindingsForInstanceRole(q rowsQueryer, instanceID, role string) ([]RoleBinding, error) {
+	rows, err := q.Query(`
+		SELECT instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
+		FROM workflow_role_bindings
+		WHERE instance_id = ? AND role = ?
+		ORDER BY role, actor
+	`, instanceID, role)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []RoleBinding
+	for rows.Next() {
+		var binding RoleBinding
+		if err := rows.Scan(&binding.InstanceID, &binding.Role, &binding.Actor, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
+			return nil, err
+		}
+		out = append(out, binding)
+	}
+	return out, rows.Err()
+}
+
+func getRoleBindingTx(tx *sql.Tx, instanceID, role, actor string) (*RoleBinding, error) {
+	row := tx.QueryRow(`
+		SELECT instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
+		FROM workflow_role_bindings
+		WHERE instance_id = ? AND role = ? AND actor = ?
+	`, instanceID, role, actor)
+	var binding RoleBinding
+	if err := row.Scan(&binding.InstanceID, &binding.Role, &binding.Actor, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
+		return nil, err
+	}
+	return &binding, nil
 }
 
 func resolveTaskUUIDQuery(q queryer, selector string) (string, error) {
@@ -1128,6 +1503,24 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if len(dataRaw) > 0 {
 			source["dataHash"] = Hash(dataRaw)
 		}
+		if strings.TrimSpace(params.ContentHash) != "" {
+			source["contentHash"] = strings.TrimSpace(params.ContentHash)
+		}
+		if params.Build != nil {
+			build := map[string]string{}
+			if strings.TrimSpace(params.Build.ID) != "" {
+				build["id"] = strings.TrimSpace(params.Build.ID)
+			}
+			if strings.TrimSpace(params.Build.Version) != "" {
+				build["version"] = strings.TrimSpace(params.Build.Version)
+			}
+			if strings.TrimSpace(params.Build.Env) != "" {
+				build["env"] = strings.TrimSpace(params.Build.Env)
+			}
+			if len(build) > 0 {
+				source["build"] = build
+			}
+		}
 		sourceJSON, _ := json.Marshal(source)
 		var factsArg interface{}
 		if facts != nil {
@@ -1185,7 +1578,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.Actor); err != nil {
 			return err
 		}
-		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, RunID: params.RunID, TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
 		if params.IdempotencyKey != "" {
 			if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
 				return err
@@ -1198,19 +1591,37 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 
 func evidenceAddRequestHash(params AddEvidenceParams, factsRaw, dataRaw json.RawMessage) string {
 	req := struct {
-		Kind    string          `json:"kind"`
-		Ref     string          `json:"ref"`
-		Summary string          `json:"summary,omitempty"`
-		Facts   json.RawMessage `json:"facts,omitempty"`
-		Data    json.RawMessage `json:"data,omitempty"`
-		Actor   string          `json:"actor,omitempty"`
-		Role    string          `json:"role,omitempty"`
-		RunID   string          `json:"runId,omitempty"`
+		Kind        string          `json:"kind"`
+		Ref         string          `json:"ref"`
+		Summary     string          `json:"summary,omitempty"`
+		Facts       json.RawMessage `json:"facts,omitempty"`
+		Data        json.RawMessage `json:"data,omitempty"`
+		Actor       string          `json:"actor,omitempty"`
+		Role        string          `json:"role,omitempty"`
+		RunID       string          `json:"runId,omitempty"`
+		ContentHash string          `json:"contentHash,omitempty"`
+		Build       *EvidenceBuild  `json:"build,omitempty"`
 	}{
 		Kind: params.Kind, Ref: params.Ref, Summary: params.Summary,
 		Facts: factsRaw, Data: dataRaw, Actor: params.Actor, Role: params.Role, RunID: params.RunID,
+		ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build),
 	}
 	return rpcidem.CanonicalRequestHash(req)
+}
+
+func normalizedEvidenceBuild(build *EvidenceBuild) *EvidenceBuild {
+	if build == nil {
+		return nil
+	}
+	out := &EvidenceBuild{
+		ID:      strings.TrimSpace(build.ID),
+		Version: strings.TrimSpace(build.Version),
+		Env:     strings.TrimSpace(build.Env),
+	}
+	if out.ID == "" && out.Version == "" && out.Env == "" {
+		return nil
+	}
+	return out
 }
 
 func replayEvidenceResult(tx *sql.Tx, instanceID, key, requestHash string) (*Evidence, error) {
@@ -1349,10 +1760,22 @@ func scanEvidenceRows(rows *sql.Rows) ([]Evidence, error) {
 		}
 		if source != "" {
 			e.Source = json.RawMessage(source)
+			e.ContentHash, e.Build = evidenceProvenanceFromSource(source)
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func evidenceProvenanceFromSource(source string) (string, *EvidenceBuild) {
+	var doc struct {
+		ContentHash string         `json:"contentHash"`
+		Build       *EvidenceBuild `json:"build"`
+	}
+	if err := json.Unmarshal([]byte(source), &doc); err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(doc.ContentHash), normalizedEvidenceBuild(doc.Build)
 }
 
 func (s *Service) SuggestEvidence(taskSelector, transitionID string) (map[string]interface{}, error) {

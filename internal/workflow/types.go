@@ -280,9 +280,17 @@ type Evidence struct {
 	Actor                string          `json:"actor,omitempty"`
 	Role                 string          `json:"role,omitempty"`
 	RunID                string          `json:"runId,omitempty"`
+	ContentHash          string          `json:"contentHash,omitempty"`
+	Build                *EvidenceBuild  `json:"build,omitempty"`
 	TaskEtagAtProduction string          `json:"taskEtagAtProduction,omitempty"`
 	TaskHashAtProduction string          `json:"taskHashAtProduction,omitempty"`
 	ProducedAt           string          `json:"producedAt"`
+}
+
+type EvidenceBuild struct {
+	ID      string `json:"id,omitempty"`
+	Version string `json:"version,omitempty"`
+	Env     string `json:"env,omitempty"`
 }
 
 // EvidenceSchema is the contract for an evidence kind, returned by
@@ -307,7 +315,71 @@ type AddEvidenceParams struct {
 	Actor          string
 	Role           string
 	RunID          string
+	ContentHash    string
+	Build          *EvidenceBuild
 	IdempotencyKey string
+}
+
+type RoleBinding struct {
+	InstanceID  string `json:"instanceId"`
+	Role        string `json:"role"`
+	Actor       string `json:"actor"`
+	DeliveryRef string `json:"deliveryRef,omitempty"`
+	Lane        string `json:"lane,omitempty"`
+	BindingMode string `json:"bindingMode"`
+	BoundAt     string `json:"boundAt"`
+}
+
+type EventQueryParams struct {
+	EventType           string   `json:"eventType,omitempty"`
+	Project             string   `json:"project,omitempty"`
+	FromPhase           string   `json:"fromPhase,omitempty"`
+	ToPhase             string   `json:"toPhase,omitempty"`
+	RiskClass           string   `json:"riskClass,omitempty"`
+	RiskClasses         []string `json:"riskClasses,omitempty"`
+	ExcludeRiskClass    string   `json:"excludeRiskClass,omitempty"`
+	ExcludeRiskClasses  []string `json:"excludeRiskClasses,omitempty"`
+	BoundRole           string   `json:"boundRole,omitempty"`
+	IncludeRoleBindings bool     `json:"includeRoleBindings,omitempty"`
+	Limit               int      `json:"limit,omitempty"`
+	Cursor              string   `json:"cursor,omitempty"`
+}
+
+type EventQueryResult struct {
+	Items      []TransitionEvent `json:"items"`
+	NextCursor string            `json:"nextCursor,omitempty"`
+	HasMore    bool              `json:"hasMore"`
+}
+
+type TransitionEvent struct {
+	ID                   string          `json:"id"`
+	EventType            string          `json:"eventType"`
+	InstanceID           string          `json:"instanceId"`
+	Seq                  int64           `json:"seq"`
+	Task                 EventTaskRef    `json:"task"`
+	Transition           string          `json:"transition,omitempty"`
+	Outcome              string          `json:"outcome,omitempty"`
+	From                 State           `json:"from,omitempty"`
+	To                   State           `json:"to,omitempty"`
+	FromPhase            string          `json:"fromPhase,omitempty"`
+	ToPhase              string          `json:"toPhase,omitempty"`
+	TransitionedAt       string          `json:"transitionedAt"`
+	Actor                string          `json:"actor,omitempty"`
+	ActorRole            string          `json:"actorRole,omitempty"`
+	MatchingRoleBindings []RoleBinding   `json:"matchingRoleBindings"`
+	RoleBindings         []RoleBinding   `json:"roleBindings,omitempty"`
+	Payload              json.RawMessage `json:"payload,omitempty"`
+}
+
+type EventTaskRef struct {
+	UUID        string `json:"uuid"`
+	ID          string `json:"id"`
+	Slug        string `json:"slug,omitempty"`
+	Ref         string `json:"ref,omitempty"`
+	ProjectUUID string `json:"projectUuid,omitempty"`
+	ProjectID   string `json:"projectId,omitempty"`
+	ProjectSlug string `json:"projectSlug,omitempty"`
+	RiskClass   string `json:"riskClass,omitempty"`
 }
 
 type Obligation struct {

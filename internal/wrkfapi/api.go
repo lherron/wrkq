@@ -690,6 +690,11 @@ func normalizeError(err error) error {
 			return NewLeaseConflictError("", "")
 		case CodeEffectNotDeliverable:
 			return NewEffectNotDeliverableError("", "")
+		case CodeEffectDeliveryFailed:
+			if detail, ok := workflow.AsErrorDetail(err); ok {
+				return NewDetailError(detail, true)
+			}
+			return newError(CodeEffectDeliveryFailed, err.Error(), true, nil, err)
 		case CodeValidation, CodeKindRoleDenied, CodeLinkageUnresolved, CodeLinkageStale:
 			if detail, ok := workflow.AsErrorDetail(err); ok {
 				return NewDetailError(detail, false)

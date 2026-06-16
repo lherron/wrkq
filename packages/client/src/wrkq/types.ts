@@ -7,7 +7,7 @@
  * (proto 2026-06-14).
  */
 
-import type { WrkfInstance } from "../wrkf/types.js";
+import type { WrkfEvent, WrkfInstance } from "../wrkf/types.js";
 
 export type WrkqTaskState =
   | "idea"
@@ -21,6 +21,7 @@ export type WrkqTaskState =
   | "deleted";
 
 export type WrkqTaskKind = "task" | "subtask" | "spike" | "bug" | "chore";
+export type WrkqRiskClass = "low" | "medium" | "high" | string;
 
 // ── Task ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ export interface WrkqTaskCreateParams {
   parentTask?: string;
   labels?: string[];
   meta?: Record<string, unknown>;
+  riskClass?: WrkqRiskClass;
   idempotencyKey?: string;
 }
 
@@ -65,6 +67,7 @@ export interface WrkqTaskUpdateParams {
     kind?: string;
     labels?: string[];
     meta?: Record<string, unknown>;
+    riskClass?: WrkqRiskClass;
     assigneePrincipalRef?: string | null;
     dueAt?: string | null;
     startAt?: string | null;
@@ -96,6 +99,7 @@ export interface WrkqTask {
   slug: string;
   title: string;
   projectUuid: string;
+  path: string;
   state: WrkqTaskState;
   priority: number;
   kind: string;
@@ -103,6 +107,7 @@ export interface WrkqTask {
   specification: string;
   labels: string[];
   meta: Record<string, unknown>;
+  riskClass?: WrkqRiskClass;
   etag: number;
   createdAt: string;
   updatedAt: string;
@@ -297,6 +302,11 @@ export interface WrkqWorkflowInspectResult {
 
 export interface WrkqWorkflowTimelineParams {
   task: string;
+}
+
+export interface WrkqWorkflowTimelineResult {
+  events: WrkfEvent[];
+  [k: string]: unknown;
 }
 
 export interface WrkqWorkflowRefreshParams {

@@ -99,6 +99,25 @@ func (a *API) WorkflowTimeline(ctx context.Context, p WorkflowTaskParams) (*Wrkq
 	return &WrkqWorkflowTimelineResult{Events: events}, nil
 }
 
+// WorkflowRefresh updates the workflow instance context from the current task
+// document and returns the same wrapped shape as inspect.
+func (a *API) WorkflowRefresh(ctx context.Context, taskSelector, actor string) (*WrkqWorkflowInspectResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.wf == nil {
+		return nil, NewInternalError(errWorkflowUnavailable)
+	}
+	if _, err := a.resolveTaskUUID(taskSelector); err != nil {
+		return nil, err
+	}
+	inst, err := a.wf.TaskRefresh(ctx, taskSelector, defaultString(actor, a.defaultActor))
+	if err != nil {
+		return nil, err
+	}
+	return &WrkqWorkflowInspectResult{Instance: inst}, nil
+}
+
 func defaultString(value, fallback string) string {
 	if value != "" {
 		return value

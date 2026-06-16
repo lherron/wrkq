@@ -44,6 +44,11 @@ var requiredMethods = []string{
 	"wrkf.transition.apply",
 	"wrkf.instance.show",
 	"wrkf.instance.next",
+	"wrkf.event.query",
+	"wrkf.role.list",
+	"wrkf.role.bind",
+	"wrkf.role.unbind",
+	"wrkf.role.set",
 }
 
 // buildCurrentRegistry constructs the method set exposed by the unified registry.

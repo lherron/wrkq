@@ -66,6 +66,14 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 			return nil, NewValidationError(kerr.Error(), map[string]any{"field": "kind"})
 		}
 	}
+	var riskClass *string
+	if strings.TrimSpace(p.RiskClass) != "" {
+		trimmed := strings.TrimSpace(p.RiskClass)
+		if rerr := domain.ValidateTaskRiskClass(trimmed); rerr != nil {
+			return nil, NewValidationError(rerr.Error(), map[string]any{"field": "riskClass"})
+		}
+		riskClass = &trimmed
+	}
 	priority := p.Priority
 	if priority == 0 {
 		priority = 3
@@ -96,6 +104,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		ParentTaskUUID: parentTaskUUID,
 		Labels:         labelsString(p.Labels),
 		Meta:           metaString(p.Meta),
+		RiskClass:      riskClass,
 		Via:            "rpc",
 	})
 	if err != nil {
@@ -205,23 +214,23 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		if rerr != nil {
 			return nil, NewNotFoundError(p.Path, "container")
 		}
-		where = append(where, "project_uuid = ?")
+		where = append(where, "t.project_uuid = ?")
 		args = append(args, containerUUID)
 	}
 	if len(p.State) > 0 {
 		ph, vals := inClause(p.State)
-		where = append(where, "state IN ("+ph+")")
+		where = append(where, "t.state IN ("+ph+")")
 		args = append(args, vals...)
 	} else if !p.IncludeDeleted {
-		where = append(where, "state != 'deleted'")
+		where = append(where, "t.state != 'deleted'")
 	}
 	if len(p.Kind) > 0 {
 		ph, vals := inClause(p.Kind)
-		where = append(where, "kind IN ("+ph+")")
+		where = append(where, "t.kind IN ("+ph+")")
 		args = append(args, vals...)
 	}
 	if strings.TrimSpace(p.Assignee) != "" {
-		where = append(where, "assignee_principal_ref = ?")
+		where = append(where, "t.assignee_principal_ref = ?")
 		args = append(args, p.Assignee)
 	}
 
@@ -235,18 +244,19 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 
 	page, err := cursor.Apply(p.Cursor, cursor.ApplyOptions{
 		SortFields: []string{"created_at"},
-		SQLFields:  []string{"created_at"},
+		SQLFields:  []string{"t.created_at"},
 		Descending: []bool{false},
-		IDField:    "id",
+		IDField:    "t.id",
 		Limit:      limit,
 	})
 	if err != nil {
 		return nil, NewValidationError("invalid cursor", map[string]any{"field": "cursor"})
 	}
 
-	query := "SELECT uuid, id, slug, title, project_uuid, state, priority, kind, description, specification, " +
-		"labels, meta, etag, created_at, updated_at, completed_at, archived_at, deleted_at, acknowledged_at, " +
-		"assignee_principal_ref, created_by_principal_ref, updated_by_principal_ref FROM tasks"
+	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, " +
+		"t.labels, t.meta, t.etag, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
+		"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
+		"COALESCE(cp.path || '/' || t.slug, t.slug) FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid"
 	if page.WhereClause != "" {
 		where = append(where, page.WhereClause)
 		args = append(args, page.Params...)
@@ -576,6 +586,17 @@ func patchFields(patch TaskPatch) (map[string]any, error) {
 		}
 		fields["kind"] = *patch.Kind
 	}
+	if patch.RiskClass != nil {
+		riskClass := strings.TrimSpace(*patch.RiskClass)
+		if riskClass == "" {
+			fields["risk_class"] = nil
+		} else {
+			if err := domain.ValidateTaskRiskClass(riskClass); err != nil {
+				return nil, NewValidationError(err.Error(), map[string]any{"field": "riskClass"})
+			}
+			fields["risk_class"] = riskClass
+		}
+	}
 	if patch.Labels != nil {
 		fields["labels"] = labelsString(*patch.Labels)
 	}
@@ -614,9 +635,10 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 // loadTask reads a task by UUID into a WrkqTask DTO.
 func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
-		"SELECT uuid, id, slug, title, project_uuid, state, priority, kind, description, specification, "+
-			"labels, meta, etag, created_at, updated_at, completed_at, archived_at, deleted_at, acknowledged_at, "+
-			"assignee_principal_ref, created_by_principal_ref, updated_by_principal_ref FROM tasks WHERE uuid = ?",
+		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
+			"t.labels, t.meta, t.etag, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
+			"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
+			"COALESCE(cp.path || '/' || t.slug, t.slug) FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE t.uuid = ?",
 		uuid,
 	)
 	task, _, err := scanTaskRow(row)
@@ -645,11 +667,12 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		createdAt, updatedAt                                                        string
 		completedAt, archivedAt, deletedAt, acknowledgedAt                          sql.NullString
 		assignee, createdByPrincipal, updatedByPrincipal                            sql.NullString
+		riskClass, path                                                             string
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &state, &priority, &kind, &description, &specification,
 		&labels, &meta, &etag, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
-		&assignee, &createdByPrincipal, &updatedByPrincipal,
+		&assignee, &createdByPrincipal, &updatedByPrincipal, &riskClass, &path,
 	); err != nil {
 		return nil, "", err
 	}
@@ -659,9 +682,11 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		Slug:                  slug,
 		Title:                 title,
 		ProjectUUID:           projectUUID,
+		Path:                  path,
 		State:                 state,
 		Priority:              priority,
 		Kind:                  kind,
+		RiskClass:             riskClass,
 		Description:           description,
 		Specification:         specification,
 		Labels:                parseLabels(labels.String),

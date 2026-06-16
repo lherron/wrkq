@@ -50,7 +50,21 @@ export interface WrkfInstance {
 
 export interface WrkfEvent {
   id: string;
+  type?: string;
+  payload?: {
+    from?: WrkfState;
+    to?: WrkfState;
+    transition?: string;
+    outcome?: string;
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
+}
+
+export interface WrkfEvidenceBuild {
+  id?: string;
+  version?: string;
+  env?: string;
 }
 
 export interface WrkfEvidence {
@@ -65,6 +79,8 @@ export interface WrkfEvidence {
   role?: string;
   /** Persisted run linkage; see docs/wrkq-wrkf-rpc.md §9.7. */
   runId?: string;
+  contentHash?: string;
+  build?: WrkfEvidenceBuild;
   producedAt?: string;
   [k: string]: unknown;
 }
@@ -220,6 +236,8 @@ export interface WrkfEvidenceAddParams {
   role?: string;
   /** Persisted run linkage; see docs/wrkq-wrkf-rpc.md §9.7. */
   runId?: string;
+  contentHash?: string;
+  build?: WrkfEvidenceBuild;
   idempotencyKey?: string;
 }
 
@@ -236,6 +254,105 @@ export interface WrkfEvidenceSuggestParams {
   task?: string;
   instanceId?: string;
   transition: string;
+}
+
+// ── Role bindings ───────────────────────────────────────────────────────────
+
+export interface WrkfRoleBinding {
+  instanceId: string;
+  role: string;
+  actor: string;
+  deliveryRef?: string;
+  lane?: string;
+  bindingMode: string;
+  boundAt: string;
+}
+
+export interface WrkfRoleListParams {
+  task?: string;
+  instanceId?: string;
+}
+
+export interface WrkfRoleBindParams {
+  task?: string;
+  instanceId?: string;
+  role: string;
+  actor: string;
+  deliveryRef?: string;
+  lane?: string;
+  bindingMode?: "required" | "optional" | "auto" | string;
+}
+
+export interface WrkfRoleUnbindParams {
+  task?: string;
+  instanceId?: string;
+  role: string;
+  actor?: string;
+}
+
+export interface WrkfRoleSetParams {
+  task?: string;
+  instanceId?: string;
+  roleMap: Record<string, string>;
+}
+
+export interface WrkfEventQueryParams {
+  eventType?: "workflow.transitioned" | string;
+  project?: string;
+  fromPhase?: string;
+  toPhase?: string;
+  riskClass?: string;
+  riskClasses?: string[];
+  excludeRiskClass?: string;
+  excludeRiskClasses?: string[];
+  boundRole?: string;
+  includeRoleBindings?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface WrkfTransitionEventTask {
+  uuid: string;
+  id: string;
+  slug?: string;
+  ref?: string;
+  projectUuid?: string;
+  projectId?: string;
+  projectSlug?: string;
+  riskClass?: string;
+}
+
+export interface WrkfTransitionEvent {
+  id: string;
+  eventType: "workflow.transitioned" | string;
+  instanceId: string;
+  seq: number;
+  task: WrkfTransitionEventTask;
+  transition?: string;
+  outcome?: string;
+  from?: WrkfState;
+  to?: WrkfState;
+  fromPhase?: string;
+  toPhase?: string;
+  transitionedAt: string;
+  actor?: string;
+  actorRole?: string;
+  matchingRoleBindings: WrkfRoleBinding[];
+  roleBindings?: WrkfRoleBinding[];
+  payload?: {
+    from?: WrkfState;
+    to?: WrkfState;
+    transition?: string;
+    outcome?: string;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+export interface WrkfEventQueryResult {
+  items: WrkfTransitionEvent[];
+  nextCursor?: string;
+  hasMore: boolean;
 }
 
 export interface WrkfSuggestResult {

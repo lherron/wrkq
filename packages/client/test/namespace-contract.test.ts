@@ -27,7 +27,9 @@ describe("public surface (runtime)", () => {
     // Business access is namespaced.
     expect(typeof client.wrkq.task.create).toBe("function");
     expect(typeof client.wrkq.workflow.attach).toBe("function");
+    expect(typeof client.wrkf.event.query).toBe("function");
     expect(typeof client.wrkf.transition.apply).toBe("function");
+    expect(typeof client.wrkf.role.set).toBe("function");
     expect(typeof client.wrkf.effect.claim).toBe("function");
 
     // No root business namespaces.
@@ -36,6 +38,7 @@ describe("public surface (runtime)", () => {
       "workflow",
       "task",
       "evidence",
+      "event",
       "obligation",
       "check",
       "hook",
@@ -57,6 +60,8 @@ function _typeNegatives(c: WorkClient) {
   c.task;
   // @ts-expect-error root client.evidence is forbidden
   c.evidence;
+  // @ts-expect-error root client.event is forbidden
+  c.event;
   // @ts-expect-error root client.transition is forbidden
   c.transition;
   // @ts-expect-error root client.run is forbidden
@@ -65,6 +70,7 @@ function _typeNegatives(c: WorkClient) {
   c.effect;
   // @ts-expect-error no wrkf.task namespace (task mutation is wrkq-only)
   c.wrkf.task;
+  c.wrkf.role.set({ task: "T-00001", roleMap: { implementer: "agent:cody" } });
   // @ts-expect-error workflow attach is a wrkq verb, not wrkf
   c.wrkf.workflow.attach;
 }

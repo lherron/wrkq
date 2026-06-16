@@ -192,13 +192,13 @@ def rpc(method, params=None, expect_error=None):
 
 
 init = rpc(
-    "wrkf.initialize",
-    {"protocolVersion": "2026-06-01", "client": {"name": "smoke", "version": "0"}},
+    "rpc.initialize",
+    {"protocolVersion": "2026-06-14", "client": {"name": "smoke", "version": "0"}},
 )
-assert init["protocolVersion"] == "2026-06-01", init
+assert init["protocolVersion"] == "2026-06-14", init
 assert init["database"]["path"] == db_path, init
 assert init["capabilities"]["effectClaimLease"] is True, init
-assert init["schemaHash"].startswith("sha256:"), init
+assert init["protocolSchemaHash"].startswith("sha256:"), init
 
 valid = rpc("wrkf.workflow.validate", {"path": workflow_path})
 assert valid["valid"] is True, valid
@@ -215,25 +215,23 @@ assert shown["template"]["id"] == "smoke_flow", shown
 diff = rpc("wrkf.workflow.diff", {"oldPath": workflow_path, "newPath": workflow_path})
 assert diff["sameHash"] is True, diff
 
-attached = rpc("wrkf.task.attach", {"task": "T-00001", "workflow": "smoke_flow@1"})
+attached_result = rpc("wrkq.workflow.attach", {"task": "T-00001", "workflow": "smoke_flow@1"})
+attached = attached_result["instance"]
 assert attached["phase"] == "plan" and attached["revision"] == 0, attached
 
-inspect = rpc("wrkf.task.inspect", {"task": "T-00001"})
+inspect = rpc("wrkf.instance.show", {"task": "T-00001"})
 assert inspect["templateId"] == "smoke_flow", inspect
 
-timeline = rpc("wrkf.task.timeline", {"task": "T-00001"})
-assert len(timeline) == 1, timeline
+timeline = rpc("wrkq.workflow.timeline", {"task": "T-00001"})
+assert len(timeline["events"]) == 1, timeline
 
-refreshed = rpc("wrkf.task.refresh", {"task": "T-00001"})
+refreshed = rpc("wrkq.workflow.refresh", {"task": "T-00001"})["instance"]
 assert refreshed["taskDocHash"].startswith("sha256:"), refreshed
-
-synced = rpc("wrkf.task.syncMeta", {"task": "T-00001"})
-assert synced["updated"] == 1, synced
 
 preflight = rpc("wrkf.check.preflight", {"task": "T-00001", "transition": "plan_ready"})
 assert any(b["id"] == "plan_ready" for b in preflight["blockedTransitions"]), preflight
 
-next_action = rpc("wrkf.next", {"task": "T-00001"})
+next_action = rpc("wrkf.instance.next", {"task": "T-00001"})
 assert any(a["kind"] == "collect_evidence" for a in next_action["actions"]), next_action
 
 bad_evidence = rpc(
@@ -258,14 +256,14 @@ assert needs_patch["facts"]["verdict"] == "needs_patch", needs_patch
 suggest = rpc("wrkf.evidence.suggest", {"task": "T-00001", "transition": "plan_ready"})
 assert "implementation" in suggest["missing"], suggest
 
-blocked = rpc("wrkf.next", {"task": "T-00001"})
+blocked = rpc("wrkf.instance.next", {"task": "T-00001"})
 assert any(
     "needs_patch" in block["message"]
     for transition in blocked["blockedTransitions"]
     for block in transition.get("blocksOn", [])
 ), blocked
 
-stale_context = rpc("wrkf.task.inspect", {"task": "T-00001"})["contextHash"]
+stale_context = rpc("wrkf.instance.show", {"task": "T-00001"})["contextHash"]
 
 ready = rpc(
     "wrkf.evidence.add",
@@ -406,7 +404,7 @@ assert closed["state"]["outcome"] == "completed" and closed["revision"] == 2, cl
 finished = rpc("wrkf.run.finish", {"runId": run_id, "summary": "done"})
 assert finished["status"] == "completed", finished
 
-done = rpc("wrkf.next", {"task": "T-00001"})
+done = rpc("wrkf.instance.next", {"task": "T-00001"})
 assert done["actions"] == [], done
 
 # ── Real-preset regression gate: drive ./pbc (pbc-progressive-refinement) intake → finalized ──
@@ -416,7 +414,7 @@ pbc_inst = rpc("wrkf.workflow.install", {"path": pbc_preset})
 assert pbc_inst["id"] == "pbc-progressive-refinement", pbc_inst
 pbc_ref = f"{pbc_inst['id']}@{pbc_inst['version']}"
 
-pbc_att = rpc("wrkf.task.attach", {"task": "T-00002", "workflow": pbc_ref})
+pbc_att = rpc("wrkq.workflow.attach", {"task": "T-00002", "workflow": pbc_ref})["instance"]
 assert pbc_att["phase"] == "intake" and pbc_att["revision"] == 0, pbc_att
 
 PBC_ROLE, PBC_ACTOR = "agent", "human:local-human"
@@ -430,7 +428,7 @@ def pbc_step(transition, evidence, want_phase):
             {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts, "actor": actor},
         )
     # re-read context before each transition: adding evidence rotates the contextHash
-    cur = rpc("wrkf.task.inspect", {"task": "T-00002"})
+    cur = rpc("wrkf.instance.show", {"task": "T-00002"})
     req = {
         "task": "T-00002",
         "transition": transition,
@@ -468,11 +466,11 @@ assert pbc_final["state"]["status"] == "closed", pbc_final
 pbc_replay = rpc("wrkf.transition.apply", pbc_final_req)
 assert pbc_replay["eventId"] == pbc_final["eventId"], (pbc_replay, pbc_final)
 
-pbc_done = rpc("wrkf.next", {"task": "T-00002"})
+pbc_done = rpc("wrkf.instance.next", {"task": "T-00002"})
 assert pbc_done["actions"] == [], pbc_done
 
-rpc("wrkf.shutdown")
-proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "wrkf.exit"}) + "\n")
+rpc("rpc.shutdown")
+proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "rpc.exit"}) + "\n")
 proc.stdin.flush()
 proc.stdin.close()
 code = proc.wait(timeout=5)

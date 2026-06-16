@@ -142,6 +142,11 @@ var methodCatalog = []string{
 	"wrkf.evidence.list",
 	"wrkf.evidence.show",
 	"wrkf.evidence.suggest",
+	"wrkf.event.query",
+	"wrkf.role.list",
+	"wrkf.role.bind",
+	"wrkf.role.unbind",
+	"wrkf.role.set",
 	"wrkf.obligation.list",
 	"wrkf.obligation.show",
 	"wrkf.obligation.satisfy",
@@ -181,6 +186,8 @@ var dtoCatalog = []string{
 	"WrkqWorkflowInspectResult",
 	"WrkfInstance",
 	"WrkfEvent",
+	"WrkfEventQueryResult",
+	"WrkfTransitionEvent",
 	"WrkfEvidence",
 	"WrkfObligation",
 	"WrkfEffect",
@@ -269,10 +276,7 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return wq.WorkflowTimeline(ctx, p)
 	}))
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		if api == nil {
-			return nil, NewDomainError(CodeWorkRPCInternal, "workflow API is unavailable", false, nil)
-		}
-		return api.TaskRefresh(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
+		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
 	}))
 }
 
@@ -311,6 +315,21 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.evidence.suggest", apiHandler(func(ctx context.Context, p taskTransitionParams) (any, error) {
 		return api.EvidenceSuggest(ctx, p.TaskSelector, p.Transition)
+	}))
+	s.Register("wrkf.event.query", apiHandler(func(ctx context.Context, p wrkfapi.EventQueryParams) (any, error) {
+		return api.EventQuery(ctx, p)
+	}))
+	s.Register("wrkf.role.list", apiHandler(func(ctx context.Context, p wrkfapi.RoleListParams) (any, error) {
+		return api.RoleList(ctx, p)
+	}))
+	s.Register("wrkf.role.bind", apiHandler(func(ctx context.Context, p wrkfapi.RoleBindParams) (any, error) {
+		return api.RoleBind(ctx, p)
+	}))
+	s.Register("wrkf.role.unbind", apiHandler(func(ctx context.Context, p wrkfapi.RoleUnbindParams) (any, error) {
+		return api.RoleUnbind(ctx, p)
+	}))
+	s.Register("wrkf.role.set", apiHandler(func(ctx context.Context, p wrkfapi.RoleSetParams) (any, error) {
+		return api.RoleSet(ctx, p)
 	}))
 	s.Register("wrkf.obligation.list", apiHandler(func(ctx context.Context, p obligationListParams) (any, error) {
 		return api.ObligationList(ctx, p.TaskSelector, p.IncludeClosed || p.All)

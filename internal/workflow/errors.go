@@ -7,17 +7,18 @@ import (
 )
 
 const (
-	wrkfCodeStaleRevision       = "WRKF_STALE_REVISION"
-	wrkfCodeContextMismatch     = "WRKF_CONTEXT_MISMATCH"
-	wrkfCodeTransitionBlocked   = "WRKF_TRANSITION_BLOCKED"
-	wrkfCodeRoleDenied          = "WRKF_ROLE_DENIED"
-	wrkfCodeIdempotencyMismatch = "WRKF_IDEMPOTENCY_MISMATCH"
-	wrkfCodeLeaseConflict       = "WRKF_LEASE_CONFLICT"
-	wrkfCodeNotDeliverable      = "WRKF_EFFECT_NOT_DELIVERABLE"
-	wrkfCodeValidation          = "WRKF_VALIDATION"
-	wrkfCodeKindRoleDenied      = "WRKF_KIND_ROLE_DENIED"
-	wrkfCodeLinkageUnresolved   = "WRKF_LINKAGE_UNRESOLVED"
-	wrkfCodeLinkageStale        = "WRKF_LINKAGE_STALE"
+	wrkfCodeStaleRevision        = "WRKF_STALE_REVISION"
+	wrkfCodeContextMismatch      = "WRKF_CONTEXT_MISMATCH"
+	wrkfCodeTransitionBlocked    = "WRKF_TRANSITION_BLOCKED"
+	wrkfCodeRoleDenied           = "WRKF_ROLE_DENIED"
+	wrkfCodeIdempotencyMismatch  = "WRKF_IDEMPOTENCY_MISMATCH"
+	wrkfCodeLeaseConflict        = "WRKF_LEASE_CONFLICT"
+	wrkfCodeNotDeliverable       = "WRKF_EFFECT_NOT_DELIVERABLE"
+	wrkfCodeEffectDeliveryFailed = "WRKF_EFFECT_DELIVERY_FAILED"
+	wrkfCodeValidation           = "WRKF_VALIDATION"
+	wrkfCodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"
+	wrkfCodeLinkageUnresolved    = "WRKF_LINKAGE_UNRESOLVED"
+	wrkfCodeLinkageStale         = "WRKF_LINKAGE_STALE"
 )
 
 // ErrorDetail is the single machine-parseable error shape carried by wrkf
@@ -179,4 +180,58 @@ func effectNotDeliverableError(effectID, status string) error {
 		code: wrkfCodeNotDeliverable,
 		msg:  fmt.Sprintf("effect %s is not deliverable from status %s", effectID, status),
 	}
+}
+
+type transitionEffectDeliveryError struct {
+	transitionID string
+	eventID      string
+	effectID     string
+	kind         string
+	status       string
+	err          error
+	result       map[string]interface{}
+}
+
+func (e *transitionEffectDeliveryError) Error() string {
+	if e == nil {
+		return ""
+	}
+	msg := fmt.Sprintf("transition %s committed as event %s but builtin effect %s (%s) delivery failed", e.transitionID, e.eventID, e.effectID, e.kind)
+	if e.status != "" {
+		msg += fmt.Sprintf(" with status %s", e.status)
+	}
+	if e.err != nil {
+		msg += ": " + e.err.Error()
+	}
+	return msg
+}
+
+func (e *transitionEffectDeliveryError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func (e *transitionEffectDeliveryError) Code() string {
+	return wrkfCodeEffectDeliveryFailed
+}
+
+func (e *transitionEffectDeliveryError) Detail() ErrorDetail {
+	if e == nil {
+		return ErrorDetail{}
+	}
+	return ErrorDetail{
+		Code:    wrkfCodeEffectDeliveryFailed,
+		Field:   "effects",
+		Message: e.Error(),
+		Fix:     "inspect the named effect and retry delivery after resolving the failure",
+	}
+}
+
+func (e *transitionEffectDeliveryError) PartialResult() map[string]interface{} {
+	if e == nil {
+		return nil
+	}
+	return e.result
 }

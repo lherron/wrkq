@@ -14,6 +14,7 @@ export type {
   WrkfHookFacade,
   WrkfInstanceFacade,
   WrkfObligationFacade,
+  WrkfRoleFacade,
   WrkfRunFacade,
   WrkfTransitionFacade,
   WrkfWorkflowFacade,

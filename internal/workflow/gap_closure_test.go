@@ -66,7 +66,85 @@ const gapClosureTemplate = `{
   ]
 }`
 
+const gapExternalEffectTemplate = `{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "gap_external_effect_test",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "initial": { "status": "active", "phase": "review" },
+  "roles": {
+    "reviewer": { "description": "Review authority" }
+  },
+  "states": [
+    { "status": "active", "phase": "review" },
+    { "status": "closed", "outcome": "approved" }
+  ],
+  "transitions": [
+    {
+      "id": "decide",
+      "from": { "status": "active", "phase": "review" },
+      "by": ["reviewer"],
+      "outcomes": [
+        {
+          "id": "approved",
+          "when": { "always": true },
+          "to": { "status": "closed", "outcome": "approved" },
+          "effects": [
+            {
+              "kind": "request_observer_review",
+              "role": "observer",
+              "semanticKey": "observer-review:{taskUuid}:{revision}",
+              "data": { "reason": "external review required" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}`
+
+const gapInvalidBuiltinEffectTemplate = `{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "gap_invalid_builtin_effect_test",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "initial": { "status": "active", "phase": "review" },
+  "roles": {
+    "reviewer": { "description": "Review authority" }
+  },
+  "states": [
+    { "status": "active", "phase": "review" },
+    { "status": "closed", "outcome": "approved" }
+  ],
+  "transitions": [
+    {
+      "id": "decide",
+      "from": { "status": "active", "phase": "review" },
+      "by": ["reviewer"],
+      "outcomes": [
+        {
+          "id": "approved",
+          "when": { "always": true },
+          "to": { "status": "closed", "outcome": "approved" },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:invalid",
+              "data": { "state": "not-a-task-state" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}`
+
 func setupGapClosureFixture(t *testing.T) (*Service, string, *db.DB) {
+	return setupGapClosureFixtureWithTemplate(t, "gap_closure_test", gapClosureTemplate)
+}
+
+func setupGapClosureFixtureWithTemplate(t *testing.T, templateID, templateBody string) (*Service, string, *db.DB) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	database, err := db.Open(filepath.Join(tmpDir, "gap_closure.db"))
@@ -80,7 +158,7 @@ func setupGapClosureFixture(t *testing.T) (*Service, string, *db.DB) {
 
 	svc := NewService(database)
 	tplPath := filepath.Join(tmpDir, "gap_closure_template.json")
-	if err := os.WriteFile(tplPath, []byte(gapClosureTemplate), 0644); err != nil {
+	if err := os.WriteFile(tplPath, []byte(templateBody), 0644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
 	if _, err := svc.InstallTemplate(tplPath, "gap-installer", nil); err != nil {
@@ -108,7 +186,7 @@ func setupGapClosureFixture(t *testing.T) (*Service, string, *db.DB) {
 	); err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
-	if _, err := svc.AttachTask(taskUUID, "gap_closure_test@1", "gap-installer"); err != nil {
+	if _, err := svc.AttachTask(taskUUID, templateID+"@1", "gap-installer"); err != nil {
 		t.Fatalf("AttachTask: %v", err)
 	}
 	return svc, taskUUID, database
@@ -184,13 +262,15 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 	if effects[0].Sequence != 1 || effects[0].SemanticKey == "" {
 		t.Fatalf("effect sequencing/idempotency not populated: %+v", effects[0])
 	}
-
-	delivery, err := svc.DeliverEffect(effects[0].ID, "gap-native-adapter", nil, "")
-	if err != nil {
-		t.Fatalf("DeliverEffect native set_task_state: %v", err)
+	if effects[0].Status != "delivered" || len(effects[0].Receipt) == 0 {
+		t.Fatalf("transition did not auto-deliver native effect with receipt: %+v", effects[0])
 	}
-	if delivery.Effect.Status != "delivered" || len(delivery.Effect.Receipt) == 0 {
-		t.Fatalf("delivered effect missing persisted receipt: %+v", delivery.Effect)
+	stored, err := svc.ShowEffect(effects[0].ID)
+	if err != nil {
+		t.Fatalf("ShowEffect: %v", err)
+	}
+	if stored.Status != "delivered" || len(stored.Receipt) == 0 {
+		t.Fatalf("stored effect was not delivered with receipt: %+v", stored)
 	}
 	var state string
 	if err := database.QueryRow(`SELECT state FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state); err != nil {
@@ -198,5 +278,111 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 	}
 	if state != "completed" {
 		t.Fatalf("task state = %q, want completed", state)
+	}
+}
+
+func TestTransitionExternalEffectRemainsPending(t *testing.T) {
+	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "gap_external_effect_test", gapExternalEffectTemplate)
+
+	rev0 := int64(0)
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
+	if err != nil {
+		t.Fatalf("Transition: %v", err)
+	}
+	var effects []Effect
+	rawEffects, _ := json.Marshal(result["effects"])
+	if err := json.Unmarshal(rawEffects, &effects); err != nil {
+		t.Fatalf("decode effects: %v", err)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("created effects = %d, want 1", len(effects))
+	}
+	if effects[0].Kind != "request_observer_review" || effects[0].Status != "pending" {
+		t.Fatalf("external effect should remain pending: %+v", effects[0])
+	}
+}
+
+func TestTransitionIdempotentReplayDrainsPendingBuiltinEffect(t *testing.T) {
+	svc, taskUUID, database := setupGapClosureFixture(t)
+
+	if _, err := svc.AddEvidence(AddEvidenceParams{
+		TaskSelector: taskUUID,
+		Kind:         "verdict",
+		Ref:          "urn:test:verdict:approve",
+		Facts:        `{"route":"approve"}`,
+		Actor:        "reviewer-a",
+		Role:         "reviewer",
+	}); err != nil {
+		t.Fatalf("AddEvidence verdict: %v", err)
+	}
+
+	rev0 := int64(0)
+	const idemKey = "gap-replay-drain"
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0, IdempotencyKey: idemKey})
+	if err != nil {
+		t.Fatalf("Transition: %v", err)
+	}
+	var effects []Effect
+	rawEffects, _ := json.Marshal(result["effects"])
+	if err := json.Unmarshal(rawEffects, &effects); err != nil {
+		t.Fatalf("decode effects: %v", err)
+	}
+	if len(effects) != 1 || effects[0].Status != "delivered" {
+		t.Fatalf("initial transition did not deliver builtin effect: %+v", effects)
+	}
+
+	if _, err := database.Exec(`UPDATE tasks SET state = 'open', etag = etag + 1 WHERE uuid = ?`, taskUUID); err != nil {
+		t.Fatalf("reset task state: %v", err)
+	}
+	if _, err := database.Exec(`
+		UPDATE workflow_effects
+		SET status = 'pending', attempts = 0, leased_by = NULL, leased_until = NULL, lease_token = NULL,
+		    delivered_at = NULL, last_error = NULL, receipt_json = NULL
+		WHERE id = ?
+	`, effects[0].ID); err != nil {
+		t.Fatalf("reset effect state: %v", err)
+	}
+
+	replayed, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0, IdempotencyKey: idemKey})
+	if err != nil {
+		t.Fatalf("replay transition: %v", err)
+	}
+	rawEffects, _ = json.Marshal(replayed["effects"])
+	if err := json.Unmarshal(rawEffects, &effects); err != nil {
+		t.Fatalf("decode replay effects: %v", err)
+	}
+	if len(effects) != 1 || effects[0].Status != "delivered" || len(effects[0].Receipt) == 0 {
+		t.Fatalf("replay did not drain pending builtin effect: %+v", effects)
+	}
+	var state string
+	if err := database.QueryRow(`SELECT state FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state); err != nil {
+		t.Fatalf("read task state: %v", err)
+	}
+	if state != "completed" {
+		t.Fatalf("task state after replay = %q, want completed", state)
+	}
+}
+
+func TestTransitionBuiltinEffectFailureIsVisible(t *testing.T) {
+	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "gap_invalid_builtin_effect_test", gapInvalidBuiltinEffectTemplate)
+
+	rev0 := int64(0)
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
+	if got := wrkfCode(err); got != wrkfCodeEffectDeliveryFailed {
+		t.Fatalf("transition error code = %q, want %s (err=%v)", got, wrkfCodeEffectDeliveryFailed, err)
+	}
+	if result == nil {
+		t.Fatal("partial failure did not return the committed transition result")
+	}
+	var effects []Effect
+	rawEffects, _ := json.Marshal(result["effects"])
+	if err := json.Unmarshal(rawEffects, &effects); err != nil {
+		t.Fatalf("decode effects: %v", err)
+	}
+	if len(effects) != 1 {
+		t.Fatalf("created effects = %d, want 1", len(effects))
+	}
+	if effects[0].Status != "failed" || effects[0].Attempts != 1 || effects[0].LastError == "" {
+		t.Fatalf("failed builtin effect was not visible with attempts/error: %+v", effects[0])
 	}
 }

@@ -8,6 +8,9 @@ import (
 
 type Instance = workflow.Instance
 type Event = workflow.Event
+type EventQueryParams = workflow.EventQueryParams
+type EventQueryResult = workflow.EventQueryResult
+type TransitionEvent = workflow.TransitionEvent
 type Evidence = workflow.Evidence
 type Obligation = workflow.Obligation
 type Effect = workflow.Effect
@@ -77,6 +80,36 @@ type SyncMetaResult struct {
 	Updated int `json:"updated"`
 }
 
+type RoleBinding = workflow.RoleBinding
+
+type RoleListParams struct {
+	TaskSelector string `json:"task,omitempty"`
+	InstanceID   string `json:"instanceId,omitempty"`
+}
+
+type RoleBindParams struct {
+	TaskSelector string `json:"task,omitempty"`
+	InstanceID   string `json:"instanceId,omitempty"`
+	Role         string `json:"role"`
+	Actor        string `json:"actor"`
+	DeliveryRef  string `json:"deliveryRef,omitempty"`
+	Lane         string `json:"lane,omitempty"`
+	BindingMode  string `json:"bindingMode,omitempty"`
+}
+
+type RoleUnbindParams struct {
+	TaskSelector string `json:"task,omitempty"`
+	InstanceID   string `json:"instanceId,omitempty"`
+	Role         string `json:"role"`
+	Actor        string `json:"actor,omitempty"`
+}
+
+type RoleSetParams struct {
+	TaskSelector string            `json:"task,omitempty"`
+	InstanceID   string            `json:"instanceId,omitempty"`
+	RoleMap      map[string]string `json:"roleMap"`
+}
+
 type CheckRunResult struct {
 	Runs []workflow.CheckRun `json:"runs"`
 }
@@ -123,17 +156,19 @@ type HookShowResult struct {
 }
 
 type EvidenceAddParams struct {
-	TaskSelector   string          `json:"task"`
-	InstanceID     string          `json:"instanceId,omitempty"`
-	Kind           string          `json:"kind"`
-	Ref            string          `json:"ref"`
-	Summary        string          `json:"summary,omitempty"`
-	Facts          json.RawMessage `json:"facts,omitempty"`
-	Data           json.RawMessage `json:"data,omitempty"`
-	Actor          string          `json:"actor,omitempty"`
-	Role           string          `json:"role,omitempty"`
-	RunID          string          `json:"runId,omitempty"`
-	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+	TaskSelector   string                  `json:"task"`
+	InstanceID     string                  `json:"instanceId,omitempty"`
+	Kind           string                  `json:"kind"`
+	Ref            string                  `json:"ref"`
+	Summary        string                  `json:"summary,omitempty"`
+	Facts          json.RawMessage         `json:"facts,omitempty"`
+	Data           json.RawMessage         `json:"data,omitempty"`
+	Actor          string                  `json:"actor,omitempty"`
+	Role           string                  `json:"role,omitempty"`
+	RunID          string                  `json:"runId,omitempty"`
+	ContentHash    string                  `json:"contentHash,omitempty"`
+	Build          *workflow.EvidenceBuild `json:"build,omitempty"`
+	IdempotencyKey string                  `json:"idempotencyKey,omitempty"`
 }
 
 type ObligationStatusParams struct {
@@ -172,6 +207,8 @@ func (p EvidenceAddParams) workflowParams() workflow.AddEvidenceParams {
 		Actor:          p.Actor,
 		Role:           p.Role,
 		RunID:          p.RunID,
+		ContentHash:    p.ContentHash,
+		Build:          p.Build,
 		IdempotencyKey: p.IdempotencyKey,
 	}
 }

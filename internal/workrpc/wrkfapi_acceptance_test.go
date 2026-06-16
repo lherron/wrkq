@@ -22,6 +22,8 @@ package workrpc_test
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/db"
 )
 
 // ─── helpers (P3-scoped) ─────────────────────────────────────────────────────
@@ -365,6 +367,549 @@ func TestWrkfEvidenceAdd_Idempotency_CanonicalKeyOrder(t *testing.T) {
 	}
 }
 
+func TestWrkfEvidenceAdd_ProvenanceRoundTripAndIdempotencyMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	tplPath := p2WorkflowTemplatePath(t)
+	taskID := p2SeedTask(t, dbPath,
+		"e3100000-0000-4000-8000-000000000013",
+		"ev-provenance-test", "Evidence Provenance Test")
+
+	_ = p3InstallAndAttach(t, dbPath, tplPath, taskID)
+
+	const idemKey = "smokey:p3:ev:provenance:001"
+	const contentHash = "sha256:provenance-001"
+	frames := p3Run(t, dbPath,
+		mkRPC("e1", "wrkf.evidence.add", map[string]any{
+			"task":           taskID,
+			"kind":           "red_test",
+			"ref":            "test/smokey/p3/provenance-001",
+			"role":           "tester",
+			"facts":          p3RedFacts(),
+			"contentHash":    contentHash,
+			"build":          map[string]any{"id": "build-001", "version": "2026.06.15", "env": "ci"},
+			"idempotencyKey": idemKey,
+		}),
+		mkRPC("l1", "wrkf.evidence.list", map[string]any{"task": taskID}),
+		mkRPC("e2", "wrkf.evidence.add", map[string]any{
+			"task":           taskID,
+			"kind":           "red_test",
+			"ref":            "test/smokey/p3/provenance-001",
+			"role":           "tester",
+			"facts":          p3RedFacts(),
+			"contentHash":    "sha256:changed",
+			"build":          map[string]any{"id": "build-001", "version": "2026.06.15", "env": "ci"},
+			"idempotencyKey": idemKey,
+		}),
+	)
+	addResult := p2ResultOrFail(t, frames[1], "wrkf.evidence.add with provenance")
+	if got, _ := addResult["contentHash"].(string); got != contentHash {
+		t.Fatalf("evidence.add contentHash: want %q, got %q", contentHash, got)
+	}
+	build, _ := addResult["build"].(map[string]any)
+	if build["id"] != "build-001" || build["version"] != "2026.06.15" || build["env"] != "ci" {
+		t.Fatalf("evidence.add build provenance mismatch: %#v", build)
+	}
+
+	items := p3EvidenceItems(t, frames[2], "wrkf.evidence.list")
+	var found bool
+	for _, item := range items {
+		if got, _ := item["contentHash"].(string); got == contentHash {
+			b, _ := item["build"].(map[string]any)
+			if b["id"] == "build-001" && b["version"] == "2026.06.15" && b["env"] == "ci" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("wrkf.evidence.list did not round-trip contentHash/build provenance: %#v", items)
+	}
+	if code := p2ErrCode(frames[3]); code != "WRKF_IDEMPOTENCY_MISMATCH" {
+		t.Fatalf("same idempotencyKey + changed provenance: want WRKF_IDEMPOTENCY_MISMATCH, got %q", code)
+	}
+}
+
+func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	tplPath := p2WorkflowTemplatePath(t)
+	taskID := p2SeedTask(t, dbPath,
+		"e3100000-0000-4000-8000-000000000014",
+		"role-binding-test", "Role Binding Test")
+
+	setupFrames := p3Run(t, dbPath,
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
+			"task":     taskID,
+			"workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}),
+	)
+	p2ResultOrFail(t, setupFrames[1], "install")
+	p2ResultOrFail(t, setupFrames[2], "attach")
+	before := p2ResultOrFail(t, setupFrames[3], "task.show before role bind")
+	beforeETag, _ := before["etag"].(float64)
+
+	frames := p3Run(t, dbPath,
+		mkRPC("b1", "wrkf.role.bind", map[string]any{
+			"task":        taskID,
+			"role":        "tester",
+			"actor":       "agent:alice",
+			"deliveryRef": "alice@wrkq:T-role",
+			"lane":        "test",
+		}),
+		mkRPC("l1", "wrkf.role.list", map[string]any{"task": taskID}),
+		mkRPC("s2", "wrkq.task.show", map[string]any{"task": taskID}),
+		mkRPC("e1", "wrkf.evidence.add", map[string]any{
+			"task":  taskID,
+			"kind":  "red_test",
+			"ref":   "test/smokey/p3/role-red-001",
+			"actor": "agent:alice",
+			"role":  "tester",
+			"facts": p3RedFacts(),
+		}),
+		mkRPC("n1", "wrkf.instance.next", map[string]any{"task": taskID}),
+		mkRPC("bad", "wrkf.transition.apply", map[string]any{
+			"task":           taskID,
+			"transition":     "author_red",
+			"actor":          "agent:bob",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "role-binding-bad",
+		}),
+		mkRPC("ok", "wrkf.transition.apply", map[string]any{
+			"task":           taskID,
+			"transition":     "author_red",
+			"actor":          "agent:alice",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "role-binding-ok",
+		}),
+		mkRPC("set", "wrkf.role.set", map[string]any{
+			"task":    taskID,
+			"roleMap": map[string]any{"tester": "agent:carol"},
+		}),
+		mkRPC("unbind", "wrkf.role.unbind", map[string]any{
+			"task":  taskID,
+			"role":  "tester",
+			"actor": "agent:carol",
+		}),
+	)
+	bind := p2ResultOrFail(t, frames[1], "wrkf.role.bind")
+	if bind["role"] != "tester" || bind["actor"] != "agent:alice" || bind["deliveryRef"] != "alice@wrkq:T-role" {
+		t.Fatalf("wrkf.role.bind returned wrong binding: %#v", bind)
+	}
+	listRaw, _ := frames[2]["result"].([]any)
+	if len(listRaw) != 1 {
+		t.Fatalf("wrkf.role.list: want one binding, got %#v", frames[2]["result"])
+	}
+	after := p2ResultOrFail(t, frames[3], "task.show after role bind")
+	afterETag, _ := after["etag"].(float64)
+	if afterETag != beforeETag {
+		t.Fatalf("role binding mutated task etag: before=%v after=%v", beforeETag, afterETag)
+	}
+	p2ResultOrFail(t, frames[4], "wrkf.evidence.add role evidence")
+	next := p2ResultOrFail(t, frames[5], "wrkf.instance.next")
+	actions, _ := next["actions"].([]any)
+	var owned bool
+	for _, raw := range actions {
+		action, _ := raw.(map[string]any)
+		owner, _ := action["owner"].(map[string]any)
+		if owner["role"] == "tester" && owner["actor"] == "agent:alice" {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		t.Fatalf("wrkf.instance.next did not assign tester work to bound actor: %#v", actions)
+	}
+	if code := p2ErrCode(frames[6]); code != "WRKF_ROLE_DENIED" {
+		t.Fatalf("transition by unbound actor: want WRKF_ROLE_DENIED, got %q", code)
+	}
+	p2ResultOrFail(t, frames[7], "transition by bound actor")
+	setRaw, _ := frames[8]["result"].([]any)
+	if len(setRaw) != 1 {
+		t.Fatalf("wrkf.role.set: want replacement binding, got %#v", frames[8]["result"])
+	}
+	unbindRaw, _ := frames[9]["result"].([]any)
+	if len(unbindRaw) != 0 {
+		t.Fatalf("wrkf.role.unbind: want no remaining tester bindings, got %#v", frames[9]["result"])
+	}
+}
+
+func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	tplPath := p2WorkflowTemplatePath(t)
+	task1ID := p2SeedTask(t, dbPath,
+		"e3200000-0000-4000-8000-000000000001",
+		"event-query-test-1", "Event Query Test 1")
+	task2ID := p2SeedTask(t, dbPath,
+		"e3200000-0000-4000-8000-000000000002",
+		"event-query-test-2", "Event Query Test 2")
+	task3ID := p2SeedTask(t, dbPath,
+		"e3200000-0000-4000-8000-000000000003",
+		"event-query-low-risk", "Event Query Low Risk")
+	task4UUID := "e3200000-0000-4000-8000-000000000004"
+	task4ID := p2SeedTask(t, dbPath,
+		task4UUID,
+		"event-query-legacy-role", "Event Query Legacy Role")
+	seedLegacyTesterAssignment(t, dbPath, task4UUID)
+
+	setupFrames := p3Run(t, dbPath,
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("u1", "wrkq.task.update", map[string]any{
+			"task": task1ID,
+			"patch": map[string]any{
+				"riskClass": "medium",
+			},
+		}),
+		mkRPC("u2", "wrkq.task.update", map[string]any{
+			"task": task2ID,
+			"patch": map[string]any{
+				"riskClass": "high",
+			},
+		}),
+		mkRPC("u3", "wrkq.task.update", map[string]any{
+			"task": task3ID,
+			"patch": map[string]any{
+				"riskClass": "low",
+			},
+		}),
+		mkRPC("u4", "wrkq.task.update", map[string]any{
+			"task": task4ID,
+			"patch": map[string]any{
+				"riskClass": "medium",
+			},
+		}),
+		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
+			"task":     task1ID,
+			"workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("a2", "wrkq.workflow.attach", map[string]any{
+			"task":     task2ID,
+			"workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("a3", "wrkq.workflow.attach", map[string]any{
+			"task":     task3ID,
+			"workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("a4", "wrkq.workflow.attach", map[string]any{
+			"task":     task4ID,
+			"workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("b1", "wrkf.role.bind", map[string]any{
+			"task":        task1ID,
+			"role":        "tester",
+			"actor":       "agent:tester-a",
+			"deliveryRef": "tester-a@wrkq:" + task1ID,
+		}),
+		mkRPC("b1b", "wrkf.role.bind", map[string]any{
+			"task":        task1ID,
+			"role":        "tester",
+			"actor":       "agent:tester-aa",
+			"deliveryRef": "tester-aa@wrkq:" + task1ID,
+		}),
+		mkRPC("b2", "wrkf.role.bind", map[string]any{
+			"task":        task2ID,
+			"role":        "tester",
+			"actor":       "agent:tester-b",
+			"deliveryRef": "tester-b@wrkq:" + task2ID,
+		}),
+		mkRPC("b3", "wrkf.role.bind", map[string]any{
+			"task":        task3ID,
+			"role":        "tester",
+			"actor":       "agent:tester-low",
+			"deliveryRef": "tester-low@wrkq:" + task3ID,
+		}),
+		mkRPC("e1", "wrkf.evidence.add", map[string]any{
+			"task":  task1ID,
+			"kind":  "red_test",
+			"ref":   "test/smokey/p3/event-query-red-1",
+			"actor": "agent:tester-a",
+			"role":  "tester",
+			"facts": p3RedFacts(),
+		}),
+		mkRPC("e2", "wrkf.evidence.add", map[string]any{
+			"task":  task2ID,
+			"kind":  "red_test",
+			"ref":   "test/smokey/p3/event-query-red-2",
+			"actor": "agent:tester-b",
+			"role":  "tester",
+			"facts": p3RedFacts(),
+		}),
+		mkRPC("e3", "wrkf.evidence.add", map[string]any{
+			"task":  task3ID,
+			"kind":  "red_test",
+			"ref":   "test/smokey/p3/event-query-red-low",
+			"actor": "agent:tester-low",
+			"role":  "tester",
+			"facts": p3RedFacts(),
+		}),
+		mkRPC("e4", "wrkf.evidence.add", map[string]any{
+			"task":  task4ID,
+			"kind":  "red_test",
+			"ref":   "test/smokey/p3/event-query-red-legacy",
+			"actor": "agent:legacy",
+			"role":  "tester",
+			"facts": p3RedFacts(),
+		}),
+		mkRPC("t1", "wrkf.transition.apply", map[string]any{
+			"task":           task1ID,
+			"transition":     "author_red",
+			"actor":          "agent:tester-a",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "event-query-transition-1",
+		}),
+		mkRPC("t2", "wrkf.transition.apply", map[string]any{
+			"task":           task2ID,
+			"transition":     "author_red",
+			"actor":          "agent:tester-b",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "event-query-transition-2",
+		}),
+		mkRPC("t3", "wrkf.transition.apply", map[string]any{
+			"task":           task3ID,
+			"transition":     "author_red",
+			"actor":          "agent:tester-low",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "event-query-transition-3",
+		}),
+		mkRPC("t4", "wrkf.transition.apply", map[string]any{
+			"task":           task4ID,
+			"transition":     "author_red",
+			"actor":          "agent:legacy",
+			"role":           "tester",
+			"expectRevision": float64(0),
+			"idempotencyKey": "event-query-transition-4",
+		}),
+	)
+	for i, label := range []string{
+		"initialize", "install", "risk task1", "risk task2", "risk task3", "risk task4",
+		"attach task1", "attach task2", "attach task3", "attach task4",
+		"bind task1", "bind task1 second tester", "bind task2", "bind task3",
+		"evidence task1", "evidence task2", "evidence task3", "evidence task4",
+		"transition task1", "transition task2", "transition task3", "transition task4",
+	} {
+		if i == 0 {
+			continue
+		}
+		p2ResultOrFail(t, setupFrames[i], label)
+	}
+
+	forceSameTransitionTimestamp(t, dbPath)
+
+	page1Frames := p3Run(t, dbPath,
+		mkRPC("q1", "wrkf.event.query", map[string]any{
+			"eventType":        "workflow.transitioned",
+			"fromPhase":        "intake",
+			"toPhase":          "red",
+			"excludeRiskClass": "low",
+			"boundRole":        "tester",
+			"limit":            float64(1),
+		}),
+	)
+	page1 := p2ResultOrFail(t, page1Frames[1], "wrkf.event.query page 1")
+	items1, _ := page1["items"].([]any)
+	if len(items1) != 1 {
+		t.Fatalf("page 1: want one item, got %#v", page1["items"])
+	}
+	nextCursor, _ := page1["nextCursor"].(string)
+	if nextCursor == "" || page1["hasMore"] != true {
+		t.Fatalf("page 1: expected nextCursor and hasMore=true, got %#v", page1)
+	}
+	assertTransitionReplayItem(t, items1[0], map[string]bool{task1ID: true, task2ID: true})
+
+	page2Frames := p3Run(t, dbPath,
+		mkRPC("q2", "wrkf.event.query", map[string]any{
+			"fromPhase":        "intake",
+			"toPhase":          "red",
+			"excludeRiskClass": "low",
+			"boundRole":        "tester",
+			"limit":            float64(1),
+			"cursor":           nextCursor,
+		}),
+		mkRPC("all", "wrkf.event.query", map[string]any{
+			"fromPhase":        "intake",
+			"toPhase":          "red",
+			"excludeRiskClass": "low",
+			"boundRole":        "tester",
+			"limit":            float64(10),
+		}),
+		mkRPC("wrong", "wrkf.event.query", map[string]any{
+			"fromPhase": "verify",
+			"toPhase":   "red",
+			"boundRole": "tester",
+			"limit":     float64(10),
+		}),
+	)
+	page2 := p2ResultOrFail(t, page2Frames[1], "wrkf.event.query page 2")
+	items2, _ := page2["items"].([]any)
+	if len(items2) != 1 {
+		t.Fatalf("page 2: want one item, got %#v", page2["items"])
+	}
+	assertTransitionReplayItem(t, items2[0], map[string]bool{task1ID: true, task2ID: true})
+
+	first, _ := items1[0].(map[string]any)
+	second, _ := items2[0].(map[string]any)
+	if first["id"] == second["id"] {
+		t.Fatalf("cursor returned duplicate transition event id %q", first["id"])
+	}
+
+	all := p2ResultOrFail(t, page2Frames[2], "wrkf.event.query all")
+	allItems, _ := all["items"].([]any)
+	if len(allItems) != 2 {
+		t.Fatalf("event.query all: want two items, got %#v", all["items"])
+	}
+	assertTaskMatchingBindingCount(t, allItems, task1ID, 2)
+	wrong := p2ResultOrFail(t, page2Frames[3], "wrkf.event.query wrong phase")
+	wrongItems, _ := wrong["items"].([]any)
+	if len(wrongItems) != 0 {
+		t.Fatalf("wrong phase filter: want zero items, got %#v", wrong["items"])
+	}
+
+	projectID := projectIDFromReplayItem(t, items1[0])
+	projectFrames := p3Run(t, dbPath,
+		mkRPC("slug", "wrkf.event.query", map[string]any{
+			"project":          "p2-test-proj",
+			"fromPhase":        "intake",
+			"toPhase":          "red",
+			"excludeRiskClass": "low",
+			"boundRole":        "tester",
+			"limit":            float64(10),
+		}),
+		mkRPC("id", "wrkf.event.query", map[string]any{
+			"project":          projectID,
+			"fromPhase":        "intake",
+			"toPhase":          "red",
+			"excludeRiskClass": "low",
+			"boundRole":        "tester",
+			"limit":            float64(10),
+		}),
+	)
+	bySlug := p2ResultOrFail(t, projectFrames[1], "project slug filter")
+	bySlugItems, _ := bySlug["items"].([]any)
+	if len(bySlugItems) != 2 {
+		t.Fatalf("project slug filter: want two items, got %#v", bySlug["items"])
+	}
+	byID := p2ResultOrFail(t, projectFrames[2], "project id filter")
+	byIDItems, _ := byID["items"].([]any)
+	if len(byIDItems) != 2 {
+		t.Fatalf("project id filter: want two items, got %#v", byID["items"])
+	}
+}
+
+func assertTransitionReplayItem(t *testing.T, raw any, allowedTasks map[string]bool) {
+	t.Helper()
+	item, _ := raw.(map[string]any)
+	if item["eventType"] != "workflow.transitioned" {
+		t.Fatalf("eventType: want workflow.transitioned, got %#v", item)
+	}
+	if item["id"] == "" || item["transitionedAt"] == "" || item["instanceId"] == "" {
+		t.Fatalf("replay item missing durable identity/timestamp/instance: %#v", item)
+	}
+	if item["transition"] != "author_red" || item["fromPhase"] != "intake" || item["toPhase"] != "red" {
+		t.Fatalf("replay item transition fields mismatch: %#v", item)
+	}
+	if item["actorRole"] != "tester" {
+		t.Fatalf("actorRole: want tester, got %#v", item)
+	}
+	task, _ := item["task"].(map[string]any)
+	taskID, _ := task["id"].(string)
+	if !allowedTasks[taskID] {
+		t.Fatalf("unexpected task in replay item: %#v", task)
+	}
+	if task["riskClass"] == "low" {
+		t.Fatalf("excludeRiskClass=low returned low-risk task: %#v", item)
+	}
+	if task["projectUuid"] == "" || task["projectId"] == "" || task["projectSlug"] != "p2-test-proj" {
+		t.Fatalf("replay item missing normalized project identity: %#v", task)
+	}
+	bindings, _ := item["matchingRoleBindings"].([]any)
+	previousActor := ""
+	for _, rawBinding := range bindings {
+		binding, _ := rawBinding.(map[string]any)
+		if binding["role"] == "tester" && binding["actor"] != "" {
+			actor, _ := binding["actor"].(string)
+			if previousActor != "" && actor < previousActor {
+				t.Fatalf("matchingRoleBindings not sorted by actor: %#v", bindings)
+			}
+			previousActor = actor
+		}
+	}
+	if previousActor == "" {
+		t.Fatalf("replay item missing tester matchingRoleBindings: %#v", item)
+	}
+}
+
+func assertTaskMatchingBindingCount(t *testing.T, items []any, taskID string, want int) {
+	t.Helper()
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		task, _ := item["task"].(map[string]any)
+		if task["id"] != taskID {
+			continue
+		}
+		bindings, _ := item["matchingRoleBindings"].([]any)
+		if len(bindings) != want {
+			t.Fatalf("task %s matchingRoleBindings: want %d, got %#v", taskID, want, bindings)
+		}
+		return
+	}
+	t.Fatalf("task %s not found in replay items: %#v", taskID, items)
+}
+
+func projectIDFromReplayItem(t *testing.T, raw any) string {
+	t.Helper()
+	item, _ := raw.(map[string]any)
+	task, _ := item["task"].(map[string]any)
+	projectID, _ := task["projectId"].(string)
+	if projectID == "" {
+		t.Fatalf("replay item missing projectId: %#v", item)
+	}
+	return projectID
+}
+
+func seedLegacyTesterAssignment(t *testing.T, dbPath, taskUUID string) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("seedLegacyTesterAssignment: db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.Exec(`
+		INSERT INTO task_role_assignments (task_uuid, role, principal_ref)
+		VALUES (?, 'tester', 'agent:legacy')
+	`, taskUUID); err != nil {
+		t.Fatalf("seedLegacyTesterAssignment: insert: %v", err)
+	}
+}
+
+func forceSameTransitionTimestamp(t *testing.T, dbPath string) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("forceSameTransitionTimestamp: db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.Exec(`
+		UPDATE workflow_events
+		SET created_at = '2026-06-15T15:00:00Z'
+		WHERE type = 'workflow.transitioned'
+	`); err != nil {
+		t.Fatalf("forceSameTransitionTimestamp: update: %v", err)
+	}
+}
+
 // ─── Dual-selector guard (§2.5) ──────────────────────────────────────────────
 
 // TestWrkfDualSelector_InstanceShow_MismatchReject verifies that wrkf.instance.show
@@ -416,7 +961,7 @@ func TestWrkfDualSelector_InstanceShow_MismatchReject(t *testing.T) {
 	// Call wrkf.instance.show with task=task1 but instanceId=task2's instance (MISMATCH).
 	testFrames := p3Run(t, dbPath,
 		mkRPC("s1", "wrkf.instance.show", map[string]any{
-			"task":       task1ID,    // resolves to instance1
+			"task":       task1ID,     // resolves to instance1
 			"instanceId": instance2ID, // resolves to instance2 — MISMATCH
 		}),
 	)
@@ -480,7 +1025,7 @@ func TestWrkfDualSelector_EvidenceAdd_MismatchReject(t *testing.T) {
 	// Call wrkf.evidence.add with task=task1 but instanceId=task2's instance (MISMATCH).
 	testFrames := p3Run(t, dbPath,
 		mkRPC("e1", "wrkf.evidence.add", map[string]any{
-			"task":       task1ID,    // task1's selector
+			"task":       task1ID,     // task1's selector
 			"instanceId": instance2ID, // task2's instance — MISMATCH
 			"kind":       "red_test",
 			"ref":        "test/smokey/p3/dual-ev-mismatch-001",

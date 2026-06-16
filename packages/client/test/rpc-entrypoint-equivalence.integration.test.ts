@@ -102,6 +102,11 @@ describe("entrypoint equivalence", () => {
       "wrkf.transition.apply",
       "wrkf.instance.show",
       "wrkf.instance.next",
+      "wrkf.event.query",
+      "wrkf.role.list",
+      "wrkf.role.bind",
+      "wrkf.role.unbind",
+      "wrkf.role.set",
     ]) {
       expect(methods.has(m)).toBe(true);
     }

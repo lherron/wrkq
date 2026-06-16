@@ -100,8 +100,9 @@ test-coverage:
   go test -tags sqlite_fts5 -v -coverprofile=coverage.out ./...
   go tool cover -html=coverage.out -o coverage.html
 
-# Install CLI binaries to ~/.local/bin (no sudo required)
-install: build
+# Install CLI binaries to ~/.local/bin, publish @wrkq/client, and sync downstream consumers.
+# Pass no-sync=1 to skip syncing downstream consumer repos.
+install no-sync="": build
   #!/usr/bin/env bash
   set -euo pipefail
   echo "Installing to ~/.local/bin/..."
@@ -127,6 +128,20 @@ install: build
     echo ""
   fi
   echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkqadm version', and 'wrkqd --help' to verify"
+  echo ""
+  just client-publish-dev
+  if [ -z "{{ no-sync }}" ]; then
+    just sync-downstream
+  else
+    echo "[install] skipping downstream sync (no-sync=1)"
+  fi
+
+# Sync downstream repos that consume @wrkq/client from local Verdaccio.
+sync-downstream:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  ( cd ../hrc-runtime && bun run sync:wrkq ) 2>&1 | sed 's/^/[hrc-sync] /'
+  ( cd ../agent-control-plane && bun run sync:wrkq ) 2>&1 | sed 's/^/[acp-sync] /'
 
 # Install the wrkq launchd agent plist
 install-launchd:
@@ -331,7 +346,7 @@ smoke: build
 check-wrkf-adoption:
   scripts/check-wrkf-adoption.sh
 
-# --- @wrkq/client TS package (quarantined; not part of `just build`/`just install`) ---
+# --- @wrkq/client TS package (not part of `just build`; published by `just install`) ---
 
 # Install JS deps for the quarantined @wrkq/client package
 client-install:
@@ -350,7 +365,7 @@ verify-rpc: client-test client-integration
   @echo "✓ verify-rpc passed (@wrkq/client unit + integration green)"
 
 # Build @wrkq/client dist (tsc → dist/{index,wrkq,wrkf,testing})
-client-build:
+client-build: client-install
   cd packages/client && bun run build
 
 # Publish @wrkq/client to local Verdaccio as a timestamped dev build

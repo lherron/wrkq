@@ -1122,6 +1122,17 @@ type EffectDelivery struct {
 	Stderr   string          `json:"stderr,omitempty"`
 }
 
+const transitionBuiltinEffectAdapter = "wrkf-transition-builtin"
+
+var engineOwnedBuiltinEffectKinds = map[string]struct{}{
+	"set_task_state": {},
+}
+
+func isEngineOwnedBuiltinEffect(kind string) bool {
+	_, ok := engineOwnedBuiltinEffectKinds[kind]
+	return ok
+}
+
 func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templateDir string) (*EffectDelivery, error) {
 	current, err := s.ShowEffect(id)
 	if err != nil {
@@ -1288,6 +1299,77 @@ func (s *Service) deliverSetTaskStateEffect(current *Effect, adapter string) (*E
 		return nil, err
 	}
 	return &EffectDelivery{Effect: delivered, Receipt: json.RawMessage(receipt), ExitCode: 0, Stdout: string(receipt)}, nil
+}
+
+func (s *Service) deliverBuiltinTransitionEffects(result map[string]interface{}, transitionID string) (map[string]interface{}, error) {
+	if result == nil {
+		return result, nil
+	}
+	// workflow_events.result_json remains the transition commit record. This
+	// post-commit pass refreshes the returned result; effect list/show are the
+	// durable delivery truth for builtin effect terminal status and receipts.
+	effects, err := transitionResultEffects(result["effects"])
+	if err != nil {
+		return result, err
+	}
+	if len(effects) == 0 {
+		return result, nil
+	}
+
+	eventID, _ := result["eventId"].(string)
+	for i := range effects {
+		if !isEngineOwnedBuiltinEffect(effects[i].Kind) {
+			continue
+		}
+		effectID := effects[i].ID
+		delivery, deliverErr := s.DeliverEffect(effectID, transitionBuiltinEffectAdapter, nil, "")
+		current := &effects[i]
+		if delivery != nil && delivery.Effect != nil {
+			current = delivery.Effect
+		} else if shown, showErr := s.ShowEffect(effectID); showErr == nil {
+			current = shown
+		}
+		effects[i] = *current
+		result["effects"] = effects
+
+		if deliverErr != nil || current.Status != "delivered" {
+			cause := deliverErr
+			if cause == nil {
+				cause = fmt.Errorf("builtin effect %s finished with status %s", current.ID, current.Status)
+			}
+			return result, &transitionEffectDeliveryError{
+				transitionID: transitionID,
+				eventID:      eventID,
+				effectID:     current.ID,
+				kind:         current.Kind,
+				status:       current.Status,
+				err:          cause,
+				result:       result,
+			}
+		}
+	}
+	return result, nil
+}
+
+func transitionResultEffects(v interface{}) ([]Effect, error) {
+	switch x := v.(type) {
+	case nil:
+		return nil, nil
+	case []Effect:
+		out := make([]Effect, len(x))
+		copy(out, x)
+		return out, nil
+	default:
+		raw, err := json.Marshal(x)
+		if err != nil {
+			return nil, err
+		}
+		var out []Effect
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
 }
 
 func (s *Service) ensureWorkflowSystemActor() (string, error) {
@@ -1763,6 +1845,12 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 	})
 	if err != nil {
 		return nil, err
+	}
+	if result != nil {
+		result, err = s.deliverBuiltinTransitionEffects(result, transitionID)
+		if err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }

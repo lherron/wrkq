@@ -154,6 +154,15 @@ class WorkClientImpl implements WorkClient {
       show: (p) => this.call("wrkf.evidence.show", p),
       suggest: (p) => this.call("wrkf.evidence.suggest", p),
     },
+    event: {
+      query: (p) => this.call("wrkf.event.query", p ?? {}),
+    },
+    role: {
+      list: (p) => this.call("wrkf.role.list", p),
+      bind: (p) => this.call("wrkf.role.bind", p),
+      unbind: (p) => this.call("wrkf.role.unbind", p),
+      set: (p) => this.call("wrkf.role.set", p),
+    },
     obligation: {
       list: (p) => this.call("wrkf.obligation.list", p),
       show: (p) => this.call("wrkf.obligation.show", p),

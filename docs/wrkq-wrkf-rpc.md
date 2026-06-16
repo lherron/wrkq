@@ -345,6 +345,7 @@ interface WrkqTask {
   slug: string;
   title: string;
   projectUuid: string;
+  path: string;          // canonical current task path
   state: WrkqTaskState;
   priority: number;
   kind: string;
@@ -657,6 +658,75 @@ interface WrkfEvidenceAddParams {
 
 `runId` must be persisted to the evidence row and returned in the evidence DTO.
 
+#### Event Query
+
+```
+wrkf.event.query   [required]
+```
+
+`wrkf.event.query` is a replayable read-model over durable workflow events. It
+returns one item per `workflow.transitioned` event in stable
+`(created_at, id)` order. It is not a SQL-shaped event dump; callers filter
+through typed workflow/task/project/role fields.
+
+```ts
+interface WrkfEventQueryParams {
+  eventType?: "workflow.transitioned"; // default
+  project?: string;                    // project uuid, id, or slug
+  fromPhase?: string;
+  toPhase?: string;
+  riskClass?: string;
+  riskClasses?: string[];
+  excludeRiskClass?: string;
+  excludeRiskClasses?: string[];
+  boundRole?: string;                  // current wrkf role binding required
+  includeRoleBindings?: boolean;       // include all current bindings
+  limit?: number;                      // capped by server
+  cursor?: string;                     // opaque nextCursor from prior page
+}
+
+interface WrkfEventQueryResult {
+  items: WrkfTransitionEvent[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
+interface WrkfTransitionEvent {
+  id: string;                          // durable workflow event id
+  eventType: "workflow.transitioned";
+  instanceId: string;
+  seq: number;
+  task: {
+    uuid: string;
+    id: string;
+    slug?: string;
+    ref?: string;
+    projectUuid?: string;
+    projectId?: string;
+    projectSlug?: string;
+    riskClass?: string;
+  };
+  transition?: string;
+  outcome?: string;
+  from?: WrkfState;
+  to?: WrkfState;
+  fromPhase?: string;
+  toPhase?: string;
+  transitionedAt: string;
+  actor?: string;
+  actorRole?: string;
+  matchingRoleBindings: WrkfRoleBinding[];
+  roleBindings?: WrkfRoleBinding[];
+  payload?: Record<string, unknown>;
+}
+```
+
+`boundRole` and `matchingRoleBindings` use current `workflow_role_bindings` at
+query time. They are current eligibility, not an event-time snapshot. Legacy
+`task_role_assignments` do not qualify for this contract. Multiple bindings for
+the same role return one transition item with `matchingRoleBindings` sorted
+deterministically; consumers must key downstream delivery by `event.id`.
+
 #### Obligations
 
 ```
@@ -925,6 +995,7 @@ wrkf.workflow.install
 wrkf.transition.apply
 wrkf.instance.show
 wrkf.instance.next
+wrkf.event.query
 ```
 
 These tests are RED until `internal/workrpc` is implemented (P1–P3 of T-04424).

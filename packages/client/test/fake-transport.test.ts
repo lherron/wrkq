@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { createClient } from "../src/client";
 import { WorkRpcError, isWorkRpcError, isWrkfError, isWrkqError } from "../src/errors";
 import { FakeTransport } from "../src/testing/fake-transport";
-import type { WrkfTransitionResult } from "../src/wrkf/types";
+import type { WrkfEventQueryResult, WrkfTransitionResult } from "../src/wrkf/types";
 import type { WrkqTask } from "../src/wrkq/types";
 
 async function clientWith(transport: FakeTransport, autoInitialize = false) {
@@ -23,6 +23,7 @@ const MOCK_TASK: WrkqTask = {
   slug: "my-task",
   title: "my task",
   projectUuid: "p-1",
+  path: "inbox/my-task",
   state: "open",
   priority: 3,
   kind: "task",
@@ -30,6 +31,7 @@ const MOCK_TASK: WrkqTask = {
   specification: "",
   labels: [],
   meta: {},
+  riskClass: "medium",
   etag: 2,
   createdAt: "2026-06-14T00:00:00Z",
   updatedAt: "2026-06-14T00:00:00Z",
@@ -44,6 +46,44 @@ const MOCK_TRANSITION_RESULT: WrkfTransitionResult = {
   eventId: "wfe_000002",
   effects: [],
   obligations: [],
+};
+
+const MOCK_EVENT_QUERY_RESULT: WrkfEventQueryResult = {
+  items: [
+    {
+      id: "wfe_000002",
+      eventType: "workflow.transitioned",
+      instanceId: "wfi_abc123",
+      seq: 2,
+      task: {
+        uuid: "task-u-1",
+        id: "T-00001",
+        slug: "my-task",
+        projectUuid: "p-1",
+        projectId: "P-00001",
+        projectSlug: "wrkq",
+        riskClass: "medium",
+      },
+      transition: "author_red",
+      outcome: "red_recorded",
+      fromPhase: "intake",
+      toPhase: "red",
+      transitionedAt: "2026-06-15T14:00:00Z",
+      actor: "agent:tester",
+      actorRole: "tester",
+      matchingRoleBindings: [
+        {
+          instanceId: "wfi_abc123",
+          role: "tester",
+          actor: "agent:tester",
+          bindingMode: "required",
+          boundAt: "2026-06-15T13:59:00Z",
+        },
+      ],
+    },
+  ],
+  nextCursor: "cursor-1",
+  hasMore: true,
 };
 
 describe("createClient lifecycle", () => {
@@ -90,13 +130,19 @@ describe("wrkq namespace", () => {
       title: "my task",
       kind: "task",
       state: "open",
+      riskClass: "medium",
       idempotencyKey: "k1",
     });
 
     const frame = transport.capturedRequests[0]!;
     expect(frame.method).toBe("wrkq.task.create");
-    expect(frame.params).toMatchObject({ title: "my task", idempotencyKey: "k1" });
+    expect(frame.params).toMatchObject({
+      title: "my task",
+      riskClass: "medium",
+      idempotencyKey: "k1",
+    });
     expect(task.id).toBe("T-00001");
+    expect(task.riskClass).toBe("medium");
     expect(task.etag).toBe(2);
   });
 
@@ -106,7 +152,7 @@ describe("wrkq namespace", () => {
 
     await client.wrkq.task.update({
       task: "T-00001",
-      patch: { state: "in_progress" },
+      patch: { state: "in_progress", riskClass: "high" },
       expectEtag: 2,
       idempotencyKey: "u1",
     });
@@ -115,7 +161,7 @@ describe("wrkq namespace", () => {
     expect(frame.method).toBe("wrkq.task.update");
     expect(frame.params).toMatchObject({
       task: "T-00001",
-      patch: { state: "in_progress" },
+      patch: { state: "in_progress", riskClass: "high" },
       expectEtag: 2,
     });
   });
@@ -139,6 +185,22 @@ describe("wrkq namespace", () => {
     expect(transport.capturedRequests[0]!.method).toBe("wrkq.workflow.attach");
     expect(res.attached).toBe(true);
     expect(res.instance.id).toBe("wfi_x");
+  });
+
+  test("workflow.timeline returns typed events envelope", async () => {
+    const transport = new FakeTransport().onResult("wrkq.workflow.timeline", {
+      events: [
+        {
+          id: "wfe_1",
+          type: "workflow.transitioned",
+          payload: { transition: "finish", outcome: "done" },
+        },
+      ],
+    });
+    const client = await clientWith(transport);
+    const res = await client.wrkq.workflow.timeline({ task: "T-00001" });
+    expect(transport.capturedRequests[0]!.method).toBe("wrkq.workflow.timeline");
+    expect(res.events[0]!.payload?.transition).toBe("finish");
   });
 });
 
@@ -175,11 +237,40 @@ describe("wrkf namespace", () => {
     expect(Array.isArray(result.effects)).toBe(true);
   });
 
-  test("evidence.add forwards runId (spec §9.7)", async () => {
+  test("event.query sends replay filters and returns a typed page", async () => {
+    const transport = new FakeTransport().onResult("wrkf.event.query", MOCK_EVENT_QUERY_RESULT);
+    const client = await clientWith(transport);
+
+    const result = await client.wrkf.event.query({
+      eventType: "workflow.transitioned",
+      fromPhase: "intake",
+      toPhase: "red",
+      excludeRiskClass: "low",
+      boundRole: "tester",
+      limit: 100,
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkf.event.query");
+    expect(frame.params).toMatchObject({
+      fromPhase: "intake",
+      toPhase: "red",
+      excludeRiskClass: "low",
+      boundRole: "tester",
+    });
+    expect(result.items[0]!.id).toBe("wfe_000002");
+    expect(result.items[0]!.matchingRoleBindings[0]!.role).toBe("tester");
+    expect(result.nextCursor).toBe("cursor-1");
+    expect(result.hasMore).toBe(true);
+  });
+
+  test("evidence.add forwards runId and provenance (spec §9.7)", async () => {
     const transport = new FakeTransport().onResult("wrkf.evidence.add", {
       id: "ev_1",
       kind: "implementation",
       runId: "run_000001",
+      contentHash: "sha256:abc",
+      build: { id: "b1", version: "2026.06.15", env: "ci" },
     });
     const client = await clientWith(transport);
     const ev = await client.wrkf.evidence.add({
@@ -187,9 +278,52 @@ describe("wrkf namespace", () => {
       kind: "implementation",
       facts: { verdict: "ready" },
       runId: "run_000001",
+      contentHash: "sha256:abc",
+      build: { id: "b1", version: "2026.06.15", env: "ci" },
     });
-    expect(transport.capturedRequests[0]!.params).toMatchObject({ runId: "run_000001" });
+    expect(transport.capturedRequests[0]!.params).toMatchObject({
+      runId: "run_000001",
+      contentHash: "sha256:abc",
+      build: { id: "b1", version: "2026.06.15", env: "ci" },
+    });
     expect(ev.runId).toBe("run_000001");
+    expect(ev.contentHash).toBe("sha256:abc");
+  });
+
+  test("role facade forwards list, bind, unbind, and set", async () => {
+    const binding = {
+      instanceId: "wfi_1",
+      role: "implementer",
+      actor: "agent:cody",
+      deliveryRef: "cody@wrkq:T-1",
+      lane: "main",
+      bindingMode: "required",
+      boundAt: "2026-06-15T00:00:00Z",
+    };
+    const transport = new FakeTransport()
+      .onResult("wrkf.role.bind", binding)
+      .onResult("wrkf.role.list", [binding])
+      .onResult("wrkf.role.unbind", [])
+      .onResult("wrkf.role.set", [binding]);
+    const client = await clientWith(transport);
+
+    await client.wrkf.role.bind({
+      task: "T-00001",
+      role: "implementer",
+      actor: "agent:cody",
+      deliveryRef: "cody@wrkq:T-1",
+      lane: "main",
+    });
+    await client.wrkf.role.list({ task: "T-00001" });
+    await client.wrkf.role.unbind({ task: "T-00001", role: "implementer", actor: "agent:cody" });
+    await client.wrkf.role.set({ task: "T-00001", roleMap: { implementer: "agent:cody" } });
+
+    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
+      "wrkf.role.bind",
+      "wrkf.role.list",
+      "wrkf.role.unbind",
+      "wrkf.role.set",
+    ]);
   });
 
   test("effect.claim returns lease token + expiry", async () => {

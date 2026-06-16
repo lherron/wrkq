@@ -45,6 +45,7 @@ import type {
   WrkqWorkflowInspectResult,
   WrkqWorkflowRefreshParams,
   WrkqWorkflowTimelineParams,
+  WrkqWorkflowTimelineResult,
 } from "./types.js";
 
 export interface WrkqTaskFacade {
@@ -85,7 +86,7 @@ export interface WrkqContainerFacade {
 export interface WrkqWorkflowFacade {
   attach(params: WrkqWorkflowAttachParams): Promise<WrkqWorkflowAttachResult>;
   inspect(params: WrkqWorkflowInspectParams): Promise<WrkqWorkflowInspectResult>;
-  timeline(params: WrkqWorkflowTimelineParams): Promise<unknown[]>;
+  timeline(params: WrkqWorkflowTimelineParams): Promise<WrkqWorkflowTimelineResult>;
   refresh(params: WrkqWorkflowRefreshParams): Promise<WrkqWorkflowInspectResult>;
 }
 

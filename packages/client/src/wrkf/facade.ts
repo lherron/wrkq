@@ -27,6 +27,8 @@ import type {
   WrkfEffectListParams,
   WrkfEffectRetryParams,
   WrkfEffectShowParams,
+  WrkfEventQueryParams,
+  WrkfEventQueryResult,
   WrkfEvidence,
   WrkfEvidenceAddParams,
   WrkfEvidenceListParams,
@@ -46,6 +48,11 @@ import type {
   WrkfObligationSatisfyParams,
   WrkfObligationShowParams,
   WrkfObligationWaiveParams,
+  WrkfRoleBindParams,
+  WrkfRoleBinding,
+  WrkfRoleListParams,
+  WrkfRoleSetParams,
+  WrkfRoleUnbindParams,
   WrkfRun,
   WrkfRunBindExternalParams,
   WrkfRunFailParams,
@@ -84,6 +91,17 @@ export interface WrkfEvidenceFacade {
   list(params: WrkfEvidenceListParams): Promise<WrkfEvidence[]>;
   show(params: WrkfEvidenceShowParams): Promise<WrkfEvidence>;
   suggest(params: WrkfEvidenceSuggestParams): Promise<WrkfSuggestResult>;
+}
+
+export interface WrkfRoleFacade {
+  list(params: WrkfRoleListParams): Promise<WrkfRoleBinding[]>;
+  bind(params: WrkfRoleBindParams): Promise<WrkfRoleBinding>;
+  unbind(params: WrkfRoleUnbindParams): Promise<WrkfRoleBinding[]>;
+  set(params: WrkfRoleSetParams): Promise<WrkfRoleBinding[]>;
+}
+
+export interface WrkfEventFacade {
+  query(params?: WrkfEventQueryParams): Promise<WrkfEventQueryResult>;
 }
 
 export interface WrkfObligationFacade {
@@ -134,6 +152,8 @@ export interface WrkfFacade {
   readonly workflow: WrkfWorkflowFacade;
   readonly instance: WrkfInstanceFacade;
   readonly evidence: WrkfEvidenceFacade;
+  readonly event: WrkfEventFacade;
+  readonly role: WrkfRoleFacade;
   readonly obligation: WrkfObligationFacade;
   readonly check: WrkfCheckFacade;
   readonly hook: WrkfHookFacade;

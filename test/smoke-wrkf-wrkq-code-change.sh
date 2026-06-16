@@ -293,22 +293,13 @@ SIGNOFF_EV="$("$BIN/wrkf" --db "$DB" evidence list T-00001 --json \
 "$BIN/wrkf" --db "$DB" --role reviewer --actor agent:reviewer \
   transition T-00001 sign_off \
   --expect-revision 3 --idempotency-key sign-off \
-  --json | jq -e '.state.status == "closed" and .state.phase == "done" and .revision == 4' >/dev/null
+  --json | jq -e '.state.status == "closed" and .state.phase == "done" and .revision == 4 and (.effects[] | select(.kind == "set_task_state" and .status == "delivered" and (.receipt.kind == "set_task_state.receipt")))' >/dev/null
 
-# set_task_state effect must be pending
+# set_task_state is an engine-owned builtin effect and must be auto-delivered.
 "$BIN/wrkf" --db "$DB" effect list T-00001 --json \
-  | jq -e '.effects[] | select(.kind == "set_task_state" and .status == "pending")' >/dev/null
+  | jq -e '.effects[] | select(.kind == "set_task_state" and .status == "delivered" and (.receipt.kind == "set_task_state.receipt"))' >/dev/null
 
-EFF_ID="$("$BIN/wrkf" --db "$DB" effect list T-00001 --json \
-  | jq -r '.effects[] | select(.kind == "set_task_state") | .id')"
-
-# claim + ack the effect
-CLAIM="$("$BIN/wrkf" --db "$DB" effect claim T-00001 --adapter smoke --limit 1 --lease-ms 30000 --json)"
-TOKEN="$(jq -r '.leaseToken' <<<"$CLAIM")"
-jq -e '.effects[0].status == "leased"' <<<"$CLAIM" >/dev/null
-
-"$BIN/wrkf" --db "$DB" effect ack "$EFF_ID" --lease-token "$TOKEN" --json \
-  | jq -e '.status == "delivered"' >/dev/null
+"$BIN/wrkq" --db "$DB" cat T-00001 --json | jq -e '.[0].state == "completed"' >/dev/null
 
 # timeline: exactly 4 transition events
 "$BIN/wrkf" --db "$DB" task timeline T-00001 --json \
