@@ -6,11 +6,19 @@ import (
 	"fmt"
 )
 
-// Cursor represents a pagination cursor with sort fields and last seen values
+// Cursor represents a pagination cursor with sort fields and last seen values.
+//
+// Descending encodes the sort direction active when the cursor was produced (one
+// flag per sort field). It is optional for backward compatibility: cursors minted
+// before direction encoding existed omit it, and Apply skips direction validation
+// in that case. When present, Apply requires it to match the consuming query's
+// direction exactly — a cursor produced under one (sort, direction) tuple cannot
+// be reused under a different one without risking duplicates or skipped rows.
 type Cursor struct {
 	SortFields []string      `json:"sort_fields"`
 	LastValues []interface{} `json:"last_values"`
 	LastID     string        `json:"last_id"`
+	Descending []bool        `json:"descending,omitempty"`
 }
 
 // Encode serializes the cursor to an opaque base64 string
@@ -288,6 +296,23 @@ func Apply(cursorStr string, opts ApplyOptions) (*ApplyResult, error) {
 			if field != opts.SortFields[i] {
 				return nil, fmt.Errorf("cursor sort field mismatch at position %d: got %q, want %q",
 					i, field, opts.SortFields[i])
+			}
+		}
+
+		// Validate cursor direction (cursor identity). Cursors that encode their
+		// origin direction must be reused only under the same direction; a cursor
+		// minted under (sort, asc) is semantically invalid for a (sort, desc)
+		// traversal. Legacy cursors that omit Descending skip this check.
+		if len(c.Descending) > 0 {
+			if len(c.Descending) != len(opts.Descending) {
+				return nil, fmt.Errorf("cursor direction mismatch: cursor has %d direction flags, query has %d",
+					len(c.Descending), len(opts.Descending))
+			}
+			for i := range c.Descending {
+				if c.Descending[i] != opts.Descending[i] {
+					return nil, fmt.Errorf("cursor direction mismatch at position %d: cursor=%v, query=%v",
+						i, c.Descending[i], opts.Descending[i])
+				}
 			}
 		}
 

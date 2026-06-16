@@ -212,6 +212,15 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		return nil, err
 	}
 
+	sortField, sqlField, serr := normalizeTaskListSort(p.Sort)
+	if serr != nil {
+		return nil, serr
+	}
+	descending, derr := normalizeTaskListDirection(p.Direction)
+	if derr != nil {
+		return nil, derr
+	}
+
 	where := []string{}
 	args := []any{}
 
@@ -220,8 +229,27 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		if rerr != nil {
 			return nil, NewNotFoundError(p.Path, "container")
 		}
-		where = append(where, "t.project_uuid = ?")
-		args = append(args, containerUUID)
+		if p.Recursive {
+			// Subtree filter: match the target container path and every path
+			// nested beneath it. cp.path is the task's container path from
+			// v_container_paths (root slug excluded).
+			var containerPath string
+			perr := a.db.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", containerUUID).Scan(&containerPath)
+			switch {
+			case perr == sql.ErrNoRows:
+				// Container has no visible path (e.g. root) — direct filter only.
+				where = append(where, "t.project_uuid = ?")
+				args = append(args, containerUUID)
+			case perr != nil:
+				return nil, NewInternalError(perr)
+			default:
+				where = append(where, "(cp.path = ? OR cp.path LIKE ? || '/%')")
+				args = append(args, containerPath, containerPath)
+			}
+		} else {
+			where = append(where, "t.project_uuid = ?")
+			args = append(args, containerUUID)
+		}
 	}
 	if len(p.State) > 0 {
 		ph, vals := inClause(p.State)
@@ -249,9 +277,9 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	}
 
 	page, err := cursor.Apply(p.Cursor, cursor.ApplyOptions{
-		SortFields: []string{"created_at"},
-		SQLFields:  []string{"t.created_at"},
-		Descending: []bool{false},
+		SortFields: []string{sortField},
+		SQLFields:  []string{sqlField},
+		Descending: []bool{descending},
 		IDField:    "t.id",
 		Limit:      limit,
 	})
@@ -298,12 +326,81 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	if len(items) > limit {
 		result.Items = items[:limit]
 		anchor := result.Items[limit-1]
-		next, cerr := cursor.BuildNextCursor([]string{"created_at"}, []any{anchor.createdAtRaw}, anchor.ID)
-		if cerr == nil {
-			result.NextCursor = next
+		// Encode the active (sort, direction) tuple into the cursor so it can
+		// only be reused under the same ordering (cursor identity).
+		next := &cursor.Cursor{
+			SortFields: []string{sortField},
+			LastValues: []any{taskCursorAnchor(anchor, sortField)},
+			LastID:     anchor.ID,
+			Descending: []bool{descending},
+		}
+		if encoded, cerr := next.Encode(); cerr == nil {
+			result.NextCursor = encoded
 		}
 	}
 	return result, nil
+}
+
+// taskListSortWhitelist maps each accepted sort field to its SQL expression.
+// Mirrors the CLI find whitelist (created_at, updated_at, id, path) plus priority.
+var taskListSortWhitelist = map[string]string{
+	"created_at": "t.created_at",
+	"updated_at": "t.updated_at",
+	"priority":   "t.priority",
+	"id":         "t.id",
+	"path":       "cp.path || '/' || t.slug",
+}
+
+// normalizeTaskListSort validates the sort field against the whitelist and
+// returns its logical name and SQL expression. An empty value defaults to
+// created_at; any non-whitelisted value is rejected with WRKQ_VALIDATION.
+func normalizeTaskListSort(field string) (logical, sqlExpr string, err error) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return "created_at", taskListSortWhitelist["created_at"], nil
+	}
+	sqlExpr, ok := taskListSortWhitelist[field]
+	if !ok {
+		return "", "", NewValidationError(
+			"invalid sort field: "+field+" (choose created_at, updated_at, priority, id, or path)",
+			map[string]any{"field": "sort"},
+		)
+	}
+	return field, sqlExpr, nil
+}
+
+// normalizeTaskListDirection maps a direction string to a descending flag. An
+// empty value preserves the default (ascending); only "asc"/"desc" are accepted,
+// case-sensitively. Any other non-empty value is rejected with WRKQ_VALIDATION.
+func normalizeTaskListDirection(direction string) (descending bool, err error) {
+	switch strings.TrimSpace(direction) {
+	case "", "asc":
+		return false, nil
+	case "desc":
+		return true, nil
+	default:
+		return false, NewValidationError(
+			"invalid direction: "+direction+" (choose asc or desc)",
+			map[string]any{"field": "direction"},
+		)
+	}
+}
+
+// taskCursorAnchor returns the raw sort-column value for the given sort field,
+// used as the cursor anchor for the next page.
+func taskCursorAnchor(t WrkqTask, sortField string) any {
+	switch sortField {
+	case "priority":
+		return t.Priority
+	case "id":
+		return t.ID
+	case "updated_at":
+		return t.updatedAtRaw
+	case "path":
+		return t.Path
+	default: // created_at
+		return t.createdAtRaw
+	}
 }
 
 // TaskUpdate applies a patch with an atomic expectEtag CAS (§8.1).
@@ -710,6 +807,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		CreatedByPrincipalRef: createdByPrincipal.String,
 		UpdatedByPrincipalRef: updatedByPrincipal.String,
 		createdAtRaw:          createdAt,
+		updatedAtRaw:          updatedAt,
 	}
 	return task, createdAt, nil
 }

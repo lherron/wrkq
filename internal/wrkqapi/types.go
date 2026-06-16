@@ -38,9 +38,10 @@ type WrkqTask struct {
 	CreatedByPrincipalRef string         `json:"createdByPrincipalRef,omitempty"`
 	UpdatedByPrincipalRef string         `json:"updatedByPrincipalRef,omitempty"`
 
-	// createdAtRaw holds the un-normalized created_at for cursor anchoring; it is
-	// unexported and never serialized.
+	// createdAtRaw / updatedAtRaw hold the un-normalized timestamps for cursor
+	// anchoring; they are unexported and never serialized.
 	createdAtRaw string
+	updatedAtRaw string
 }
 
 // WrkqTaskListResult is the paginated task list envelope.
@@ -129,6 +130,17 @@ type TaskListParams struct {
 	IncludeDeleted bool       `json:"includeDeleted,omitempty"`
 	Limit          int        `json:"limit,omitempty"`
 	Cursor         string     `json:"cursor,omitempty"`
+
+	// Sort selects the ordering field. Whitelist: created_at (default),
+	// updated_at, priority, id, path. Non-whitelisted values are rejected with
+	// WRKQ_VALIDATION (mirrors the CLI find sort whitelist plus priority).
+	Sort string `json:"sort,omitempty"`
+	// Direction is "asc" (default) or "desc". An empty value preserves the
+	// default ordering; any other non-empty value is rejected.
+	Direction string `json:"direction,omitempty"`
+	// Recursive, when true, includes tasks in containers nested under Path
+	// (the whole subtree). Default false keeps the direct-container-only filter.
+	Recursive bool `json:"recursive,omitempty"`
 }
 
 // TaskUpdateParams mirrors WrkqTaskUpdateParams. ExpectEtag is a pointer so a

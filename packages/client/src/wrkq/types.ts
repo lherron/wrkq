@@ -55,6 +55,12 @@ export interface WrkqTaskListParams {
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
+  /** Sort field. Whitelist: created_at (default), updated_at, priority, id, path. */
+  sort?: "created_at" | "updated_at" | "priority" | "id" | "path";
+  /** Sort direction; defaults to ascending. */
+  direction?: "asc" | "desc";
+  /** Include tasks in containers nested under `path` (the whole subtree). Default false. */
+  recursive?: boolean;
 }
 
 export interface WrkqTaskUpdateParams {

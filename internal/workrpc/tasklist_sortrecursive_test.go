@@ -19,6 +19,7 @@ package workrpc_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/db"
 )
@@ -309,6 +310,14 @@ func TestWrkqTaskList_SortUpdatedAtAsc(t *testing.T) {
 	if task1ID == "" {
 		t.Fatal("create first task returned empty id")
 	}
+	// The tasks_au_touch trigger (migration 000010) writes updated_at with
+	// SECOND granularity (strftime('%Y-%m-%dT%H:%M:%SZ','now')). Both creates
+	// and the update below would otherwise land in the same wall-clock second,
+	// yielding identical updated_at values and a tie broken by id ASC — making
+	// "the updated task sorts last" impossible. Wait past the second boundary so
+	// task1's updated_at is strictly greater than task2's.
+	time.Sleep(1100 * time.Millisecond)
+
 	// Update task1 so its updated_at is newer than task2.
 	p2Run(t, dbPath,
 		mkRPC("u1", "wrkq.task.update", map[string]any{
