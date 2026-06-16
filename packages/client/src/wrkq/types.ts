@@ -35,6 +35,7 @@ export interface WrkqTaskCreateParams {
   priority?: number;
   state?: WrkqTaskState;
   parentTask?: string;
+  assigneePrincipalRef?: string | null;
   labels?: string[];
   meta?: Record<string, unknown>;
   riskClass?: WrkqRiskClass;
@@ -109,6 +110,8 @@ export interface WrkqTask {
   meta: Record<string, unknown>;
   riskClass?: WrkqRiskClass;
   etag: number;
+  startAt?: string;
+  dueAt?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;

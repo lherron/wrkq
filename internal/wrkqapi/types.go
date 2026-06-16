@@ -26,6 +26,8 @@ type WrkqTask struct {
 	Labels                []string       `json:"labels"`
 	Meta                  map[string]any `json:"meta"`
 	ETag                  int64          `json:"etag"`
+	StartAt               string         `json:"startAt,omitempty"`
+	DueAt                 string         `json:"dueAt,omitempty"`
 	CreatedAt             string         `json:"createdAt"`
 	UpdatedAt             string         `json:"updatedAt"`
 	CompletedAt           string         `json:"completedAt,omitempty"`
@@ -94,20 +96,21 @@ type WrkqWorkflowTimelineResult struct {
 
 // TaskCreateParams mirrors WrkqTaskCreateParams (§6.2).
 type TaskCreateParams struct {
-	Path           string         `json:"path,omitempty"`
-	Project        string         `json:"project,omitempty"`
-	Title          string         `json:"title"`
-	Description    string         `json:"description,omitempty"`
-	Specification  string         `json:"specification,omitempty"`
-	Kind           string         `json:"kind,omitempty"`
-	Priority       int            `json:"priority,omitempty"`
-	State          string         `json:"state,omitempty"`
-	RiskClass      string         `json:"riskClass,omitempty"`
-	ParentTask     string         `json:"parentTask,omitempty"`
-	Labels         []string       `json:"labels,omitempty"`
-	Meta           map[string]any `json:"meta,omitempty"`
-	Actor          string         `json:"actor,omitempty"`
-	IdempotencyKey string         `json:"idempotencyKey,omitempty"`
+	Path                 string         `json:"path,omitempty"`
+	Project              string         `json:"project,omitempty"`
+	Title                string         `json:"title"`
+	Description          string         `json:"description,omitempty"`
+	Specification        string         `json:"specification,omitempty"`
+	Kind                 string         `json:"kind,omitempty"`
+	Priority             int            `json:"priority,omitempty"`
+	State                string         `json:"state,omitempty"`
+	RiskClass            string         `json:"riskClass,omitempty"`
+	ParentTask           string         `json:"parentTask,omitempty"`
+	AssigneePrincipalRef string         `json:"assigneePrincipalRef,omitempty"`
+	Labels               []string       `json:"labels,omitempty"`
+	Meta                 map[string]any `json:"meta,omitempty"`
+	Actor                string         `json:"actor,omitempty"`
+	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
 }
 
 // TaskShowParams mirrors WrkqTaskShowParams.

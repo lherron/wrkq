@@ -90,22 +90,28 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		}
 		parentTaskUUID = &uuid
 	}
+	var assigneePrincipalRef *string
+	if strings.TrimSpace(p.AssigneePrincipalRef) != "" {
+		trimmed := strings.TrimSpace(p.AssigneePrincipalRef)
+		assigneePrincipalRef = &trimmed
+	}
 
 	attr := a.attributionFor(p.Actor)
 	result, err := a.store.Tasks.CreateWithAttribution(attr, store.CreateParams{
-		Slug:           slug,
-		Title:          p.Title,
-		Description:    p.Description,
-		Specification:  p.Specification,
-		ProjectUUID:    projectUUID,
-		State:          state,
-		Priority:       priority,
-		Kind:           p.Kind,
-		ParentTaskUUID: parentTaskUUID,
-		Labels:         labelsString(p.Labels),
-		Meta:           metaString(p.Meta),
-		RiskClass:      riskClass,
-		Via:            "rpc",
+		Slug:                 slug,
+		Title:                p.Title,
+		Description:          p.Description,
+		Specification:        p.Specification,
+		ProjectUUID:          projectUUID,
+		State:                state,
+		Priority:             priority,
+		Kind:                 p.Kind,
+		ParentTaskUUID:       parentTaskUUID,
+		AssigneePrincipalRef: assigneePrincipalRef,
+		Labels:               labelsString(p.Labels),
+		Meta:                 metaString(p.Meta),
+		RiskClass:            riskClass,
+		Via:                  "rpc",
 	})
 	if err != nil {
 		return nil, mapStoreError(err, "")
@@ -254,7 +260,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	}
 
 	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, " +
-		"t.labels, t.meta, t.etag, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
+		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
 		"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
 		"COALESCE(cp.path || '/' || t.slug, t.slug) FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid"
 	if page.WhereClause != "" {
@@ -636,7 +642,7 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
 		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
-			"t.labels, t.meta, t.etag, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
+			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
 			"COALESCE(cp.path || '/' || t.slug, t.slug) FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE t.uuid = ?",
 		uuid,
@@ -665,13 +671,13 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		priority                                                                    int
 		etag                                                                        int64
 		createdAt, updatedAt                                                        string
-		completedAt, archivedAt, deletedAt, acknowledgedAt                          sql.NullString
+		startAt, dueAt, completedAt, archivedAt, deletedAt, acknowledgedAt          sql.NullString
 		assignee, createdByPrincipal, updatedByPrincipal                            sql.NullString
 		riskClass, path                                                             string
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &state, &priority, &kind, &description, &specification,
-		&labels, &meta, &etag, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
+		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
 		&assignee, &createdByPrincipal, &updatedByPrincipal, &riskClass, &path,
 	); err != nil {
 		return nil, "", err
@@ -692,6 +698,8 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		Labels:                parseLabels(labels.String),
 		Meta:                  parseMeta(meta.String),
 		ETag:                  etag,
+		StartAt:               toRFC3339(startAt.String),
+		DueAt:                 toRFC3339(dueAt.String),
 		CreatedAt:             toRFC3339(createdAt),
 		UpdatedAt:             toRFC3339(updatedAt),
 		CompletedAt:           toRFC3339(completedAt.String),

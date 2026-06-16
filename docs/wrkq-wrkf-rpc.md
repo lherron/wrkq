@@ -302,6 +302,7 @@ interface WrkqTaskCreateParams {
   priority?: number;
   state?: WrkqTaskState;
   parentTask?: string;
+  assigneePrincipalRef?: string | null;
   labels?: string[];
   meta?: Record<string, unknown>;
   idempotencyKey?: string;
@@ -354,6 +355,8 @@ interface WrkqTask {
   labels: string[];
   meta: Record<string, unknown>;
   etag: number;
+  startAt?: string;      // RFC3339
+  dueAt?: string;        // RFC3339
   createdAt: string;     // RFC3339
   updatedAt: string;     // RFC3339
   completedAt?: string;
