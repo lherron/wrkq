@@ -43,7 +43,7 @@ func init() {
 func runWatch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 
-	// Watch events
+	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq watch is deprecated; use wrkq monitor watch --raw")
 	return watchEvents(cmd.OutOrStdout(), database, watchSince, watchNDJSON || !isStdoutTTY(cmd.OutOrStdout()), watchFollow)
 }
 
