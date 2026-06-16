@@ -125,6 +125,9 @@ var methodCatalog = []string{
 	"wrkq.relation.add",
 	"wrkq.relation.list",
 	"wrkq.relation.remove",
+	"wrkq.admin.legacyActor.list",
+	"wrkq.admin.legacyActor.create",
+	"wrkq.admin.legacyActor.update",
 	"wrkq.container.create",
 	"wrkq.container.delete",
 	"wrkq.container.deleteRecursive",
@@ -187,6 +190,8 @@ var dtoCatalog = []string{
 	"WrkqRelation",
 	"WrkqContainer",
 	"WrkqContainerListResult",
+	"WrkqLegacyActor",
+	"WrkqLegacyActorListResult",
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
 	"WrkfInstance",
@@ -264,6 +269,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.relation.remove", apiHandler(func(ctx context.Context, p wrkqapi.RelationRemoveParams) (any, error) {
 		return wq.RelationRemove(ctx, p)
+	}))
+	s.Register("wrkq.admin.legacyActor.list", apiHandler(func(ctx context.Context, p wrkqapi.ActorListParams) (any, error) {
+		return wq.ActorList(ctx, p)
+	}))
+	s.Register("wrkq.admin.legacyActor.create", apiHandler(func(ctx context.Context, p wrkqapi.ActorCreateParams) (any, error) {
+		return wq.ActorCreate(ctx, p)
+	}))
+	s.Register("wrkq.admin.legacyActor.update", apiHandler(func(ctx context.Context, p wrkqapi.ActorUpdateParams) (any, error) {
+		return wq.ActorUpdate(ctx, p)
 	}))
 	s.Register("wrkq.container.create", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCreateParams) (any, error) {
 		return wq.ContainerCreate(ctx, p)

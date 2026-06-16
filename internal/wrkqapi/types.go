@@ -384,6 +384,49 @@ type WrkqContainerListResult struct {
 	NextCursor string          `json:"nextCursor,omitempty"`
 }
 
+// WrkqLegacyActor is the legacy actor display/admin-cache DTO (T-04850, gap2).
+// Actor rows are a legacy display/admin cache: they do NOT issue, validate, or
+// authorize principals, so the DTO deliberately has NO principalRef field.
+type WrkqLegacyActor struct {
+	UUID        string         `json:"uuid"`
+	ID          string         `json:"id"`
+	Slug        string         `json:"slug"`
+	DisplayName string         `json:"displayName,omitempty"`
+	Role        string         `json:"role"`
+	Meta        map[string]any `json:"meta,omitempty"`
+	CreatedAt   string         `json:"createdAt"`
+	UpdatedAt   string         `json:"updatedAt"`
+}
+
+// WrkqLegacyActorListResult is the legacy actor list envelope.
+type WrkqLegacyActorListResult struct {
+	Items []WrkqLegacyActor `json:"items"`
+}
+
+// ActorListParams is the (empty) parameter set for wrkq.admin.legacyActor.list.
+type ActorListParams struct{}
+
+// ActorCreateParams mirrors wrkq.admin.legacyActor.create params. Meta is a raw
+// message so a non-object value can be rejected with WRKQ_VALIDATION instead of
+// being silently coerced.
+type ActorCreateParams struct {
+	Slug           string          `json:"slug"`
+	DisplayName    *string         `json:"displayName,omitempty"`
+	Role           string          `json:"role,omitempty"`
+	Meta           json.RawMessage `json:"meta,omitempty"`
+	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+}
+
+// ActorUpdateParams mirrors wrkq.admin.legacyActor.update params. Patch is a raw
+// message so unknown / immutable fields can be rejected and explicit nulls
+// (clear) can be distinguished from omitted fields.
+type ActorUpdateParams struct {
+	Actor           string          `json:"actor"`
+	Patch           json.RawMessage `json:"patch"`
+	ExpectUpdatedAt string          `json:"expectUpdatedAt,omitempty"`
+	IdempotencyKey  string          `json:"idempotencyKey,omitempty"`
+}
+
 // ContainerCreateParams mirrors WrkqContainerCreateParams.
 type ContainerCreateParams struct {
 	Path       string `json:"path,omitempty"`

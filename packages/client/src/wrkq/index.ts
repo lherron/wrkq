@@ -7,10 +7,12 @@
 
 export type * from "./types.js";
 export type {
+  WrkqAdminFacade,
   WrkqAttachmentFacade,
   WrkqCommentFacade,
   WrkqContainerFacade,
   WrkqFacade,
+  WrkqLegacyActorFacade,
   WrkqRelationFacade,
   WrkqTaskFacade,
   WrkqWorkflowFacade,

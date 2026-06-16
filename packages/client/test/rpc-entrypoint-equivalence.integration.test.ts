@@ -107,6 +107,9 @@ describe("entrypoint equivalence", () => {
       "wrkf.role.bind",
       "wrkf.role.unbind",
       "wrkf.role.set",
+      "wrkq.admin.legacyActor.list",
+      "wrkq.admin.legacyActor.create",
+      "wrkq.admin.legacyActor.update",
     ]) {
       expect(methods.has(m)).toBe(true);
     }
@@ -118,6 +121,9 @@ describe("entrypoint equivalence", () => {
       "wrkf.task.syncMeta",
       "wrkf.workflow.attach",
       "wrkf.initialize",
+      "wrkq.actor.list",
+      "wrkq.actor.create",
+      "wrkq.actor.update",
     ]) {
       expect(methods.has(m)).toBe(false);
     }

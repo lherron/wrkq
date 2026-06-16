@@ -30,7 +30,11 @@ export type {
 } from "./transport.js";
 
 // Namespace facade types + DTOs (also available via subpaths).
-export type { WrkqFacade } from "./wrkq/facade.js";
+export type {
+  WrkqAdminFacade,
+  WrkqFacade,
+  WrkqLegacyActorFacade,
+} from "./wrkq/facade.js";
 export type { WrkfFacade } from "./wrkf/facade.js";
 export type * from "./wrkq/types.js";
 export type * from "./wrkf/types.js";
