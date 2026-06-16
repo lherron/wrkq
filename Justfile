@@ -142,6 +142,7 @@ sync-downstream:
   set -euo pipefail
   ( cd ../hrc-runtime && bun run sync:wrkq ) 2>&1 | sed 's/^/[hrc-sync] /'
   ( cd ../agent-control-plane && bun run sync:wrkq ) 2>&1 | sed 's/^/[acp-sync] /'
+  ( cd ../taskboard && bun run sync:wrkq ) 2>&1 | sed 's/^/[taskboard-sync] /'
 
 # Install the wrkq launchd agent plist
 install-launchd:
