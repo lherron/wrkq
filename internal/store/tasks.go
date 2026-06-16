@@ -1026,6 +1026,7 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 
 // AttachmentInfo contains info about an attachment for file cleanup.
 type AttachmentInfo struct {
+	TaskUUID     string
 	RelativePath string
 	SizeBytes    int64
 }

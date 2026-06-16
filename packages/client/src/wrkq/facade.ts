@@ -22,6 +22,11 @@ import type {
   WrkqCommentListResult,
   WrkqCommentShowParams,
   WrkqContainer,
+  WrkqContainerCreateParams,
+  WrkqContainerDeleteParams,
+  WrkqContainerDeleteRecursiveParams,
+  WrkqContainerDeleteRecursiveResult,
+  WrkqContainerDeleteResult,
   WrkqContainerListParams,
   WrkqContainerListResult,
   WrkqContainerShowParams,
@@ -79,6 +84,11 @@ export interface WrkqRelationFacade {
 }
 
 export interface WrkqContainerFacade {
+  create(params: WrkqContainerCreateParams): Promise<WrkqContainer>;
+  delete(params: WrkqContainerDeleteParams): Promise<WrkqContainerDeleteResult>;
+  deleteRecursive(
+    params: WrkqContainerDeleteRecursiveParams,
+  ): Promise<WrkqContainerDeleteRecursiveResult>;
   show(params: WrkqContainerShowParams): Promise<WrkqContainer>;
   list(params?: WrkqContainerListParams): Promise<WrkqContainerListResult>;
 }

@@ -384,6 +384,17 @@ type WrkqContainerListResult struct {
 	NextCursor string          `json:"nextCursor,omitempty"`
 }
 
+// ContainerCreateParams mirrors WrkqContainerCreateParams.
+type ContainerCreateParams struct {
+	Path       string `json:"path,omitempty"`
+	Project    string `json:"project,omitempty"`
+	ParentPath string `json:"parentPath,omitempty"`
+	Slug       string `json:"slug,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
 // ContainerShowParams mirrors WrkqContainerShowParams.
 type ContainerShowParams struct {
 	Path    string `json:"path,omitempty"`
@@ -396,4 +407,52 @@ type ContainerListParams struct {
 	IncludeArchived bool   `json:"includeArchived,omitempty"`
 	Limit           int    `json:"limit,omitempty"`
 	Cursor          string `json:"cursor,omitempty"`
+}
+
+// ContainerDeleteParams mirrors WrkqContainerDeleteParams.
+type ContainerDeleteParams struct {
+	Container  string `json:"container,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Project    string `json:"project,omitempty"`
+	ExpectETag int64  `json:"expectEtag,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
+// WrkqContainerDeleteResult is returned by empty-only hard delete.
+type WrkqContainerDeleteResult struct {
+	Deleted bool `json:"deleted"`
+}
+
+// ContainerDeleteRecursiveExpected carries the destructive impact CAS.
+type ContainerDeleteRecursiveExpected struct {
+	Containers  int64 `json:"containers"`
+	Tasks       int64 `json:"tasks"`
+	Attachments int64 `json:"attachments"`
+	Bytes       int64 `json:"bytes"`
+}
+
+// ContainerDeleteRecursiveParams mirrors WrkqContainerDeleteRecursiveParams.
+type ContainerDeleteRecursiveParams struct {
+	Container  string                            `json:"container,omitempty"`
+	Path       string                            `json:"path,omitempty"`
+	Project    string                            `json:"project,omitempty"`
+	DryRun     bool                              `json:"dryRun,omitempty"`
+	ExpectETag int64                             `json:"expectEtag,omitempty"`
+	Expected   *ContainerDeleteRecursiveExpected `json:"expected,omitempty"`
+	Actor      string                            `json:"actor,omitempty"`
+}
+
+// WrkqContainerDeleteRecursiveResult is used for both dry-run and commit.
+type WrkqContainerDeleteRecursiveResult struct {
+	Container          *WrkqContainer `json:"container,omitempty"`
+	Containers         *int64         `json:"containers,omitempty"`
+	Tasks              *int64         `json:"tasks,omitempty"`
+	Attachments        *int64         `json:"attachments,omitempty"`
+	Bytes              *int64         `json:"bytes,omitempty"`
+	Deleted            *bool          `json:"deleted,omitempty"`
+	ContainersDeleted  *int64         `json:"containersDeleted,omitempty"`
+	TasksDeleted       *int64         `json:"tasksDeleted,omitempty"`
+	AttachmentsDeleted *int64         `json:"attachmentsDeleted,omitempty"`
+	BytesFreed         *int64         `json:"bytesFreed,omitempty"`
+	FileCleanupErrors  []string       `json:"fileCleanupErrors,omitempty"`
 }

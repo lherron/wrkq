@@ -258,6 +258,16 @@ export interface WrkqContainerShowParams {
   project?: string;
 }
 
+export interface WrkqContainerCreateParams {
+  path?: string;
+  project?: string;
+  parentPath?: string;
+  slug?: string;
+  title?: string;
+  kind?: string;
+  actor?: string;
+}
+
 export interface WrkqContainerListParams {
   project?: string;
   includeArchived?: boolean;
@@ -282,6 +292,49 @@ export interface WrkqContainer {
 export interface WrkqContainerListResult {
   items: WrkqContainer[];
   nextCursor?: string;
+}
+
+export interface WrkqContainerDeleteParams {
+  container?: string;
+  path?: string;
+  project?: string;
+  expectEtag?: number;
+  actor?: string;
+}
+
+export interface WrkqContainerDeleteResult {
+  deleted: boolean;
+}
+
+export interface WrkqContainerDeleteRecursiveExpected {
+  containers: number;
+  tasks: number;
+  attachments: number;
+  bytes: number;
+}
+
+export interface WrkqContainerDeleteRecursiveParams {
+  container?: string;
+  path?: string;
+  project?: string;
+  dryRun?: boolean;
+  expectEtag?: number;
+  expected?: WrkqContainerDeleteRecursiveExpected;
+  actor?: string;
+}
+
+export interface WrkqContainerDeleteRecursiveResult {
+  container?: WrkqContainer;
+  containers?: number;
+  tasks?: number;
+  attachments?: number;
+  bytes?: number;
+  deleted?: boolean;
+  containersDeleted?: number;
+  tasksDeleted?: number;
+  attachmentsDeleted?: number;
+  bytesFreed?: number;
+  fileCleanupErrors?: string[];
 }
 
 // ── Task-workflow binding ────────────────────────────────────────────────────

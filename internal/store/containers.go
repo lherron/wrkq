@@ -31,6 +31,40 @@ type ContainerCreateResult struct {
 	ETag int64
 }
 
+// ContainerDeleteRecursiveImpact summarizes a destructive container subtree
+// purge. Container counts include the root container being deleted.
+type ContainerDeleteRecursiveImpact struct {
+	ContainerUUID string
+	Containers    int64
+	Tasks         int64
+	Attachments   int64
+	Bytes         int64
+}
+
+// ContainerDeleteRecursiveResult contains committed purge statistics and file
+// cleanup inputs captured before rows were deleted.
+type ContainerDeleteRecursiveResult struct {
+	Deleted            bool
+	ContainersDeleted  int64
+	TasksDeleted       int64
+	AttachmentsDeleted int64
+	BytesFreed         int64
+	Attachments        []AttachmentInfo
+	TaskUUIDs          []string
+}
+
+// ContainerDeleteImpactMismatchError reports that a caller-supplied recursive
+// delete preflight is stale relative to the impact recomputed in the delete
+// transaction.
+type ContainerDeleteImpactMismatchError struct {
+	Expected ContainerDeleteRecursiveImpact
+	Current  ContainerDeleteRecursiveImpact
+}
+
+func (e *ContainerDeleteImpactMismatchError) Error() string {
+	return "container deleteRecursive expected impact does not match current impact"
+}
+
 // Create creates a new container and logs a container.created event.
 func (cs *ContainerStore) Create(actorUUID string, params ContainerCreateParams) (*ContainerCreateResult, error) {
 	return cs.CreateWithAttribution(cs.store.attributionFromActorUUID(actorUUID), params)
@@ -458,13 +492,16 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 	return cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
 		var currentETag int64
-		var slug string
-		err := tx.QueryRow("SELECT etag, slug FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &slug)
+		var slug, kind string
+		err := tx.QueryRow("SELECT etag, slug, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &slug, &kind)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("container not found: %s", containerUUID)
 			}
 			return fmt.Errorf("failed to get container: %w", err)
+		}
+		if kind == string(domain.ContainerKindRoot) {
+			return fmt.Errorf("root container cannot be deleted")
 		}
 
 		// Check etag if ifMatch was provided
@@ -515,6 +552,267 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 
 		return nil
 	})
+}
+
+// DeleteRecursiveImpact computes the current impact for deleting the container
+// subtree rooted at containerUUID without mutating the database.
+func (cs *ContainerStore) DeleteRecursiveImpact(containerUUID string) (*ContainerDeleteRecursiveImpact, error) {
+	tx, err := cs.store.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	impact, _, _, err := cs.recursiveDeleteImpactTx(tx, containerUUID)
+	return impact, err
+}
+
+// DeleteRecursiveWithAttribution hard-deletes a container and all descendant
+// tasks/containers. The root container etag is the only CAS target; expected
+// impact is compared against a fresh impact computed inside the delete tx.
+func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attribution, containerUUID string, ifMatch int64, expected ContainerDeleteRecursiveImpact) (*ContainerDeleteRecursiveResult, error) {
+	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
+	var result *ContainerDeleteRecursiveResult
+	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		var currentETag int64
+		var kind string
+		err := tx.QueryRow("SELECT etag, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &kind)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("container not found: %s", containerUUID)
+			}
+			return fmt.Errorf("failed to get container: %w", err)
+		}
+		if kind == string(domain.ContainerKindRoot) {
+			return fmt.Errorf("root container cannot be deleted")
+		}
+		if err := checkETag(currentETag, ifMatch); err != nil {
+			return err
+		}
+
+		current, containers, tasks, err := cs.recursiveDeleteImpactTx(tx, containerUUID)
+		if err != nil {
+			return err
+		}
+		if !sameDeleteImpact(expected, *current) {
+			return &ContainerDeleteImpactMismatchError{Expected: expected, Current: *current}
+		}
+
+		attachments, err := recursiveDeleteAttachmentsTx(tx, containerUUID)
+		if err != nil {
+			return err
+		}
+		taskUUIDs := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			taskUUIDs = append(taskUUIDs, task.UUID)
+			payload := map[string]interface{}{
+				"slug":      task.Slug,
+				"purged_by": attr.PrincipalRef,
+			}
+			if task.AttachmentCount > 0 {
+				payload["attachment_count"] = task.AttachmentCount
+				payload["bytes_freed"] = task.Bytes
+			}
+			payloadJSON, _ := json.Marshal(payload)
+			payloadStr := string(payloadJSON)
+			if err := ew.LogEvent(tx, &domain.Event{
+				ActorUUID:    eventActorUUID(attr),
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
+				ResourceType: "task",
+				ResourceUUID: &task.UUID,
+				EventType:    "task.purged",
+				Payload:      &payloadStr,
+			}); err != nil {
+				return fmt.Errorf("failed to log task purge event: %w", err)
+			}
+		}
+		for _, task := range tasks {
+			if _, err := tx.Exec("DELETE FROM tasks WHERE uuid = ?", task.UUID); err != nil {
+				return fmt.Errorf("failed to delete task: %w", err)
+			}
+		}
+
+		for _, container := range containers {
+			payloadJSON, _ := json.Marshal(map[string]interface{}{
+				"slug":       container.Slug,
+				"deleted_by": attr.PrincipalRef,
+				"recursive":  true,
+			})
+			payloadStr := string(payloadJSON)
+			if err := ew.LogEvent(tx, &domain.Event{
+				ActorUUID:    eventActorUUID(attr),
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
+				ResourceType: "container",
+				ResourceUUID: &container.UUID,
+				EventType:    "container.deleted",
+				Payload:      &payloadStr,
+			}); err != nil {
+				return fmt.Errorf("failed to log container delete event: %w", err)
+			}
+		}
+		for _, container := range containers {
+			if _, err := tx.Exec("DELETE FROM containers WHERE uuid = ?", container.UUID); err != nil {
+				return fmt.Errorf("failed to delete container: %w", err)
+			}
+		}
+
+		result = &ContainerDeleteRecursiveResult{
+			Deleted:            true,
+			ContainersDeleted:  current.Containers,
+			TasksDeleted:       current.Tasks,
+			AttachmentsDeleted: current.Attachments,
+			BytesFreed:         current.Bytes,
+			Attachments:        attachments,
+			TaskUUIDs:          taskUUIDs,
+		}
+		return nil
+	})
+	return result, err
+}
+
+type recursiveContainerRow struct {
+	UUID  string
+	Slug  string
+	Depth int
+}
+
+type recursiveTaskRow struct {
+	UUID            string
+	Slug            string
+	AttachmentCount int64
+	Bytes           int64
+}
+
+func (cs *ContainerStore) recursiveDeleteImpactTx(tx *sql.Tx, containerUUID string) (*ContainerDeleteRecursiveImpact, []recursiveContainerRow, []recursiveTaskRow, error) {
+	containers, err := recursiveDeleteContainersTx(tx, containerUUID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tasks, err := recursiveDeleteTasksTx(tx, containerUUID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var attachmentCount, totalBytes int64
+	for _, task := range tasks {
+		attachmentCount += task.AttachmentCount
+		totalBytes += task.Bytes
+	}
+	return &ContainerDeleteRecursiveImpact{
+		ContainerUUID: containerUUID,
+		Containers:    int64(len(containers)),
+		Tasks:         int64(len(tasks)),
+		Attachments:   attachmentCount,
+		Bytes:         totalBytes,
+	}, containers, tasks, nil
+}
+
+func recursiveDeleteContainersTx(tx *sql.Tx, containerUUID string) ([]recursiveContainerRow, error) {
+	rows, err := tx.Query(`
+		WITH RECURSIVE subtree(uuid, slug, depth) AS (
+			SELECT uuid, slug, 0 FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid, c.slug, subtree.depth + 1
+			  FROM containers c
+			  JOIN subtree ON c.parent_uuid = subtree.uuid
+		)
+		SELECT uuid, slug, depth FROM subtree ORDER BY depth DESC, slug ASC
+	`, containerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recursive containers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []recursiveContainerRow{}
+	for rows.Next() {
+		var row recursiveContainerRow
+		if err := rows.Scan(&row.UUID, &row.Slug, &row.Depth); err != nil {
+			return nil, fmt.Errorf("failed to scan recursive container: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate recursive containers: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("container not found: %s", containerUUID)
+	}
+	return out, nil
+}
+
+func recursiveDeleteTasksTx(tx *sql.Tx, containerUUID string) ([]recursiveTaskRow, error) {
+	rows, err := tx.Query(`
+		WITH RECURSIVE subtree(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid FROM containers c JOIN subtree ON c.parent_uuid = subtree.uuid
+		)
+		SELECT t.uuid, t.slug, COUNT(a.uuid), COALESCE(SUM(a.size_bytes), 0)
+		  FROM tasks t
+		  JOIN subtree ON t.project_uuid = subtree.uuid
+		  LEFT JOIN attachments a ON a.task_uuid = t.uuid
+		 GROUP BY t.uuid, t.slug
+		 ORDER BY t.id ASC
+	`, containerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recursive tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []recursiveTaskRow{}
+	for rows.Next() {
+		var row recursiveTaskRow
+		if err := rows.Scan(&row.UUID, &row.Slug, &row.AttachmentCount, &row.Bytes); err != nil {
+			return nil, fmt.Errorf("failed to scan recursive task: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate recursive tasks: %w", err)
+	}
+	return out, nil
+}
+
+func recursiveDeleteAttachmentsTx(tx *sql.Tx, containerUUID string) ([]AttachmentInfo, error) {
+	rows, err := tx.Query(`
+		WITH RECURSIVE subtree(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid FROM containers c JOIN subtree ON c.parent_uuid = subtree.uuid
+		)
+		SELECT a.task_uuid, a.relative_path, a.size_bytes
+		  FROM attachments a
+		  JOIN tasks t ON t.uuid = a.task_uuid
+		  JOIN subtree ON t.project_uuid = subtree.uuid
+		 ORDER BY a.id ASC
+	`, containerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recursive attachments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []AttachmentInfo{}
+	for rows.Next() {
+		var a AttachmentInfo
+		if err := rows.Scan(&a.TaskUUID, &a.RelativePath, &a.SizeBytes); err != nil {
+			return nil, fmt.Errorf("failed to scan recursive attachment: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate recursive attachments: %w", err)
+	}
+	return out, nil
+}
+
+func sameDeleteImpact(a, b ContainerDeleteRecursiveImpact) bool {
+	return a.Containers == b.Containers &&
+		a.Tasks == b.Tasks &&
+		a.Attachments == b.Attachments &&
+		a.Bytes == b.Bytes
 }
 
 // GetByUUID retrieves a container by UUID.

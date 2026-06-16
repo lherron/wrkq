@@ -3,11 +3,47 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/cursor"
+	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 )
+
+// ContainerCreate creates a project/directory container and returns the stable
+// container DTO with server-computed path and etag.
+func (a *API) ContainerCreate(ctx context.Context, p ContainerCreateParams) (*WrkqContainer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	parentUUID, slug, err := a.resolveContainerCreateTarget(p)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(slug) == "" {
+		return nil, NewValidationError("container slug is required", map[string]any{"field": "slug"})
+	}
+	normalizedSlug, serr := paths.NormalizeSlug(slug)
+	if serr != nil {
+		return nil, NewValidationError(serr.Error(), map[string]any{"field": "slug"})
+	}
+
+	result, err := a.store.Containers.CreateWithAttribution(a.attributionFor(p.Actor), store.ContainerCreateParams{
+		Slug:       normalizedSlug,
+		Title:      strings.TrimSpace(p.Title),
+		ParentUUID: parentUUID,
+		Kind:       strings.TrimSpace(p.Kind),
+	})
+	if err != nil {
+		return nil, mapContainerStoreError(err, "")
+	}
+	return a.loadContainer(result.UUID)
+}
 
 // ContainerShow resolves a container by path or project selector and returns its
 // camelCase DTO (including the computed path). Not found → WRKQ_NOT_FOUND.
@@ -117,6 +153,83 @@ func (a *API) ContainerList(ctx context.Context, p ContainerListParams) (*WrkqCo
 	return result, nil
 }
 
+// ContainerDelete hard-deletes an empty container.
+func (a *API) ContainerDelete(ctx context.Context, p ContainerDeleteParams) (*WrkqContainerDeleteResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	selector := containerMutationSelector(p.Container, p.Path, p.Project)
+	if selector == "" {
+		return nil, NewValidationError("container selector is required", map[string]any{"field": "container"})
+	}
+	containerUUID, _, err := selectors.ResolveContainer(a.db, selector)
+	if err != nil {
+		return nil, NewNotFoundError(selector, "container")
+	}
+	if err := a.rejectRootContainer(containerUUID); err != nil {
+		return nil, err
+	}
+	if err := a.store.Containers.DeleteWithAttribution(a.attributionFor(p.Actor), containerUUID, p.ExpectETag); err != nil {
+		return nil, mapContainerStoreError(err, selector)
+	}
+	return &WrkqContainerDeleteResult{Deleted: true}, nil
+}
+
+// ContainerDeleteRecursive preflights or commits a destructive container subtree
+// purge. Commit compares expected impact against a fresh impact inside the store
+// transaction and cleans attachment files after the DB commit.
+func (a *API) ContainerDeleteRecursive(ctx context.Context, p ContainerDeleteRecursiveParams) (*WrkqContainerDeleteRecursiveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	selector := containerMutationSelector(p.Container, p.Path, p.Project)
+	if selector == "" {
+		return nil, NewValidationError("container selector is required", map[string]any{"field": "container"})
+	}
+	containerUUID, _, err := selectors.ResolveContainer(a.db, selector)
+	if err != nil {
+		return nil, NewNotFoundError(selector, "container")
+	}
+	if err := a.rejectRootContainer(containerUUID); err != nil {
+		return nil, err
+	}
+
+	dto, err := a.loadContainer(containerUUID)
+	if err != nil {
+		return nil, err
+	}
+	if p.DryRun {
+		impact, ierr := a.store.Containers.DeleteRecursiveImpact(containerUUID)
+		if ierr != nil {
+			return nil, mapContainerStoreError(ierr, selector)
+		}
+		return deleteRecursiveImpactResult(dto, impact), nil
+	}
+	if p.Expected == nil {
+		return nil, NewValidationError("expected impact is required", map[string]any{"field": "expected"})
+	}
+	expected := store.ContainerDeleteRecursiveImpact{
+		ContainerUUID: containerUUID,
+		Containers:    p.Expected.Containers,
+		Tasks:         p.Expected.Tasks,
+		Attachments:   p.Expected.Attachments,
+		Bytes:         p.Expected.Bytes,
+	}
+	result, derr := a.store.Containers.DeleteRecursiveWithAttribution(a.attributionFor(p.Actor), containerUUID, p.ExpectETag, expected)
+	if derr != nil {
+		return nil, mapContainerStoreError(derr, selector)
+	}
+	cleanupErrors := a.cleanupRecursiveAttachmentFiles(result)
+	return &WrkqContainerDeleteRecursiveResult{
+		Deleted:            boolPtr(result.Deleted),
+		ContainersDeleted:  int64Ptr(result.ContainersDeleted),
+		TasksDeleted:       int64Ptr(result.TasksDeleted),
+		AttachmentsDeleted: int64Ptr(result.AttachmentsDeleted),
+		BytesFreed:         int64Ptr(result.BytesFreed),
+		FileCleanupErrors:  cleanupErrors,
+	}, nil
+}
+
 // loadContainer reads a container by UUID into a WrkqContainer DTO.
 func (a *API) loadContainer(containerUUID string) (*WrkqContainer, error) {
 	row := a.db.QueryRow(`
@@ -133,6 +246,146 @@ func (a *API) loadContainer(containerUUID string) (*WrkqContainer, error) {
 		return nil, NewInternalError(err)
 	}
 	return c, nil
+}
+
+func (a *API) resolveContainerCreateTarget(p ContainerCreateParams) (*string, string, error) {
+	slug := strings.TrimSpace(p.Slug)
+	parentSelector := strings.TrimSpace(p.ParentPath)
+	if parentSelector == "" {
+		parentSelector = strings.TrimSpace(p.Project)
+	}
+	if slug != "" {
+		if parentSelector == "" {
+			parentSelector = strings.TrimSpace(p.Path)
+		}
+		if parentSelector == "" {
+			return nil, slug, nil
+		}
+		parentUUID, _, err := selectors.ResolveContainer(a.db, parentSelector)
+		if err != nil {
+			return nil, "", NewNotFoundError(parentSelector, "container")
+		}
+		return &parentUUID, slug, nil
+	}
+	if strings.TrimSpace(p.Path) != "" {
+		parentUUID, finalSlug, _, err := selectors.ResolveParentContainer(a.db, p.Path)
+		if err != nil {
+			return nil, "", NewNotFoundError(p.Path, "container")
+		}
+		return parentUUID, finalSlug, nil
+	}
+	if strings.TrimSpace(p.Title) != "" {
+		slug = slugFromTitle(p.Title)
+		if parentSelector == "" {
+			return nil, slug, nil
+		}
+		parentUUID, _, err := selectors.ResolveContainer(a.db, parentSelector)
+		if err != nil {
+			return nil, "", NewNotFoundError(parentSelector, "container")
+		}
+		return &parentUUID, slug, nil
+	}
+	return nil, "", NewValidationError("container slug or path is required", map[string]any{"field": "slug"})
+}
+
+func containerMutationSelector(container, path, project string) string {
+	for _, value := range []string{container, path, project} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func (a *API) rejectRootContainer(containerUUID string) error {
+	var kind string
+	if err := a.db.QueryRow("SELECT kind FROM containers WHERE uuid = ?", containerUUID).Scan(&kind); err != nil {
+		if err == sql.ErrNoRows {
+			return NewNotFoundError(containerUUID, "container")
+		}
+		return NewInternalError(err)
+	}
+	if kind == string(domain.ContainerKindRoot) {
+		return NewValidationError("root container cannot be deleted", map[string]any{"field": "container"})
+	}
+	return nil
+}
+
+func deleteRecursiveImpactResult(container *WrkqContainer, impact *store.ContainerDeleteRecursiveImpact) *WrkqContainerDeleteRecursiveResult {
+	return &WrkqContainerDeleteRecursiveResult{
+		Container:   container,
+		Containers:  int64Ptr(impact.Containers),
+		Tasks:       int64Ptr(impact.Tasks),
+		Attachments: int64Ptr(impact.Attachments),
+		Bytes:       int64Ptr(impact.Bytes),
+	}
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func (a *API) cleanupRecursiveAttachmentFiles(result *store.ContainerDeleteRecursiveResult) []string {
+	if strings.TrimSpace(a.attachDir) == "" || result == nil {
+		return nil
+	}
+	errs := []string{}
+	for _, attachment := range result.Attachments {
+		if attachment.RelativePath == "" {
+			continue
+		}
+		if err := attach.DeleteFile(a.attachDir, attachment.RelativePath); err != nil {
+			errs = append(errs, attachment.RelativePath+": "+err.Error())
+		}
+	}
+	for _, taskUUID := range result.TaskUUIDs {
+		if err := attach.DeleteTaskDir(a.attachDir, taskUUID); err != nil {
+			errs = append(errs, "tasks/"+taskUUID+": "+err.Error())
+		}
+	}
+	return errs
+}
+
+func mapContainerStoreError(err error, selector string) error {
+	if err == nil {
+		return nil
+	}
+	var mismatch *domain.ETagMismatchError
+	if errors.As(err, &mismatch) {
+		return NewConflictError("container etag precondition failed", map[string]any{"currentEtag": mismatch.Actual})
+	}
+	var impactMismatch *store.ContainerDeleteImpactMismatchError
+	if errors.As(err, &impactMismatch) {
+		return NewConflictError("container deleteRecursive impact changed", map[string]any{
+			"current": map[string]any{
+				"containers":  impactMismatch.Current.Containers,
+				"tasks":       impactMismatch.Current.Tasks,
+				"attachments": impactMismatch.Current.Attachments,
+				"bytes":       impactMismatch.Current.Bytes,
+			},
+		})
+	}
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "not found"):
+		return NewNotFoundError(selector, "container")
+	case strings.Contains(lower, "unique") || strings.Contains(lower, "constraint"):
+		return NewConflictError(msg, nil)
+	case strings.Contains(lower, "not empty") ||
+		strings.Contains(lower, "invalid") ||
+		strings.Contains(lower, "required") ||
+		strings.Contains(lower, "must ") ||
+		strings.Contains(lower, "cannot be deleted") ||
+		strings.Contains(lower, "only project containers"):
+		return NewValidationError(msg, nil)
+	default:
+		return NewInternalError(err)
+	}
 }
 
 // scanContainerRow scans a container row (column order matches the queries

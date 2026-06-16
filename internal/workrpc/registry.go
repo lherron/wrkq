@@ -125,6 +125,9 @@ var methodCatalog = []string{
 	"wrkq.relation.add",
 	"wrkq.relation.list",
 	"wrkq.relation.remove",
+	"wrkq.container.create",
+	"wrkq.container.delete",
+	"wrkq.container.deleteRecursive",
 	"wrkq.container.show",
 	"wrkq.container.list",
 	"wrkq.workflow.attach",
@@ -182,6 +185,8 @@ var dtoCatalog = []string{
 	"WrkqCommentListResult",
 	"WrkqAttachment",
 	"WrkqRelation",
+	"WrkqContainer",
+	"WrkqContainerListResult",
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
 	"WrkfInstance",
@@ -259,6 +264,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.relation.remove", apiHandler(func(ctx context.Context, p wrkqapi.RelationRemoveParams) (any, error) {
 		return wq.RelationRemove(ctx, p)
+	}))
+	s.Register("wrkq.container.create", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCreateParams) (any, error) {
+		return wq.ContainerCreate(ctx, p)
+	}))
+	s.Register("wrkq.container.delete", apiHandler(func(ctx context.Context, p wrkqapi.ContainerDeleteParams) (any, error) {
+		return wq.ContainerDelete(ctx, p)
+	}))
+	s.Register("wrkq.container.deleteRecursive", apiHandler(func(ctx context.Context, p wrkqapi.ContainerDeleteRecursiveParams) (any, error) {
+		return wq.ContainerDeleteRecursive(ctx, p)
 	}))
 	s.Register("wrkq.container.show", apiHandler(func(ctx context.Context, p wrkqapi.ContainerShowParams) (any, error) {
 		return wq.ContainerShow(ctx, p)

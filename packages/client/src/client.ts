@@ -125,6 +125,9 @@ class WorkClientImpl implements WorkClient {
       remove: (p) => this.call("wrkq.relation.remove", p),
     },
     container: {
+      create: (p) => this.call("wrkq.container.create", p),
+      delete: (p) => this.call("wrkq.container.delete", p),
+      deleteRecursive: (p) => this.call("wrkq.container.deleteRecursive", p),
       show: (p) => this.call("wrkq.container.show", p),
       list: (p) => this.call("wrkq.container.list", p ?? {}),
     },

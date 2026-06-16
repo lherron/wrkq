@@ -11,7 +11,7 @@ import { createClient } from "../src/client";
 import { WorkRpcError, isWorkRpcError, isWrkfError, isWrkqError } from "../src/errors";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type { WrkfEventQueryResult, WrkfTransitionResult } from "../src/wrkf/types";
-import type { WrkqTask } from "../src/wrkq/types";
+import type { WrkqContainer, WrkqTask } from "../src/wrkq/types";
 
 async function clientWith(transport: FakeTransport, autoInitialize = false) {
   return createClient({ transport, autoInitialize });
@@ -34,6 +34,18 @@ const MOCK_TASK: WrkqTask = {
   riskClass: "medium",
   etag: 2,
   assigneePrincipalRef: "agent:larry",
+  createdAt: "2026-06-14T00:00:00Z",
+  updatedAt: "2026-06-14T00:00:00Z",
+};
+
+const MOCK_CONTAINER: WrkqContainer = {
+  uuid: "p-1",
+  id: "P-00001",
+  slug: "project",
+  title: "Project",
+  kind: "project",
+  path: "project",
+  etag: 1,
   createdAt: "2026-06-14T00:00:00Z",
   updatedAt: "2026-06-14T00:00:00Z",
 };
@@ -174,6 +186,44 @@ describe("wrkq namespace", () => {
     const res = await client.wrkq.task.list({ state: "open" });
     expect(res.items).toHaveLength(1);
     expect(res.items[0]!.id).toBe("T-00001");
+  });
+
+  test("container mutation facade forwards create, delete, and deleteRecursive", async () => {
+    const transport = new FakeTransport()
+      .onResult("wrkq.container.create", MOCK_CONTAINER)
+      .onResult("wrkq.container.delete", { deleted: true })
+      .onResult("wrkq.container.deleteRecursive", {
+        deleted: true,
+        containersDeleted: 2,
+        tasksDeleted: 3,
+        attachmentsDeleted: 1,
+        bytesFreed: 42,
+      });
+    const client = await clientWith(transport);
+
+    const created = await client.wrkq.container.create({
+      path: "project",
+      slug: "child",
+      kind: "directory",
+    });
+    const deleted = await client.wrkq.container.delete({ path: "project/child", expectEtag: 1 });
+    const recursive = await client.wrkq.container.deleteRecursive({
+      path: "project",
+      expected: { containers: 2, tasks: 3, attachments: 1, bytes: 42 },
+    });
+
+    expect(created.id).toBe("P-00001");
+    expect(deleted.deleted).toBe(true);
+    expect(recursive.deleted).toBe(true);
+    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
+      "wrkq.container.create",
+      "wrkq.container.delete",
+      "wrkq.container.deleteRecursive",
+    ]);
+    expect(transport.capturedRequests[2]!.params).toMatchObject({
+      path: "project",
+      expected: { containers: 2, tasks: 3, attachments: 1, bytes: 42 },
+    });
   });
 
   test("workflow.attach is a wrkq verb", async () => {
