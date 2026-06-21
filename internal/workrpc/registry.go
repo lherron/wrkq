@@ -173,6 +173,12 @@ var methodCatalog = []string{
 	"wrkf.run.fail",
 	"wrkf.run.show",
 	"wrkf.run.list",
+	"wrkf.action.start",
+	"wrkf.action.bindExternal",
+	"wrkf.action.complete",
+	"wrkf.action.fail",
+	"wrkf.action.show",
+	"wrkf.action.list",
 	"wrkf.effect.list",
 	"wrkf.effect.show",
 	"wrkf.effect.claim",
@@ -421,6 +427,25 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.run.list", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
 		return api.RunList(ctx, p.TaskSelector)
+	}))
+	s.Register("wrkf.action.start", apiHandler(func(ctx context.Context, p wrkfapi.ActionStartParams) (any, error) {
+		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		return api.ActionStart(ctx, p)
+	}))
+	s.Register("wrkf.action.bindExternal", apiHandler(func(ctx context.Context, p wrkfapi.ActionBindExternalParams) (any, error) {
+		return api.ActionBindExternal(ctx, p)
+	}))
+	s.Register("wrkf.action.complete", apiHandler(func(ctx context.Context, p wrkfapi.ActionCompleteParams) (any, error) {
+		return api.ActionComplete(ctx, p)
+	}))
+	s.Register("wrkf.action.fail", apiHandler(func(ctx context.Context, p wrkfapi.ActionFailParams) (any, error) {
+		return api.ActionFail(ctx, p)
+	}))
+	s.Register("wrkf.action.show", apiHandler(func(ctx context.Context, p wrkfapi.ActionShowParams) (any, error) {
+		return api.ActionShow(ctx, p)
+	}))
+	s.Register("wrkf.action.list", apiHandler(func(ctx context.Context, p wrkfapi.ActionListParams) (any, error) {
+		return api.ActionList(ctx, p)
 	}))
 	s.Register("wrkf.effect.list", apiHandler(func(ctx context.Context, p effectListParams) (any, error) {
 		return api.EffectList(ctx, p.TaskSelector, p.All)

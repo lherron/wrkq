@@ -203,6 +203,14 @@ class WorkClientImpl implements WorkClient {
       show: (p) => this.call("wrkf.run.show", p),
       list: (p) => this.call("wrkf.run.list", p),
     },
+    action: {
+      start: (p) => this.call("wrkf.action.start", p),
+      bindExternal: (p) => this.call("wrkf.action.bindExternal", p),
+      complete: (p) => this.call("wrkf.action.complete", p),
+      fail: (p) => this.call("wrkf.action.fail", p),
+      show: (p) => this.call("wrkf.action.show", p),
+      list: (p) => this.call("wrkf.action.list", p),
+    },
     effect: {
       list: (p) => this.call("wrkf.effect.list", p),
       show: (p) => this.call("wrkf.effect.show", p),

@@ -11,6 +11,15 @@
  */
 
 import type {
+  WrkfActionBindExternalParams,
+  WrkfActionCompleteParams,
+  WrkfActionCompleteResult,
+  WrkfActionFailParams,
+  WrkfActionListParams,
+  WrkfActionListResult,
+  WrkfActionRun,
+  WrkfActionShowParams,
+  WrkfActionStartParams,
   WrkfCheckListParams,
   WrkfCheckPreflightParams,
   WrkfCheckRun,
@@ -138,6 +147,15 @@ export interface WrkfRunFacade {
   list(params: WrkfRunListParams): Promise<WrkfRun[]>;
 }
 
+export interface WrkfActionFacade {
+  start(params: WrkfActionStartParams): Promise<WrkfActionRun>;
+  bindExternal(params: WrkfActionBindExternalParams): Promise<WrkfActionRun>;
+  complete(params: WrkfActionCompleteParams): Promise<WrkfActionCompleteResult>;
+  fail(params: WrkfActionFailParams): Promise<WrkfActionRun>;
+  show(params: WrkfActionShowParams): Promise<WrkfActionRun>;
+  list(params: WrkfActionListParams): Promise<WrkfActionListResult>;
+}
+
 export interface WrkfEffectFacade {
   list(params: WrkfEffectListParams): Promise<WrkfEffect[]>;
   show(params: WrkfEffectShowParams): Promise<WrkfEffect>;
@@ -159,5 +177,6 @@ export interface WrkfFacade {
   readonly hook: WrkfHookFacade;
   readonly transition: WrkfTransitionFacade;
   readonly run: WrkfRunFacade;
+  readonly action: WrkfActionFacade;
   readonly effect: WrkfEffectFacade;
 }

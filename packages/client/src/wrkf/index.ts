@@ -7,6 +7,7 @@
 
 export type * from "./types.js";
 export type {
+  WrkfActionFacade,
   WrkfCheckFacade,
   WrkfEffectFacade,
   WrkfEvidenceFacade,

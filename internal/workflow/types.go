@@ -459,6 +459,7 @@ type Run struct {
 	DeliveryRef    string `json:"deliveryRef,omitempty"`
 	Lane           string `json:"lane,omitempty"`
 	ExternalRunRef string `json:"externalRunRef,omitempty"`
+	Action         string `json:"action,omitempty"`
 	Status         string `json:"status"`
 	StartedAt      string `json:"startedAt"`
 	CompletedAt    string `json:"completedAt,omitempty"`
@@ -470,6 +471,10 @@ type StartRunOptions struct {
 	DeliveryRef    string
 	Lane           string
 	ExternalRunRef string
+	// Action is the optional semantic-action label (triage/implement/...) for
+	// runs created through the wrkf.action.* surface. Empty for low-level
+	// wrkf.run.start callers.
+	Action string
 }
 
 type BindExternalOptions struct {
@@ -581,6 +586,10 @@ type TransitionOptions struct {
 	DryRun         bool
 	HookCatalog    *HookCatalog
 	TemplateDir    string
+	// RunID, when set, links the resulting workflow.transitioned event to a
+	// wrkf run (used by the wrkf.action.* surface so action history can join
+	// transition events to their action run).
+	RunID string
 }
 
 type nowFunc func() time.Time

@@ -513,6 +513,108 @@ export interface WrkfRunListParams {
   instanceId?: string;
 }
 
+// ── Actions (low-ceremony composition over run/evidence/transition) ──────────
+
+/** Workflow template ref backing an action run. */
+export interface WrkfActionWorkflowRef {
+  id: string;
+  version: string;
+  hash?: string;
+}
+
+/** Canonical semantic view of one action run. */
+export interface WrkfActionRun {
+  actionRunId: string;
+  runId: string;
+  task: string;
+  instanceId: string;
+  workflow: WrkfActionWorkflowRef;
+  action: string;
+  role: string;
+  actor?: string;
+  lane?: string;
+  deliveryRef?: string;
+  externalRunRef?: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string;
+  terminalResult?: string;
+  evidenceIds?: string[];
+  evidenceKinds?: string[];
+  transitionEventIds?: string[];
+  [k: string]: unknown;
+}
+
+export interface WrkfActionEvidenceInput {
+  kind?: string;
+  ref?: string;
+  summary?: string;
+  facts?: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  contentHash?: string;
+  idempotencyKey?: string;
+}
+
+export interface WrkfActionStartParams {
+  task?: string;
+  instanceId?: string;
+  workflow?: string;
+  action: "triage" | "implement" | "review" | "verify" | (string & {});
+  role?: string;
+  actor?: string;
+  lane?: string;
+  deliveryRef?: string | Record<string, unknown>;
+  externalRunRef?: string;
+  idempotencyKey?: string;
+}
+
+export interface WrkfActionBindExternalParams {
+  actionRunId: string;
+  externalRunRef: string;
+  deliveryRef?: string | Record<string, unknown>;
+  lane?: string;
+  idempotencyKey?: string;
+}
+
+export interface WrkfActionCompleteParams {
+  actionRunId: string;
+  evidence?: WrkfActionEvidenceInput;
+  /** Transition id to apply, or false to skip; omit for default resolution. */
+  transition?: string | false;
+  transitionIdempotencyKey?: string;
+  runSummary?: string;
+}
+
+export interface WrkfActionCompleteResult {
+  run: WrkfActionRun;
+  evidence?: WrkfEvidence;
+  transition?: WrkfTransitionResult;
+}
+
+export interface WrkfActionFailParams {
+  actionRunId: string;
+  summary: string;
+  evidence?: WrkfActionEvidenceInput;
+}
+
+export interface WrkfActionShowParams {
+  actionRunId: string;
+}
+
+export interface WrkfActionListParams {
+  task?: string;
+  instanceId?: string;
+  includeClosedInstances?: boolean;
+  status?: string;
+  action?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface WrkfActionListResult {
+  items: WrkfActionRun[];
+}
+
 // ── Effects ──────────────────────────────────────────────────────────────────
 
 export interface WrkfEffectListParams {

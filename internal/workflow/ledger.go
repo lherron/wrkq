@@ -1473,7 +1473,7 @@ func effectByIDTx(tx *sql.Tx, id string) ([]Effect, error) {
 func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
 		FROM workflow_runs
 		WHERE instance_id = ? AND role = ? AND status = 'active' AND COALESCE(delivery_ref,'') != ''
 		ORDER BY started_at DESC, id DESC LIMIT 1
@@ -1486,7 +1486,7 @@ func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
 		return nil, fmt.Errorf("role %s is not bound; run wrkf run bind TASK %s HANDLE", role, role)
 	}
 	var r Run
-	if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
+	if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
 		return nil, err
 	}
 	return &r, rows.Err()
@@ -1838,7 +1838,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		result["transition"] = transitionID
 		result["outcome"] = chosen.ID
 		resultJSON, _ := json.Marshal(result)
-		if err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.Actor, opts.Role, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}); err != nil {
+		if err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.Actor, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}); err != nil {
 			return err
 		}
 		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.Actor)
@@ -1928,7 +1928,7 @@ func transitionResultMap(taskSelector string, updated Instance, eventID string, 
 	}
 }
 
-func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
+func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
@@ -1936,11 +1936,11 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role string,
 	eventHash := chainedEventHash(prevHash, payloadJSON)
 	_, err := tx.Exec(`
 		INSERT INTO workflow_events (
-			id, instance_id, seq, schema_version, type, actor, role,
+			id, instance_id, seq, schema_version, type, actor, role, run_id,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
-	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	return err
 }
 
@@ -2062,10 +2062,10 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 		_, err = tx.Exec(`
 			INSERT INTO workflow_runs (
 				id, instance_id, role, actor, delivery_ref, lane, external_run_ref,
-				status, started_at, idempotency_key, request_hash
+				status, started_at, idempotency_key, request_hash, action
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
-		`, id, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash))
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+		`, id, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash), nullIfEmpty(opts.Action))
 		if err != nil {
 			if isRunUniqueConflict(err) {
 				return idempotencyMismatchError(opts.IdempotencyKey)
@@ -2082,7 +2082,7 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 		if err != nil {
 			return err
 		}
-		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Status: "active", StartedAt: now}
+		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now}
 		return nil
 	})
 	return run, err
@@ -2183,9 +2183,9 @@ func (s *Service) ShowRun(id string) (*Run, error) {
 	var r Run
 	err := s.db.QueryRow(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
 		FROM workflow_runs WHERE id = ?
-	`, id).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
+	`, id).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("run not found: %s", id)
@@ -2201,7 +2201,7 @@ type runRowScanner interface {
 
 func scanRun(scanner runRowScanner) (*Run, error) {
 	var r Run
-	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
+	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
 	if err != nil {
 		return nil, err
 	}
@@ -2211,7 +2211,7 @@ func scanRun(scanner runRowScanner) (*Run, error) {
 func selectRunByID(tx *sql.Tx, id string) (*Run, error) {
 	run, err := scanRun(tx.QueryRow(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
 		FROM workflow_runs WHERE id = ?
 	`, id))
 	if err != nil {
@@ -2228,9 +2228,9 @@ func selectRunByInstanceIdempotencyKey(tx *sql.Tx, instanceID, key string) (*Run
 	var requestHash string
 	err := tx.QueryRow(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''), COALESCE(request_hash,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''), COALESCE(request_hash,'')
 		FROM workflow_runs WHERE instance_id = ? AND idempotency_key = ?
-	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &requestHash)
+	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &requestHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", nil
@@ -2248,6 +2248,7 @@ func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) s
 		DeliveryRef     string `json:"deliveryRef,omitempty"`
 		Lane            string `json:"lane,omitempty"`
 		ExternalRunRef  string `json:"externalRunRef,omitempty"`
+		Action          string `json:"action,omitempty"`
 		IdempotencySalt string `json:"idempotencySalt"`
 	}{
 		InstanceID:      instanceID,
@@ -2256,6 +2257,7 @@ func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) s
 		DeliveryRef:     opts.DeliveryRef,
 		Lane:            opts.Lane,
 		ExternalRunRef:  opts.ExternalRunRef,
+		Action:          opts.Action,
 		IdempotencySalt: "workflow.run.start.v1",
 	}
 	b, _ := json.Marshal(payload)
@@ -2284,7 +2286,7 @@ func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
 	}
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
 		FROM workflow_runs WHERE instance_id = ? ORDER BY started_at, id
 	`, inst.ID)
 	if err != nil {
@@ -2294,7 +2296,7 @@ func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
 	var out []Run
 	for rows.Next() {
 		var r Run
-		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
+		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

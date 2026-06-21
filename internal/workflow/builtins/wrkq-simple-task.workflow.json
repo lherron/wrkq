@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "wrkq-simple-task",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "description": "Built-in low-ceremony task lifecycle workflow for atomic wrkf actions (triage, implement, verify, review). One forward transition per semantic action; no evidence/SoD gates.",
+  "initial": {
+    "status": "open",
+    "phase": "intake"
+  },
+  "roles": {
+    "triager": {
+      "description": "Triages the task and records the triage result."
+    },
+    "implementer": {
+      "description": "Implements the task and records the implementation result."
+    },
+    "tester": {
+      "description": "Verifies the task and records the verification result."
+    },
+    "reviewer": {
+      "description": "Reviews the task and records the review result."
+    },
+    "system": {
+      "description": "System effect adapter and administrative workflow authority."
+    }
+  },
+  "states": [
+    {
+      "status": "open",
+      "phase": "intake",
+      "description": "Task is attached to the simple workflow and awaiting triage."
+    },
+    {
+      "status": "active",
+      "phase": "ready",
+      "description": "Triage is complete; implementation may begin."
+    },
+    {
+      "status": "active",
+      "phase": "implemented",
+      "description": "Implementation is complete; verification may begin."
+    },
+    {
+      "status": "active",
+      "phase": "reviewing",
+      "description": "Verification is complete; review may begin."
+    },
+    {
+      "status": "closed",
+      "phase": "done",
+      "description": "Terminal success: review is complete."
+    },
+    {
+      "status": "closed",
+      "phase": "cancelled",
+      "description": "Terminal cancellation."
+    }
+  ],
+  "evidenceKinds": {
+    "triage_result": {
+      "class": "note",
+      "description": "Output/proof produced by a triage action."
+    },
+    "implement_result": {
+      "class": "note",
+      "description": "Output/proof produced by an implement action."
+    },
+    "verify_result": {
+      "class": "verify",
+      "description": "Output/proof produced by a verify action."
+    },
+    "review_result": {
+      "class": "review",
+      "description": "Output/proof produced by a review action."
+    },
+    "failure_result": {
+      "class": "note",
+      "description": "Output/proof produced by a failed action."
+    }
+  },
+  "transitions": [
+    {
+      "id": "triage_complete",
+      "description": "Triage is complete; move the task into the ready state.",
+      "from": {
+        "status": "open",
+        "phase": "intake"
+      },
+      "by": [
+        "triager"
+      ],
+      "outcomes": [
+        {
+          "id": "ready",
+          "description": "Triage recorded; implementation may proceed.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          }
+        }
+      ],
+      "responsibility": {
+        "role": "triager",
+        "scope": "task",
+        "lane": "triage"
+      }
+    },
+    {
+      "id": "implement_complete",
+      "description": "Implementation is complete; move the task into the implemented state.",
+      "from": {
+        "status": "active",
+        "phase": "ready"
+      },
+      "by": [
+        "implementer"
+      ],
+      "outcomes": [
+        {
+          "id": "implemented",
+          "description": "Implementation recorded; verification may proceed.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "implemented"
+          }
+        }
+      ],
+      "responsibility": {
+        "role": "implementer",
+        "scope": "task",
+        "lane": "implementation"
+      }
+    },
+    {
+      "id": "verify_complete",
+      "description": "Verification is complete; move the task into the reviewing state.",
+      "from": {
+        "status": "active",
+        "phase": "implemented"
+      },
+      "by": [
+        "tester"
+      ],
+      "outcomes": [
+        {
+          "id": "verified",
+          "description": "Verification recorded; review may proceed.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "active",
+            "phase": "reviewing"
+          }
+        }
+      ],
+      "responsibility": {
+        "role": "tester",
+        "scope": "task",
+        "lane": "verify"
+      }
+    },
+    {
+      "id": "review_complete",
+      "description": "Review is complete; close the task.",
+      "from": {
+        "status": "active",
+        "phase": "reviewing"
+      },
+      "by": [
+        "reviewer"
+      ],
+      "outcomes": [
+        {
+          "id": "done",
+          "description": "Review recorded; close the workflow.",
+          "when": {
+            "always": true
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          }
+        }
+      ],
+      "responsibility": {
+        "role": "reviewer",
+        "scope": "task",
+        "lane": "review"
+      }
+    }
+  ]
+}

@@ -315,6 +315,13 @@ func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map
 	if err != nil {
 		return nil, err
 	}
+	return s.installTemplateCanonical(tpl, canonical, hash, actor, catalog)
+}
+
+// installTemplateCanonical installs an already-parsed template. It is shared by
+// the file-based InstallTemplate and the embedded built-in installer so both
+// honor the same validation and idempotent-by-hash semantics.
+func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash, actor string, catalog *HookCatalog) (map[string]interface{}, error) {
 	if errs := ValidateTemplate(tpl, canonical, catalog); len(errs) > 0 {
 		return nil, fmt.Errorf("invalid template: %s", strings.Join(errs, "; "))
 	}

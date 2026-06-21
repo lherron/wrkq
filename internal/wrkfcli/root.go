@@ -62,6 +62,7 @@ func init() {
 	rootCmd.AddCommand(workflowCmd())
 	rootCmd.AddCommand(taskCmd())
 	rootCmd.AddCommand(runCmd())
+	rootCmd.AddCommand(actionCmd())
 	rootCmd.AddCommand(nextCmd())
 	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(transitionCmd())
@@ -857,6 +858,192 @@ func runCmd() *cobra.Command {
 	}
 	cmd.AddCommand(start, bind, finish, fail, show, list)
 	return cmd
+}
+
+func actionCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "action", Short: "Low-ceremony task lifecycle actions over wrkf runs"}
+	var (
+		workflowRef, action, role, actor, lane, deliveryRef, externalRunRef, idempotencyKey string
+		evidenceKind, evidenceRef, evidenceSummary, evidenceFacts, evidenceData             string
+		runSummary, transition                                                              string
+		noTransition, includeClosed                                                         bool
+		status, actionFilter                                                                string
+		limit                                                                               int
+	)
+
+	actionEvidence := func() *workflow.ActionEvidenceInput {
+		if evidenceKind == "" && evidenceRef == "" && evidenceSummary == "" && evidenceFacts == "" && evidenceData == "" {
+			return nil
+		}
+		return &workflow.ActionEvidenceInput{
+			Kind: evidenceKind, Ref: evidenceRef, Summary: evidenceSummary,
+			Facts: evidenceFacts, Data: evidenceData,
+		}
+	}
+
+	start := &cobra.Command{
+		Use:  "start TASK --action ACTION",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			if action == "" {
+				return fmt.Errorf("--action is required")
+			}
+			run, err := a.service.StartAction(workflow.StartActionParams{
+				Task:           args[0],
+				Workflow:       workflowRef,
+				Action:         action,
+				Role:           role,
+				Actor:          firstNonEmpty(actor, a.actor),
+				Lane:           lane,
+				DeliveryRef:    deliveryRef,
+				ExternalRunRef: externalRunRef,
+				IdempotencyKey: idempotencyKey,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, run)
+		}),
+	}
+	start.Flags().StringVar(&action, "action", "", "Semantic action (triage|implement|review|verify|...)")
+	start.Flags().StringVar(&workflowRef, "workflow", "", "Workflow ref to attach when none exists (defaults to built-in wrkq-simple-task@1)")
+	start.Flags().StringVar(&role, "role", "", "Workflow role (defaults from action)")
+	start.Flags().StringVar(&actor, "actor", "", "Actor id")
+	start.Flags().StringVar(&lane, "lane", "", "Lane (defaults from action)")
+	start.Flags().StringVar(&deliveryRef, "delivery-ref", "", "Delivery ref")
+	start.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref (hrc:<runId>)")
+	start.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key")
+
+	bind := &cobra.Command{
+		Use:  "bind ACTION_RUN --external-run-ref hrc:RUNID",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			if externalRunRef == "" {
+				return fmt.Errorf("--external-run-ref is required")
+			}
+			run, err := a.service.BindActionExternal(workflow.BindActionExternalParams{
+				ActionRunID:    args[0],
+				ExternalRunRef: externalRunRef,
+				DeliveryRef:    deliveryRef,
+				Lane:           lane,
+				IdempotencyKey: idempotencyKey,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, run)
+		}),
+	}
+	bind.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref (hrc:<runId>)")
+	bind.Flags().StringVar(&deliveryRef, "delivery-ref", "", "Delivery ref")
+	bind.Flags().StringVar(&lane, "lane", "", "Lane")
+	bind.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key")
+
+	complete := &cobra.Command{
+		Use:  "complete ACTION_RUN",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			mode := workflow.TransitionDefault
+			transitionID := ""
+			switch {
+			case noTransition:
+				mode = workflow.TransitionSkip
+			case transition != "":
+				mode = workflow.TransitionExplicit
+				transitionID = transition
+			}
+			out, err := a.service.CompleteAction(workflow.CompleteActionParams{
+				ActionRunID:    args[0],
+				Evidence:       actionEvidence(),
+				TransitionMode: mode,
+				TransitionID:   transitionID,
+				RunSummary:     runSummary,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, out)
+		}),
+	}
+	complete.Flags().StringVar(&evidenceKind, "kind", "", "Evidence kind (defaults to <action>_result)")
+	complete.Flags().StringVar(&evidenceRef, "ref", "", "Evidence ref")
+	complete.Flags().StringVar(&evidenceSummary, "summary", "", "Evidence summary")
+	complete.Flags().StringVar(&evidenceFacts, "facts", "", "Evidence facts JSON object")
+	complete.Flags().StringVar(&evidenceData, "data", "", "Evidence data JSON")
+	complete.Flags().StringVar(&runSummary, "run-summary", "", "Run terminal summary")
+	complete.Flags().StringVar(&transition, "transition", "", "Explicit transition id (default: auto-resolve)")
+	complete.Flags().BoolVar(&noTransition, "no-transition", false, "Skip the transition; finish the run only")
+
+	fail := &cobra.Command{
+		Use:  "fail ACTION_RUN --run-summary SUMMARY",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			if runSummary == "" {
+				return fmt.Errorf("--run-summary is required")
+			}
+			run, err := a.service.FailAction(workflow.FailActionParams{
+				ActionRunID: args[0],
+				Summary:     runSummary,
+				Evidence:    actionEvidence(),
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, run)
+		}),
+	}
+	fail.Flags().StringVar(&runSummary, "run-summary", "", "Failure summary")
+	fail.Flags().StringVar(&evidenceKind, "kind", "", "Failure evidence kind (defaults to failure_result)")
+	fail.Flags().StringVar(&evidenceRef, "ref", "", "Failure evidence ref")
+	fail.Flags().StringVar(&evidenceSummary, "summary", "", "Failure evidence summary")
+	fail.Flags().StringVar(&evidenceFacts, "facts", "", "Failure evidence facts JSON object")
+	fail.Flags().StringVar(&evidenceData, "data", "", "Failure evidence data JSON")
+
+	show := &cobra.Command{
+		Use:  "show ACTION_RUN",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := a.service.ShowAction(args[0])
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, run)
+		}),
+	}
+
+	list := &cobra.Command{
+		Use:  "list TASK",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			runs, err := a.service.ListActions(workflow.ListActionsParams{
+				Task:                   args[0],
+				IncludeClosedInstances: includeClosed,
+				Status:                 status,
+				Action:                 actionFilter,
+				Limit:                  limit,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, map[string]interface{}{"items": runs})
+		}),
+	}
+	list.Flags().BoolVar(&includeClosed, "include-closed-instances", false, "Include runs from closed workflow instances")
+	list.Flags().StringVar(&status, "status", "", "Filter by run status")
+	list.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
+	list.Flags().IntVar(&limit, "limit", 0, "Maximum runs to return")
+
+	cmd.AddCommand(start, bind, complete, fail, show, list)
+	return cmd
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func hookCmd() *cobra.Command {

@@ -821,6 +821,82 @@ interface WrkfRunStartParams {
 }
 ```
 
+#### Actions (low-ceremony composition)
+
+The `wrkf.action.*` surface composes the run / evidence / transition primitives
+into single semantic task-lifecycle calls. It is not a second ledger: an action
+run *is* a `workflow_runs` row (carrying a semantic `action` label), evidence is
+recorded via `wrkf.evidence.add`, and state moves go through `wrkf.transition.apply`.
+When no workflow is attached and none is supplied, the built-in
+`wrkq-simple-task@1` workflow is installed and attached automatically. The action
+surface never reads or writes legacy `cp_*` / `run_status` task fields.
+
+```
+wrkf.action.start
+wrkf.action.bindExternal
+wrkf.action.complete
+wrkf.action.fail
+wrkf.action.show
+wrkf.action.list
+```
+
+```ts
+interface WrkfActionStartParams {
+  task?: string;
+  instanceId?: string;
+  workflow?: string;            // defaults to built-in wrkq-simple-task@1
+  action: "triage" | "implement" | "review" | "verify" | (string & {});
+  role?: string;                // defaults from action (triage→triager, ...)
+  actor?: string;
+  lane?: string;                // defaults from action
+  deliveryRef?: string | object;
+  externalRunRef?: string;
+  idempotencyKey?: string;
+}
+
+interface WrkfActionRun {
+  actionRunId: string;          // == runId (workflow_runs.id)
+  runId: string;
+  task: string;
+  instanceId: string;
+  workflow: { id: string; version: string; hash?: string };
+  action: string;
+  role: string;
+  actor?: string;
+  lane?: string;
+  deliveryRef?: string;
+  externalRunRef?: string;      // HRC bindings standardized as hrc:<runId>
+  status: string;
+  startedAt: string;
+  completedAt?: string;
+  terminalResult?: string;
+  evidenceIds?: string[];       // run-linked (show/list)
+  evidenceKinds?: string[];
+  transitionEventIds?: string[];
+}
+
+interface WrkfActionCompleteParams {
+  actionRunId: string;
+  evidence?: {                  // default kind <action>_result, ref wrkf-action:<id>
+    kind?: string; ref?: string; summary?: string;
+    facts?: object; data?: object; contentHash?: string; idempotencyKey?: string;
+  };
+  transition?: string | false;  // omit: default-resolve; false: skip
+  transitionIdempotencyKey?: string;
+  runSummary?: string;
+}
+
+interface WrkfActionListParams {
+  task?: string;
+  instanceId?: string;
+  includeClosedInstances?: boolean;   // span all instances of the task
+  status?: string;
+  action?: string;
+  limit?: number;
+  cursor?: string;
+}
+```
+
 #### Effects
 
 ```
