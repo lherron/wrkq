@@ -319,7 +319,14 @@ interface WrkqTaskListParams {
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
+  summary?: boolean;     // omit description/specification bodies; keep has* booleans
 }
+
+When `summary` is true, `wrkq.task.list` returns `description: ""` and
+`specification: ""` on each item to keep list payloads small. The server still
+returns `hasDescription` and `hasSpecification`, computed with
+`TRIM(COALESCE(body,''))`, so whitespace-only bodies report `false`. Omitting
+`summary` preserves full-body list behavior.
 
 interface WrkqTaskUpdateParams {
   task: string;
@@ -352,6 +359,8 @@ interface WrkqTask {
   kind: string;
   description: string;
   specification: string;
+  hasDescription: boolean;    // trim-aware presence of description
+  hasSpecification: boolean;  // trim-aware presence of specification
   labels: string[];
   meta: Record<string, unknown>;
   etag: number;

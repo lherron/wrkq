@@ -19,6 +19,8 @@ import (
 
 const nsTaskCreate = "wrkq.task.create"
 
+const taskPresenceTrimCharsSQL = "char(9)||char(10)||char(11)||char(12)||char(13)||' '"
+
 // TaskCreate creates a task and returns the WrkqTask DTO. It enforces mandatory
 // idempotency when an idempotencyKey is supplied (§8.2).
 func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, error) {
@@ -287,10 +289,17 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		return nil, NewValidationError("invalid cursor", map[string]any{"field": "cursor"})
 	}
 
-	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, " +
+	bodyColumns := "t.description, t.specification"
+	if p.Summary {
+		bodyColumns = "'' AS description, '' AS specification"
+	}
+	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", " +
 		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
 		"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
-		"COALESCE(cp.path || '/' || t.slug, t.slug) FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid"
+		"COALESCE(cp.path || '/' || t.slug, t.slug), " +
+		"CAST(LENGTH(TRIM(COALESCE(t.description,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_description, " +
+		"CAST(LENGTH(TRIM(COALESCE(t.specification,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_specification " +
+		"FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid"
 	if page.WhereClause != "" {
 		where = append(where, page.WhereClause)
 		args = append(args, page.Params...)
@@ -783,7 +792,10 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
-			"COALESCE(cp.path || '/' || t.slug, t.slug) FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE t.uuid = ?",
+			"COALESCE(cp.path || '/' || t.slug, t.slug), "+
+			"CAST(LENGTH(TRIM(COALESCE(t.description,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_description, "+
+			"CAST(LENGTH(TRIM(COALESCE(t.specification,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_specification "+
+			"FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE t.uuid = ?",
 		uuid,
 	)
 	task, _, err := scanTaskRow(row)
@@ -813,11 +825,12 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		startAt, dueAt, completedAt, archivedAt, deletedAt, acknowledgedAt          sql.NullString
 		assignee, createdByPrincipal, updatedByPrincipal                            sql.NullString
 		riskClass, path                                                             string
+		hasDescription, hasSpecification                                            int
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &state, &priority, &kind, &description, &specification,
 		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
-		&assignee, &createdByPrincipal, &updatedByPrincipal, &riskClass, &path,
+		&assignee, &createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification,
 	); err != nil {
 		return nil, "", err
 	}
@@ -834,6 +847,8 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		RiskClass:             riskClass,
 		Description:           description,
 		Specification:         specification,
+		HasDescription:        hasDescription != 0,
+		HasSpecification:      hasSpecification != 0,
 		Labels:                parseLabels(labels.String),
 		Meta:                  parseMeta(meta.String),
 		ETag:                  etag,

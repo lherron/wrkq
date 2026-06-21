@@ -9,6 +9,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
@@ -166,6 +167,7 @@ type treeNode struct {
 
 type treeOutput struct {
 	Path                         string      `json:"path"`
+	ProjectID                    string      `json:"project_id,omitempty"`
 	Children                     []*treeNode `json:"children"`
 	HiddenContainersNotDisplayed int         `json:"hidden_containers_not_displayed"`
 }
@@ -204,29 +206,54 @@ func displayTree(w io.Writer, database *db.DB, rootPath string, maxDepth int, in
 		outputPath = "."
 	}
 
+	// Resolve the friendly ID of the top-level parent project so the tree header
+	// can anchor the view to a concrete project (e.g. `wrkq [P-00060]`).
+	projectID := resolveTopLevelProjectID(database, rootPath)
+
 	switch {
 	case legacyPorcelain:
-		return printTreeOutput(w, root, rootPath, true)
+		return printTreeOutput(w, root, rootPath, projectID, true)
 	case sel.Mode == outputModeJSON:
 		return writeJSONOutput(w, sel, treeOutput{
 			Path:                         outputPath,
+			ProjectID:                    projectID,
 			Children:                     root.Children,
 			HiddenContainersNotDisplayed: root.HiddenContainerCount,
 		})
 	case sel.Mode == outputModeNDJSON:
 		return writeNDJSONOutput(w, flattenTree(root, rootPath))
 	default:
-		return printTreeOutput(w, root, rootPath, false)
+		return printTreeOutput(w, root, rootPath, projectID, false)
 	}
 }
 
-func printTreeOutput(w io.Writer, root *treeNode, rootPath string, porcelain bool) error {
-	// Print tree
-	if rootPath == "" {
-		fmt.Fprintln(w, ".")
-	} else {
-		fmt.Fprintln(w, rootPath)
+// resolveTopLevelProjectID returns the friendly ID (e.g. "P-00060") of the
+// top-level project that owns rootPath. The top-level project is the first
+// path segment; subpaths still resolve to their owning project. Returns "" for
+// the multi-project root view or when the project can't be resolved.
+func resolveTopLevelProjectID(database *db.DB, rootPath string) string {
+	segments := paths.SplitPath(rootPath)
+	if len(segments) == 0 {
+		return ""
 	}
+	_, friendlyID, err := selectors.WalkContainerPath(database, segments[0])
+	if err != nil {
+		return ""
+	}
+	return friendlyID
+}
+
+func printTreeOutput(w io.Writer, root *treeNode, rootPath, projectID string, porcelain bool) error {
+	// Print tree header. The top-level parent project's ID is annotated on the
+	// header in the pretty view so the tree is anchored to a concrete project.
+	header := rootPath
+	if header == "" {
+		header = "."
+	}
+	if projectID != "" && !porcelain {
+		header += " " + paint(colDim, fmt.Sprintf("[%s]", projectID))
+	}
+	fmt.Fprintln(w, header)
 
 	printTree(w, root, "", true, porcelain)
 	if root.HiddenContainerCount > 0 && !porcelain {

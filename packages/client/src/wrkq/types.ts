@@ -61,6 +61,8 @@ export interface WrkqTaskListParams {
   direction?: "asc" | "desc";
   /** Include tasks in containers nested under `path` (the whole subtree). Default false. */
   recursive?: boolean;
+  /** Omit description/specification bodies from list items while retaining presence booleans. */
+  summary?: boolean;
 }
 
 export interface WrkqTaskUpdateParams {
@@ -119,6 +121,8 @@ export interface WrkqTask {
   kind: string;
   description: string;
   specification: string;
+  hasDescription?: boolean;
+  hasSpecification?: boolean;
   labels: string[];
   meta: Record<string, unknown>;
   riskClass?: WrkqRiskClass;

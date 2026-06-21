@@ -157,6 +157,19 @@ func p2AssertHasItems(t *testing.T, result map[string]any, label string) {
 	}
 }
 
+func p2TaskItemByID(t *testing.T, result map[string]any, id string) map[string]any {
+	t.Helper()
+	items, _ := result["items"].([]any)
+	for _, item := range items {
+		m, _ := item.(map[string]any)
+		if m["id"] == id {
+			return m
+		}
+	}
+	t.Fatalf("task.list result did not include %s; items=%#v", id, items)
+	return nil
+}
+
 // mapKeys returns the keys of a map as a slice (for error messages).
 func mapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
@@ -684,6 +697,179 @@ func TestWrkqTaskList_CursorPagination(t *testing.T) {
 		mkRPC("l2", "wrkq.task.list", map[string]any{"cursor": nextCursor, "limit": 2}),
 	)
 	p2ResultOrFail(t, p2Frames[1], "list page 2 via cursor")
+}
+
+func TestWrkqTaskList_SummaryProjectionOmitsBodiesReportsPresence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	created := p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.task.create", map[string]any{
+			"title":         "Summary Bodies",
+			"description":   "body text",
+			"specification": "spec text",
+			"state":         "open",
+		}),
+		mkRPC("c2", "wrkq.task.create", map[string]any{
+			"title": "Summary Empty",
+			"state": "open",
+		}),
+		mkRPC("c3", "wrkq.task.create", map[string]any{
+			"title":         "Summary Whitespace",
+			"description":   " \n\t ",
+			"specification": "   ",
+			"state":         "open",
+		}),
+	)
+	bodyID, _ := p2ResultOrFail(t, created[1], "create body")["id"].(string)
+	emptyID, _ := p2ResultOrFail(t, created[2], "create empty")["id"].(string)
+	whiteID, _ := p2ResultOrFail(t, created[3], "create whitespace")["id"].(string)
+
+	frames := p2Run(t, dbPath,
+		mkRPC("l1", "wrkq.task.list", map[string]any{"state": "open", "limit": 100, "summary": true}),
+	)
+	result := p2ResultOrFail(t, frames[1], "summary task.list")
+
+	body := p2TaskItemByID(t, result, bodyID)
+	if body["description"] != "" || body["specification"] != "" {
+		t.Fatalf("summary=true must omit bodies for non-empty task, got description=%q specification=%q", body["description"], body["specification"])
+	}
+	if body["hasDescription"] != true || body["hasSpecification"] != true {
+		t.Fatalf("summary=true non-empty task presence: want true/true, got hasDescription=%v hasSpecification=%v", body["hasDescription"], body["hasSpecification"])
+	}
+
+	empty := p2TaskItemByID(t, result, emptyID)
+	if empty["description"] != "" || empty["specification"] != "" {
+		t.Fatalf("summary=true must omit bodies for empty task, got description=%q specification=%q", empty["description"], empty["specification"])
+	}
+	if empty["hasDescription"] != false || empty["hasSpecification"] != false {
+		t.Fatalf("summary=true empty task presence: want false/false, got hasDescription=%v hasSpecification=%v", empty["hasDescription"], empty["hasSpecification"])
+	}
+
+	white := p2TaskItemByID(t, result, whiteID)
+	if white["description"] != "" || white["specification"] != "" {
+		t.Fatalf("summary=true must omit bodies for whitespace task, got description=%q specification=%q", white["description"], white["specification"])
+	}
+	if white["hasDescription"] != false || white["hasSpecification"] != false {
+		t.Fatalf("summary=true whitespace task presence must be trim-aware false/false, got hasDescription=%v hasSpecification=%v", white["hasDescription"], white["hasSpecification"])
+	}
+}
+
+func TestWrkqTaskList_DefaultProjectionKeepsBodiesAndPresence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	created := p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.task.create", map[string]any{
+			"title":         "Full Bodies",
+			"description":   "visible body",
+			"specification": "visible spec",
+			"state":         "open",
+		}),
+	)
+	taskID, _ := p2ResultOrFail(t, created[1], "create full body")["id"].(string)
+
+	frames := p2Run(t, dbPath,
+		mkRPC("l1", "wrkq.task.list", map[string]any{"state": "open", "limit": 100}),
+	)
+	item := p2TaskItemByID(t, p2ResultOrFail(t, frames[1], "default task.list"), taskID)
+	if item["description"] != "visible body" || item["specification"] != "visible spec" {
+		t.Fatalf("default task.list must keep full bodies, got description=%q specification=%q", item["description"], item["specification"])
+	}
+	if item["hasDescription"] != true || item["hasSpecification"] != true {
+		t.Fatalf("default task.list presence: want true/true, got hasDescription=%v hasSpecification=%v", item["hasDescription"], item["hasSpecification"])
+	}
+}
+
+func TestWrkqTaskLoadBackedPresenceBooleans(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	createdFrames := p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.task.create", map[string]any{
+			"title":         "Load Presence",
+			"specification": "initial spec",
+		}),
+	)
+	created := p2ResultOrFail(t, createdFrames[1], "create load presence")
+	taskID, _ := created["id"].(string)
+	if created["hasDescription"] != false || created["hasSpecification"] != true {
+		t.Fatalf("create DTO presence: want false/true, got hasDescription=%v hasSpecification=%v", created["hasDescription"], created["hasSpecification"])
+	}
+
+	updatedFrames := p2Run(t, dbPath,
+		mkRPC("u1", "wrkq.task.update", map[string]any{
+			"task": taskID,
+			"patch": map[string]any{
+				"description":   "now described",
+				"specification": "   ",
+			},
+		}),
+		mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}),
+	)
+	updated := p2ResultOrFail(t, updatedFrames[1], "update load presence")
+	if updated["description"] != "now described" || updated["specification"] != "   " {
+		t.Fatalf("update DTO must keep full bodies, got description=%q specification=%q", updated["description"], updated["specification"])
+	}
+	if updated["hasDescription"] != true || updated["hasSpecification"] != false {
+		t.Fatalf("update DTO presence must be trim-aware, got hasDescription=%v hasSpecification=%v", updated["hasDescription"], updated["hasSpecification"])
+	}
+
+	shown := p2ResultOrFail(t, updatedFrames[2], "show load presence")
+	if shown["hasDescription"] != true || shown["hasSpecification"] != false {
+		t.Fatalf("show DTO presence must match update DTO, got hasDescription=%v hasSpecification=%v", shown["hasDescription"], shown["hasSpecification"])
+	}
+}
+
+func TestWrkqTaskList_SummaryPagination(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "Summary Page 1", "description": "d1", "specification": "s1"}),
+		mkRPC("c2", "wrkq.task.create", map[string]any{"title": "Summary Page 2", "description": "d2", "specification": "s2"}),
+		mkRPC("c3", "wrkq.task.create", map[string]any{"title": "Summary Page 3", "description": "d3", "specification": "s3"}),
+	)
+
+	page1Frames := p2Run(t, dbPath,
+		mkRPC("l1", "wrkq.task.list", map[string]any{"limit": 2, "summary": true}),
+	)
+	page1 := p2ResultOrFail(t, page1Frames[1], "summary list page 1")
+	items1, _ := page1["items"].([]any)
+	if len(items1) != 2 {
+		t.Fatalf("summary page 1: want 2 items, got %d", len(items1))
+	}
+	for _, raw := range items1 {
+		item, _ := raw.(map[string]any)
+		if item["description"] != "" || item["specification"] != "" {
+			t.Fatalf("summary page 1 item must omit bodies: %#v", item)
+		}
+	}
+	nextCursor, _ := page1["nextCursor"].(string)
+	if nextCursor == "" {
+		t.Fatal("summary page 1 with three tasks and limit=2 must return nextCursor")
+	}
+
+	page2Frames := p2Run(t, dbPath,
+		mkRPC("l2", "wrkq.task.list", map[string]any{"limit": 2, "cursor": nextCursor, "summary": true}),
+	)
+	page2 := p2ResultOrFail(t, page2Frames[1], "summary list page 2")
+	items2, _ := page2["items"].([]any)
+	if len(items2) != 1 {
+		t.Fatalf("summary page 2: want 1 item, got %d", len(items2))
+	}
+	item, _ := items2[0].(map[string]any)
+	if item["description"] != "" || item["specification"] != "" {
+		t.Fatalf("summary page 2 item must omit bodies: %#v", item)
+	}
 }
 
 // ─── wrkq.task.update ───────────────────────────────────────────────────────

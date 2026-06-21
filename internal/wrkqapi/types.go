@@ -23,6 +23,8 @@ type WrkqTask struct {
 	RiskClass             string         `json:"riskClass,omitempty"`
 	Description           string         `json:"description"`
 	Specification         string         `json:"specification"`
+	HasDescription        bool           `json:"hasDescription"`
+	HasSpecification      bool           `json:"hasSpecification"`
 	Labels                []string       `json:"labels"`
 	Meta                  map[string]any `json:"meta"`
 	ETag                  int64          `json:"etag"`
@@ -141,6 +143,9 @@ type TaskListParams struct {
 	// Recursive, when true, includes tasks in containers nested under Path
 	// (the whole subtree). Default false keeps the direct-container-only filter.
 	Recursive bool `json:"recursive,omitempty"`
+	// Summary, when true, omits the heavy text bodies from returned list items.
+	// Their presence is still reported via hasDescription / hasSpecification.
+	Summary bool `json:"summary,omitempty"`
 }
 
 // TaskUpdateParams mirrors WrkqTaskUpdateParams. ExpectEtag is a pointer so a

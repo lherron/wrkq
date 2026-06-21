@@ -288,6 +288,72 @@ func TestFormatTreeOpenedAge(t *testing.T) {
 	}
 }
 
+func TestDisplayTreeHeaderShowsTopLevelProjectID(t *testing.T) {
+	database, _ := setupTestEnv(t)
+
+	// Seed a project with a nested container and an open task so the tree has
+	// visible content under both the project root and the subpath.
+	_, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES
+			('00000000-0000-0000-0000-000000000801', 'P-00801', 'proj', 'Proj', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1),
+			('00000000-0000-0000-0000-000000000802', 'P-00802', 'sub', 'Sub', '00000000-0000-0000-0000-000000000801', 'directory', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed containers: %v", err)
+	}
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000803', 'T-00803', 'open-task', 'Open Task', '00000000-0000-0000-0000-000000000802', 'open', 2, '', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed task: %v", err)
+	}
+
+	// Project root header carries the project's own friendly ID.
+	var out bytes.Buffer
+	if err := displayTree(&out, database, "proj", 0, false, false, outputSelection{Mode: outputModeHuman}, false); err != nil {
+		t.Fatalf("displayTree failed: %v", err)
+	}
+	header := strings.SplitN(out.String(), "\n", 2)[0]
+	if header != "proj [P-00801]" {
+		t.Fatalf("Expected project root header %q, got %q", "proj [P-00801]", header)
+	}
+
+	// A subpath header still anchors to the top-level parent project's ID.
+	out.Reset()
+	if err := displayTree(&out, database, "proj/sub", 0, false, false, outputSelection{Mode: outputModeHuman}, false); err != nil {
+		t.Fatalf("displayTree failed: %v", err)
+	}
+	header = strings.SplitN(out.String(), "\n", 2)[0]
+	if header != "proj/sub [P-00801]" {
+		t.Fatalf("Expected subpath header %q, got %q", "proj/sub [P-00801]", header)
+	}
+
+	// JSON output exposes the project_id field.
+	out.Reset()
+	if err := displayTree(&out, database, "proj", 0, false, false, outputSelection{Mode: outputModeJSON}, false); err != nil {
+		t.Fatalf("displayTree failed: %v", err)
+	}
+	var got treeOutput
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("tree JSON was not valid: %v\n%s", err, out.String())
+	}
+	if got.ProjectID != "P-00801" {
+		t.Fatalf("Expected JSON project_id P-00801, got %q", got.ProjectID)
+	}
+
+	// Porcelain output stays machine-parseable: no annotation on the header.
+	out.Reset()
+	if err := displayTree(&out, database, "proj", 0, false, false, outputSelection{Mode: outputModeRaw}, true); err != nil {
+		t.Fatalf("displayTree failed: %v", err)
+	}
+	header = strings.SplitN(out.String(), "\n", 2)[0]
+	if header != "proj" {
+		t.Fatalf("Expected porcelain header %q, got %q", "proj", header)
+	}
+}
+
 func collectTreeSlugs(root *treeNode) map[string]bool {
 	slugs := make(map[string]bool)
 	var walk func(*treeNode)

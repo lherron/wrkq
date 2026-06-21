@@ -209,7 +209,11 @@ describe("wrkq namespace", () => {
   test("task.list returns the items envelope", async () => {
     const transport = new FakeTransport().onResult("wrkq.task.list", { items: [MOCK_TASK] });
     const client = await clientWith(transport);
-    const res = await client.wrkq.task.list({ state: "open" });
+    const res = await client.wrkq.task.list({ state: "open", summary: true });
+    expect(transport.capturedRequests[0]!.params).toMatchObject({
+      state: "open",
+      summary: true,
+    });
     expect(res.items).toHaveLength(1);
     expect(res.items[0]!.id).toBe("T-00001");
   });
