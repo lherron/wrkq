@@ -218,6 +218,48 @@ var parityCases = []parityCase{
 		args:  []string{"cat", "T-09999999", "--json"},
 	},
 
+	// diff ✓ RPC-backed: two wrkq.task.catView reads, CLI-local field comparison
+	// + JSON/human rendering. Default (non-TTY) output is JSON, matching legacy.
+	{
+		name: "diff/two-tasks-json",
+		setup: [][]string{
+			{"touch", "inbox/da", "-t", "Title A", "--priority", "2", "-d", "desc a"},
+			{"touch", "inbox/db", "-t", "Title B", "--priority", "1", "-d", "desc b"},
+		},
+		args: []string{"diff", "inbox/da", "inbox/db", "--json"},
+	},
+	{
+		name: "diff/two-tasks-default-json",
+		setup: [][]string{
+			{"touch", "inbox/da", "-t", "Title A"},
+			{"touch", "inbox/db", "-t", "Title B"},
+		},
+		args: []string{"diff", "inbox/da", "inbox/db"},
+	},
+	{
+		name: "diff/same-title-only-slug-differs",
+		setup: [][]string{
+			{"touch", "inbox/da", "-t", "Same"},
+			{"touch", "inbox/db", "-t", "Same"},
+		},
+		args: []string{"diff", "inbox/da", "inbox/db", "--json"},
+	},
+	{
+		name:  "diff/single-arg-not-implemented",
+		setup: [][]string{{"touch", "inbox/da", "-t", "Only A"}},
+		args:  []string{"diff", "inbox/da"},
+	},
+	{
+		name:  "diff/unknown-ref-A-errors",
+		setup: nil,
+		args:  []string{"diff", "T-09999999", "T-09999998", "--json"},
+	},
+	{
+		name:  "diff/unknown-ref-B-errors",
+		setup: [][]string{{"touch", "inbox/da", "-t", "Only A"}},
+		args:  []string{"diff", "inbox/da", "T-09999998", "--json"},
+	},
+
 	// mkdir / rmdir ✓ RPC-backed via wrkq.container.create / .delete(Recursive).
 	{
 		name:    "mkdir/single",

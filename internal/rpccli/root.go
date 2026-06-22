@@ -29,7 +29,7 @@ var topLevelCommands = []mirroredCommand{
 	// cat is the one real command this slice; registered separately.
 	// check / check-inbox are RPC-backed (real parity commands); registered separately.
 	{use: "cp <source>... <destination>"},
-	{use: "diff <A> [B]"},
+	// diff is RPC-backed (real parity command); registered separately.
 	// find is RPC-backed (real parity command); registered separately.
 	{use: "handoff"},
 	{use: "index"},
@@ -70,6 +70,7 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().String("output", "", "Output mode: table, human, json, ndjson, porcelain, yaml, tsv, raw")
 
 	root.AddCommand(newCatCmd())
+	root.AddCommand(newDiffCmd())
 	root.AddCommand(newAckCmd())
 	root.AddCommand(newStatCmd())
 	root.AddCommand(newMkdirCmd())

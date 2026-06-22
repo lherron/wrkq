@@ -362,6 +362,12 @@ wrkq.task.restore
 > hint** (meaningful on the canonical host, not a remote-filesystem guarantee).
 > Do not add its projection fields to `wrkq.task.show`. Registering it changes
 > the method catalog and `protocolSchemaHash`.
+>
+> `wrkq.task.catView` also backs `wrkq diff`: the mirror reads BOTH operands
+> through it (`includeComments:false`) and performs the field-by-field comparison
+> + `{fields_changed, changes}` rendering CLI-side — no `diff`-specific RPC method
+> or DTO exists, because the diff object is a pure presentation projection, not
+> durable state.
 
 > **`wrkq.task.blockedView`** is a CLI compatibility read model for
 > `wrkq check blocked`, **not** a canonical resource. It resolves the (already
