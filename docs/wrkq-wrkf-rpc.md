@@ -299,12 +299,19 @@ wrkq.task.restore
 > **`wrkq.task.lsView`** is a CLI compatibility list read model for `wrkq ls`,
 > **not** canonical `wrkq.task.list`. The server owns mixed task/container
 > listing, container rollup counts (recursive CTE), in-memory merge-sort by the
-> requested sort field, and cursor pagination over the merged set:
-> `{ path?, sort?, reverse?, limit?, cursor?, type?, includeHidden? }` →
-> `{ items: WrkqLsEntry[], next_cursor }`. Rows are legacy-shaped (snake_case).
-> `task_count`/`active_task_count` are container rollups. Cataloged + fingerprinted.
-> NOTE: the mirror `ls` command + parity fixtures are not yet implemented, so the
-> command is not command-parity-green even though the method contract is defined.
+> requested sort field, and cursor pagination over the merged set — INCLUDING the
+> multi-path merge (the per-path query runs the cursor's WHERE/LIMIT in SQL, then
+> all paths' entries are merge-sorted and limit+1/next-cursor truncated over the
+> COMBINED set, exactly as legacy `runLs`):
+> `{ path?, paths?, sort?, reverse?, limit?, cursor?, type?, includeHidden? }` →
+> `{ items: WrkqLsEntry[], next_cursor }`. `path` is the single-path form; `paths`
+> is the multi-path form (the CLI sends `paths` when more than one path is given,
+> `path` otherwise). When both are empty the view lists the top-level (root)
+> containers. Rows are legacy-shaped (snake_case). `task_count`/`active_task_count`
+> are container rollups. Cataloged + fingerprinted.
+> The mirror `ls` command is command-parity-green across its FULL read surface:
+> --json/--ndjson/--porcelain, table/human/yaml/tsv, --one/--nul, --type/--all/
+> --sort/--reverse/--limit/--cursor, multi-path, and --recursive (a legacy no-op).
 
 > **`wrkq.task.findListView`** is a CLI compatibility list read model for
 > `wrkq find`, **not** canonical `wrkq.task.list`. The server owns recursive

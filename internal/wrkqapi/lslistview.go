@@ -11,15 +11,21 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 )
 
-// LsListViewParams mirrors the legacy `wrkq ls <path>` surface for one path.
+// LsListViewParams mirrors the legacy `wrkq ls <path...>` surface. Path is the
+// single-path form (back-compat); Paths is the multi-path form. When both are
+// empty the view lists the top-level (root) containers. The server owns the
+// per-path query, the in-memory merge-sort across the COMBINED set, and the
+// limit+1 / next-cursor truncation over that combined set — exactly as legacy
+// runLs does — so the CLI mirror never re-sorts or re-paginates.
 type LsListViewParams struct {
-	Path          string `json:"path,omitempty"`
-	Sort          string `json:"sort,omitempty"`
-	Reverse       bool   `json:"reverse,omitempty"`
-	Limit         int    `json:"limit,omitempty"`
-	Cursor        string `json:"cursor,omitempty"`
-	Type          string `json:"type,omitempty"` // "p" or "t"
-	IncludeHidden bool   `json:"includeHidden,omitempty"`
+	Path          string   `json:"path,omitempty"`
+	Paths         []string `json:"paths,omitempty"`
+	Sort          string   `json:"sort,omitempty"`
+	Reverse       bool     `json:"reverse,omitempty"`
+	Limit         int      `json:"limit,omitempty"`
+	Cursor        string   `json:"cursor,omitempty"`
+	Type          string   `json:"type,omitempty"` // "p" or "t"
+	IncludeHidden bool     `json:"includeHidden,omitempty"`
 }
 
 // WrkqLsEntry matches the legacy lsEntry shape exactly (field order + json tags).
@@ -74,39 +80,24 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 		return nil, NewValidationError(err.Error(), map[string]any{"field": "cursor"})
 	}
 
-	var entries []WrkqLsEntry
-	if p.Path == "" {
-		if p.Type == "" || p.Type == "p" {
-			rows, qerr := a.lsQueryContainers(ctx, "(SELECT uuid FROM containers WHERE kind = 'root')", pag, "")
-			if qerr != nil {
-				return nil, qerr
-			}
-			entries = append(entries, rows...)
-		}
-	} else {
-		containerUUID, _, cerr := selectors.WalkContainerPath(a.db, p.Path)
-		if cerr == nil {
-			if p.Type == "" || p.Type == "p" {
-				rows, qerr := a.lsQueryContainers(ctx, "?", pag, p.Path, containerUUID)
-				if qerr != nil {
-					return nil, qerr
-				}
-				entries = append(entries, rows...)
-			}
-			if p.Type == "" || p.Type == "t" {
-				rows, qerr := a.lsQueryTasks(ctx, containerUUID, p.Path, p.IncludeHidden, pag)
-				if qerr != nil {
-					return nil, qerr
-				}
-				entries = append(entries, rows...)
-			}
+	// Resolve the effective path list. Legacy runLs: applyProjectRootToPaths gives
+	// the scoped paths (caller-side), and an empty list defaults to [""] (top-level).
+	paths := p.Paths
+	if len(paths) == 0 {
+		if p.Path != "" {
+			paths = []string{p.Path}
 		} else {
-			single, serr := a.lsSingleTask(ctx, p.Path)
-			if serr != nil {
-				return nil, serr
-			}
-			entries = append(entries, *single)
+			paths = []string{""}
 		}
+	}
+
+	var entries []WrkqLsEntry
+	for _, path := range paths {
+		rows, perr := a.lsEntriesForPath(ctx, path, p, pag)
+		if perr != nil {
+			return nil, perr
+		}
+		entries = append(entries, rows...)
 	}
 
 	sortLsEntries(entries, sortField, descending)
@@ -117,6 +108,48 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 		nextCursor, _ = cursor.BuildNextCursor([]string{sortField}, []any{lsEntrySortValue(last, sortField)}, last.ID)
 	}
 	return &WrkqLsListView{Items: entries, NextCursor: nextCursor}, nil
+}
+
+// lsEntriesForPath returns the entries for a single path, matching legacy runLs's
+// per-path body: top-level containers when path=="", otherwise the container's
+// child containers + tasks, or (if the path is not a container) the single task
+// at that path. The cursor's per-path WHERE/LIMIT clauses are applied in SQL here,
+// exactly as legacy does, before the combined merge-sort in LsListView.
+func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewParams, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+	var entries []WrkqLsEntry
+	if path == "" {
+		if p.Type == "" || p.Type == "p" {
+			rows, qerr := a.lsQueryContainers(ctx, "(SELECT uuid FROM containers WHERE kind = 'root')", pag, "")
+			if qerr != nil {
+				return nil, qerr
+			}
+			entries = append(entries, rows...)
+		}
+		return entries, nil
+	}
+	containerUUID, _, cerr := selectors.WalkContainerPath(a.db, path)
+	if cerr == nil {
+		if p.Type == "" || p.Type == "p" {
+			rows, qerr := a.lsQueryContainers(ctx, "?", pag, path, containerUUID)
+			if qerr != nil {
+				return nil, qerr
+			}
+			entries = append(entries, rows...)
+		}
+		if p.Type == "" || p.Type == "t" {
+			rows, qerr := a.lsQueryTasks(ctx, containerUUID, path, p.IncludeHidden, pag)
+			if qerr != nil {
+				return nil, qerr
+			}
+			entries = append(entries, rows...)
+		}
+		return entries, nil
+	}
+	single, serr := a.lsSingleTask(ctx, path)
+	if serr != nil {
+		return nil, serr
+	}
+	return append(entries, *single), nil
 }
 
 // lsQueryContainers lists child containers under parentExpr (a SQL expression or

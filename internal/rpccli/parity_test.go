@@ -744,6 +744,94 @@ var parityCases = []parityCase{
 		env:  []string{"WRKQ_PROJECT_ROOT=myproj"},
 	},
 
+	// ── UNGATED mirror-only modes now byte-proven against legacy ──
+	// table/human render through the SAME internal/render.FormatTable path (legacy's
+	// runLs switch has no human case → falls through to the table renderer), so both
+	// produce identical bytes. yaml/tsv decode the compat projection back into the
+	// legacy struct so render output is identical.
+	{
+		name:  "ls/output-table",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--output", "table"},
+	},
+	{
+		name:  "ls/output-human",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--output", "human"},
+	},
+	{
+		name:  "ls/output-yaml",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--output", "yaml"},
+	},
+	{
+		name:  "ls/output-tsv",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--output", "tsv"},
+	},
+	{
+		// Empty set table render → legacy RenderTable returns nil for 0 rows (no
+		// header either). The mirror matches via the same render path.
+		name:  "ls/output-table-empty",
+		setup: [][]string{{"mkdir", "empty"}},
+		args:  []string{"ls", "empty", "--output", "table"},
+	},
+	{
+		// --one emits entry.Path per line (newline-joined + trailing newline).
+		name:  "ls/one",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--one"},
+	},
+	{
+		// --nul emits entry.Path NUL-separated with NO trailing delimiter.
+		name:  "ls/nul",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--nul"},
+	},
+	{
+		// --one over an empty set emits nothing.
+		name:  "ls/one-empty",
+		setup: [][]string{{"mkdir", "empty"}},
+		args:  []string{"ls", "empty", "--one"},
+	},
+	{
+		// --recursive/-R is a no-op in legacy (rollups already recurse) → identical
+		// to the un-flagged listing. Accepted-and-ignored by the mirror.
+		name:  "ls/recursive-noop",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "-R", "--json"},
+	},
+	{
+		// Multi-path: the server queries each path and merge-sorts the COMBINED set.
+		name:  "ls/multi-path",
+		setup: lsMixed,
+		args:  []string{"ls", "proj/alpha", "proj/beta", "--json"},
+	},
+	{
+		// Multi-path with a limit exercises the combined limit+1 / next-cursor.
+		name:  "ls/multi-path-limit-cursor",
+		setup: lsMixed,
+		args:  []string{"ls", "proj/alpha", "proj", "--porcelain", "--limit", "2"},
+	},
+	{
+		// Multi-path where one path does not exist → legacy errors mid-iteration.
+		name:  "ls/multi-path-unknown-errors",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "nope", "--json"},
+	},
+	{
+		// --one over multiple paths emits the merged paths.
+		name:  "ls/multi-path-one",
+		setup: lsMixed,
+		args:  []string{"ls", "proj/alpha", "proj/beta", "--one"},
+	},
+	{
+		// Conflicting output modes error identically on both binaries.
+		name:  "ls/conflicting-modes-errors",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--ndjson"},
+	},
+
 	// ── project-root scoping parity (WRKQ_PROJECT_ROOT / ASP_PROJECT / --project) ──
 	// Both binaries apply the SAME neutral projectroot transform before any RPC
 	// param is sent. The seed is root-less; only the command-under-test runs with a
@@ -1215,48 +1303,12 @@ func TestFindHardGates(t *testing.T) {
 	}
 }
 
-// TestLsHardGates proves the mirror REFUSES (clean non-zero exit, not silent
-// degradation) every legacy ls surface it does not yet implement, so a narrower
-// behavior can never masquerade as parity. Legacy would succeed for these, so they
-// cannot be byte-parity cases; we assert the gate on the mirror alone.
-func TestLsHardGates(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds binaries + runs the mirror CLI")
-	}
-	bins := buildParityBinaries(t)
-	base := seedFixture(t, bins, lsMixed)
-	dir := copyFixture(t, base)
-
-	gated := []struct {
-		name string
-		args []string
-	}{
-		{"recursive", []string{"ls", "proj", "--ndjson", "--recursive"}},
-		{"one", []string{"ls", "proj", "--ndjson", "--one"}},
-		{"nul", []string{"ls", "proj", "--ndjson", "--nul"}},
-		{"multi-path", []string{"ls", "proj", "inbox", "--ndjson"}},
-		{"output-yaml", []string{"ls", "proj", "--output", "yaml"}},
-		{"output-tsv", []string{"ls", "proj", "--output", "tsv"}},
-		{"output-table", []string{"ls", "proj", "--output", "table"}},
-		// human IS in legacy's ls allow-set (legacy renders it); the mirror cannot
-		// yet, so it must hard-gate (mirror-only error). Distinct from raw, which
-		// legacy rejects and the mirror parity-matches.
-		{"output-human", []string{"ls", "proj", "--output", "human"}},
-		{"conflicting-modes", []string{"ls", "proj", "--json", "--ndjson"}},
-	}
-	for _, g := range gated {
-		g := g
-		t.Run(g.name, func(t *testing.T) {
-			res := runCLI(t, bins.mirror, dir, g.args)
-			if res.exit == 0 {
-				t.Errorf("expected non-zero exit (hard-gate) for %v, got 0\n stdout: %q", g.args, res.stdout)
-			}
-			if strings.TrimSpace(res.stderr) == "" {
-				t.Errorf("expected a gate error message on stderr for %v", g.args)
-			}
-		})
-	}
-}
+// TestLsHardGates previously proved the mirror REFUSED the legacy ls surfaces it
+// did not yet implement. All of those (table/human/yaml/tsv, --one/--nul,
+// --recursive, multi-path, conflicting-modes) now have REAL byte parity and live
+// in TestParity (ls/output-*, ls/one, ls/nul, ls/recursive-noop, ls/multi-path*,
+// ls/conflicting-modes-errors). No ls surface remains hard-gated, so the gate test
+// is retired — its coverage moved into the equivalence harness.
 
 // TestTreeHardGates proves the mirror REFUSES (clean non-zero exit, not silent
 // degradation) every legacy tree surface it does not yet implement, so a narrower

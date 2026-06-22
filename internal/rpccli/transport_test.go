@@ -284,6 +284,20 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !jsonEqual(t, inInbox, subInbox) {
 		t.Errorf("task.inboxView transport results differ:\n in-process: %s\n subprocess: %s", inInbox, subInbox)
 	}
+
+	// task.lsView multi-path form ("paths") — the server owns the per-path query
+	// plus the combined merge-sort — must also agree across transports.
+	inLsM, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}})
+	if err != nil {
+		t.Fatalf("in-process task.lsView (paths): %v", err)
+	}
+	subLsM, err := sub.Call(ctx, "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}})
+	if err != nil {
+		t.Fatalf("subprocess task.lsView (paths): %v", err)
+	}
+	if !jsonEqual(t, inLsM, subLsM) {
+		t.Errorf("task.lsView (paths) transport results differ:\n in-process: %s\n subprocess: %s", inLsM, subLsM)
+	}
 }
 
 // assertRejectsBeforeInitialize drives a single wrkq.task.show request through a
