@@ -256,6 +256,34 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !jsonEqual(t, inTree, subTree) {
 		t.Errorf("task.treeView transport results differ:\n in-process: %s\n subprocess: %s", inTree, subTree)
 	}
+
+	// task.blockedView (the `check blocked` compat projection) must agree across
+	// transports. The seed task has no blockers (empty blockers slice).
+	inBlk, err := inproc.Call(context.Background(), "wrkq.task.blockedView", map[string]any{"task": taskID})
+	if err != nil {
+		t.Fatalf("in-process task.blockedView: %v", err)
+	}
+	subBlk, err := sub.Call(ctx, "wrkq.task.blockedView", map[string]any{"task": taskID})
+	if err != nil {
+		t.Fatalf("subprocess task.blockedView: %v", err)
+	}
+	if !jsonEqual(t, inBlk, subBlk) {
+		t.Errorf("task.blockedView transport results differ:\n in-process: %s\n subprocess: %s", inBlk, subBlk)
+	}
+
+	// task.inboxView (the `check-inbox` compat list projection) must agree across
+	// transports. No inbox container is seeded, so the open-inbox set is empty.
+	inInbox, err := inproc.Call(context.Background(), "wrkq.task.inboxView", map[string]any{"inboxPath": "inbox"})
+	if err != nil {
+		t.Fatalf("in-process task.inboxView: %v", err)
+	}
+	subInbox, err := sub.Call(ctx, "wrkq.task.inboxView", map[string]any{"inboxPath": "inbox"})
+	if err != nil {
+		t.Fatalf("subprocess task.inboxView: %v", err)
+	}
+	if !jsonEqual(t, inInbox, subInbox) {
+		t.Errorf("task.inboxView transport results differ:\n in-process: %s\n subprocess: %s", inInbox, subInbox)
+	}
 }
 
 // assertRejectsBeforeInitialize drives a single wrkq.task.show request through a

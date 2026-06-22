@@ -651,6 +651,99 @@ var parityCases = []parityCase{
 		args:  []string{"tree", "proj", "--output", "raw"},
 	},
 
+	// check blocked ✓ RPC-backed via wrkq.task.blockedView (server compat projection
+	// over store.Tasks.BlockedBy). Non-TTY → indented JSON; blocked → exit 1 with the
+	// JSON body on stdout AND an Error line on stderr.
+	{
+		name:  "check-blocked/not-blocked",
+		setup: [][]string{{"touch", "inbox/free", "-t", "Free"}},
+		args:  []string{"check", "blocked", "inbox/free"},
+	},
+	{
+		name: "check-blocked/blocked",
+		setup: [][]string{
+			{"touch", "inbox/main", "-t", "Main"},
+			{"touch", "inbox/blk", "-t", "Blocker"},
+			{"relation", "add", "inbox/blk", "blocks", "inbox/main"},
+		},
+		args: []string{"check", "blocked", "inbox/main"},
+	},
+	{
+		name: "check-blocked/blocked-completed-not-counted",
+		setup: [][]string{
+			{"touch", "inbox/main2", "-t", "Main2"},
+			{"touch", "inbox/blk2", "-t", "Blocker2"},
+			{"relation", "add", "inbox/blk2", "blocks", "inbox/main2"},
+			{"set", "inbox/blk2", "--state", "completed"},
+		},
+		args: []string{"check", "blocked", "inbox/main2"},
+	},
+	{
+		name: "check-blocked/quiet-not-blocked",
+		setup: [][]string{
+			{"touch", "inbox/qfree", "-t", "QFree"},
+		},
+		args: []string{"check", "blocked", "inbox/qfree", "--quiet"},
+	},
+	{
+		name: "check-blocked/quiet-blocked",
+		setup: [][]string{
+			{"touch", "inbox/qmain", "-t", "QMain"},
+			{"touch", "inbox/qblk", "-t", "QBlocker"},
+			{"relation", "add", "inbox/qblk", "blocks", "inbox/qmain"},
+		},
+		args: []string{"check", "blocked", "inbox/qmain", "--quiet"},
+	},
+	{
+		name:  "check-blocked/unknown-ref-errors",
+		setup: nil,
+		args:  []string{"check", "blocked", "T-09999999"},
+	},
+
+	// check-inbox ✓ RPC-backed via wrkq.task.inboxView (server compat list projection:
+	// open inbox tasks + ack-pending requested-by tasks). Non-TTY default → ndjson.
+	{
+		name:  "check-inbox/empty",
+		setup: nil,
+		args:  []string{"check-inbox"},
+	},
+	{
+		name: "check-inbox/open-tasks-ndjson",
+		setup: [][]string{
+			{"touch", "inbox/one", "-t", "One", "--priority", "2"},
+			{"touch", "inbox/two", "-t", "Two", "--priority", "1"},
+		},
+		args: []string{"check-inbox"},
+	},
+	{
+		name: "check-inbox/json",
+		setup: [][]string{
+			{"touch", "inbox/one", "-t", "One"},
+		},
+		args: []string{"check-inbox", "--json"},
+	},
+	{
+		name: "check-inbox/excludes-non-open",
+		setup: [][]string{
+			{"touch", "inbox/openish", "-t", "Open"},
+			{"touch", "inbox/donish", "-t", "Done"},
+			{"set", "inbox/donish", "--state", "completed"},
+		},
+		args: []string{"check-inbox"},
+	},
+	{
+		// Project-root scoping: with a root configured, the inbox path is scoped
+		// to <root>/inbox AND ack-pending tasks requested by <root> are surfaced.
+		name: "check-inbox/project-root-scoped",
+		setup: [][]string{
+			{"mkdir", "myproj"},
+			{"mkdir", "myproj/inbox"},
+			{"touch", "myproj/inbox/scoped", "-t", "Scoped"},
+		},
+		args: []string{"check-inbox", "--json"},
+		env:  []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+
 	// ── project-root scoping parity (WRKQ_PROJECT_ROOT / ASP_PROJECT / --project) ──
 	// Both binaries apply the SAME neutral projectroot transform before any RPC
 	// param is sent. The seed is root-less; only the command-under-test runs with a

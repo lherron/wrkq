@@ -105,7 +105,8 @@ byte-parity proven and covered by installed smoke.
 | `watch` | `not-started` | streaming |
 | `diff` | `not-started` | |
 | `log` | `not-started` | event/history |
-| `check` / `check-inbox` | `not-started` | |
+| `check blocked` | `rpc-backed (partial)` | **Non-TTY parity proven** via server-owned `wrkq.task.blockedView` compat projection (reproduces legacy `BlockedResult` over `store.Tasks.BlockedBy`: incomplete `blocks`-relation sources, state filter `NOT IN (completed,archived,deleted,cancelled,idea)`): default/`--json` indented JSON to stdout; **blocked → exit 1 with the JSON body on stdout AND `Error: task is blocked by N incomplete task(s)` on stderr**; `--quiet` (exit-code only; blocked → `Error: task is blocked`); unknown-ref → `Error: failed to resolve task: <raw resolve err>` (mirror re-wraps the server's raw resolve message exactly). TTY human-readable table HARD-GATED (mirror-only error, no silent degradation). Project-root scoping applies (selector via `sc.selector(arg,false)`). |
+| `check-inbox` | `rpc-backed (partial)` | **Non-TTY parity proven** via server-owned `wrkq.task.inboxView` compat list projection (reproduces legacy `inboxTask` rows + the two queries: open tasks under the inbox container path, then ack-pending `completed/cancelled` tasks requested by the configured project): default ndjson, `--json` (indented array), `--ndjson`/`--porcelain` (ndjson), empty→`[]`, excludes non-open. **Project-root is CALLER-scoped**: the mirror passes the scoped inbox path (`ApplyToPath("inbox",false)`) and project id (`Normalize(cfg)`) as RPC params; the view never reads project-root env/flags (TestParity/check-inbox/project-root-scoped). TTY table HARD-GATED. |
 | `bundle` | `not-started` | `rpc-gap` candidate |
 | `webhook` | `not-started` | `rpc-gap` candidate |
 | `agent` / `agent-context` / `agent-info` | `not-started` | |

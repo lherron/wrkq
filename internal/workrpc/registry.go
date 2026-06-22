@@ -114,6 +114,8 @@ var methodCatalog = []string{
 	"wrkq.task.lsView",
 	"wrkq.task.findListView",
 	"wrkq.task.treeView",
+	"wrkq.task.blockedView",
+	"wrkq.task.inboxView",
 	"wrkq.task.update",
 	"wrkq.task.move",
 	"wrkq.task.acknowledge",
@@ -207,6 +209,8 @@ var dtoCatalog = []string{
 	"WrkqLsListView",         // CLI compatibility list projection (ls)
 	"WrkqFindListView",       // CLI compatibility list projection (find)
 	"WrkqTreeView",           // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
+	"WrkqTaskBlockedView",    // CLI compatibility projection (check blocked); nested WrkqTaskBlockedEntry is part of this DTO
+	"WrkqInboxView",          // CLI compatibility list projection (check-inbox); nested WrkqInboxEntry is part of this DTO
 	"CatViewRelation",        // element of relation.listView (also nested in WrkqTaskCatView)
 	"WrkqTaskListResult",
 	"WrkqComment",
@@ -261,6 +265,12 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.task.treeView", apiHandler(func(ctx context.Context, p wrkqapi.TreeViewParams) (any, error) {
 		return wq.TreeView(ctx, p)
+	}))
+	s.Register("wrkq.task.blockedView", apiHandler(func(ctx context.Context, p wrkqapi.TaskBlockedViewParams) (any, error) {
+		return wq.TaskBlockedView(ctx, p)
+	}))
+	s.Register("wrkq.task.inboxView", apiHandler(func(ctx context.Context, p wrkqapi.InboxViewParams) (any, error) {
+		return wq.InboxView(ctx, p)
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)

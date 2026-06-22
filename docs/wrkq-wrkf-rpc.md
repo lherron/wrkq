@@ -287,6 +287,8 @@ wrkq.task.catView     [CLI compatibility projection — see note]
 wrkq.task.lsView      [CLI compatibility list projection — see note]
 wrkq.task.findListView [CLI compatibility list projection — see note]
 wrkq.task.treeView    [CLI compatibility tree projection — see note]
+wrkq.task.blockedView [CLI compatibility projection — see note]
+wrkq.task.inboxView   [CLI compatibility list projection — see note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
 wrkq.task.acknowledge
@@ -353,6 +355,29 @@ wrkq.task.restore
 > hint** (meaningful on the canonical host, not a remote-filesystem guarantee).
 > Do not add its projection fields to `wrkq.task.show`. Registering it changes
 > the method catalog and `protocolSchemaHash`.
+
+> **`wrkq.task.blockedView`** is a CLI compatibility read model for
+> `wrkq check blocked`, **not** a canonical resource. It resolves the (already
+> project-root-scoped) selector and enumerates the incomplete tasks that block it
+> via the same store query legacy uses (`store.Tasks.BlockedBy`: `blocks`-relation
+> sources whose state is `NOT IN (completed,archived,deleted,cancelled,idea)`).
+> Params: `{ task: string }` → `WrkqTaskBlockedView { task_id, task_uuid,
+> is_blocked, blockers: WrkqTaskBlockedEntry[] }` (each entry `{ id, uuid, slug,
+> title, state }`), reproducing the legacy `BlockedResult` JSON exactly (`blockers`
+> is always a non-null array). A selector that does not resolve surfaces the **raw**
+> resolve error (the CLI re-wraps it as `failed to resolve task: <err>`). Cataloged
+> + fingerprinted.
+
+> **`wrkq.task.inboxView`** is a CLI compatibility list read model for
+> `wrkq check-inbox`, **not** a canonical resource. The CLI passes the already
+> project-root-scoped inbox container path and (optionally) the configured project
+> id — the view never reads project-root env/flags. Params:
+> `{ inboxPath: string; projectId?: string }` → `WrkqInboxView { items:
+> WrkqInboxEntry[] }`. It reproduces the two legacy queries in order: open tasks
+> under the inbox container path, then (when `projectId` is set) `completed`/
+> `cancelled` tasks requested by that project with `acknowledged_at IS NULL`. Rows
+> are legacy `inboxTask`-shaped (snake_case); `items` is always a non-null array
+> (empty → `[]`). Cataloged + fingerprinted.
 
 Params/results (camelCase JSON fields throughout):
 

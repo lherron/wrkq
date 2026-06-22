@@ -41,3 +41,10 @@ func (s *scoper) selector(raw string, defaultToRoot bool) string {
 func (s *scoper) paths(raw []string, defaultToRoot bool) []string {
 	return projectroot.ApplyToPaths(s.cfg, raw, defaultToRoot)
 }
+
+// projectRoot returns the configured project root (normalized, "" when unset).
+// check-inbox needs it as the project ID for the requested-by ack-pending query,
+// mirroring legacy normalizeProjectRoot(app.Config).
+func (s *scoper) projectRoot() string {
+	return projectroot.Normalize(s.cfg)
+}

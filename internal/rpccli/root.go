@@ -27,8 +27,7 @@ var topLevelCommands = []mirroredCommand{
 	{use: "apply <PATHSPEC|ID> <FILE|->"},
 	{use: "bundle"},
 	// cat is the one real command this slice; registered separately.
-	{use: "check"},
-	{use: "check-inbox"},
+	// check / check-inbox are RPC-backed (real parity commands); registered separately.
 	{use: "cp <source>... <destination>"},
 	{use: "diff <A> [B]"},
 	// find is RPC-backed (real parity command); registered separately.
@@ -85,6 +84,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newLsCmd())
 	root.AddCommand(newFindCmd())
 	root.AddCommand(newTreeCmd())
+	root.AddCommand(newCheckCmd())
+	root.AddCommand(newCheckInboxCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}
