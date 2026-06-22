@@ -291,6 +291,68 @@ var parityCases = []parityCase{
 		args:  []string{"comment", "cat", "C-00001", "--json"},
 	},
 	{
+		// non-TTY default == JSON (no flag); proves the implicit-json path.
+		name:  "comment-cat/default-nontty-json",
+		setup: [][]string{{"touch", "inbox/cc", "-t", "CC"}, {"comment", "add", "inbox/cc", "the body"}},
+		args:  []string{"comment", "cat", "C-00001"},
+	},
+	{
+		// c: typed selector echoes the stripped ref in JSON but the original in errors.
+		name:  "comment-cat/by-c-token",
+		setup: [][]string{{"touch", "inbox/cc", "-t", "CC"}, {"comment", "add", "inbox/cc", "the body"}},
+		args:  []string{"comment", "cat", "c:C-00001", "--json"},
+	},
+	{
+		name:  "comment-cat/ndjson",
+		setup: [][]string{{"touch", "inbox/cc", "-t", "CC"}, {"comment", "add", "inbox/cc", "the body"}},
+		args:  []string{"comment", "cat", "C-00001", "--ndjson"},
+	},
+	{
+		name: "comment-cat/ndjson-multi",
+		setup: [][]string{
+			{"touch", "inbox/cc", "-t", "CC"},
+			{"comment", "add", "inbox/cc", "one"},
+			{"comment", "add", "inbox/cc", "two Ã¢ÂÂ"},
+		},
+		args: []string{"comment", "cat", "C-00001", "C-00002", "--ndjson"},
+	},
+	{
+		name:  "comment-cat/raw-single",
+		setup: [][]string{{"touch", "inbox/cc", "-t", "CC"}, {"comment", "add", "inbox/cc", "raw body line\nsecond line"}},
+		args:  []string{"comment", "cat", "C-00001", "--raw"},
+	},
+	{
+		name: "comment-cat/raw-multi",
+		setup: [][]string{
+			{"touch", "inbox/cc", "-t", "CC"},
+			{"comment", "add", "inbox/cc", "first"},
+			{"comment", "add", "inbox/cc", "second"},
+		},
+		args: []string{"comment", "cat", "C-00001", "C-00002", "--raw"},
+	},
+	{
+		name:  "comment-cat/not-found-errors",
+		setup: nil,
+		args:  []string{"comment", "cat", "C-09999", "--json"},
+	},
+	{
+		// not-found preserves the original c: prefix in the error message.
+		name:  "comment-cat/not-found-c-token-errors",
+		setup: nil,
+		args:  []string{"comment", "cat", "c:C-09999"},
+	},
+	{
+		name:  "comment-cat/invalid-ref-errors",
+		setup: nil,
+		args:  []string{"comment", "cat", "not-a-ref", "--json"},
+	},
+	{
+		// invalid ref preserves the original c: prefix in the error message.
+		name:  "comment-cat/invalid-ref-c-token-errors",
+		setup: nil,
+		args:  []string{"comment", "cat", "c:bogus", "--json"},
+	},
+	{
 		name:  "comment-ls/json",
 		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
 		args:  []string{"comment", "ls", "inbox/cl", "--json"},

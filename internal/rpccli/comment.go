@@ -250,6 +250,19 @@ func str(v interface{}) string {
 	return s
 }
 
+// commentCatProjection decodes only the fields the mirror needs to re-render the
+// legacy raw/human comment-cat shapes. It is the same server-owned compat
+// projection used for --json (wrkq.comment.catView); we keep the raw bytes for
+// the json/ndjson paths so those stay byte-identical to legacy's map marshal.
+type commentCatProjection struct {
+	ID        string `json:"id"`
+	CreatedAt string `json:"created_at"`
+	ActorSlug string `json:"actor_slug"`
+	ActorRole string `json:"actor_role"`
+	TaskID    string `json:"task_id"`
+	Body      string `json:"body"`
+}
+
 func newCommentCatCmd() *cobra.Command {
 	var asJSON, ndjson, raw bool
 	cmd := &cobra.Command{
@@ -257,12 +270,13 @@ func newCommentCatCmd() *cobra.Command {
 		Short: "Print comment details",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Legacy comment cat defaults to JSON when non-TTY; only the JSON path is
-			// parity-proven.
+			// Legacy comment cat output selection (internal/cli/comment_cat.go):
+			//   json   := --json OR (non-TTY AND !raw AND !ndjson)
+			//   ndjson := --ndjson
+			//   human  := default TTY (header+body) / --raw (body only), `---`-joined
+			// --json wins over --ndjson which wins over raw/human; mirror matches.
 			jsonMode := asJSON || (!isStdoutTTY(cmd.OutOrStdout()) && !raw && !ndjson)
-			if !jsonMode {
-				return fmt.Errorf("comment cat: only --json / non-TTY JSON output is implemented in wrkq-rpccli so far")
-			}
+
 			// comment cat takes comment IDs / c: tokens, not paths — no project-root
 			// scoping applies (the scoper is intentionally unused here).
 			tr, _, closeFn, err := openMirror(cmd)
@@ -270,23 +284,72 @@ func newCommentCatCmd() *cobra.Command {
 				return err
 			}
 			defer closeFn()
-			objs := make([]json.RawMessage, 0, len(args))
-			for _, ref := range args {
-				ref = strings.TrimPrefix(ref, "c:")
+
+			// raws keeps the compact server DTO bytes (json/ndjson re-marshal them
+			// byte-for-byte); projs decodes the fields raw/human rendering needs.
+			raws := make([]json.RawMessage, 0, len(args))
+			projs := make([]commentCatProjection, 0, len(args))
+			for _, orig := range args {
+				ref := strings.TrimPrefix(orig, "c:")
 				out, err := tr.Call(cmd.Context(), "wrkq.comment.catView", map[string]string{"comment": ref})
 				if err != nil {
-					if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-						return fmt.Errorf("comment not found: %s", ref)
+					if re, ok := err.(*Error); ok {
+						// Legacy reports the ORIGINAL arg (incl. any c: prefix), not the
+						// stripped ref, in both error messages.
+						switch re.DomainID {
+						case "WRKQ_NOT_FOUND":
+							return fmt.Errorf("comment not found: %s", orig)
+						case "WRKQ_VALIDATION":
+							return fmt.Errorf("invalid comment reference: %s (expected friendly ID like C-00001 or UUID)", orig)
+						}
+						return errors.New(re.Message)
 					}
 					return err
 				}
-				objs = append(objs, out)
+				raws = append(raws, out)
+				var p commentCatProjection
+				if err := json.Unmarshal(out, &p); err != nil {
+					return err
+				}
+				projs = append(projs, p)
 			}
-			data, err := json.MarshalIndent(objs, "", "  ")
-			if err != nil {
-				return err
+
+			out := cmd.OutOrStdout()
+			if jsonMode {
+				// Legacy renders all comments as one indented JSON array.
+				data, err := json.MarshalIndent(raws, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(out, string(data))
+				return nil
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), string(data))
+			if ndjson {
+				// Legacy marshals each comment map compact, one per line. The compat
+				// DTO declares fields in alphabetical json-tag order so the server's
+				// compact bytes equal legacy's map marshal byte-for-byte.
+				for _, r := range raws {
+					if _, err := out.Write(append([]byte(r), '\n')); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			// Human-readable: `---` between entries; --raw prints body only, otherwise
+			// a header line + blank line + body.
+			for i, p := range projs {
+				if i > 0 {
+					fmt.Fprintln(out, "---")
+				}
+				if raw {
+					fmt.Fprintln(out, p.Body)
+					continue
+				}
+				fmt.Fprintf(out, "[%s] [%s] %s (%s) - Task: %s\n",
+					p.ID, p.CreatedAt, p.ActorSlug, p.ActorRole, p.TaskID)
+				fmt.Fprintln(out)
+				fmt.Fprintln(out, p.Body)
+			}
 			return nil
 		},
 	}
