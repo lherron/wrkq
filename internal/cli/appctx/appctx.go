@@ -5,13 +5,12 @@ package appctx
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/projectroot"
 	"github.com/lherron/wrkq/internal/scope"
-	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -200,24 +199,10 @@ func resolveScopeForCommand(cmd *cobra.Command) *scope.ResolvedScope {
 	return nil
 }
 
-// resolveProjectFlag resolves a project selector (path, slug, or ID) to a project path.
-// This is used to override the WRKQ_PROJECT_ROOT config from the --project flag.
+// resolveProjectFlag resolves a project selector (path, slug, or ID) to a project
+// path, used to override the WRKQ_PROJECT_ROOT config from the --project flag. It
+// delegates to the neutral projectroot package so the legacy CLI and the mirror
+// resolve --project identically (no drift).
 func resolveProjectFlag(database *db.DB, projectSelector string) (string, error) {
-	selector := strings.TrimSpace(projectSelector)
-	if selector == "" {
-		return "", nil
-	}
-
-	projectUUID, _, err := selectors.ResolveContainer(database, selector)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve project %q: %w", selector, err)
-	}
-
-	var projectPath string
-	if err := database.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", projectUUID).Scan(&projectPath); err != nil {
-		return "", fmt.Errorf("failed to resolve project path: %w", err)
-	}
-
-	projectPath = strings.Trim(projectPath, "/")
-	return projectPath, nil
+	return projectroot.ResolveProjectFlag(database, projectSelector)
 }

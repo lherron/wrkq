@@ -17,6 +17,11 @@ var trackedDocs = []string{
 	"docs/wrkf-rpc.md",
 	"docs/change-validation.md",
 	"internal/cli/embedded/WRKQ-USAGE.md",
+	// architecture/ durable-law surface: keep its router + ADR provenance reachable.
+	// (Generated projections INVARIANTS.md/RISKS.md/index.jsonl are gated by
+	// cmd/architecture-records, not here.)
+	"architecture/README.md",
+	"architecture/adr/0001-wrkf-rpc-recovery-contract.md",
 }
 
 func main() {

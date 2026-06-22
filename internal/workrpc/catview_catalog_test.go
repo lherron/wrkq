@@ -1,0 +1,64 @@
+package workrpc
+
+import "testing"
+
+// TestCatViewInCatalogs guards daedalus's catView contract corrections (T-05090):
+// the compatibility projection must be represented in BOTH the method catalog and
+// the DTO catalog. NOTE: ProtocolSchemaHash() hashes catalog *names*, not field
+// shapes — so these memberships make the hash detect added/removed method/DTO
+// NAMES, not field-level drift. Field-shape drift is guarded separately by
+// TestCatViewDTOFingerprint (internal/wrkqapi). True shape-hashing is a tracked
+// follow-up (see docs/rpc-cli-migration.md).
+func TestCatViewInCatalogs(t *testing.T) {
+	if !contains(methodCatalog, "wrkq.task.catView") {
+		t.Error("wrkq.task.catView missing from methodCatalog (its name would not be in the schema-hash input)")
+	}
+	if !contains(dtoCatalog, "WrkqTaskCatView") {
+		t.Error("WrkqTaskCatView missing from dtoCatalog (its name would not be in the schema-hash input)")
+	}
+	if !contains(methodCatalog, "wrkq.container.catView") {
+		t.Error("wrkq.container.catView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqContainerCatView") {
+		t.Error("WrkqContainerCatView missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.comment.catView") {
+		t.Error("wrkq.comment.catView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqCommentCatView") {
+		t.Error("WrkqCommentCatView missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.relation.listView") {
+		t.Error("wrkq.relation.listView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "CatViewRelation") {
+		t.Error("CatViewRelation missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.comment.listView") {
+		t.Error("wrkq.comment.listView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqCommentListView") {
+		t.Error("WrkqCommentListView missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.attachment.listView") {
+		t.Error("wrkq.attachment.listView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqAttachmentListView") {
+		t.Error("WrkqAttachmentListView missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.task.lsView") {
+		t.Error("wrkq.task.lsView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqLsListView") {
+		t.Error("WrkqLsListView missing from dtoCatalog")
+	}
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}

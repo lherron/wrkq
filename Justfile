@@ -53,6 +53,8 @@ build:
   go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
   go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
+  # RPC-backed mirror (parity harness, not system-installed). See docs/rpc-cli-migration.md.
+  go build -tags sqlite_fts5 -o bin/wrkq-rpccli ./cmd/wrkq-rpccli
 
 # Conservative no-network check for agents/CI sandboxes
 agent-check:
@@ -290,6 +292,11 @@ surface-guard:
 doc-links:
   go run ./cmd/doc-link-check --root .
 
+# Fail on malformed/stale durable architecture records or out-of-date projections under architecture/
+# (pass --write to regenerate the generated projections: just architecture-records --write)
+architecture-records *args:
+  go run ./cmd/architecture-records --root . {{args}}
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -300,8 +307,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + @wrkq/client unit+integration RPC)
-verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links verify-rpc
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + @wrkq/client unit+integration RPC)
+verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
   @echo "✓ All checks passed"
 
 # Run the full slow backstop tier (verify [incl. RPC] + smoke)

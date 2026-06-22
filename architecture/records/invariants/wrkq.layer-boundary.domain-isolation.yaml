@@ -1,0 +1,27 @@
+id: wrkq.layer-boundary.domain-isolation
+kind: invariant
+status: active
+owner_project: wrkq
+scope: Go package import layering
+predicate: >
+  internal/domain must not (transitively) import internal/cli, internal/wrkfcli,
+  internal/store, internal/db, internal/workflow, or internal/wrkfapi — domain stays
+  independent of adapter/persistence/protocol details.
+authority:
+  repo: wrkq
+  surface: Go import graph
+enforced_by: cmd/layer-boundary   # rule id "domain-layer"; BFS transitive closure via go list
+exception_channel: "// ARCH-EXCEPTION(T-id): <reason> on the first-hop import"
+source:
+  - cmd/layer-boundary/main.go            # liveConfig() rule "domain-layer"
+  - internal/layerguard/layerguard.go     # transitive chain detection + teaching diagnostic
+required_tests:
+  - internal/layerguard/layerguard_test.go
+last_verified:
+  date: 2026-06-22
+  evidence: "just layer-boundary green (part of just verify); Daedalus run hrcchat#9876"
+reopen_when:
+  - the domain-layer forbidden set changes
+  - a new internal layer is introduced
+supersedes: []
+superseded_by: null

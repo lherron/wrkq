@@ -1,12 +1,23 @@
 # wrkf RPC — Frozen Contract (v1)
 
 > **Status:** P0 contract freeze. This document is the *machine contract* for the wrkf
-> JSON-RPC stdio substrate. It is authoritative for method names, DTO field names, error
-> codes, and the protocol/lifecycle shape. Implementation phases (wrkfapi, hardening, wrkfrpc,
-> @wrkf/client) must conform to this file. Design rationale now lives in git history and
-> tracked wrkq tasks; this file is the maintained contract.
+> JSON-RPC stdio substrate. It is authoritative for method names, DTO field names, and the
+> protocol/lifecycle shape. **Authority exception:** the `WRKF_*` error-code set and their
+> retryability are owned by the durable architecture contract record
+> [architecture/contracts/wrkf-rpc.yaml](architecture/contracts/wrkf-rpc.yaml)
+> (`wrkq.contract.wrkf-rpc`) — for that slice this document is explanatory/projection and must
+> conform to the record. Implementation phases (wrkfapi, hardening, wrkfrpc, @wrkf/client) must
+> conform to this file. Design rationale now lives in git history and tracked wrkq tasks; this
+> file is the maintained contract.
 
 Protocol version string: **`2026-06-01`**.
+
+> **Durable-law anchor:** the error-recovery half of this contract is captured as durable
+> architecture law in [architecture/contracts/wrkf-rpc.yaml](architecture/contracts/wrkf-rpc.yaml)
+> (record `wrkq.contract.wrkf-rpc`), with provenance in
+> [architecture/adr/0001-wrkf-rpc-recovery-contract.md](architecture/adr/0001-wrkf-rpc-recovery-contract.md).
+> That record is the authority for `WRKF_*` codes + retryability; this file is the explanatory
+> machine contract that conforms to it. (Link paths here are repo-root-relative.)
 
 ---
 

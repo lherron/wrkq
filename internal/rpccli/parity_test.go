@@ -1,0 +1,982 @@
+package rpccli
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/lherron/wrkq/internal/db"
+)
+
+// TestParity is the data-driven old-vs-new equivalence harness. It is the single
+// proof that `wrkq-rpccli <cmd>` is functionally equivalent to legacy `wrkq <cmd>`:
+// for each case it seeds two identical fixtures, runs the OLD binary on one and
+// the NEW binary on the other, and asserts byte-equal exit code + stdout + stderr,
+// plus an identical durable-task-table snapshot for mutating commands.
+//
+// Adding coverage for a new command means appending rows to parityCases ✓ never
+// editing the driver. This is the migration's command-equivalence oracle; the
+// old CLI is the source of truth (rpcwrkqcli.md "Compatibility Invariant").
+type parityCase struct {
+	name string
+	// setup is a sequence of legacy-wrkq argv (excluding --db/--as) run to seed
+	// the fixture identically for both binaries.
+	setup [][]string
+	// args is the command under test, run on BOTH binaries (excluding --db/--as).
+	args []string
+	// mutates additionally compares the durable task-table snapshot.
+	mutates bool
+	// normalizeUUID neutralizes UUIDs in stdout/stderr before comparison. Set for
+	// CREATE commands whose output echoes a freshly-generated (non-deterministic)
+	// UUID; leave false for reads so a wrong-UUID bug is still caught.
+	normalizeUUID bool
+	// env adds extra environment variables (beyond the hermetic HOME/PATH) for the
+	// command-under-test run on BOTH binaries — e.g. WRKQ_PROJECT_ROOT/ASP_PROJECT
+	// to prove project-root scoping. The setup/seed always runs root-less.
+	env []string
+}
+
+var parityCases = []parityCase{
+	{
+		name:    "ack/fresh",
+		setup:   [][]string{{"touch", "inbox/done", "-t", "done"}, {"set", "inbox/done", "--state", "completed"}},
+		args:    []string{"ack", "inbox/done"},
+		mutates: true,
+	},
+	{
+		name: "ack/skip-already-acked",
+		setup: [][]string{
+			{"touch", "inbox/done", "-t", "done"}, {"set", "inbox/done", "--state", "completed"}, {"ack", "inbox/done"},
+		},
+		args:    []string{"ack", "inbox/done"},
+		mutates: true,
+	},
+	{
+		name:    "ack/nonterminal-noforce-errors",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"ack", "inbox/open"},
+		mutates: false,
+	},
+	{
+		name:    "ack/force-on-open",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"ack", "inbox/open", "--force"},
+		mutates: true,
+	},
+	{
+		name:    "ack/unknown-ref-errors",
+		setup:   nil,
+		args:    []string{"ack", "T-09999999"},
+		mutates: false,
+	},
+	{
+		name: "ack/multi-mixed-fresh-and-skip",
+		setup: [][]string{
+			{"touch", "inbox/task-a", "-t", "a"}, {"set", "inbox/task-a", "--state", "completed"}, {"ack", "inbox/task-a"},
+			{"touch", "inbox/task-b", "-t", "b"}, {"set", "inbox/task-b", "--state", "completed"},
+		},
+		args:    []string{"ack", "inbox/task-a", "inbox/task-b"},
+		mutates: true,
+	},
+
+	// stat ✓ first RPC-backed READ command (re-projects wrkq.task.show /
+	// wrkq.container.show into the legacy stat metadata shape). Read-only.
+	{
+		name:  "stat/task",
+		setup: [][]string{{"touch", "inbox/thing", "-t", "A Thing", "--priority", "2"}},
+		args:  []string{"stat", "inbox/thing"},
+	},
+	{
+		name:  "stat/task-by-id",
+		setup: [][]string{{"touch", "inbox/thing", "-t", "A Thing"}},
+		args:  []string{"stat", "T-00001"},
+	},
+	{
+		name:  "stat/container",
+		setup: [][]string{{"mkdir", "proj"}},
+		args:  []string{"stat", "proj"},
+	},
+	{
+		name:  "stat/multi-task-and-container",
+		setup: [][]string{{"mkdir", "proj"}, {"touch", "proj/thing", "-t", "T"}},
+		args:  []string{"stat", "proj", "proj/thing"},
+	},
+	{
+		name:  "stat/unknown-ref-errors",
+		setup: nil,
+		args:  []string{"stat", "T-09999999"},
+	},
+	{
+		name:  "stat/completed-task",
+		setup: [][]string{{"touch", "inbox/done", "-t", "Done"}, {"set", "inbox/done", "--state", "completed"}},
+		args:  []string{"stat", "inbox/done"},
+	},
+
+	// cat --json ✓ RPC-backed via wrkq.task.catView (server-owned compat projection).
+	// JSON mode only (ndjson/porcelain/raw are not yet implemented; cat is partial).
+	{
+		name:  "cat/single-json",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "--priority", "2", "--labels", `["x","y"]`, "-d", "body Ã¢ÂÂ"}},
+		args:  []string{"cat", "inbox/one", "--json"},
+	},
+	{
+		name:  "cat/multi-json",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One"}, {"touch", "inbox/two", "-t", "Two"}},
+		args:  []string{"cat", "inbox/one", "inbox/two", "--json"},
+	},
+	{
+		name: "cat/with-comment",
+		setup: [][]string{
+			{"touch", "inbox/cmt", "-t", "Commented"}, {"comment", "add", "inbox/cmt", "first comment Ã¢ÂÂ"},
+		},
+		args: []string{"cat", "inbox/cmt", "--json"},
+	},
+	{
+		name: "cat/exclude-comments",
+		setup: [][]string{
+			{"touch", "inbox/cmt", "-t", "Commented"}, {"comment", "add", "inbox/cmt", "hidden"},
+		},
+		args: []string{"cat", "inbox/cmt", "--json", "--exclude-comments"},
+	},
+	{
+		name: "cat/with-relation-and-blocker",
+		setup: [][]string{
+			{"touch", "inbox/main", "-t", "Main"},
+			{"touch", "inbox/blk", "-t", "Blocker"},
+			{"relation", "add", "inbox/blk", "blocks", "inbox/main"},
+		},
+		args: []string{"cat", "inbox/main", "--json"},
+	},
+	{
+		name:  "cat/unknown-ref-errors",
+		setup: nil,
+		args:  []string{"cat", "T-09999999", "--json"},
+	},
+
+	// mkdir / rmdir ✓ RPC-backed via wrkq.container.create / .delete(Recursive).
+	{
+		name:    "mkdir/single",
+		setup:   nil,
+		args:    []string{"mkdir", "proj"},
+		mutates: true,
+	},
+	{
+		name:    "mkdir/multi",
+		setup:   nil,
+		args:    []string{"mkdir", "proj", "area"},
+		mutates: true,
+	},
+	{
+		name:    "rmdir/empty",
+		setup:   [][]string{{"mkdir", "gone"}},
+		args:    []string{"rmdir", "gone"},
+		mutates: true,
+	},
+	// NOTE: `rmdir --force` (recursive) is intentionally NOT covered yet ✓ legacy
+	// uses an interactive confirmation flow and the RPC deleteRecursive requires an
+	// "expected impact" confirmation param. That reconciliation is a tracked gap.
+
+	// touch ✓ RPC-backed via wrkq.task.create, re-projected to the legacy
+	// touchResult array. Core flags only (due-at/start-at/etc. hard-error as gaps).
+	{
+		name:          "touch/basic",
+		setup:         nil,
+		args:          []string{"touch", "inbox/newtask", "-t", "New Task"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:          "touch/flags",
+		setup:         nil,
+		args:          []string{"touch", "inbox/rich", "-t", "Rich Ã¢ÂÂ", "--priority", "1", "--kind", "bug", "-d", "desc", "--labels", `["a","b"]`},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:          "touch/default-title-is-slug",
+		setup:         nil,
+		args:          []string{"touch", "inbox/noname"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:    "touch/duplicate-errors",
+		setup:   [][]string{{"touch", "inbox/dup", "-t", "Dup"}},
+		args:    []string{"touch", "inbox/dup", "-t", "Dup"},
+		mutates: false,
+	},
+
+	// mv â single-source task move into an existing container (wrkq.task.move).
+	{
+		name:    "mv/task-into-container",
+		setup:   [][]string{{"touch", "inbox/movable", "-t", "M"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/movable", "dest"},
+		mutates: true,
+	},
+
+	// set — field updates via wrkq.task.update patch (success cases).
+	{
+		name:    "set/state",
+		setup:   [][]string{{"touch", "inbox/s1", "-t", "S1"}},
+		args:    []string{"set", "inbox/s1", "--state", "in_progress"},
+		mutates: true,
+	},
+	{
+		name:    "set/multi-field",
+		setup:   [][]string{{"touch", "inbox/s2", "-t", "S2"}},
+		args:    []string{"set", "inbox/s2", "--priority", "1", "--title", "New Title", "--labels", `["z"]`},
+		mutates: true,
+	},
+
+	// comment add via wrkq.comment.add (re-projected to legacy snake_case output).
+	{
+		name:          "comment/add",
+		setup:         [][]string{{"touch", "inbox/ct", "-t", "CT"}},
+		args:          []string{"comment", "add", "inbox/ct", "hello world"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+
+	// relation add/rm via wrkq.relation.add/.remove (composes task.show for id+uuid).
+	{
+		name:    "relation/add",
+		setup:   [][]string{{"touch", "inbox/ra", "-t", "A"}, {"touch", "inbox/rb", "-t", "B"}},
+		args:    []string{"relation", "add", "inbox/ra", "blocks", "inbox/rb"},
+		mutates: true,
+	},
+	{
+		name:    "relation/rm",
+		setup:   [][]string{{"touch", "inbox/ra", "-t", "A"}, {"touch", "inbox/rb", "-t", "B"}, {"relation", "add", "inbox/ra", "blocks", "inbox/rb"}},
+		args:    []string{"relation", "rm", "inbox/ra", "blocks", "inbox/rb"},
+		mutates: true,
+	},
+
+	// relation ls via wrkq.relation.listView (server compat list projection).
+	{
+		name:  "relation-ls/json",
+		setup: [][]string{{"touch", "inbox/ra", "-t", "A"}, {"touch", "inbox/rb", "-t", "B"}, {"relation", "add", "inbox/ra", "blocks", "inbox/rb"}},
+		args:  []string{"relation", "ls", "inbox/ra", "--json"},
+	},
+	{
+		name:  "relation-ls/ndjson-default",
+		setup: [][]string{{"touch", "inbox/ra", "-t", "A"}, {"touch", "inbox/rb", "-t", "B"}, {"relation", "add", "inbox/ra", "blocks", "inbox/rb"}},
+		args:  []string{"relation", "ls", "inbox/rb"},
+	},
+	{
+		name:  "relation-ls/empty",
+		setup: [][]string{{"touch", "inbox/ra", "-t", "A"}},
+		args:  []string{"relation", "ls", "inbox/ra", "--json"},
+	},
+
+	// container cat via wrkq.container.catView (server compat projection).
+	{
+		name:  "container-cat/project",
+		setup: [][]string{{"mkdir", "myproj"}},
+		args:  []string{"container", "cat", "myproj", "--json"},
+	},
+	{
+		name:  "container-cat/nested-rich",
+		setup: [][]string{{"mkdir", "realproj"}, {"mkdir", "realproj/sub"}},
+		args:  []string{"container", "cat", "realproj/sub", "--json"},
+	},
+	{
+		name:  "comment-cat/by-id",
+		setup: [][]string{{"touch", "inbox/cc", "-t", "CC"}, {"comment", "add", "inbox/cc", "the body"}},
+		args:  []string{"comment", "cat", "C-00001", "--json"},
+	},
+	{
+		name:  "comment-ls/json",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json"},
+	},
+	{
+		name:  "comment-ls/ndjson-default",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl"},
+	},
+	{
+		name:  "comment-ls/porcelain-limit-cursor",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}, {"comment", "add", "inbox/cl", "three"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--porcelain", "--limit", "2"},
+	},
+	{
+		name:  "comment-ls/empty",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json"},
+	},
+	{
+		name:  "comment-ls/sort-id",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--sort", "id"},
+	},
+	{
+		name:  "comment-ls/sort-created_at",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--sort", "created_at"},
+	},
+	{
+		name:  "comment-ls/sort-updated_at",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--sort", "updated_at"},
+	},
+	{
+		name:  "comment-ls/malformed-cursor-errors",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--cursor", "not-a-valid-cursor"},
+	},
+	{
+		name:  "comment-ls/include-deleted-none",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--include-deleted"},
+	},
+
+	// attach ls (empty) via wrkq.attachment.listView (cursor pattern; populated case needs attach put fs, pending).
+	{
+		name:  "attach-ls/empty",
+		setup: [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:  []string{"attach", "ls", "inbox/at", "--json"},
+	},
+
+	// ls via wrkq.task.lsView (server compat list projection: mixed task/container
+	// listing, recursive rollup counts, in-memory merge-sort, cursor over the
+	// merged set). lsMixed seeds a project with child containers + tasks.
+	{
+		name:  "ls/top-level-rollups",
+		setup: lsMixed,
+		args:  []string{"ls", "--json"},
+	},
+	{
+		name:  "ls/container-mixed",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json"},
+	},
+	{
+		name:  "ls/ndjson-default",
+		setup: lsMixed,
+		args:  []string{"ls", "proj"},
+	},
+	{
+		name:  "ls/porcelain-limit-cursor",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--porcelain", "--limit", "2"},
+	},
+	{
+		name:  "ls/sort-id",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--sort", "id"},
+	},
+	{
+		name:  "ls/sort-created_at",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--sort", "created_at"},
+	},
+	{
+		name:  "ls/sort-updated_at",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--sort", "updated_at"},
+	},
+	{
+		name:  "ls/reverse",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--reverse"},
+	},
+	{
+		name:  "ls/type-p",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--type", "p"},
+	},
+	{
+		name:  "ls/type-t",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--type", "t"},
+	},
+	{
+		name: "ls/all-includes-hidden",
+		setup: append(append([][]string{}, lsMixed...),
+			[]string{"touch", "proj/done", "-t", "Done"}, []string{"set", "proj/done", "--state", "completed"}),
+		args: []string{"ls", "proj", "--json", "--all"},
+	},
+	{
+		name: "ls/default-hides-completed",
+		setup: append(append([][]string{}, lsMixed...),
+			[]string{"touch", "proj/done", "-t", "Done"}, []string{"set", "proj/done", "--state", "completed"}),
+		args: []string{"ls", "proj", "--json"},
+	},
+	{
+		name:  "ls/single-task",
+		setup: lsMixed,
+		args:  []string{"ls", "proj/task-x", "--json"},
+	},
+	{
+		name:  "ls/empty-null",
+		setup: [][]string{{"mkdir", "empty"}},
+		args:  []string{"ls", "empty", "--json"},
+	},
+	{
+		name:  "ls/unknown-path-errors",
+		setup: nil,
+		args:  []string{"ls", "nope", "--json"},
+	},
+	{
+		name:  "ls/invalid-sort-errors",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--sort", "bogus"},
+	},
+	{
+		// Legacy passes an unknown --type through both type blocks (neither runs) →
+		// empty set → `null`. The server lsView matches; pinned as parity.
+		name:  "ls/invalid-type-null",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--type", "bogus", "--json"},
+	},
+	{
+		// Legacy excludes raw from ls's allowed output set → identical error on both.
+		name:  "ls/output-raw-unsupported",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--output", "raw"},
+	},
+	{
+		name:  "ls/malformed-cursor-errors",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--json", "--cursor", "not-a-valid-cursor"},
+	},
+
+	// ── project-root scoping parity (WRKQ_PROJECT_ROOT / ASP_PROJECT / --project) ──
+	// Both binaries apply the SAME neutral projectroot transform before any RPC
+	// param is sent. The seed is root-less; only the command-under-test runs with a
+	// project root. Proves ls + a selector read (cat/stat) + mutations (touch/set/mv)
+	// per daedalus's invariant.
+	{
+		name:  "pr/ls-default-root",
+		setup: prSeed,
+		args:  []string{"ls", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+	{
+		name:  "pr/ls-relative-path",
+		setup: prSeed,
+		args:  []string{"ls", "sub", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+	{
+		name:  "pr/cat-relative-selector",
+		setup: prSeed,
+		args:  []string{"cat", "task-a", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+	{
+		name:  "pr/stat-relative-selector",
+		setup: prSeed,
+		args:  []string{"stat", "task-a"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+	{
+		name:          "pr/touch-relative-path",
+		setup:         prSeed,
+		args:          []string{"touch", "newtask", "-t", "New"},
+		env:           []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:    "pr/set-relative-selector",
+		setup:   prSeed,
+		args:    []string{"set", "task-a", "--state", "in_progress"},
+		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates: true,
+	},
+	{
+		name:    "pr/mv-relative-selectors",
+		setup:   prSeed,
+		args:    []string{"mv", "task-b", "sub"},
+		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates: true,
+	},
+	{
+		// ASP_PROJECT is the agent-runtime project hint; config.Load honors it as a
+		// project-root source. Same effect as WRKQ_PROJECT_ROOT for this case.
+		name:  "pr/asp-project-ls",
+		setup: prSeed,
+		args:  []string{"ls", "--json"},
+		env:   []string{"ASP_PROJECT=myproj"},
+	},
+	{
+		// --project OVERRIDES the configured root: env points at `other` (no task-a),
+		// but --project myproj scopes the read into myproj. If the mirror ignored
+		// --project it would look under `other` and diverge.
+		name:  "pr/project-flag-override-ls",
+		setup: prSeed,
+		args:  []string{"--project", "myproj", "ls", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=other"},
+	},
+	{
+		name:  "pr/project-flag-override-cat",
+		setup: prSeed,
+		args:  []string{"--project", "myproj", "cat", "task-a", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=other"},
+	},
+}
+
+// prSeed builds a root-less fixture with two top-level projects (myproj, other),
+// a sub-container, and tasks under myproj. The project-root parity cases run the
+// command-under-test WITH a project root so the mirror must scope relative
+// paths/selectors into myproj exactly as legacy does.
+var prSeed = [][]string{
+	{"mkdir", "myproj"},
+	{"mkdir", "myproj/sub"},
+	{"mkdir", "other"},
+	{"touch", "myproj/task-a", "-t", "Task A"},
+	{"touch", "myproj/task-b", "-t", "Task B"},
+}
+
+// lsMixed seeds a project container with child containers + tasks so ls exercises
+// mixed task/container listing, rollup counts (alpha has a nested descendant
+// task), and merge-sort ordering across the combined set.
+var lsMixed = [][]string{
+	{"mkdir", "proj"},
+	{"mkdir", "proj/alpha"},
+	{"mkdir", "proj/beta"},
+	{"touch", "proj/alpha/nested", "-t", "Nested"},
+	{"touch", "proj/task-x", "-t", "Task X"},
+	{"touch", "proj/task-y", "-t", "Task Y"},
+}
+
+func TestParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds wrkq + wrkq-rpccli and runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	for _, tc := range parityCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Seed ONE base fixture, then give each binary a byte-identical copy
+			// (incl. random UUIDs), so output comparison catches real id bugs
+			// rather than masking legitimately-different independent seeds.
+			base := seedFixture(t, bins, tc.setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldRes := runCLIEnv(t, bins.wrkq, oldDir, tc.args, tc.env)
+			newRes := runCLIEnv(t, bins.mirror, newDir, tc.args, tc.env)
+
+			if oldRes.exit != newRes.exit {
+				t.Errorf("exit code: old=%d new=%d\n old stderr: %s\n new stderr: %s",
+					oldRes.exit, newRes.exit, oldRes.stderr, newRes.stderr)
+			}
+			norm := func(s string) string {
+				s = normalize(s)
+				if tc.normalizeUUID {
+					s = uuidRe.ReplaceAllString(s, "<UUID>")
+				}
+				return s
+			}
+			if got, want := norm(newRes.stdout), norm(oldRes.stdout); got != want {
+				t.Errorf("stdout mismatch:\n old: %q\n new: %q", want, got)
+			}
+			if got, want := norm(newRes.stderr), norm(oldRes.stderr); got != want {
+				t.Errorf("stderr mismatch:\n old: %q\n new: %q", want, got)
+			}
+			if tc.mutates {
+				if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
+					t.Errorf("durable task snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+// Ã¢ÂÂÃ¢ÂÂ harness internals Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+
+// TestCommentLsCursorReplay proves the paginated list-view cursor contract beyond
+// first-page emission: cursor replay across page boundaries, per-page byte parity
+// between old and new, and no-dup/no-miss (concatenated pages equal unpaginated).
+func TestCommentLsCursorReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	setup := [][]string{{"touch", "inbox/page", "-t", "P"}}
+	for _, b := range []string{"c1", "c2", "c3", "c4", "c5"} {
+		setup = append(setup, []string{"comment", "add", "inbox/page", b})
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	paginateAll := func(bin, dir string) (all, pages []string) {
+		cur := ""
+		for {
+			args := []string{"comment", "ls", "inbox/page", "--porcelain", "--limit", "2"}
+			if cur != "" {
+				args = append(args, "--cursor", cur)
+			}
+			res := runCLI(t, bin, dir, args)
+			if res.exit != 0 {
+				t.Fatalf("%s page (cursor=%q) exit %d: %s", bin, cur, res.exit, res.stderr)
+			}
+			all = append(all, nonEmptyLines(res.stdout)...)
+			pages = append(pages, res.stdout+"\x1e"+res.stderr)
+			next := extractCursor(res.stderr)
+			if next == "" {
+				break
+			}
+			cur = next
+			if len(pages) > 20 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+		return all, pages
+	}
+
+	oldAll, oldPages := paginateAll(bins.wrkq, oldDir)
+	newAll, newPages := paginateAll(bins.mirror, newDir)
+
+	if len(oldPages) != len(newPages) {
+		t.Fatalf("page count: old=%d new=%d", len(oldPages), len(newPages))
+	}
+	for i := range oldPages {
+		if oldPages[i] != newPages[i] {
+			t.Errorf("page %d bytes differ:\n old: %q\n new: %q", i, oldPages[i], newPages[i])
+		}
+	}
+
+	oldFull := nonEmptyLines(runCLI(t, bins.wrkq, oldDir, []string{"comment", "ls", "inbox/page"}).stdout)
+	newFull := nonEmptyLines(runCLI(t, bins.mirror, newDir, []string{"comment", "ls", "inbox/page"}).stdout)
+	if strings.Join(oldAll, "\n") != strings.Join(oldFull, "\n") {
+		t.Errorf("OLD paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", oldAll, oldFull)
+	}
+	if strings.Join(newAll, "\n") != strings.Join(newFull, "\n") {
+		t.Errorf("NEW paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", newAll, newFull)
+	}
+	if len(oldAll) != 5 || len(newAll) != 5 {
+		t.Errorf("expected 5 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
+	}
+}
+
+// TestLsCursorReplay proves the ls list-view cursor contract over the MIXED
+// task/container set: cursor replay across page boundaries, per-page byte parity
+// old-vs-new, and no-dup/no-miss (concatenated pages equal the unpaginated list).
+// daedalus requires this distinct from the first-page parity case for ls/find.
+func TestLsCursorReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	// 5 mixed entries under proj: containers alpha,beta + tasks task-1,task-2,task-3.
+	// Sorted by slug: alpha, beta, task-1, task-2, task-3 → pages of 2,2,1.
+	setup := [][]string{{"mkdir", "proj"}, {"mkdir", "proj/alpha"}, {"mkdir", "proj/beta"}}
+	for _, s := range []string{"task-1", "task-2", "task-3"} {
+		setup = append(setup, []string{"touch", "proj/" + s, "-t", s})
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	paginateAll := func(bin, dir string) (all, pages []string) {
+		cur := ""
+		for {
+			args := []string{"ls", "proj", "--porcelain", "--limit", "2"}
+			if cur != "" {
+				args = append(args, "--cursor", cur)
+			}
+			res := runCLI(t, bin, dir, args)
+			if res.exit != 0 {
+				t.Fatalf("%s page (cursor=%q) exit %d: %s", bin, cur, res.exit, res.stderr)
+			}
+			all = append(all, nonEmptyLines(res.stdout)...)
+			pages = append(pages, res.stdout+"\x1e"+res.stderr)
+			next := extractCursor(res.stderr)
+			if next == "" {
+				break
+			}
+			cur = next
+			if len(pages) > 20 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+		return all, pages
+	}
+
+	oldAll, oldPages := paginateAll(bins.wrkq, oldDir)
+	newAll, newPages := paginateAll(bins.mirror, newDir)
+
+	if len(oldPages) != len(newPages) {
+		t.Fatalf("page count: old=%d new=%d", len(oldPages), len(newPages))
+	}
+	for i := range oldPages {
+		if oldPages[i] != newPages[i] {
+			t.Errorf("page %d bytes differ:\n old: %q\n new: %q", i, oldPages[i], newPages[i])
+		}
+	}
+
+	oldFull := nonEmptyLines(runCLI(t, bins.wrkq, oldDir, []string{"ls", "proj"}).stdout)
+	newFull := nonEmptyLines(runCLI(t, bins.mirror, newDir, []string{"ls", "proj"}).stdout)
+	if strings.Join(oldAll, "\n") != strings.Join(oldFull, "\n") {
+		t.Errorf("OLD paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", oldAll, oldFull)
+	}
+	if strings.Join(newAll, "\n") != strings.Join(newFull, "\n") {
+		t.Errorf("NEW paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", newAll, newFull)
+	}
+	if len(oldAll) != 5 || len(newAll) != 5 {
+		t.Errorf("expected 5 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
+	}
+}
+
+// TestLsHardGates proves the mirror REFUSES (clean non-zero exit, not silent
+// degradation) every legacy ls surface it does not yet implement, so a narrower
+// behavior can never masquerade as parity. Legacy would succeed for these, so they
+// cannot be byte-parity cases; we assert the gate on the mirror alone.
+func TestLsHardGates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs the mirror CLI")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, lsMixed)
+	dir := copyFixture(t, base)
+
+	gated := []struct {
+		name string
+		args []string
+	}{
+		{"recursive", []string{"ls", "proj", "--ndjson", "--recursive"}},
+		{"one", []string{"ls", "proj", "--ndjson", "--one"}},
+		{"nul", []string{"ls", "proj", "--ndjson", "--nul"}},
+		{"multi-path", []string{"ls", "proj", "inbox", "--ndjson"}},
+		{"output-yaml", []string{"ls", "proj", "--output", "yaml"}},
+		{"output-tsv", []string{"ls", "proj", "--output", "tsv"}},
+		{"output-table", []string{"ls", "proj", "--output", "table"}},
+		// human IS in legacy's ls allow-set (legacy renders it); the mirror cannot
+		// yet, so it must hard-gate (mirror-only error). Distinct from raw, which
+		// legacy rejects and the mirror parity-matches.
+		{"output-human", []string{"ls", "proj", "--output", "human"}},
+		{"conflicting-modes", []string{"ls", "proj", "--json", "--ndjson"}},
+	}
+	for _, g := range gated {
+		g := g
+		t.Run(g.name, func(t *testing.T) {
+			res := runCLI(t, bins.mirror, dir, g.args)
+			if res.exit == 0 {
+				t.Errorf("expected non-zero exit (hard-gate) for %v, got 0\n stdout: %q", g.args, res.stdout)
+			}
+			if strings.TrimSpace(res.stderr) == "" {
+				t.Errorf("expected a gate error message on stderr for %v", g.args)
+			}
+		})
+	}
+}
+
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func extractCursor(stderr string) string {
+	for _, l := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(l, "next_cursor=") {
+			return strings.TrimPrefix(l, "next_cursor=")
+		}
+	}
+	return ""
+}
+
+type binaries struct{ wrkq, mirror, wrkqadm string }
+
+var (
+	parityBins  binaries
+	parityOnce  sync.Once
+	parityBuilt bool
+	// sharedHome is a single HOME used for every binary invocation so HOME-derived
+	// values (e.g. cat's artifact_dir = $HOME/praesidium/var/wrkq-artifacts/<id>)
+	// are identical for old and new, which run in separate fixture dirs. The DB is
+	// always located via --db, so HOME need not be the fixture dir.
+	sharedHome string
+)
+
+func buildParityBinaries(t *testing.T) binaries {
+	t.Helper()
+	parityOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "rpccli-parity-bins")
+		if err != nil {
+			t.Fatalf("mkdtemp: %v", err)
+		}
+		sharedHome = filepath.Join(dir, "home")
+		if err := os.MkdirAll(sharedHome, 0o755); err != nil {
+			t.Fatalf("mkdir sharedHome: %v", err)
+		}
+		root := repoRootFromTest(t)
+		build := func(name, pkg string) string {
+			out := filepath.Join(dir, name)
+			cmd := exec.Command("go", "build", "-tags", "sqlite_fts5", "-o", out, pkg)
+			cmd.Dir = root
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("build %s: %v\n%s", pkg, err, b)
+			}
+			return out
+		}
+		parityBins = binaries{
+			wrkq:    build("wrkq", "./cmd/wrkq"),
+			mirror:  build("wrkq-rpccli", "./cmd/wrkq-rpccli"),
+			wrkqadm: build("wrkqadm", "./cmd/wrkqadm"),
+		}
+		parityBuilt = true
+	})
+	if !parityBuilt {
+		t.Fatal("parity binaries failed to build")
+	}
+	return parityBins
+}
+
+// seedFixture creates a hermetic fixture dir (own HOME, no inherited project
+// scope, cwd inside the dir so config.Load does not walk into the repo's
+// .env.local), runs `wrkqadm init`, and applies the setup commands with the
+// legacy binary so both fixtures start identical.
+func seedFixture(t *testing.T, bins binaries, setup [][]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "wrkq.db")
+	mustRun(t, bins.wrkqadm, dir, []string{"--db", dbPath, "init"})
+	for _, argv := range setup {
+		mustRun(t, bins.wrkq, dir, append([]string{"--db", dbPath, "--as", "local-human"}, argv...))
+	}
+	return dir
+}
+
+// copyFixture copies a seeded fixture's SQLite files (main + WAL + shm) into a
+// fresh dir so both binaries run against byte-identical starting state. The
+// seeding processes have exited and committed, so the triplet copy is consistent.
+func copyFixture(t *testing.T, base string) string {
+	t.Helper()
+	dst := t.TempDir()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(filepath.Join(base, "wrkq.db"+suffix))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("copy fixture read: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, "wrkq.db"+suffix), b, 0o644); err != nil {
+			t.Fatalf("copy fixture write: %v", err)
+		}
+	}
+	return dst
+}
+
+type cliResult struct {
+	exit   int
+	stdout string
+	stderr string
+}
+
+func runCLI(t *testing.T, bin, dir string, args []string) cliResult {
+	return runCLIEnv(t, bin, dir, args, nil)
+}
+
+func runCLIEnv(t *testing.T, bin, dir string, args []string, extraEnv []string) cliResult {
+	t.Helper()
+	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, args...)
+	cmd := exec.Command(bin, full...)
+	cmd.Dir = dir
+	cmd.Env = append(hermeticEnv(), extraEnv...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exit := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exit = ee.ExitCode()
+		} else {
+			t.Fatalf("run %s: %v", bin, err)
+		}
+	}
+	return cliResult{exit: exit, stdout: stdout.String(), stderr: stderr.String()}
+}
+
+func mustRun(t *testing.T, bin, dir string, args []string) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	cmd.Env = hermeticEnv()
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("seed %s %v: %v\n%s", bin, args, err, b)
+	}
+}
+
+func hermeticEnv() []string {
+	return []string{"HOME=" + sharedHome, "PATH=" + os.Getenv("PATH")}
+}
+
+var rfc3339Re = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})`)
+var uuidRe = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+// normalize neutralizes wall-clock timestamps so byte comparison is stable for
+// commands whose output embeds them (ack has none; this future-proofs the harness).
+func normalize(s string) string {
+	return rfc3339Re.ReplaceAllString(s, "<TS>")
+}
+
+// snapshot renders the durable task state as a stable string: id, slug, state,
+// priority, kind, etag, and whether acknowledged/completed timestamps are set
+// (presence, not value ✓ the wall-clock value legitimately differs per run).
+// Provenance columns (updated_by, via) are intentionally excluded: the RPC path
+// records via='rpc' by design, which is a correct difference, not a regression.
+func snapshot(t *testing.T, dir string) string {
+	t.Helper()
+	database, err := db.Open(filepath.Join(dir, "wrkq.db"))
+	if err != nil {
+		t.Fatalf("snapshot open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	rows, err := database.Query(`
+		SELECT id, slug, state, priority, kind, etag,
+		       CASE WHEN acknowledged_at IS NOT NULL AND acknowledged_at != '' THEN 'ack' ELSE '-' END,
+		       CASE WHEN completed_at    IS NOT NULL AND completed_at    != '' THEN 'done' ELSE '-' END
+		FROM tasks ORDER BY id`)
+	if err != nil {
+		t.Fatalf("snapshot query: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var b strings.Builder
+	for rows.Next() {
+		var id, slug, state, kind, ackd, done string
+		var prio, etag int
+		if err := rows.Scan(&id, &slug, &state, &prio, &kind, &etag, &ackd, &done); err != nil {
+			t.Fatalf("snapshot scan: %v", err)
+		}
+		b.WriteString("task|" + strings.Join([]string{id, slug, state, strconv.Itoa(prio), kind, strconv.Itoa(etag), ackd, done}, "|"))
+		b.WriteByte('\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("snapshot rows: %v", err)
+	}
+
+	crows, err := database.Query(`SELECT id, slug, kind FROM containers ORDER BY id`)
+	if err != nil {
+		t.Fatalf("snapshot container query: %v", err)
+	}
+	defer func() { _ = crows.Close() }()
+	for crows.Next() {
+		var id, slug, kind string
+		if err := crows.Scan(&id, &slug, &kind); err != nil {
+			t.Fatalf("snapshot container scan: %v", err)
+		}
+		b.WriteString("container|" + strings.Join([]string{id, slug, kind}, "|") + "\n")
+	}
+	if err := crows.Err(); err != nil {
+		t.Fatalf("snapshot container rows: %v", err)
+	}
+	return b.String()
+}

@@ -283,12 +283,37 @@ $/cancelRequest
 ```
 wrkq.task.create      [required]
 wrkq.task.show        [required]
+wrkq.task.catView     [CLI compatibility projection — see note]
+wrkq.task.lsView      [CLI compatibility list projection — see note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
 wrkq.task.acknowledge
 wrkq.task.delete
 wrkq.task.restore
 ```
+
+> **`wrkq.task.lsView`** is a CLI compatibility list read model for `wrkq ls`,
+> **not** canonical `wrkq.task.list`. The server owns mixed task/container
+> listing, container rollup counts (recursive CTE), in-memory merge-sort by the
+> requested sort field, and cursor pagination over the merged set:
+> `{ path?, sort?, reverse?, limit?, cursor?, type?, includeHidden? }` →
+> `{ items: WrkqLsEntry[], next_cursor }`. Rows are legacy-shaped (snake_case).
+> `task_count`/`active_task_count` are container rollups. Cataloged + fingerprinted.
+> NOTE: the mirror `ls` command + parity fixtures are not yet implemented, so the
+> command is not command-parity-green even though the method contract is defined.
+
+> **`wrkq.task.catView` is a CLI compatibility read model, not a domain
+> resource.** Unlike `wrkq.task.show` (the stable camelCase `WrkqTask` DTO), it
+> returns the exact legacy `wrkq cat --json` per-task object: snake_case field
+> names, legacy time formats, and nested `comments` / `relations` (both
+> directions) / `blocked_by` (incomplete blockers only), assembled server-side
+> under a single read transaction. The snapshot covers the **resolved task
+> UUID's** projection; selector→UUID resolution happens before the transaction,
+> so it is not part of the snapshot. Params: `{ task: string; includeComments?:
+> boolean /* default true */ }`. `artifact_dir` is a **server-local host path
+> hint** (meaningful on the canonical host, not a remote-filesystem guarantee).
+> Do not add its projection fields to `wrkq.task.show`. Registering it changes
+> the method catalog and `protocolSchemaHash`.
 
 Params/results (camelCase JSON fields throughout):
 
@@ -413,10 +438,27 @@ rejected), and cascade-restores subtasks.
 
 ```
 wrkq.comment.add      [required]
+wrkq.comment.catView  [CLI compatibility projection]
+wrkq.comment.listView [CLI compatibility list projection]
 wrkq.comment.list     [required]
 wrkq.comment.show
 wrkq.comment.delete
 ```
+
+> **`wrkq.comment.listView`** is a CLI compatibility list read model for
+> `wrkq comment ls`, **not** the canonical `wrkq.comment.list`. It owns the legacy
+> cursor pagination server-side: `{ task, limit?, cursor?, includeDeleted?, sort?,
+> desc? }` → `{ items: WrkqCommentCatView[], next_cursor }`, using `cursor.Apply`
+> + `limit+1` + `BuildNextCursor` so the cursor token is byte-identical to legacy.
+> The RPC CLI renders items (JSON array / NDJSON) and routes `next_cursor` to
+> stderr only in porcelain mode, exactly as legacy does. Cataloged + fingerprinted.
+
+> **`wrkq.comment.catView`** is a CLI compatibility read model, **not** a canonical
+> resource DTO. It returns the legacy `wrkq comment cat` per-comment object
+> (snake_case, alphabetical keys, conditional actor/scope/deletion-provenance
+> fields) for one comment ref (`{ comment: string }`). Do not add its display
+> fields (`actor_slug`/`actor_role`/scope refs) to `WrkqComment`. Cataloged +
+> fingerprinted; changing its field shape is a deliberate contract change.
 
 ```ts
 interface WrkqCommentAddParams {
@@ -451,10 +493,18 @@ interface WrkqComment {
 
 ```
 wrkq.attachment.add
+wrkq.attachment.listView  [CLI compatibility list projection]
 wrkq.attachment.list
 wrkq.attachment.show
 wrkq.attachment.remove
 ```
+
+> **`wrkq.attachment.listView`** is a CLI compatibility list read model for
+> `wrkq attach ls`, **not** canonical `wrkq.attachment.list`. DB-only (does not
+> touch attachment storage); server owns cursor pagination
+> (`{ task, limit?, cursor? }` → `{ items, next_cursor }`, created_at ASC,
+> `cursor.Apply` + `limit+1` + `BuildNextCursor`). Rows are legacy-shaped
+> (snake_case, alphabetical keys). Cataloged + fingerprinted.
 
 ```ts
 interface WrkqAttachmentAddParams {
@@ -500,8 +550,17 @@ or row).
 ```
 wrkq.relation.add
 wrkq.relation.list
+wrkq.relation.listView  [CLI compatibility list projection]
 wrkq.relation.remove
 ```
+
+> **`wrkq.relation.listView`** is a CLI compatibility list read model, **not** the
+> canonical `WrkqRelation` resource. It returns the legacy `wrkq relation ls` rows
+> (`CatViewRelation`: direction/kind/task_id/task_uuid/task_slug/task_title/
+> created_at/created_by_id, outgoing then incoming, ordered by kind,id) for one
+> task (`{ task: string }`). **No cursor** — legacy `relation ls` exposes no
+> limit/cursor and the set is bounded by the task. Do not back-propagate these
+> rows into `WrkqRelation`. Cataloged + fingerprinted (via `CatViewRelation`).
 
 ```ts
 interface WrkqRelationAddParams {
@@ -539,8 +598,18 @@ deletes by composite key; a 0-row delete → `WRKQ_NOT_FOUND`.
 
 ```
 wrkq.container.show
+wrkq.container.catView  [CLI compatibility projection]
 wrkq.container.list
 ```
+
+> **`wrkq.container.catView`** is a CLI compatibility read model, **not** a
+> canonical resource DTO. It returns the legacy `wrkq container cat` object
+> (snake_case: `description`, friendly `parent_id`, `parent_path`, `sort_index`,
+> `webhook_urls`, `created_by`/`updated_by` actor slugs) for one container
+> (`{ container?: string; path?: string }`), assembled under a single read
+> transaction over the **resolved container UUID** (selector resolution happens
+> before the snapshot). Do not back-propagate these fields into `WrkqContainer`.
+> Cataloged + fingerprinted.
 
 ```ts
 interface WrkqContainerShowParams { path?: string; project?: string }

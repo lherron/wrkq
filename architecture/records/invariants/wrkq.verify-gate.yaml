@@ -1,0 +1,24 @@
+id: wrkq.verify-gate
+kind: invariant
+status: active
+owner_project: wrkq
+scope: handoff / commit-time control loop
+predicate: >
+  `just verify` is wrkq's local handoff gate and must be green before handoff; once DAP
+  is adopted, architecture-records must be part of that gate. Cloud CI is
+  release/recheck verification, not the local handoff authority.
+authority:
+  repo: wrkq
+  surface: justfile `verify` recipe
+source:
+  - Justfile                              # the recipe binds the exact chain composition
+required_tests:
+  - "just verify exits 0"
+last_verified:
+  date: 2026-06-22
+  evidence: "Daedalus ran just verify in /Users/lherron/praesidium/wrkq — green end-to-end (hrcchat#9876)"
+reopen_when:
+  - the verify chain composition changes
+  - a pre-push/pre-commit git hook is added (record the enforcement)
+supersedes: []
+superseded_by: null

@@ -1,0 +1,19 @@
+id: wrkq.simple-task.v1.naive-supersede
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-06-22
+severity: medium
+blast_radius: built-in wrkq-simple-task@1 instances may evaluate under a replaced definition
+mitigation: forward-fix divergence if it surfaces; do not claim old-instance hash pinning
+expiry: null
+review_trigger:
+  - versioned built-in workflow definitions are introduced
+  - old-instance divergence is observed
+reopen_when:
+  - built-in workflow migration semantics change
+source:
+  - hrcchat#9647
+supersedes: []
+superseded_by: null

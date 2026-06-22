@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
-	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc"
-	"github.com/lherron/wrkq/internal/wrkfapi"
+	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
 )
 
@@ -23,67 +21,18 @@ var rpcCmd = &cobra.Command{
 		if !rpcStdio {
 			return fmt.Errorf("--stdio is required")
 		}
-		hookPath, err := workflow.ResolveHookCatalogPath("")
+		// Construct the server through the neutral bootstrap helper so the
+		// stdio entrypoint and the RPC-backed mirror CLI build identical
+		// API/options and cannot drift.
+		api, opts, err := bootstrap.Server(app.DB, app.Config)
 		if err != nil {
-			return fmt.Errorf("failed to resolve hook catalog: %w", err)
+			return err
 		}
-		cat, err := workflow.LoadHookCatalog(hookPath)
-		if err != nil {
-			return fmt.Errorf("failed to load hook catalog: %w", err)
-		}
-		api := wrkfapi.New(
-			workflow.NewService(app.DB),
-			wrkfapi.WithHookCatalog(cat),
-			wrkfapi.WithTemplateDir(workflow.HookCatalogDir(hookPath)),
-		)
-		return workrpc.ServeStdio(context.Background(), os.Stdin, os.Stdout, api, workrpc.RegistryOptions{
-			Database:         app.DB,
-			DatabasePath:     app.DB.Path(),
-			ServerVersion:    "dev",
-			Entrypoint:       "wrkq",
-			DefaultActor:     defaultRPCActor(app.Config.DefaultActor),
-			DefaultRole:      os.Getenv("WRKF_ROLE"),
-			AttachDir:        rpcAttachDir(app.Config.AttachDir),
-			AttachmentsMaxMB: app.Config.AttachmentsMaxMB,
-		})
+		return workrpc.ServeStdio(context.Background(), os.Stdin, os.Stdout, api, opts)
 	}),
 }
 
 func init() {
 	rpcCmd.Flags().BoolVar(&rpcStdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")
 	rootCmd.AddCommand(rpcCmd)
-}
-
-func defaultRPCActor(actor string) string {
-	if actor != "" {
-		return actor
-	}
-	return "system:wrkq"
-}
-
-// rpcAttachDir resolves the attachment storage directory for the RPC server. It
-// returns only an *explicitly configured* directory: WRKQ_ATTACH_DIR takes
-// precedence, then a config.yaml attach_dir that differs from the cwd/home
-// auto-default. When nothing is explicitly configured it returns "" so
-// attachment.add reports WRKQ_VALIDATION rather than silently writing to the
-// per-user default location.
-func rpcAttachDir(configured string) string {
-	if env := os.Getenv("WRKQ_ATTACH_DIR"); env != "" {
-		return env
-	}
-	if configured != "" && configured != defaultAttachDir() {
-		return configured
-	}
-	return ""
-}
-
-// defaultAttachDir mirrors config.Load's auto-default so rpcAttachDir can ignore
-// it. An empty result (no home dir) means "treat any configured value as
-// explicit".
-func defaultAttachDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".local", "share", "wrkq", "attachments")
 }

@@ -86,6 +86,7 @@ If you have questions, number them for easier responses.
 
 ## Territory docs & further reading
 
+- [Durable architecture law](architecture/README.md) — canonical invariant/risk records, producer contracts, and their generated projections; consult and cite record ids before changing a recorded surface.
 - [Search index operations](internal/search/README.md) — FTS5, dense vectors, llama-server operating notes, and canonical launch args.
 - [Domain model operations](internal/domain/README.md) — resources, addressing, optimistic concurrency, attachments, comments, and migrations.
 - [wrkq product/domain/CLI/daemon spec](docs/SPEC.md) — canonical product and command contract.

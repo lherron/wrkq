@@ -1,101 +1,24 @@
 package cli
 
 import (
-	"strings"
-
 	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/id"
-	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/projectroot"
 )
 
-func normalizeProjectRoot(cfg *config.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	root := strings.TrimSpace(cfg.ProjectRoot)
-	root = strings.Trim(root, "/")
-	return root
-}
+// The project-root transform lives in the neutral internal/projectroot package so
+// the legacy CLI and the RPC-backed mirror share ONE implementation (no drift).
+// These thin wrappers keep the existing call sites unchanged.
+
+func normalizeProjectRoot(cfg *config.Config) string { return projectroot.Normalize(cfg) }
 
 func applyProjectRootToPath(cfg *config.Config, path string, defaultToRoot bool) string {
-	root := normalizeProjectRoot(cfg)
-	trimmed := strings.TrimSpace(path)
-	if root == "" {
-		return trimmed
-	}
-	if trimmed == "" {
-		if defaultToRoot {
-			return root
-		}
-		return trimmed
-	}
-	return applyProjectRootToken(root, trimmed)
+	return projectroot.ApplyToPath(cfg, path, defaultToRoot)
 }
 
 func applyProjectRootToSelector(cfg *config.Config, selector string, defaultToRoot bool) string {
-	root := normalizeProjectRoot(cfg)
-	trimmed := strings.TrimSpace(selector)
-	if root == "" {
-		return trimmed
-	}
-	if trimmed == "" {
-		if defaultToRoot {
-			return root
-		}
-		return trimmed
-	}
-
-	if strings.HasPrefix(trimmed, "t:") || strings.HasPrefix(trimmed, "c:") {
-		prefix := trimmed[:2]
-		token := strings.TrimSpace(trimmed[2:])
-		if token == "" {
-			if defaultToRoot {
-				return prefix + root
-			}
-			return trimmed
-		}
-		return prefix + applyProjectRootToken(root, token)
-	}
-
-	return applyProjectRootToken(root, trimmed)
+	return projectroot.ApplyToSelector(cfg, selector, defaultToRoot)
 }
 
 func applyProjectRootToPaths(cfg *config.Config, pathsIn []string, defaultToRoot bool) []string {
-	if len(pathsIn) == 0 {
-		root := normalizeProjectRoot(cfg)
-		if defaultToRoot && root != "" {
-			return []string{root}
-		}
-		return pathsIn
-	}
-	out := make([]string, 0, len(pathsIn))
-	for _, path := range pathsIn {
-		out = append(out, applyProjectRootToPath(cfg, path, false))
-	}
-	return out
-}
-
-func applyProjectRootToken(root, token string) string {
-	if token == "" {
-		return token
-	}
-
-	if id.IsFriendlyID(token) || id.IsUUID(token) {
-		return token
-	}
-
-	// A bare sequence number ("1454") is an ID-like task shorthand, not a
-	// path segment, so leave it untouched here; ResolveTask expands it.
-	if _, ok := id.ExpandTaskID(token); ok {
-		return token
-	}
-
-	normalized := strings.Trim(token, "/")
-	if normalized == "" {
-		return normalized
-	}
-	if normalized == root || strings.HasPrefix(normalized, root+"/") {
-		return normalized
-	}
-	return paths.JoinPath(root, normalized)
+	return projectroot.ApplyToPaths(cfg, pathsIn, defaultToRoot)
 }

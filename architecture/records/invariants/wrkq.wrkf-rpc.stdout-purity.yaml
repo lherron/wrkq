@@ -1,0 +1,24 @@
+id: wrkq.wrkf-rpc.stdout-purity
+kind: invariant
+status: active
+owner_project: wrkq
+scope: wrkf RPC stdio transport
+predicate: >
+  the wrkf RPC server's stdout carries only well-formed JSON-RPC frames; no handler
+  may write non-protocol bytes to stdout (logs/diagnostics go to stderr).
+authority:
+  repo: wrkq
+  surface: wrkf rpc --stdio
+source:
+  - internal/wrkfrpc/stdout_purity_test.go
+required_tests:
+  - TestStdoutPurity_HandlerMustNotCorruptStream
+  - TestStdoutPurity_OnlyRPCFrames_ShutdownNotification
+last_verified:
+  date: 2026-06-22
+  evidence: "just verify green incl. internal/wrkfrpc tests; Daedalus run hrcchat#9876"
+reopen_when:
+  - a new transport or framing is added
+  - any handler is allowed to write to stdout
+supersedes: []
+superseded_by: null

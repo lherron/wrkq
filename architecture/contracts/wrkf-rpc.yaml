@@ -1,0 +1,30 @@
+id: wrkq.contract.wrkf-rpc
+kind: contract
+status: active
+owner_project: wrkq
+scope: wrkf JSON-RPC wire + error-recovery contract
+predicate: >
+  wrkf RPC errors carry a stable WRKF_* code and a boolean retryable; codes and
+  retryability are canonical here and preserved across the JSON-RPC boundary to clients.
+authority:
+  repo: wrkq
+  surface: wrkf JSON-RPC (stdio)
+consumers:
+  - "@wrkq/client"               # packages/client — owns its own compatibility obligation + tests
+source:
+  - internal/wrkfapi/errors.go            # WRKF_NOT_FOUND, WRKF_VALIDATION, WRKF_STALE_REVISION, …
+  - internal/wrkfrpc/errors.go            # maps typed codes onto JSON-RPC
+  - packages/client/src/errors.ts         # client preserves data.code + retryability
+  - docs/wrkf-rpc.md                      # explanatory projection (companion)
+required_tests:
+  - internal/wrkfrpc/codec_test.go
+  - "packages/client (verify-rpc: client-test + client-integration)"
+last_verified:
+  date: 2026-06-22
+  evidence: "just verify-rpc green (client unit + integration vs real wrkf rpc --stdio); Daedalus run hrcchat#9876"
+reopen_when:
+  - WRKF_* code set changes
+  - retryable semantics change
+  - JSON-RPC error envelope changes
+supersedes: []
+superseded_by: null

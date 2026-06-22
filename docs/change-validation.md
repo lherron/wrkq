@@ -6,8 +6,9 @@ checks remain the source of truth; do not copy their flags or behavior here.
 ## Fast inner loop
 
 Run `just verify` for normal implementation feedback before commit. Its recipe
-in [justfile](justfile) chains the current fast guards: suppression-lint,
-layer-boundary, lint, test, rot-sensor, surface-guard, and doc-links.
+in [Justfile](Justfile) chains the current fast guards: suppression-lint,
+layer-boundary, lint, test, rot-sensor, surface-guard, doc-links,
+architecture-records, and verify-rpc.
 
 This is the default bar for scoped code and documentation changes, including the
 S1-S4 and S8 guard surfaces.
@@ -16,8 +17,8 @@ S1-S4 and S8 guard surfaces.
 
 Run `just verify-full` when the change affects executable behavior, cross-tool
 contracts, workflow/RPC surfaces, or before closing tasks that require the full
-gate. Its recipe in [justfile](justfile) routes through `just verify`, `just
-smoke`, and `just verify-rpc`; this is the S5 backstop.
+gate. Its recipe in [Justfile](Justfile) routes through `just verify` and `just
+smoke`; `verify-rpc` is already inside the fast gate. This is the S5 backstop.
 
 ## Installed-binary smoke
 

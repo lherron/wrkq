@@ -109,7 +109,9 @@ var methodCatalog = []string{
 	"$/cancelRequest",
 	"wrkq.task.create",
 	"wrkq.task.show",
+	"wrkq.task.catView",
 	"wrkq.task.list",
+	"wrkq.task.lsView",
 	"wrkq.task.update",
 	"wrkq.task.move",
 	"wrkq.task.acknowledge",
@@ -118,13 +120,17 @@ var methodCatalog = []string{
 	"wrkq.comment.add",
 	"wrkq.comment.list",
 	"wrkq.comment.show",
+	"wrkq.comment.catView",
+	"wrkq.comment.listView",
 	"wrkq.comment.delete",
 	"wrkq.attachment.add",
 	"wrkq.attachment.list",
+	"wrkq.attachment.listView",
 	"wrkq.attachment.show",
 	"wrkq.attachment.remove",
 	"wrkq.relation.add",
 	"wrkq.relation.list",
+	"wrkq.relation.listView",
 	"wrkq.relation.remove",
 	"wrkq.admin.legacyActor.list",
 	"wrkq.admin.legacyActor.create",
@@ -133,6 +139,7 @@ var methodCatalog = []string{
 	"wrkq.container.delete",
 	"wrkq.container.deleteRecursive",
 	"wrkq.container.show",
+	"wrkq.container.catView",
 	"wrkq.container.list",
 	"wrkq.workflow.attach",
 	"wrkq.workflow.inspect",
@@ -190,6 +197,13 @@ var methodCatalog = []string{
 
 var dtoCatalog = []string{
 	"WrkqTask",
+	"WrkqTaskCatView", // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
+	"WrkqContainerCatView", // CLI compatibility projection (container cat)
+	"WrkqCommentCatView", // CLI compatibility projection (comment cat)
+	"WrkqCommentListView", // CLI compatibility list projection (comment ls)
+	"WrkqAttachmentListView", // CLI compatibility list projection (attach ls)
+	"WrkqLsListView", // CLI compatibility list projection (ls)
+	"CatViewRelation", // element of relation.listView (also nested in WrkqTaskCatView)
 	"WrkqTaskListResult",
 	"WrkqComment",
 	"WrkqCommentListResult",
@@ -229,8 +243,14 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.task.show", apiHandler(func(ctx context.Context, p wrkqapi.TaskShowParams) (any, error) {
 		return wq.TaskShow(ctx, p)
 	}))
+	s.Register("wrkq.task.catView", apiHandler(func(ctx context.Context, p wrkqapi.TaskCatViewParams) (any, error) {
+		return wq.TaskCatView(ctx, p)
+	}))
 	s.Register("wrkq.task.list", apiHandler(func(ctx context.Context, p wrkqapi.TaskListParams) (any, error) {
 		return wq.TaskList(ctx, p)
+	}))
+	s.Register("wrkq.task.lsView", apiHandler(func(ctx context.Context, p wrkqapi.LsListViewParams) (any, error) {
+		return wq.LsListView(ctx, p)
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)
@@ -250,6 +270,12 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.comment.add", apiHandler(func(ctx context.Context, p wrkqapi.CommentAddParams) (any, error) {
 		return wq.CommentAdd(ctx, p)
 	}))
+	s.Register("wrkq.comment.catView", apiHandler(func(ctx context.Context, p wrkqapi.CommentCatViewParams) (any, error) {
+		return wq.CommentCatView(ctx, p)
+	}))
+	s.Register("wrkq.comment.listView", apiHandler(func(ctx context.Context, p wrkqapi.CommentListViewParams) (any, error) {
+		return wq.CommentListView(ctx, p)
+	}))
 	s.Register("wrkq.comment.list", apiHandler(func(ctx context.Context, p wrkqapi.CommentListParams) (any, error) {
 		return wq.CommentList(ctx, p)
 	}))
@@ -265,6 +291,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.attachment.list", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentListParams) (any, error) {
 		return wq.AttachmentList(ctx, p)
 	}))
+	s.Register("wrkq.attachment.listView", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentListViewParams) (any, error) {
+		return wq.AttachmentListView(ctx, p)
+	}))
 	s.Register("wrkq.attachment.show", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentShowParams) (any, error) {
 		return wq.AttachmentShow(ctx, p)
 	}))
@@ -273,6 +302,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.relation.add", apiHandler(func(ctx context.Context, p wrkqapi.RelationAddParams) (any, error) {
 		return wq.RelationAdd(ctx, p)
+	}))
+	s.Register("wrkq.relation.listView", apiHandler(func(ctx context.Context, p wrkqapi.RelationListViewParams) (any, error) {
+		return wq.RelationListView(ctx, p)
 	}))
 	s.Register("wrkq.relation.list", apiHandler(func(ctx context.Context, p wrkqapi.RelationListParams) (any, error) {
 		return wq.RelationList(ctx, p)
@@ -300,6 +332,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.container.show", apiHandler(func(ctx context.Context, p wrkqapi.ContainerShowParams) (any, error) {
 		return wq.ContainerShow(ctx, p)
+	}))
+	s.Register("wrkq.container.catView", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCatViewParams) (any, error) {
+		return wq.ContainerCatView(ctx, p)
 	}))
 	s.Register("wrkq.container.list", apiHandler(func(ctx context.Context, p wrkqapi.ContainerListParams) (any, error) {
 		return wq.ContainerList(ctx, p)
