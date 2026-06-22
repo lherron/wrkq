@@ -570,6 +570,87 @@ var parityCases = []parityCase{
 		args:  []string{"find", "proj", "--output", "raw"},
 	},
 
+	// tree via wrkq.task.treeView (server-owned compat tree projection: recursive
+	// traversal, container pruning, "all done" rollups, subtask nesting, hidden
+	// counting). Only deterministic modes are parity-tested; the pretty/human
+	// renderer is TTY-only + non-deterministic ("opened N ago") and is hard-gated.
+	{
+		name:  "tree/top-level-ndjson-default",
+		setup: treeMixed,
+		args:  []string{"tree"},
+	},
+	{
+		name:  "tree/top-level-json",
+		setup: treeMixed,
+		args:  []string{"tree", "--json"},
+	},
+	{
+		name:  "tree/subtree-json",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--json"},
+	},
+	{
+		name:  "tree/subtree-ndjson",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--ndjson"},
+	},
+	{
+		name:  "tree/subtree-porcelain",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--porcelain"},
+	},
+	{
+		name:  "tree/depth-limit",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "-L", "1", "--json"},
+	},
+	{
+		name:  "tree/open-only",
+		setup: treeMixedWithStates,
+		args:  []string{"tree", "proj", "--open", "--json"},
+	},
+	{
+		name:  "tree/all-includes-completed-and-empty",
+		setup: treeMixedWithStates,
+		args:  []string{"tree", "proj", "--all", "--json"},
+	},
+	{
+		name:  "tree/default-hides-completed",
+		setup: treeMixedWithStates,
+		args:  []string{"tree", "proj", "--json"},
+	},
+	{
+		name:  "tree/all-done-collapses",
+		setup: treeAllDone,
+		args:  []string{"tree", "proj", "--json"},
+	},
+	{
+		name:  "tree/nested-subtasks",
+		setup: treeSubtasks,
+		args:  []string{"tree", "proj", "--json"},
+	},
+	{
+		name:  "tree/nested-subtasks-ndjson",
+		setup: treeSubtasks,
+		args:  []string{"tree", "proj", "--ndjson"},
+	},
+	{
+		name:  "tree/empty-container",
+		setup: [][]string{{"mkdir", "empty"}},
+		args:  []string{"tree", "empty", "--json"},
+	},
+	{
+		name:  "tree/unknown-path-errors",
+		setup: nil,
+		args:  []string{"tree", "nope", "--json"},
+	},
+	{
+		// raw is excluded from tree's allowed output set → identical error both sides.
+		name:  "tree/output-raw-unsupported",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--output", "raw"},
+	},
+
 	// ── project-root scoping parity (WRKQ_PROJECT_ROOT / ASP_PROJECT / --project) ──
 	// Both binaries apply the SAME neutral projectroot transform before any RPC
 	// param is sent. The seed is root-less; only the command-under-test runs with a
@@ -628,6 +709,18 @@ var parityCases = []parityCase{
 		args:    []string{"mv", "task-b", "sub"},
 		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
 		mutates: true,
+	},
+	{
+		name:  "pr/tree-default-root",
+		setup: prSeed,
+		args:  []string{"tree", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+	{
+		name:  "pr/tree-relative-path",
+		setup: prSeed,
+		args:  []string{"tree", "sub", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
 	},
 	{
 		// ASP_PROJECT is the agent-runtime project hint; config.Load honors it as a
@@ -692,6 +785,48 @@ var findMixed = [][]string{
 	{"set", "proj/task-a", "--state", "open"},
 	{"set", "proj/task-b", "--state", "open"},
 	{"set", "proj/sub/task-c", "--state", "completed"},
+}
+
+// treeMixed seeds a project with child containers (one nested deeper) + tasks so
+// tree exercises recursive traversal, pruning of empty containers, and mixed
+// task/container rendering. alpha has a nested descendant task; beta is empty
+// (pruned by default).
+var treeMixed = [][]string{
+	{"mkdir", "proj"},
+	{"mkdir", "proj/alpha"},
+	{"mkdir", "proj/beta"},
+	{"touch", "proj/alpha/nested", "-t", "Nested"},
+	{"touch", "proj/task-x", "-t", "Task X"},
+	{"touch", "proj/task-y", "-t", "Task Y"},
+}
+
+// treeMixedWithStates seeds tasks in distinct states so --all / --open /
+// default-hide filtering and the "all done" rollup are exercised distinctly:
+// an open task, a draft task, and a completed task.
+var treeMixedWithStates = [][]string{
+	{"mkdir", "proj"},
+	{"mkdir", "proj/alpha"},
+	{"touch", "proj/alpha/nested", "-t", "Nested"},
+	{"touch", "proj/task-open", "-t", "Open Task"},
+	{"touch", "proj/task-draft", "-t", "Draft Task", "--state", "draft"},
+	{"touch", "proj/task-done", "-t", "Done Task"},
+	{"set", "proj/task-done", "--state", "completed"},
+}
+
+// treeAllDone seeds a project whose only task is completed so the container
+// collapses to "(All done)" and the task is omitted from the default tree.
+var treeAllDone = [][]string{
+	{"mkdir", "proj"},
+	{"touch", "proj/done", "-t", "Done"},
+	{"set", "proj/done", "--state", "completed"},
+}
+
+// treeSubtasks seeds a parent task with a child subtask so the tree exercises
+// in-set subtask nesting (the child nests under its parent node).
+var treeSubtasks = [][]string{
+	{"mkdir", "proj"},
+	{"touch", "proj/parent", "-t", "Parent"},
+	{"touch", "proj/child", "-t", "Child", "--parent-task", "proj/parent"},
 }
 
 func TestParity(t *testing.T) {
@@ -1015,6 +1150,46 @@ func TestLsHardGates(t *testing.T) {
 		// legacy rejects and the mirror parity-matches.
 		{"output-human", []string{"ls", "proj", "--output", "human"}},
 		{"conflicting-modes", []string{"ls", "proj", "--json", "--ndjson"}},
+	}
+	for _, g := range gated {
+		g := g
+		t.Run(g.name, func(t *testing.T) {
+			res := runCLI(t, bins.mirror, dir, g.args)
+			if res.exit == 0 {
+				t.Errorf("expected non-zero exit (hard-gate) for %v, got 0\n stdout: %q", g.args, res.stdout)
+			}
+			if strings.TrimSpace(res.stderr) == "" {
+				t.Errorf("expected a gate error message on stderr for %v", g.args)
+			}
+		})
+	}
+}
+
+// TestTreeHardGates proves the mirror REFUSES (clean non-zero exit, not silent
+// degradation) every legacy tree surface it does not yet implement, so a narrower
+// behavior can never masquerade as parity. Legacy would succeed for these, so they
+// cannot be byte-parity cases; we assert the gate on the mirror alone. The
+// pretty/human renderer is the load-bearing gate: it is TTY-only and embeds
+// wall-clock-relative "opened N ago" strings, so it cannot be byte-reproduced.
+func TestTreeHardGates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs the mirror CLI")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, treeMixed)
+	dir := copyFixture(t, base)
+
+	gated := []struct {
+		name string
+		args []string
+	}{
+		{"output-human", []string{"tree", "proj", "--output", "human"}},
+		{"output-table", []string{"tree", "proj", "--output", "table"}},
+		{"output-yaml", []string{"tree", "proj", "--output", "yaml"}},
+		{"output-tsv", []string{"tree", "proj", "--output", "tsv"}},
+		{"multi-path", []string{"tree", "proj", "inbox", "--json"}},
+		{"fields", []string{"tree", "proj", "--json", "--fields", "id,slug"}},
+		{"conflicting-modes", []string{"tree", "proj", "--json", "--ndjson"}},
 	}
 	for _, g := range gated {
 		g := g

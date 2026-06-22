@@ -45,7 +45,7 @@ var topLevelCommands = []mirroredCommand{
 	{use: "search <query> [PATH...]"},
 	{use: "server"},
 	// stat is RPC-backed (real parity command); registered separately.
-	{use: "tree [PATH...]"},
+	// tree is RPC-backed (real parity command); registered separately.
 	{use: "usage", aliases: []string{"info"}},
 	{use: "version"},
 	{use: "watch [PATH...]"},
@@ -84,6 +84,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newAttachCmd())
 	root.AddCommand(newLsCmd())
 	root.AddCommand(newFindCmd())
+	root.AddCommand(newTreeCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

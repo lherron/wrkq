@@ -286,6 +286,7 @@ wrkq.task.show        [required]
 wrkq.task.catView     [CLI compatibility projection — see note]
 wrkq.task.lsView      [CLI compatibility list projection — see note]
 wrkq.task.findListView [CLI compatibility list projection — see note]
+wrkq.task.treeView    [CLI compatibility tree projection — see note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
 wrkq.task.acknowledge
@@ -324,6 +325,21 @@ wrkq.task.restore
 > caller-side (the mirror scopes paths + `--parent-task` before sending). Compat
 > read model, not a canonical resource. Cataloged + fingerprinted (registering it
 > changes the method catalog and `protocolSchemaHash`).
+> **`wrkq.task.treeView`** is a CLI compatibility tree read model for `wrkq tree`,
+> **not** a canonical resource. The server owns the entire recursive hierarchy
+> walk: child-container + task traversal, empty-container pruning (default; `inbox`
+> always shown), the recursive "all done" rollup (`all_tasks_completed`), in-set
+> subtask nesting (a task whose parent is also visible nests under it), and the
+> hidden-container count. Params:
+> `{ path?, maxDepth?, includeArchived?, openOnly? }` →
+> `WrkqTreeView{ path, project_id?, children: WrkqTreeNode[], hidden_containers_not_displayed, wire_raw_path? }`.
+> The nested `children` reproduce legacy's `tree --json` node shape byte-for-byte.
+> Three `wire_*` carriers (`wire_created_at`, `wire_parent_task_uuid` on each node;
+> `wire_raw_path` on the view) carry state the JSON projection hides but the CLI
+> needs to rebuild the NDJSON stream + nesting; the CLI strips them for `--json`.
+> The CLI owns ONLY byte rendering (json / ndjson / porcelain); the interactive
+> pretty/human renderer is TTY-only and not mirrored (non-deterministic
+> `opened N ago` + ANSI). Cataloged + fingerprinted (TestTreeViewDTOFingerprint).
 
 > **`wrkq.task.catView` is a CLI compatibility read model, not a domain
 > resource.** Unlike `wrkq.task.show` (the stable camelCase `WrkqTask` DTO), it

@@ -113,6 +113,7 @@ var methodCatalog = []string{
 	"wrkq.task.list",
 	"wrkq.task.lsView",
 	"wrkq.task.findListView",
+	"wrkq.task.treeView",
 	"wrkq.task.update",
 	"wrkq.task.move",
 	"wrkq.task.acknowledge",
@@ -205,6 +206,7 @@ var dtoCatalog = []string{
 	"WrkqAttachmentListView", // CLI compatibility list projection (attach ls)
 	"WrkqLsListView",         // CLI compatibility list projection (ls)
 	"WrkqFindListView",       // CLI compatibility list projection (find)
+	"WrkqTreeView",           // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
 	"CatViewRelation",        // element of relation.listView (also nested in WrkqTaskCatView)
 	"WrkqTaskListResult",
 	"WrkqComment",
@@ -256,6 +258,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.task.findListView", apiHandler(func(ctx context.Context, p wrkqapi.FindListViewParams) (any, error) {
 		return wq.FindListView(ctx, p)
+	}))
+	s.Register("wrkq.task.treeView", apiHandler(func(ctx context.Context, p wrkqapi.TreeViewParams) (any, error) {
+		return wq.TreeView(ctx, p)
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)

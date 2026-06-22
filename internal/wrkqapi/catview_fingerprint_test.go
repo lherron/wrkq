@@ -91,6 +91,18 @@ func TestFindListViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestTreeViewDTOFingerprint guards the tree projection shapes (same rationale as
+// the cat/ls fingerprints). The wire_* carriers are part of the contract: the
+// mirror depends on them to reconstruct legacy's NDJSON stream + JSON `path`.
+func TestTreeViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqTreeView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqTreeNode{}))
+	const want = "WrkqTreeView{path,project_id,omitempty,children,hidden_containers_not_displayed,wire_raw_path,omitempty}\n" +
+		"WrkqTreeNode{type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,children,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
+	if got != want {
+		t.Errorf("tree view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestLsListViewDTOFingerprint guards the ls projection shapes.
 func TestLsListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqLsListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLsEntry{}))

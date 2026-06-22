@@ -58,6 +58,12 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqFindListView") {
 		t.Error("WrkqFindListView missing from dtoCatalog")
 	}
+	if !contains(methodCatalog, "wrkq.task.treeView") {
+		t.Error("wrkq.task.treeView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqTreeView") {
+		t.Error("WrkqTreeView missing from dtoCatalog")
+	}
 }
 
 func contains(haystack []string, needle string) bool {
