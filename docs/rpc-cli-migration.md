@@ -61,9 +61,15 @@ new RPC surface anyway).
 - The CLI owns byte rendering: the mirror wraps per-task objects into the legacy
   indented JSON array.
 
-**catView contract green ≠ cat command parity green.** `cat` stays `partial`
-until *every* exposed mode (`--json` done; `ndjson`/`porcelain`/`raw` pending) is
-byte-parity proven and covered by installed smoke.
+**catView contract green ≠ cat command parity green.** Every exposed `cat`
+render mode is now byte-parity proven on the SAME catView projection: `--json`
+(indented array + non-TTY default), `--json --porcelain` (compact array),
+`--ndjson` (one compact object per line), and `raw` markdown front-matter
+(`--output raw` / `--porcelain` / TTY default), including `--no-frontmatter`,
+comments, and relation/blocker front-matter. The TTY-only styled view is NOT
+reproduced (never byte-tested; never reached when stdout is piped). No catView
+DTO change was needed — every scalar the raw renderer prints was already on the
+projection (T-05090), so its fingerprint pin is unchanged.
 
 ## Coverage
 
@@ -71,7 +77,7 @@ byte-parity proven and covered by installed smoke.
 |---|---|---|
 | `ack` | `rpc-backed` | **Proven parity** (TestParity, 6 cases): RPC-backed via composition — `wrkq.task.show` to classify already-acked skips + not-found, then `wrkq.task.acknowledge` for the durable mutation (server stays authoritative for the force/terminal gate, attribution, etag). Output + error wording reproduced byte-for-byte; durable snapshot verified. |
 | `stat` | `rpc-backed` | **Proven parity** (TestParity, 6 cases): first RPC-backed READ command. Re-projects `wrkq.task.show` (falling back to `wrkq.container.show`) into the legacy stat metadata shape. Byte-identical stdout incl. UUIDs (copy-fixture), plus error parity (`path not found`). |
-| `cat` | `rpc-backed (partial)` | **`--json` parity proven** (TestParity: single/multi/comments/relations/blockers/exclude-comments/unknown). RPC-backed via the server-owned `wrkq.task.catView` compatibility projection (one read snapshot per task; T-05090 ruling). `ndjson`/`porcelain`/`raw` modes not yet implemented → **partial, not fully `rpc-backed`** until every exposed mode is byte-proven (daedalus guard). |
+| `cat` | `rpc-backed` | **All exposed render modes parity proven** (TestParity, 16 cases): `--json` (single/multi/comments/relations/blockers/exclude-comments/unknown), `--ndjson` (single/multi), `--json --porcelain` (compact array), `raw` markdown (`--output raw`, `--porcelain`, multi, `--no-frontmatter`, comments, relation/blocker front-matter), and the `--output table` "not supported" byte-parity error. All modes render the SAME server-owned `wrkq.task.catView` compat projection (one read snapshot per task; T-05090 ruling) — CLI-side byte rendering only; no DTO change. TTY-only styled markdown is intentionally not reproduced (never byte-tested). |
 | `touch` | `rpc-backed (partial)` | **Core-flag parity proven** (TestParity: basic/flags/default-title) via `wrkq.task.create`, re-projected to the legacy touchResult array. Flags with no create param (`due-at`/`start-at`/`requested-by`/`assigned-project`/`resolution`/`meta-file`/`force-uuid`) hard-error as gaps (no silent divergence). Artifact-dir disk creation is a side-effect not yet replicated (output string matches). |
 | `set` | `rpc-backed (partial)` | **Common field-update parity proven** (state/multi-field) via `wrkq.task.update` patch. Patch-less flags (slug/parent-task/cp-*/resolution/run-status/…) hard-error as gaps; partial-failure exit-code taxonomy not yet covered. |
 | `mv` | `rpc-backed (partial)` | **Single-source task→container move parity proven** via `wrkq.task.move`. Rename, container sources, multi-source, `--dry-run` not yet (hard-error). |

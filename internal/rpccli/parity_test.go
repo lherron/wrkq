@@ -118,12 +118,71 @@ var parityCases = []parityCase{
 		args:  []string{"stat", "inbox/done"},
 	},
 
-	// cat --json ✓ RPC-backed via wrkq.task.catView (server-owned compat projection).
-	// JSON mode only (ndjson/porcelain/raw are not yet implemented; cat is partial).
+	// cat ✓ RPC-backed via wrkq.task.catView (server-owned compat projection).
+	// All exposed render modes are byte-proven: json (--json + non-TTY default),
+	// ndjson (--ndjson), raw (--output raw / --porcelain / TTY default markdown),
+	// and compact json (--json --porcelain).
 	{
 		name:  "cat/single-json",
 		setup: [][]string{{"touch", "inbox/one", "-t", "One", "--priority", "2", "--labels", `["x","y"]`, "-d", "body Ã¢ÂÂ"}},
 		args:  []string{"cat", "inbox/one", "--json"},
+	},
+	{
+		name:  "cat/single-ndjson",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "--priority", "2", "--labels", `["x","y"]`, "-d", "body Ã¢ÂÂ"}},
+		args:  []string{"cat", "inbox/one", "--ndjson"},
+	},
+	{
+		name:  "cat/multi-ndjson",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One"}, {"touch", "inbox/two", "-t", "Two"}},
+		args:  []string{"cat", "inbox/one", "inbox/two", "--ndjson"},
+	},
+	{
+		name:  "cat/single-porcelain-json",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "--priority", "2"}},
+		args:  []string{"cat", "inbox/one", "--json", "--porcelain"},
+	},
+	{
+		name:  "cat/single-raw",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "--priority", "2", "--labels", `["x","y"]`, "-d", "body Ã¢ÂÂ"}},
+		args:  []string{"cat", "inbox/one", "--output", "raw"},
+	},
+	{
+		name:  "cat/single-porcelain-raw",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "-d", "porcelain body"}},
+		args:  []string{"cat", "inbox/one", "--porcelain"},
+	},
+	{
+		name:  "cat/multi-raw",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "-d", "first body"}, {"touch", "inbox/two", "-t", "Two", "-d", "second body"}},
+		args:  []string{"cat", "inbox/one", "inbox/two", "--output", "raw"},
+	},
+	{
+		name:  "cat/raw-no-frontmatter",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One", "-d", "just the body"}},
+		args:  []string{"cat", "inbox/one", "--output", "raw", "--no-frontmatter"},
+	},
+	{
+		name: "cat/raw-with-comment",
+		setup: [][]string{
+			{"touch", "inbox/cmt", "-t", "Commented", "-d", "main body"},
+			{"comment", "add", "inbox/cmt", "first comment Ã¢ÂÂ"},
+		},
+		args: []string{"cat", "inbox/cmt", "--output", "raw"},
+	},
+	{
+		name: "cat/raw-with-relation-and-blocker",
+		setup: [][]string{
+			{"touch", "inbox/main", "-t", "Main", "-d", "main desc"},
+			{"touch", "inbox/blk", "-t", "Blocker"},
+			{"relation", "add", "inbox/blk", "blocks", "inbox/main"},
+		},
+		args: []string{"cat", "inbox/main", "--output", "raw"},
+	},
+	{
+		name:  "cat/raw-table-not-supported",
+		setup: [][]string{{"touch", "inbox/one", "-t", "One"}},
+		args:  []string{"cat", "inbox/one", "--output", "table"},
 	},
 	{
 		name:  "cat/multi-json",
