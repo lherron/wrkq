@@ -26,7 +26,11 @@ func (s *Service) EnsureBuiltinTemplate(templateRef, actor string) (string, stri
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := s.installTemplateCanonical(tpl, canonical, Hash(canonical), actor, nil); err != nil {
+	// supersede=true: a rebuilt binary may carry an evolved built-in definition
+	// (same id@version, new hash); overwrite the stored definition in place
+	// rather than erroring. No pinned-hash guard — old instances may evaluate
+	// under the new definition; accepted operational risk for built-ins only.
+	if _, err := s.installTemplateCanonical(tpl, canonical, Hash(canonical), actor, nil, true); err != nil {
 		return "", "", err
 	}
 	return tpl.ID, tpl.Version, nil

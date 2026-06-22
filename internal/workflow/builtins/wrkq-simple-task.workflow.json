@@ -82,7 +82,7 @@
   "transitions": [
     {
       "id": "triage_complete",
-      "description": "Triage is complete; move the task into the ready state.",
+      "description": "Triage is complete. If a specification was produced, move the task to ready; otherwise block the task (blocked is a wrkq task.state set via effect — no new workflow state) and hold the workflow at intake for re-triage.",
       "from": {
         "status": "open",
         "phase": "intake"
@@ -93,14 +93,48 @@
       "outcomes": [
         {
           "id": "ready",
-          "description": "Triage recorded; implementation may proceed.",
+          "description": "Specification produced; implementation may proceed. Normalize the wrkq task state to open so a worker start-reflex in_progress does not survive triage, and a previously blocked task is unblocked on successful re-triage.",
           "when": {
-            "always": true
+            "factEquals": {
+              "path": "task.has_specification",
+              "value": true
+            }
           },
           "to": {
             "status": "active",
             "phase": "ready"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:open",
+              "data": {
+                "state": "open"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blocked_no_spec",
+          "description": "No specification produced; block the task for clarification and hold the workflow at intake.",
+          "when": {
+            "otherwise": true
+          },
+          "to": {
+            "status": "open",
+            "phase": "intake"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
         }
       ],
       "responsibility": {

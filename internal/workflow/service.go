@@ -315,13 +315,23 @@ func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map
 	if err != nil {
 		return nil, err
 	}
-	return s.installTemplateCanonical(tpl, canonical, hash, actor, catalog)
+	return s.installTemplateCanonical(tpl, canonical, hash, actor, catalog, false)
 }
 
 // installTemplateCanonical installs an already-parsed template. It is shared by
 // the file-based InstallTemplate and the embedded built-in installer so both
 // honor the same validation and idempotent-by-hash semantics.
-func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash, actor string, catalog *HookCatalog) (map[string]interface{}, error) {
+//
+// When supersede is true (embedded built-in installer only), a same-version
+// hash change overwrites the stored definition/hash in place instead of
+// erroring, so a rebuilt binary can evolve a built-in workflow. There is NO
+// pinned-hash guard: old instances carrying the prior template hash may then
+// evaluate under the NEW definition. That divergence is an explicitly accepted
+// operational risk for embedded built-ins only (Lance, T-triage-spec-gate);
+// correctness is asserted only for behavior evaluated after install, not for
+// historical template-hash immutability. File-based InstallTemplate keeps the
+// immutable same-id/version-hash-mismatch rejection (supersede=false).
+func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash, actor string, catalog *HookCatalog, supersede bool) (map[string]interface{}, error) {
 	if errs := ValidateTemplate(tpl, canonical, catalog); len(errs) > 0 {
 		return nil, fmt.Errorf("invalid template: %s", strings.Join(errs, "; "))
 	}
@@ -333,7 +343,14 @@ func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash
 	err = s.db.QueryRow(`SELECT hash, COALESCE(hook_catalog_hash, '') FROM workflow_templates WHERE id = ? AND version = ?`, tpl.ID, tpl.Version).Scan(&existingHash, &existingCatalogHash)
 	if err == nil {
 		if existingHash != hash {
-			return nil, fmt.Errorf("template %s@%s already installed with different hash", tpl.ID, tpl.Version)
+			if !supersede {
+				return nil, fmt.Errorf("template %s@%s already installed with different hash", tpl.ID, tpl.Version)
+			}
+			if _, err := s.db.Exec(`UPDATE workflow_templates SET hash = ?, definition_json = ?, hook_catalog_json = ?, hook_catalog_hash = ? WHERE id = ? AND version = ?`,
+				hash, string(canonical), nullIfEmpty(string(catalogCanonical)), nullIfEmpty(catalogHash), tpl.ID, tpl.Version); err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{"id": tpl.ID, "version": tpl.Version, "hash": hash, "installed": true, "superseded": true}, nil
 		}
 		if catalogHash != "" && existingCatalogHash != "" && existingCatalogHash != catalogHash {
 			return nil, fmt.Errorf("template %s@%s already installed with different hook catalog hash", tpl.ID, tpl.Version)
@@ -2148,6 +2165,11 @@ func resolveFact(ctx evalContext, path string) interface{} {
 			return ctx.Task.State
 		case "task.id":
 			return ctx.Task.ID
+		case "task.has_specification":
+			// Derived fact: true iff the task carries a non-empty specification.
+			// Lets transition outcomes branch on the triage deliverable without a
+			// coordinator-run check (checks do not auto-run in the action flow).
+			return strings.TrimSpace(ctx.Task.Specification) != ""
 		}
 	}
 	switch path {
