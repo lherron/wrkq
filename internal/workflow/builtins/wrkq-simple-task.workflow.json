@@ -64,11 +64,39 @@
     },
     "implement_result": {
       "class": "note",
-      "description": "Output/proof produced by an implement action."
+      "description": "Output/proof produced by an implement action.",
+      "facts": {
+        "properties": {
+          "impl.disposition": {
+            "type": "string",
+            "enum": ["done", "blocked"]
+          },
+          "red.proven": { "type": "boolean" },
+          "red.needed": { "type": "boolean" },
+          "bar.hash": { "type": "string" },
+          "bar.commandsHash": { "type": "string" },
+          "green.exit": { "type": "integer" },
+          "fullSuite.exit": { "type": "integer" },
+          "git.clean": { "type": "boolean" },
+          "commit.sha": { "type": "string" }
+        }
+      }
     },
     "verify_result": {
       "class": "verify",
-      "description": "Output/proof produced by a verify action."
+      "description": "Output/proof produced by a verify action.",
+      "facts": {
+        "properties": {
+          "verify.disposition": {
+            "type": "string",
+            "enum": ["verified", "blocked"]
+          },
+          "install.exit": { "type": "integer" },
+          "smoke.exit": { "type": "integer" },
+          "git.clean": { "type": "boolean" },
+          "commit.sha": { "type": "string" }
+        }
+      }
     },
     "review_result": {
       "class": "review",
@@ -145,7 +173,7 @@
     },
     {
       "id": "implement_complete",
-      "description": "Implementation is complete; move the task into the implemented state.",
+      "description": "Implementation is complete. Branch on the run-linked implement_result evidence facts: a `done` disposition advances to implemented; a `blocked` disposition rewinds to ready and blocks the wrkq task (task.state set via effect). Callers that supply no disposition fact preserve the original unconditional advance to implemented via `otherwise`.",
       "from": {
         "status": "active",
         "phase": "ready"
@@ -155,10 +183,52 @@
       ],
       "outcomes": [
         {
-          "id": "implemented",
-          "description": "Implementation recorded; verification may proceed.",
+          "id": "done",
+          "description": "Implementation reported done; verification may proceed. Selected from the just-written implement_result evidence facts (impl.disposition=done).",
           "when": {
-            "always": true
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "impl.disposition": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implemented"
+          }
+        },
+        {
+          "id": "blocked",
+          "description": "Implementation reported blocked; rewind the task to ready and block the wrkq task (blocked is a wrkq task.state set via effect — no new workflow state). Selected from the just-written implement_result evidence facts (impl.disposition=blocked).",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "impl.disposition": "blocked"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
+        },
+        {
+          "id": "implemented",
+          "description": "Implementation recorded; verification may proceed. Preserves the original unconditional behavior for callers that complete without disposition facts.",
+          "when": {
+            "otherwise": true
           },
           "to": {
             "status": "active",
@@ -174,7 +244,7 @@
     },
     {
       "id": "verify_complete",
-      "description": "Verification is complete; move the task into the reviewing state.",
+      "description": "Verification is complete. Branch on the run-linked verify_result evidence facts: a `verified` disposition closes the task as done and marks the wrkq task completed (task.state set via effect); a `blocked` disposition rewinds to ready and blocks the wrkq task. Callers that supply no disposition fact preserve the original unconditional advance to reviewing via `otherwise`.",
       "from": {
         "status": "active",
         "phase": "implemented"
@@ -185,9 +255,61 @@
       "outcomes": [
         {
           "id": "verified",
-          "description": "Verification recorded; review may proceed.",
+          "description": "Verification reported verified; close the task as done and mark the wrkq task completed (task.state set via effect). Selected from the just-written verify_result evidence facts (verify.disposition=verified).",
           "when": {
-            "always": true
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "verify.disposition": "verified"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blocked",
+          "description": "Verification reported blocked; rewind the task to ready and block the wrkq task (blocked is a wrkq task.state set via effect — no new workflow state). A failed verification invalidates the implementation claim. Selected from the just-written verify_result evidence facts (verify.disposition=blocked).",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "verify.disposition": "blocked"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
+        },
+        {
+          "id": "reviewing",
+          "description": "Verification recorded; review may proceed. Preserves the original unconditional behavior for callers that complete without disposition facts.",
+          "when": {
+            "otherwise": true
           },
           "to": {
             "status": "active",
