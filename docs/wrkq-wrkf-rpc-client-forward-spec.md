@@ -507,6 +507,7 @@ Recommended shared error families:
 | `WRKQ_CONFLICT` | -32021 | true | task update conflict, stale etag, or conflicting unique constraint |
 | `WRKQ_PERMISSION_DENIED` | -32022 | false | principal/scope cannot perform wrkq operation |
 | `WRKQ_DB_MIGRATION_REQUIRED` | -32023 | false | DB schema behind required migration |
+| `WRKQ_DB_BUSY` | -32024 | true | SQLite write contention that outlasted `busy_timeout`; `data.reason="sqlite_busy"`. Back off and retry the operation. |
 | `WRKF_NOT_FOUND` | -32004 | false | workflow template/instance/effect/run/evidence not found |
 | `WRKF_VALIDATION` | -32602 | false | malformed wrkf params, invalid template, bad protocol version |
 | `WRKF_STALE_REVISION` | -32009 | true | transition `expectRevision` mismatch |

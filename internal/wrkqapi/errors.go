@@ -4,7 +4,11 @@
 // named camelCase DTOs plus WRKQ_* typed domain errors.
 package wrkqapi
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/lherron/wrkq/internal/db"
+)
 
 // Stable machine-readable error codes (docs/wrkq-wrkf-rpc.md §5).
 const (
@@ -13,6 +17,7 @@ const (
 	CodeConflict         = "WRKQ_CONFLICT"
 	CodePermissionDenied = "WRKQ_PERMISSION_DENIED"
 	CodeMigrationReq     = "WRKQ_DB_MIGRATION_REQUIRED"
+	CodeDBBusy           = "WRKQ_DB_BUSY"
 	CodeInternal         = "WORKRPC_INTERNAL"
 )
 
@@ -112,8 +117,23 @@ func NewConflictError(msg string, data any) *DomainError {
 	return newError(CodeConflict, msg, true, data, nil)
 }
 
-// NewInternalError wraps an unclassified failure (WORKRPC_INTERNAL).
+// NewBusyError reports SQLite write contention that outlasted busy_timeout
+// (WRKQ_DB_BUSY). It is retryable: the caller should back off and retry the
+// whole operation. data carries reason:"sqlite_busy" for clients.
+func NewBusyError(err error) *DomainError {
+	return newError(CodeDBBusy, "database is busy due to write contention; retry", true, struct {
+		Reason string `json:"reason"`
+	}{Reason: "sqlite_busy"}, err)
+}
+
+// NewInternalError wraps an unclassified failure (WORKRPC_INTERNAL). A SQLite
+// busy/locked contention error is reclassified to the typed, retryable
+// WRKQ_DB_BUSY so contention never surfaces as a generic internal error
+// (docs/wrkq-wrkf-rpc.md §5; T-05066).
 func NewInternalError(err error) *DomainError {
+	if db.IsBusy(err) {
+		return NewBusyError(err)
+	}
 	msg := "internal error"
 	if err != nil {
 		msg = err.Error()

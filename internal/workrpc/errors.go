@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
 
@@ -18,6 +19,7 @@ const (
 	CodeWRKQConflict          = "WRKQ_CONFLICT"
 	CodeWRKQPermissionDenied  = "WRKQ_PERMISSION_DENIED"
 	CodeWRKQMigrationRequired = "WRKQ_DB_MIGRATION_REQUIRED"
+	CodeWRKQDBBusy            = "WRKQ_DB_BUSY"
 	CodeWorkRPCInternal       = "WORKRPC_INTERNAL"
 )
 
@@ -27,6 +29,7 @@ var domainRPCCode = map[string]int{
 	CodeWRKQConflict:                 -32021,
 	CodeWRKQPermissionDenied:         -32022,
 	CodeWRKQMigrationRequired:        -32023,
+	CodeWRKQDBBusy:                   -32024,
 	wrkfapi.CodeNotFound:             -32004,
 	wrkfapi.CodeValidation:           -32602,
 	wrkfapi.CodeStaleRevision:        -32009,
@@ -101,6 +104,14 @@ type errorData interface {
 func MapError(err error) *RPCError {
 	if err == nil {
 		return nil
+	}
+	// SQLite write contention that outlasted busy_timeout always maps to the
+	// typed, retryable WRKQ_DB_BUSY — never a generic internal error — no
+	// matter which layer wrapped it (T-05066, docs/wrkq-wrkf-rpc.md §5). This
+	// is checked first because a busy error is always an infrastructure
+	// contention signal, never a semantic conflict/validation failure.
+	if db.IsBusy(err) {
+		return domainError(CodeWRKQDBBusy, "database is busy due to write contention; retry", true, map[string]any{"reason": "sqlite_busy"})
 	}
 	var validation *ValidationError
 	if errors.As(err, &validation) {

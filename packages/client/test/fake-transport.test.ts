@@ -527,6 +527,25 @@ describe("error mapping", () => {
     expect((caught as WorkRpcError).domainCode).toBe("WRKQ_CONFLICT");
   });
 
+  test("WRKQ_DB_BUSY contention surfaces as a retryable wrkq error", async () => {
+    const transport = new FakeTransport().onError("wrkq.task.update", {
+      code: -32024,
+      message: "database is busy due to write contention; retry",
+      data: { code: "WRKQ_DB_BUSY", retryable: true, reason: "sqlite_busy" },
+    });
+    const client = await clientWith(transport);
+    let caught: unknown;
+    try {
+      await client.wrkq.task.update({ task: "T-1", patch: {} });
+    } catch (e) {
+      caught = e;
+    }
+    expect(isWrkqError(caught)).toBe(true);
+    expect((caught as WorkRpcError).domainCode).toBe("WRKQ_DB_BUSY");
+    expect((caught as WorkRpcError).retryable).toBe(true);
+    expect((caught as WorkRpcError).data?.reason).toBe("sqlite_busy");
+  });
+
   test("protocol error (method-not-found) has no domainCode", async () => {
     const transport = new FakeTransport(); // no handlers → -32601
     const client = await clientWith(transport);

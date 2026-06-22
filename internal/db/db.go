@@ -3,13 +3,14 @@ package db
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/mattn/go-sqlite3"
 )
 
 //go:embed migrations/*.sql
@@ -21,34 +22,68 @@ type DB struct {
 	path string
 }
 
-// Open opens a SQLite database at the given path and applies pragmas
+// Open opens a SQLite database at the given path and applies the connection
+// policy via DSN parameters.
+//
+// The pragmas are carried in the DSN — not applied with post-open db.Exec — so
+// that go-sqlite3 reapplies them on EVERY physical connection database/sql
+// opens, giving a uniform policy across the whole pool. _txlock=immediate is
+// the load-bearing correctness mechanism: it makes every write transaction
+// begin with BEGIN IMMEDIATE (reserving the writer lock up front) instead of
+// the default deferred transaction that reads first and then loses an
+// un-retryable lock upgrade under concurrent writers (the T-05066 "database is
+// locked"/internal-error failure). busy_timeout then lets contending writers
+// wait and serialize rather than failing instantly. See docs/wrkq-wrkf-rpc.md.
 func Open(path string) (*DB, error) {
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", path)
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	dsn := path + sep + "_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_txlock=immediate"
+
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Apply pragmas
-	pragmas := []string{
+	// Fail-fast verification that the policy is actually live on a connection.
+	// The DSN params above are the policy carrier; this is only a sanity check.
+	for _, pragma := range []string{
 		"PRAGMA foreign_keys = ON",
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA busy_timeout = 5000",
 		"PRAGMA synchronous = NORMAL",
-	}
-
-	for _, pragma := range pragmas {
+	} {
 		if _, err := db.Exec(pragma); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("failed to apply pragma %q: %w", pragma, err)
 		}
 	}
 
+	// DB.path stays the clean path (no DSN params) so Path() and any consumer
+	// that re-derives a DSN from it (e.g. workflow.withImmediateTx) does not
+	// inherit doubly-encoded query parameters.
 	return &DB{DB: db, path: path}, nil
+}
+
+// IsBusy reports whether err (anywhere in its chain) is a SQLite busy/locked
+// contention error — i.e. a writer that lost the race for the write lock even
+// after waiting out busy_timeout. Callers map this to a typed, retryable
+// contention error rather than a generic internal error.
+func IsBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	var se sqlite3.Error
+	if errors.As(err, &se) {
+		return se.Code == sqlite3.ErrBusy || se.Code == sqlite3.ErrLocked
+	}
+	return false
 }
 
 // Path returns the database file path
