@@ -1688,6 +1688,77 @@ func TestTreeHardGates(t *testing.T) {
 	}
 }
 
+// TestRelationLsTTYTableParity proves the legacy-only TTY render path. `relation
+// ls` emits the padded human TABLE (Direction/Kind/Task ID/Slug/Title) ONLY when
+// stdout is an interactive terminal — unreachable through the bytes.Buffer harness,
+// which always reports non-TTY. So each binary runs with stdout attached to a real
+// pseudo-terminal and the captured terminal bytes (incl. the pty's identical
+// \n→\r\n translation) are byte-compared old-vs-new. Covers the populated table
+// (outgoing+incoming, multi-kind ordering) and the empty "No relations found" line.
+func TestRelationLsTTYTableParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		setup [][]string
+		args  []string
+	}{
+		{
+			// Outgoing (blocks, relates_to) + incoming, exercising the multi-kind,
+			// multi-direction ordering and column padding of the table.
+			name: "populated",
+			setup: [][]string{
+				{"touch", "inbox/ra", "-t", "Alpha task"},
+				{"touch", "inbox/rb", "-t", "Beta"},
+				{"touch", "inbox/rc", "-t", "Gamma the third"},
+				{"relation", "add", "inbox/ra", "blocks", "inbox/rb"},
+				{"relation", "add", "inbox/ra", "relates_to", "inbox/rc"},
+				{"relation", "add", "inbox/rc", "blocks", "inbox/ra"},
+			},
+			args: []string{"relation", "ls", "inbox/ra"},
+		},
+		{
+			name:  "empty",
+			setup: [][]string{{"touch", "inbox/ra", "-t", "Alpha"}},
+			args:  []string{"relation", "ls", "inbox/ra"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := seedFixture(t, bins, tc.setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, tc.args)
+			newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, tc.args)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("tty table mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+			// Guard against a false "both produced nothing/identical-error" parity:
+			// assert the legacy oracle actually rendered the expected TTY surface.
+			if tc.name == "populated" {
+				for _, want := range []string{"Direction", "Kind", "Task ID", "Slug", "Title", "blocks", "relates_to"} {
+					if !strings.Contains(oldOut, want) {
+						t.Fatalf("legacy TTY table missing %q (got %q)", want, oldOut)
+					}
+				}
+			} else if !strings.Contains(oldOut, "No relations found") {
+				t.Fatalf("legacy empty TTY output missing sentinel (got %q)", oldOut)
+			}
+		})
+	}
+}
+
 func nonEmptyLines(s string) []string {
 	var out []string
 	for _, l := range strings.Split(s, "\n") {

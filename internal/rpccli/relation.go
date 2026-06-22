@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
 // newRelationCmd mirrors `wrkq relation`. add/rm are RPC-backed via
 // wrkq.relation.add/.remove, composing wrkq.task.show to resolve each endpoint's
-// id+uuid for the legacy output. ls is pending the list-view ruling.
+// id+uuid for the legacy output. ls is RPC-backed via wrkq.relation.listView and
+// renders --json / NDJSON / --porcelain / non-TTY default plus the legacy TTY table.
 func newRelationCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relation", Short: "Manage task relations"}
 	cmd.AddCommand(newRelationMutateCmd("add", "wrkq.relation.add", "created", "Created"))
@@ -25,11 +27,6 @@ func newRelationLsCmd() *cobra.Command {
 		Short: "List relations for a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// JSON (indented array) and NDJSON/non-TTY default are proven; the
-			// TTY table is pending.
-			if !asJSON && !ndjson && !porcelain && isStdoutTTY(cmd.OutOrStdout()) {
-				return fmt.Errorf("relation ls: only --json / --ndjson / non-TTY output is implemented in wrkq-rpccli so far")
-			}
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
@@ -44,12 +41,15 @@ func newRelationLsCmd() *cobra.Command {
 				}
 				return err
 			}
-			var items []json.RawMessage
-			if err := json.Unmarshal(raw, &items); err != nil {
-				return err
-			}
 			out := cmd.OutOrStdout()
+
+			// --json: indented array of the raw relation objects (empty → null,
+			// matching the server's nil-slice projection).
 			if asJSON {
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
+					return err
+				}
 				data, err := json.MarshalIndent(items, "", "  ")
 				if err != nil {
 					return err
@@ -57,13 +57,48 @@ func newRelationLsCmd() *cobra.Command {
 				_, err = out.Write(append(data, '\n'))
 				return err
 			}
-			// NDJSON: one compact relation per line.
-			for _, it := range items {
-				if _, err := out.Write(append([]byte(it), '\n')); err != nil {
+
+			// NDJSON / --porcelain / non-TTY default: one compact relation per line.
+			if ndjson || porcelain || !isStdoutTTY(out) {
+				var items []json.RawMessage
+				if err := json.Unmarshal(raw, &items); err != nil {
 					return err
 				}
+				for _, it := range items {
+					if _, err := out.Write(append([]byte(it), '\n')); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
-			return nil
+
+			// TTY default: legacy table (internal/cli/relation.go). Columns
+			// Direction/Kind/Task ID/Slug/Title; empty → "No relations found".
+			// porcelain is always false here (porcelain routes to NDJSON above),
+			// so the renderer emits the padded human table, never tab-separated.
+			var rels []struct {
+				Direction string `json:"direction"`
+				Kind      string `json:"kind"`
+				TaskID    string `json:"task_id"`
+				TaskSlug  string `json:"task_slug"`
+				TaskTitle string `json:"task_title"`
+			}
+			if err := json.Unmarshal(raw, &rels); err != nil {
+				return err
+			}
+			if len(rels) == 0 {
+				fmt.Fprintln(out, "No relations found")
+				return nil
+			}
+			headers := []string{"Direction", "Kind", "Task ID", "Slug", "Title"}
+			rowsData := make([][]string, 0, len(rels))
+			for _, rel := range rels {
+				rowsData = append(rowsData, []string{
+					rel.Direction, rel.Kind, rel.TaskID, rel.TaskSlug, rel.TaskTitle,
+				})
+			}
+			r := render.NewRenderer(out, render.Options{Format: render.FormatTable})
+			return r.RenderTable(headers, rowsData)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")

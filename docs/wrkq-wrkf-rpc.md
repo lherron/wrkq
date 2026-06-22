@@ -647,6 +647,10 @@ wrkq.relation.remove
 > task (`{ task: string }`). **No cursor** — legacy `relation ls` exposes no
 > limit/cursor and the set is bounded by the task. Do not back-propagate these
 > rows into `WrkqRelation`. Cataloged + fingerprinted (via `CatViewRelation`).
+> The RPC CLI renders these rows as an indented JSON array (`--json`), NDJSON
+> (`--ndjson`/`--porcelain`/non-TTY default), or — when stdout is an interactive
+> terminal — the legacy padded table (Direction/Kind/Task ID/Slug/Title; empty →
+> "No relations found"). Rendering is CLI-side; the projection is mode-agnostic.
 
 ```ts
 interface WrkqRelationAddParams {
