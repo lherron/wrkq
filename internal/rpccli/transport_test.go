@@ -228,6 +228,20 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !jsonEqual(t, inLs, subLs) {
 		t.Errorf("task.lsView transport results differ:\n in-process: %s\n subprocess: %s", inLs, subLs)
 	}
+
+	// task.findListView (the find recursive/filtered compat list projection) must
+	// agree across transports. Search the seeded project's tasks recursively.
+	inFind, err := inproc.Call(context.Background(), "wrkq.task.findListView", map[string]any{"paths": []string{"rpccli-test-proj"}, "type": "t"})
+	if err != nil {
+		t.Fatalf("in-process task.findListView: %v", err)
+	}
+	subFind, err := sub.Call(ctx, "wrkq.task.findListView", map[string]any{"paths": []string{"rpccli-test-proj"}, "type": "t"})
+	if err != nil {
+		t.Fatalf("subprocess task.findListView: %v", err)
+	}
+	if !jsonEqual(t, inFind, subFind) {
+		t.Errorf("task.findListView transport results differ:\n in-process: %s\n subprocess: %s", inFind, subFind)
+	}
 }
 
 // assertRejectsBeforeInitialize drives a single wrkq.task.show request through a

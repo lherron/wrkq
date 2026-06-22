@@ -31,7 +31,7 @@ var topLevelCommands = []mirroredCommand{
 	{use: "check-inbox"},
 	{use: "cp <source>... <destination>"},
 	{use: "diff <A> [B]"},
-	{use: "find [PATH...]"},
+	// find is RPC-backed (real parity command); registered separately.
 	{use: "handoff"},
 	{use: "index"},
 	{use: "log <PATHSPEC|ID>"},
@@ -83,6 +83,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newContainerCmd())
 	root.AddCommand(newAttachCmd())
 	root.AddCommand(newLsCmd())
+	root.AddCommand(newFindCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

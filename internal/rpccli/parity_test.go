@@ -447,6 +447,129 @@ var parityCases = []parityCase{
 		args:  []string{"ls", "proj", "--json", "--cursor", "not-a-valid-cursor"},
 	},
 
+	// find via wrkq.task.findListView (server compat list projection: recursive
+	// path-prefix matching, metadata filters, cursor.Apply + limit+1 +
+	// sort-validation + BuildNextCursor over the filtered set, mixed-type
+	// in-memory merge-sort). findMixed seeds nested containers + tasks in varied
+	// states/kinds so filters and recursion are all exercised.
+	{
+		name:  "find/all-default",
+		setup: findMixed,
+		args:  []string{"find", "--ndjson"},
+	},
+	{
+		name:  "find/path-prefix-recursive",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--ndjson"},
+	},
+	{
+		name:  "find/type-t",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--ndjson"},
+	},
+	{
+		name:  "find/type-p",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "p", "--ndjson"},
+	},
+	{
+		name:  "find/state-open",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--state", "open", "--ndjson"},
+	},
+	{
+		name:  "find/state-all",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--state", "all", "--ndjson"},
+	},
+	{
+		name:  "find/kind-bug",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--kind", "bug", "--ndjson"},
+	},
+	{
+		name:  "find/slug-glob",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--slug-glob", "task-*", "--ndjson"},
+	},
+	{
+		name:  "find/json-pretty",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--json"},
+	},
+	{
+		name:  "find/sort-id",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--sort", "id", "--ndjson"},
+	},
+	{
+		name:  "find/sort-created_at",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--sort", "created_at", "--ndjson"},
+	},
+	{
+		name:  "find/sort-updated_at",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--sort", "updated_at", "--ndjson"},
+	},
+	{
+		name:  "find/sort-path",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--sort", "path", "--ndjson"},
+	},
+	{
+		name:  "find/reverse",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--sort", "id", "--reverse", "--ndjson"},
+	},
+	{
+		name:  "find/porcelain-limit-cursor",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--porcelain", "--limit", "2"},
+	},
+	{
+		// Mixed-type (no --type) ignores the cursor entirely (legacy searchBoth
+		// path skips pagination); proves the mirror replicates that exactly.
+		name:  "find/mixed-cursor-ignored",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--ndjson", "--cursor", "not-a-valid-cursor"},
+	},
+	{
+		// Single-type cursor IS applied SQL-side → malformed cursor errors.
+		name:  "find/type-t-malformed-cursor-errors",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--ndjson", "--cursor", "not-a-valid-cursor"},
+	},
+	{
+		// find does NOT resolve search paths; an unknown path is a no-match filter,
+		// NOT an error → empty result (json `[]`, ndjson nothing).
+		name:  "find/unknown-path-empty-json",
+		setup: findMixed,
+		args:  []string{"find", "nope", "--json"},
+	},
+	{
+		name:  "find/empty-json",
+		setup: [][]string{{"mkdir", "void"}},
+		args:  []string{"find", "void/nothing-here", "--json"},
+	},
+	{
+		name:  "find/invalid-sort-errors",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--sort", "bogus", "--json"},
+	},
+	{
+		// Unknown --parent-task is a resolution error surfaced raw by both binaries.
+		name:  "find/unknown-parent-task-errors",
+		setup: findMixed,
+		args:  []string{"find", "--parent-task", "T-09999999", "--json"},
+	},
+	{
+		// Legacy excludes raw from find's allowed output set → identical error.
+		name:  "find/output-raw-unsupported",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--output", "raw"},
+	},
+
 	// ── project-root scoping parity (WRKQ_PROJECT_ROOT / ASP_PROJECT / --project) ──
 	// Both binaries apply the SAME neutral projectroot transform before any RPC
 	// param is sent. The seed is root-less; only the command-under-test runs with a
@@ -462,6 +585,14 @@ var parityCases = []parityCase{
 		name:  "pr/ls-relative-path",
 		setup: prSeed,
 		args:  []string{"ls", "sub", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
+	},
+	{
+		// find scopes its raw search paths through the same neutral projectroot
+		// transform; a bare `find` under a root searches the root recursively.
+		name:  "pr/find-default-root",
+		setup: prSeed,
+		args:  []string{"find", "--type", "t", "--ndjson"},
 		env:   []string{"WRKQ_PROJECT_ROOT=myproj"},
 	},
 	{
@@ -545,6 +676,22 @@ var lsMixed = [][]string{
 	{"touch", "proj/alpha/nested", "-t", "Nested"},
 	{"touch", "proj/task-x", "-t", "Task X"},
 	{"touch", "proj/task-y", "-t", "Task Y"},
+}
+
+// findMixed seeds nested containers plus tasks in varied states/kinds so the
+// find parity cases exercise recursive path-prefix matching, per-filter
+// narrowing (state/type/kind/slug-glob), and mixed-type merge-sort. Tasks default
+// to state "open" (find's default excludes archived/deleted/idea, so open tasks
+// are visible); one is flipped to completed and one to a bug kind.
+var findMixed = [][]string{
+	{"mkdir", "proj"},
+	{"mkdir", "proj/sub"},
+	{"touch", "proj/task-a", "-t", "Task A"},
+	{"touch", "proj/task-b", "-t", "Task B", "--kind", "bug"},
+	{"touch", "proj/sub/task-c", "-t", "Task C"},
+	{"set", "proj/task-a", "--state", "open"},
+	{"set", "proj/task-b", "--state", "open"},
+	{"set", "proj/sub/task-c", "--state", "completed"},
 }
 
 func TestParity(t *testing.T) {
@@ -726,6 +873,117 @@ func TestLsCursorReplay(t *testing.T) {
 	}
 	if len(oldAll) != 5 || len(newAll) != 5 {
 		t.Errorf("expected 5 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
+	}
+}
+
+// TestFindCursorReplay proves the find list-view cursor contract over the
+// FILTERED/RECURSIVE single-type set: cursor replay across page boundaries,
+// per-page byte parity old-vs-new, and no-dup/no-miss (concatenated pages equal
+// the unpaginated list). daedalus REQUIRES this distinct from the first-page
+// parity case. Single-type (--type t) is used because the mixed (searchBoth) path
+// deliberately ignores the cursor (legacy parity, covered in find/mixed-cursor-*).
+func TestFindCursorReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	// 5 open tasks across nested containers under proj; find recurses the prefix.
+	// Sorted by id ASC → stable pages of 2,2,1.
+	setup := [][]string{{"mkdir", "proj"}, {"mkdir", "proj/sub"}}
+	for _, s := range []string{"t1", "t2", "t3"} {
+		setup = append(setup, []string{"touch", "proj/" + s, "-t", s})
+	}
+	for _, s := range []string{"t4", "t5"} {
+		setup = append(setup, []string{"touch", "proj/sub/" + s, "-t", s})
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	paginateAll := func(bin, dir string) (all, pages []string) {
+		cur := ""
+		for {
+			args := []string{"find", "proj", "--type", "t", "--sort", "id", "--porcelain", "--limit", "2"}
+			if cur != "" {
+				args = append(args, "--cursor", cur)
+			}
+			res := runCLI(t, bin, dir, args)
+			if res.exit != 0 {
+				t.Fatalf("%s page (cursor=%q) exit %d: %s", bin, cur, res.exit, res.stderr)
+			}
+			all = append(all, nonEmptyLines(res.stdout)...)
+			pages = append(pages, res.stdout+"\x1e"+res.stderr)
+			next := extractCursor(res.stderr)
+			if next == "" {
+				break
+			}
+			cur = next
+			if len(pages) > 20 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+		return all, pages
+	}
+
+	oldAll, oldPages := paginateAll(bins.wrkq, oldDir)
+	newAll, newPages := paginateAll(bins.mirror, newDir)
+
+	if len(oldPages) != len(newPages) {
+		t.Fatalf("page count: old=%d new=%d", len(oldPages), len(newPages))
+	}
+	for i := range oldPages {
+		if oldPages[i] != newPages[i] {
+			t.Errorf("page %d bytes differ:\n old: %q\n new: %q", i, oldPages[i], newPages[i])
+		}
+	}
+
+	oldFull := nonEmptyLines(runCLI(t, bins.wrkq, oldDir, []string{"find", "proj", "--type", "t", "--sort", "id", "--ndjson"}).stdout)
+	newFull := nonEmptyLines(runCLI(t, bins.mirror, newDir, []string{"find", "proj", "--type", "t", "--sort", "id", "--ndjson"}).stdout)
+	if strings.Join(oldAll, "\n") != strings.Join(oldFull, "\n") {
+		t.Errorf("OLD paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", oldAll, oldFull)
+	}
+	if strings.Join(newAll, "\n") != strings.Join(newFull, "\n") {
+		t.Errorf("NEW paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", newAll, newFull)
+	}
+	if len(oldAll) != 5 || len(newAll) != 5 {
+		t.Errorf("expected 5 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
+	}
+}
+
+// TestFindHardGates proves the mirror REFUSES (clean non-zero exit) the legacy
+// find surface it does not yet implement, so a narrower behavior can never
+// masquerade as parity. Legacy would succeed for these, so they cannot be
+// byte-parity cases; the gate is asserted on the mirror alone.
+func TestFindHardGates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs the mirror CLI")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, findMixed)
+	dir := copyFixture(t, base)
+
+	gated := []struct {
+		name string
+		args []string
+	}{
+		{"print0", []string{"find", "proj", "--print0"}},
+		{"output-yaml", []string{"find", "proj", "--output", "yaml"}},
+		{"output-tsv", []string{"find", "proj", "--output", "tsv"}},
+		{"output-table", []string{"find", "proj", "--output", "table"}},
+		{"output-human", []string{"find", "proj", "--output", "human"}},
+		{"conflicting-modes", []string{"find", "proj", "--json", "--ndjson"}},
+	}
+	for _, g := range gated {
+		g := g
+		t.Run(g.name, func(t *testing.T) {
+			res := runCLI(t, bins.mirror, dir, g.args)
+			if res.exit == 0 {
+				t.Errorf("expected non-zero exit (hard-gate) for %v, got 0\n stdout: %q", g.args, res.stdout)
+			}
+			if strings.TrimSpace(res.stderr) == "" {
+				t.Errorf("expected a gate error message on stderr for %v", g.args)
+			}
+		})
 	}
 }
 

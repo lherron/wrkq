@@ -112,6 +112,7 @@ var methodCatalog = []string{
 	"wrkq.task.catView",
 	"wrkq.task.list",
 	"wrkq.task.lsView",
+	"wrkq.task.findListView",
 	"wrkq.task.update",
 	"wrkq.task.move",
 	"wrkq.task.acknowledge",
@@ -197,13 +198,14 @@ var methodCatalog = []string{
 
 var dtoCatalog = []string{
 	"WrkqTask",
-	"WrkqTaskCatView", // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
-	"WrkqContainerCatView", // CLI compatibility projection (container cat)
-	"WrkqCommentCatView", // CLI compatibility projection (comment cat)
-	"WrkqCommentListView", // CLI compatibility list projection (comment ls)
+	"WrkqTaskCatView",        // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
+	"WrkqContainerCatView",   // CLI compatibility projection (container cat)
+	"WrkqCommentCatView",     // CLI compatibility projection (comment cat)
+	"WrkqCommentListView",    // CLI compatibility list projection (comment ls)
 	"WrkqAttachmentListView", // CLI compatibility list projection (attach ls)
-	"WrkqLsListView", // CLI compatibility list projection (ls)
-	"CatViewRelation", // element of relation.listView (also nested in WrkqTaskCatView)
+	"WrkqLsListView",         // CLI compatibility list projection (ls)
+	"WrkqFindListView",       // CLI compatibility list projection (find)
+	"CatViewRelation",        // element of relation.listView (also nested in WrkqTaskCatView)
 	"WrkqTaskListResult",
 	"WrkqComment",
 	"WrkqCommentListResult",
@@ -251,6 +253,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.task.lsView", apiHandler(func(ctx context.Context, p wrkqapi.LsListViewParams) (any, error) {
 		return wq.LsListView(ctx, p)
+	}))
+	s.Register("wrkq.task.findListView", apiHandler(func(ctx context.Context, p wrkqapi.FindListViewParams) (any, error) {
+		return wq.FindListView(ctx, p)
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)

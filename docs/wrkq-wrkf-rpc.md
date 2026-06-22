@@ -285,6 +285,7 @@ wrkq.task.create      [required]
 wrkq.task.show        [required]
 wrkq.task.catView     [CLI compatibility projection — see note]
 wrkq.task.lsView      [CLI compatibility list projection — see note]
+wrkq.task.findListView [CLI compatibility list projection — see note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
 wrkq.task.acknowledge
@@ -301,6 +302,28 @@ wrkq.task.restore
 > `task_count`/`active_task_count` are container rollups. Cataloged + fingerprinted.
 > NOTE: the mirror `ls` command + parity fixtures are not yet implemented, so the
 > command is not command-parity-green even though the method contract is defined.
+
+> **`wrkq.task.findListView`** is a CLI compatibility list read model for
+> `wrkq find`, **not** canonical `wrkq.task.list`. The server owns recursive
+> path-prefix matching (`path = ? OR path LIKE ?||'/%'`, or GLOB for `*` paths),
+> all metadata filters (state/type/kind/slug-glob/assignee/parent-task/
+> requested-by/assigned-project/due-before/due-after/ack-pending), assignee
+> normalization + parent-task selector→UUID resolution, cursor.Apply + limit+1 +
+> sort-validation + BuildNextCursor over the filtered set, and the legacy
+> mixed-type in-memory merge-sort:
+> `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, assignee?,
+> parentTask?, requestedBy?, assignedProject?, ackPending?, sort?, reverse?,
+> limit?, cursor? }` → `{ items: WrkqFindEntry[], next_cursor }`. Rows are
+> legacy-shaped (snake_case `findResult`). PINNED PARITY QUIRKS the server
+> reproduces exactly: (1) when NO `--type` is given (searchBoth) the cursor is
+> IGNORED — pagination/limit run over the merged in-memory set with no
+> cursor.Apply; only a single `type` (`t`|`p`) applies the cursor SQL-side; (2)
+> empty result renders as `[]` (legacy inits `[]findResult{}`), distinct from
+> `lsView`'s `null`; (3) findTasks/findContainers errors carry the
+> `finding tasks:` / `finding containers:` message prefix. Project-root scoping is
+> caller-side (the mirror scopes paths + `--parent-task` before sending). Compat
+> read model, not a canonical resource. Cataloged + fingerprinted (registering it
+> changes the method catalog and `protocolSchemaHash`).
 
 > **`wrkq.task.catView` is a CLI compatibility read model, not a domain
 > resource.** Unlike `wrkq.task.show` (the stable camelCase `WrkqTask` DTO), it

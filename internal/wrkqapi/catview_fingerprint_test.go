@@ -82,6 +82,15 @@ func TestAttachmentListViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestFindListViewDTOFingerprint guards the find projection shapes.
+func TestFindListViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))
+	const want = "WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,created_at,updated_at,etag}"
+	if got != want {
+		t.Errorf("find list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestLsListViewDTOFingerprint guards the ls projection shapes.
 func TestLsListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqLsListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLsEntry{}))

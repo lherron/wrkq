@@ -1,0 +1,601 @@
+package wrkqapi
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/cursor"
+	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
+)
+
+// FindListViewParams mirrors the legacy `wrkq find [PATH...]` surface. The CLI
+// scopes the raw paths/parent selector through the project-root scoper BEFORE
+// these params are sent; the server NEVER reads project-root env/flags. Assignee
+// normalization and parent-task resolution are durable read behavior and so are
+// owned here on the server side.
+type FindListViewParams struct {
+	Paths                []string `json:"paths,omitempty"`
+	Type                 string   `json:"type,omitempty"` // "t" (task) or "p" (project/container)
+	SlugGlob             string   `json:"slugGlob,omitempty"`
+	State                string   `json:"state,omitempty"`
+	DueBefore            string   `json:"dueBefore,omitempty"`
+	DueAfter             string   `json:"dueAfter,omitempty"`
+	Kind                 string   `json:"kind,omitempty"`
+	Assignee             string   `json:"assignee,omitempty"`
+	ParentTask           string   `json:"parentTask,omitempty"`
+	RequestedByProjectID string   `json:"requestedBy,omitempty"`
+	AssignedProjectID    string   `json:"assignedProject,omitempty"`
+	AckPending           bool     `json:"ackPending,omitempty"`
+	Limit                int      `json:"limit,omitempty"`
+	Cursor               string   `json:"cursor,omitempty"`
+	Sort                 string   `json:"sort,omitempty"`
+	Reverse              bool     `json:"reverse,omitempty"`
+}
+
+// WrkqFindEntry matches the legacy findResult shape exactly (field order + json
+// tags). Marshaled by encoding/json — NOT alphabetical (legacy uses a struct, not
+// a map), so field order here is the wire order.
+type WrkqFindEntry struct {
+	Type                 string  `json:"type"`
+	UUID                 string  `json:"uuid"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Title                string  `json:"title"`
+	Path                 string  `json:"path"`
+	Specification        string  `json:"specification,omitempty"`
+	State                *string `json:"state,omitempty"`
+	Priority             *int    `json:"priority,omitempty"`
+	Kind                 *string `json:"kind,omitempty"`
+	Assignee             *string `json:"assignee,omitempty"`
+	AssigneePrincipalRef *string `json:"assignee_principal_ref,omitempty"`
+	ParentTaskID         *string `json:"parent_task_id,omitempty"`
+	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
+	Resolution           *string `json:"resolution,omitempty"`
+	DueAt                *string `json:"due_at,omitempty"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+	ETag                 int64   `json:"etag"`
+}
+
+// WrkqFindListView is the server-owned COMPATIBILITY list projection for
+// `wrkq find`. It owns recursive/filtered task+container search, cursor.Apply +
+// limit+1 + sort-validation + BuildNextCursor over the filtered/recursive set,
+// and the legacy mixed-type in-memory merge-sort. Not a canonical resource.
+type WrkqFindListView struct {
+	Items      []WrkqFindEntry `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
+// FindListView reproduces legacy `wrkq find` byte-for-byte: same filters, same
+// recursive path-prefix matching, same searchBoth-vs-single-type cursor handling
+// (cursor is applied SQL-side only when filtering to a single type; the mixed set
+// is paginated in memory WITHOUT a cursor, matching legacy executeFindQuery).
+func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFindListView, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Normalize assignee to a principal ref (legacy does this in the CLI; it is
+	// durable read behavior so it lives on the server here).
+	var assigneePrincipalRef string
+	if p.Assignee != "" {
+		ref, err := attribution.NormalizeCompat(p.Assignee)
+		if err != nil {
+			return nil, NewValidationError(fmt.Sprintf("failed to resolve assignee: %s", err.Error()), map[string]any{"field": "assignee"})
+		}
+		assigneePrincipalRef = ref
+	}
+
+	// Resolve parent task to UUID (legacy applies project-root scoping to the
+	// selector first; the CLI already scoped it before sending).
+	var parentTaskUUID string
+	if p.ParentTask != "" {
+		uuid, _, err := selectors.ResolveTask(a.db, p.ParentTask)
+		if err != nil {
+			return nil, NewValidationError(fmt.Sprintf("failed to resolve parent task: %s", err.Error()), map[string]any{"field": "parentTask"})
+		}
+		parentTaskUUID = uuid
+	}
+
+	sortField, descending, err := normalizeFindSort(p.Sort, p.Reverse, p.Type)
+	if err != nil {
+		return nil, NewValidationError(err.Error(), map[string]any{"field": "sort"})
+	}
+
+	opts := findQueryOptions{
+		paths:                p.Paths,
+		typeFilter:           p.Type,
+		slugGlob:             p.SlugGlob,
+		state:                p.State,
+		dueBefore:            p.DueBefore,
+		dueAfter:             p.DueAfter,
+		kind:                 p.Kind,
+		assigneePrincipalRef: assigneePrincipalRef,
+		parentTaskUUID:       parentTaskUUID,
+		requestedByProjectID: p.RequestedByProjectID,
+		assignedProjectID:    p.AssignedProjectID,
+		ackPending:           p.AckPending,
+		limit:                p.Limit,
+		cursor:               p.Cursor,
+		sortField:            sortField,
+		sortDescending:       descending,
+	}
+
+	results, hasMore, err := a.executeFindQuery(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	view := &WrkqFindListView{Items: results}
+	if hasMore && len(results) > 0 {
+		last := results[len(results)-1]
+		view.NextCursor, _ = cursor.BuildNextCursor(
+			[]string{sortField},
+			[]any{findEntrySortValue(last, sortField)},
+			last.ID,
+		)
+	}
+	return view, nil
+}
+
+type findQueryOptions struct {
+	paths                []string
+	typeFilter           string
+	slugGlob             string
+	state                string
+	dueBefore            string
+	dueAfter             string
+	kind                 string
+	assigneePrincipalRef string
+	parentTaskUUID       string
+	requestedByProjectID string
+	assignedProjectID    string
+	ackPending           bool
+	limit                int
+	cursor               string
+	sortField            string
+	sortDescending       bool
+}
+
+func (a *API) executeFindQuery(ctx context.Context, opts findQueryOptions) ([]WrkqFindEntry, bool, error) {
+	results := []WrkqFindEntry{}
+
+	searchTasks := opts.typeFilter == "" || opts.typeFilter == "t"
+	searchContainers := opts.typeFilter == "" || opts.typeFilter == "p"
+	searchBoth := searchTasks && searchContainers
+
+	var hasMore bool
+
+	if searchTasks {
+		tasks, taskHasMore, err := a.findTasks(ctx, opts, searchBoth)
+		if err != nil {
+			// Legacy wraps findTasks errors as "finding tasks: %w".
+			return nil, false, prefixFindError("finding tasks: ", err)
+		}
+		results = append(results, tasks...)
+		if !searchBoth {
+			hasMore = taskHasMore
+		}
+	}
+
+	if searchContainers {
+		containers, containerHasMore, err := a.findContainers(ctx, opts, searchBoth)
+		if err != nil {
+			// Legacy wraps findContainers errors as "finding containers: %w".
+			return nil, false, prefixFindError("finding containers: ", err)
+		}
+		results = append(results, containers...)
+		if !searchBoth {
+			hasMore = containerHasMore
+		}
+	}
+
+	if searchBoth && opts.limit > 0 {
+		sortFindEntries(results, opts.sortField, opts.sortDescending)
+		if len(results) > opts.limit {
+			hasMore = true
+			results = results[:opts.limit]
+		}
+	} else if searchBoth {
+		sortFindEntries(results, opts.sortField, opts.sortDescending)
+	}
+
+	return results, hasMore, nil
+}
+
+func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPagination bool) ([]WrkqFindEntry, bool, error) {
+	var pag *cursor.ApplyResult
+	var err error
+	if !skipPagination {
+		pag, err = cursor.Apply(opts.cursor, cursor.ApplyOptions{
+			SortFields: []string{opts.sortField},
+			SQLFields:  []string{findTaskSortSQL(opts.sortField)},
+			Descending: []bool{opts.sortDescending},
+			IDField:    "t.id",
+			Limit:      opts.limit,
+		})
+		if err != nil {
+			return nil, false, NewValidationError(err.Error(), map[string]any{"field": "cursor"})
+		}
+	}
+
+	query := `
+		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
+		       t.assignee_principal_ref, t.parent_task_uuid, t.requested_by_project_id,
+		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
+		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at
+		FROM tasks t
+		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+		WHERE 1=1
+	`
+	args := []any{}
+
+	switch opts.state {
+	case "all":
+	case "":
+		query += " AND t.state NOT IN ('archived', 'deleted', 'idea')"
+	default:
+		query += " AND t.state = ?"
+		args = append(args, opts.state)
+	}
+
+	if opts.kind != "" {
+		query += " AND t.kind = ?"
+		args = append(args, opts.kind)
+	}
+	if opts.assigneePrincipalRef != "" {
+		query += " AND t.assignee_principal_ref = ?"
+		args = append(args, opts.assigneePrincipalRef)
+	}
+	if opts.parentTaskUUID != "" {
+		query += " AND t.parent_task_uuid = ?"
+		args = append(args, opts.parentTaskUUID)
+	}
+	if opts.requestedByProjectID != "" {
+		query += " AND t.requested_by_project_id = ?"
+		args = append(args, opts.requestedByProjectID)
+	}
+	if opts.assignedProjectID != "" {
+		query += " AND t.assigned_project_id = ?"
+		args = append(args, opts.assignedProjectID)
+	}
+	if opts.ackPending {
+		query += " AND t.acknowledged_at IS NULL AND t.state IN ('completed', 'cancelled')"
+	}
+
+	if opts.dueBefore != "" {
+		dueBeforeTime, perr := time.Parse("2006-01-02", opts.dueBefore)
+		if perr != nil {
+			return nil, false, NewValidationError(fmt.Sprintf("invalid due-before date: %s", perr.Error()), map[string]any{"field": "dueBefore"})
+		}
+		query += " AND t.due_at IS NOT NULL AND t.due_at < ?"
+		args = append(args, dueBeforeTime.Format(time.RFC3339))
+	}
+	if opts.dueAfter != "" {
+		dueAfterTime, perr := time.Parse("2006-01-02", opts.dueAfter)
+		if perr != nil {
+			return nil, false, NewValidationError(fmt.Sprintf("invalid due-after date: %s", perr.Error()), map[string]any{"field": "dueAfter"})
+		}
+		query += " AND t.due_at IS NOT NULL AND t.due_at > ?"
+		args = append(args, dueAfterTime.Format(time.RFC3339))
+	}
+
+	if opts.slugGlob != "" {
+		pattern := paths.GlobToSQLPattern(opts.slugGlob)
+		query += " AND t.slug GLOB ?"
+		args = append(args, pattern)
+	}
+
+	if len(opts.paths) > 0 {
+		pathConditions := []string{}
+		for _, p := range opts.paths {
+			if strings.Contains(p, "*") {
+				pattern := paths.GlobToSQLPattern(p)
+				pathConditions = append(pathConditions, "(cp.path || '/' || t.slug) GLOB ?")
+				args = append(args, pattern)
+			} else {
+				pathConditions = append(pathConditions, "((cp.path || '/' || t.slug) = ? OR (cp.path || '/' || t.slug) LIKE ? || '/%')")
+				args = append(args, p, p)
+			}
+		}
+		if len(pathConditions) > 0 {
+			query += " AND (" + strings.Join(pathConditions, " OR ") + ")"
+		}
+	}
+
+	if pag != nil && pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		args = append(args, pag.Params...)
+	}
+
+	if pag != nil {
+		query += " " + pag.OrderByClause
+	} else {
+		query += " ORDER BY " + findTaskSortSQL(opts.sortField)
+		if opts.sortDescending {
+			query += " DESC"
+		} else {
+			query += " ASC"
+		}
+		if opts.sortField != "id" {
+			if opts.sortDescending {
+				query += ", t.id DESC"
+			} else {
+				query += ", t.id ASC"
+			}
+		}
+	}
+
+	if pag != nil && pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		args = append(args, *pag.LimitParam)
+	}
+
+	rows, err := a.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	results := []WrkqFindEntry{}
+	for rows.Next() {
+		var r WrkqFindEntry
+		var specification string
+		var state, kind, assigneePrincipalRef, parentTaskUUID, dueAt sql.NullString
+		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
+		var priority sql.NullInt64
+
+		if err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
+			&assigneePrincipalRef, &parentTaskUUID, &requestedBy, &assignedProject,
+			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, false, NewInternalError(err)
+		}
+
+		r.Type = "task"
+		r.Specification = specification
+		if state.Valid {
+			r.State = &state.String
+		}
+		if priority.Valid {
+			pv := int(priority.Int64)
+			r.Priority = &pv
+		}
+		if kind.Valid {
+			r.Kind = &kind.String
+		}
+		if assigneePrincipalRef.Valid {
+			r.AssigneePrincipalRef = &assigneePrincipalRef.String
+			display := attribution.PrincipalHandle(assigneePrincipalRef.String)
+			r.Assignee = &display
+		}
+		if parentTaskUUID.Valid {
+			var parentID string
+			if perr := a.db.QueryRowContext(ctx, "SELECT id FROM tasks WHERE uuid = ?", parentTaskUUID.String).Scan(&parentID); perr == nil {
+				r.ParentTaskID = &parentID
+			}
+		}
+		if requestedBy.Valid {
+			r.RequestedByProjectID = &requestedBy.String
+		}
+		if assignedProject.Valid {
+			r.AssignedProjectID = &assignedProject.String
+		}
+		if acknowledgedAt.Valid {
+			r.AcknowledgedAt = &acknowledgedAt.String
+		}
+		if resolution.Valid {
+			r.Resolution = &resolution.String
+		}
+		if dueAt.Valid {
+			r.DueAt = &dueAt.String
+		}
+
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, NewInternalError(err)
+	}
+
+	hasMore := false
+	if !skipPagination && opts.limit > 0 && len(results) > opts.limit {
+		hasMore = true
+		results = results[:opts.limit]
+	}
+	return results, hasMore, nil
+}
+
+func (a *API) findContainers(ctx context.Context, opts findQueryOptions, skipPagination bool) ([]WrkqFindEntry, bool, error) {
+	var pag *cursor.ApplyResult
+	var err error
+	if !skipPagination {
+		pag, err = cursor.Apply(opts.cursor, cursor.ApplyOptions{
+			SortFields: []string{opts.sortField},
+			SQLFields:  []string{findContainerSortSQL(opts.sortField)},
+			Descending: []bool{opts.sortDescending},
+			IDField:    "c.id",
+			Limit:      opts.limit,
+		})
+		if err != nil {
+			return nil, false, NewValidationError(err.Error(), map[string]any{"field": "cursor"})
+		}
+	}
+
+	query := `
+		SELECT c.uuid, c.id, c.slug, COALESCE(c.title, c.slug) as title, c.etag,
+		       cp.path, c.created_at, c.updated_at
+		FROM containers c
+		JOIN v_container_paths cp ON cp.uuid = c.uuid
+		WHERE c.archived_at IS NULL
+	`
+	args := []any{}
+
+	if opts.slugGlob != "" {
+		pattern := paths.GlobToSQLPattern(opts.slugGlob)
+		query += " AND c.slug GLOB ?"
+		args = append(args, pattern)
+	}
+
+	if len(opts.paths) > 0 {
+		pathConditions := []string{}
+		for _, p := range opts.paths {
+			if strings.Contains(p, "*") {
+				pattern := paths.GlobToSQLPattern(p)
+				pathConditions = append(pathConditions, "cp.path GLOB ?")
+				args = append(args, pattern)
+			} else {
+				pathConditions = append(pathConditions, "(cp.path = ? OR cp.path LIKE ? || '/%')")
+				args = append(args, p, p)
+			}
+		}
+		if len(pathConditions) > 0 {
+			query += " AND (" + strings.Join(pathConditions, " OR ") + ")"
+		}
+	}
+
+	if pag != nil && pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		args = append(args, pag.Params...)
+	}
+
+	if pag != nil {
+		query += " " + pag.OrderByClause
+	} else {
+		query += " ORDER BY " + findContainerSortSQL(opts.sortField)
+		if opts.sortDescending {
+			query += " DESC"
+		} else {
+			query += " ASC"
+		}
+		if opts.sortField != "id" {
+			if opts.sortDescending {
+				query += ", c.id DESC"
+			} else {
+				query += ", c.id ASC"
+			}
+		}
+	}
+
+	if pag != nil && pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		args = append(args, *pag.LimitParam)
+	}
+
+	rows, err := a.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	results := []WrkqFindEntry{}
+	for rows.Next() {
+		var r WrkqFindEntry
+		if err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, false, NewInternalError(err)
+		}
+		r.Type = "container"
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, NewInternalError(err)
+	}
+
+	hasMore := false
+	if !skipPagination && opts.limit > 0 && len(results) > opts.limit {
+		hasMore = true
+		results = results[:opts.limit]
+	}
+	return results, hasMore, nil
+}
+
+// prefixFindError reproduces legacy executeFindQuery's "finding tasks: %w" /
+// "finding containers: %w" wrapping while preserving the underlying domain code
+// (so the wire error.data.code and the mirror's stripped message both match the
+// legacy raw text). A non-domain error is wrapped as an internal error.
+func prefixFindError(prefix string, err error) error {
+	if de, ok := err.(*DomainError); ok {
+		return newError(de.Code(), prefix+de.Error(), de.Retryable(), de.Data(), de.Unwrap())
+	}
+	return NewInternalError(fmt.Errorf("%s%w", prefix, err))
+}
+
+func normalizeFindSort(field string, reverse bool, typeFilter string) (string, bool, error) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		switch typeFilter {
+		case "p":
+			return "path", reverse, nil
+		default:
+			return "updated_at", !reverse, nil
+		}
+	}
+	switch field {
+	case "updated_at", "created_at", "id", "path":
+	default:
+		return "", false, fmt.Errorf("invalid --sort %q: choose updated_at, created_at, id, or path", field)
+	}
+	return field, reverse, nil
+}
+
+func findTaskSortSQL(field string) string {
+	switch field {
+	case "id":
+		return "t.id"
+	case "created_at":
+		return "t.created_at"
+	case "path":
+		return "cp.path || '/' || t.slug"
+	default:
+		return "t.updated_at"
+	}
+}
+
+func findContainerSortSQL(field string) string {
+	switch field {
+	case "id":
+		return "c.id"
+	case "created_at":
+		return "c.created_at"
+	case "updated_at":
+		return "c.updated_at"
+	default:
+		return "cp.path"
+	}
+}
+
+func sortFindEntries(results []WrkqFindEntry, field string, descending bool) {
+	sort.SliceStable(results, func(i, j int) bool {
+		left := findEntrySortValue(results[i], field)
+		right := findEntrySortValue(results[j], field)
+		if left == right {
+			if descending {
+				return results[i].ID > results[j].ID
+			}
+			return results[i].ID < results[j].ID
+		}
+		if descending {
+			return left > right
+		}
+		return left < right
+	})
+}
+
+func findEntrySortValue(result WrkqFindEntry, field string) string {
+	switch field {
+	case "id":
+		return result.ID
+	case "created_at":
+		return result.CreatedAt
+	case "path":
+		return result.Path
+	default:
+		return result.UpdatedAt
+	}
+}
