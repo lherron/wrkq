@@ -689,7 +689,9 @@ wrkq.container.list
 > (`{ container?: string; path?: string }`), assembled under a single read
 > transaction over the **resolved container UUID** (selector resolution happens
 > before the snapshot). Do not back-propagate these fields into `WrkqContainer`.
-> Cataloged + fingerprinted.
+> Cataloged + fingerprinted. All `wrkq container cat` render modes
+> (json/ndjson/porcelain/markdown/raw) are produced **CLI-side** from this one
+> projection — no scalar is missing — so no per-mode RPC surface exists.
 
 ```ts
 interface WrkqContainerShowParams { path?: string; project?: string }

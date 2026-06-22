@@ -344,6 +344,49 @@ var parityCases = []parityCase{
 		setup: [][]string{{"mkdir", "realproj"}, {"mkdir", "realproj/sub"}},
 		args:  []string{"container", "cat", "realproj/sub", "--json"},
 	},
+	// container cat render modes (CLI-side on the wrkq.container.catView projection).
+	// ndjson + porcelain are compact single-line JSON of the same object; --json and
+	// the non-TTY default are indented. --no-frontmatter is the "raw" body-only mode
+	// (markdown path with the front matter suppressed → description only, empty for
+	// mkdir-seeded containers). Markdown WITH front matter only renders on a TTY and
+	// so cannot be byte-parity tested under the pipe-based harness.
+	{
+		name:  "container-cat/ndjson",
+		setup: [][]string{{"mkdir", "myproj"}},
+		args:  []string{"container", "cat", "myproj", "--ndjson"},
+	},
+	{
+		name:  "container-cat/porcelain",
+		setup: [][]string{{"mkdir", "myproj"}},
+		args:  []string{"container", "cat", "myproj", "--porcelain"},
+	},
+	{
+		name:  "container-cat/non-tty-default-json",
+		setup: [][]string{{"mkdir", "myproj"}},
+		args:  []string{"container", "cat", "myproj"},
+	},
+	{
+		name:  "container-cat/no-frontmatter-raw",
+		setup: [][]string{{"mkdir", "myproj"}},
+		args:  []string{"container", "cat", "myproj", "--no-frontmatter"},
+	},
+	{
+		// A container with webhook_urls set exercises the webhook_urls array in the
+		// json/ndjson/porcelain projections (and the front-matter line on a TTY).
+		name:  "container-cat/webhooks-ndjson",
+		setup: [][]string{{"mkdir", "hooked"}, {"container", "set", "hooked", "--webhook-urls", `["https://example.test/a","https://example.test/b"]`}},
+		args:  []string{"container", "cat", "hooked", "--ndjson"},
+	},
+	{
+		name:  "container-cat/webhooks-json",
+		setup: [][]string{{"mkdir", "hooked"}, {"container", "set", "hooked", "--webhook-urls", `["https://example.test/a"]`}},
+		args:  []string{"container", "cat", "hooked", "--json"},
+	},
+	{
+		name:  "container-cat/unknown-ref-errors",
+		setup: nil,
+		args:  []string{"container", "cat", "P-09999999", "--json"},
+	},
 	{
 		name:  "comment-cat/by-id",
 		setup: [][]string{{"touch", "inbox/cc", "-t", "CC"}, {"comment", "add", "inbox/cc", "the body"}},
