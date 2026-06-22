@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wrkq CLI to RPC Gap Analysis</title>
+<style>
+:root {
+  --paper: #f7f5ee;
+  --ink: #17191a;
+  --muted: #5f686b;
+  --quiet: #7f8788;
+  --line: #d6d1c3;
+  --line-strong: #aaa28d;
+  --panel: #fffefa;
+  --teal: #006f73;
+  --teal-soft: #dff2f0;
+  --amber: #9a6500;
+  --amber-soft: #fff0c7;
+  --red: #a13b32;
+  --red-soft: #ffe4df;
+  --blue: #405f9a;
+  --blue-soft: #e4ebff;
+  --green: #327348;
+  --green-soft: #e3f1e7;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+
+a {
+  color: var(--teal);
+  text-underline-offset: 3px;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
+
+.page {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 28px 22px;
+  border-right: 1px solid var(--line);
+  background: rgba(247, 245, 238, 0.96);
+}
+
+.sidebar h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.sidebar p {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.nav {
+  display: grid;
+  gap: 7px;
+}
+
+.nav a {
+  display: block;
+  padding: 8px 10px;
+  border-left: 3px solid transparent;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.nav a:hover {
+  border-left-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+main {
+  min-width: 0;
+}
+
+.hero {
+  min-height: 74vh;
+  display: grid;
+  align-content: center;
+  padding: 58px clamp(24px, 5vw, 72px) 42px;
+  border-bottom: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(23, 25, 26, 0.05) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(0deg, rgba(23, 25, 26, 0.035) 1px, transparent 1px) 0 0 / 32px 32px,
+    var(--paper);
+}
+
+.kicker {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 880px;
+  margin: 18px 0 16px;
+  font-size: clamp(40px, 7vw, 78px);
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.deck {
+  max-width: 820px;
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(18px, 2.4vw, 24px);
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 38px;
+  max-width: 980px;
+}
+
+.metric {
+  min-height: 134px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.metric strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 28px;
+}
+
+.metric span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+section {
+  padding: 48px clamp(24px, 5vw, 72px);
+  border-bottom: 1px solid var(--line);
+}
+
+section > h2 {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 4vw, 44px);
+  letter-spacing: 0;
+}
+
+section > .intro {
+  max-width: 820px;
+  margin: 0 0 28px;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.lane {
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.lane h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.lane p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.covered { color: var(--green); background: var(--green-soft); }
+.partial { color: var(--amber); background: var(--amber-soft); }
+.missing { color: var(--red); background: var(--red-soft); }
+.local { color: var(--blue); background: var(--blue-soft); }
+
+.method-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.method-list {
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.method-list h3 {
+  margin: 0 0 12px;
+}
+
+.method-list code {
+  display: block;
+  padding: 4px 0;
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.matrix {
+  display: grid;
+  gap: 12px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 220px 135px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.row h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.row p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.row .status {
+  justify-self: start;
+  margin: 0;
+}
+
+.callouts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.callout {
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.callout h3 {
+  margin: 0 0 10px;
+}
+
+.callout p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.contract {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.codebox {
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: #161b1c;
+  color: #f6f0e3;
+}
+
+.codebox h3 {
+  margin: 0 0 12px;
+  color: #f6f0e3;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.timeline {
+  display: grid;
+  gap: 14px;
+  max-width: 980px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.step-num {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.step-body {
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.step-body h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.step-body p {
+  margin: 0;
+  color: var(--muted);
+}
+
+footer {
+  padding: 28px clamp(24px, 5vw, 72px);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 980px) {
+  .page {
+    display: block;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hero {
+    min-height: auto;
+  }
+
+  .hero-grid,
+  .lanes,
+  .method-panel,
+  .callouts,
+  .contract {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .nav {
+    grid-template-columns: 1fr;
+  }
+
+  section {
+    padding: 36px 18px;
+  }
+
+  .hero {
+    padding: 40px 18px 34px;
+  }
+
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .step {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <aside class="sidebar">
+    <h2>RPC CLI Audit</h2>
+    <p>Source: rpcgaps.md</p>
+    <nav class="nav" aria-label="Sections">
+      <a href="#summary">Summary</a>
+      <a href="#catalog">RPC Catalog</a>
+      <a href="#matrix">Command Matrix</a>
+      <a href="#critical">Critical Gaps</a>
+      <a href="#contracts">DTO Gap</a>
+      <a href="#plan">Migration Order</a>
+    </nav>
+  </aside>
+
+  <main>
+    <header class="hero" id="top">
+      <span class="kicker">2026-06-22 / wrkq</span>
+      <h1>wrkq can start migrating to RPC, but byte parity needs new protocol surface.</h1>
+      <p class="deck">The existing JSON-RPC interface covers the core resource model. The current CLI also exposes projections, streams, search/index operations, handoffs, webhooks, local process controls, and legacy output contracts that are not represented in RPC today.</p>
+      <div class="hero-grid" aria-label="At a glance">
+        <div class="metric">
+          <strong>Core covered</strong>
+          <span>Tasks, comments, attachments, relations, containers, legacy actors, and workflow attachment have basic RPC methods.</span>
+        </div>
+        <div class="metric">
+          <strong>Parity blocked</strong>
+          <span>`cat`, `set`, `ls`, `find`, `rm`, `mv`, and `restore` have behavior or fields beyond the current DTOs.</span>
+        </div>
+        <div class="metric">
+          <strong>Missing areas</strong>
+          <span>Search/index, monitor/watch/log, handoffs, webhooks, copy, diff, bundle, and rich tree projections need decisions.</span>
+        </div>
+      </div>
+    </header>
+
+    <section id="summary">
+      <h2>Three Migration Lanes</h2>
+      <p class="intro">The audit separates commands that can use RPC soon from commands that need DTO widening or entirely new RPC namespaces.</p>
+      <div class="lanes">
+        <article class="lane">
+          <span class="badge covered">Use soon</span>
+          <h3>Resource primitives</h3>
+          <p>Basic task, comment, attachment, relation, and container operations have matching RPC methods. These are good candidates for the first mirror implementation.</p>
+        </article>
+        <article class="lane">
+          <span class="badge partial">Widen first</span>
+          <h3>CLI projections</h3>
+          <p>Commands such as `cat`, `ls`, `find`, `stat`, and `tree` depend on aggregate or legacy shapes that current resource DTOs do not provide.</p>
+        </article>
+        <article class="lane">
+          <span class="badge missing">Add or keep local</span>
+          <h3>Operational surfaces</h3>
+          <p>Search/index, monitor/watch/log, handoff, webhook, bundle, agent, and server commands need new namespaces or explicit local-only decisions.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="catalog">
+      <h2>What RPC Has Today</h2>
+      <p class="intro">The current method catalog is strong for resource CRUD and workflow operations. It does not expose most CLI-specific projections.</p>
+      <div class="method-panel">
+        <div class="method-list">
+          <h3>wrkq namespace</h3>
+          <code>wrkq.task.create/show/list/update/move</code>
+          <code>wrkq.task.acknowledge/delete/restore</code>
+          <code>wrkq.comment.add/list/show/delete</code>
+          <code>wrkq.attachment.add/list/show/remove</code>
+          <code>wrkq.relation.add/list/remove</code>
+          <code>wrkq.container.create/show/list/delete/deleteRecursive</code>
+          <code>wrkq.admin.legacyActor.list/create/update</code>
+          <code>wrkq.workflow.attach/inspect/timeline/refresh</code>
+        </div>
+        <div class="method-list">
+          <h3>wrkf namespace</h3>
+          <code>wrkf.workflow.validate/show/list/diff/install</code>
+          <code>wrkf.instance.show/next</code>
+          <code>wrkf.evidence.add/list/show/suggest</code>
+          <code>wrkf.role.list/bind/unbind/set</code>
+          <code>wrkf.obligation.list/show/satisfy/waive/cancel</code>
+          <code>wrkf.check.preflight/run/show/list</code>
+          <code>wrkf.hook.list/show/run</code>
+          <code>wrkf.transition.apply</code>
+          <code>wrkf.run.*, wrkf.action.*, wrkf.effect.*</code>
+        </div>
+      </div>
+    </section>
+
+    <section id="matrix">
+      <h2>Command Gap Matrix</h2>
+      <p class="intro">The most important rows are marked partial: a method exists, but the current CLI cannot be byte-compared against it without added fields, projections, or adapter behavior.</p>
+      <div class="matrix">
+        <article class="row">
+          <h3>`touch`, `set`, `cat`</h3>
+          <span class="badge partial status">Partial</span>
+          <p>Task create/show/update exist, but `set` lacks several fields, `touch` lacks force UUID and project-linkage fields, and `cat` emits a richer task document with comments, relations, blockers, artifact_dir, and async run fields.</p>
+        </article>
+        <article class="row">
+          <h3>`ls`, `find`, `tree`, `stat`, `projects`</h3>
+          <span class="badge partial status">Projection gap</span>
+          <p>RPC has separate task/container list and show calls. The CLI returns mixed task/container projections, rollups, compact metadata, hierarchy, project-root exceptions, and legacy snake_case output.</p>
+        </article>
+        <article class="row">
+          <h3>`rm`, `mv`, `restore`, `mkdir`, `rmdir`</h3>
+          <span class="badge partial status">Semantic gap</span>
+          <p>Container create/delete and task move/delete/restore exist, but CLI behavior includes archive vs delete semantics, rename, multi-source operations, confirmation, dry-run, recursive deletion, and restore-with-move/comment updates.</p>
+        </article>
+        <article class="row">
+          <h3>`comment *`, `attach *`, `relation *`</h3>
+          <span class="badge partial status">Mostly covered</span>
+          <p>Core operations are present. Gaps remain for comment purge/dry-run/CAS/multi-ref, attachment stdin and file-byte retrieval, richer list/show output, and exact presentation parity.</p>
+        </article>
+        <article class="row">
+          <h3>`search`, `index *`</h3>
+          <span class="badge missing status">Missing</span>
+          <p>No `wrkq.search.*` or `wrkq.index.*` methods exist. These commands operate the local sidecar index, freshness checks, ranking, snippets, and background index state.</p>
+        </article>
+        <article class="row">
+          <h3>`log`, `watch`, `monitor *`</h3>
+          <span class="badge missing status">Missing</span>
+          <p>No wrkq event-log or monitor namespace exists. `wrkf.event.query` is workflow-event scoped and does not replace CLI event history, raw watch, or terminal monitor contracts.</p>
+        </article>
+        <article class="row">
+          <h3>`handoff *`, `webhook *`</h3>
+          <span class="badge missing status">Missing</span>
+          <p>Handoffs and global/per-container webhook mutations have no RPC methods today. Container webhook changes also need a container update method.</p>
+        </article>
+        <article class="row">
+          <h3>`cp`, `apply`, `diff`, `bundle create`</h3>
+          <span class="badge missing status">Missing or partial</span>
+          <p>`apply` can end in task.update after local parsing, but has no RPC apply method. Copy, diff, and bundle export are not represented in RPC.</p>
+        </article>
+        <article class="row">
+          <h3>`agent`, `agent-context`, `server *`, `usage`, `version`, `whoami`</h3>
+          <span class="badge local status">Likely local</span>
+          <p>These are process, runtime, environment, documentation, or local identity surfaces. Keep them local unless a control-plane RPC is deliberately introduced.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="critical">
+      <h2>Critical Cutover Blockers</h2>
+      <p class="intro">These are the issues that will break a byte-comparison harness if the mirror CLI simply swaps command handlers for current RPC calls.</p>
+      <div class="callouts">
+        <article class="callout">
+          <h3>Delete semantics do not match</h3>
+          <p>CLI `rm` defaults to archive behavior. RPC `wrkq.task.delete` sets `state=deleted` and `deleted_at`. That cannot be substituted silently.</p>
+        </article>
+        <article class="callout">
+          <h3>Task detail is narrower than `cat`</h3>
+          <p>`WrkqTask` lacks current CLI fields such as artifact_dir, project_id, parent display fields, blocker summary, comments, relations, resolution, and async run linkage.</p>
+        </article>
+        <article class="callout">
+          <h3>Streams are absent</h3>
+          <p>`log`, `watch`, and `monitor` depend on event_log reads, polling, condition evaluation, and terminal NDJSON records. There is no equivalent RPC namespace.</p>
+        </article>
+        <article class="callout">
+          <h3>Presentation contracts are separate work</h3>
+          <p>RPC uses camelCase resource DTOs. CLI machine output often uses snake_case, table rows, raw markdown, porcelain IDs, and command-specific aggregate summaries.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="contracts">
+      <h2>Task Patch Contract Gap</h2>
+      <p class="intro">The fastest way to unblock core command migration is to widen task update semantics before routing `set` through RPC.</p>
+      <div class="contract">
+        <div class="codebox">
+          <h3>Current `TaskPatch`</h3>
+<pre>interface TaskPatch {
+  title?: string;                  // display title
+  description?: string;            // task body
+  specification?: string;          // task spec body
+  state?: WrkqTaskState;           // lifecycle state
+  priority?: number;               // 1..4
+  kind?: string;                   // task kind
+  riskClass?: string;              // risk class
+  labels?: string[];               // label set
+  meta?: Record&lt;string, unknown&gt;;  // metadata object
+  assigneePrincipalRef?: string;   // assignee
+  dueAt?: string | null;           // due date
+  startAt?: string | null;         // start date
+}</pre>
+        </div>
+        <div class="codebox">
+          <h3>Needed for `wrkq set`</h3>
+<pre>interface CliParityTaskPatch extends TaskPatch {
+  slug?: string;                   // task path segment
+  parentTask?: string | null;      // parent or clear parent
+  requestedByProjectId?: string;   // return-to project
+  assignedProjectId?: string;      // owning project
+  resolution?: string;             // done / wont_do / duplicate
+  cpProjectId?: string;            // external CP project
+  cpWorkItemId?: string;           // external work item
+  cpRunId?: string;                // external run
+  sessionId?: string;              // stored as cp_session_id
+  runStatus?: string;              // queued / running / terminal
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="plan">
+      <h2>Recommended RPC Work Order</h2>
+      <p class="intro">The migration should avoid command-by-command cutover until a mirrored Cobra tree and comparison harness can prove behavior.</p>
+      <div class="timeline">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h3>Mirror first</h3>
+            <p>Add the parallel RPC-backed Cobra tree and command-tree parity test before changing production `wrkq` behavior.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h3>Start with low-projection reads</h3>
+            <p>Implement basic relation, attachment list/remove, comment show/list, and container show paths where current RPC is closest.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h3>Widen task mutations</h3>
+            <p>Extend task patch/create/delete/restore semantics before attempting `touch`, `set`, `rm`, `restore`, or `cat` parity.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h3>Add projection namespaces</h3>
+            <p>Add or deliberately compose rich projections for `cat`, `ls`, `find`, `tree`, `stat`, and `projects`.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h3>Decide operational scope</h3>
+            <p>Choose which command groups become RPC-backed and which stay local: server, agent, usage, version, search/index, monitor, handoff, webhook, bundle.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Source document: rpcgaps.md, "wrkq CLI to RPC Gap Analysis". Generated as a standalone docs/html artifact for the RPC-backed CLI migration discussion.
+    </footer>
+  </main>
+</div>
+</body>
+</html>
