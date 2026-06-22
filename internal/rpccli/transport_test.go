@@ -201,6 +201,20 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 		t.Errorf("comment.listView transport results differ:\n in-process: %s\n subprocess: %s", inCl, subCl)
 	}
 
+	// comment.listView multi-task form (the `tasks` array param) must also agree
+	// across transports — the accumulate-per-task paging shape is server-owned.
+	inClM, err := inproc.Call(context.Background(), "wrkq.comment.listView", map[string]any{"tasks": []string{taskID}})
+	if err != nil {
+		t.Fatalf("in-process comment.listView (multi-task): %v", err)
+	}
+	subClM, err := sub.Call(ctx, "wrkq.comment.listView", map[string]any{"tasks": []string{taskID}})
+	if err != nil {
+		t.Fatalf("subprocess comment.listView (multi-task): %v", err)
+	}
+	if !jsonEqual(t, inClM, subClM) {
+		t.Errorf("comment.listView (multi-task) transport results differ:\n in-process: %s\n subprocess: %s", inClM, subClM)
+	}
+
 	// attachment.listView must agree across transports (empty set is sufficient
 	// for transport equivalence; populated requires attachment storage setup).
 	inAl, err := inproc.Call(context.Background(), "wrkq.attachment.listView", map[string]any{"task": taskID})

@@ -7,16 +7,21 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 )
 
-// CommentListViewParams mirrors the legacy `wrkq comment ls` surface for one
-// task. The server owns cursor.Apply, limit+1, sort/direction validation, and
-// next-cursor construction.
+// CommentListViewParams mirrors the legacy `wrkq comment ls` surface. The server
+// owns cursor.Apply, limit+1, sort/direction validation, and next-cursor
+// construction. Legacy accepts MULTIPLE task arguments: it applies the same
+// cursor predicate + limit+1 to EACH task's query, accumulates the rows in task
+// order, then truncates the combined set at limit and builds the next cursor
+// from the last surviving row. `Tasks` carries the multi-task list; `Task` is the
+// single-task back-compat field (used when `Tasks` is empty).
 type CommentListViewParams struct {
-	Task           string `json:"task"`
-	Limit          int    `json:"limit,omitempty"`
-	Cursor         string `json:"cursor,omitempty"`
-	IncludeDeleted bool   `json:"includeDeleted,omitempty"`
-	Sort           string `json:"sort,omitempty"` // default created_at
-	Desc           bool   `json:"desc,omitempty"`
+	Task           string   `json:"task,omitempty"`
+	Tasks          []string `json:"tasks,omitempty"`
+	Limit          int      `json:"limit,omitempty"`
+	Cursor         string   `json:"cursor,omitempty"`
+	IncludeDeleted bool     `json:"includeDeleted,omitempty"`
+	Sort           string   `json:"sort,omitempty"` // default created_at
+	Desc           bool     `json:"desc,omitempty"`
 }
 
 // WrkqCommentListView is the server-owned COMPATIBILITY list projection for
@@ -29,15 +34,21 @@ type WrkqCommentListView struct {
 
 var commentListSortFields = map[string]bool{"created_at": true, "updated_at": true, "id": true}
 
-// CommentListView lists one task's comments with legacy cursor pagination.
+// CommentListView lists one or more tasks' comments with legacy cursor
+// pagination. With multiple tasks it reproduces legacy accumulation EXACTLY: the
+// same cursor predicate + limit+1 is applied to each task's query and the rows
+// are appended in task order, then the combined set is truncated at limit and the
+// next cursor is built from the last surviving row.
 func (a *API) CommentListView(ctx context.Context, p CommentListViewParams) (*WrkqCommentListView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	taskUUID, _, err := selectors.ResolveTask(a.db, p.Task)
-	if err != nil {
-		return nil, NewNotFoundError(p.Task, "task")
+
+	tasks := p.Tasks
+	if len(tasks) == 0 {
+		tasks = []string{p.Task}
 	}
+
 	sortField := p.Sort
 	if sortField == "" {
 		sortField = "created_at"
@@ -58,37 +69,45 @@ func (a *API) CommentListView(ctx context.Context, p CommentListViewParams) (*Wr
 		return nil, NewValidationError(err.Error(), map[string]any{"field": "cursor"})
 	}
 
-	query := commentCatViewSelect + " WHERE c.task_uuid = ?"
-	args := []any{taskUUID}
-	if !p.IncludeDeleted {
-		query += " AND c.deleted_at IS NULL"
-	}
-	if pag.WhereClause != "" {
-		query += " AND " + pag.WhereClause
-		args = append(args, pag.Params...)
-	}
-	query += " " + pag.OrderByClause
-	if pag.LimitClause != "" {
-		query += " " + pag.LimitClause
-		args = append(args, *pag.LimitParam)
-	}
-
-	rows, err := a.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, NewInternalError(err)
-	}
-	defer func() { _ = rows.Close() }()
-
 	items := []WrkqCommentCatView{}
-	for rows.Next() {
-		v, serr := scanCommentCatView(rows)
-		if serr != nil {
-			return nil, NewInternalError(serr)
+	for _, task := range tasks {
+		taskUUID, _, rerr := selectors.ResolveTask(a.db, task)
+		if rerr != nil {
+			return nil, NewNotFoundError(task, "task")
 		}
-		items = append(items, *v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, NewInternalError(err)
+
+		query := commentCatViewSelect + " WHERE c.task_uuid = ?"
+		args := []any{taskUUID}
+		if !p.IncludeDeleted {
+			query += " AND c.deleted_at IS NULL"
+		}
+		if pag.WhereClause != "" {
+			query += " AND " + pag.WhereClause
+			args = append(args, pag.Params...)
+		}
+		query += " " + pag.OrderByClause
+		if pag.LimitClause != "" {
+			query += " " + pag.LimitClause
+			args = append(args, *pag.LimitParam)
+		}
+
+		rows, qerr := a.db.QueryContext(ctx, query, args...)
+		if qerr != nil {
+			return nil, NewInternalError(qerr)
+		}
+		for rows.Next() {
+			v, serr := scanCommentCatView(rows)
+			if serr != nil {
+				_ = rows.Close()
+				return nil, NewInternalError(serr)
+			}
+			items = append(items, *v)
+		}
+		if rerr := rows.Err(); rerr != nil {
+			_ = rows.Close()
+			return nil, NewInternalError(rerr)
+		}
+		_ = rows.Close()
 	}
 
 	nextCursor := ""

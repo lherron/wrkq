@@ -518,11 +518,20 @@ wrkq.comment.delete
 
 > **`wrkq.comment.listView`** is a CLI compatibility list read model for
 > `wrkq comment ls`, **not** the canonical `wrkq.comment.list`. It owns the legacy
-> cursor pagination server-side: `{ task, limit?, cursor?, includeDeleted?, sort?,
-> desc? }` → `{ items: WrkqCommentCatView[], next_cursor }`, using `cursor.Apply`
-> + `limit+1` + `BuildNextCursor` so the cursor token is byte-identical to legacy.
-> The RPC CLI renders items (JSON array / NDJSON) and routes `next_cursor` to
-> stderr only in porcelain mode, exactly as legacy does. Cataloged + fingerprinted.
+> cursor pagination server-side: `{ task?, tasks?, limit?, cursor?, includeDeleted?,
+> sort?, desc? }` → `{ items: WrkqCommentCatView[], next_cursor }`, using
+> `cursor.Apply` + `limit+1` + `BuildNextCursor` so the cursor token is
+> byte-identical to legacy. Legacy accepts MULTIPLE task arguments: `tasks` carries
+> the list (`task` is the single-task back-compat form, used when `tasks` is empty).
+> With multiple tasks the server reproduces legacy accumulation EXACTLY — it applies
+> the same cursor predicate + `limit+1` to each task's query, appends the rows in
+> task order, then truncates the combined set at `limit` and builds the next cursor
+> from the last surviving row. `sort` accepts `created_at`/`updated_at`/`id` (others
+> are a clean WRKQ_VALIDATION error — a deliberate, pinned divergence from legacy's
+> raw "no such column" leak); `desc` reverses the order. The RPC CLI scopes each
+> raw task arg through the project-root scoper (caller semantics) before the call,
+> renders items (JSON array / NDJSON / YAML / TSV / table), and routes `next_cursor`
+> to stderr only in porcelain mode, exactly as legacy does. Cataloged + fingerprinted.
 
 > **`wrkq.comment.catView`** is a CLI compatibility read model, **not** a canonical
 > resource DTO. It returns the legacy `wrkq comment cat` per-comment object

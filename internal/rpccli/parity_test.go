@@ -335,6 +335,66 @@ var parityCases = []parityCase{
 		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}},
 		args:  []string{"comment", "ls", "inbox/cl", "--json", "--include-deleted"},
 	},
+	{
+		name:  "comment-ls/yaml",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--yaml"},
+	},
+	{
+		name:  "comment-ls/tsv",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--tsv"},
+	},
+	{
+		name:  "comment-ls/reverse-json",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}, {"comment", "add", "inbox/cl", "three"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--reverse"},
+	},
+	{
+		name:  "comment-ls/reverse-sort-id",
+		setup: [][]string{{"touch", "inbox/cl", "-t", "CL"}, {"comment", "add", "inbox/cl", "one"}, {"comment", "add", "inbox/cl", "two"}},
+		args:  []string{"comment", "ls", "inbox/cl", "--json", "--sort", "id", "--reverse"},
+	},
+	{
+		name: "comment-ls/multi-task-json",
+		setup: [][]string{
+			{"touch", "inbox/ca", "-t", "CA"}, {"comment", "add", "inbox/ca", "a-one"},
+			{"touch", "inbox/cb", "-t", "CB"}, {"comment", "add", "inbox/cb", "b-one"}, {"comment", "add", "inbox/cb", "b-two"},
+		},
+		args: []string{"comment", "ls", "inbox/ca", "inbox/cb", "--json"},
+	},
+	{
+		name: "comment-ls/multi-task-ndjson-default",
+		setup: [][]string{
+			{"touch", "inbox/ca", "-t", "CA"}, {"comment", "add", "inbox/ca", "a-one"},
+			{"touch", "inbox/cb", "-t", "CB"}, {"comment", "add", "inbox/cb", "b-one"},
+		},
+		args: []string{"comment", "ls", "inbox/ca", "inbox/cb"},
+	},
+	{
+		name: "comment-ls/multi-task-yaml",
+		setup: [][]string{
+			{"touch", "inbox/ca", "-t", "CA"}, {"comment", "add", "inbox/ca", "a-one"},
+			{"touch", "inbox/cb", "-t", "CB"}, {"comment", "add", "inbox/cb", "b-one"},
+		},
+		args: []string{"comment", "ls", "inbox/ca", "inbox/cb", "--yaml"},
+	},
+	{
+		name: "comment-ls/multi-task-tsv",
+		setup: [][]string{
+			{"touch", "inbox/ca", "-t", "CA"}, {"comment", "add", "inbox/ca", "a-one"},
+			{"touch", "inbox/cb", "-t", "CB"}, {"comment", "add", "inbox/cb", "b-one"},
+		},
+		args: []string{"comment", "ls", "inbox/ca", "inbox/cb", "--tsv"},
+	},
+	{
+		name: "comment-ls/multi-task-porcelain-limit",
+		setup: [][]string{
+			{"touch", "inbox/ca", "-t", "CA"}, {"comment", "add", "inbox/ca", "a-one"}, {"comment", "add", "inbox/ca", "a-two"},
+			{"touch", "inbox/cb", "-t", "CB"}, {"comment", "add", "inbox/cb", "b-one"}, {"comment", "add", "inbox/cb", "b-two"},
+		},
+		args: []string{"comment", "ls", "inbox/ca", "inbox/cb", "--porcelain", "--limit", "3"},
+	},
 
 	// attach ls (empty) via wrkq.attachment.listView (cursor pattern; populated case needs attach put fs, pending).
 	{
@@ -1120,6 +1180,78 @@ func TestCommentLsCursorReplay(t *testing.T) {
 	}
 	if len(oldAll) != 5 || len(newAll) != 5 {
 		t.Errorf("expected 5 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
+	}
+}
+
+// TestCommentLsMultiTaskCursorReplay proves the multi-task `comment ls` paging
+// contract. Legacy applies the same cursor predicate + limit+1 to EACH task's
+// query, accumulates rows in task order, then truncates the combined set at limit
+// and builds the next cursor from the last surviving row — a non-obvious paging
+// shape. This replays the cursor across pages over TWO tasks and asserts per-page
+// byte parity old-vs-new plus no-dup/no-miss (concatenated pages == unpaginated).
+func TestCommentLsMultiTaskCursorReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	setup := [][]string{{"touch", "inbox/pa", "-t", "PA"}, {"touch", "inbox/pb", "-t", "PB"}}
+	for _, b := range []string{"a1", "a2", "a3"} {
+		setup = append(setup, []string{"comment", "add", "inbox/pa", b})
+	}
+	for _, b := range []string{"b1", "b2", "b3"} {
+		setup = append(setup, []string{"comment", "add", "inbox/pb", b})
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	tasks := []string{"inbox/pa", "inbox/pb"}
+	paginateAll := func(bin, dir string) (all, pages []string) {
+		cur := ""
+		for {
+			args := append([]string{"comment", "ls"}, tasks...)
+			args = append(args, "--porcelain", "--limit", "2")
+			if cur != "" {
+				args = append(args, "--cursor", cur)
+			}
+			res := runCLI(t, bin, dir, args)
+			if res.exit != 0 {
+				t.Fatalf("%s page (cursor=%q) exit %d: %s", bin, cur, res.exit, res.stderr)
+			}
+			all = append(all, nonEmptyLines(res.stdout)...)
+			pages = append(pages, res.stdout+"\x1e"+res.stderr)
+			next := extractCursor(res.stderr)
+			if next == "" {
+				break
+			}
+			cur = next
+			if len(pages) > 20 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+		return all, pages
+	}
+
+	oldAll, oldPages := paginateAll(bins.wrkq, oldDir)
+	newAll, newPages := paginateAll(bins.mirror, newDir)
+
+	if len(oldPages) != len(newPages) {
+		t.Fatalf("page count: old=%d new=%d", len(oldPages), len(newPages))
+	}
+	for i := range oldPages {
+		if oldPages[i] != newPages[i] {
+			t.Errorf("page %d bytes differ:\n old: %q\n new: %q", i, oldPages[i], newPages[i])
+		}
+	}
+
+	fullArgs := append([]string{"comment", "ls"}, tasks...)
+	oldFull := nonEmptyLines(runCLI(t, bins.wrkq, oldDir, fullArgs).stdout)
+	newFull := nonEmptyLines(runCLI(t, bins.mirror, newDir, fullArgs).stdout)
+	if strings.Join(oldAll, "\n") != strings.Join(oldFull, "\n") {
+		t.Errorf("OLD multi-task paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", oldAll, oldFull)
+	}
+	if strings.Join(newAll, "\n") != strings.Join(newFull, "\n") {
+		t.Errorf("NEW multi-task paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", newAll, newFull)
 	}
 }
 
