@@ -62,6 +62,26 @@ func actRunID(t *testing.T, result map[string]any, label string) string {
 	return id
 }
 
+// actSeedSpecification sets a non-empty specification on the seeded task so the
+// triage_complete transition resolves task.has_specification=true and takes the
+// `ready` outcome. Without a spec, triage_complete blocks the task (the
+// blocked_no_spec doctrine in wrkq-simple-task), which derails the happy-path
+// lifecycle these tests exercise. The real triage deliverable is the
+// specification; the action surface does not author it, so the test seeds it.
+func actSeedSpecification(t *testing.T, dbPath, taskUUID, spec string) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("actSeedSpecification: db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.Exec(
+		`UPDATE tasks SET specification = ? WHERE uuid = ?`, spec, taskUUID,
+	); err != nil {
+		t.Fatalf("actSeedSpecification: UPDATE: %v", err)
+	}
+}
+
 // 1 + 2: start triage on an un-workflowed task installs the built-in workflow,
 // creates one active run, and replays idempotently.
 func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
@@ -202,6 +222,7 @@ func TestWrkfActionComplete_EvidenceTransitionFinishAndReplay(t *testing.T) {
 	taskID := p2SeedTask(t, dbPath,
 		"a5000000-0000-4000-8000-000000000004",
 		"action-complete", "Action Complete")
+	actSeedSpecification(t, dbPath, "a5000000-0000-4000-8000-000000000004", "spec: triaged deliverable")
 	startFrames := p3Run(t, dbPath,
 		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
 	)
@@ -402,6 +423,7 @@ func TestWrkfActionList_IncludeClosedInstances(t *testing.T) {
 	taskID := p2SeedTask(t, dbPath,
 		"a5000000-0000-4000-8000-000000000008",
 		"action-history", "Action History")
+	actSeedSpecification(t, dbPath, "a5000000-0000-4000-8000-000000000008", "spec: triaged deliverable")
 
 	// Drive a full lifecycle through the simple workflow to close the first
 	// instance: triage -> implement -> verify -> review (review_complete closes).
