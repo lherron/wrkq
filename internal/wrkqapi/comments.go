@@ -311,7 +311,18 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, NewInternalError(eerr)
 	}
 
-	payload := `{"task_id":"` + taskID + `","comment_id":"` + commentUUID + `","soft_delete":true}`
+	// Read back the bumped etag for the event (legacy re-fetches after the UPDATE).
+	var newEtag int64
+	if eerr := tx.QueryRow("SELECT etag FROM comments WHERE uuid = ?", commentUUID).Scan(&newEtag); eerr != nil {
+		return nil, NewInternalError(eerr)
+	}
+
+	// Event-log payload MUST byte-match legacy internal/cli/comment_rm.go:
+	// task_id = the task UUID (not the friendly id), comment_id = the FRIENDLY
+	// comment id (not the uuid), deleted_by_principal_ref present, soft_delete:true.
+	// The event ETag is the NEW (post-bump) comment etag.
+	payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID +
+		`","deleted_by_principal_ref":"` + attr.PrincipalRef + `","soft_delete":true}`
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
@@ -319,6 +330,7 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		ResourceType: "comment",
 		ResourceUUID: &commentUUID,
 		EventType:    "comment.deleted",
+		ETag:         &newEtag,
 		Payload:      &payload,
 	}); eerr != nil {
 		return nil, NewInternalError(eerr)

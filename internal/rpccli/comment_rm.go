@@ -136,10 +136,7 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 		if f.purge {
 			mode = "purge"
 		}
-		params := map[string]any{"id": c.UUID, "mode": mode}
-		if actor != "" {
-			params["actor"] = actor
-		}
+		params := commentDeleteParams(c.UUID, mode, actor, f.ifMatch)
 		if _, derr := tr.Call(ctx, "wrkq.comment.delete", params); derr != nil {
 			return errors.New(rpcMessage(derr))
 		}
@@ -173,6 +170,24 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 		return enc.Encode(results)
 	}
 	return nil
+}
+
+// commentDeleteParams builds the wrkq.comment.delete params the mirror sends
+// AFTER the local warn/skip prechecks have passed: the resolved comment UUID, the
+// EXPLICIT mode (caller-owned-confirmation invariant — never the absent-mode
+// default), the optional actor, and — crucially — the etag precondition forwarded
+// as the server CAS (`ifMatch`) so the COMMIT is race-guarded against a concurrent
+// bump between the resolve (show) and the delete. ifMatch is omitted when ≤ 0 (no
+// --if-match supplied), exactly as legacy skips the check for if-match=0.
+func commentDeleteParams(commentUUID, mode, actor string, ifMatch int64) map[string]any {
+	params := map[string]any{"id": commentUUID, "mode": mode}
+	if actor != "" {
+		params["actor"] = actor
+	}
+	if ifMatch > 0 {
+		params["ifMatch"] = ifMatch
+	}
+	return params
 }
 
 // commentBodyPreview mirrors legacy: newlines → spaces, truncate >60 to 57+"...".

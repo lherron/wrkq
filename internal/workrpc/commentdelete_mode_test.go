@@ -192,3 +192,115 @@ func TestCommentDelete_NonInteractive_FromParamsAlone(t *testing.T) {
 		t.Error("purge from params alone must hard-delete the row")
 	}
 }
+
+// createCommentRPCFull creates a task + comment and returns the comment UUID, the
+// FRIENDLY comment id, and the task UUID (the latter two are what the legacy event
+// payload embeds).
+func createCommentRPCFull(t *testing.T, dbPath, body string) (commentUUID, commentID, taskUUID string) {
+	t.Helper()
+	_, taskUUID = createTaskRPC(t, dbPath, "comment-host: "+body)
+	frames := p2Run(t, dbPath,
+		mkRPC("ca", "wrkq.comment.add", map[string]any{"task": taskUUID, "body": body}),
+	)
+	result := p2ResultOrFail(t, frames[1], "wrkq.comment.add")
+	commentUUID, _ = result["uuid"].(string)
+	commentID, _ = result["id"].(string)
+	if commentUUID == "" || commentID == "" {
+		t.Fatalf("createCommentRPCFull: empty uuid/id: %#v", result)
+	}
+	return commentUUID, commentID, taskUUID
+}
+
+// latestCommentEvent reads the most recent event_log row for a comment by
+// event_type, returning the durable (etag, payload). etag is nil-presence-aware:
+// hasEtag is false when the column is NULL.
+func latestCommentEvent(t *testing.T, dbPath, commentUUID, eventType string) (hasEtag bool, etag int64, payload string) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("latestCommentEvent: db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var et sql.NullInt64
+	var pl sql.NullString
+	err = database.QueryRow(
+		`SELECT etag, payload FROM event_log
+		 WHERE resource_type = 'comment' AND resource_uuid = ? AND event_type = ?
+		 ORDER BY id DESC LIMIT 1`,
+		commentUUID, eventType,
+	).Scan(&et, &pl)
+	if err == sql.ErrNoRows {
+		t.Fatalf("no %s event for comment %s", eventType, commentUUID)
+	}
+	if err != nil {
+		t.Fatalf("latestCommentEvent query: %v", err)
+	}
+	return et.Valid, et.Int64, pl.String
+}
+
+// TestCommentDelete_SoftEventParity proves the soft-delete durable EVENT matches
+// legacy byte-for-byte where the row-snapshot oracle cannot: the comment.deleted
+// event payload shape (task_id = task UUID, comment_id = FRIENDLY comment id,
+// deleted_by_principal_ref present, soft_delete:true) AND the event etag = the NEW
+// (post-bump) comment etag. This is the regression guard for the HIGH-severity
+// event-log drift fixed in hrcchat#10198.
+func TestCommentDelete_SoftEventParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	commentUUID, commentID, taskUUID := createCommentRPCFull(t, dbPath, "soft event parity") // fresh etag=1
+
+	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": commentUUID}))
+	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (soft event parity)")
+
+	// Row preserved + etag bumped 1→2.
+	exists, deletedAt, rowEtag := commentRow(t, dbPath, commentUUID)
+	if !exists || deletedAt == "" {
+		t.Fatalf("soft-delete must preserve the row + set deleted_at; exists=%v deletedAt=%q", exists, deletedAt)
+	}
+	if rowEtag != 2 {
+		t.Fatalf("soft-delete row etag: want 2, got %d", rowEtag)
+	}
+
+	hasEtag, evtEtag, payload := latestCommentEvent(t, dbPath, commentUUID, "comment.deleted")
+	if !hasEtag {
+		t.Error("comment.deleted event MUST carry an etag (legacy sets it to the new comment etag)")
+	} else if evtEtag != 2 {
+		t.Errorf("comment.deleted event etag: want 2 (new comment etag), got %d", evtEtag)
+	}
+
+	// Legacy payload is a fixed key order: task_id, comment_id, deleted_by_principal_ref, soft_delete.
+	want := `{"task_id":"` + taskUUID + `","comment_id":"` + commentID +
+		`","deleted_by_principal_ref":"agent:wrkq-system","soft_delete":true}`
+	if payload != want {
+		t.Errorf("comment.deleted payload mismatch:\n want: %s\n got:  %s", want, payload)
+	}
+}
+
+// TestCommentDelete_PurgeEventParity proves the purge event payload byte-matches
+// legacy: comment.purged with {task_id = task UUID, comment_id = FRIENDLY id,
+// hard_delete:true} and NO event etag (legacy omits it for purge).
+func TestCommentDelete_PurgeEventParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	commentUUID, commentID, taskUUID := createCommentRPCFull(t, dbPath, "purge event parity")
+
+	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": commentUUID, "mode": "purge"}))
+	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (purge event parity)")
+
+	if exists, _, _ := commentRow(t, dbPath, commentUUID); exists {
+		t.Fatal("purge must hard-delete the comment row")
+	}
+
+	hasEtag, _, payload := latestCommentEvent(t, dbPath, commentUUID, "comment.purged")
+	if hasEtag {
+		t.Error("comment.purged event must NOT carry an etag (legacy omits it for purge)")
+	}
+	want := `{"task_id":"` + taskUUID + `","comment_id":"` + commentID + `","hard_delete":true}`
+	if payload != want {
+		t.Errorf("comment.purged payload mismatch:\n want: %s\n got:  %s", want, payload)
+	}
+}

@@ -33,17 +33,19 @@ source:
   - internal/rpccli/containers.go                     # rmdir --force mirror: two-phase deleteRecursive preflight→confirm→commit(expected)
   - internal/workrpc/registry.go                      # wrkq.task.delete / comment.delete (param-only mode change) + container.deleteRecursive registration
   - internal/workrpc/taskdelete_mode_test.go          # server delete-mode + non-interactivity acceptance tests
-  - internal/workrpc/commentdelete_mode_test.go       # server comment-delete mode/ifMatch + non-interactivity acceptance tests
+  - internal/workrpc/commentdelete_mode_test.go       # server comment-delete mode/ifMatch + event-payload-parity + non-interactivity acceptance tests
+  - internal/rpccli/comment_rm_test.go                # mirror if-match forwarding (server-CAS) param guard
   - internal/rpccli/pty_rm_darwin_test.go             # PTY prompt-ownership tests (rm/comment-rm/rmdir-force)
 required_tests:
   - internal/workrpc/taskdelete_mode_test.go          # TestTaskDelete_* (no-mode preserved, archive, purge+cleanup, invalid→VALIDATION, non-interactive)
-  - internal/workrpc/commentdelete_mode_test.go       # TestCommentDelete_* (soft default/explicit, purge, invalid→VALIDATION, ifMatch→CONFLICT/match, non-interactive)
+  - internal/workrpc/commentdelete_mode_test.go       # TestCommentDelete_* (soft default/explicit, purge, invalid→VALIDATION, ifMatch→CONFLICT/match, non-interactive) + TestCommentDelete_SoftEventParity/PurgeEventParity (durable event payload shape + new-etag byte-match — the snapshot oracle can't see event drift)
+  - internal/rpccli/comment_rm_test.go                # TestCommentDeleteParams_ForwardsIfMatch (mirror forwards the etag CAS to the server after the precheck passes; omits when absent)
   - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership / TestCommentRmPromptOwnership / TestRmdirForcePromptOwnership (mirror owns each prompt's exact text/accept-token/abort/--yes on a real TTY)
   - internal/rpccli/parity_test.go                    # TestParity/rm/*, TestParity/comment-rm/*, TestParity/rmdir/* (incl. --force two-phase) + comment row in the durable snapshot
   - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror routes durable mutation through the RPC boundary only)
 last_verified:
   date: 2026-06-22
-  evidence: "go test internal/rpccli (TestParity/rm + TestParity/comment-rm + TestParity/rmdir + TestRmPurgePromptOwnership + TestCommentRmPromptOwnership + TestRmdirForcePromptOwnership + TestCoreRuleImportGuard) + internal/workrpc (TestTaskDelete_* + TestCommentDelete_*) green; rm/comment-rm byte-match legacy for archive/soft/purge, rmdir --force byte-matches legacy via two-phase deleteRecursive; daedalus B-ruling hrcchat#10185 + seam-blessing #10190 (T-05100)"
+  evidence: "go test internal/rpccli (TestParity/rm + TestParity/comment-rm + TestParity/rmdir + TestRmPurgePromptOwnership + TestCommentRmPromptOwnership + TestRmdirForcePromptOwnership + TestCoreRuleImportGuard) + internal/workrpc (TestTaskDelete_* + TestCommentDelete_*) green; rm/comment-rm byte-match legacy for archive/soft/purge (incl. the comment.deleted/purged event payload shape + new-etag, TestCommentDelete_SoftEventParity/PurgeEventParity); rmdir --force byte-matches legacy for SINGLE-LEVEL ACTIVE contents — for nested or archived contents the prompt counts intentionally reflect the TRUE recursive/archived-inclusive impact, NOT legacy's immediate active-only count (daedalus-accepted divergence, hrcchat#10198); the committed recursive delete is byte-equivalent. daedalus B-ruling hrcchat#10185 + seam-blessing #10190 + conditional-accept #10198 (T-05100)"
 reopen_when:
   - a mutation method begins prompting, reading stdin, or inspecting a TTY
   - a destructive disposition becomes a hidden default (no explicit mode/intent)
