@@ -530,7 +530,15 @@ interface WrkqTaskDeleteParams {
 
 interface WrkqTaskRestoreParams {
   task: string;
-  state?: string; // target state (default "open"); archived/deleted rejected
+  state?: string;       // target state (default "open"); archived/deleted rejected
+  toPath?: string;      // move-on-restore destination (parent path + final slug)
+  title?: string;       // field update on restore (empty = unchanged)
+  description?: string; // field update on restore (empty = unchanged)
+  priority?: number;    // field update on restore (1-4; 0 = unchanged)
+  labels?: string;      // JSON array string; field update on restore ("" = unchanged)
+  assignee?: string;    // compat actor/principal ref; field update on restore
+  comment?: string;     // appended as a comment on restore
+  ifMatch?: number;     // conditional etag precondition; mismatch → WRKQ_CONFLICT
 }
 ```
 
@@ -561,7 +569,23 @@ absent-mode tombstone behavior.
 `wrkq.task.restore` is the inverse: the current state must be `archived` or
 `deleted` (else `WRKQ_VALIDATION`); it clears `archivedAt`/`deletedAt`/
 `deletedBy`, restores to `state` (default `open`, archived/deleted targets
-rejected), and cascade-restores subtasks.
+rejected), and cascade-restores subtasks (to the same target state, without
+propagating field updates / move / comment to children).
+
+Per the **caller-owned-confirmation** B-ruling (T-05100), restore carries the
+WHOLE legacy `wrkq restore` semantic op SERVER-side rather than composing it
+client-side (which would expose intermediate states + drift): `toPath`
+(move-on-restore — parent + final slug resolved + slug-conflict-checked inside
+the op), the `title`/`description`/`priority`/`labels`/`assignee` field updates,
+`comment`, and `ifMatch`. Error precedence mirrors legacy: state/priority/labels/
+assignee validation → not-deleted-or-archived check → `ifMatch` mismatch
+(`WRKQ_CONFLICT`, "etag mismatch: expected N, got M") → `toPath` resolve +
+slug-conflict (`WRKQ_CONFLICT`, "slug conflict: task with slug '…' already exists
+at destination"). The restore UPDATE intentionally does NOT bump the etag (legacy
+parity). restore NEVER prompts, so the mirror carries no confirmation flow — it
+owns only the caller-side scoping of the task ref + the `toPath` destination and
+the legacy output rendering. Container restore has no RPC method yet and is
+hard-gated in the mirror.
 
 #### Comment methods
 

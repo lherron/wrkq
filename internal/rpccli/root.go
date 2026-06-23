@@ -38,7 +38,8 @@ var topLevelCommands = []mirroredCommand{
 	{use: "monitor"},
 	{use: "projects"},
 	{use: "rename-container <path|id> <new-slug>"},
-	{use: "restore <path|id|uuid>"},
+	// restore is RPC-backed (extended wrkq.task.restore, caller-owned-confirmation
+	// seam: task flags server-side, container targets hard-gated); registered separately.
 	// rm is RPC-backed (caller-owned-confirmation seam); registered separately.
 	{use: "rpc --stdio"},
 	{use: "search <query> [PATH...]"},
@@ -90,6 +91,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newCheckInboxCmd())
 	root.AddCommand(newRmCmd())
 	root.AddCommand(newApplyCmd())
+	root.AddCommand(newRestoreCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

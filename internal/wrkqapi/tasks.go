@@ -5,14 +5,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -645,11 +648,9 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	uuid, err := a.resolveTaskUUID(p.Task)
-	if err != nil {
-		return nil, err
-	}
 
+	// Legacy precedence: state/priority/labels/assignee are validated BEFORE the
+	// task ref is resolved, so a bad flag errors even on an unresolvable ref.
 	// Validate target state.
 	targetState := string(domain.StateOpen)
 	if strings.TrimSpace(p.State) != "" {
@@ -663,8 +664,39 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		targetState = string(parsed)
 	}
 
+	// Validate priority (legacy: only when non-zero).
+	if p.Priority != 0 {
+		if verr := domain.ValidatePriority(p.Priority); verr != nil {
+			return nil, NewValidationError(verr.Error(), map[string]any{"field": "priority"})
+		}
+	}
+
+	// Validate labels JSON (legacy: only when non-empty).
+	if strings.TrimSpace(p.Labels) != "" {
+		var labels []string
+		if jerr := json.Unmarshal([]byte(p.Labels), &labels); jerr != nil {
+			return nil, NewValidationError("invalid labels JSON: "+jerr.Error(), map[string]any{"field": "labels"})
+		}
+	}
+
+	// Resolve assignee (legacy attribution.NormalizeCompat).
+	var assigneePrincipalRef *string
+	if strings.TrimSpace(p.Assignee) != "" {
+		principalRef, aerr := attribution.NormalizeCompat(p.Assignee)
+		if aerr != nil {
+			return nil, NewValidationError("failed to resolve assignee: "+aerr.Error(), map[string]any{"field": "assignee"})
+		}
+		assigneePrincipalRef = &principalRef
+	}
+
+	uuid, err := a.resolveTaskUUID(p.Task)
+	if err != nil {
+		return nil, err
+	}
+
 	var currentState string
-	if scanErr := a.db.QueryRow("SELECT state FROM tasks WHERE uuid = ?", uuid).Scan(&currentState); scanErr != nil {
+	var currentEtag int64
+	if scanErr := a.db.QueryRow("SELECT state, etag FROM tasks WHERE uuid = ?", uuid).Scan(&currentState, &currentEtag); scanErr != nil {
 		if scanErr == sql.ErrNoRows {
 			return nil, NewNotFoundError(p.Task, "task")
 		}
@@ -677,19 +709,86 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		)
 	}
 
+	// --if-match precondition (legacy: checked AFTER the state check, BEFORE --to).
+	// Mirrors legacy "etag mismatch: expected %d, got %d"; surfaced as WRKQ_CONFLICT.
+	if p.IfMatch != 0 && p.IfMatch != currentEtag {
+		return nil, NewConflictError(
+			"etag mismatch: expected "+strconv.FormatInt(p.IfMatch, 10)+", got "+strconv.FormatInt(currentEtag, 10),
+			map[string]any{"expectEtag": p.IfMatch, "currentEtag": currentEtag},
+		)
+	}
+
+	// --to (move-on-restore): resolve the destination parent + final slug and
+	// check for a slug conflict at the destination, exactly as legacy restore.go.
+	var newProjectUUID *string
+	var newSlug *string
+	if strings.TrimSpace(p.ToPath) != "" {
+		parentUUID, slug, _, derr := selectors.ResolveParentContainer(a.db, p.ToPath)
+		if derr != nil {
+			return nil, NewValidationError("failed to resolve destination: "+derr.Error(), map[string]any{"field": "toPath"})
+		}
+		newProjectUUID = parentUUID
+		newSlug = &slug
+
+		var existingUUID string
+		cerr := a.db.QueryRow(
+			"SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ? AND uuid != ?",
+			*parentUUID, slug, uuid,
+		).Scan(&existingUUID)
+		if cerr == nil {
+			return nil, NewConflictError(
+				"slug conflict: task with slug '"+slug+"' already exists at destination",
+				map[string]any{"field": "slug", "slug": slug},
+			)
+		} else if cerr != sql.ErrNoRows {
+			return nil, NewInternalError(cerr)
+		}
+	}
+
 	attr := a.attributionFor(p.Actor)
-	if rerr := a.restoreTaskTx(uuid, targetState, attr); rerr != nil {
+	opts := restoreOptions{
+		targetState:          targetState,
+		newProjectUUID:       newProjectUUID,
+		newSlug:              newSlug,
+		newTitle:             p.Title,
+		newDescription:       p.Description,
+		newPriority:          p.Priority,
+		newLabels:            p.Labels,
+		assigneePrincipalRef: assigneePrincipalRef,
+		comment:              p.Comment,
+	}
+	if rerr := a.restoreTaskTx(uuid, opts, attr); rerr != nil {
 		return nil, rerr
 	}
+	// Subtasks cascade-restore to the target state only (no field updates / move /
+	// comment propagate to children — legacy cascadeRestoreSubtasks passes a bare
+	// options struct).
 	if rerr := a.cascadeRestoreSubtasks(uuid, targetState, attr); rerr != nil {
 		return nil, rerr
 	}
 	return a.loadTask(uuid)
 }
 
+// restoreOptions carries the per-task restore mutation (target state + the
+// optional move / field updates / comment). Mirrors internal/cli restoreTaskOptions.
+type restoreOptions struct {
+	targetState          string
+	newProjectUUID       *string
+	newSlug              *string
+	newTitle             string
+	newDescription       string
+	newPriority          int
+	newLabels            string
+	assigneePrincipalRef *string
+	comment              string
+}
+
 // restoreTaskTx clears the archived/deleted markers and sets the target state for
-// a single task within a transaction, logging a task.restored event.
-func (a *API) restoreTaskTx(taskUUID, targetState string, attr attribution.Attribution) error {
+// a single task within a transaction, applying any move / field updates / comment,
+// and logging a task.restored event. Mirrors internal/cli restoreTaskWithOptions.
+// The legacy UPDATE intentionally does NOT bump etag, so this method preserves it
+// for byte-parity of the durable snapshot.
+func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attribution.Attribution) error {
 	tx, err := a.db.Begin()
 	if err != nil {
 		return NewInternalError(err)
@@ -701,18 +800,53 @@ func (a *API) restoreTaskTx(taskUUID, targetState string, attr attribution.Attri
 		return NewInternalError(scanErr)
 	}
 
-	if _, eerr := tx.Exec(`
-		UPDATE tasks
-		SET state = ?, archived_at = NULL, deleted_at = NULL,
-		    deleted_by_principal_ref = NULL, deleted_by_scope_ref = NULL,
-		    etag = etag + 1,
-		    updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?
-		WHERE uuid = ?
-	`, targetState, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), taskUUID); eerr != nil {
+	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL,
+		deleted_by_principal_ref = NULL, deleted_by_scope_ref = NULL,
+		updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?`
+	args := []any{opts.targetState, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr)}
+
+	if opts.newProjectUUID != nil {
+		query += `, project_uuid = ?`
+		args = append(args, *opts.newProjectUUID)
+	}
+	if opts.newSlug != nil {
+		query += `, slug = ?`
+		args = append(args, *opts.newSlug)
+	}
+	if opts.newTitle != "" {
+		query += `, title = ?`
+		args = append(args, opts.newTitle)
+	}
+	if opts.newDescription != "" {
+		query += `, description = ?`
+		args = append(args, opts.newDescription)
+	}
+	if opts.newPriority != 0 {
+		query += `, priority = ?`
+		args = append(args, opts.newPriority)
+	}
+	if opts.newLabels != "" {
+		query += `, labels = ?`
+		args = append(args, opts.newLabels)
+	}
+	if opts.assigneePrincipalRef != nil {
+		query += `, assignee_principal_ref = ?`
+		args = append(args, *opts.assigneePrincipalRef)
+	}
+	query += ` WHERE uuid = ?`
+	args = append(args, taskUUID)
+
+	if _, eerr := tx.Exec(query, args...); eerr != nil {
 		return NewInternalError(eerr)
 	}
 
-	payload := `{"action":"restored","target_state":"` + targetState + `"}`
+	// Event payload mirrors legacy: action + target_state, plus moved_to on a move.
+	payloadMap := map[string]any{"action": "restored", "target_state": opts.targetState}
+	if opts.newProjectUUID != nil {
+		payloadMap["moved_to"] = *opts.newProjectUUID
+	}
+	payloadJSON, _ := json.Marshal(payloadMap)
+	payload := string(payloadJSON)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
@@ -723,6 +857,30 @@ func (a *API) restoreTaskTx(taskUUID, targetState string, attr attribution.Attri
 		Payload:      &payload,
 	}); eerr != nil {
 		return NewInternalError(eerr)
+	}
+
+	// --comment: append a comment (legacy id sequencing via MAX(id)+1 + the
+	// comment_sequences bookkeeping row).
+	if opts.comment != "" {
+		var nextSeq int64
+		if serr := tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments").Scan(&nextSeq); serr != nil {
+			return NewInternalError(serr)
+		}
+		if _, serr := tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", nextSeq); serr != nil {
+			return NewInternalError(serr)
+		}
+		commentUUID := uuid.New().String()
+		commentID := id.FormatComment(int(nextSeq))
+		if _, serr := tx.Exec(`
+			INSERT INTO comments (
+				uuid, id, task_uuid, actor_uuid, created_by_principal_ref,
+				created_by_scope_ref, body, etag
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+		`, commentUUID, commentID, taskUUID, legacyActorBind(attr),
+			attr.PrincipalRef, scopeBind(attr), opts.comment); serr != nil {
+			return NewInternalError(serr)
+		}
 	}
 
 	if cerr := tx.Commit(); cerr != nil {
@@ -755,7 +913,7 @@ func (a *API) cascadeRestoreSubtasks(parentTaskUUID, targetState string, attr at
 	}
 
 	for _, subtaskUUID := range subtaskUUIDs {
-		if rerr := a.restoreTaskTx(subtaskUUID, targetState, attr); rerr != nil {
+		if rerr := a.restoreTaskTx(subtaskUUID, restoreOptions{targetState: targetState}, attr); rerr != nil {
 			return rerr
 		}
 		if rerr := a.cascadeRestoreSubtasks(subtaskUUID, targetState, attr); rerr != nil {

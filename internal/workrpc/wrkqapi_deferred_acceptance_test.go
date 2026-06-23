@@ -510,6 +510,76 @@ func TestWrkqTaskRestore_RejectsDeletedTargetState(t *testing.T) {
 	p4AssertNotStub(t, rf[1], "restore with invalid target state must be real domain error, not stub")
 }
 
+// TestWrkqTaskRestore_ExtendedFields restores an archived task while applying the
+// server-side flag set carried by the extended wrkq.task.restore (T-05100 item 4):
+// target state + field updates (priority) + a comment, in one atomic call. The DTO
+// reflects the applied state/priority; the method never prompts or reads stdin —
+// every input arrives as an explicit param.
+func TestWrkqTaskRestore_ExtendedFields(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	taskUUID := "f0000003-0000-4000-8000-00000000aa01"
+	taskID := p4SeedArchivedTask(t, dbPath, taskUUID, "restore-extended", "Restore Extended")
+
+	rf := p2Run(t, dbPath,
+		mkRPC("r1", "wrkq.task.restore", map[string]any{
+			"task":     taskID,
+			"state":    "in_progress",
+			"priority": 1,
+			"comment":  "back online",
+		}),
+	)
+	result := p2ResultOrFail(t, rf[1], "wrkq.task.restore extended fields")
+	p2AssertFieldEq(t, result, "state", "in_progress")
+	p2AssertFieldEq(t, result, "priority", float64(1))
+}
+
+// TestWrkqTaskRestore_IfMatchMismatch proves the conditional --if-match
+// precondition: a non-matching expected etag yields WRKQ_CONFLICT (not a stub),
+// with no mutation. The server decides purely from the supplied param.
+func TestWrkqTaskRestore_IfMatchMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	taskUUID := "f0000003-0000-4000-8000-00000000aa02"
+	taskID := p4SeedArchivedTask(t, dbPath, taskUUID, "restore-ifmatch", "Restore IfMatch")
+
+	rf := p2Run(t, dbPath,
+		mkRPC("r1", "wrkq.task.restore", map[string]any{"task": taskID, "ifMatch": 999}),
+	)
+	code := p2ErrCode(rf[1])
+	if code != "WRKQ_CONFLICT" {
+		t.Errorf("restore with stale ifMatch: want WRKQ_CONFLICT, got %q", code)
+	}
+	p4AssertNotStub(t, rf[1], "restore ifMatch mismatch must be a real conflict, not stub")
+}
+
+// TestWrkqTaskRestore_InvalidPriority proves an out-of-range --priority is a real
+// WRKQ_VALIDATION (server-side flag validation), not a stub.
+func TestWrkqTaskRestore_InvalidPriority(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	taskUUID := "f0000003-0000-4000-8000-00000000aa03"
+	taskID := p4SeedArchivedTask(t, dbPath, taskUUID, "restore-badprio", "Restore BadPrio")
+
+	rf := p2Run(t, dbPath,
+		mkRPC("r1", "wrkq.task.restore", map[string]any{"task": taskID, "priority": 99}),
+	)
+	code := p2ErrCode(rf[1])
+	if code != "WRKQ_VALIDATION" {
+		t.Errorf("restore with priority=99: want WRKQ_VALIDATION, got %q", code)
+	}
+	p4AssertNotStub(t, rf[1], "restore invalid priority must be a real validation error, not stub")
+}
+
 // ─── Group 2: task.acknowledge ───────────────────────────────────────────────
 
 // TestWrkqTaskAcknowledge_Completed_Succeeds creates a task, updates it to

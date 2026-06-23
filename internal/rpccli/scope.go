@@ -42,6 +42,13 @@ func (s *scoper) paths(raw []string, defaultToRoot bool) []string {
 	return projectroot.ApplyToPaths(s.cfg, raw, defaultToRoot)
 }
 
+// path scopes a single raw PATH argument (not a typed selector) — mirrors legacy
+// applyProjectRootToPath. restore --to is a destination path, so it uses this
+// rather than selector() (which exempts typed t:/c: + ID/UUID tokens).
+func (s *scoper) path(raw string, defaultToRoot bool) string {
+	return projectroot.ApplyToPath(s.cfg, raw, defaultToRoot)
+}
+
 // projectRoot returns the configured project root (normalized, "" when unset).
 // check-inbox needs it as the project ID for the requested-by ack-pending query,
 // mirroring legacy normalizeProjectRoot(app.Config).

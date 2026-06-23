@@ -262,10 +262,34 @@ type TaskDeleteParams struct {
 
 // TaskRestoreParams mirrors WrkqTaskRestoreParams. state is the target state
 // (default open); archived/deleted targets are rejected.
+//
+// Per the caller-owned-confirmation B-ruling (T-05100, hrcchat#10185 item 4) the
+// restore method carries every exposed `wrkq restore` flag SERVER-side so the
+// whole legacy semantic op (move-on-restore, field updates, comment, cascade,
+// event payload, error precedence, etag/ifMatch) is one atomic, non-interactive
+// call — never composed client-side. The mirror scopes the selectors (Task,
+// ToPath) caller-side and passes explicit intent here.
+//
+//   - ToPath: move-on-restore destination (legacy --to). A parent-container path
+//   - final slug, resolved + slug-conflict-checked + applied inside the restore.
+//   - Title/Description/Priority/Labels/Assignee: field updates applied on
+//     restore (legacy --title/--description/--priority/--labels/--assignee).
+//     Empty/zero means "leave unchanged" (legacy semantics).
+//   - Comment: appended as a comment on restore (legacy --comment).
+//   - IfMatch: conditional etag precondition (legacy --if-match); mismatch →
+//     WRKQ_CONFLICT (the mirror surfaces the legacy "etag mismatch" wording).
 type TaskRestoreParams struct {
-	Task  string `json:"task"`
-	State string `json:"state,omitempty"`
-	Actor string `json:"actor,omitempty"`
+	Task        string `json:"task"`
+	State       string `json:"state,omitempty"`
+	ToPath      string `json:"toPath,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Priority    int    `json:"priority,omitempty"`
+	Labels      string `json:"labels,omitempty"`
+	Assignee    string `json:"assignee,omitempty"`
+	Comment     string `json:"comment,omitempty"`
+	IfMatch     int64  `json:"ifMatch,omitempty"`
+	Actor       string `json:"actor,omitempty"`
 }
 
 // ─── Comment show / delete params ────────────────────────────────────────────

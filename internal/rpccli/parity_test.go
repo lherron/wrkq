@@ -432,6 +432,142 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 
+	// restore ✓ RPC-backed via the EXTENDED wrkq.task.restore (server carries the
+	// whole legacy semantic op: move-on-restore, field updates, --comment, --state,
+	// cascade, slug-conflict/etag precedence). Container restore is hard-gated.
+	{
+		name:    "restore/basic-archived",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone"},
+		mutates: true,
+	},
+	{
+		name:    "restore/by-id",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "T-00001"},
+		mutates: true,
+	},
+	{
+		name:    "restore/state",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--state", "in_progress"},
+		mutates: true,
+	},
+	{
+		name:    "restore/comment",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--comment", "back from the dead"},
+		mutates: true,
+	},
+	{
+		name:    "restore/title",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--title", "Renamed On Restore"},
+		mutates: true,
+	},
+	{
+		name:    "restore/description",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--description", "fresh body"},
+		mutates: true,
+	},
+	{
+		name:    "restore/priority",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone", "--priority", "3"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--priority", "1"},
+		mutates: true,
+	},
+	{
+		name:    "restore/labels",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--labels", `["urgent","x"]`},
+		mutates: true,
+	},
+	{
+		name:    "restore/assignee",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--assignee", "clod"},
+		mutates: true,
+	},
+	{
+		// --to: move-on-restore into an existing destination container (new slug).
+		name: "restore/to-move",
+		setup: [][]string{
+			{"mkdir", "dest"},
+			{"touch", "inbox/gone", "-t", "Gone"},
+			{"rm", "inbox/gone"},
+		},
+		args:    []string{"restore", "inbox/gone", "--to", "dest/gone"},
+		mutates: true,
+	},
+	{
+		// --to slug conflict: destination already has a task with that slug.
+		name: "restore/to-slug-conflict",
+		setup: [][]string{
+			{"mkdir", "dest"},
+			{"touch", "dest/taken", "-t", "Taken"},
+			{"touch", "inbox/gone", "-t", "Gone"},
+			{"rm", "inbox/gone"},
+		},
+		args:    []string{"restore", "inbox/gone", "--to", "dest/taken"},
+		mutates: true,
+	},
+	{
+		// --if-match matching etag → restore proceeds.
+		name:    "restore/if-match-ok",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--if-match", "1"},
+		mutates: true,
+	},
+	{
+		// --if-match mismatch → etag mismatch error, no mutation.
+		name:    "restore/if-match-mismatch",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--if-match", "999"},
+		mutates: true,
+	},
+	{
+		// Cascade restore: archiving a parent archives subtasks; restoring the parent
+		// cascade-restores them.
+		name: "restore/cascade-subtasks",
+		setup: [][]string{
+			{"touch", "inbox/parent", "-t", "Parent"},
+			{"touch", "inbox/child", "-t", "Child", "--parent-task", "inbox/parent"},
+			{"rm", "inbox/child"},
+			{"rm", "inbox/parent"},
+		},
+		args:    []string{"restore", "inbox/parent"},
+		mutates: true,
+	},
+	{
+		// Restore-to-archived-state is rejected (precedence: validated before DB read).
+		name:    "restore/reject-archived-state",
+		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
+		args:    []string{"restore", "inbox/gone", "--state", "archived"},
+		mutates: true,
+	},
+	{
+		// Not-deleted-or-archived task cannot be restored.
+		name:    "restore/reject-active",
+		setup:   [][]string{{"touch", "inbox/live", "-t", "Live"}},
+		args:    []string{"restore", "inbox/live"},
+		mutates: true,
+	},
+	{
+		name:    "restore/not-found",
+		setup:   nil,
+		args:    []string{"restore", "T-09999999"},
+		mutates: true,
+	},
+	{
+		// project-root scoping: relative selector resolved under WRKQ_PROJECT_ROOT.
+		name:    "restore/pr-relative-selector",
+		setup:   [][]string{{"mkdir", "myproj"}, {"touch", "myproj/task-a", "-t", "A"}, {"rm", "myproj/task-a"}},
+		args:    []string{"restore", "task-a"},
+		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates: true,
+	},
+
 	// touch ✓ RPC-backed via wrkq.task.create, re-projected to the legacy
 	// touchResult array. Core flags only (due-at/start-at/etc. hard-error as gaps).
 	{
@@ -2551,6 +2687,40 @@ func TestRmContainerHardGate(t *testing.T) {
 			t.Errorf("leading task must remain open (un-deleted) after the gate abort; snapshot:\n%s", after)
 		}
 	})
+}
+
+// TestRestoreContainerHardGate proves the mirror REFUSES container `restore`
+// targets on the caller-owned-confirmation seam: there is no wrkq.container.restore
+// method, so a container restore cannot be byte-proven and is hard-gated (clean
+// non-zero, no mutation). Legacy SUCCEEDS (it un-archives the container), so this
+// cannot be a parity row; the gate + no-mutation guarantee are asserted on the
+// mirror alone. Container restore is a future slice (the container archive/restore
+// mode), deliberately NOT in this slice.
+func TestRestoreContainerHardGate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs the mirror CLI")
+	}
+	bins := buildParityBinaries(t)
+	// Seed an ARCHIVED container (legacy restore would un-archive it). rm archives
+	// the named container; the mirror refuses to remove containers, so archive it
+	// with the LEGACY binary in setup so the target is genuinely restorable.
+	setup := [][]string{
+		{"mkdir", "myproj"},
+		{"rm", "myproj"},
+	}
+	base := seedFixture(t, bins, setup)
+	dir := copyFixture(t, base)
+	before := snapshot(t, dir)
+	res := runCLI(t, bins.mirror, dir, []string{"restore", "myproj"})
+	if res.exit == 0 {
+		t.Errorf("expected non-zero exit (container restore hard-gate), got 0\n stdout: %q", res.stdout)
+	}
+	if strings.TrimSpace(res.stderr) == "" {
+		t.Error("expected a gate error message on stderr")
+	}
+	if after := snapshot(t, dir); after != before {
+		t.Errorf("container restore hard-gate must NOT mutate:\n before:\n%s\n after:\n%s", before, after)
+	}
 }
 
 // TestLsHardGates previously proved the mirror REFUSED the legacy ls surfaces it
