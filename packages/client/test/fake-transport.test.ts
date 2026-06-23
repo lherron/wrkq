@@ -11,7 +11,7 @@ import { createClient } from "../src/client";
 import { WorkRpcError, isWorkRpcError, isWrkfError, isWrkqError } from "../src/errors";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type { WrkfEventQueryResult, WrkfTransitionResult } from "../src/wrkf/types";
-import type { WrkqContainer, WrkqTask } from "../src/wrkq/types";
+import type { WrkqContainer, WrkqTask, WrkqTaskCopyResult } from "../src/wrkq/types";
 
 async function clientWith(transport: FakeTransport, autoInitialize = false) {
   return createClient({ transport, autoInitialize });
@@ -254,6 +254,118 @@ describe("wrkq namespace", () => {
       path: "project",
       expected: { containers: 2, tasks: 3, attachments: 1, bytes: 42 },
     });
+  });
+
+  test("task.restore forwards the full legacy restore op (move/fields/comment/ifMatch)", async () => {
+    const transport = new FakeTransport().onResult("wrkq.task.restore", {
+      ...MOCK_TASK,
+      state: "open",
+      path: "backlog/my-task",
+    });
+    const client = await clientWith(transport);
+
+    const restored = await client.wrkq.task.restore({
+      task: "T-00001",
+      state: "open",
+      toPath: "backlog/my-task",
+      title: "renamed on restore",
+      description: "fresh body",
+      priority: 2,
+      labels: '["urgent"]',
+      assignee: "agent:larry",
+      comment: "restored after triage",
+      ifMatch: 4,
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.task.restore");
+    expect(frame.params).toMatchObject({
+      task: "T-00001",
+      state: "open",
+      toPath: "backlog/my-task",
+      title: "renamed on restore",
+      description: "fresh body",
+      priority: 2,
+      labels: '["urgent"]',
+      assignee: "agent:larry",
+      comment: "restored after triage",
+      ifMatch: 4,
+    });
+    expect(restored.path).toBe("backlog/my-task");
+  });
+
+  test("task.copy forwards wrkq.task.copy and returns snake_case WrkqTaskCopyResult", async () => {
+    const MOCK_COPY_RESULT: WrkqTaskCopyResult = {
+      source_id: "T-00001",
+      source_uuid: "u-1",
+      dest_id: "T-00009",
+      dest_uuid: "u-9",
+      dest_path: "done/my-task",
+      attachments_copied: 2,
+      with_files: true,
+    };
+    const transport = new FakeTransport().onResult("wrkq.task.copy", MOCK_COPY_RESULT);
+    const client = await clientWith(transport);
+
+    const copied = await client.wrkq.task.copy({
+      source: "T-00001",
+      destination: "done",
+      overwrite: true,
+      withAttachments: true,
+      expectEtag: 2,
+      actor: "agent:larry",
+      idempotencyKey: "cp1",
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.task.copy");
+    expect(frame.params).toMatchObject({
+      source: "T-00001",
+      destination: "done",
+      overwrite: true,
+      withAttachments: true,
+      expectEtag: 2,
+      idempotencyKey: "cp1",
+    });
+    // Result keys are DELIBERATELY snake_case (legacy copyResult byte-parity).
+    expect(copied.source_id).toBe("T-00001");
+    expect(copied.source_uuid).toBe("u-1");
+    expect(copied.dest_id).toBe("T-00009");
+    expect(copied.dest_uuid).toBe("u-9");
+    expect(copied.dest_path).toBe("done/my-task");
+    expect(copied.attachments_copied).toBe(2);
+    expect(copied.with_files).toBe(true);
+  });
+
+  test("container.update forwards wrkq.container.update and returns WrkqContainer", async () => {
+    const transport = new FakeTransport().onResult("wrkq.container.update", {
+      ...MOCK_CONTAINER,
+      slug: "renamed",
+      title: "Renamed",
+      path: "renamed",
+      etag: 2,
+    });
+    const client = await clientWith(transport);
+
+    const updated = await client.wrkq.container.update({
+      container: "project",
+      patch: { slug: "renamed", title: "Renamed" },
+      expectEtag: 1,
+      actor: "agent:larry",
+      idempotencyKey: "cu1",
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.container.update");
+    expect(frame.params).toMatchObject({
+      container: "project",
+      patch: { slug: "renamed", title: "Renamed" },
+      expectEtag: 1,
+      idempotencyKey: "cu1",
+    });
+    expect(updated.slug).toBe("renamed");
+    expect(updated.title).toBe("Renamed");
+    expect(updated.etag).toBe(2);
   });
 
   test("workflow.attach is a wrkq verb", async () => {

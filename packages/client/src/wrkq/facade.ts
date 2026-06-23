@@ -30,6 +30,7 @@ import type {
   WrkqContainerListParams,
   WrkqContainerListResult,
   WrkqContainerShowParams,
+  WrkqContainerUpdateParams,
   WrkqLegacyActor,
   WrkqLegacyActorCreateParams,
   WrkqLegacyActorListParams,
@@ -42,6 +43,8 @@ import type {
   WrkqRelationRemoveParams,
   WrkqTask,
   WrkqTaskAcknowledgeParams,
+  WrkqTaskCopyParams,
+  WrkqTaskCopyResult,
   WrkqTaskCreateParams,
   WrkqTaskDeleteParams,
   WrkqTaskListParams,
@@ -68,6 +71,7 @@ export interface WrkqTaskFacade {
   acknowledge(params: WrkqTaskAcknowledgeParams): Promise<WrkqTask>;
   delete(params: WrkqTaskDeleteParams): Promise<WrkqTask>;
   restore(params: WrkqTaskRestoreParams): Promise<WrkqTask>;
+  copy(params: WrkqTaskCopyParams): Promise<WrkqTaskCopyResult>;
 }
 
 export interface WrkqCommentFacade {
@@ -92,6 +96,7 @@ export interface WrkqRelationFacade {
 
 export interface WrkqContainerFacade {
   create(params: WrkqContainerCreateParams): Promise<WrkqContainer>;
+  update(params: WrkqContainerUpdateParams): Promise<WrkqContainer>;
   delete(params: WrkqContainerDeleteParams): Promise<WrkqContainerDeleteResult>;
   deleteRecursive(
     params: WrkqContainerDeleteRecursiveParams,

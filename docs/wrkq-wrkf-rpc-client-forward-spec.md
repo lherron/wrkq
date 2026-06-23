@@ -568,7 +568,16 @@ wrkq.task.move
 wrkq.task.acknowledge
 wrkq.task.delete
 wrkq.task.restore
+wrkq.task.copy        # server-owned deep copy (T-05111); see WrkqTaskCopy* below
 ```
+
+> **Tranche B client catch-up (this section).** The authoritative method/DTO
+> shapes are `docs/wrkq-wrkf-rpc.md` §6.2 — this forward spec is descriptive and
+> must not contradict it. As of Tranche B the published `@wrkq/client` surface
+> adds `wrkq.task.copy`, `wrkq.container.update`, and the EXTENDED
+> `wrkq.task.restore` params (`toPath`/`title`/`description`/`priority`/`labels`/
+> `assignee`/`comment`/`ifMatch`). The older single-field `WrkqTaskRestoreParams`
+> below is **superseded** by the extended shape.
 
 Required minimum for agent-loop readiness:
 
@@ -700,6 +709,73 @@ Contract (daedalus HIGH-risk ruling, T-04847 C-04823 §2):
 - Move origin metadata is honest: events/attribution record origin `rpc` (never `cli`).
 - The `task.moved` event payload carries the old/new container uuid + path and, for cascaded descendants, the `cascadeRootTaskUuid` (the tests also accept `cascade_root_task_uuid`).
 
+#### `wrkq.task.restore` (extended — Tranche B)
+
+`wrkq.task.restore` carries the WHOLE legacy `wrkq restore` semantic op
+SERVER-side (caller-owned-confirmation B-ruling, T-05100) rather than composing
+move/field-update/comment client-side. The extended params (authoritative:
+`docs/wrkq-wrkf-rpc.md` §6.2) **supersede** the single-field shape above:
+
+```ts
+interface WrkqTaskRestoreParams {
+  task: string;
+  state?: string;       // target state (default "open"); archived/deleted rejected
+  toPath?: string;      // move-on-restore destination (parent path + final slug)
+  title?: string;       // field update on restore (empty = unchanged)
+  description?: string; // field update on restore (empty = unchanged)
+  priority?: number;    // field update on restore (1-4; 0/omitted = unchanged)
+  labels?: string;      // JSON array string; field update ("" = unchanged)
+  assignee?: string;    // compat actor/principal ref; field update on restore
+  comment?: string;     // appended as a comment on restore
+  ifMatch?: number;     // conditional etag precondition; mismatch → WRKQ_CONFLICT
+}
+// → WrkqTask
+```
+
+Error precedence mirrors legacy: state/priority/labels/assignee validation →
+not-deleted-or-archived check → `ifMatch` mismatch (`WRKQ_CONFLICT`) → `toPath`
+resolve + slug-conflict (`WRKQ_CONFLICT`). `labels` is a JSON **array string**
+(not a `string[]`), matching the Go `TaskRestoreParams.Labels` json tag.
+
+#### `wrkq.task.copy` (server-owned deep copy — Tranche B)
+
+`wrkq.task.copy` (T-05111, daedalus hrcchat#10196) backs `wrkq cp`. It is the
+server-owned ONE source-task copy envelope (source resolution, destination
+resolution, source `expectEtag` CAS, create-or-overwrite, task-row write,
+attachment-metadata cascade, optional SAME-STORE file copy, `task.copied` event,
+post-commit `created` webhook). The CLI owns multi-source fan-out, prompts,
+dry-run, and output rendering — it calls this once per source.
+
+```ts
+interface WrkqTaskCopyParams {
+  source: string;
+  destination: string;
+  overwrite?: boolean;
+  withAttachments?: boolean;
+  shallow?: boolean;
+  expectEtag?: number;     // source-task etag CAS
+  actor?: string;
+  idempotencyKey?: string; // mandatory-style: a retried copy must not duplicate
+}
+
+// Result keys are DELIBERATELY snake_case — the LEGACY `copyResult` output keys,
+// preserved verbatim for byte-parity with legacy `wrkq cp` machine output.
+interface WrkqTaskCopyResult {
+  source_id: string;
+  source_uuid: string;
+  dest_id: string;
+  dest_uuid: string;
+  dest_path: string;
+  attachments_copied?: number;
+  with_files?: boolean;
+}
+```
+
+`withAttachments` and `shallow` are mutually exclusive (→ `WRKQ_VALIDATION`).
+File-copy safety: physical attachment files are staged into a temp `.copy-*`
+under the destination task dir before commit and atomically renamed only after
+the DB tx commits, so a failed copy leaves no RPC-visible partial durable state.
+
 #### Comment methods
 
 ```text
@@ -793,6 +869,7 @@ Read + full mutation surface (container mutation shipped in T-04849 / gap1):
 wrkq.container.show
 wrkq.container.list
 wrkq.container.create
+wrkq.container.update         # in-place rename (Tranche B); see below
 wrkq.container.delete
 wrkq.container.deleteRecursive
 ```
@@ -835,6 +912,31 @@ interface WrkqContainerCreateParams {
 ```
 
 A duplicate slug under the same parent is `WRKQ_CONFLICT`; an invalid kind/placement (e.g. a `project` nested under a non-root container) is `WRKQ_VALIDATION`.
+
+##### `wrkq.container.update` (in-place rename — Tranche B)
+
+`wrkq.container.update` (T-05112, daedalus hrcchat#10196) renames a container in
+place. The FIRST patch surface is deliberately **NARROW** — only `{ slug?, title? }`;
+any other key (including `kind`/`parentUuid`/`webhookUrls`/`archived`) →
+`WRKQ_VALIDATION`. It is identity-preserving (UUID/friendly-id/children/history
+survive; an in-place `UPDATE`, never delete+recreate) and `v_container_paths`
+rebuilds so the container path and all descendant paths reflect the new slug.
+
+```ts
+interface WrkqContainerUpdateParams {
+  container: string;                          // path / friendly-id / uuid selector
+  patch: { slug?: string; title?: string };   // NARROW — any other key → WRKQ_VALIDATION
+  expectEtag?: number;                        // optional etag CAS; stale → WRKQ_CONFLICT
+  actor?: string;
+  idempotencyKey?: string;
+}
+// → WrkqContainer (the updated container)
+```
+
+Error mapping is typed (never a raw store leak): empty/absent patch, an unknown
+patch key, or an invalid slug → `WRKQ_VALIDATION`; a slug collision with an
+existing sibling or a stale `expectEtag` → `WRKQ_CONFLICT`; an unresolvable
+`container` selector → `WRKQ_NOT_FOUND`.
 
 ##### `wrkq.container.delete` (empty-only HARD delete)
 

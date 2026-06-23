@@ -103,10 +103,69 @@ export interface WrkqTaskDeleteParams {
   task: string;
 }
 
+/**
+ * WrkqTaskRestoreParams carries the WHOLE legacy `wrkq restore` semantic op
+ * SERVER-side (caller-owned-confirmation B-ruling, T-05100): move-on-restore,
+ * field updates, comment, etag precondition — never composed client-side. Empty/
+ * zero field values mean "leave unchanged" (legacy semantics). Mirrors
+ * docs/wrkq-wrkf-rpc.md §6.2 WrkqTaskRestoreParams.
+ */
 export interface WrkqTaskRestoreParams {
   task: string;
   /** Target state (default "open"); archived/deleted targets are rejected. */
   state?: string;
+  /** Move-on-restore destination (parent container path + final slug). */
+  toPath?: string;
+  /** Field update on restore (empty = unchanged). */
+  title?: string;
+  /** Field update on restore (empty = unchanged). */
+  description?: string;
+  /** Field update on restore (1-4; 0/omitted = unchanged). */
+  priority?: number;
+  /** JSON array string; field update on restore ("" = unchanged). */
+  labels?: string;
+  /** Compat actor/principal ref; field update on restore. */
+  assignee?: string;
+  /** Appended as a comment on restore. */
+  comment?: string;
+  /** Conditional etag precondition; mismatch → WRKQ_CONFLICT. */
+  ifMatch?: number;
+}
+
+/**
+ * WrkqTaskCopyParams selects ONE source task + a destination container and the
+ * copy options. The server owns the per-source deep copy; the CLI owns
+ * multi-source fan-out / prompts / dry-run / output. Mirrors
+ * docs/wrkq-wrkf-rpc.md §6.2 (T-05111, daedalus hrcchat#10196).
+ */
+export interface WrkqTaskCopyParams {
+  source: string;
+  destination: string;
+  overwrite?: boolean;
+  withAttachments?: boolean;
+  shallow?: boolean;
+  /** Source-task etag CAS precondition. */
+  expectEtag?: number;
+  actor?: string;
+  /** Mandatory-style under client fan-out: a retried copy must not duplicate. */
+  idempotencyKey?: string;
+}
+
+/**
+ * WrkqTaskCopyResult is the per-source copy outcome.
+ *
+ * Keys are DELIBERATELY snake_case — they are the LEGACY `copyResult` output
+ * keys, preserved verbatim for byte-parity with legacy `wrkq cp` machine output.
+ * Do NOT camelCase them.
+ */
+export interface WrkqTaskCopyResult {
+  source_id: string;
+  source_uuid: string;
+  dest_id: string;
+  dest_uuid: string;
+  dest_path: string;
+  attachments_copied?: number;
+  with_files?: boolean;
 }
 
 export interface WrkqTask {
@@ -303,6 +362,21 @@ export interface WrkqContainer {
 export interface WrkqContainerListResult {
   items: WrkqContainer[];
   nextCursor?: string;
+}
+
+/**
+ * WrkqContainerUpdateParams renames a container in place. The FIRST patch surface
+ * is deliberately NARROW — only { slug?, title? }; any other key →
+ * WRKQ_VALIDATION (T-05112 daedalus hrcchat#10196). Mirrors docs/wrkq-wrkf-rpc.md
+ * §6.2 WrkqContainerUpdateParams. Returns the updated WrkqContainer.
+ */
+export interface WrkqContainerUpdateParams {
+  container: string;
+  patch: { slug?: string; title?: string };
+  /** Optional etag CAS; stale → WRKQ_CONFLICT. */
+  expectEtag?: number;
+  actor?: string;
+  idempotencyKey?: string;
 }
 
 export interface WrkqContainerDeleteParams {

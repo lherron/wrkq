@@ -107,6 +107,7 @@ class WorkClientImpl implements WorkClient {
       acknowledge: (p) => this.call("wrkq.task.acknowledge", p),
       delete: (p) => this.call("wrkq.task.delete", p),
       restore: (p) => this.call("wrkq.task.restore", p),
+      copy: (p) => this.call("wrkq.task.copy", p),
     },
     comment: {
       add: (p) => this.call("wrkq.comment.add", p),
@@ -127,6 +128,7 @@ class WorkClientImpl implements WorkClient {
     },
     container: {
       create: (p) => this.call("wrkq.container.create", p),
+      update: (p) => this.call("wrkq.container.update", p),
       delete: (p) => this.call("wrkq.container.delete", p),
       deleteRecursive: (p) => this.call("wrkq.container.deleteRecursive", p),
       show: (p) => this.call("wrkq.container.show", p),
