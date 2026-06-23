@@ -73,6 +73,20 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqTreeView") {
 		t.Error("WrkqTreeView missing from dtoCatalog")
 	}
+	// Byte-transfer boundary (T-05103): the new methods + DTOs must be in BOTH
+	// catalogs so their NAMES enter the protocol schema-hash input.
+	if !contains(methodCatalog, "wrkq.attachment.getBytes") {
+		t.Error("wrkq.attachment.getBytes missing from methodCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.attachment.addBytes") {
+		t.Error("wrkq.attachment.addBytes missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqAttachmentBytes") {
+		t.Error("WrkqAttachmentBytes missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqAttachmentAddBytesResult") {
+		t.Error("WrkqAttachmentAddBytesResult missing from dtoCatalog")
+	}
 }
 
 func contains(haystack []string, needle string) bool {

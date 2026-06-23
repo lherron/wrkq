@@ -3,6 +3,7 @@ package rpccli
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"os"
@@ -327,6 +328,177 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !jsonEqual(t, inLsM, subLsM) {
 		t.Errorf("task.lsView (paths) transport results differ:\n in-process: %s\n subprocess: %s", inLsM, subLsM)
 	}
+}
+
+// TestTransportEquivalence_AttachmentBytes covers the byte-transfer methods
+// (wrkq.attachment.getBytes / addBytes, T-05103) across both transports: an
+// attachment is uploaded in-process via chunked addBytes, then read back via
+// getBytes through BOTH the in-process pipe and a real `wrkq rpc --stdio`
+// subprocess, asserting byte-identical results. WRKQ_ATTACH_DIR is set so both
+// the in-proc bootstrap (AttachDir env precedence) and the subprocess config.Load
+// resolve the SAME explicit attach dir.
+func TestTransportEquivalence_AttachmentBytes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a wrkq binary; skipped under -short")
+	}
+	dbPath, taskID := migratedDBWithTask(t)
+	binPath := buildWrkq(t)
+
+	attachDir := t.TempDir()
+	t.Setenv("WRKQ_ATTACH_DIR", attachDir)
+
+	inproc := inProcessTransport(t, dbPath)
+	defer func() { _ = inproc.Close() }()
+
+	// Upload bytes via the chunked addBytes path (single chunk, final=true).
+	content := []byte("xport-bytes ✓\x00\x01\nline2")
+	addRaw, err := inproc.Call(context.Background(), "wrkq.attachment.addBytes", map[string]any{
+		"task":          taskID,
+		"filename":      "xport.bin",
+		"seq":           0,
+		"contentBase64": base64.StdEncoding.EncodeToString(content),
+		"final":         true,
+	})
+	if err != nil {
+		t.Fatalf("addBytes: %v", err)
+	}
+	var addRes struct {
+		Committed  bool `json:"committed"`
+		Attachment struct {
+			ID string `json:"id"`
+		} `json:"attachment"`
+	}
+	if uerr := json.Unmarshal(addRaw, &addRes); uerr != nil {
+		t.Fatalf("decode addBytes: %v", uerr)
+	}
+	if !addRes.Committed || addRes.Attachment.ID == "" {
+		t.Fatalf("addBytes did not commit: %s", addRaw)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sub, err := NewSubprocess(ctx, binPath, dbPath, []string{"WRKQ_ATTACH_DIR=" + attachDir})
+	if err != nil {
+		t.Fatalf("NewSubprocess: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	getParams := map[string]any{"id": addRes.Attachment.ID, "offset": 0}
+	inGet, err := inproc.Call(context.Background(), "wrkq.attachment.getBytes", getParams)
+	if err != nil {
+		t.Fatalf("in-process getBytes: %v", err)
+	}
+	subGet, err := sub.Call(ctx, "wrkq.attachment.getBytes", getParams)
+	if err != nil {
+		t.Fatalf("subprocess getBytes: %v", err)
+	}
+	if !jsonEqual(t, inGet, subGet) {
+		t.Errorf("getBytes transport results differ:\n in-process: %s\n subprocess: %s", inGet, subGet)
+	}
+
+	// Sanity: the decoded content round-trips byte-for-byte through the read DTO.
+	var chunk struct {
+		Content string `json:"contentBase64"`
+		EOF     bool   `json:"eof"`
+	}
+	if uerr := json.Unmarshal(inGet, &chunk); uerr != nil {
+		t.Fatalf("decode getBytes: %v", uerr)
+	}
+	decoded, derr := base64.StdEncoding.DecodeString(chunk.Content)
+	if derr != nil {
+		t.Fatalf("decode chunk: %v", derr)
+	}
+	if string(decoded) != string(content) || !chunk.EOF {
+		t.Errorf("round-trip mismatch: got %q eof=%v want %q eof=true", decoded, chunk.EOF, content)
+	}
+}
+
+// TestStdoutPurity_AttachmentGetBytes is the byte-transfer stdout-purity guard
+// (T-05103): a binary attachment fetched via wrkq.attachment.getBytes must NOT
+// leak raw bytes onto the SERVER's stdout — every server stdout line is a
+// well-formed JSON-RPC frame. The decoded raw bytes are emitted only by the
+// wrkq-rpccli CLI after frame decode (proven by the attach-get parity cases).
+func TestStdoutPurity_AttachmentGetBytes(t *testing.T) {
+	dbPath, taskID := migratedDBWithTask(t)
+	attachDir := t.TempDir()
+	t.Setenv("WRKQ_ATTACH_DIR", attachDir)
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	api, opts, err := bootstrap.Server(database, &config.Config{DBPath: dbPath, AttachmentsMaxMB: 50})
+	if err != nil {
+		t.Fatalf("bootstrap.Server: %v", err)
+	}
+	clientR, clientW := io.Pipe()
+	serverR, serverW := io.Pipe()
+	srv := workrpc.NewServer(serverW)
+	workrpc.RegisterAPI(srv, api, opts)
+	go func() {
+		_ = srv.Serve(context.Background(), clientR)
+		_ = serverW.Close()
+		_ = database.Close()
+	}()
+	defer func() { _ = clientW.Close() }()
+
+	// Binary payload with NUL + control bytes — exactly what would corrupt stdio if
+	// it leaked unencoded.
+	content := []byte("PNG\x89\x00\x01\x02\nbinary\x7f")
+
+	// io.Pipe is UNBUFFERED, so each request must be written and its response read
+	// before the next request — otherwise the server blocks writing a response while
+	// the test blocks writing the next request (deadlock). Drive one frame at a time
+	// and assert each server stdout line is pure JSON with no raw NUL.
+	br := bufio.NewReader(serverR)
+	call := func(id int, method string, params any) {
+		pb, _ := json.Marshal(params)
+		req, _ := json.Marshal(workrpc.Request{
+			JSONRPC: "2.0", ID: json.RawMessage(itoa(id)),
+			Method: method, Params: pb,
+		})
+		if _, werr := clientW.Write(append(req, '\n')); werr != nil {
+			t.Fatalf("write frame %d: %v", id, werr)
+		}
+		line, rerr := br.ReadBytes('\n')
+		if rerr != nil && len(line) == 0 {
+			t.Fatalf("read response %d: %v", id, rerr)
+		}
+		trimmed := line
+		if n := len(trimmed); n > 0 && trimmed[n-1] == '\n' {
+			trimmed = trimmed[:n-1]
+		}
+		if !json.Valid(trimmed) {
+			t.Fatalf("server stdout for %s is not valid JSON (raw bytes leaked): %q", method, trimmed)
+		}
+		for _, b := range trimmed {
+			if b == 0x00 {
+				t.Fatalf("server stdout for %s contains a raw NUL byte (stdio corruption): %q", method, trimmed)
+			}
+		}
+	}
+
+	call(1, "rpc.initialize", map[string]any{"protocolVersion": workrpc.ProtocolVersion})
+	call(2, "wrkq.attachment.addBytes", map[string]any{
+		"task": taskID, "filename": "pure.bin", "seq": 0,
+		"contentBase64": base64.StdEncoding.EncodeToString(content), "final": true,
+	})
+	call(3, "wrkq.attachment.getBytes", map[string]any{"id": "ATT-00001", "offset": 0})
+}
+
+// itoa is a tiny int→ascii for building request ids without strconv churn.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }
 
 // assertRejectsBeforeInitialize drives a single wrkq.task.show request through a

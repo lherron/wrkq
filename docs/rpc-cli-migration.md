@@ -88,8 +88,8 @@ projection (T-05090), so its fingerprint pin is unchanged.
 | `comment cat` | `rpc-backed` | **All render modes parity proven** via server-owned wrkq.comment.catView compat projection (alphabetical-key struct matching legacy map; conditional actor/scope/deletion fields). Modes: `--json` + non-TTY-default-json (indented array), `--ndjson` (compact server DTO bytes == legacy map marshal, single + multi), `--raw` (body-only, `---`-joined, single + multi), and error parity: not-found (`comment not found: <arg>`) + invalid-ref (`invalid comment reference: <arg> (expected friendly ID like C-00001 or UUID)`). Error messages preserve the ORIGINAL arg incl. any `c:` prefix (mirror reconstructs from the WRKQ_NOT_FOUND/WRKQ_VALIDATION domain code, not the stripped ref). CLI-side rendering only; no new RPC method/DTO. TTY header mode (`[id] [ts] slug (role) - Task: id` + body) implemented but not parity-reachable (parity runs non-TTY). |
 | `comment rm` | `not-started` | confirmation-flow. |
 | `attach ls` | `rpc-backed` | **Empty-set + POPULATED-row + pagination + transport parity proven** via server-owned wrkq.attachment.listView (DB-only cursor-paginated). Populated rows seeded with the legacy binary's `attach put` (source files materialized into the fixture dir before seeding via the additive `parityCase.files` map). Modes: `--json`, NDJSON/non-TTY default, `--porcelain --limit` first-page next_cursor→stderr. DB-only projection; relative_path is dir-independent so the seed `attach put` may write to the default attach dir. |
-| `attach put` | `rpc-backed (partial)` | **Real-FILE put parity proven** via the existing wrkq.attachment.add (NO new method). The mirror sends the HOST FILE PATH; the server reads the bytes and writes them into the server-local attach dir — exactly the "server-local host-path hint" model (bytes never cross the RPC boundary). Output re-projected from the camelCase WrkqAttachment DTO to legacy's alphabetical snake_case map {filename,id,mime_type,relative_path,size_bytes,task_id,task_uuid,uuid}; task_id resolved via wrkq.task.show (DTO carries only task_uuid). Cases: basic, --name/--mime override, unknown-task error (raw `task not found: <ref>`). WRKQ_ATTACH_DIR set relative per-case so each binary writes into its own cmd.Dir despite identical task UUIDs. **STDIN put (`attach put <task> -`) is HARD-GATED** (clean non-zero exit): it is a byte-UPLOAD over the RPC boundary with no host path — an open bytes-over-RPC design decision for daedalus. |
-| `attach get` | `STOP-AND-GAP (hard-gated)` | NOT implemented. `attach get` reads attachment BYTES back out of the server-local attach dir to stdout/--as. No RPC method returns bytes (or a guaranteed-reachable host path) to the client, and `artifact_dir`/attach_dir is a server-local host-path HINT, not a remote-filesystem guarantee (daedalus). Reproducing byte-parity forces a bytes-over-RPC vs host-path-return decision that is daedalus's to make, so the mirror refuses (clean non-zero exit) rather than invent a contract. See "attach get/stdin byte-transfer gap" below. |
+| `attach put` | `rpc-backed (full)` | **Real-FILE put parity proven** via the existing wrkq.attachment.add (host-path fast path; the mirror sends the HOST FILE PATH, server reads the bytes). Output re-projected from the camelCase WrkqAttachment DTO to legacy's alphabetical snake_case map {filename,id,mime_type,relative_path,size_bytes,task_id,task_uuid,uuid}; task_id resolved via wrkq.task.show. Cases: basic, --name/--mime override, unknown-task error. WRKQ_ATTACH_DIR set relative per-case so each binary writes into its own cmd.Dir. **STDIN put (`attach put <task> -`) is NOW RPC-backed via wrkq.attachment.addBytes** (T-05103, daedalus OPTION 1): the mirror reads stdin and uploads the bytes as base64 PROTOCOL DATA in 1 MiB chunks (never a host path); the server stages each chunk into a temp file, enforces the size limit incrementally, and on the final chunk atomically renames into the attach dir + inserts metadata/event (temp+atomic-rename cleanup parity with AttachmentAdd). Parity (TestParity/attach-put-stdin/*): basic text, binary stdin (NUL/newlines) with --mime, --name-required error, duplicate-filename conflict (`attachment with filename "<f>" already exists for task <T-id>`), unknown-task error. Error precedence matches legacy (server resolves task BEFORE the --name check). |
+| `attach get` | `rpc-backed (full)` | **Byte-transfer get parity proven** via NEW wrkq.attachment.getBytes (T-05103, daedalus OPTION 1). Attachment CONTENT crosses the RPC boundary as base64 PROTOCOL DATA (chunked: server returns up to 1 MiB raw per frame + whole-file size/checksum); the MIRROR decodes each frame and writes RAW bytes to stdout (`--as -`) or a local file (`--as <path>`, CLI-owned write). The reassembled bytes are checksum/size-verified against the server metadata. **Stdout purity:** raw bytes are emitted ONLY by wrkq-rpccli post-decode — the JSON-RPC server stdout stays pure (guarded by TestStdoutPurity_AttachmentGetBytes: every server stdout line is valid JSON, no raw NUL). Parity (TestParity/attach-get/*): stdout text, stdout binary NUL payload, `--as <path>` JSON `{copied,path,...}` result, missing-attachment error (`attachment not found: <ref>`). The global persistent `--as` actor flag is shadowed by `attach get`'s local `--as` output flag (legacy collision reproduced; `--as -` forces stdout). Transport-equivalence across in-proc + subprocess stdio (TestTransportEquivalence_AttachmentBytes). |
 | `attach rm` | `rpc-backed` | **Parity proven** via the existing wrkq.attachment.remove (metadata DELETE + server-side file unlink; NO new method). Multi-arg; `--yes` skips the interactive confirm (the prompt path resolves via wrkq.attachment.show first to print id+filename, then removes — empty-stdin harness uses --yes for determinism). Unknown id → `Warning: attachment not found: <ref>` on stderr + continue (non-fatal), legacy-exact. Non-TTY emits the indented JSON results array {id,uuid,filename,deleted}. Cases: rm --yes, unknown-warns-continues. |
 | `relation add`/`rm` | `rpc-backed` | **Proven parity** via wrkq.relation.add/.remove, composing task.show for each endpoint id+uuid. |
 | `container cat` | `rpc-backed` | **All render modes parity proven** via server-owned wrkq.container.catView compat projection (CLI-side rendering on the one projection). TestParity (9 cases): `--json` + non-TTY default (indented), `--ndjson` + `--porcelain` (compact single-line, identical objects), `--no-frontmatter` ("raw" body-only), webhook_urls array round-trip (json/ndjson), and `container not found: <ref>` error parity (mirror strips the RPC domain prefix and matches legacy's raw `selectors.ResolveContainer` message — NOT the generic `path not found`). The front-matter **markdown** branch only renders on a TTY (the pipe harness cannot drive one), so it is pinned by TestContainerCatMarkdownRender, which renders the REAL catView projection through the same `renderContainerMarkdown` the CLI uses and asserts the field set/order/YAML framing byte-for-byte (parent_id/parent_uuid emitted, parent_path omitted when path has no `/`, created_by/updated_by are actor slugs). No new RPC method/DTO (catView already proven across transports). Project-root scoping applies via the scoper. |
@@ -121,52 +121,63 @@ projection (T-05090), so its fingerprint pin is unchanged.
 | `server` | `not-started` | `daemon-control` (start/stop/restart/status/health) |
 | `rpc` | `not-started` | `local-only` (the mirror is itself the client) |
 
-## attach get / stdin-put byte-transfer gap (STOP-AND-GAP — needs daedalus ruling)
+## attach get / stdin-put byte-transfer boundary (RESOLVED — daedalus OPTION 1, T-05103)
 
-`attach put <task> <file>` and `attach rm` are mirrored through the EXISTING
-`wrkq.attachment.add` / `wrkq.attachment.remove` methods with NO new server
-surface: the file BYTES are read/written **server-side** from the configured
-attach dir, and the mirror only ever sends/receives a host **path string** plus
-metadata. This is a clean fit for the pinned invariant that `artifact_dir` /
-attach dir is a *server-local host-path hint, not a remote-filesystem guarantee*.
+`attach put <task> <file>` (real file) and `attach rm` are mirrored through the
+EXISTING `wrkq.attachment.add` / `wrkq.attachment.remove` methods: for a
+co-located real file the mirror sends a host **path string** plus metadata (the
+server reads the bytes). This stays the **local fast path**.
 
-Two byte-transfer surfaces do NOT have a clean fit and are HARD-GATED (clean
-non-zero exit, never silent degradation):
+The two byte-transfer surfaces — **`attach get <id>`** (server → client bytes) and
+**`attach put <task> -`** (client stdin → server bytes) — are now implemented per
+**daedalus OPTION 1 (hrcchat#10132)**: attachment CONTENT crosses the RPC boundary
+as **explicit protocol data** (base64 + declared size + checksum), NEVER as a
+server-local host path. A server-local path is a hint/impl detail, never required
+for client-visible `attach get` output or stdin-upload correctness.
 
-- **`attach get <id>`** — legacy copies the stored bytes out of the attach dir to
-  stdout (or `--as <path>`). The client is the consumer of the bytes.
-- **`attach put <task> -`** — legacy reads bytes from **stdin** and writes them
-  into the attach dir. The client is the producer of the bytes.
+**Chunked, not single-frame.** The JSON-RPC frame cap is 8 MiB
+(`workrpc.DefaultMaxFrameBytes`); the default attach limit is 50 MB
+(`attachments_max_mb`). A single base64 frame for a max-size attachment would
+exceed the frame cap, so a bounded single-base64 DTO **cannot** cover the
+configured limit — transfers are CHUNKED (1 MiB raw per frame → ~1.34 MiB base64,
+comfortably under the cap).
 
-Both require attachment bytes to cross the RPC boundary in one direction or the
-other. The two design options:
+- **`wrkq.attachment.getBytes`** `{id, offset, limit}` → `WrkqAttachmentBytes`
+  `{uuid,id,taskUuid,filename,mimeType,sizeBytes,checksum,offset,contentBase64,eof}`.
+  The mirror loops with an increasing `offset` until `eof`, decoding each frame
+  and writing RAW bytes to stdout (`--as -`) or a local file (`--as <path>`,
+  CLI-owned write). The reassembled bytes are checksum/size-verified against the
+  server's whole-file metadata. A missing row → `WRKQ_NOT_FOUND` (`attachment not
+  found: <ref>`); a missing file-on-disk → `WRKQ_NOT_FOUND` (kind `attachment
+  file`).
+- **`wrkq.attachment.addBytes`** chunked upload: the first call (no `uploadId`)
+  supplies `task/filename/mimeType/actor` and receives a server-generated
+  `uploadId`; subsequent calls echo it with a monotonic `seq`. The server stages
+  each chunk into a **temp file** under the task's attach dir, enforces the size
+  limit **incrementally** (cleanup on reject), and on the `final` chunk validates
+  the total, **atomically renames** the temp file into place, and inserts the
+  metadata row + `attachment.created` event — temp+atomic-rename cleanup parity
+  with `AttachmentAdd`. Duplicate filename → `WRKQ_CONFLICT` with legacy's exact
+  wording. Idempotency: `idempotencyKey` on the begin call replays the committed
+  DTO.
 
-1. **Bytes-over-RPC** — base64 (or a chunked/streamed frame) carries the bytes in
-   the DTO/params. Self-contained and transport-agnostic (works for a future
-   remote `wrkqd`), but puts arbitrary file payloads through the JSON-RPC line
-   protocol (size limits, base64 bloat, streaming semantics) and contradicts the
-   "host-path hint, not a filesystem guarantee" framing for the *return* path.
-2. **Host-path return / staged path** — the method returns the server-local
-   absolute path (for `get`) or accepts a server-reachable staged path (for
-   stdin-`put`), and the CLI does the local copy. Zero payload over the wire and
-   consistent with the host-path-hint model, but only correct when client and
-   server **share a filesystem** — it is NOT a remote-`wrkqd` contract, exactly
-   the guarantee daedalus declined to make.
+**Stdout purity (sacred).** Raw bytes are emitted ONLY by `wrkq-rpccli` AFTER
+decoding the RPC frame — the JSON-RPC server stdout carries only JSON-RPC frames
+(guarded by `TestStdoutPurity_AttachmentGetBytes`; invariant
+`architecture/records/invariants/wrkq.wrkf-rpc.attachment-byte-transfer.yaml`).
 
-**Parity implication:** byte-parity for `attach get`/stdin-`put` cannot be proven
-without first fixing this contract, because the legacy oracle's behavior (raw
-bytes to stdout / from stdin) only has a faithful mirror under option 1, while
-the durable model favors option 2 for everything else.
+**Capability/contract.** Absence of byte capability HARD-GATES: when no attach dir
+is explicitly configured the byte methods return `WRKQ_VALIDATION` ("attachment
+storage is not configured") — they never silently fall back to a host path. There
+is NO host-path return/staged-path path; if one is added later it must be a
+distinctly-named local capability (`sharedFilesystemPaths`), never the
+correctness/remote path.
 
-**Exact daedalus question:** *For attachment byte transfer across the RPC seam
-(`attach get` return path and `attach put -` stdin upload), do attachment bytes
-flow THROUGH the RPC boundary (base64/streamed in the DTO — option 1, remote-safe)
-or as a server-local host PATH the co-located client copies itself (option 2,
-consistent with the "host-path hint, not a remote-filesystem guarantee" framing
-but shared-filesystem-only)? Pick one (or a hybrid: option-2 fast path with an
-option-1 fallback when a `remote` capability flag is set), so `attach get`/stdin-
-`put` can be implemented to a stable contract instead of guessed.* Until then the
-mirror refuses both surfaces.
+**Byte-proven coverage:** `attach get` stdout text, stdout binary (NUL/newlines),
+`--as <path>` JSON result, missing-attachment, checksum/size match; `attach put -`
+basic text, binary stdin + `--mime`, `--name` required, duplicate filename, unknown
+task. Transport-equivalence across in-proc + subprocess stdio. (TestParity/attach-*,
+TestTransportEquivalence_AttachmentBytes, TestStdoutPurity_AttachmentGetBytes.)
 
 ## Parity harness (data-driven)
 

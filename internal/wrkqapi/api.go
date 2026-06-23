@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -23,6 +24,13 @@ type API struct {
 	defaultActor string
 	attachDir    string
 	attachMaxMB  int
+
+	// uploads tracks in-progress chunked byte uploads (wrkq.attachment.addBytes),
+	// keyed by server-generated uploadId. Each session stages bytes into a temp
+	// file under the attach dir; finalize atomically renames into place. The mutex
+	// guards the map; per-session writes are serialized by the monotonic seq check.
+	uploadsMu sync.Mutex
+	uploads   map[string]*attachmentUpload
 }
 
 // New constructs a wrkq API over the given database. wf provides workflow
@@ -38,6 +46,7 @@ func New(database *db.DB, wf *wrkfapi.API, defaultActor, attachDir string, attac
 		defaultActor: defaultActor,
 		attachDir:    attachDir,
 		attachMaxMB:  attachMaxMB,
+		uploads:      map[string]*attachmentUpload{},
 	}
 }
 

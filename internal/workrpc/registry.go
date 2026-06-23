@@ -129,6 +129,8 @@ var methodCatalog = []string{
 	"wrkq.comment.listView",
 	"wrkq.comment.delete",
 	"wrkq.attachment.add",
+	"wrkq.attachment.addBytes",
+	"wrkq.attachment.getBytes",
 	"wrkq.attachment.list",
 	"wrkq.attachment.listView",
 	"wrkq.attachment.show",
@@ -219,6 +221,8 @@ var dtoCatalog = []string{
 	"WrkqComment",
 	"WrkqCommentListResult",
 	"WrkqAttachment",
+	"WrkqAttachmentBytes",          // byte-transfer read chunk (attach get); byte-transfer boundary, not canonical
+	"WrkqAttachmentAddBytesResult", // byte-transfer upload ack (attach put -); byte-transfer boundary, not canonical
 	"WrkqRelation",
 	"WrkqContainer",
 	"WrkqContainerListResult",
@@ -311,6 +315,12 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.attachment.add", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentAddParams) (any, error) {
 		return wq.AttachmentAdd(ctx, p)
+	}))
+	s.Register("wrkq.attachment.addBytes", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentAddBytesParams) (any, error) {
+		return wq.AttachmentAddBytes(ctx, p)
+	}))
+	s.Register("wrkq.attachment.getBytes", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentGetBytesParams) (any, error) {
+		return wq.AttachmentGetBytes(ctx, p)
 	}))
 	s.Register("wrkq.attachment.list", apiHandler(func(ctx context.Context, p wrkqapi.AttachmentListParams) (any, error) {
 		return wq.AttachmentList(ctx, p)

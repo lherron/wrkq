@@ -82,6 +82,21 @@ func TestAttachmentListViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestAttachmentBytesDTOFingerprint guards the byte-transfer DTO shapes (T-05103,
+// daedalus OPTION 1). These carry attachment CONTENT across the RPC boundary as
+// explicit protocol data (base64 + size + checksum); any field/tag drift is a
+// PROTOCOL CONTRACT change and must be made deliberately (bump fingerprint, update
+// docs/dtoCatalog, re-verify get/put-byte parity).
+func TestAttachmentBytesDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqAttachmentBytes{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqAttachmentAddBytesResult{}))
+	const want = "WrkqAttachmentBytes{uuid,id,taskUuid,filename,mimeType,omitempty,sizeBytes,checksum,omitempty,offset,contentBase64,eof}\n" +
+		"WrkqAttachmentAddBytesResult{uploadId,seq,bytesReceived,committed,attachment,omitempty}"
+	if got != want {
+		t.Errorf("attachment byte-transfer DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestFindListViewDTOFingerprint guards the find projection shapes.
 func TestFindListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))

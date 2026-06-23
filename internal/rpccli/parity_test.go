@@ -46,6 +46,17 @@ type parityCase struct {
 	// both sides. copyFixture only carries the SQLite triplet, so file inputs that
 	// must exist at run time are seeded here instead.
 	files map[string]string
+	// stdin feeds the command-under-test's standard input on BOTH binaries (used by
+	// `attach put <task> -`, which reads the attachment bytes from stdin). Raw
+	// bytes — NUL/newlines survive the round-trip and are compared byte-for-byte.
+	stdin []byte
+	// seededAttachStore makes the harness seed the fixture under a SHARED ABSOLUTE
+	// attach dir (<base>/attach-store) and inject WRKQ_ATTACH_DIR=<that abs> into the
+	// command-under-test env for BOTH binaries. Required by `attach get`, whose
+	// bytes must be reachable at get time from the SAME dir the seed `attach put`
+	// wrote them into (the mirror's RPC server reads from the EXPLICITLY-configured
+	// attach dir, never the HOME auto-default).
+	seededAttachStore bool
 }
 
 var parityCases = []parityCase{
@@ -704,6 +715,113 @@ var parityCases = []parityCase{
 		files:   attachSrcFiles,
 		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
 		mutates: true,
+	},
+
+	// attach get via wrkq.attachment.getBytes (byte transfer: server returns base64
+	// chunks + size/checksum; the MIRROR decodes and writes raw bytes to stdout /
+	// --as). The seed `attach put` writes the bytes into the seeding binary's
+	// HOME-default attach dir (shared HOME); the get runs WITHOUT WRKQ_ATTACH_DIR so
+	// both binaries read that same dir. relative_path (in the copied DB) is
+	// dir-independent. Attachment friendly ids are deterministic ATT-NNNNN.
+	{
+		// `--as -` forces stdout (the harness's global `--as local-human` would
+		// otherwise shadow the local output-path flag → file mode; legacy has the
+		// same collision, so `--as -` is the deterministic way to exercise stdout).
+		name: "attach-get/stdout-text",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+		},
+		args:              []string{"attach", "get", "ATT-00001", "--as", "-"},
+		files:             attachSrcFiles,
+		seededAttachStore: true,
+	},
+	{
+		// gamma.bin carries NUL + control bytes — the raw stdout must survive the
+		// base64 round-trip byte-for-byte (binary payload guard).
+		name: "attach-get/stdout-binary-nul",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "gamma.bin"},
+		},
+		args:              []string{"attach", "get", "ATT-00001", "--as", "-"},
+		files:             attachSrcFiles,
+		seededAttachStore: true,
+	},
+	{
+		// --as <path>: the mirror writes the bytes to a local file (CLI-owned) and
+		// prints the JSON {copied:true,path:...} result. The JSON result is
+		// byte-matched.
+		name: "attach-get/as-path-json",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "beta.md"},
+		},
+		args:              []string{"attach", "get", "ATT-00001", "--as", "out.copy"},
+		files:             attachSrcFiles,
+		seededAttachStore: true,
+	},
+	{
+		name:              "attach-get/unknown-attachment-errors",
+		setup:             [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:              []string{"attach", "get", "ATT-09999999", "--as", "-"},
+		files:             attachSrcFiles,
+		seededAttachStore: true,
+	},
+
+	// attach put - via wrkq.attachment.addBytes (byte UPLOAD: the MIRROR reads stdin
+	// and sends base64 chunks; the server stages + commits). --name is required for
+	// stdin. WRKQ_ATTACH_DIR is per-run so each binary stages into its own cmd.Dir.
+	{
+		name:          "attach-put-stdin/basic",
+		setup:         [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:          []string{"attach", "put", "inbox/at", "-", "--name", "piped.txt"},
+		stdin:         []byte("piped attachment body\n"),
+		env:           []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// binary stdin with NUL/newlines + an explicit --mime override.
+		name:          "attach-put-stdin/binary-with-mime",
+		setup:         [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:          []string{"attach", "put", "inbox/at", "-", "--name", "blob.dat", "--mime", "application/x-custom"},
+		stdin:         []byte("blob\x00\x01\x02\nmore\nbytes"),
+		env:           []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// --name required for stdin: legacy errors "--name is required when reading
+		// from stdin" before touching anything; the mirror must match.
+		name:    "attach-put-stdin/name-required-errors",
+		setup:   [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:    []string{"attach", "put", "inbox/at", "-"},
+		stdin:   []byte("ignored"),
+		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates: false,
+	},
+	{
+		// duplicate filename for the task → conflict (legacy errors before write).
+		name: "attach-put-stdin/duplicate-filename-errors",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+		},
+		args:    []string{"attach", "put", "inbox/at", "-", "--name", "alpha.txt"},
+		stdin:   []byte("dup body"),
+		files:   attachSrcFiles,
+		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates: false,
+	},
+	{
+		// unknown task → resolve error, no write.
+		name:    "attach-put-stdin/unknown-task-errors",
+		setup:   nil,
+		args:    []string{"attach", "put", "T-09999999", "-", "--name", "x.txt"},
+		stdin:   []byte("body"),
+		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates: false,
 	},
 
 	// ls via wrkq.task.lsView (server compat list projection: mixed task/container
@@ -1543,14 +1661,25 @@ func TestParity(t *testing.T) {
 			// Seed ONE base fixture, then give each binary a byte-identical copy
 			// (incl. random UUIDs), so output comparison catches real id bugs
 			// rather than masking legitimately-different independent seeds.
-			base := seedFixtureFiles(t, bins, tc.setup, tc.files)
+			var seedEnv []string
+			runEnv := tc.env
+			if tc.seededAttachStore {
+				// Shared absolute store: the seed `attach put` writes the bytes here;
+				// both get-runs read from the SAME dir (the copied DB's relative_path is
+				// dir-independent). Computed at run time so it cannot live in the static
+				// case literal.
+				store := filepath.Join(t.TempDir(), "attach-store")
+				seedEnv = []string{"WRKQ_ATTACH_DIR=" + store}
+				runEnv = append(append([]string{}, tc.env...), "WRKQ_ATTACH_DIR="+store)
+			}
+			base := seedFixtureFilesEnv(t, bins, tc.setup, tc.files, seedEnv)
 			oldDir := copyFixture(t, base)
 			newDir := copyFixture(t, base)
 			writeRunFiles(t, oldDir, tc.files)
 			writeRunFiles(t, newDir, tc.files)
 
-			oldRes := runCLIEnv(t, bins.wrkq, oldDir, tc.args, tc.env)
-			newRes := runCLIEnv(t, bins.mirror, newDir, tc.args, tc.env)
+			oldRes := runCLIStdin(t, bins.wrkq, oldDir, tc.args, runEnv, tc.stdin)
+			newRes := runCLIStdin(t, bins.mirror, newDir, tc.args, runEnv, tc.stdin)
 
 			if oldRes.exit != newRes.exit {
 				t.Errorf("exit code: old=%d new=%d\n old stderr: %s\n new stderr: %s",
@@ -2350,13 +2479,20 @@ func seedFixture(t *testing.T, bins binaries, setup [][]string) string {
 // (HOME-derived) attach dir; that location is irrelevant to DB-only readers like
 // `attach ls`, which compare the stored rows (relative_path is dir-independent).
 func seedFixtureFiles(t *testing.T, bins binaries, setup [][]string, files map[string]string) string {
+	return seedFixtureFilesEnv(t, bins, setup, files, nil)
+}
+
+// seedFixtureFilesEnv is seedFixtureFiles with an extra environment applied to the
+// SETUP commands (e.g. WRKQ_ATTACH_DIR so a seed `attach put` stages its bytes
+// into a shared absolute attach dir reachable by the command-under-test).
+func seedFixtureFilesEnv(t *testing.T, bins binaries, setup [][]string, files map[string]string, seedEnv []string) string {
 	t.Helper()
 	dir := t.TempDir()
 	writeRunFiles(t, dir, files)
 	dbPath := filepath.Join(dir, "wrkq.db")
 	mustRun(t, bins.wrkqadm, dir, []string{"--db", dbPath, "init"})
 	for _, argv := range setup {
-		mustRun(t, bins.wrkq, dir, append([]string{"--db", dbPath, "--as", "local-human"}, argv...))
+		mustRunEnv(t, bins.wrkq, dir, append([]string{"--db", dbPath, "--as", "local-human"}, argv...), seedEnv)
 	}
 	return dir
 }
@@ -2409,11 +2545,18 @@ func runCLI(t *testing.T, bin, dir string, args []string) cliResult {
 }
 
 func runCLIEnv(t *testing.T, bin, dir string, args []string, extraEnv []string) cliResult {
+	return runCLIStdin(t, bin, dir, args, extraEnv, nil)
+}
+
+func runCLIStdin(t *testing.T, bin, dir string, args []string, extraEnv []string, stdin []byte) cliResult {
 	t.Helper()
 	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, args...)
 	cmd := exec.Command(bin, full...)
 	cmd.Dir = dir
 	cmd.Env = append(hermeticEnv(), extraEnv...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2430,10 +2573,14 @@ func runCLIEnv(t *testing.T, bin, dir string, args []string, extraEnv []string) 
 }
 
 func mustRun(t *testing.T, bin, dir string, args []string) {
+	mustRunEnv(t, bin, dir, args, nil)
+}
+
+func mustRunEnv(t *testing.T, bin, dir string, args []string, extraEnv []string) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
-	cmd.Env = hermeticEnv()
+	cmd.Env = append(hermeticEnv(), extraEnv...)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("seed %s %v: %v\n%s", bin, args, err, b)
 	}

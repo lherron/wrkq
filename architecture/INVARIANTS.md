@@ -31,6 +31,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `just verify exits 0`
 - **last_verified:** 2026-06-22
 
+## wrkq.wrkf-rpc.attachment-byte-transfer
+
+- **scope:** attachment content crossing the wrkq/wrkf RPC boundary
+- **predicate:** Attachment CONTENT crossing the client↔server RPC boundary must cross as explicit protocol data with a declared encoding (base64), size, and checksum — never as a required server-local host path. The CLI owns reading local stdin/files and writing decoded bytes to stdout or `--as <path>`; the server owns storage, authoritative size validation (vs attachments_max_mb), checksum, metadata/event mutation, and cleanup (temp file + atomic rename). RAW bytes are emitted ONLY by wrkq-rpccli after RPC-frame decode — the JSON-RPC server stdout stays JSON-RPC-pure. Absence of byte capability (no explicitly-configured attach dir) HARD-GATES with WRKQ_VALIDATION; it never silently falls back to a host path. A server-local/staged path may exist later ONLY as a distinctly-named local capability (e.g. sharedFilesystemPaths), never the correctness path and never the remote contract. Transfers are CHUNKED because the JSON-RPC frame cap (workrpc.DefaultMaxFrameBytes = 8 MiB) is smaller than the default attach limit (attachments_max_mb = 50 MB): getBytes returns up to 1 MiB raw per frame (+ whole-file size/checksum); addBytes stages chunks into a temp file and atomically renames on the final chunk. The existing wrkq.attachment.add (host-path fast path for a co-located real file) is unaffected and remains local-only.
+- **enforced_by:** `wrkq.attachment.getBytes/addBytes (chunked base64 + size + checksum) + the byte-transfer parity/transport/stdout-purity tests; daedalus OPTION 1 ruling hrcchat#10132 (T-05103)`
+- **source:** `internal/wrkqapi/attachmentbytes.go`, `internal/rpccli/attach.go`, `internal/workrpc/registry.go`
+- **required_tests:** `internal/rpccli/parity_test.go`, `internal/rpccli/transport_test.go`, `internal/wrkqapi/catview_fingerprint_test.go`, `internal/workrpc/catview_catalog_test.go`
+- **last_verified:** 2026-06-22
+
 ## wrkq.wrkf-rpc.stdout-purity
 
 - **scope:** wrkf RPC stdio transport

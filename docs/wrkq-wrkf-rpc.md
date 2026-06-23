@@ -614,6 +614,8 @@ interface WrkqComment {
 
 ```
 wrkq.attachment.add
+wrkq.attachment.addBytes  [byte-transfer upload — see byte-transfer note]
+wrkq.attachment.getBytes  [byte-transfer download — see byte-transfer note]
 wrkq.attachment.listView  [CLI compatibility list projection]
 wrkq.attachment.list
 wrkq.attachment.show
@@ -654,18 +656,59 @@ interface WrkqAttachment {
 }
 ```
 
-Binary attachment contents are not streamed in v1. The server stores/copies
-from a local path and returns metadata. The RPC-backed mirror's `attach put`
-(real-file) and `attach rm` ride this contract directly: the mirror sends the
-host **path string** to `wrkq.attachment.add` (server reads the bytes) and an id
-to `wrkq.attachment.remove` (server unlinks). It re-projects the camelCase
-`WrkqAttachment` into legacy's snake_case `attach put` map and resolves `task_id`
-via `wrkq.task.show`. Because v1 does NOT stream bytes, two surfaces have no
-faithful mirror and are HARD-GATED in `wrkq-rpccli`: **`attach get`** (bytes back
-to the client) and **`attach put -`** (bytes from client stdin). Picking a
-byte-transfer contract for those (bytes-over-RPC vs host-path-return) is an open
-ruling — see `docs/rpc-cli-migration.md` "attach get / stdin-put byte-transfer
-gap".
+`wrkq.attachment.add` is the **local fast path** for a co-located real file: the
+mirror sends the host **path string** (the server reads the bytes) and re-projects
+the camelCase `WrkqAttachment` into legacy's snake_case `attach put` map. `attach
+rm` rides `wrkq.attachment.remove` similarly. These are local-only — NOT a
+remote-safe contract.
+
+##### Byte transfer (daedalus OPTION 1, T-05103)
+
+Attachment CONTENT that must cross the client↔server boundary — **`attach get`**
+(server → client) and **`attach put -`** (client stdin → server) — crosses as
+explicit **protocol data** (base64 + declared size + checksum), NEVER as a
+server-local host path. The server owns storage/size-validation/checksum/metadata/
+cleanup; the CLI owns reading local stdin/files and writing decoded bytes to
+stdout or `--as <path>`. RAW bytes are emitted ONLY by `wrkq-rpccli` after RPC-
+frame decode — the JSON-RPC server stdout stays pure.
+
+Transfers are **chunked**: the frame cap (8 MiB) is below the default attach limit
+(50 MB), so a single base64 frame cannot carry a max-size attachment. `getBytes`
+returns up to 1 MiB raw per frame plus the whole-file size/checksum; `addBytes`
+stages chunks into a server temp file and **atomically renames** into place on the
+final chunk (temp+atomic-rename cleanup parity with `attachment.add`).
+
+```ts
+interface WrkqAttachmentGetBytesParams { id: string; offset?: number; limit?: number }
+interface WrkqAttachmentBytes {       // one read chunk + whole-file metadata
+  uuid: string; id: string; taskUuid: string; filename: string;
+  mimeType?: string; sizeBytes: number; checksum?: string;
+  offset: number; contentBase64: string; eof: boolean;
+}
+
+interface WrkqAttachmentAddBytesParams {  // first call omits uploadId
+  task?: string; filename?: string; mimeType?: string; actor?: string;
+  idempotencyKey?: string;
+  uploadId?: string;                      // echoed on chunks after the first
+  seq: number;                            // 0-based monotonic
+  contentBase64?: string;
+  final?: boolean;                        // last chunk → finalize + commit
+}
+interface WrkqAttachmentAddBytesResult {
+  uploadId: string; seq: number; bytesReceived: number;
+  committed: boolean; attachment?: WrkqAttachment;  // present on the committing chunk
+}
+```
+
+`getBytes`: missing row → `WRKQ_NOT_FOUND`; missing file-on-disk → `WRKQ_NOT_FOUND`
+(kind `attachment file`). `addBytes`: task resolves BEFORE the `--name` check
+(legacy precedence); duplicate filename → `WRKQ_CONFLICT`; size over the limit →
+`WRKQ_VALIDATION` (temp file cleaned up); `idempotencyKey` replays the committed
+DTO. Both `WrkqAttachmentBytes` and `WrkqAttachmentAddBytesResult` are cataloged +
+fingerprinted (byte-transfer boundary, **not canonical**). Absence of byte
+capability (no explicit attach dir) hard-gates with `WRKQ_VALIDATION`; there is no
+silent host-path fallback. See `architecture/records/invariants/
+wrkq.wrkf-rpc.attachment-byte-transfer.yaml` and `docs/rpc-cli-migration.md`.
 
 Attachment storage config (attach dir + max size) is sourced from the SAME wrkq
 configuration on both the `wrkq` and `wrkf` rpc entrypoints. When no attach dir

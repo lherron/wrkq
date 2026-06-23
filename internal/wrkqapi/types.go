@@ -329,6 +329,72 @@ type AttachmentRemoveParams struct {
 	Actor string `json:"actor,omitempty"`
 }
 
+// ─── attachment byte transfer (T-05103, daedalus OPTION 1) ───────────────────
+//
+// Attachment CONTENT crosses the RPC boundary as explicit protocol data (base64
+// + declared size + checksum), never as a server-local host path. Transfers are
+// CHUNKED because the 8 MiB frame cap is smaller than the default 50 MB attach
+// limit (a single base64 frame for a max-size attachment would exceed the frame
+// cap). See docs/wrkq-wrkf-rpc.md "attachment byte transfer".
+
+// AttachmentByteChunkBytes is the server's preferred raw-bytes-per-chunk on read.
+// 1 MiB raw → ~1.34 MiB base64, comfortably under the 8 MiB frame cap with JSON
+// envelope overhead.
+const AttachmentByteChunkBytes = 1 << 20
+
+// AttachmentGetBytesParams requests a slice of an attachment's stored bytes.
+// offset/limit are byte offsets into the decoded content; the server clamps limit
+// to AttachmentByteChunkBytes. A caller streams by looping until eof is true.
+type AttachmentGetBytesParams struct {
+	ID     string `json:"id"`
+	Offset int64  `json:"offset,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// WrkqAttachmentBytes is a single read chunk plus the whole-file metadata needed
+// for client-side integrity verification. content is base64 of the [offset,
+// offset+len(decoded)) slice; sizeBytes/checksum describe the FULL file.
+type WrkqAttachmentBytes struct {
+	UUID      string `json:"uuid"`
+	ID        string `json:"id"`
+	TaskUUID  string `json:"taskUuid"`
+	Filename  string `json:"filename"`
+	MimeType  string `json:"mimeType,omitempty"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Checksum  string `json:"checksum,omitempty"`
+	Offset    int64  `json:"offset"`
+	Content   string `json:"contentBase64"`
+	EOF       bool   `json:"eof"`
+}
+
+// AttachmentAddBytesParams uploads one chunk of a stdin/byte attachment. The first
+// call omits uploadId (and supplies task/filename/mimeType/actor); the server
+// returns an uploadId to echo on subsequent chunks. seq is the 0-based monotonic
+// chunk index. final marks the last chunk and triggers finalize (size validation,
+// atomic rename into the attach dir, metadata + event). content is base64.
+type AttachmentAddBytesParams struct {
+	Task           string `json:"task,omitempty"`
+	Filename       string `json:"filename,omitempty"`
+	MimeType       string `json:"mimeType,omitempty"`
+	Actor          string `json:"actor,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	UploadID       string `json:"uploadId,omitempty"`
+	Seq            int    `json:"seq"`
+	Content        string `json:"contentBase64,omitempty"`
+	Final          bool   `json:"final,omitempty"`
+}
+
+// WrkqAttachmentAddBytesResult is the per-chunk upload ack. While the upload is
+// in progress (not yet final) only uploadId/seq/bytesReceived/committed=false are
+// set; the finalizing chunk additionally carries the committed WrkqAttachment.
+type WrkqAttachmentAddBytesResult struct {
+	UploadID      string          `json:"uploadId"`
+	Seq           int             `json:"seq"`
+	BytesReceived int64           `json:"bytesReceived"`
+	Committed     bool            `json:"committed"`
+	Attachment    *WrkqAttachment `json:"attachment,omitempty"`
+}
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 // WrkqRelation is the stable relation resource DTO. Relations are identified by
