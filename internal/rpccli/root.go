@@ -24,7 +24,7 @@ var topLevelCommands = []mirroredCommand{
 	{use: "agent [prompt] [-- extra hrcchat-turn args]"},
 	{use: "agent-context"},
 	{use: "agent-info"},
-	{use: "apply <PATHSPEC|ID> <FILE|->"},
+	// apply is RPC-backed (wrkq.task.update via the caller-side parse/gate); registered separately.
 	{use: "bundle"},
 	// cat is the one real command this slice; registered separately.
 	// check / check-inbox are RPC-backed (real parity commands); registered separately.
@@ -89,6 +89,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newCheckCmd())
 	root.AddCommand(newCheckInboxCmd())
 	root.AddCommand(newRmCmd())
+	root.AddCommand(newApplyCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

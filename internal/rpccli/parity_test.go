@@ -1665,6 +1665,88 @@ var parityCases = []parityCase{
 		args:  []string{"--project", "myproj", "cat", "task-a", "--json"},
 		env:   []string{"WRKQ_PROJECT_ROOT=other"},
 	},
+
+	// apply ✓ wrkq.task.update via the caller-side parse/gate. The mirror reads the
+	// file/stdin, parses (md/yaml/json), gates metadata, prechecks etag, and sends a
+	// single update patch. Output shape (uuid/updated/fields snake_case) is mirror-owned.
+	{
+		// Plain markdown file → description-only body update.
+		name:    "apply/md-file-description",
+		setup:   [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:    []string{"apply", "inbox/doc", "body.md"},
+		files:   map[string]string{"body.md": "This is the new description\n\nwith paragraphs.\n"},
+		mutates: true,
+	},
+	{
+		// stdin (-) description update; the mirror reads cmd stdin, never server stdin.
+		name:    "apply/stdin-description",
+		setup:   [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:    []string{"apply", "inbox/doc", "-"},
+		stdin:   []byte("piped description body\n"),
+		mutates: true,
+	},
+	{
+		// YAML front matter carrying a specification (body-only allows specification).
+		name:    "apply/md-frontmatter-spec",
+		setup:   [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:    []string{"apply", "inbox/doc", "spec.md"},
+		files:   map[string]string{"spec.md": "---\nspecification: |\n  # Spec heading\n  detail\n---\nThe description body\n"},
+		mutates: true,
+	},
+	{
+		// Metadata present without --with-metadata: warning to stderr + fields dropped,
+		// only the description survives. Proves the gate + warning byte-match.
+		name:    "apply/metadata-gated-warn",
+		setup:   [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:    []string{"apply", "inbox/doc", "meta.md"},
+		files:   map[string]string{"meta.md": "---\ntitle: Ignored Title\nstate: in_progress\n---\nDescription survives\n"},
+		mutates: true,
+	},
+	{
+		// --with-metadata applies title/state/priority/due_at alongside the body.
+		name:    "apply/with-metadata",
+		setup:   [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:    []string{"apply", "inbox/doc", "full.md", "--with-metadata"},
+		files:   map[string]string{"full.md": "---\ntitle: New Title\nstate: in_progress\npriority: 1\n---\nFull body\n"},
+		mutates: true,
+	},
+	{
+		// dry-run: non-TTY JSON plan, no mutation.
+		name:  "apply/dry-run-json",
+		setup: [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:  []string{"apply", "inbox/doc", "body.md", "--dry-run"},
+		files: map[string]string{"body.md": "Planned description\n"},
+	},
+	{
+		// etag mismatch precheck owned by the CLI (distinct error text), no mutation.
+		name:  "apply/if-match-mismatch-errors",
+		setup: [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:  []string{"apply", "inbox/doc", "body.md", "--if-match", "999"},
+		files: map[string]string{"body.md": "wont apply\n"},
+	},
+	{
+		// empty input rejected before any mutation.
+		name:  "apply/empty-input-errors",
+		setup: [][]string{{"touch", "inbox/doc", "-t", "Doc"}},
+		args:  []string{"apply", "inbox/doc", "-"},
+		stdin: []byte(""),
+	},
+	{
+		// unknown task → "failed to resolve task: task not found: <id>" (byte-match).
+		name:  "apply/unknown-task-errors",
+		setup: nil,
+		args:  []string{"apply", "T-09999999", "-"},
+		stdin: []byte("body"),
+	},
+	{
+		// project-root scoping: the bare ref resolves under the configured root.
+		name:    "apply/project-root",
+		setup:   prSeed,
+		args:    []string{"apply", "task-a", "body.md"},
+		files:   map[string]string{"body.md": "scoped description\n"},
+		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates: true,
+	},
 }
 
 // attachSrcFiles are the host source files materialized into each run/seed dir

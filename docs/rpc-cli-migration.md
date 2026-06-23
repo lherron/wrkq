@@ -97,11 +97,11 @@ projection (T-05090), so its fingerprint pin is unchanged.
 | `find` | `rpc-backed (partial)` | **Recursive/filtered search parity proven** via server-owned wrkq.task.findListView (server owns recursive path-prefix matching, metadata filters, cursor.Apply + limit+1 + sort-validation + BuildNextCursor over the filtered set, and the mixed-type in-memory merge-sort): all-default, path-prefix recursion, --type t\|p, --state (open/all/default-excludes-archived/deleted/idea), --kind, --slug-glob, --json (empty→`[]`, NOT null — legacy inits `[]findResult{}`), NDJSON/non-TTY, --porcelain limit+cursor (next_cursor→stderr), all accepted --sort (updated_at/created_at/id/path), --reverse, unknown-path→empty (find does NOT resolve search paths; a non-matching path is a no-op filter, not an error), invalid --sort error, unknown --parent-task error. **Mixed-type (no --type) IGNORES the cursor** — legacy's searchBoth path calls findTasks/findContainers with skipPagination so cursor.Apply never runs; single-type (--type t\|p) applies the cursor SQL-side (TestParity/find/mixed-cursor-ignored vs find/type-t-malformed-cursor-errors). Error wrapping replicated: findTasks/findContainers errors carry legacy's `finding tasks:`/`finding containers:` prefix (server prefixFindError preserves the domain code). **`--output raw` is byte-parity UNSUPPORTED** (legacy excludes raw from find's allow-set; identical `output mode "raw" is not supported for this command`). Cursor replay/no-dup-no-miss across the FILTERED/RECURSIVE single-type set proven (TestFindCursorReplay, per daedalus). HARD-GATED mirror-only (proven by TestFindHardGates, no silent degradation; legacy RENDERS these): --print0, table/human/yaml/tsv, conflicting modes. Project-root scoping applies to search paths + --parent-task selector (TestParity/pr/find-default-root; see architecture/records/invariants/wrkq.project-root.caller-semantics.yaml). |
 | `ls` | `rpc-backed (full read surface)` | **Mixed task/container parity proven** via server-owned wrkq.task.lsView (rollup counts, in-memory merge-sort over the merged set, cursor): top-level rollups, container mixed ordering, single-task path, --json (empty→`null`), NDJSON/non-TTY, --porcelain limit+cursor (next_cursor→stderr), all accepted --sort (slug/id/created_at/updated_at), --reverse, --type p\|t, --all (incl. default-hides-completed), empty→null, unknown-path error, malformed-cursor. **NOW UNGATED with REAL byte parity** (moved out of the former TestLsHardGates into TestParity): `--output table`/`human` (both render through internal/render.FormatTable — legacy's runLs switch has no human case → table fall-through), `--output yaml` (render decodes the compat projection back into the legacy `lsEntry` struct so yaml.v3's untagged-field-name keys match exactly), `--output tsv`, `--one` (-1) / `--nul` (-0) path emission, multi-path (server-owned per-path query + combined merge-sort + combined limit+1/next-cursor via the new `paths` param), `--recursive`/`-R` (a NO-OP in legacy — rollups already recurse — accepted-and-ignored to byte-match), and conflicting `--json --ndjson` (identical "choose only one output mode"). **`--output raw` stays byte-parity UNSUPPORTED** (legacy excludes raw from ls's allow-set; both emit the identical `output mode "raw" is not supported for this command` — TestParity/ls/output-raw-unsupported). **Invalid `--type` stays parity-pinned to empty/`null`**. Cursor replay/no-dup-no-miss across the MIXED set proven (TestLsCursorReplay). TestLsHardGates RETIRED — no ls surface remains hard-gated. DELIBERATE DIVERGENCE: invalid --sort returns a clean validation error (legacy leaks a raw SQL "no such column" string). lsSingleTask not-found emits legacy's exact "path not found: <path>". Project-root scoping applies (see architecture/records/invariants/wrkq.project-root.caller-semantics.yaml). |
 | `tree` | `rpc-backed (partial)` | **Recursive-hierarchy parity proven** via server-owned `wrkq.task.treeView` compat projection (the SERVER owns the entire walk: container pruning, "all done" rollups, in-set subtask nesting, hidden-container counting; the CLI owns ONLY byte rendering). Proven (non-TTY): bare-default NDJSON, `--json` (full nested `treeOutput`), `--ndjson` (flat depth/path stream), `--porcelain` (tab-separated walk), `-L/--level` depth limit, `--open`, `--all` (incl. default-hides-completed + `(All done)` collapse), single subtree path, empty container, nested subtasks, unknown-path error (legacy's exact `failed to resolve path "<p>": container not found: <p>`), and project-root scoping (`WRKQ_PROJECT_ROOT` default-root + relative path). **`--output raw` is byte-parity UNSUPPORTED** (legacy excludes raw from tree's allow-set; both emit the identical `output mode "raw" is not supported for this command` — TestParity/tree/output-raw-unsupported). HARD-GATED mirror-only (TestTreeHardGates, no silent degradation): the interactive PRETTY/human renderer (TTY-only + embeds wall-clock-relative `opened N ago` strings and ANSI color → not byte-reproducible in the hermetic non-TTY harness; legacy gates the non-TTY default to NDJSON for outputShapeList so it is never exercised), `--output table/yaml/tsv`, multi-path, `--fields`, conflicting modes. The tree DTO carries two `wire_*` carriers (`wire_created_at`, `wire_parent_task_uuid`) + `wire_raw_path` — **real fingerprinted RPC protocol fields** (non-canonical compat carriers); the CLI uses them to rebuild the NDJSON stream + nesting and strips them from the user-facing `tree --json` projection (legacy never exposed them — hidden from `tree --json`, NOT from the RPC response; pinned by TestTreeViewDTOFingerprint). Project-root scoping applies (invariant wrkq.project-root.caller-semantics). |
-| `apply` | `not-started` | |
-| `cp` | `not-started` | |
+| `apply` | `rpc-backed` | **Full parity proven** (Tranche B, T-05100) via `wrkq.task.update`. The mirror owns ALL caller-side work — reading the file/`-` stdin, format detection + parse (md / md+YAML-frontmatter / yaml / json via the pure `internal/parse` package), the `--with-metadata` gate (drops title/state/priority/due_at + emits the legacy stderr warning when absent), empty/size validation, the legacy etag precheck (its distinct "task was modified" message stays the source of truth; the patch additionally sends `expectEtag` when `--if-match`>0), dry-run rendering (TTY text + non-TTY JSON plan), and project-root scoping — the RPC method only receives the resolved patch. Output shape (`uuid`/`updated`/`fields` with snake_case `due_at`) is mirror-owned. Cases (TestParity/apply/*): md-file + stdin description, frontmatter spec, metadata-gated warn, `--with-metadata`, dry-run JSON, `--if-match` mismatch, empty input, unknown-task (`failed to resolve task: task not found: <id>`), project-root. The RPC `task not found: <ref>` message byte-matches legacy `selectors.ResolveTask`, so the wrapped resolve error is identical. |
+| `cp` | `not-started` | **RPC GAP — needs new server method.** Legacy `cp` is a DEEP multi-resource copy (task fields → new task with `--overwrite` upsert; attachment-metadata copy + optional file copy via `--with-attachments`/`--shallow`; a `task.copied` event with source-uuid payload; a `created` webhook dispatch with a synthetic `source_uuid` change). No existing method (`wrkq.task.show` + `wrkq.task.create`) reproduces the byte output (`source_id`/`source_uuid`/`dest_id`/`dest_uuid`/`dest_path`/`attachments_copied`), the `task.copied` event type, OR the attachment cascade — composing it client-side would expose intermediate states + drift the event/webhook shape. Proposed: `wrkq.task.copy` (server-owned deep copy + cascade + event + webhook). See "Open gaps" below for the DTO + daedalus question. |
 | `mkdir` | `rpc-backed` | **Proven parity** (TestParity): RPC-backed via `wrkq.container.create` with legacy top-level→project / nested→directory kind inference. |
 | `rmdir` | `rpc-backed (partial)` | **Empty-container parity proven** via `wrkq.container.delete`. `--force` (recursive) is a gap: legacy uses interactive confirmation; RPC `deleteRecursive` needs an expected-impact param. |
-| `rename-container` | `not-started` | |
+| `rename-container` | `not-started` | **RPC GAP — needs new server method.** Legacy renames a container's `slug` + `title` via `store.Containers.UpdateFieldsWithAttribution` (identity-preserving: same uuid/friendly-id, etag bump, `--if-match` CAS, `--dry-run`). The `wrkq.container` RPC surface has NO update/rename method (only create / delete / deleteRecursive / show / catView / list). A delete+recreate fake would LOSE identity + events + nested children, so it is NOT viable. Proposed: `wrkq.container.update` (or `.rename`) carrying a slug/title patch + `expectEtag`. See "Open gaps" below for the DTO + daedalus question. |
 | `handoff` | `not-started` | `rpc-gap` candidate |
 | `search` | `not-started` | `rpc-gap` / index-owner question |
 | `index` | `not-started` | `local-only` / admin candidate |
@@ -178,6 +178,75 @@ correctness/remote path.
 basic text, binary stdin + `--mime`, `--name` required, duplicate filename, unknown
 task. Transport-equivalence across in-proc + subprocess stdio. (TestParity/attach-*,
 TestTransportEquivalence_AttachmentBytes, TestStdoutPurity_AttachmentGetBytes.)
+
+## Open gaps — Tranche B mutations awaiting new RPC surface (T-05100)
+
+Two Tranche-B mutation commands cannot be byte-proven on the existing RPC surface
+and are STOP-AND-GAPped (no mirror code landed; faking them would violate
+identity/event invariants):
+
+### `cp` → proposed `wrkq.task.copy`
+
+**Legacy behavior** (`internal/cli/cp.go`): a deep, per-source-task copy into a
+destination container. For each source task it (1) copies the mutable task fields
+into a NEW task in the destination (or upserts an existing same-slug task when
+`--overwrite`); (2) copies attachment **metadata** rows, and with
+`--with-attachments` copies the underlying **files** (skipped entirely with
+`--shallow`); (3) writes a `task.copied` event with a `{source_id, source_uuid,
+attachment_count, with_files}` payload; (4) dispatches a `created` webhook with a
+synthetic `source_uuid` change. Output: `copyResult{source_id, source_uuid,
+dest_id, dest_uuid, dest_path, attachments_copied, with_files}`. Flags: `--dry-run`,
+`-j/--jobs`, `--continue-on-error`, `--with-attachments`/`--shallow`,
+`-r/--recursive`, `--overwrite`, `--yes` (prompt only when >5 sources),
+`--nullglob`, `--if-match`, output modes.
+
+**Why no existing method maps**: composing `wrkq.task.show` + `wrkq.task.create`
+client-side would (a) NOT reproduce the `task.copied` event type or the
+source-uuid webhook change, (b) expose intermediate states + drift the event
+shape, and (c) leave the attachment cascade (metadata + optional file copy) with
+no RPC home. There is no copy method on the surface today.
+
+**Proposed**: `wrkq.task.copy` (server-owned deep copy + cascade + event +
+webhook), DTO `WrkqTaskCopyParams{ source, destination, overwrite, withAttachments,
+shallow, expectEtag, actor }` → `WrkqTaskCopyResult{ sourceId, sourceUuid, destId,
+destUuid, destPath, attachmentsCopied, withFiles }`. The CLI owns the >5-source
+prompt, `--jobs`/`--continue-on-error` fan-out, dry-run, nullglob, and output
+rendering; the server owns one atomic single-task copy + cascade + event + webhook.
+
+**Daedalus question**: *Approve a new server-owned `wrkq.task.copy` method (full
+catalog/DTO/fingerprint checklist) that performs the deep single-task copy
+(fields + attachment-metadata + optional attachment-file copy + `task.copied`
+event + `created` webhook with the synthetic `source_uuid` change), with the CLI
+retaining the multi-source fan-out / prompt / dry-run / output rendering? Or
+should the attachment-file copy be a separate explicit mode/boundary (cf. the
+attach byte-transfer ruling, T-05103)?*
+
+### `rename-container` → proposed `wrkq.container.update` (or `.rename`)
+
+**Legacy behavior** (`internal/cli/rename_container.go`): renames a container's
+`slug` + `title` (title defaults to the new slug, or `--title`) via
+`store.Containers.UpdateFieldsWithAttribution`, identity-preserving (same
+uuid/friendly-id, etag bump, attribution). Flags: `--title`, `--if-match` (CAS),
+`--dry-run`.
+
+**Why no existing method maps**: `wrkq.container` exposes only create / delete /
+deleteRecursive / show / catView / list — NO update or rename. A delete+recreate
+fake would lose the container's identity (uuid/friendly-id), its event history,
+and its nested children — NOT viable.
+
+**Proposed**: `wrkq.container.update` (general field patch) or a narrow
+`wrkq.container.rename`, DTO `WrkqContainerUpdateParams{ container,
+patch{slug?,title?}, expectEtag, actor }` → `WrkqContainer` (the updated record).
+The CLI owns slug normalization, the dry-run render, project-root scoping, and the
+old→new display; the server owns the identity-preserving field update + etag CAS +
+slug-conflict validation.
+
+**Daedalus question**: *Approve `wrkq.container.update` with a slug/title patch +
+`expectEtag` (full checklist) — preferred as a general container-mutation method
+that also seats future container edits — or a narrower `wrkq.container.rename`?
+Either must preserve container identity (uuid/friendly-id) and reject a
+slug-conflict with `WRKQ_CONFLICT`/`WRKQ_VALIDATION` rather than the raw store
+error.*
 
 ## Parity harness (data-driven)
 
