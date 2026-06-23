@@ -344,8 +344,11 @@ wrkq.task.restore
 > `WrkqTreeView{ path, project_id?, children: WrkqTreeNode[], hidden_containers_not_displayed, wire_raw_path? }`.
 > The nested `children` reproduce legacy's `tree --json` node shape byte-for-byte.
 > Three `wire_*` carriers (`wire_created_at`, `wire_parent_task_uuid` on each node;
-> `wire_raw_path` on the view) carry state the JSON projection hides but the CLI
-> needs to rebuild the NDJSON stream + nesting; the CLI strips them for `--json`.
+> `wire_raw_path` on the view) are **real, fingerprinted protocol fields** present in
+> the RPC JSON; they carry state the CLI needs to rebuild the NDJSON stream + nesting.
+> They are non-canonical compat carriers (named `wire_*`) and the CLI **strips them from
+> the user-facing `tree --json` projection** (legacy never exposed them) — they are
+> hidden from `tree --json`, NOT from the RPC response.
 > The CLI owns ONLY byte rendering (json / ndjson / porcelain); the interactive
 > pretty/human renderer is TTY-only and not mirrored (non-deterministic
 > `opened N ago` + ANSI). Cataloged + fingerprinted (TestTreeViewDTOFingerprint).

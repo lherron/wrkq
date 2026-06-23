@@ -1530,6 +1530,79 @@ func TestLsCursorReplay(t *testing.T) {
 	}
 }
 
+// TestLsMultiPathCursorReplay proves the ls MULTI-PATH cursor contract: the SERVER
+// owns combined paging over the merge-sorted union of multiple path args (the client
+// must NOT sort/page per-argument). It asserts per-page byte parity old-vs-new and
+// no-dup/no-miss (concatenated pages equal the unpaginated combined output) over a
+// genuine two-container-path fixture. daedalus requires this distinct from the
+// single-path TestLsCursorReplay (multi-path first-page parity does not prove replay).
+func TestLsMultiPathCursorReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	// Two top-level projects, each with a child container + two tasks. Combined
+	// merge-sort by slug over BOTH paths: ca, cb, ta-1, ta-2, tb-1, tb-2 → pages 2,2,2.
+	setup := [][]string{
+		{"mkdir", "pa"}, {"mkdir", "pb"},
+		{"mkdir", "pa/ca"}, {"mkdir", "pb/cb"},
+		{"touch", "pa/ta-1", "-t", "ta-1"}, {"touch", "pa/ta-2", "-t", "ta-2"},
+		{"touch", "pb/tb-1", "-t", "tb-1"}, {"touch", "pb/tb-2", "-t", "tb-2"},
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	paths := []string{"pa", "pb"}
+	paginateAll := func(bin, dir string) (all, pages []string) {
+		cur := ""
+		for {
+			args := append([]string{"ls"}, paths...)
+			args = append(args, "--porcelain", "--limit", "2")
+			if cur != "" {
+				args = append(args, "--cursor", cur)
+			}
+			res := runCLI(t, bin, dir, args)
+			if res.exit != 0 {
+				t.Fatalf("%s page (cursor=%q) exit %d: %s", bin, cur, res.exit, res.stderr)
+			}
+			all = append(all, nonEmptyLines(res.stdout)...)
+			pages = append(pages, res.stdout+"\x1e"+res.stderr)
+			next := extractCursor(res.stderr)
+			if next == "" {
+				break
+			}
+			cur = next
+			if len(pages) > 20 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+		return all, pages
+	}
+
+	oldAll, oldPages := paginateAll(bins.wrkq, oldDir)
+	newAll, newPages := paginateAll(bins.mirror, newDir)
+
+	if len(oldPages) != len(newPages) {
+		t.Fatalf("page count: old=%d new=%d", len(oldPages), len(newPages))
+	}
+	for i := range oldPages {
+		if oldPages[i] != newPages[i] {
+			t.Errorf("page %d bytes differ:\n old: %q\n new: %q", i, oldPages[i], newPages[i])
+		}
+	}
+
+	fullArgs := append([]string{"ls"}, paths...)
+	oldFull := nonEmptyLines(runCLI(t, bins.wrkq, oldDir, fullArgs).stdout)
+	newFull := nonEmptyLines(runCLI(t, bins.mirror, newDir, fullArgs).stdout)
+	if strings.Join(oldAll, "\n") != strings.Join(oldFull, "\n") {
+		t.Errorf("OLD multi-path paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", oldAll, oldFull)
+	}
+	if strings.Join(newAll, "\n") != strings.Join(newFull, "\n") {
+		t.Errorf("NEW multi-path paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", newAll, newFull)
+	}
+}
+
 // TestFindCursorReplay proves the find list-view cursor contract over the
 // FILTERED/RECURSIVE single-type set: cursor replay across page boundaries,
 // per-page byte parity old-vs-new, and no-dup/no-miss (concatenated pages equal
