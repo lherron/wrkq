@@ -246,10 +246,17 @@ type TaskAcknowledgeParams struct {
 	Actor string `json:"actor,omitempty"`
 }
 
-// TaskDeleteParams mirrors WrkqTaskDeleteParams. Reversible delete (state =
-// deleted); restore is the inverse.
+// TaskDeleteParams mirrors WrkqTaskDeleteParams.
+//
+// mode is the EXPLICIT, caller-supplied disposition (caller-owned-confirmation
+// invariant): the server never infers it from a TTY/prompt. The empty mode
+// preserves the legacy reversible-delete contract (state=deleted + deleted_at
+// tombstone). mode="archive" applies the legacy soft-archive (state=archived +
+// archived_at); mode="purge" hard-deletes the task and cleans attachment files +
+// the task attachment dir. Any other value is WRKQ_VALIDATION.
 type TaskDeleteParams struct {
 	Task  string `json:"task"`
+	Mode  string `json:"mode,omitempty"`
 	Actor string `json:"actor,omitempty"`
 }
 

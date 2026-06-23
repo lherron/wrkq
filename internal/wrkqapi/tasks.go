@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
@@ -545,13 +546,30 @@ func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*Wr
 	return a.loadTask(uuid)
 }
 
-// TaskDelete performs a reversible delete: state='deleted' + deleted_at=now,
-// cascading to subtasks. It never sets archived_at and never purges. Re-deleting
-// an already-deleted task is a no-op return of the current task.
+// TaskDelete disposes of a task per the caller-owned-confirmation invariant
+// (architecture/records/invariants/wrkq.mutation.caller-owned-confirmation.yaml):
+// the disposition is the EXPLICIT, caller-supplied mode — the server never
+// prompts, inspects a TTY, reads stdin, or infers confirmation from transport.
+//
+//   - mode "" (legacy, PRESERVED): reversible delete — state='deleted' +
+//     deleted_at=now, cascading to subtasks. Never sets archived_at, never
+//     purges. Re-deleting an already-deleted task is a no-op.
+//   - mode "archive": soft-archive — state='archived' + archived_at (legacy
+//     `wrkq rm` default). Re-archiving is the store no-op.
+//   - mode "purge": hard-delete the task + clean attachment files and the task
+//     attachment dir (legacy `wrkq rm --purge`). Irreversible; never a default.
+//   - any other mode: WRKQ_VALIDATION.
 func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	mode := strings.TrimSpace(p.Mode)
+	switch mode {
+	case "", "archive", "purge":
+	default:
+		return nil, NewValidationError("invalid mode: "+p.Mode+" (expected archive or purge)", map[string]any{"field": "mode"})
+	}
+
 	uuid, err := a.resolveTaskUUID(p.Task)
 	if err != nil {
 		return nil, err
@@ -565,21 +583,58 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		return nil, NewInternalError(scanErr)
 	}
 
-	// Re-delete is a no-op (no etag bump).
-	if state == string(domain.StateDeleted) {
+	attr := a.attributionFor(p.Actor)
+
+	switch mode {
+	case "archive":
+		if _, aerr := a.store.Tasks.ArchiveWithViaAttribution(attr, uuid, 0, "rpc"); aerr != nil {
+			return nil, mapStoreError(aerr, p.Task)
+		}
+		return a.loadTask(uuid)
+	case "purge":
+		// Snapshot the task DTO BEFORE the row is gone so the method still returns a
+		// valid task; the mirror derives its purge stats (count + bytes) from a
+		// pre-purge attachment.list, not from this return value.
+		snapshot, serr := a.loadTask(uuid)
+		if serr != nil {
+			return nil, serr
+		}
+		// Capture attachment paths BEFORE purge for post-commit file cleanup.
+		attachments, gerr := a.store.Tasks.GetAttachments(uuid)
+		if gerr != nil {
+			return nil, NewInternalError(gerr)
+		}
+		if _, perr := a.store.Tasks.PurgeWithAttribution(attr, uuid, 0); perr != nil {
+			return nil, mapStoreError(perr, p.Task)
+		}
+		// Delete attachment files + the task dir AFTER the DB purge commits. File
+		// cleanup is best-effort (the durable DB delete already committed); skipped
+		// entirely when no attach dir is configured.
+		if strings.TrimSpace(a.attachDir) != "" {
+			for _, at := range attachments {
+				if at.RelativePath == "" {
+					continue
+				}
+				_ = attach.DeleteFile(a.attachDir, at.RelativePath)
+			}
+			_ = attach.DeleteTaskDir(a.attachDir, uuid)
+		}
+		return snapshot, nil
+	default:
+		// mode == "" — legacy reversible delete, PRESERVED.
+		if state == string(domain.StateDeleted) {
+			return a.loadTask(uuid)
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		// Setting state=deleted triggers cascade-delete of subtasks in the store.
+		if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{
+			"state":      string(domain.StateDeleted),
+			"deleted_at": now,
+		}, 0, "rpc"); uerr != nil {
+			return nil, mapStoreError(uerr, p.Task)
+		}
 		return a.loadTask(uuid)
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	attr := a.attributionFor(p.Actor)
-	// Setting state=deleted triggers cascade-delete of subtasks in the store.
-	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{
-		"state":      string(domain.StateDeleted),
-		"deleted_at": now,
-	}, 0, "rpc"); uerr != nil {
-		return nil, mapStoreError(uerr, p.Task)
-	}
-	return a.loadTask(uuid)
 }
 
 // TaskRestore reverses delete/archive: current state must be archived or deleted,

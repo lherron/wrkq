@@ -14,6 +14,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `internal/layerguard/layerguard_test.go`
 - **last_verified:** 2026-06-22
 
+## wrkq.mutation.caller-owned-confirmation
+
+- **scope:** human confirmation + interactivity for destructive mutations crossing the wrkq RPC boundary
+- **predicate:** RPC mutation methods are NON-INTERACTIVE and deterministic: they accept caller-scoped selectors + EXPLICIT intent (mode, target fields, actor) + machine-checkable preconditions (ifMatch, expected impact), and they decide purely from those params. They MUST NOT prompt, inspect a TTY, read stdin, or infer confirmation from the transport. The CLI mirror (internal/rpccli) owns ALL human interaction — the legacy prompt text, abort, --yes, dry-run, and non-TTY rendering — AND the project-root scoping, BEFORE it builds RPC params. Purge/irreversible dispositions are EXPLICIT, never a hidden default: the mirror ALWAYS passes an explicit mode (archive for the legacy `rm` default, purge for `rm --purge`) and never relies on the absent-mode behavior of a method. Destructive recursive mutations preflight + commit under an expected-impact CAS (see wrkq.container.deleteRecursive). A command that cannot yet byte-prove a destructive mode/flag HARD-GATES it (clean non-zero, no silent degradation) rather than routing through an unproven path.
+- **enforced_by:** `explicit mode/expected-impact params on the mutation methods + the caller-side confirmation seam (internal/rpccli/confirm.go) + the prompt-ownership / non-interactivity tests; daedalus B-ruling hrcchat#10185 (T-05100)`
+- **source:** `internal/wrkqapi/tasks.go`, `internal/rpccli/confirm.go`, `internal/rpccli/rm.go`, `internal/workrpc/registry.go`, `internal/workrpc/taskdelete_mode_test.go`, `internal/rpccli/pty_rm_darwin_test.go`
+- **required_tests:** `internal/workrpc/taskdelete_mode_test.go`, `internal/rpccli/pty_rm_darwin_test.go`, `internal/rpccli/parity_test.go`, `internal/rpccli/importguard_test.go`
+- **last_verified:** 2026-06-22
+
 ## wrkq.project-root.caller-semantics
 
 - **scope:** project-root path/selector scoping across CLI surfaces

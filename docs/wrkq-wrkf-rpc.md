@@ -523,7 +523,10 @@ interface WrkqTaskAcknowledgeParams {
   force?: boolean; // allow ack on non-terminal tasks (mirrors `wrkq ack --force`)
 }
 
-interface WrkqTaskDeleteParams { task: string }
+interface WrkqTaskDeleteParams {
+  task: string;
+  mode?: "archive" | "purge"; // EXPLICIT disposition; absent = legacy reversible delete
+}
 
 interface WrkqTaskRestoreParams {
   task: string;
@@ -536,10 +539,24 @@ The task must be `completed` or `cancelled` unless `force: true`
 (else `WRKQ_VALIDATION`). An already-acknowledged task is a no-op: the current
 `WrkqTask` is returned with its stable `acknowledgedAt` and no etag bump.
 
-`wrkq.task.delete` is a **reversible** delete: it sets `state="deleted"` +
-`deletedAt` (never `archivedAt`) and cascade-deletes subtasks. Re-deleting an
-already-deleted task is a no-op. Hard delete/purge is CLI-only — there is no
-purge RPC method.
+`wrkq.task.delete` disposes of a task per the **caller-owned-confirmation**
+invariant: the disposition is the EXPLICIT, caller-supplied `mode` — the server
+never prompts, inspects a TTY, reads stdin, or infers confirmation from
+transport. Modes:
+
+- **absent** (legacy, PRESERVED): reversible delete — sets `state="deleted"` +
+  `deletedAt` (never `archivedAt`), cascade-deletes subtasks; re-deleting an
+  already-deleted task is a no-op.
+- **`"archive"`**: soft-archive — `state="archived"` + `archivedAt` (legacy
+  `wrkq rm` default).
+- **`"purge"`**: hard-delete the task + clean attachment files and the task
+  attachment dir (legacy `wrkq rm --purge`). Irreversible; never a default.
+- any other value → `WRKQ_VALIDATION`.
+
+The CLI mirror (`wrkq rm`) owns ALL human interaction — the legacy purge prompt
+text, abort, `--yes`, dry-run, non-TTY rendering — and ALWAYS passes an explicit
+`mode` (`archive` for the default, `purge` for `--purge`); it never relies on the
+absent-mode tombstone behavior.
 
 `wrkq.task.restore` is the inverse: the current state must be `archived` or
 `deleted` (else `WRKQ_VALIDATION`); it clears `archivedAt`/`deletedAt`/

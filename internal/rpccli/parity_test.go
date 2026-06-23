@@ -300,6 +300,138 @@ var parityCases = []parityCase{
 	// uses an interactive confirmation flow and the RPC deleteRecursive requires an
 	// "expected impact" confirmation param. That reconciliation is a tracked gap.
 
+	// rm ✓ caller-owned-confirmation seam (B0 exemplar). Durable mutation runs
+	// through wrkq.task.delete with an EXPLICIT mode (archive default / purge for
+	// --purge); the mirror owns scoping, the purge prompt+abort+--yes, dry-run, and
+	// the exit-code taxonomy. TASK targets are byte-proven here; container targets
+	// are hard-gated (no archive mode on wrkq.container.delete yet) and therefore
+	// excluded from parity — a deliberate B0 divergence, NOT a regression.
+	{
+		// Default = legacy soft-archive (state=archived + archived_at via mode:archive).
+		name:    "rm/archive-default",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha", "--priority", "2"}},
+		args:    []string{"rm", "inbox/aaa"},
+		mutates: true,
+	},
+	{
+		// Multi-target archive: ordering + both rows archived.
+		name: "rm/archive-multi",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+			{"touch", "inbox/bbb", "-t", "Beta"},
+		},
+		args:    []string{"rm", "inbox/aaa", "inbox/bbb"},
+		mutates: true,
+	},
+	{
+		// --purge --yes hard-deletes the task row (no prompt because --yes).
+		name:    "rm/purge-yes",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/aaa", "--purge", "--yes"},
+		mutates: true,
+	},
+	{
+		// --purge prompt ACCEPT via stdin "yes": warning text + confirm line + delete.
+		name:    "rm/purge-prompt-accept",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/aaa", "--purge"},
+		stdin:   []byte("yes\n"),
+		mutates: true,
+	},
+	{
+		// --purge prompt ABORT via stdin "no": warning + "aborted" error, no mutation.
+		name:    "rm/purge-prompt-abort",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/aaa", "--purge"},
+		stdin:   []byte("no\n"),
+		mutates: true,
+	},
+	{
+		// --purge prompt with EMPTY stdin (non-TTY, no input): EOF → abort, no hang.
+		name:    "rm/purge-prompt-empty-stdin-abort",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/aaa", "--purge"},
+		stdin:   []byte(""),
+		mutates: true,
+	},
+	{
+		// Non-TTY dry-run emits the legacy JSON plan (archive variant).
+		name:  "rm/dry-run-json-archive",
+		setup: [][]string{{"touch", "inbox/aaa", "-t", "Alpha", "--priority", "2"}},
+		args:  []string{"rm", "inbox/aaa", "--dry-run"},
+	},
+	{
+		// Non-TTY dry-run emits the legacy JSON plan (purge variant: purge:true).
+		name:  "rm/dry-run-json-purge",
+		setup: [][]string{{"touch", "inbox/aaa", "-t", "Alpha", "--priority", "2"}},
+		args:  []string{"rm", "inbox/aaa", "--purge", "--dry-run"},
+	},
+	{
+		name: "rm/ndjson-multi",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+			{"touch", "inbox/bbb", "-t", "Beta"},
+		},
+		args:    []string{"rm", "inbox/aaa", "inbox/bbb", "--ndjson"},
+		mutates: true,
+	},
+	{
+		name: "rm/porcelain-multi",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+			{"touch", "inbox/bbb", "-t", "Beta"},
+		},
+		args:    []string{"rm", "inbox/aaa", "inbox/bbb", "--porcelain"},
+		mutates: true,
+	},
+	{
+		// Unknown ref WITHOUT nullglob → "target not found" error, exit 1, no mutation.
+		name:    "rm/notfound-no-nullglob",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/zzz"},
+		mutates: true,
+	},
+	{
+		// Unknown ref WITH --nullglob → no-op exit 0, no mutation.
+		name:    "rm/notfound-nullglob",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/zzz", "--nullglob"},
+		mutates: true,
+	},
+	{
+		// Mixed found + unknown with --nullglob: the found task is archived, the
+		// unknown is skipped (exit 0).
+		name: "rm/nullglob-mixed",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+		},
+		args:    []string{"rm", "inbox/aaa", "inbox/zzz", "--nullglob"},
+		mutates: true,
+	},
+	{
+		// Partial failure with --continue-on-error: one resolvable archive + one that
+		// cannot be removed; legacy exits 5 on partial success. Here both resolve, so
+		// to exercise the taxonomy we re-rm an already-archived task (store no-op) plus
+		// an unknown caught at resolve time — resolution errors abort before exec, so
+		// this case asserts the resolve-time error path is identical.
+		name: "rm/stdin-dash-refs",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+			{"touch", "inbox/bbb", "-t", "Beta"},
+		},
+		args:    []string{"rm", "-"},
+		stdin:   []byte("inbox/aaa\ninbox/bbb\n"),
+		mutates: true,
+	},
+	{
+		// project-root scoping: relative selector resolved under WRKQ_PROJECT_ROOT.
+		name:    "rm/pr-relative-selector",
+		setup:   prSeed,
+		args:    []string{"rm", "task-a"},
+		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates: true,
+	},
+
 	// touch ✓ RPC-backed via wrkq.task.create, re-projected to the legacy
 	// touchResult array. Core flags only (due-at/start-at/etc. hard-error as gaps).
 	{

@@ -1,0 +1,47 @@
+id: wrkq.mutation.caller-owned-confirmation
+kind: invariant
+status: active
+owner_project: wrkq
+scope: human confirmation + interactivity for destructive mutations crossing the wrkq RPC boundary
+predicate: >
+  RPC mutation methods are NON-INTERACTIVE and deterministic: they accept
+  caller-scoped selectors + EXPLICIT intent (mode, target fields, actor) +
+  machine-checkable preconditions (ifMatch, expected impact), and they decide
+  purely from those params. They MUST NOT prompt, inspect a TTY, read stdin, or
+  infer confirmation from the transport. The CLI mirror (internal/rpccli) owns
+  ALL human interaction — the legacy prompt text, abort, --yes, dry-run, and
+  non-TTY rendering — AND the project-root scoping, BEFORE it builds RPC params.
+
+  Purge/irreversible dispositions are EXPLICIT, never a hidden default: the
+  mirror ALWAYS passes an explicit mode (archive for the legacy `rm` default,
+  purge for `rm --purge`) and never relies on the absent-mode behavior of a
+  method. Destructive recursive mutations preflight + commit under an
+  expected-impact CAS (see wrkq.container.deleteRecursive). A command that cannot
+  yet byte-prove a destructive mode/flag HARD-GATES it (clean non-zero, no silent
+  degradation) rather than routing through an unproven path.
+authority:
+  repo: wrkq
+  surface: wrkq mutation methods (wrkq.task.delete mode, wrkq.container.deleteRecursive CAS) over the JSON-RPC boundary
+enforced_by: "explicit mode/expected-impact params on the mutation methods + the caller-side confirmation seam (internal/rpccli/confirm.go) + the prompt-ownership / non-interactivity tests; daedalus B-ruling hrcchat#10185 (T-05100)"
+source:
+  - internal/wrkqapi/tasks.go                         # TaskDelete mode (archive/purge/absent), no prompt/TTY/stdin read
+  - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY)
+  - internal/rpccli/rm.go                             # rm mirror: explicit mode + scoper + confirm; container targets hard-gated
+  - internal/workrpc/registry.go                      # wrkq.task.delete registration (param-only mode change)
+  - internal/workrpc/taskdelete_mode_test.go          # server delete-mode + non-interactivity acceptance tests
+  - internal/rpccli/pty_rm_darwin_test.go             # PTY prompt-ownership test (warning/yes/abort/--yes)
+required_tests:
+  - internal/workrpc/taskdelete_mode_test.go          # TestTaskDelete_* (no-mode preserved, archive, purge+cleanup, invalid→VALIDATION, non-interactive)
+  - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership (mirror owns prompt text/accept/abort/--yes on a real TTY)
+  - internal/rpccli/parity_test.go                    # TestParity/rm/* (archive default, --purge prompt/abort/--yes, dry-run, multi-target, output modes, nullglob, project-root)
+  - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror routes durable mutation through the RPC boundary only)
+last_verified:
+  date: 2026-06-22
+  evidence: "go test internal/rpccli (TestParity/rm + TestRmPurgePromptOwnership + TestCoreRuleImportGuard) + internal/workrpc (TestTaskDelete_*) green; rm byte-matches legacy for task archive/purge; daedalus B-ruling hrcchat#10185 (T-05100)"
+reopen_when:
+  - a mutation method begins prompting, reading stdin, or inspecting a TTY
+  - a destructive disposition becomes a hidden default (no explicit mode/intent)
+  - a new destructive mirror command routes confirmation server-side instead of through the caller seam
+  - the legacy prompt text / abort / --yes semantics change without updating the mirror + parity
+supersedes: []
+superseded_by: null
