@@ -480,6 +480,16 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 	{
+		// add with an explicit canonical principal (--as agent:flag-principal, no
+		// legacy actor row): the durable updated_by_principal_ref in the snapshot
+		// must record agent:flag-principal on BOTH binaries (not wrkq-system). This
+		// is the cross-binary attribution guard for daedalus #10261 (T-05119); the
+		// rendered result is also byte-checked.
+		name:    "webhook/add-with-principal",
+		args:    []string{"webhook", "add", "https://hook.test/wrkq", "--as", "agent:flag-principal"},
+		mutates: true,
+	},
+	{
 		// add duplicate (non-TTY): idempotent → no-change result {changed,webhook_urls}.
 		name:    "webhook/add-duplicate-no-change",
 		setup:   [][]string{{"webhook", "add", "https://hook.test/wrkq"}},
@@ -2639,6 +2649,26 @@ var parityCases = []parityCase{
 		searchIndex:       true,
 		searchSeedRebuild: true,
 	},
+	// --assignee with a BARE agent slug: legacy normalizes `clod` → `agent:clod`
+	// before filtering; the server must do the same compat normalization or the
+	// assigned hit disappears (daedalus #10263, T-05114). The seed assigns the task
+	// to agent:clod so the filter must match on both binaries.
+	{
+		name:              "search/assignee-bare",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma", "--assignee", "clod"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--assignee", "clod", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	// --assignee with a CANONICAL ref: server-side normalization must be idempotent
+	// so this finds the same hit as the bare form.
+	{
+		name:              "search/assignee-canonical",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma", "--assignee", "clod"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--assignee", "agent:clod", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
 	// search disabled: WRKQ_SEARCH_ENABLED=0 → legacy "search is disabled" error
 	// on both binaries (the mirror surfaces the server message raw).
 	{
@@ -4140,17 +4170,21 @@ func snapshot(t *testing.T, dir string) string {
 	// stored on the root container) proves DURABLE write parity — the rendered
 	// output is byte-checked separately, but the on-disk webhook_urls value must
 	// also match between legacy and the RPC mirror.
-	crows, err := database.Query(`SELECT id, slug, kind, COALESCE(webhook_urls, '') FROM containers ORDER BY id`)
+	// updated_by_principal_ref is included so caller-resolved write ATTRIBUTION
+	// (e.g. webhook add --as agent:flag-principal) is proven durable + identical
+	// between legacy and the RPC mirror — the rendered output excludes provenance,
+	// so a byte-match alone would miss an attribution regression (daedalus #10261).
+	crows, err := database.Query(`SELECT id, slug, kind, COALESCE(webhook_urls, ''), COALESCE(updated_by_principal_ref, '') FROM containers ORDER BY id`)
 	if err != nil {
 		t.Fatalf("snapshot container query: %v", err)
 	}
 	defer func() { _ = crows.Close() }()
 	for crows.Next() {
-		var id, slug, kind, hooks string
-		if err := crows.Scan(&id, &slug, &kind, &hooks); err != nil {
+		var id, slug, kind, hooks, updatedBy string
+		if err := crows.Scan(&id, &slug, &kind, &hooks, &updatedBy); err != nil {
 			t.Fatalf("snapshot container scan: %v", err)
 		}
-		b.WriteString("container|" + strings.Join([]string{id, slug, kind, hooks}, "|") + "\n")
+		b.WriteString("container|" + strings.Join([]string{id, slug, kind, hooks, updatedBy}, "|") + "\n")
 	}
 	if err := crows.Err(); err != nil {
 		t.Fatalf("snapshot container rows: %v", err)

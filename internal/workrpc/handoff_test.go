@@ -89,6 +89,31 @@ func TestHandoffCreate_IdempotentReplayAndMismatch(t *testing.T) {
 	}
 }
 
+// TestHandoffCreate_IncoherentScopeRejected covers daedalus's T-05117 condition:
+// an explicit create scopeRef that disagrees with agentId/projectId is a protocol-
+// integrity violation the server can prove from params alone. It must reject with
+// WRKQ_VALIDATION and write neither a handoff row nor a handoff.created event.
+func TestHandoffCreate_IncoherentScopeRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	bad := hoCreateParams("evil", "evil body", nil)
+	bad["scopeRef"] = "agent:someoneelse:project:otherproj" // disagrees with agentId=cody/projectId=wrkq
+	frames := p2Run(t, dbPath,
+		mkRPC("c1", "wrkq.handoff.create", bad),
+	)
+	if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
+		t.Errorf("incoherent scopeRef want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
+	}
+	if n := countAllHandoffs(t, dbPath); n != 0 {
+		t.Errorf("rejected create must write no handoff row, found %d", n)
+	}
+	if n := countAllHandoffEvents(t, dbPath, "handoff.created"); n != 0 {
+		t.Errorf("rejected create must write no handoff.created event, found %d", n)
+	}
+}
+
 func TestHandoffGet_NotFound(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -223,6 +248,40 @@ func assertHandoffEvent(t *testing.T, dbPath, resourceUUID, eventType string) {
 	if n := countHandoffEvents(t, dbPath, resourceUUID, eventType); n == 0 {
 		t.Errorf("expected at least one %q event for handoff %s, found none", eventType, resourceUUID)
 	}
+}
+
+// countAllHandoffs returns the total handoff rows (used to prove a rejected
+// create wrote nothing).
+func countAllHandoffs(t *testing.T, dbPath string) int {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db for handoff count: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var n int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM handoffs`).Scan(&n); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("count handoffs: %v", err)
+	}
+	return n
+}
+
+// countAllHandoffEvents returns the total handoff events of a type (used to prove
+// a rejected create emitted no event).
+func countAllHandoffEvents(t *testing.T, dbPath, eventType string) int {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db for event count: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var n int
+	if err := database.QueryRow(
+		`SELECT COUNT(*) FROM event_log WHERE resource_type = 'handoff' AND event_type = ?`, eventType,
+	).Scan(&n); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("count handoff events: %v", err)
+	}
+	return n
 }
 
 func countHandoffEvents(t *testing.T, dbPath, resourceUUID, eventType string) int {

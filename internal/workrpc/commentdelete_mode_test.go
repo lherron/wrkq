@@ -20,6 +20,40 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 )
 
+// TestCommentAdd_ExactAttribution is the NON-webhook guard for the shared
+// attributionFor fix (daedalus #10261, T-05119): a canonical --as principal with
+// no legacy actor row must be recorded exactly (created_by_principal_ref) on a
+// comment.add — proving the fix is in the shared helper, not webhook-specific.
+func TestCommentAdd_ExactAttribution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	_, taskUUID := createTaskRPC(t, dbPath, "attribution host")
+	frames := p2Run(t, dbPath,
+		mkRPC("ca", "wrkq.comment.add", map[string]any{"task": taskUUID, "body": "hi", "actor": "agent:flag-principal"}),
+	)
+	res := p2ResultOrFail(t, frames[1], "wrkq.comment.add attribution")
+	commentUUID, _ := res["uuid"].(string)
+	if commentUUID == "" {
+		t.Fatalf("comment.add returned no uuid: %#v", res)
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var pr string
+	if err := database.QueryRow(
+		`SELECT created_by_principal_ref FROM comments WHERE uuid = ?`, commentUUID,
+	).Scan(&pr); err != nil {
+		t.Fatalf("read comment attribution: %v", err)
+	}
+	if pr != "agent:flag-principal" {
+		t.Errorf("comment created_by_principal_ref: want agent:flag-principal, got %q", pr)
+	}
+}
+
 // commentRow reads (exists, deletedAt, etag) for a comment UUID, or exists=false
 // when the row is gone (purge).
 func commentRow(t *testing.T, dbPath, uuid string) (exists bool, deletedAt string, etag int64) {
@@ -251,7 +285,11 @@ func TestCommentDelete_SoftEventParity(t *testing.T) {
 	dbPath := migratedDB(t)
 	commentUUID, commentID, taskUUID := createCommentRPCFull(t, dbPath, "soft event parity") // fresh etag=1
 
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": commentUUID}))
+	// Pass an EXPLICIT actor so the recorded principal is deterministic regardless
+	// of the ambient config default_actor (the server now honors a caller/default
+	// principal exactly like legacy — daedalus #10261 — so an unset actor would
+	// resolve to whatever default_actor the rpc subprocess inherits).
+	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": commentUUID, "actor": "wrkq-system"}))
 	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (soft event parity)")
 
 	// Row preserved + etag bumped 1→2.

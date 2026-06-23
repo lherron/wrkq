@@ -19,7 +19,17 @@ predicate: >
   concern. The server owns ONLY the durable semantics it can prove without
   authenticated identity: the handoff.created / handoff.acknowledged events, the
   idempotency replay + payload-mismatch conflict, the acknowledge etag CAS, the
-  "already acknowledged" mapping, and the not-found contract.
+  "already acknowledged" mapping, the not-found contract, and explicit-param
+  CONSISTENCY.
+
+  Explicit-param consistency (protocol integrity, NOT authenticated self-scope):
+  for CREATE the explicit create scope tuple MUST be internally coherent — scopeRef,
+  agentId, and projectId describe the SAME canonical project scope. When a scopeRef
+  is supplied it must parse and its agent/project must equal agentId/projectId, or
+  the server rejects WRKQ_VALIDATION before any write or dry-run projection. The
+  server can prove this from the params alone (no env, no auth), so accepting an
+  inconsistent tuple would be hidden coupling — and would corrupt scope filtering,
+  idempotency scope, and event-payload interpretation — not caller-owned scope.
 
   RISK (LOW, accepted): server-side self-scope is UNENFORCEABLE without an
   authenticated transport, so caller-side enforcement + explicit params is the
@@ -40,18 +50,19 @@ source:
 required_tests:
   - internal/wrkqapi/catview_fingerprint_test.go        # TestHandoffDTOFingerprint (WrkqHandoff legacy field order pinned)
   - internal/workrpc/catview_catalog_test.go            # TestCatViewInCatalogs (handoff methods + DTOs in both catalogs)
-  - internal/workrpc/handoff_test.go                    # server create/get/list/ack + idempotent replay/mismatch + ack ifMatch CAS + dryRun no-write + already-acknowledged + event payloads
+  - internal/workrpc/handoff_test.go                    # server create/get/list/ack + idempotent replay/mismatch + ack ifMatch CAS + dryRun no-write + already-acknowledged + event payloads + TestHandoffCreate_IncoherentScopeRejected (scopeRef vs agentId/projectId coherence → WRKQ_VALIDATION, no write/event)
   - internal/rpccli/handoff_test.go                     # mirror NO-server-env-read guard + self-scope violation (caller-side) + env scope precedence
   - internal/rpccli/parity_test.go                      # TestParity/handoff/* (create/get/list/ack; idempotent replay; dryRun; output modes) byte-match legacy
   - internal/rpccli/transport_test.go                   # TestTransportEquivalence (handoff get/listView agree in-proc vs subprocess)
   - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard (mirror routes durable handoff behavior through the RPC boundary only)
 last_verified:
   date: 2026-06-23
-  evidence: "go test -tags sqlite_fts5 ./internal/rpccli/... ./internal/wrkqapi/ ./internal/workrpc/... ./internal/cli/ ./internal/scope/ green; handoff create/get/list/ack byte-match legacy wrkq across output modes; server receives explicit scope/actor + reads no ASP_* env (asserted). daedalus ruling hrcchat#10211 (T-05117)"
+  evidence: "go test -tags sqlite_fts5 ./internal/rpccli/... ./internal/wrkqapi/ ./internal/workrpc/... ./internal/cli/ ./internal/scope/ green; handoff create/get/list/ack byte-match legacy wrkq across output modes; server receives explicit scope/actor + reads no ASP_* env (asserted); incoherent create scopeRef vs agentId/projectId → WRKQ_VALIDATION with no write/event (asserted). daedalus rulings hrcchat#10211 + #10258 (T-05117)"
 reopen_when:
   - a handoff RPC method begins reading ASP_SCOPE_REF / ASP_HANDLE / ASP_AGENT_ID / ASP_PROJECT
   - the scope resolution precedence or self-scope enforcement rule changes without updating the mirror + parity
   - a new handoff mirror command resolves scope server-side instead of caller-side
   - an authenticated wrkqd adds server-side self-scope validation (revisit the LOW-risk factoring)
+  - the create explicit-param coherence check (scopeRef vs agentId/projectId) is weakened or removed
 supersedes: []
 superseded_by: null

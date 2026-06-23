@@ -300,6 +300,24 @@ func validateHandoffCreate(p HandoffCreateParams) (scope.ResolvedScope, error) {
 	canonical := strings.TrimSpace(p.ScopeRef)
 	if canonical == "" {
 		canonical = "agent:" + agentID + ":project:" + projectID
+	} else {
+		// Protocol integrity (NOT authenticated self-scope enforcement): when an
+		// explicit scopeRef is supplied it must be internally coherent with
+		// agentId/projectId — i.e. describe the SAME canonical project scope. The
+		// server can prove this from the params alone (no env, no auth), so an
+		// inconsistent tuple is rejected rather than silently stored, where it
+		// would corrupt scope filtering, idempotency scope, and event payloads.
+		parsed, err := scope.ParseScopeRef(canonical)
+		if err != nil {
+			return scope.ResolvedScope{}, NewValidationError(
+				"invalid scopeRef: "+err.Error(),
+				map[string]any{"field": "scopeRef", "scopeRef": canonical})
+		}
+		if parsed.AgentID != agentID || parsed.ProjectID != projectID {
+			return scope.ResolvedScope{}, NewValidationError(
+				"scopeRef must describe the same canonical project scope as agentId/projectId",
+				map[string]any{"field": "scopeRef", "scopeRef": canonical, "agentId": agentID, "projectId": projectID})
+		}
 	}
 	return scope.ResolvedScope{
 		AgentID:      agentID,

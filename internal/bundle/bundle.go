@@ -725,7 +725,12 @@ func exportTaskTx(db queryRower, taskUUID string) (string, error) {
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var createdAt, updatedAt string
 	var etag int64
-	var projectUUID, createdByUUID, updatedByUUID string
+	var projectUUID string
+	// created_by/updated_by actor UUIDs are NULLABLE: a write by a caller principal
+	// with no legacy actor row (e.g. --as agent:flag-principal) records a principal
+	// ref but no actor uuid, so these columns can legitimately be NULL (legacy
+	// parity). Scanning into *string avoids a NULL→string scan crash on export.
+	var createdByUUID, updatedByUUID *string
 
 	err := db.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
@@ -743,10 +748,14 @@ func exportTaskTx(db queryRower, taskUUID string) (string, error) {
 		return "", fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// Get actor slugs
+	// Get actor slugs (best-effort display; empty when no actor uuid / no row).
 	var createdBySlug, updatedBySlug string
-	_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-	_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+	if createdByUUID != nil {
+		_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *createdByUUID).Scan(&createdBySlug)
+	}
+	if updatedByUUID != nil {
+		_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *updatedByUUID).Scan(&updatedBySlug)
+	}
 
 	// Get project info
 	var projectID string

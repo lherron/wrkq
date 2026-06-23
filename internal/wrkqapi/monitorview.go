@@ -110,6 +110,13 @@ type MonitorEventsViewParams struct {
 	EventTypes []string `json:"eventTypes,omitempty"`
 	Cursor     int64    `json:"cursor"`
 	Limit      int      `json:"limit,omitempty"`
+	// LastN, when > 0, makes eventsView a START-CURSOR RESOLUTION call for the
+	// `--last N` replay: it returns HighWater = the legacy start cursor
+	// (COALESCE(MIN(id),0)-1 over the last N EXISTING event_log rows by id) with an
+	// empty page. The client then streams forward from that cursor applying its
+	// selectors/filters, exactly as legacy does. This resolves the cursor from
+	// actual row identity (gap-independent), not high_water-N arithmetic.
+	LastN int64 `json:"lastN,omitempty"`
 }
 
 // MonitorStateViewParams carries the watched task selectors and the --until
@@ -144,6 +151,26 @@ const monitorMaxPageLimit = 1000
 func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) (*WrkqMonitorEventsView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+
+	// `--last N` start-cursor resolution (server-owned row identity, NOT client
+	// arithmetic): the legacy predicate is COALESCE(MIN(id),0)-1 over the last N
+	// EXISTING event_log rows by id DESC — gap-independent, unlike high_water-N.
+	// Returns the cursor only (empty page); the client streams forward from it
+	// applying selectors/filters, exactly as legacy does (daedalus #10262, T-05115).
+	if p.LastN > 0 {
+		var cur sql.NullInt64
+		if err := a.db.QueryRowContext(ctx,
+			`SELECT COALESCE(MIN(id), 0) - 1 FROM (SELECT id FROM event_log ORDER BY id DESC LIMIT ?)`,
+			p.LastN,
+		).Scan(&cur); err != nil {
+			return nil, NewInternalError(fmt.Errorf("resolve last-%d cursor: %w", p.LastN, err))
+		}
+		start := int64(0)
+		if cur.Valid && cur.Int64 > 0 {
+			start = cur.Int64
+		}
+		return &WrkqMonitorEventsView{Items: []WrkqMonitorEvent{}, HighWater: start}, nil
 	}
 
 	uuids, friendlyIDs, err := a.resolveMonitorSelectors(p.Tasks)

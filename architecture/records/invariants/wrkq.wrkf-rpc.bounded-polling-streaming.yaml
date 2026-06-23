@@ -26,6 +26,15 @@ predicate: >
   per-event / terminal NDJSON is emitted ONLY by wrkq-rpccli after RPC-frame decode. The
   raw tail (watch / monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape: INCLUDES
   resource_id, STRING timestamp, nullable resource_uuid), DISTINCT from WrkqLogEvent.
+
+  The `--last N` replay start cursor is resolved SERVER-SIDE from actual row IDENTITY:
+  eventsView with lastN>0 returns the legacy predicate COALESCE(MIN(id),0)-1 over the last
+  N EXISTING event_log rows (by id DESC) as the high-water cursor with an empty page; the
+  client then streams forward from it applying its selectors/filters. This is
+  GAP-INDEPENDENT: event_log.id is monotonic AUTOINCREMENT identity but is NOT assumed
+  gap-free, so the client MUST NOT compute the start cursor as high_water-N arithmetic
+  (which under-replays when the last N rows span an id gap). No implicit event_log.id
+  contiguity invariant exists or may be relied upon (daedalus ruling #10262).
 authority:
   repo: wrkq
   surface: wrkq.monitor.eventsView / wrkq.monitor.stateView / wrkq.history.tailView
@@ -38,17 +47,18 @@ source:
 required_tests:
   - internal/rpccli/parity_test.go              # TestParity/monitor/*, TestParity/watch/*
   - internal/rpccli/transport_test.go           # TestTransportEquivalence_InProcVsSubprocess (eventsView/stateView/tailView arms)
-  - internal/wrkqapi/monitorview_test.go        # TestMonitorEventsView_* / TestMonitorStateView_* / TestHistoryTailView_*
+  - internal/wrkqapi/monitorview_test.go        # TestMonitorEventsView_* (incl. _LastNGapIndependent: --last N start cursor = MIN(id)-1 over last N existing rows, gap-independent) / TestMonitorStateView_* / TestHistoryTailView_*
   - internal/wrkqapi/catview_fingerprint_test.go # TestMonitorViewDTOFingerprint, TestHistoryTailViewDTOFingerprint
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (eventsView/stateView/tailView + DTOs)
 last_verified:
   date: 2026-06-23
-  evidence: "go test internal/rpccli + internal/wrkqapi + internal/workrpc green (T-05115 / T-05116)"
+  evidence: "go test internal/rpccli + internal/wrkqapi + internal/workrpc green (T-05115 / T-05116); --last N start cursor server-resolved from row identity (MIN(id)-1 over last N existing rows), gap-independence asserted by TestMonitorEventsView_LastNGapIndependent. daedalus rulings hrcchat#10211 + #10262"
 reopen_when:
   - a server push / subscribe / long-lived stream is introduced for monitor or watch
   - the server is given ownership of the timeout/stall clocks or the terminal NDJSON line
   - the per-page server cap (monitorMaxPageLimit) is removed or made client-controlled
   - stateView is allowed to sleep / poll / emit terminal lines (it must stay a single snapshot)
   - the raw tail is changed to reuse WrkqLogEvent (it must stay the watchEvent shape)
+  - the `--last N` start cursor is computed by client arithmetic (high_water-N) instead of server-side row identity, or any code begins assuming event_log.id is gap-free
 supersedes: []
 superseded_by: null

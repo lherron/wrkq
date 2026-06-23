@@ -57,6 +57,33 @@ func TestMonitorEventsView_SelectorResolution(t *testing.T) {
 	}
 }
 
+// TestMonitorEventsView_LastNGapIndependent covers daedalus's T-05115 condition:
+// `--last N` must resolve the start cursor from the last N EXISTING event_log rows
+// by id identity (COALESCE(MIN(id),0)-1), NOT high_water-N arithmetic which
+// under-replays when those rows span an id gap. With ids {1,2,3,5,7} (gaps at 4,6)
+// the last 3 existing rows are {3,5,7}, so the cursor is MIN(3,5,7)-1 = 2; the
+// broken high_water-N arithmetic would give 7-3 = 4 and drop event id 3.
+func TestMonitorEventsView_LastNGapIndependent(t *testing.T) {
+	api, _ := newMonitorAPI(t)
+	for _, eid := range []int64{1, 2, 3, 5, 7} {
+		if _, err := api.db.Exec(
+			`INSERT INTO event_log (id, resource_type, event_type) VALUES (?, 'system', 'test.event')`, eid,
+		); err != nil {
+			t.Fatalf("seed event id %d: %v", eid, err)
+		}
+	}
+	view, err := api.MonitorEventsView(context.Background(), MonitorEventsViewParams{LastN: 3})
+	if err != nil {
+		t.Fatalf("MonitorEventsView lastN: %v", err)
+	}
+	if view.HighWater != 2 {
+		t.Errorf("last-3 start cursor: want 2 (MIN(3,5,7)-1, gap-independent); got %d (high_water-N arithmetic would wrongly give 4)", view.HighWater)
+	}
+	if len(view.Items) != 0 {
+		t.Errorf("lastN cursor-resolution returns an empty page; got %d items", len(view.Items))
+	}
+}
+
 // TestMonitorEventsView_TaskMatchAndCursor proves task.* events are matched by
 // resource_uuid and the high-water cursor advances to the last RAW row scanned
 // (even when later rows are filtered out), so the client never re-scans.

@@ -250,6 +250,40 @@ func TestWrkqWebhookAdd_EventAttribution(t *testing.T) {
 }
 
 // TestWrkqWebhookAdd_StaleEtagConflict: the OPTIONAL expectEtag CAS rejects a stale
+// TestWrkqWebhookAdd_ExactAttribution covers daedalus's T-05119 condition: a
+// caller-supplied canonical principal (--as agent:flag-principal, no legacy actor
+// row) must be recorded EXACTLY — both the container.updated event principal_ref
+// and the root container's updated_by_principal_ref — not coerced to wrkq-system.
+func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	rootUUID := g1RootUUID(t, dbPath)
+
+	frames := p2Run(t, dbPath,
+		mkRPC("w1", "wrkq.webhook.add", map[string]any{"url": "https://attr.test/wrkq", "actor": "agent:flag-principal"}),
+	)
+	p2ResultOrFail(t, frames[1], "webhook.add exact-attribution")
+
+	_, _, principalRef := g1LatestEvent(t, dbPath, "container.updated", rootUUID)
+	if principalRef != "agent:flag-principal" {
+		t.Errorf("event principal_ref: want agent:flag-principal, got %q", principalRef)
+	}
+	if got := g1ContainerField(t, dbPath, rootUUID, "updated_by_principal_ref"); got != "agent:flag-principal" {
+		t.Errorf("root updated_by_principal_ref: want agent:flag-principal, got %q", got)
+	}
+
+	// Bare compat slug normalizes to agent:<slug> (same as legacy --as <slug>).
+	frames2 := p2Run(t, dbPath,
+		mkRPC("w2", "wrkq.webhook.add", map[string]any{"url": "https://attr2.test/wrkq", "actor": "bareslug"}),
+	)
+	p2ResultOrFail(t, frames2[1], "webhook.add bare-slug attribution")
+	if _, _, pr := g1LatestEvent(t, dbPath, "container.updated", rootUUID); pr != "agent:bareslug" {
+		t.Errorf("bare-slug event principal_ref: want agent:bareslug, got %q", pr)
+	}
+}
+
 // etag with WRKQ_CONFLICT (the CLI mirror never sends it, so legacy no-CAS
 // last-writer-wins is preserved; raw RPC callers may opt in to reduce that risk).
 func TestWrkqWebhookAdd_StaleEtagConflict(t *testing.T) {

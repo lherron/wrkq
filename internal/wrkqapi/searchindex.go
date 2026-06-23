@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/search"
 	"github.com/lherron/wrkq/internal/search/embed"
 	"github.com/lherron/wrkq/internal/search/indexdb"
@@ -194,6 +195,20 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 	if strings.TrimSpace(p.Query) == "" {
 		return nil, NewValidationError("search query is required", map[string]any{"field": "query"})
 	}
+	// Compat normalization (server-owned, mirrors FindListView): the caller passes
+	// the raw --assignee token (bare agent slug OR canonical ref); the server
+	// canonicalizes it to a principal ref so the effective filter matches legacy
+	// BEFORE search.Service compares rows. NormalizeCompat is idempotent on
+	// already-canonical refs, so a canonical --assignee agent:clod also works.
+	assigneePrincipalRef := strings.TrimSpace(p.AssigneePrincipalRef)
+	if assigneePrincipalRef != "" {
+		ref, nerr := attribution.NormalizeCompat(assigneePrincipalRef)
+		if nerr != nil {
+			return nil, NewValidationError("failed to resolve assignee: "+nerr.Error(), map[string]any{"field": "assignee"})
+		}
+		assigneePrincipalRef = ref
+	}
+
 	idx, err := a.openSidecar()
 	if err != nil {
 		return nil, err
@@ -209,7 +224,7 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 		Paths:                p.Paths,
 		State:                p.State,
 		Kind:                 p.Kind,
-		AssigneePrincipalRef: p.AssigneePrincipalRef,
+		AssigneePrincipalRef: assigneePrincipalRef,
 		Limit:                p.Limit,
 		CandidateLimit:       p.CandidateLimit,
 		Fresh:                p.Fresh,

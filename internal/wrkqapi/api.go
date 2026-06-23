@@ -77,27 +77,46 @@ func WithSearch(cfg SearchConfig) Option {
 const systemActorUUID = "00000000-0000-4000-8000-0000000000a0"
 
 // attributionFor resolves a write attribution for the given actor selector.
-// It accepts an actor UUID or slug; unknown/empty selectors fall back to the
-// built-in wrkq-system actor so writes always carry a valid agent:<id>
-// principal ref.
+// It accepts an actor UUID, a canonical principal ref (agent:<id>), or a bare
+// compat slug, and records the SAME caller-resolved principal legacy would
+// record (--as agent:x -> agent:x; bare slug -> agent:<slug>) WITHOUT requiring
+// a legacy actor row. A legacy actor row, when present, backfills the display
+// UUID. Only a truly empty selector (no actor, no default) falls back to the
+// built-in wrkq-system actor (daedalus #10261, T-05119).
 func (a *API) attributionFor(actor string) attribution.Attribution {
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
-		actor = a.defaultActor
+		actor = strings.TrimSpace(a.defaultActor)
 	}
-	if actor != "" {
-		var uuid, slug string
-		err := a.db.QueryRow(
-			"SELECT uuid, slug FROM actors WHERE uuid = ? OR slug = ? LIMIT 1",
-			actor, actor,
-		).Scan(&uuid, &slug)
-		if err == nil {
-			u := uuid
-			return attribution.Attribution{PrincipalRef: "agent:" + slug, LegacyActorUUID: &u}
-		}
+	if actor == "" {
+		u := systemActorUUID
+		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}
 	}
-	u := systemActorUUID
-	return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}
+	// A UUID selector resolves directly off the actor row (canonical principal +
+	// legacy uuid).
+	var uuid, slug string
+	if err := a.db.QueryRow(
+		"SELECT uuid, slug FROM actors WHERE uuid = ? LIMIT 1", actor,
+	).Scan(&uuid, &slug); err == nil {
+		u := uuid
+		return attribution.Attribution{PrincipalRef: "agent:" + slug, LegacyActorUUID: &u}
+	}
+	// Otherwise resolve the caller selector to a principal ref the way legacy does
+	// (attribution.NormalizeCompat), preserving canonical attribution even when no
+	// legacy actor row exists; best-effort backfill the display UUID by slug.
+	principal, err := attribution.NormalizeCompat(actor)
+	if err != nil {
+		u := systemActorUUID
+		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}
+	}
+	attr := attribution.Attribution{PrincipalRef: principal}
+	var u string
+	if err := a.db.QueryRow(
+		"SELECT uuid FROM actors WHERE slug = ? LIMIT 1", attribution.PrincipalHandle(principal),
+	).Scan(&u); err == nil {
+		attr.LegacyActorUUID = &u
+	}
+	return attr
 }
 
 // ─── shared canonical request hashing ────────────────────────────────────────

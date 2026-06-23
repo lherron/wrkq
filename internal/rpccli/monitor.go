@@ -514,20 +514,25 @@ func monitorHighWater(ctx context.Context, tr Transport) (int64, error) {
 	}
 }
 
-// cursorForLastEvents resolves the start cursor for `--last N`: it walks the
-// ASCENDING tail to learn the high-water, then returns high_water-N (clamped at 0)
-// so the next stream replays the last N events. (Legacy computed MIN(id)-1 over the
-// last N rows DESC; high_water-N is equivalent for the contiguous-id event_log.)
+// cursorForLastEvents resolves the start cursor for `--last N` by asking the
+// SERVER to compute it from actual row identity — the legacy predicate
+// COALESCE(MIN(id),0)-1 over the last N EXISTING event_log rows. This is
+// gap-independent; the previous high_water-N arithmetic under-replayed when the
+// last N rows spanned an event_log id gap (daedalus #10262, T-05115). The server
+// returns the cursor as high_water (empty page); the stream then replays forward
+// from it applying selectors/filters, exactly as legacy does.
 func cursorForLastEvents(ctx context.Context, tr Transport, n int64) (int64, error) {
-	hw, err := monitorHighWater(ctx, tr)
+	raw, err := tr.Call(ctx, "wrkq.monitor.eventsView", map[string]any{"lastN": n})
 	if err != nil {
-		return 0, err
+		return 0, monitorStripError(err)
 	}
-	start := hw - n
-	if start < 0 {
-		start = 0
+	var res struct {
+		HighWater int64 `json:"high_water"`
 	}
-	return start, nil
+	if jerr := json.Unmarshal(raw, &res); jerr != nil {
+		return 0, jerr
+	}
+	return res.HighWater, nil
 }
 
 // ──── error / exit helpers ─────────────────────────────────────────────────────
