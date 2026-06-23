@@ -33,7 +33,7 @@ var topLevelCommands = []mirroredCommand{
 	// find is RPC-backed (real parity command); registered separately.
 	{use: "handoff"},
 	{use: "index"},
-	{use: "log <PATHSPEC|ID>"},
+	// log is RPC-backed (real parity command); registered separately.
 	// ls is RPC-backed (real parity command); registered separately.
 	{use: "monitor"},
 	{use: "projects"},
@@ -82,6 +82,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRelationCmd())
 	root.AddCommand(newContainerCmd())
 	root.AddCommand(newAttachCmd())
+	root.AddCommand(newLogCmd())
 	root.AddCommand(newLsCmd())
 	root.AddCommand(newFindCmd())
 	root.AddCommand(newTreeCmd())

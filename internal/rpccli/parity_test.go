@@ -933,6 +933,132 @@ var parityCases = []parityCase{
 		args:  []string{"find", "proj", "--output", "raw"},
 	},
 
+	// log via wrkq.history.listView (server-owned compat history read model over the
+	// generic event_log table — distinct from wrkf.event.query/workflow_events). The
+	// server resolves the caller-scoped target (task/container/actor by friendly ID
+	// T-*/P-*/A- OR UUID), filters since/until, and owns cursor.Apply + limit+1 +
+	// BuildNextCursor over event_log.id DESC. logSeed creates a task (one create
+	// event), a container, and a relation so task + container histories are non-empty.
+	//
+	// Byte-proven modes: --json (incl. empty → null), NDJSON (non-TTY default +
+	// --porcelain), the porcelain next_cursor→stderr contract, --since/--until,
+	// malformed cursor, and every resolution error path. The oneline/detailed/--patch
+	// presentation modes render their Summary/Changes lines by iterating the decoded
+	// payload MAP, which Go randomizes — legacy itself is non-byte-stable for any
+	// multi-key payload (proven: two legacy --patch runs differ), so those modes
+	// CANNOT have a byte-parity fixture. The mirror copies legacy's render code
+	// verbatim (faithful, not narrower); the divergence is documented in
+	// docs/rpc-cli-migration.md, NOT silently degraded and NOT hard-gated (legacy
+	// succeeds, so a gate would be worse parity).
+	{
+		name:  "log/task-id-json",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json"},
+	},
+	{
+		name:  "log/task-id-ndjson-default",
+		setup: logSeed,
+		args:  []string{"log", "T-00001"},
+	},
+	{
+		name:  "log/container-id-json",
+		setup: logSeed,
+		args:  []string{"log", "P-00002", "--json"},
+	},
+	{
+		// Actor (A-*) history. A-00001 is the seeded local-human actor; it has no
+		// event_log rows, so this also proves the empty --json → null path for the
+		// actor resource type (daedalus: don't omit actor history from fixtures).
+		name:  "log/actor-id-empty-json-null",
+		setup: logSeed,
+		args:  []string{"log", "A-00001", "--json"},
+	},
+	{
+		// Empty history NDJSON → no output (legacy `var events []logEvent`).
+		name:  "log/actor-id-empty-ndjson",
+		setup: logSeed,
+		args:  []string{"log", "A-00001"},
+	},
+	{
+		name:  "log/porcelain-limit-next-cursor",
+		setup: logSeedMultiEvent,
+		args:  []string{"log", "P-00002", "--porcelain", "--limit", "1"},
+	},
+	{
+		name:  "log/since-excludes-all",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json", "--since", "2099-01-01"},
+	},
+	{
+		name:  "log/until-excludes-all",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json", "--until", "2000-01-01"},
+	},
+	{
+		name:  "log/since-includes-all",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json", "--since", "2000-01-01"},
+	},
+	{
+		name:  "log/since-invalid-errors",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json", "--since", "not-a-date"},
+	},
+	{
+		name:  "log/until-invalid-errors",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json", "--until", "not-a-date"},
+	},
+	{
+		name:  "log/malformed-cursor-errors",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json", "--cursor", "not-a-valid-cursor"},
+	},
+	{
+		name:  "log/unknown-task-errors",
+		setup: logSeed,
+		args:  []string{"log", "T-09999999", "--json"},
+	},
+	{
+		name:  "log/unknown-container-errors",
+		setup: logSeed,
+		args:  []string{"log", "P-09999999", "--json"},
+	},
+	{
+		name:  "log/unknown-actor-errors",
+		setup: logSeed,
+		args:  []string{"log", "A-09999999", "--json"},
+	},
+	{
+		name:  "log/unknown-uuid-errors",
+		setup: logSeed,
+		args:  []string{"log", "00000000-0000-0000-0000-000000000000", "--json"},
+	},
+	{
+		// PINNED DIVERGENCE: legacy advertises path targets in help but errors today
+		// (path resolution is a TODO). Both binaries error identically.
+		name:  "log/path-target-todo-errors",
+		setup: logSeed,
+		args:  []string{"log", "inbox/log-task", "--json"},
+	},
+	{
+		// Project-root parity: a friendly ID is NOT prefixed by the root (it resolves
+		// the same as without a root), so the history is identical to the root-less run.
+		name:  "log/pr-id-not-prefixed",
+		setup: logSeed,
+		args:  []string{"log", "T-00001", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=inbox"},
+	},
+	{
+		// Project-root parity: a relative/path target IS scoped to <root>/<path>, then
+		// still errors with the legacy scoped path-resolution-TODO message. Proves the
+		// mirror scopes the raw target BEFORE the call (caller semantics).
+		name:  "log/pr-relative-path-scoped-error",
+		setup: logSeed,
+		args:  []string{"log", "deep/thing", "--json"},
+		env:   []string{"WRKQ_PROJECT_ROOT=inbox"},
+	},
+
 	// tree via wrkq.task.treeView (server-owned compat tree projection: recursive
 	// traversal, container pruning, "all done" rollups, subtask nesting, hidden
 	// counting). Only deterministic modes are parity-tested; the pretty/human
@@ -1339,6 +1465,28 @@ var findMixed = [][]string{
 	{"set", "proj/task-a", "--state", "open"},
 	{"set", "proj/task-b", "--state", "open"},
 	{"set", "proj/sub/task-c", "--state", "completed"},
+}
+
+// logSeed builds a fixture for the `log` history read model: a task (one
+// task.created event), a top-level container P-00002 (one container.created
+// event), and a relation (adds a task.relation.created event to the task). The
+// seeded local-human actor A-00001 has no event_log rows, so it is the empty-history
+// fixture. Friendly IDs are deterministic: inbox=P-00001 (seeded), proj=P-00002,
+// the first task=T-00001.
+var logSeed = [][]string{
+	{"touch", "inbox/log-task", "-t", "Log Task", "--priority", "2"},
+	{"mkdir", "proj"},
+	{"touch", "inbox/log-blocker", "-t", "Blocker"},
+	{"relation", "add", "inbox/log-task", "blocks", "inbox/log-blocker"},
+}
+
+// logSeedMultiEvent gives the container P-00002 MORE THAN ONE event_log row
+// (create + a title update + a rename) so the --porcelain --limit 1 case exercises
+// a real next_cursor over event_log.id DESC (page 1 of N, cursor emitted to stderr).
+var logSeedMultiEvent = [][]string{
+	{"mkdir", "proj"},
+	{"container", "set", "proj", "--webhook-urls", `["https://a.test"]`},
+	{"rename-container", "proj", "renamed-proj"},
 }
 
 // treeMixed seeds a project with child containers (one nested deeper) + tasks so
@@ -1783,6 +1931,83 @@ func TestFindCursorReplay(t *testing.T) {
 	}
 	if len(oldAll) != 5 || len(newAll) != 5 {
 		t.Errorf("expected 5 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
+	}
+}
+
+// TestLogCursorReplay proves the `log` history read-model cursor contract over the
+// event_log id-DESC ordering: cursor replay across page boundaries, per-page byte
+// parity old-vs-new, and no-dup/no-miss (concatenated pages equal the unpaginated
+// history). daedalus REQUIRES this distinct from the first-page parity case. The
+// container target accumulates several event_log rows (create + title update +
+// rename) so paging over id DESC is genuinely exercised. NDJSON is the comparison
+// substrate (deterministic; the oneline/detailed/--patch Summary lines iterate a
+// payload map and are non-byte-stable in legacy itself).
+func TestLogCursorReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	// proj = P-00002 (inbox is P-00001). Four container events: created, updated
+	// (webhook a), updated (webhook b), updated (rename) → ids DESC paginate 2,2.
+	setup := [][]string{
+		{"mkdir", "proj"},
+		{"container", "set", "proj", "--webhook-urls", `["https://a.test"]`},
+		{"container", "set", "proj", "--webhook-urls", `["https://b.test"]`},
+		{"rename-container", "proj", "renamed"},
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	paginateAll := func(bin, dir string) (all, pages []string) {
+		cur := ""
+		for {
+			args := []string{"log", "P-00002", "--porcelain", "--limit", "2"}
+			if cur != "" {
+				args = append(args, "--cursor", cur)
+			}
+			res := runCLI(t, bin, dir, args)
+			if res.exit != 0 {
+				t.Fatalf("%s page (cursor=%q) exit %d: %s", bin, cur, res.exit, res.stderr)
+			}
+			all = append(all, nonEmptyLines(res.stdout)...)
+			pages = append(pages, normalize(res.stdout)+"\x1e"+res.stderr)
+			next := extractCursor(res.stderr)
+			if next == "" {
+				break
+			}
+			cur = next
+			if len(pages) > 20 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+		return all, pages
+	}
+
+	oldAll, oldPages := paginateAll(bins.wrkq, oldDir)
+	newAll, newPages := paginateAll(bins.mirror, newDir)
+
+	if len(oldPages) != len(newPages) {
+		t.Fatalf("page count: old=%d new=%d", len(oldPages), len(newPages))
+	}
+	for i := range oldPages {
+		if oldPages[i] != newPages[i] {
+			t.Errorf("page %d bytes differ:\n old: %q\n new: %q", i, oldPages[i], newPages[i])
+		}
+	}
+
+	oldFull := nonEmptyLines(normalize(runCLI(t, bins.wrkq, oldDir, []string{"log", "P-00002"}).stdout))
+	newFull := nonEmptyLines(normalize(runCLI(t, bins.mirror, newDir, []string{"log", "P-00002"}).stdout))
+	oldAllN := nonEmptyLines(normalize(strings.Join(oldAll, "\n")))
+	newAllN := nonEmptyLines(normalize(strings.Join(newAll, "\n")))
+	if strings.Join(oldAllN, "\n") != strings.Join(oldFull, "\n") {
+		t.Errorf("OLD paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", oldAllN, oldFull)
+	}
+	if strings.Join(newAllN, "\n") != strings.Join(newFull, "\n") {
+		t.Errorf("NEW paginated != unpaginated (dup/miss):\n paged: %v\n full: %v", newAllN, newFull)
+	}
+	if len(oldAll) != 4 || len(newAll) != 4 {
+		t.Errorf("expected 4 rows across pages: old=%d new=%d", len(oldAll), len(newAll))
 	}
 }
 

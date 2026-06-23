@@ -289,6 +289,7 @@ wrkq.task.findListView [CLI compatibility list projection — see note]
 wrkq.task.treeView    [CLI compatibility tree projection — see note]
 wrkq.task.blockedView [CLI compatibility projection — see note]
 wrkq.task.inboxView   [CLI compatibility list projection — see note]
+wrkq.history.listView [CLI compatibility history read model — see note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
 wrkq.task.acknowledge
@@ -352,6 +353,37 @@ wrkq.task.restore
 > The CLI owns ONLY byte rendering (json / ndjson / porcelain); the interactive
 > pretty/human renderer is TTY-only and not mirrored (non-deterministic
 > `opened N ago` + ANSI). Cataloged + fingerprinted (TestTreeViewDTOFingerprint).
+
+> **`wrkq.history.listView`** is the CLI compatibility **history read model** for
+> `wrkq log`, **not** `wrkf.event.query`. It reads the generic `event_log` table
+> (the durable per-resource change log); `wrkf.event.query` reads `workflow_events`
+> (typed to `workflow.transitioned`) and is NOT the substrate here. It is also NOT
+> a canonical event-stream API — it exists solely to reproduce legacy `wrkq log`.
+> The server owns resource resolution: the already-CALLER-scoped `target` resolves
+> to exactly one `(resource_type, resource_uuid)` among task/container/actor, by
+> friendly ID (`T-*`/`P-*`/`A-*`) AND UUID — actor (`A-*`) history included. It also
+> owns `since`/`until` filtering (legacy time-format parsing + error text) and
+> `cursor.Apply` + `limit+1` + `BuildNextCursor` over `event_log.id DESC` (cursor
+> sort `[id]` over `e.id`). Server default `limit=50` (`0`=unlimited) is applied in
+> the registry handler ONLY when the caller omits `limit`; the mirror always sends
+> the flag value so legacy byte parity holds. Params:
+> `{ target, since?, until?, limit?, cursor? }` →
+> `WrkqHistoryListView{ items: WrkqLogEvent[], next_cursor }`. `WrkqLogEvent` is in
+> LEGACY STRUCT ORDER (NOT alphabetical):
+> `{ id, timestamp, actor_uuid?, actor_slug?, actor_id?, principal_ref?, scope_ref?,
+> resource_type, resource_uuid, event_type, etag?, payload? }`. `payload` stays a
+> raw STRING (not parsed JSON); `--patch` is rendered CLIENT-side from it (no extra
+> RPC, no server-side patch projection). Empty history encodes `--json` as `null`
+> (legacy `var events []logEvent`), NOT `[]`. PINNED DIVERGENCE: path-target
+> resolution is a legacy TODO (path args error today); the server reproduces the
+> exact `path resolution not yet implemented: <target>` message and does NOT add
+> path resolution. Legacy error wrapping is reproduced: the view returns the full
+> `failed to resolve resource: …` / `failed to query event log: …` text
+> (prefixLogError preserves the domain code; the mirror strips the code prefix).
+> Project-root is CALLER-scoped (the mirror scopes the raw target before sending;
+> the view never reads project-root env/flags). Compat read model, not a canonical
+> resource. Cataloged + fingerprinted (TestHistoryListViewDTOFingerprint;
+> registering it changes the method catalog and `protocolSchemaHash`).
 
 > **`wrkq.task.catView` is a CLI compatibility read model, not a domain
 > resource.** Unlike `wrkq.task.show` (the stable camelCase `WrkqTask` DTO), it

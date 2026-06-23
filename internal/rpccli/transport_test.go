@@ -299,6 +299,21 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 		t.Errorf("task.inboxView transport results differ:\n in-process: %s\n subprocess: %s", inInbox, subInbox)
 	}
 
+	// history.listView (the `log` compat history read model over event_log) must
+	// agree across transports. The seed task has at least its create event, so the
+	// history is non-empty; target it by friendly ID with the server default limit.
+	inHist, err := inproc.Call(context.Background(), "wrkq.history.listView", map[string]any{"target": taskID})
+	if err != nil {
+		t.Fatalf("in-process history.listView: %v", err)
+	}
+	subHist, err := sub.Call(ctx, "wrkq.history.listView", map[string]any{"target": taskID})
+	if err != nil {
+		t.Fatalf("subprocess history.listView: %v", err)
+	}
+	if !jsonEqual(t, inHist, subHist) {
+		t.Errorf("history.listView transport results differ:\n in-process: %s\n subprocess: %s", inHist, subHist)
+	}
+
 	// task.lsView multi-path form ("paths") — the server owns the per-path query
 	// plus the combined merge-sort — must also agree across transports.
 	inLsM, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}})

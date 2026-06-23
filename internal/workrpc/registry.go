@@ -113,6 +113,7 @@ var methodCatalog = []string{
 	"wrkq.task.list",
 	"wrkq.task.lsView",
 	"wrkq.task.findListView",
+	"wrkq.history.listView",
 	"wrkq.task.treeView",
 	"wrkq.task.blockedView",
 	"wrkq.task.inboxView",
@@ -208,6 +209,8 @@ var dtoCatalog = []string{
 	"WrkqAttachmentListView", // CLI compatibility list projection (attach ls)
 	"WrkqLsListView",         // CLI compatibility list projection (ls)
 	"WrkqFindListView",       // CLI compatibility list projection (find)
+	"WrkqHistoryListView",    // CLI compatibility history read model (log over event_log); nested WrkqLogEvent is part of this DTO
+	"WrkqLogEvent",           // element of history.listView (the legacy logEvent row shape)
 	"WrkqTreeView",           // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
 	"WrkqTaskBlockedView",    // CLI compatibility projection (check blocked); nested WrkqTaskBlockedEntry is part of this DTO
 	"WrkqInboxView",          // CLI compatibility list projection (check-inbox); nested WrkqInboxEntry is part of this DTO
@@ -263,6 +266,7 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.task.findListView", apiHandler(func(ctx context.Context, p wrkqapi.FindListViewParams) (any, error) {
 		return wq.FindListView(ctx, p)
 	}))
+	s.Register("wrkq.history.listView", historyListViewHandler(wq))
 	s.Register("wrkq.task.treeView", apiHandler(func(ctx context.Context, p wrkqapi.TreeViewParams) (any, error) {
 		return wq.TreeView(ctx, p)
 	}))
@@ -529,6 +533,34 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		p.Adapter = defaultString(p.Adapter, opts.DefaultActor)
 		return api.EffectDeliver(ctx, p)
 	}))
+}
+
+// historyListViewHandler wires wrkq.history.listView, owning the server default
+// limit = 50 (0 = unlimited). The default applies ONLY when the caller omits the
+// `limit` key entirely; an explicit 0 stays unlimited. The mirror always sends the
+// flag value (legacy default 50) so legacy byte parity holds regardless, while a
+// raw RPC caller that omits limit still gets the documented server default.
+func historyListViewHandler(wq *wrkqapi.API) HandlerFunc {
+	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		var p wrkqapi.HistoryListViewParams
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		var probe struct {
+			Limit *int `json:"limit"`
+		}
+		if len(raw) > 0 && string(raw) != "null" {
+			_ = json.Unmarshal(raw, &probe)
+		}
+		if probe.Limit == nil {
+			p.Limit = 50
+		}
+		result, err := wq.HistoryListView(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		return marshalResult(result)
+	}
 }
 
 func apiHandler[P any](fn func(context.Context, P) (any, error)) HandlerFunc {

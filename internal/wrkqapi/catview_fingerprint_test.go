@@ -91,6 +91,19 @@ func TestFindListViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestHistoryListViewDTOFingerprint guards the log compat history read-model shapes
+// (same rationale as the cat/ls/find fingerprints). WrkqLogEvent is the legacy
+// logEvent row shape in LEGACY STRUCT ORDER (NOT alphabetical) — payload stays a
+// string, pointer/omitempty match legacy.
+func TestHistoryListViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqHistoryListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLogEvent{}))
+	const want = "WrkqHistoryListView{items,next_cursor,omitempty}\n" +
+		"WrkqLogEvent{id,timestamp,actor_uuid,omitempty,actor_slug,omitempty,actor_id,omitempty,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,event_type,etag,omitempty,payload,omitempty}"
+	if got != want {
+		t.Errorf("history list view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestTreeViewDTOFingerprint guards the tree projection shapes (same rationale as
 // the cat/ls fingerprints). The wire_* carriers are part of the contract: the
 // mirror depends on them to reconstruct legacy's NDJSON stream + JSON `path`.

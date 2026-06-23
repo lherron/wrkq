@@ -58,6 +58,15 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqFindListView") {
 		t.Error("WrkqFindListView missing from dtoCatalog")
 	}
+	if !contains(methodCatalog, "wrkq.history.listView") {
+		t.Error("wrkq.history.listView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqHistoryListView") {
+		t.Error("WrkqHistoryListView missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqLogEvent") {
+		t.Error("WrkqLogEvent missing from dtoCatalog")
+	}
 	if !contains(methodCatalog, "wrkq.task.treeView") {
 		t.Error("wrkq.task.treeView missing from methodCatalog")
 	}
