@@ -16,6 +16,7 @@ import (
 	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/wrkfapi"
+	"github.com/lherron/wrkq/internal/wrkqapi"
 	"github.com/spf13/cobra"
 )
 
@@ -1115,9 +1116,25 @@ func rpcCmd() *cobra.Command {
 			// entrypoint (T-04448 entrypoint equivalence).
 			attachDir := ""
 			attachMaxMB := 0
+			// search host config so the wrkf rpc entrypoint serves the same
+			// server-owned search/index methods as the wrkq entrypoint (T-05114
+			// entrypoint equivalence — the method is registered on BOTH entrypoints).
+			var searchCfg wrkqapi.SearchConfig
 			if cfg, cerr := config.Load(); cerr == nil {
 				attachDir = rpcAttachDir(cfg.AttachDir)
 				attachMaxMB = cfg.AttachmentsMaxMB
+				searchCfg = wrkqapi.SearchConfig{
+					Enabled:          cfg.Search.Enabled,
+					CanonicalDBPath:  a.db.Path(),
+					DBPath:           cfg.Search.DBPath,
+					DenseProvider:    cfg.Search.DenseProvider,
+					DenseBaseURL:     cfg.Search.DenseBaseURL,
+					DenseModel:       cfg.Search.DenseModel,
+					DenseDimension:   cfg.Search.DenseDimension,
+					QueryInstruction: cfg.Search.QueryInstruction,
+					IndexBatchSize:   cfg.Search.IndexBatchSize,
+					CandidateLimit:   cfg.Search.CandidateLimit,
+				}
 			}
 			srv := workrpc.NewServer(os.Stdout)
 			workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
@@ -1129,6 +1146,7 @@ func rpcCmd() *cobra.Command {
 				DefaultRole:      a.role,
 				AttachDir:        attachDir,
 				AttachmentsMaxMB: attachMaxMB,
+				Search:           searchCfg,
 			})
 			return srv.Serve(context.Background(), os.Stdin)
 		}),

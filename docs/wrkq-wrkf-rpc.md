@@ -1223,6 +1223,69 @@ interface WrkqWorkflowTimelineParams { task: string }
 There is no `wrkq.workflow.syncMeta` method. Projection from workflow state to
 task fields happens through `wrkf.transition.apply` as an internal side effect.
 
+#### Search + index methods
+
+```
+wrkq.search.listView    [CLI compatibility search read model — see search note]
+wrkq.index.status       [server-owned sidecar status]
+wrkq.index.update       [server-owned incremental index]
+wrkq.index.rebuild      [server-owned full rebuild]
+wrkq.index.vacuum       [server-owned sidecar VACUUM]
+wrkq.index.pause        [server-owned indexing pause]
+wrkq.index.resume       [server-owned indexing resume]
+```
+
+> **`wrkq.search.*` / `wrkq.index.*`** are the search + index family (T-05114,
+> daedalus hrcchat#10211). The derived `<db>.search.sqlite` sidecar + the dense
+> embedder are SERVER-OWNED and live BEHIND the RPC boundary. The server owns:
+> opening + migrating the sidecar, freshness, FTS5/vec/lexical queries, RRF
+> fusion, canonical filtering, status, and lifecycle mutation. `EnsureLlamaReady`
+> MOVES to the server / index-lifecycle host — `wrkq.index.update` and
+> `wrkq.index.rebuild` kickstart ONLY the SERVER host's configured embedder, NEVER
+> the caller's launchd; if the server cannot ready its embedder, dense
+> degrades/fails per the existing contract and never reaches back to the client.
+> The CLI mirror owns project-root path scoping (paths are pre-scoped before the
+> call) + presentation ONLY; the mirror MUST NOT open the sidecar or call
+> `EnsureLlamaReady` (importguard-proven). The server index path defaults from the
+> server DB config (`<db>.search.sqlite`), overridable by the server's
+> `WRKQ_SEARCH_DB_PATH`. When search is disabled the methods report
+> `WRKQ_VALIDATION` "search is disabled".
+>
+> **Field order:** `WrkqSearchListView` reproduces the legacy `search.Response`
+> STRUCT order; `WrkqSearchResult` the legacy `search.Result` STRUCT order;
+> `WrkqIndexStatus` the legacy `indexdb.Status` STRUCT order (NOT alphabetical —
+> these are legacy struct-marshal shapes). The lifecycle methods
+> (update/rebuild/vacuum/pause/resume) return LEGACY map-shaped acks whose JSON
+> keys are map-ALPHABETICAL (`rebuilt`/`status`, `updated`/`status`, `vacuumed`,
+> `status`), with the nested `status` block in `indexdb.Status` struct order.
+
+```ts
+interface WrkqSearchListViewParams {
+  query: string;
+  paths?: string[];               // pre-scoped path prefixes (caller scopes)
+  state?: string;                 // "" → open only; "all" → non-deleted
+  kind?: string;
+  assigneePrincipalRef?: string;
+  limit?: number;                 // default 20
+  candidateLimit?: number;        // default 300
+  sort?: string;                  // "relevance" (default) | "updated_at" | "created_at"
+  reverse?: boolean;
+  fresh?: boolean;                // WRKQ_VALIDATION if stale, rather than stale rows
+  explain?: boolean;
+}
+// → WrkqSearchListView{ query, stale, status, results, total_matches, offset }
+//   results: WrkqSearchResult[] (legacy search.Result struct order)
+//   status:  WrkqIndexStatus    (legacy indexdb.Status struct order)
+
+interface WrkqIndexLifecycleParams { foreground?: boolean }  // rebuild surface parity
+// wrkq.index.status   → WrkqIndexStatus
+// wrkq.index.update   → { status: WrkqIndexStatus, updated: true }   (map-alphabetical)
+// wrkq.index.rebuild  → { rebuilt: true, status: WrkqIndexStatus }   (map-alphabetical)
+// wrkq.index.vacuum   → { vacuumed: true }
+// wrkq.index.pause    → { status: "paused" }
+// wrkq.index.resume   → { status: "ready" }
+```
+
 ### 6.3 wrkf namespace
 
 #### Workflow template registry

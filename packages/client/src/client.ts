@@ -151,6 +151,17 @@ class WorkClientImpl implements WorkClient {
       listView: (p) => this.call("wrkq.handoff.listView", p),
       acknowledge: (p) => this.call("wrkq.handoff.acknowledge", p),
     },
+    search: {
+      listView: (p) => this.call("wrkq.search.listView", p),
+    },
+    index: {
+      status: () => this.call("wrkq.index.status", {}),
+      update: (p) => this.call("wrkq.index.update", p ?? {}),
+      rebuild: (p) => this.call("wrkq.index.rebuild", p ?? {}),
+      vacuum: (p) => this.call("wrkq.index.vacuum", p ?? {}),
+      pause: (p) => this.call("wrkq.index.pause", p ?? {}),
+      resume: (p) => this.call("wrkq.index.resume", p ?? {}),
+    },
     admin: {
       legacyActor: {
         list: (p) => this.call("wrkq.admin.legacyActor.list", p ?? {}),

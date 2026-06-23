@@ -72,7 +72,14 @@ func inProcessTransport(t *testing.T, dbPath string) Transport {
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
-	api, opts, err := bootstrap.Server(database, &config.Config{DBPath: dbPath, AttachmentsMaxMB: 50})
+	cfg := &config.Config{DBPath: dbPath, AttachmentsMaxMB: 50}
+	// Mirror production: pull the env-driven search host settings (search T-05114
+	// tests set WRKQ_SEARCH_* in their env) so the in-process server's search
+	// config matches what `wrkq rpc --stdio` would build from config.Load().
+	if loaded, lerr := config.Load(); lerr == nil {
+		cfg.Search = loaded.Search
+	}
+	api, opts, err := bootstrap.Server(database, cfg)
 	if err != nil {
 		_ = database.Close()
 		t.Fatalf("bootstrap.Server: %v", err)

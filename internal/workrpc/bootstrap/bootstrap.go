@@ -18,6 +18,7 @@ import (
 	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/wrkfapi"
+	"github.com/lherron/wrkq/internal/wrkqapi"
 )
 
 // Server builds the wrkf API and registry options for an already-open database
@@ -47,6 +48,7 @@ func Server(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.Registry
 		DefaultRole:      os.Getenv("WRKF_ROLE"),
 		AttachDir:        AttachDir(cfg.AttachDir),
 		AttachmentsMaxMB: cfg.AttachmentsMaxMB,
+		Search:           SearchConfig(cfg, database.Path()),
 	}
 	return api, opts, nil
 }
@@ -100,6 +102,26 @@ func Open(dbPathOverride string) (*Handle, error) {
 		return nil, err
 	}
 	return &Handle{DB: database, API: api, Opts: opts, Config: cfg}, nil
+}
+
+// SearchConfig maps the loaded config's search settings into the server-owned
+// search host configuration. canonicalDBPath is the canonical database path (the
+// sidecar defaults to <path>.search.sqlite). The SERVER owns the derived sidecar
+// + dense embedder; the mirror never opens the sidecar or calls EnsureLlamaReady
+// (T-05114).
+func SearchConfig(cfg *config.Config, canonicalDBPath string) wrkqapi.SearchConfig {
+	return wrkqapi.SearchConfig{
+		Enabled:          cfg.Search.Enabled,
+		CanonicalDBPath:  canonicalDBPath,
+		DBPath:           cfg.Search.DBPath,
+		DenseProvider:    cfg.Search.DenseProvider,
+		DenseBaseURL:     cfg.Search.DenseBaseURL,
+		DenseModel:       cfg.Search.DenseModel,
+		DenseDimension:   cfg.Search.DenseDimension,
+		QueryInstruction: cfg.Search.QueryInstruction,
+		IndexBatchSize:   cfg.Search.IndexBatchSize,
+		CandidateLimit:   cfg.Search.CandidateLimit,
+	}
 }
 
 // DefaultActor mirrors the stdio server's default-actor policy: an explicit

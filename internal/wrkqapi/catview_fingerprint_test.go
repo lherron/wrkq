@@ -261,6 +261,25 @@ func TestTreeViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestSearchIndexViewDTOFingerprint guards the search + index family DTO shapes
+// (T-05114). WrkqSearchListView reproduces the legacy search.Response struct order,
+// WrkqSearchResult the legacy search.Result struct order, and WrkqIndexStatus the
+// legacy indexdb.Status struct order — NOT alphabetical (these are legacy
+// struct-marshal shapes). Any field/tag drift is a PROTOCOL CONTRACT change and
+// must be made deliberately (bump fingerprint, update docs/dtoCatalog, re-verify
+// search/index parity).
+func TestSearchIndexViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqSearchListView{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqSearchResult{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqIndexStatus{}))
+	const want = "WrkqSearchListView{query,stale,status,results,total_matches,offset}\n" +
+		"WrkqSearchResult{resource_type,resource_id,resource_uuid,task_id,omitempty,task_uuid,omitempty,comment_id,omitempty,scope_ref,omitempty,status,omitempty,path,title,state,omitempty,kind,omitempty,snippet,score,created_at,updated_at,stale,explain,omitempty}\n" +
+		"WrkqIndexStatus{path,enabled,status,last_indexed_event_id,canonical_max_event_id,stale_event_count,dense_model_id,omitempty,dense_dimension,omitempty,dense_vector_count,omitempty,last_error,omitempty,searchable_chunk_count}"
+	if got != want {
+		t.Errorf("search/index DTO shape drifted (protocol contract change):\n got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestLsListViewDTOFingerprint guards the ls projection shapes.
 func TestLsListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqLsListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLsEntry{}))

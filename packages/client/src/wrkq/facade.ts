@@ -40,6 +40,12 @@ import type {
   WrkqHandoffGetParams,
   WrkqHandoffListResult,
   WrkqHandoffListViewParams,
+  WrkqIndexLifecycleParams,
+  WrkqIndexRebuildResult,
+  WrkqIndexStateResult,
+  WrkqIndexStatus,
+  WrkqIndexUpdateResult,
+  WrkqIndexVacuumResult,
   WrkqLegacyActor,
   WrkqLegacyActorCreateParams,
   WrkqLegacyActorListParams,
@@ -50,6 +56,8 @@ import type {
   WrkqRelationListParams,
   WrkqRelationListResult,
   WrkqRelationRemoveParams,
+  WrkqSearchListView,
+  WrkqSearchListViewParams,
   WrkqTask,
   WrkqTaskAcknowledgeParams,
   WrkqTaskCopyParams,
@@ -179,6 +187,29 @@ export interface WrkqHandoffFacade {
   acknowledge(params: WrkqHandoffAcknowledgeParams): Promise<WrkqHandoff>;
 }
 
+/**
+ * wrkq.search.* — the server-owned search read surface (T-05114). The SERVER owns
+ * the derived sidecar + dense embedder; the client owns ONLY project-root path
+ * scoping (paths pre-scoped) + presentation, NEVER the sidecar.
+ */
+export interface WrkqSearchFacade {
+  listView(params: WrkqSearchListViewParams): Promise<WrkqSearchListView>;
+}
+
+/**
+ * wrkq.index.* — the server-owned search index lifecycle (T-05114). update/rebuild
+ * kickstart ONLY the server host's configured embedder (EnsureLlamaReady) — never
+ * the caller's. The client owns presentation only.
+ */
+export interface WrkqIndexFacade {
+  status(): Promise<WrkqIndexStatus>;
+  update(params?: WrkqIndexLifecycleParams): Promise<WrkqIndexUpdateResult>;
+  rebuild(params?: WrkqIndexLifecycleParams): Promise<WrkqIndexRebuildResult>;
+  vacuum(params?: WrkqIndexLifecycleParams): Promise<WrkqIndexVacuumResult>;
+  pause(params?: WrkqIndexLifecycleParams): Promise<WrkqIndexStateResult>;
+  resume(params?: WrkqIndexLifecycleParams): Promise<WrkqIndexStateResult>;
+}
+
 export interface WrkqFacade {
   readonly task: WrkqTaskFacade;
   readonly comment: WrkqCommentFacade;
@@ -188,6 +219,8 @@ export interface WrkqFacade {
   readonly webhook: WrkqWebhookFacade;
   readonly workflow: WrkqWorkflowFacade;
   readonly handoff: WrkqHandoffFacade;
+  readonly search: WrkqSearchFacade;
+  readonly index: WrkqIndexFacade;
   readonly admin: WrkqAdminFacade;
   readonly bundle: WrkqBundleFacade;
 }

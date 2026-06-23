@@ -20,6 +20,14 @@ type RegistryOptions struct {
 	DefaultRole      string
 	AttachDir        string
 	AttachmentsMaxMB int
+
+	// Search carries the SERVER-owned search/index host configuration (T-05114).
+	// The server owns the derived <db>.search.sqlite sidecar + dense embedder
+	// behind wrkq.search.listView / wrkq.index.*; the mirror NEVER opens the
+	// sidecar or calls EnsureLlamaReady. Zero-value (Enabled=false) disables the
+	// search host (search/index methods report WRKQ_VALIDATION "search is
+	// disabled"). bootstrap.Server populates this from config.SearchConfig.
+	Search wrkqapi.SearchConfig
 }
 
 func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
@@ -165,6 +173,13 @@ var methodCatalog = []string{
 	"wrkq.handoff.get",
 	"wrkq.handoff.listView",
 	"wrkq.handoff.acknowledge",
+	"wrkq.search.listView",
+	"wrkq.index.status",
+	"wrkq.index.update",
+	"wrkq.index.rebuild",
+	"wrkq.index.vacuum",
+	"wrkq.index.pause",
+	"wrkq.index.resume",
 	"wrkf.workflow.validate",
 	"wrkf.workflow.show",
 	"wrkf.workflow.list",
@@ -256,6 +271,9 @@ var dtoCatalog = []string{
 	"WrkqHandoff",             // handoff resource DTO (legacy handoffJSON field order)
 	"WrkqHandoffCreateResult", // wrkq.handoff.create envelope (handoff + idempotentReplay)
 	"WrkqHandoffListResult",   // wrkq.handoff.listView page envelope
+	"WrkqSearchListView",      // CLI compatibility search read model (search); nested WrkqSearchResult + WrkqIndexStatus are part of this DTO
+	"WrkqSearchResult",        // element of search.listView (legacy search.Result struct order)
+	"WrkqIndexStatus",         // CLI compatibility index status projection (index status; legacy indexdb.Status struct order)
 	"WrkfInstance",
 	"WrkfEvent",
 	"WrkfEventQueryResult",
@@ -276,7 +294,7 @@ var dtoCatalog = []string{
 }
 
 func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
-	wq := wrkqapi.New(opts.Database, api, opts.DefaultActor, opts.AttachDir, opts.AttachmentsMaxMB)
+	wq := wrkqapi.New(opts.Database, api, opts.DefaultActor, opts.AttachDir, opts.AttachmentsMaxMB, wrkqapi.WithSearch(opts.Search))
 
 	s.Register("wrkq.task.create", apiHandler(func(ctx context.Context, p wrkqapi.TaskCreateParams) (any, error) {
 		return wq.TaskCreate(ctx, p)
@@ -453,6 +471,31 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.handoff.acknowledge", apiHandler(func(ctx context.Context, p wrkqapi.HandoffAcknowledgeParams) (any, error) {
 		return wq.HandoffAcknowledge(ctx, p)
+	}))
+	// search + index family (T-05114). SERVER-OWNED: the wrkqapi search host opens +
+	// migrates the derived sidecar, builds the host dense embedder, and (for index
+	// update/rebuild) kickstarts ONLY this host's embedder via EnsureLlamaReady. The
+	// mirror NEVER opens the sidecar or calls EnsureLlamaReady.
+	s.Register("wrkq.search.listView", apiHandler(func(ctx context.Context, p wrkqapi.SearchListViewParams) (any, error) {
+		return wq.SearchListView(ctx, p)
+	}))
+	s.Register("wrkq.index.status", apiHandler(func(ctx context.Context, p wrkqapi.IndexStatusParams) (any, error) {
+		return wq.IndexStatus(ctx, p)
+	}))
+	s.Register("wrkq.index.update", apiHandler(func(ctx context.Context, p wrkqapi.IndexLifecycleParams) (any, error) {
+		return wq.IndexUpdate(ctx, p)
+	}))
+	s.Register("wrkq.index.rebuild", apiHandler(func(ctx context.Context, p wrkqapi.IndexLifecycleParams) (any, error) {
+		return wq.IndexRebuild(ctx, p)
+	}))
+	s.Register("wrkq.index.vacuum", apiHandler(func(ctx context.Context, p wrkqapi.IndexLifecycleParams) (any, error) {
+		return wq.IndexVacuum(ctx, p)
+	}))
+	s.Register("wrkq.index.pause", apiHandler(func(ctx context.Context, p wrkqapi.IndexLifecycleParams) (any, error) {
+		return wq.IndexPause(ctx, p)
+	}))
+	s.Register("wrkq.index.resume", apiHandler(func(ctx context.Context, p wrkqapi.IndexLifecycleParams) (any, error) {
+		return wq.IndexResume(ctx, p)
 	}))
 }
 

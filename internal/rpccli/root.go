@@ -36,7 +36,8 @@ var topLevelCommands = []mirroredCommand{
 	// handoff is RPC-backed (wrkq.handoff.create/get/listView/acknowledge; caller-
 	// owned scope resolution + self-scope enforcement client-side; searchView
 	// deferred); registered separately.
-	{use: "index"},
+	// index is RPC-backed (server-owned sidecar lifecycle via wrkq.index.*,
+	// T-05114); registered separately.
 	// log is RPC-backed (real parity command); registered separately.
 	// ls is RPC-backed (real parity command); registered separately.
 	// monitor is RPC-backed (bounded polling via wrkq.monitor.eventsView +
@@ -48,7 +49,8 @@ var topLevelCommands = []mirroredCommand{
 	// seam: task flags server-side, container targets hard-gated); registered separately.
 	// rm is RPC-backed (caller-owned-confirmation seam); registered separately.
 	{use: "rpc --stdio"},
-	{use: "search <query> [PATH...]"},
+	// search is RPC-backed (server-owned wrkq.search.listView, T-05114);
+	// registered separately.
 	{use: "server"},
 	// stat is RPC-backed (real parity command); registered separately.
 	// tree is RPC-backed (real parity command); registered separately.
@@ -107,6 +109,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newHandoffCmd())
 	root.AddCommand(newMonitorCmd())
 	root.AddCommand(newWatchCmd())
+	root.AddCommand(newSearchCmd())
+	root.AddCommand(newIndexCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

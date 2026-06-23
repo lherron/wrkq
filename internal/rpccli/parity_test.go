@@ -63,6 +63,17 @@ type parityCase struct {
 	// agent/project scope env (ASP_SCOPE_REF) since handoff scope is caller-owned;
 	// the seed always uses the LEGACY wrkq binary so both fixtures are byte-identical.
 	seedEnv []string
+	// searchIndex enables a DETERMINISTIC, hermetic search host for the case: the
+	// `none` dense provider (pure lexical/FTS — no llama, no non-determinism) is set
+	// on BOTH the seed and the command-under-test runs. When searchSeedRebuild is
+	// also set, the harness seeds a SHARED ABSOLUTE sidecar (<base>/search.sqlite via
+	// WRKQ_SEARCH_DB_PATH) and runs `index rebuild` against it at seed time, so a
+	// read-only `search` command-under-test (which never rebuilds) finds the indexed
+	// rows on both binaries from the SAME prebuilt sidecar. Without searchSeedRebuild
+	// each binary opens a fresh per-dir sidecar (empty/stale) — deterministic for
+	// status / empty-search / lifecycle cases.
+	searchIndex       bool
+	searchSeedRebuild bool
 }
 
 var parityCases = []parityCase{
@@ -2511,6 +2522,131 @@ var parityCases = []parityCase{
 		args:    []string{"watch", "--since", "9999", "--ndjson", "--follow=false"},
 		mutates: false,
 	},
+	// ── search + index family (T-05114) ──────────────────────────────────────
+	// SERVER-OWNED sidecar + embedder behind wrkq.search.* / wrkq.index.*. All
+	// cases use the deterministic `none` dense provider (pure lexical/FTS — no
+	// llama, no non-determinism), so old-vs-new byte-parity holds for status,
+	// lexical search, stale, and lifecycle. The TTY human renderers are hard-gated;
+	// every case below exercises a non-TTY (piped) output mode.
+
+	// index status: a fresh per-dir sidecar (empty/stale) — deterministic JSON.
+	{
+		name:        "index/status-empty-json",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"index", "status", "--json"},
+		searchIndex: true,
+	},
+	// index status: non-TTY default is JSON (no flag).
+	{
+		name:        "index/status-empty-default",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"index", "status"},
+		searchIndex: true,
+	},
+	// index rebuild: rebuilds from identical canonical data → identical ack JSON
+	// (map-alphabetical rebuilt/status). Each binary rebuilds its own per-dir sidecar.
+	{
+		name:        "index/rebuild",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "indexable body text"}},
+		args:        []string{"index", "rebuild"},
+		searchIndex: true,
+	},
+	// index update: no pending changes after the seed's implicit state → deterministic.
+	{
+		name:        "index/update",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"index", "update"},
+		searchIndex: true,
+	},
+	// index vacuum: deterministic ack (map-alphabetical vacuumed).
+	{
+		name:        "index/vacuum",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"index", "vacuum"},
+		searchIndex: true,
+	},
+	// index pause / resume: deterministic acks (map-alphabetical status).
+	{
+		name:        "index/pause",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"index", "pause"},
+		searchIndex: true,
+	},
+	{
+		name:        "index/resume",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}, {"index", "pause"}},
+		args:        []string{"index", "resume"},
+		searchIndex: true,
+	},
+
+	// search: empty index (no rebuild seeded) → stale, empty results. Both the
+	// non-TTY default (NDJSON) and --json forms are deterministic with no rows.
+	{
+		name:        "search/empty-default",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"search", "searchable"},
+		searchIndex: true,
+	},
+	{
+		name:        "search/empty-json",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"search", "searchable", "--json"},
+		searchIndex: true,
+	},
+
+	// search WITH a prebuilt shared sidecar: the seed `index rebuild` populates a
+	// shared absolute sidecar; the read-only `search` finds the lexical match on
+	// both binaries. Covers json / ndjson / stale / path / assignee / sort.
+	{
+		name:              "search/json-hit",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:              "search/ndjson-hit",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--ndjson"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:              "search/fresh-after-rebuild",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--fresh", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:              "search/path-filter",
+		setup:             [][]string{{"mkdir", "proj"}, {"touch", "proj/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "proj", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:              "search/sort-updated",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--sort", "updated_at", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:              "search/state-all",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--state", "all", "--json"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	// search disabled: WRKQ_SEARCH_ENABLED=0 → legacy "search is disabled" error
+	// on both binaries (the mirror surfaces the server message raw).
+	{
+		name:  "search/disabled-errors",
+		setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:  []string{"search", "alpha"},
+		env:   []string{"WRKQ_SEARCH_ENABLED=0"},
+	},
 }
 
 // attachSrcFiles are the host source files materialized into each run/seed dir
@@ -2649,6 +2785,26 @@ func TestParity(t *testing.T) {
 				store := filepath.Join(t.TempDir(), "attach-store")
 				seedEnv = append(seedEnv, "WRKQ_ATTACH_DIR="+store)
 				runEnv = append(append([]string{}, tc.env...), "WRKQ_ATTACH_DIR="+store)
+			}
+			if tc.searchIndex {
+				// Deterministic hermetic search host: ON + `none` dense provider (pure
+				// lexical/FTS, no llama, no non-determinism) on BOTH seed + run. A SHARED
+				// ABSOLUTE sidecar (WRKQ_SEARCH_DB_PATH) is always used so the index
+				// status `path` field is dir-independent and byte-identical across the
+				// old/new run dirs (the default <db>.search.sqlite would embed each
+				// binary's distinct copied-fixture dir). The shared sidecar is safe: the
+				// old + new runs are sequential, and every exercised index op is
+				// idempotent (rebuild/update/vacuum/pause/resume) or read-only
+				// (status/search). When searchSeedRebuild is set the seed `index rebuild`
+				// also populates this SAME sidecar so a read-only `search` finds rows.
+				sidecar := filepath.Join(t.TempDir(), "search.sqlite")
+				searchBase := []string{
+					"WRKQ_SEARCH_ENABLED=1",
+					"WRKQ_SEARCH_DENSE_PROVIDER=none",
+					"WRKQ_SEARCH_DB_PATH=" + sidecar,
+				}
+				seedEnv = append(append([]string{}, seedEnv...), searchBase...)
+				runEnv = append(append([]string{}, runEnv...), searchBase...)
 			}
 			base := seedFixtureFilesEnv(t, bins, tc.setup, tc.files, seedEnv)
 			oldDir := copyFixture(t, base)

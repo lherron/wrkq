@@ -938,6 +938,43 @@ patch key, or an invalid slug → `WRKQ_VALIDATION`; a slug collision with an
 existing sibling or a stale `expectEtag` → `WRKQ_CONFLICT`; an unresolvable
 `container` selector → `WRKQ_NOT_FOUND`.
 
+##### `wrkq.search.*` / `wrkq.index.*` (server-owned search + index — Tranche D)
+
+The search + index family (T-05114, daedalus hrcchat#10211) puts the derived
+`<db>.search.sqlite` sidecar + the dense embedder BEHIND the RPC boundary. The
+server owns sidecar open/migrate, freshness, FTS5/vec/lexical queries, RRF fusion,
+status, and lifecycle mutation; `EnsureLlamaReady` MOVES to the server host
+(`wrkq.index.update`/`rebuild` kickstart ONLY the server's configured embedder,
+never the caller's launchd). The client owns project-root path scoping (paths are
+pre-scoped) + presentation ONLY; the published `@wrkq/client` surface adds
+`client.wrkq.search.listView` and `client.wrkq.index.{status,update,rebuild,vacuum,
+pause,resume}`. The result DTOs keep the LEGACY snake_case output keys
+(`search.Response` / `search.Result` / `indexdb.Status` struct shapes); the
+lifecycle methods return legacy map-alphabetical acks.
+
+```ts
+interface WrkqSearchListViewParams {
+  query: string;
+  paths?: string[];               // pre-scoped path prefixes
+  state?: string; kind?: string; assigneePrincipalRef?: string;
+  limit?: number; candidateLimit?: number;
+  sort?: string; reverse?: boolean; fresh?: boolean; explain?: boolean;
+}
+// → WrkqSearchListView{ query, stale, status: WrkqIndexStatus|null,
+//                       results: WrkqSearchResult[], total_matches, offset }
+
+interface WrkqIndexLifecycleParams { foreground?: boolean }
+// wrkq.index.status   → WrkqIndexStatus
+// wrkq.index.update   → { status: WrkqIndexStatus, updated: true }
+// wrkq.index.rebuild  → { rebuilt: true, status: WrkqIndexStatus }
+// wrkq.index.vacuum   → { vacuumed: true }
+// wrkq.index.pause    → { status: "paused" }
+// wrkq.index.resume   → { status: "ready" }
+```
+
+Search disabled on the server → `WRKQ_VALIDATION` "search is disabled". Invalid
+sort / `--fresh` on a stale index → `WRKQ_VALIDATION` (legacy message verbatim).
+
 ##### `wrkq.container.delete` (empty-only HARD delete)
 
 ```ts

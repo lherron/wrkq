@@ -161,16 +161,24 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqBundleTaskDoc") {
 		t.Error("WrkqBundleTaskDoc missing from dtoCatalog")
 	}
-	// Handoff family (T-05117): the four new methods + the three new DTOs must be
-	// in BOTH catalogs so their NAMES enter the protocol schema-hash input.
+	// Handoff family (T-05117) + search + index family (T-05114): the new methods
+	// must be in BOTH catalogs so their NAMES enter the protocol schema-hash input.
+	// Index lifecycle outputs are map-shaped (no struct DTO).
 	for _, m := range []string{
 		"wrkq.handoff.create", "wrkq.handoff.get", "wrkq.handoff.listView", "wrkq.handoff.acknowledge",
+		"wrkq.search.listView",
+		"wrkq.index.status",
+		"wrkq.index.update",
+		"wrkq.index.rebuild",
+		"wrkq.index.vacuum",
+		"wrkq.index.pause",
+		"wrkq.index.resume",
 	} {
 		if !contains(methodCatalog, m) {
 			t.Errorf("%s missing from methodCatalog", m)
 		}
 	}
-	for _, d := range []string{"WrkqHandoff", "WrkqHandoffCreateResult", "WrkqHandoffListResult"} {
+	for _, d := range []string{"WrkqHandoff", "WrkqHandoffCreateResult", "WrkqHandoffListResult", "WrkqSearchListView", "WrkqSearchResult", "WrkqIndexStatus"} {
 		if !contains(dtoCatalog, d) {
 			t.Errorf("%s missing from dtoCatalog", d)
 		}

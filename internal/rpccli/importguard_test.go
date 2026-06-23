@@ -22,6 +22,12 @@ func TestCoreRuleImportGuard(t *testing.T) {
 		"github.com/lherron/wrkq/internal/db",
 		"github.com/lherron/wrkq/internal/cli", // includes internal/cli/appctx
 		"github.com/mattn/go-sqlite3",
+		// Search/index family (T-05114): the server owns the derived sidecar +
+		// dense embedder. The mirror MUST NOT open the sidecar (internal/search,
+		// internal/search/indexdb, internal/search/indexer) or call EnsureLlamaReady
+		// (internal/search/embed). Forbidding these import paths is the structural
+		// proof of "rpccli must NOT open the sidecar or call EnsureLlamaReady".
+		"github.com/lherron/wrkq/internal/search",
 	}
 
 	entries, err := os.ReadDir(".")

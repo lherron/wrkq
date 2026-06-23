@@ -25,6 +25,13 @@ type API struct {
 	attachDir    string
 	attachMaxMB  int
 
+	// searchCfg is the SERVER's search/index host configuration. The server owns
+	// the derived sidecar + dense embedder behind the wrkq.search.* / wrkq.index.*
+	// methods (T-05114). Zero-value (Enabled=false) means the search host is not
+	// configured and search/index methods report WRKQ_VALIDATION "search is
+	// disabled".
+	searchCfg SearchConfig
+
 	// uploads tracks in-progress chunked byte uploads (wrkq.attachment.addBytes),
 	// keyed by server-generated uploadId. Each session stages bytes into a temp
 	// file under the attach dir; finalize atomically renames into place. The mutex
@@ -38,8 +45,8 @@ type API struct {
 // attachDir/attachMaxMB carry the explicitly-configured attachment storage
 // settings; an empty attachDir disables attachment writes (attachment.add
 // returns WRKQ_VALIDATION rather than silently writing relative to cwd).
-func New(database *db.DB, wf *wrkfapi.API, defaultActor, attachDir string, attachMaxMB int) *API {
-	return &API{
+func New(database *db.DB, wf *wrkfapi.API, defaultActor, attachDir string, attachMaxMB int, opts ...Option) *API {
+	a := &API{
 		db:           database,
 		store:        store.New(database),
 		wf:           wf,
@@ -48,6 +55,20 @@ func New(database *db.DB, wf *wrkfapi.API, defaultActor, attachDir string, attac
 		attachMaxMB:  attachMaxMB,
 		uploads:      map[string]*attachmentUpload{},
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// Option configures optional API capabilities at construction time.
+type Option func(*API)
+
+// WithSearch wires the server-owned search/index host (sidecar + dense embedder)
+// behind the wrkq.search.* / wrkq.index.* methods. Without it the search/index
+// methods report WRKQ_VALIDATION "search is disabled".
+func WithSearch(cfg SearchConfig) Option {
+	return func(a *API) { a.searchCfg = cfg }
 }
 
 // ─── attribution ─────────────────────────────────────────────────────────────

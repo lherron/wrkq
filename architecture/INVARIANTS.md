@@ -67,6 +67,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `internal/rpccli/parity_test.go`, `internal/rpccli/transport_test.go`, `internal/wrkqapi/monitorview_test.go`, `internal/wrkqapi/catview_fingerprint_test.go`, `internal/workrpc/catview_catalog_test.go`
 - **last_verified:** 2026-06-23
 
+## wrkq.wrkf-rpc.search-index-server-owned
+
+- **scope:** server-owned search/index derived state (the <db>.search.sqlite sidecar + dense embedder) behind the wrkq RPC boundary
+- **predicate:** The derived <db>.search.sqlite search sidecar AND the dense embedder are SERVER-OWNED and live BEHIND the JSON-RPC boundary (wrkq.search.listView / wrkq.index.{status,update,rebuild,vacuum,pause,resume}). The server owns: opening + migrating the sidecar, freshness/status, FTS5/vec/lexical queries, RRF fusion, canonical filtering, and lifecycle mutation. EnsureLlamaReady lives on the SERVER / index-lifecycle host — index update/rebuild kickstart ONLY the SERVER host's configured embedder, NEVER the caller's launchd; if the server cannot ready its embedder, dense degrades/fails per the existing contract and never reaches back to the client. The CLI mirror (internal/rpccli) owns ONLY project-root path scoping (paths are pre-scoped before the call) + presentation. It MUST NOT open the sidecar (internal/search, internal/search/indexdb, internal/search/indexer) or call EnsureLlamaReady (internal/search/embed) — this is enforced structurally by the rpccli import guard, which forbids the internal/search import subtree. Field order is part of the contract: WrkqSearchListView reproduces the legacy search.Response struct order, WrkqSearchResult the legacy search.Result struct order, and WrkqIndexStatus the legacy indexdb.Status struct order (NOT alphabetical). The lifecycle methods return legacy map-shaped acks whose JSON keys are map-ALPHABETICAL, with the nested status block in indexdb.Status struct order. The server search-index path defaults from the server DB config (<db>.search.sqlite). When search is disabled the methods report WRKQ_VALIDATION "search is disabled".
+- **enforced_by:** `the server-owned search host (internal/wrkqapi/searchindex.go) + the import-guard forbidding the internal/search subtree in the mirror + the search/index acceptance, transport-equivalence, and parity tests; daedalus B-ruling hrcchat#10211 (T-05114)`
+- **source:** `internal/wrkqapi/searchindex.go`, `internal/workrpc/registry.go`, `internal/workrpc/bootstrap/bootstrap.go`, `internal/wrkfcli/root.go`, `internal/rpccli/search.go`, `internal/rpccli/index.go`, `internal/rpccli/importguard_test.go`
+- **required_tests:** `internal/wrkqapi/searchindex_test.go`, `internal/wrkqapi/catview_fingerprint_test.go`, `internal/workrpc/catview_catalog_test.go`, `internal/rpccli/importguard_test.go`, `internal/rpccli/searchindex_transport_test.go`, `internal/rpccli/parity_test.go`
+- **last_verified:** 2026-06-23
+
 ## wrkq.wrkf-rpc.stdout-purity
 
 - **scope:** wrkf RPC stdio transport

@@ -1,0 +1,59 @@
+id: wrkq.wrkf-rpc.search-index-server-owned
+kind: invariant
+status: active
+owner_project: wrkq
+scope: server-owned search/index derived state (the <db>.search.sqlite sidecar + dense embedder) behind the wrkq RPC boundary
+predicate: >
+  The derived <db>.search.sqlite search sidecar AND the dense embedder are
+  SERVER-OWNED and live BEHIND the JSON-RPC boundary (wrkq.search.listView /
+  wrkq.index.{status,update,rebuild,vacuum,pause,resume}). The server owns:
+  opening + migrating the sidecar, freshness/status, FTS5/vec/lexical queries,
+  RRF fusion, canonical filtering, and lifecycle mutation. EnsureLlamaReady lives
+  on the SERVER / index-lifecycle host — index update/rebuild kickstart ONLY the
+  SERVER host's configured embedder, NEVER the caller's launchd; if the server
+  cannot ready its embedder, dense degrades/fails per the existing contract and
+  never reaches back to the client.
+
+  The CLI mirror (internal/rpccli) owns ONLY project-root path scoping (paths are
+  pre-scoped before the call) + presentation. It MUST NOT open the sidecar
+  (internal/search, internal/search/indexdb, internal/search/indexer) or call
+  EnsureLlamaReady (internal/search/embed) — this is enforced structurally by the
+  rpccli import guard, which forbids the internal/search import subtree.
+
+  Field order is part of the contract: WrkqSearchListView reproduces the legacy
+  search.Response struct order, WrkqSearchResult the legacy search.Result struct
+  order, and WrkqIndexStatus the legacy indexdb.Status struct order (NOT
+  alphabetical). The lifecycle methods return legacy map-shaped acks whose JSON
+  keys are map-ALPHABETICAL, with the nested status block in indexdb.Status struct
+  order. The server search-index path defaults from the server DB config
+  (<db>.search.sqlite). When search is disabled the methods report WRKQ_VALIDATION
+  "search is disabled".
+authority:
+  repo: wrkq
+  surface: wrkq.search.listView + wrkq.index.* over the JSON-RPC boundary (registered on BOTH wrkq and wrkf entrypoints)
+enforced_by: "the server-owned search host (internal/wrkqapi/searchindex.go) + the import-guard forbidding the internal/search subtree in the mirror + the search/index acceptance, transport-equivalence, and parity tests; daedalus B-ruling hrcchat#10211 (T-05114)"
+source:
+  - internal/wrkqapi/searchindex.go                   # server search host: opens sidecar, builds embedder, EnsureLlamaReady on server side, projects legacy shapes
+  - internal/workrpc/registry.go                      # registers wrkq.search.listView + wrkq.index.* (registerWrkqMethods → both entrypoints) + method/dto catalogs
+  - internal/workrpc/bootstrap/bootstrap.go           # threads config.SearchConfig → RegistryOptions.Search (server DB config default sidecar path)
+  - internal/wrkfcli/root.go                           # wrkf rpc --stdio entrypoint also builds the search host (entrypoint equivalence)
+  - internal/rpccli/search.go                          # search mirror: scopes paths + presentation, never opens the sidecar
+  - internal/rpccli/index.go                           # index mirror: lifecycle presentation, never opens the sidecar / EnsureLlamaReady
+  - internal/rpccli/importguard_test.go                # forbids internal/search subtree in the mirror (structural proof)
+required_tests:
+  - internal/wrkqapi/searchindex_test.go              # TestSearchIndex_RebuildStatusSearchLifecycle / TestSearchIndex_Disabled / TestSearchListView_InvalidSortIsValidation (server owns sidecar + EnsureLlamaReady; disabled → WRKQ_VALIDATION)
+  - internal/wrkqapi/catview_fingerprint_test.go      # TestSearchIndexViewDTOFingerprint (legacy struct-order field pins for search/result/status DTOs)
+  - internal/workrpc/catview_catalog_test.go          # TestCatViewInCatalogs (search/index methods + DTOs in BOTH catalogs → schema-hash input)
+  - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror MUST NOT import internal/search subtree → cannot open sidecar / call EnsureLlamaReady)
+  - internal/rpccli/searchindex_transport_test.go     # TestTransportEquivalence_SearchIndex / TestSearchDisabled_TransportError (in-proc + subprocess agree; disabled error surfaces)
+  - internal/rpccli/parity_test.go                    # TestParity/search/* + TestParity/index/* (json/ndjson/stale/path/assignee/sort + status/rebuild/update/vacuum/pause/resume + disabled)
+last_verified:
+  date: 2026-06-23
+  evidence: "go test -tags sqlite_fts5 ./internal/rpccli/... ./internal/wrkqapi/ ./internal/workrpc/... ./internal/cli/ green; search/index parity byte-identical with the `none` dense provider; @wrkq/client fake-transport unit green"
+reopen_when:
+  - the mirror gains a direct sidecar open or an EnsureLlamaReady call (import guard would already fail)
+  - EnsureLlamaReady is allowed to reach the caller's launchd/embedder instead of the server host's
+  - a search/index DTO field order drifts from its legacy struct/map-alphabetical contract
+  - the server search-index path default stops deriving from the server DB config
+supersedes: []
+superseded_by: null
