@@ -28,7 +28,8 @@ var topLevelCommands = []mirroredCommand{
 	{use: "bundle"},
 	// cat is the one real command this slice; registered separately.
 	// check / check-inbox are RPC-backed (real parity commands); registered separately.
-	{use: "cp <source>... <destination>"},
+	// cp is RPC-backed (server-owned deep copy via wrkq.task.copy; caller owns
+	// fan-out/prompt/dry-run/output); registered separately.
 	// diff is RPC-backed (real parity command); registered separately.
 	// find is RPC-backed (real parity command); registered separately.
 	{use: "handoff"},
@@ -94,6 +95,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newApplyCmd())
 	root.AddCommand(newRestoreCmd())
 	root.AddCommand(newRenameContainerCmd())
+	root.AddCommand(newCpCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

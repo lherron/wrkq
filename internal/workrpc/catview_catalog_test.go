@@ -96,6 +96,17 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqContainer") {
 		t.Error("WrkqContainer missing from dtoCatalog (wrkq.container.update result DTO)")
 	}
+	// Server-owned deep copy (T-05111): the new mutation method + its DTOs must be
+	// in BOTH catalogs so their NAMES enter the protocol schema-hash input.
+	if !contains(methodCatalog, "wrkq.task.copy") {
+		t.Error("wrkq.task.copy missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqTaskCopyParams") {
+		t.Error("WrkqTaskCopyParams missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqTaskCopyResult") {
+		t.Error("WrkqTaskCopyResult missing from dtoCatalog")
+	}
 }
 
 func contains(haystack []string, needle string) bool {

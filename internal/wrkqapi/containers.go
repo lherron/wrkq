@@ -64,7 +64,14 @@ func (a *API) ContainerShow(ctx context.Context, p ContainerShowParams) (*WrkqCo
 	}
 	containerUUID, _, err := selectors.ResolveContainer(a.db, selector)
 	if err != nil {
-		return nil, NewNotFoundError(selector, "container")
+		// Surface the resolver's own message (e.g. "container not found: <first
+		// failing segment>") rather than the full selector, so callers byte-match
+		// legacy selectors.ResolveContainer (a multi-segment path errors at the
+		// first missing segment, not the whole path).
+		return nil, newError(CodeNotFound, err.Error(), false, struct {
+			Ref  string `json:"ref,omitempty"`
+			Kind string `json:"kind,omitempty"`
+		}{Ref: selector, Kind: "container"}, err)
 	}
 	return a.loadContainer(containerUUID)
 }

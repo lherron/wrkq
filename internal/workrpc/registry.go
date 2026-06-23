@@ -117,6 +117,7 @@ var methodCatalog = []string{
 	"wrkq.task.treeView",
 	"wrkq.task.blockedView",
 	"wrkq.task.inboxView",
+	"wrkq.task.copy",
 	"wrkq.task.update",
 	"wrkq.task.move",
 	"wrkq.task.acknowledge",
@@ -205,6 +206,8 @@ var methodCatalog = []string{
 
 var dtoCatalog = []string{
 	"WrkqTask",
+	"WrkqTaskCopyParams",     // wrkq.task.copy request envelope (server-owned deep copy)
+	"WrkqTaskCopyResult",     // wrkq.task.copy per-source outcome (legacy copyResult output shape)
 	"WrkqTaskCatView",        // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
 	"WrkqContainerCatView",   // CLI compatibility projection (container cat)
 	"WrkqCommentCatView",     // CLI compatibility projection (comment cat)
@@ -280,6 +283,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.task.inboxView", apiHandler(func(ctx context.Context, p wrkqapi.InboxViewParams) (any, error) {
 		return wq.InboxView(ctx, p)
+	}))
+	s.Register("wrkq.task.copy", apiHandler(func(ctx context.Context, p wrkqapi.TaskCopyParams) (any, error) {
+		return wq.TaskCopy(ctx, p)
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)

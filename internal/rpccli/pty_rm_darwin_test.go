@@ -186,6 +186,75 @@ func TestCommentRmPromptOwnership(t *testing.T) {
 	}
 }
 
+// TestCpPromptOwnership proves the mirror owns the legacy `cp` >5-source
+// confirmation on a real TTY: the inline "Copy <n> tasks? [y/N] " line on stderr
+// (no warning block; distinct from rm's "yes"-token shape), accepting a
+// y-prefixed answer, the abort branch ("n" → aborted, exit 1), and --yes (no
+// prompt). The prompt only engages for >5 sources; the terminal output + exit
+// code + the durable snapshot byte-match legacy `wrkq cp`.
+func TestCpPromptOwnership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + drives a real pty")
+	}
+	bins := buildParityBinaries(t)
+
+	// Six sources so the >5 prompt engages; a destination container to copy into.
+	setup := [][]string{
+		{"mkdir", "dest"},
+		{"touch", "inbox/c1", "-t", "C1"}, {"touch", "inbox/c2", "-t", "C2"},
+		{"touch", "inbox/c3", "-t", "C3"}, {"touch", "inbox/c4", "-t", "C4"},
+		{"touch", "inbox/c5", "-t", "C5"}, {"touch", "inbox/c6", "-t", "C6"},
+	}
+	srcs := []string{"inbox/c1", "inbox/c2", "inbox/c3", "inbox/c4", "inbox/c5", "inbox/c6"}
+	cpArgs := func(extra ...string) []string {
+		return append(append([]string{"cp"}, srcs...), append([]string{"dest"}, extra...)...)
+	}
+
+	cases := []struct {
+		name  string
+		args  []string
+		input string
+	}{
+		{name: "accept-y", args: cpArgs(), input: "y\n"},
+		{name: "abort-n", args: cpArgs(), input: "n\n"},
+		{name: "yes-flag-skips-prompt", args: cpArgs("--yes"), input: ""},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := seedFixture(t, bins, setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+
+			// The prompting cases MUST render the legacy "Copy N tasks? [y/N]" line
+			// (and NOT rm's "Type 'yes' to confirm" shape).
+			if tc.name != "yes-flag-skips-prompt" {
+				if !strings.Contains(oldOut, "Copy 6 tasks? [y/N]") {
+					t.Fatalf("legacy cp prompt missing %q (got %q)", "Copy 6 tasks? [y/N]", oldOut)
+				}
+				if strings.Contains(oldOut, "Type 'yes' to confirm") {
+					t.Fatalf("cp must NOT reuse rm's confirm shape (got %q)", oldOut)
+				}
+			}
+			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
+				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
+			}
+		})
+	}
+}
+
 // TestRmdirForcePromptOwnership proves the mirror owns the legacy `rmdir --force`
 // confirmation on a real TTY: the destructive WARNING block (with the rendered
 // counts) + "Are you sure? (yes/no): " requiring EXACTLY "yes", the accept/abort

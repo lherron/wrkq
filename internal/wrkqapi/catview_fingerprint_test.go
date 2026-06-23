@@ -97,6 +97,21 @@ func TestAttachmentBytesDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestTaskCopyDTOFingerprint guards the wrkq.task.copy request + result DTO shapes
+// (T-05111, daedalus hrcchat#10196). TaskCopyParams crosses the RPC boundary as the
+// server-owned copy envelope in the daedalus-approved SEMANTIC field order; the
+// result keeps the LEGACY copyResult snake_case output keys so the mirror renders
+// byte-identical output. Any field/tag drift is a PROTOCOL CONTRACT change.
+func TestTaskCopyDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(TaskCopyParams{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqTaskCopyResult{}))
+	const want = "TaskCopyParams{source,destination,overwrite,omitempty,withAttachments,omitempty,shallow,omitempty,expectEtag,omitempty,actor,omitempty,idempotencyKey,omitempty}\n" +
+		"WrkqTaskCopyResult{source_id,source_uuid,dest_id,dest_uuid,dest_path,attachments_copied,omitempty,with_files,omitempty}"
+	if got != want {
+		t.Errorf("wrkq.task.copy DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestFindListViewDTOFingerprint guards the find projection shapes.
 func TestFindListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))

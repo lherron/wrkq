@@ -373,6 +373,23 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !reflect.DeepEqual(normContainer(inUpd), normContainer(subUpd)) {
 		t.Errorf("container.update transport results differ:\n in-process: %s\n subprocess: %s", inUpd, subUpd)
 	}
+
+	// task.copy (the server-owned deep copy, T-05111) must agree across transports.
+	// The source task already lives in rpccli-test-proj, so both calls use overwrite
+	// to target the SAME destination row → byte-identical result DTO (same dest
+	// uuid/id), proving the create-or-overwrite envelope is server-owned.
+	copyParams := map[string]any{"source": taskID, "destination": "rpccli-test-proj", "overwrite": true}
+	inCopy, err := inproc.Call(context.Background(), "wrkq.task.copy", copyParams)
+	if err != nil {
+		t.Fatalf("in-process task.copy: %v", err)
+	}
+	subCopy, err := sub.Call(ctx, "wrkq.task.copy", copyParams)
+	if err != nil {
+		t.Fatalf("subprocess task.copy: %v", err)
+	}
+	if !jsonEqual(t, inCopy, subCopy) {
+		t.Errorf("task.copy transport results differ:\n in-process: %s\n subprocess: %s", inCopy, subCopy)
+	}
 }
 
 // TestTransportEquivalence_AttachmentBytes covers the byte-transfer methods

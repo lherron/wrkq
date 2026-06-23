@@ -295,7 +295,29 @@ wrkq.task.update      [required]
 wrkq.task.acknowledge
 wrkq.task.delete
 wrkq.task.restore
+wrkq.task.copy        [new mutation method — server-owned deep copy; see copy note]
 ```
+
+> **`wrkq.task.copy`** is a NEW mutation method (T-05111, daedalus hrcchat#10196)
+> backing `wrkq cp`. It is the server-owned ONE source-task copy envelope: source
+> resolution, destination-container resolution, source `expectEtag` CAS, the
+> create-or-overwrite decision, the task-row write, the attachment-metadata
+> cascade, an optional SAME-STORE attachment-file copy (NOT byte-transfer over the
+> protocol), a `task.copied` event, and a post-commit `created` webhook carrying a
+> synthetic `source_uuid` change. The CLI owns multi-source fan-out, stdin
+> sources, the `>5`-source prompt/abort/`--yes`, the dry-run plan,
+> nullglob/continue-on-error/jobs, output rendering, and project-root scoping:
+> `WrkqTaskCopyParams{ source, destination, overwrite?, withAttachments?,
+> shallow?, expectEtag?, actor?, idempotencyKey? }` → `WrkqTaskCopyResult{
+> source_id, source_uuid, dest_id, dest_uuid, dest_path, attachments_copied?,
+> with_files? }`. The result DTO keeps the LEGACY `copyResult` snake_case output
+> keys (byte-parity for `wrkq cp` machine output). FILE-COPY SAFETY: the physical
+> attachment-file copy is NOT inside the SQLite tx and is **not** claimed fully
+> transactional — files are staged into a temp `.copy-*` under the destination
+> task dir before commit; a staging failure rolls the DB tx back + cleans the
+> temps (no RPC-visible partial durable state), and only after commit are the
+> staged temps atomically renamed into place. `idempotencyKey` is mandatory-style
+> (create-like under client fan-out → a retried copy must not duplicate the task).
 
 > **`wrkq.task.lsView`** is a CLI compatibility list read model for `wrkq ls`,
 > **not** canonical `wrkq.task.list`. The server owns mixed task/container

@@ -2124,6 +2124,114 @@ var parityCases = []parityCase{
 		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
 		mutates: true,
 	},
+
+	// cp ✓ server-owned deep copy via wrkq.task.copy. The CLI owns fan-out, stdin
+	// sources, the >5-source prompt (PTY-tested separately), dry-run, nullglob,
+	// jobs/continue-on-error, output rendering, and project-root scoping.
+	{
+		// New copy into a different container: a fresh task row is created. The dest
+		// uuid/id are freshly generated → normalize.
+		name:          "cp/new-into-container",
+		setup:         [][]string{{"touch", "inbox/orig", "-t", "Orig"}, {"mkdir", "dest"}},
+		args:          []string{"cp", "inbox/orig", "dest"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// --overwrite onto an existing slug updates the existing row (deterministic
+		// dest uuid → no normalization, so a wrong-uuid bug is still caught).
+		name: "cp/overwrite-existing",
+		setup: [][]string{
+			{"touch", "inbox/orig", "-t", "Orig", "--priority", "1"},
+			{"mkdir", "dest"}, {"touch", "dest/orig", "-t", "Stale"},
+		},
+		args:    []string{"cp", "inbox/orig", "dest", "--overwrite"},
+		mutates: true,
+	},
+	{
+		// Dest slug-conflict WITHOUT --overwrite errors (no durable change).
+		name: "cp/slug-conflict-no-overwrite-errors",
+		setup: [][]string{
+			{"touch", "inbox/orig", "-t", "Orig"},
+			{"mkdir", "dest"}, {"touch", "dest/orig", "-t", "Existing"},
+		},
+		args:    []string{"cp", "inbox/orig", "dest"},
+		mutates: true,
+	},
+	{
+		// --shallow copies neither metadata nor files (attachments_copied omitted).
+		name:          "cp/shallow",
+		setup:         [][]string{{"touch", "inbox/orig", "-t", "Orig"}, {"mkdir", "dest"}},
+		args:          []string{"cp", "inbox/orig", "dest", "--shallow"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Mutually-exclusive flag validation (CLI-owned, before any RPC).
+		name:  "cp/with-attachments-and-shallow-errors",
+		setup: [][]string{{"touch", "inbox/orig", "-t", "Orig"}, {"mkdir", "dest"}},
+		args:  []string{"cp", "inbox/orig", "dest", "--with-attachments", "--shallow"},
+	},
+	{
+		// Unknown source errors (NOT_FOUND taxonomy, no nullglob).
+		name:  "cp/unknown-source-errors",
+		setup: [][]string{{"mkdir", "dest"}},
+		args:  []string{"cp", "T-09999999", "dest"},
+	},
+	{
+		// Unknown destination container errors.
+		name:  "cp/unknown-dest-errors",
+		setup: [][]string{{"touch", "inbox/orig", "-t", "Orig"}},
+		args:  []string{"cp", "inbox/orig", "nope/missing"},
+	},
+	{
+		// nullglob: a missing source is a silent success (no error, no copy).
+		name:    "cp/nullglob-missing-source",
+		setup:   [][]string{{"mkdir", "dest"}},
+		args:    []string{"cp", "T-09999999", "dest", "--nullglob"},
+		mutates: true,
+	},
+	{
+		// stdin sources: one selector per line, fanned out by the CLI.
+		name: "cp/stdin-sources",
+		setup: [][]string{
+			{"touch", "inbox/aa", "-t", "A"}, {"touch", "inbox/bb", "-t", "B"}, {"mkdir", "dest"},
+		},
+		args:          []string{"cp", "-", "dest"},
+		stdin:         []byte("inbox/aa\ninbox/bb\n"),
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// dry-run renders the JSON plan (non-TTY) without mutating.
+		name:    "cp/dry-run-json",
+		setup:   [][]string{{"touch", "inbox/orig", "-t", "Orig"}, {"mkdir", "dest"}},
+		args:    []string{"cp", "inbox/orig", "dest", "--dry-run"},
+		mutates: true,
+	},
+	{
+		// with-attachments: real file copy into the SAME store + metadata cascade.
+		// Seeded shared attach store so the source bytes are reachable at copy time.
+		name: "cp/with-attachments",
+		setup: [][]string{
+			{"touch", "inbox/orig", "-t", "Orig"}, {"mkdir", "dest"},
+			{"attach", "put", "inbox/orig", "att.txt"},
+		},
+		args:              []string{"cp", "inbox/orig", "dest", "--with-attachments"},
+		files:             map[string]string{"att.txt": "attachment payload\n"},
+		mutates:           true,
+		normalizeUUID:     true,
+		seededAttachStore: true,
+	},
+	{
+		// project-root scoping: bare source/dest refs resolve under the root.
+		name:          "cp/project-root",
+		setup:         prSeed,
+		args:          []string{"cp", "task-a", "sub"},
+		env:           []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
 }
 
 // attachSrcFiles are the host source files materialized into each run/seed dir
@@ -2868,6 +2976,33 @@ func TestFindHardGates(t *testing.T) {
 				t.Errorf("expected a gate error message on stderr for %v", g.args)
 			}
 		})
+	}
+}
+
+// TestCpRecursiveHardGate proves the mirror REFUSES `cp --recursive` (container
+// copy), which is NOT in this tranche (T-05111 is single-task copy only via
+// wrkq.task.copy). Legacy would SUCCEED (recursive container copy), so this
+// cannot be a byte-parity row; the clean non-zero gate + the no-mutation
+// guarantee are asserted on the mirror alone. Container/recursive copy is a
+// future slice, deliberately NOT here.
+func TestCpRecursiveHardGate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs the mirror CLI")
+	}
+	bins := buildParityBinaries(t)
+	setup := [][]string{{"touch", "inbox/aa", "-t", "A"}, {"mkdir", "dest"}}
+	base := seedFixture(t, bins, setup)
+	dir := copyFixture(t, base)
+	before := snapshot(t, dir)
+	res := runCLI(t, bins.mirror, dir, []string{"cp", "inbox/aa", "dest", "--recursive"})
+	if res.exit == 0 {
+		t.Errorf("expected non-zero exit (cp --recursive hard-gate), got 0\n stdout: %q", res.stdout)
+	}
+	if strings.TrimSpace(res.stderr) == "" {
+		t.Error("expected a gate error message on stderr")
+	}
+	if after := snapshot(t, dir); after != before {
+		t.Errorf("cp --recursive hard-gate must NOT mutate:\n before:\n%s\n after:\n%s", before, after)
 	}
 }
 
