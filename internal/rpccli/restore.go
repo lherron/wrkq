@@ -94,31 +94,11 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 		to = sc.path(to, false)
 	}
 
-	// Resolve the target as a task (legacy ResolveTask wins), capturing id/uuid for
-	// the output. A non-task ref falls back to container — which is hard-gated here.
-	show, terr := tr.Call(ctx, "wrkq.task.show", map[string]string{"task": arg})
-	if terr != nil {
-		if !isNotFound(terr) {
-			return errors.New(rpcMessage(terr))
-		}
-		// Not a task: is it a container? (legacy restores containers; this seam
-		// has no wrkq.container.restore — hard-gate, no silent degradation.)
-		if _, cerr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": arg}); cerr == nil {
-			return fmt.Errorf("restore: container targets are not yet supported in wrkq-rpccli (gated: container restore mode pending; got %s)", arg)
-		}
-		// Neither: legacy emits "not found: <arg>".
-		return fmt.Errorf("not found: %s", arg)
-	}
-	var t struct {
-		ID   string `json:"id"`
-		UUID string `json:"uuid"`
-	}
-	if uerr := json.Unmarshal(show, &t); uerr != nil {
-		return uerr
-	}
-
 	// Build the extended, explicit-intent restore params; the server applies the
-	// whole semantic op atomically.
+	// whole semantic op atomically AND owns validation-before-lookup, so we call it
+	// FIRST (no speculative task.show pre-resolve) to preserve the server's
+	// validation-before-resolution precedence: a bad --state/--priority/--labels/
+	// --assignee on a MISSING ref surfaces the VALIDATION error, not not-found.
 	params := map[string]any{"task": arg}
 	if actor != "" {
 		params["actor"] = actor
@@ -153,19 +133,35 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 
 	restored, rerr := tr.Call(ctx, "wrkq.task.restore", params)
 	if rerr != nil {
+		// Only a genuine NOT_FOUND (ref didn't resolve to a task) is rewritten to
+		// the container hard-gate / legacy not-found. Validation/conflict errors
+		// (bad flag, etag/slug conflict) pass through unchanged — the server already
+		// owns their precedence ahead of the task lookup.
+		if isNotFound(rerr) {
+			// Is it a container? (legacy restores containers; this seam has no
+			// wrkq.container.restore — hard-gate, no silent degradation.)
+			if _, cerr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": arg}); cerr == nil {
+				return fmt.Errorf("restore: container targets are not yet supported in wrkq-rpccli (gated: container restore mode pending; got %s)", arg)
+			}
+			// Neither task nor container: legacy emits "not found: <arg>".
+			return fmt.Errorf("not found: %s", arg)
+		}
 		return errors.New(rpcMessage(rerr))
 	}
-	// Echo the canonical target state the server applied (legacy echoes the parsed
-	// state, default "open"). Read it back from the returned DTO so a normalized
-	// state alias renders identically to legacy.
+
+	// Use the RETURNED DTO for output (id/uuid + the canonical applied state); no
+	// speculative pre-resolve. Legacy echoes the parsed state (default "open").
+	var t struct {
+		ID    string `json:"id"`
+		UUID  string `json:"uuid"`
+		State string `json:"state"`
+	}
+	if uerr := json.Unmarshal(restored, &t); uerr != nil {
+		return uerr
+	}
 	targetState := "open"
-	if f.state != "" {
-		var rt struct {
-			State string `json:"state"`
-		}
-		if uerr := json.Unmarshal(restored, &rt); uerr == nil && rt.State != "" {
-			targetState = rt.State
-		}
+	if f.state != "" && t.State != "" {
+		targetState = t.State
 	}
 
 	out := cmd.OutOrStdout()

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 const nsTaskCreate = "wrkq.task.create"
@@ -757,12 +759,15 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		assigneePrincipalRef: assigneePrincipalRef,
 		comment:              p.Comment,
 	}
-	if rerr := a.restoreTaskTx(uuid, opts, attr); rerr != nil {
+	webhookCtx, rerr := a.restoreTaskTx(uuid, opts, attr)
+	if rerr != nil {
 		return nil, rerr
 	}
+	// Dispatch the restore webhook for the ROOT task (legacy runRestore parity).
+	webhooks.DispatchTaskEvent(a.db, uuid, webhookCtx)
 	// Subtasks cascade-restore to the target state only (no field updates / move /
 	// comment propagate to children — legacy cascadeRestoreSubtasks passes a bare
-	// options struct).
+	// options struct); each restored subtask dispatches its own webhook.
 	if rerr := a.cascadeRestoreSubtasks(uuid, targetState, attr); rerr != nil {
 		return nil, rerr
 	}
@@ -787,17 +792,21 @@ type restoreOptions struct {
 // a single task within a transaction, applying any move / field updates / comment,
 // and logging a task.restored event. Mirrors internal/cli restoreTaskWithOptions.
 // The legacy UPDATE intentionally does NOT bump etag, so this method preserves it
-// for byte-parity of the durable snapshot.
-func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attribution.Attribution) error {
+// for byte-parity of the durable snapshot. It returns the webhooks.EventContext
+// the caller dispatches after commit (matching legacy: the root task AND every
+// cascade-restored subtask dispatch the restore webhook). Via is "rpc" — the
+// RPC-mutation convention threaded through the store (e.g.
+// UpdateFieldsWithViaAttribution(..., "rpc")) — distinct from the legacy "cli".
+func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attribution.Attribution) (webhooks.EventContext, error) {
 	tx, err := a.db.Begin()
 	if err != nil {
-		return NewInternalError(err)
+		return webhooks.EventContext{}, NewInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var currentState string
 	if scanErr := tx.QueryRow("SELECT state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentState); scanErr != nil {
-		return NewInternalError(scanErr)
+		return webhooks.EventContext{}, NewInternalError(scanErr)
 	}
 
 	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL,
@@ -805,39 +814,55 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?`
 	args := []any{opts.targetState, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr)}
 
+	// fields mirrors legacy restoreTaskWithOptions' webhook `fields` map exactly —
+	// it drives Changed (sorted keys) + Changes (from→to). Note description is
+	// reported as {"length": N}, not the raw body (legacy parity).
+	fields := map[string]any{
+		"state":       opts.targetState,
+		"archived_at": nil,
+		"deleted_at":  nil,
+	}
+
 	if opts.newProjectUUID != nil {
 		query += `, project_uuid = ?`
 		args = append(args, *opts.newProjectUUID)
+		fields["project_uuid"] = *opts.newProjectUUID
 	}
 	if opts.newSlug != nil {
 		query += `, slug = ?`
 		args = append(args, *opts.newSlug)
+		fields["slug"] = *opts.newSlug
 	}
 	if opts.newTitle != "" {
 		query += `, title = ?`
 		args = append(args, opts.newTitle)
+		fields["title"] = opts.newTitle
 	}
 	if opts.newDescription != "" {
 		query += `, description = ?`
 		args = append(args, opts.newDescription)
+		fields["description"] = map[string]any{"length": len(opts.newDescription)}
 	}
 	if opts.newPriority != 0 {
 		query += `, priority = ?`
 		args = append(args, opts.newPriority)
+		fields["priority"] = opts.newPriority
 	}
 	if opts.newLabels != "" {
 		query += `, labels = ?`
 		args = append(args, opts.newLabels)
+		fields["labels"] = opts.newLabels
 	}
 	if opts.assigneePrincipalRef != nil {
 		query += `, assignee_principal_ref = ?`
 		args = append(args, *opts.assigneePrincipalRef)
+		fields["assignee_principal_ref"] = *opts.assigneePrincipalRef
 	}
 	query += ` WHERE uuid = ?`
 	args = append(args, taskUUID)
 
 	if _, eerr := tx.Exec(query, args...); eerr != nil {
-		return NewInternalError(eerr)
+		return webhooks.EventContext{}, NewInternalError(eerr)
 	}
 
 	// Event payload mirrors legacy: action + target_state, plus moved_to on a move.
@@ -847,7 +872,7 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	}
 	payloadJSON, _ := json.Marshal(payloadMap)
 	payload := string(payloadJSON)
-	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
+	eventMeta, eerr := events.NewWriter(a.db.DB).LogEventReturning(tx, &domain.Event{
 		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
@@ -855,8 +880,9 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		ResourceUUID: &taskUUID,
 		EventType:    "task.restored",
 		Payload:      &payload,
-	}); eerr != nil {
-		return NewInternalError(eerr)
+	})
+	if eerr != nil {
+		return webhooks.EventContext{}, NewInternalError(eerr)
 	}
 
 	// --comment: append a comment (legacy id sequencing via MAX(id)+1 + the
@@ -864,10 +890,10 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	if opts.comment != "" {
 		var nextSeq int64
 		if serr := tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments").Scan(&nextSeq); serr != nil {
-			return NewInternalError(serr)
+			return webhooks.EventContext{}, NewInternalError(serr)
 		}
 		if _, serr := tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", nextSeq); serr != nil {
-			return NewInternalError(serr)
+			return webhooks.EventContext{}, NewInternalError(serr)
 		}
 		commentUUID := uuid.New().String()
 		commentID := id.FormatComment(int(nextSeq))
@@ -879,17 +905,30 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 			VALUES (?, ?, ?, ?, ?, ?, ?, 1)
 		`, commentUUID, commentID, taskUUID, legacyActorBind(attr),
 			attr.PrincipalRef, scopeBind(attr), opts.comment); serr != nil {
-			return NewInternalError(serr)
+			return webhooks.EventContext{}, NewInternalError(serr)
 		}
 	}
 
 	if cerr := tx.Commit(); cerr != nil {
-		return NewInternalError(cerr)
+		return webhooks.EventContext{}, NewInternalError(cerr)
 	}
-	return nil
+
+	// EventContext mirrors legacy restoreTaskWithOptions: an `updated` event with
+	// the archived/deleted→target transition, the per-field Changed/Changes derived
+	// from the same `fields` map, and Via="rpc" (this path's mutation convention).
+	return webhooks.EventContext{
+		Metadata:   eventMeta,
+		Event:      "updated",
+		ActorUUID:  attr.LegacyActorUUID,
+		Via:        "rpc",
+		Transition: &webhooks.Transition{From: &currentState, To: &opts.targetState},
+		Changed:    webhookSortedKeys(fields),
+		Changes:    webhookMapChanges(fields, map[string]any{"state": currentState}),
+	}, nil
 }
 
-// cascadeRestoreSubtasks restores all archived/deleted subtasks of a parent.
+// cascadeRestoreSubtasks restores all archived/deleted subtasks of a parent,
+// dispatching the restore webhook for EACH restored subtask (legacy parity).
 func (a *API) cascadeRestoreSubtasks(parentTaskUUID, targetState string, attr attribution.Attribution) error {
 	rows, err := a.db.Query(
 		"SELECT uuid FROM tasks WHERE parent_task_uuid = ? AND state IN ('archived', 'deleted')",
@@ -913,14 +952,37 @@ func (a *API) cascadeRestoreSubtasks(parentTaskUUID, targetState string, attr at
 	}
 
 	for _, subtaskUUID := range subtaskUUIDs {
-		if rerr := a.restoreTaskTx(subtaskUUID, restoreOptions{targetState: targetState}, attr); rerr != nil {
+		webhookCtx, rerr := a.restoreTaskTx(subtaskUUID, restoreOptions{targetState: targetState}, attr)
+		if rerr != nil {
 			return rerr
 		}
+		webhooks.DispatchTaskEvent(a.db, subtaskUUID, webhookCtx)
 		if rerr := a.cascadeRestoreSubtasks(subtaskUUID, targetState, attr); rerr != nil {
 			return rerr
 		}
 	}
 	return nil
+}
+
+// webhookSortedKeys returns the field keys in sorted order (mirrors legacy
+// sortedMapKeys, driving the webhook Changed slice deterministically).
+func webhookSortedKeys(fields map[string]any) []string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// webhookMapChanges builds the webhook Changes map (from oldValues, to fields),
+// mirroring legacy mapChanges.
+func webhookMapChanges(fields map[string]any, oldValues map[string]any) map[string]webhooks.Change {
+	changes := make(map[string]webhooks.Change, len(fields))
+	for _, key := range webhookSortedKeys(fields) {
+		changes[key] = webhooks.Change{From: oldValues[key], To: fields[key]}
+	}
+	return changes
 }
 
 // patchFields converts a TaskPatch into the store field map (DB column names).

@@ -696,6 +696,34 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 	{
+		// Validation-before-resolution precedence: a bad flag on a MISSING ref must
+		// fail with the VALIDATION error, NOT not-found/container-gate. The mirror
+		// calls wrkq.task.restore first (no speculative task.show), so the server's
+		// flag-validation-before-lookup ordering is preserved end to end.
+		name:    "restore/precedence-bad-state-missing-ref",
+		setup:   nil,
+		args:    []string{"restore", "T-09999999", "--state", "archived"},
+		mutates: true,
+	},
+	{
+		name:    "restore/precedence-bad-priority-missing-ref",
+		setup:   nil,
+		args:    []string{"restore", "T-09999999", "--priority", "99"},
+		mutates: true,
+	},
+	{
+		name:    "restore/precedence-bad-labels-missing-ref",
+		setup:   nil,
+		args:    []string{"restore", "T-09999999", "--labels", "not-json"},
+		mutates: true,
+	},
+	{
+		name:    "restore/precedence-bad-assignee-missing-ref",
+		setup:   nil,
+		args:    []string{"restore", "T-09999999", "--assignee", "agent:x:project:y"},
+		mutates: true,
+	},
+	{
 		// project-root scoping: relative selector resolved under WRKQ_PROJECT_ROOT.
 		name:    "restore/pr-relative-selector",
 		setup:   [][]string{{"mkdir", "myproj"}, {"touch", "myproj/task-a", "-t", "A"}, {"rm", "myproj/task-a"}},

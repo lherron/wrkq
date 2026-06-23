@@ -604,10 +604,15 @@ assignee validation → not-deleted-or-archived check → `ifMatch` mismatch
 (`WRKQ_CONFLICT`, "etag mismatch: expected N, got M") → `toPath` resolve +
 slug-conflict (`WRKQ_CONFLICT`, "slug conflict: task with slug '…' already exists
 at destination"). The restore UPDATE intentionally does NOT bump the etag (legacy
-parity). restore NEVER prompts, so the mirror carries no confirmation flow — it
-owns only the caller-side scoping of the task ref + the `toPath` destination and
-the legacy output rendering. Container restore has no RPC method yet and is
-hard-gated in the mirror.
+parity). The server dispatches the restore webhook (`updated` event, the
+archived/deleted→target transition, per-field changed payload, `origin.via="rpc"`)
+for the ROOT task AND each cascade-restored subtask — webhook delivery is part of
+the mutation contract, not just the event log. restore NEVER prompts, so the
+mirror carries no confirmation flow — it owns only the caller-side scoping of the
+task ref + the `toPath` destination and the legacy output rendering, and it calls
+`wrkq.task.restore` first (no speculative `task.show`) so the server's
+validation-before-resolution precedence holds end to end. Container restore has no
+RPC method yet and is hard-gated in the mirror.
 
 #### Comment methods
 
