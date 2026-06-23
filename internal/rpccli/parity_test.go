@@ -2412,6 +2412,65 @@ func TestFindHardGates(t *testing.T) {
 	}
 }
 
+// TestRmContainerHardGate proves the mirror REFUSES container `rm` targets on
+// the B0 caller-owned-confirmation seam: wrkq.container.delete has no archive
+// mode, so container rm cannot be byte-proven and is hard-gated (clean non-zero,
+// abort-before-mutation). Legacy would SUCCEED (it archives the container), so
+// these cannot be parity rows; the gate + the no-mutation guarantee are asserted
+// on the mirror alone. Container archive is a future slice, deliberately NOT in
+// B0.
+func TestRmContainerHardGate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs the mirror CLI")
+	}
+	bins := buildParityBinaries(t)
+	setup := [][]string{
+		{"mkdir", "myproj"},
+		{"touch", "inbox/keepme", "-t", "Keep Me"},
+	}
+
+	t.Run("pure-container-target", func(t *testing.T) {
+		t.Parallel()
+		base := seedFixture(t, bins, setup)
+		dir := copyFixture(t, base)
+		before := snapshot(t, dir)
+		res := runCLI(t, bins.mirror, dir, []string{"rm", "myproj"})
+		if res.exit == 0 {
+			t.Errorf("expected non-zero exit (container hard-gate), got 0\n stdout: %q", res.stdout)
+		}
+		if strings.TrimSpace(res.stderr) == "" {
+			t.Error("expected a gate error message on stderr")
+		}
+		if after := snapshot(t, dir); after != before {
+			t.Errorf("container hard-gate must NOT mutate:\n before:\n%s\n after:\n%s", before, after)
+		}
+	})
+
+	t.Run("mixed-task-and-container-abort-before-mutation", func(t *testing.T) {
+		t.Parallel()
+		base := seedFixture(t, bins, setup)
+		dir := copyFixture(t, base)
+		before := snapshot(t, dir)
+		// Task FIRST, container second: the gate must abort the WHOLE batch before
+		// ANY mutation, so the leading task must NOT be archived/deleted.
+		res := runCLI(t, bins.mirror, dir, []string{"rm", "inbox/keepme", "myproj"})
+		if res.exit == 0 {
+			t.Errorf("expected non-zero exit (mixed batch hard-gate), got 0\n stdout: %q", res.stdout)
+		}
+		if strings.TrimSpace(res.stderr) == "" {
+			t.Error("expected a gate error message on stderr")
+		}
+		after := snapshot(t, dir)
+		if after != before {
+			t.Errorf("mixed batch must abort BEFORE mutating the task (no partial apply):\n before:\n%s\n after:\n%s", before, after)
+		}
+		// Defense-in-depth: the leading task must still be present and 'open'.
+		if !strings.Contains(after, "|keepme|open|") {
+			t.Errorf("leading task must remain open (un-deleted) after the gate abort; snapshot:\n%s", after)
+		}
+	})
+}
+
 // TestLsHardGates previously proved the mirror REFUSED the legacy ls surfaces it
 // did not yet implement. All of those (table/human/yaml/tsv, --one/--nul,
 // --recursive, multi-path, conflicting-modes) now have REAL byte parity and live

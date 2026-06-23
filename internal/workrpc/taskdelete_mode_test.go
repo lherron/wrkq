@@ -17,6 +17,8 @@ package workrpc_test
 
 import (
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -173,6 +175,73 @@ func TestTaskDelete_PurgeCleansAttachments(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("purge must remove attachment rows; %d remain", n)
+	}
+}
+
+// TestTaskDelete_PurgePhysicalFileCleanup proves mode:purge unlinks the actual
+// attachment BYTES on disk AND removes the task attachment dir — not just the DB
+// rows. It configures an explicit WRKQ_ATTACH_DIR, adds an attachment with real
+// bytes via wrkq.attachment.add (which writes attachDir/tasks/<uuid>/<file>),
+// asserts the file + task dir exist, purges, then asserts both are gone (plus the
+// DB-row-gone guarantee).
+func TestTaskDelete_PurgePhysicalFileCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	attachDir := t.TempDir()
+	extraEnv := []string{"WRKQ_ATTACH_DIR=" + attachDir}
+
+	// Create the task in the SAME attach-dir env so the server is consistently
+	// configured across calls.
+	cf := pdRunEnv(t, "wrkq", dbPath, extraEnv,
+		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "purge-physical", "kind": "task"}),
+	)
+	cr := p2ResultOrFail(t, cf[1], "wrkq.task.create")
+	taskID, _ := cr["id"].(string)
+	taskUUID, _ := cr["uuid"].(string)
+	if taskID == "" || taskUUID == "" {
+		t.Fatalf("create returned empty id/uuid: %#v", cr)
+	}
+
+	// Add an attachment with real bytes on disk.
+	srcPath := p4WriteTempFile(t, "payload.txt", "real attachment bytes that must be unlinked on purge")
+	filename := filepath.Base(srcPath)
+	af := pdRunEnv(t, "wrkq", dbPath, extraEnv,
+		mkRPC("a1", "wrkq.attachment.add", map[string]any{
+			"task":     taskID,
+			"path":     srcPath,
+			"filename": filename,
+		}),
+	)
+	p2ResultOrFail(t, af[1], "wrkq.attachment.add")
+
+	storedFile := filepath.Join(attachDir, "tasks", taskUUID, filename)
+	taskDir := filepath.Join(attachDir, "tasks", taskUUID)
+	if _, err := os.Stat(storedFile); err != nil {
+		t.Fatalf("precondition: attachment file must exist before purge at %s: %v", storedFile, err)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("precondition: task attachment dir must exist before purge at %s: %v", taskDir, err)
+	}
+
+	// Purge with the SAME attach-dir env so the server can resolve + unlink files.
+	pf := pdRunEnv(t, "wrkq", dbPath, extraEnv,
+		mkRPC("d1", "wrkq.task.delete", map[string]any{"task": taskUUID, "mode": "purge"}),
+	)
+	p2ResultOrFail(t, pf[1], "wrkq.task.delete (purge physical)")
+
+	// DB row gone.
+	if exists, _, _, _ := taskRow(t, dbPath, taskUUID); exists {
+		t.Error("purge must hard-delete the task row")
+	}
+	// Physical file gone.
+	if _, err := os.Stat(storedFile); !os.IsNotExist(err) {
+		t.Errorf("purge must unlink the attachment file %s (stat err=%v)", storedFile, err)
+	}
+	// Task attachment dir gone.
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Errorf("purge must remove the task attachment dir %s (stat err=%v)", taskDir, err)
 	}
 }
 

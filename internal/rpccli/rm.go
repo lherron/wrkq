@@ -190,7 +190,7 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 		if perr != nil {
 			return perr
 		}
-		if cerr := (confirmPrompt{skip: false, warning: warning}).run(cmd); cerr != nil {
+		if cerr := purgeConfirm(cmd, false, warning); cerr != nil {
 			return cerr
 		}
 	}
