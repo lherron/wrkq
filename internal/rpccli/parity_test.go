@@ -417,15 +417,14 @@ var parityCases = []parityCase{
 		args:    []string{"rename-container", "oldproj", "!!!"},
 		mutates: true,
 	},
-	{
-		// Slug conflict: renaming to an existing sibling slug → server UNIQUE →
-		// WRKQ_CONFLICT (typed, not a raw store leak), no mutation. Two top-level
-		// projects; rename one onto the other's slug.
-		name:    "rename-container/slug-conflict",
-		setup:   [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
-		args:    []string{"rename-container", "alpha", "beta"},
-		mutates: true,
-	},
+	// NOTE: slug-conflict is a DELIBERATE byte divergence, not a parity case.
+	// Legacy LEAKS the raw SQLite error ("failed to update container: UNIQUE
+	// constraint failed: containers.parent_uuid, containers.slug"); the RPC path
+	// returns a STABLE, implementation-free WRKQ_CONFLICT message ("container slug
+	// already exists in parent") per the T-05112 daedalus ruling (hrcchat#10203).
+	// The typed code + clean (no SQLite/store text) message are asserted in the
+	// server acceptance test TestWrkqContainerUpdate_SlugConflictTyped, so this is
+	// intentionally absent from the byte-equality table.
 	{
 		// project-root scoping: a relative selector is resolved under WRKQ_PROJECT_ROOT
 		// before becoming an RPC param. Rename a child container of myproj.

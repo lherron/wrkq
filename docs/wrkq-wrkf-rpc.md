@@ -958,8 +958,13 @@ changed fields + bumped etag). Error mapping is **typed** (never a raw store lea
 
 - empty / absent patch, an unknown patch key (`kind`/`parentUuid`/`webhookUrls`/
   `archived`/…), or an invalid slug → `WRKQ_VALIDATION`;
-- a slug collision with an existing sibling (unique-in-parent), or a stale
-  `expectEtag` → `WRKQ_CONFLICT`;
+- a slug collision with an existing sibling (unique-in-parent) → `WRKQ_CONFLICT`
+  with a **stable, implementation-free** message
+  (`container slug already exists in parent`) — the raw SQLite UNIQUE-constraint /
+  store text (`UNIQUE constraint failed: containers.parent_uuid, containers.slug`)
+  is NEVER leaked;
+- a stale `expectEtag` → `WRKQ_CONFLICT` (`container etag precondition failed`,
+  with `currentEtag` in the error data);
 - an unresolvable `container` selector → `WRKQ_NOT_FOUND`.
 
 Adding any field beyond `slug`/`title` (kind, parent, webhook URLs, archive state,

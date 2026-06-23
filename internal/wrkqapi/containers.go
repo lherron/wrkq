@@ -497,7 +497,11 @@ func mapContainerStoreError(err error, selector string) error {
 	case strings.Contains(lower, "not found"):
 		return NewNotFoundError(selector, "container")
 	case strings.Contains(lower, "unique") || strings.Contains(lower, "constraint"):
-		return NewConflictError(msg, nil)
+		// A slug collision surfaces as a SQLite UNIQUE-constraint failure on
+		// (parent_uuid, slug). Map it to a STABLE, implementation-free conflict
+		// message + data — never leak the raw "UNIQUE constraint failed:
+		// containers.parent_uuid, containers.slug" store/SQLite text.
+		return NewConflictError("container slug already exists in parent", nil)
 	case strings.Contains(lower, "not empty") ||
 		strings.Contains(lower, "invalid") ||
 		strings.Contains(lower, "required") ||

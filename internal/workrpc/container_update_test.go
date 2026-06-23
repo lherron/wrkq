@@ -25,6 +25,13 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 )
 
+// g1ErrMessage extracts the top-level JSON-RPC error.message from a response frame.
+func g1ErrMessage(frame map[string]any) string {
+	errObj, _ := frame["error"].(map[string]any)
+	msg, _ := errObj["message"].(string)
+	return msg
+}
+
 // g1ContainerField reads a single column for a container by UUID.
 func g1ContainerField(t *testing.T, dbPath, containerUUID, column string) string {
 	t.Helper()
@@ -245,6 +252,17 @@ func TestWrkqContainerUpdate_StaleEtagConflict(t *testing.T) {
 	if code := p2ErrCode(frames[1]); code != "WRKQ_CONFLICT" {
 		t.Errorf("stale etag: want WRKQ_CONFLICT, got %q (frame=%#v)", code, frames[1])
 	}
+	// The stale-etag conflict message must also be stable + implementation-free —
+	// no raw store/SQLite text.
+	msg := g1ErrMessage(frames[1])
+	for _, banned := range []string{
+		"UNIQUE", "constraint", "failed to update container",
+		"containers", "parent_uuid", "sql", "SQLITE", "sqlite",
+	} {
+		if strings.Contains(msg, banned) {
+			t.Errorf("stale-etag conflict message leaks store/SQLite text %q: %q", banned, msg)
+		}
+	}
 	if got := g1ContainerField(t, dbPath, projUUID, "slug"); got != "g1-upd-stale" {
 		t.Errorf("slug must be unchanged after stale-etag conflict, got %q", got)
 	}
@@ -272,11 +290,23 @@ func TestWrkqContainerUpdate_SlugConflictTyped(t *testing.T) {
 	if code != "WRKQ_CONFLICT" {
 		t.Errorf("slug conflict: want WRKQ_CONFLICT, got %q (frame=%#v)", code, frames[1])
 	}
-	// Typed error: must NOT be the raw protocol method-not-found, and the message
-	// must not leak the raw "failed to update container" store wrapper bare without
-	// a domain code (the code assertion above already guarantees the typed domain).
 	if g1IsMethodNotFound(frames[1]) {
 		t.Error("slug conflict: method not registered")
+	}
+	// The conflict message MUST be a stable, implementation-free string — it must
+	// NOT leak any raw SQLite / store text (UNIQUE-constraint wording, the
+	// "failed to update container" store wrapper, or table/column identifiers).
+	msg := g1ErrMessage(frames[1])
+	for _, banned := range []string{
+		"UNIQUE", "unique", "constraint", "failed to update container",
+		"containers", "parent_uuid", "slug = ", "sql", "SQLITE", "sqlite",
+	} {
+		if strings.Contains(msg, banned) {
+			t.Errorf("slug conflict message leaks store/SQLite text %q: %q", banned, msg)
+		}
+	}
+	if msg == "" {
+		t.Error("slug conflict: expected a non-empty conflict message")
 	}
 	if got := g1ContainerField(t, dbPath, aUUID, "slug"); got != "g1-conf-alpha" {
 		t.Errorf("slug must be unchanged after conflict, got %q", got)
