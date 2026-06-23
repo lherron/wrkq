@@ -623,7 +623,17 @@ interface WrkqAttachment {
 ```
 
 Binary attachment contents are not streamed in v1. The server stores/copies
-from a local path and returns metadata.
+from a local path and returns metadata. The RPC-backed mirror's `attach put`
+(real-file) and `attach rm` ride this contract directly: the mirror sends the
+host **path string** to `wrkq.attachment.add` (server reads the bytes) and an id
+to `wrkq.attachment.remove` (server unlinks). It re-projects the camelCase
+`WrkqAttachment` into legacy's snake_case `attach put` map and resolves `task_id`
+via `wrkq.task.show`. Because v1 does NOT stream bytes, two surfaces have no
+faithful mirror and are HARD-GATED in `wrkq-rpccli`: **`attach get`** (bytes back
+to the client) and **`attach put -`** (bytes from client stdin). Picking a
+byte-transfer contract for those (bytes-over-RPC vs host-path-return) is an open
+ruling — see `docs/rpc-cli-migration.md` "attach get / stdin-put byte-transfer
+gap".
 
 Attachment storage config (attach dir + max size) is sourced from the SAME wrkq
 configuration on both the `wrkq` and `wrkf` rpc entrypoints. When no attach dir

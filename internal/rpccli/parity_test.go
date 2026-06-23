@@ -40,6 +40,12 @@ type parityCase struct {
 	// command-under-test run on BOTH binaries — e.g. WRKQ_PROJECT_ROOT/ASP_PROJECT
 	// to prove project-root scoping. The setup/seed always runs root-less.
 	env []string
+	// files writes literal files into EACH binary's run dir (keyed by a relative
+	// path) before the command-under-test runs, so commands that consume a host
+	// file path (e.g. `attach put <task> <file>`) have a byte-identical source on
+	// both sides. copyFixture only carries the SQLite triplet, so file inputs that
+	// must exist at run time are seeded here instead.
+	files map[string]string
 }
 
 var parityCases = []parityCase{
@@ -602,11 +608,102 @@ var parityCases = []parityCase{
 		args: []string{"comment", "ls", "inbox/ca", "inbox/cb", "--porcelain", "--limit", "3"},
 	},
 
-	// attach ls (empty) via wrkq.attachment.listView (cursor pattern; populated case needs attach put fs, pending).
+	// attach ls via wrkq.attachment.listView (server compat list projection,
+	// DB-only, cursor-paginated). Populated rows are seeded with the legacy binary's
+	// `attach put` (source files materialized into the fixture dir before seeding).
 	{
 		name:  "attach-ls/empty",
 		setup: [][]string{{"touch", "inbox/at", "-t", "AT"}},
 		args:  []string{"attach", "ls", "inbox/at", "--json"},
+	},
+	{
+		name: "attach-ls/populated-json",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+			{"attach", "put", "inbox/at", "beta.md"},
+		},
+		args:  []string{"attach", "ls", "inbox/at", "--json"},
+		files: attachSrcFiles,
+	},
+	{
+		name: "attach-ls/populated-ndjson-default",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+			{"attach", "put", "inbox/at", "beta.md"},
+		},
+		args:  []string{"attach", "ls", "inbox/at"},
+		files: attachSrcFiles,
+	},
+	{
+		name: "attach-ls/populated-porcelain-limit-cursor",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+			{"attach", "put", "inbox/at", "beta.md"},
+			{"attach", "put", "inbox/at", "gamma.bin"},
+		},
+		args:  []string{"attach", "ls", "inbox/at", "--porcelain", "--limit", "2"},
+		files: attachSrcFiles,
+	},
+
+	// attach put via wrkq.attachment.add (server reads the host file bytes and
+	// writes them into the server-local attach dir). WRKQ_ATTACH_DIR is set
+	// relative so each binary writes into its OWN run dir (cmd.Dir), keeping them
+	// isolated despite identical task UUIDs in the copied DB.
+	{
+		name:          "attach-put/basic",
+		setup:         [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:          []string{"attach", "put", "inbox/at", "alpha.txt"},
+		files:         attachSrcFiles,
+		env:           []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:          "attach-put/with-name-and-mime",
+		setup:         [][]string{{"touch", "inbox/at", "-t", "AT"}},
+		args:          []string{"attach", "put", "inbox/at", "alpha.txt", "--name", "renamed.dat", "--mime", "application/x-custom"},
+		files:         attachSrcFiles,
+		env:           []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:    "attach-put/unknown-task-errors",
+		setup:   nil,
+		args:    []string{"attach", "put", "T-09999999", "alpha.txt"},
+		files:   attachSrcFiles,
+		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates: false,
+	},
+
+	// attach rm via wrkq.attachment.remove (metadata DELETE + server-side unlink).
+	// --yes skips the interactive confirmation so the harness (empty stdin) is
+	// deterministic. Attachment friendly ids are ATT-NNNNN (attachment_seq), so the
+	// first seeded attachment is the deterministic ATT-00001.
+	{
+		name: "attach-rm/yes",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+		},
+		args:    []string{"attach", "rm", "ATT-00001", "--yes"},
+		files:   attachSrcFiles,
+		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates: true,
+	},
+	{
+		name: "attach-rm/unknown-warns-continues",
+		setup: [][]string{
+			{"touch", "inbox/at", "-t", "AT"},
+			{"attach", "put", "inbox/at", "alpha.txt"},
+		},
+		args:    []string{"attach", "rm", "ATT-09999999", "--yes"},
+		files:   attachSrcFiles,
+		env:     []string{"WRKQ_ATTACH_DIR=attach-store"},
+		mutates: true,
 	},
 
 	// ls via wrkq.task.lsView (server compat list projection: mixed task/container
@@ -1194,6 +1291,16 @@ var parityCases = []parityCase{
 	},
 }
 
+// attachSrcFiles are the host source files materialized into each run/seed dir
+// for the attach put/ls cases. Distinct extensions exercise MIME auto-detection
+// (.txt → text/plain, .md → text/markdown, .bin → application/octet-stream) and
+// distinct byte lengths so size_bytes differs per row.
+var attachSrcFiles = map[string]string{
+	"alpha.txt": "alpha attachment body\n",
+	"beta.md":   "# beta\n\nmarkdown attachment\n",
+	"gamma.bin": "gamma\x00\x01\x02bytes",
+}
+
 // prSeed builds a root-less fixture with two top-level projects (myproj, other),
 // a sub-container, and tasks under myproj. The project-root parity cases run the
 // command-under-test WITH a project root so the mirror must scope relative
@@ -1288,9 +1395,11 @@ func TestParity(t *testing.T) {
 			// Seed ONE base fixture, then give each binary a byte-identical copy
 			// (incl. random UUIDs), so output comparison catches real id bugs
 			// rather than masking legitimately-different independent seeds.
-			base := seedFixture(t, bins, tc.setup)
+			base := seedFixtureFiles(t, bins, tc.setup, tc.files)
 			oldDir := copyFixture(t, base)
 			newDir := copyFixture(t, base)
+			writeRunFiles(t, oldDir, tc.files)
+			writeRunFiles(t, newDir, tc.files)
 
 			oldRes := runCLIEnv(t, bins.wrkq, oldDir, tc.args, tc.env)
 			newRes := runCLIEnv(t, bins.mirror, newDir, tc.args, tc.env)
@@ -1903,8 +2012,19 @@ func buildParityBinaries(t *testing.T) binaries {
 // .env.local), runs `wrkqadm init`, and applies the setup commands with the
 // legacy binary so both fixtures start identical.
 func seedFixture(t *testing.T, bins binaries, setup [][]string) string {
+	return seedFixtureFiles(t, bins, setup, nil)
+}
+
+// seedFixtureFiles is seedFixture plus literal source files written into the
+// fixture dir BEFORE the setup commands run, so a seed step that consumes a host
+// file path (e.g. `attach put <task> <file>`) has its source present. The seed
+// `attach put` writes the attachment file under the seeding binary's default
+// (HOME-derived) attach dir; that location is irrelevant to DB-only readers like
+// `attach ls`, which compare the stored rows (relative_path is dir-independent).
+func seedFixtureFiles(t *testing.T, bins binaries, setup [][]string, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	writeRunFiles(t, dir, files)
 	dbPath := filepath.Join(dir, "wrkq.db")
 	mustRun(t, bins.wrkqadm, dir, []string{"--db", dbPath, "init"})
 	for _, argv := range setup {
@@ -1932,6 +2052,22 @@ func copyFixture(t *testing.T, base string) string {
 		}
 	}
 	return dst
+}
+
+// writeRunFiles materializes literal source files into a run dir before the
+// command-under-test executes. Used by commands that consume a host file path
+// (e.g. `attach put`), which copyFixture (SQLite-only) does not carry.
+func writeRunFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		p := filepath.Join(dir, rel)
+		if mkErr := os.MkdirAll(filepath.Dir(p), 0o755); mkErr != nil {
+			t.Fatalf("write run file mkdir %s: %v", p, mkErr)
+		}
+		if wErr := os.WriteFile(p, []byte(content), 0o644); wErr != nil {
+			t.Fatalf("write run file %s: %v", p, wErr)
+		}
+	}
 }
 
 type cliResult struct {
