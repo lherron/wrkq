@@ -39,7 +39,8 @@ var topLevelCommands = []mirroredCommand{
 	{use: "index"},
 	// log is RPC-backed (real parity command); registered separately.
 	// ls is RPC-backed (real parity command); registered separately.
-	{use: "monitor"},
+	// monitor is RPC-backed (bounded polling via wrkq.monitor.eventsView +
+	// wrkq.monitor.stateView; caller owns the loop/terminal/exit codes); registered separately.
 	{use: "projects"},
 	// rename-container is RPC-backed (new wrkq.container.update, narrow slug/title
 	// patch + etag CAS, T-05112); registered separately.
@@ -53,7 +54,8 @@ var topLevelCommands = []mirroredCommand{
 	// tree is RPC-backed (real parity command); registered separately.
 	{use: "usage", aliases: []string{"info"}},
 	{use: "version"},
-	{use: "watch [PATH...]"},
+	// watch is RPC-backed (bounded raw tail via wrkq.history.tailView; caller owns
+	// the follow loop + deprecation warning + rendering); registered separately.
 	// webhook is RPC-backed (DEDICATED family wrkq.webhook.add/remove/listView,
 	// T-05119); registered separately.
 	{use: "whoami"},
@@ -103,6 +105,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newWebhookCmd())
 	root.AddCommand(newBundleCmd())
 	root.AddCommand(newHandoffCmd())
+	root.AddCommand(newMonitorCmd())
+	root.AddCommand(newWatchCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

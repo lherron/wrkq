@@ -316,6 +316,50 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 		t.Errorf("history.listView transport results differ:\n in-process: %s\n subprocess: %s", inHist, subHist)
 	}
 
+	// history.tailView (the watch / monitor-raw bounded ASCENDING raw tail over
+	// event_log) must agree across transports. From cursor 0 it returns the seeded
+	// task's create event(s) plus the high-water cursor.
+	inTail, err := inproc.Call(context.Background(), "wrkq.history.tailView", map[string]any{"cursor": 0})
+	if err != nil {
+		t.Fatalf("in-process history.tailView: %v", err)
+	}
+	subTail, err := sub.Call(ctx, "wrkq.history.tailView", map[string]any{"cursor": 0})
+	if err != nil {
+		t.Fatalf("subprocess history.tailView: %v", err)
+	}
+	if !jsonEqual(t, inTail, subTail) {
+		t.Errorf("history.tailView transport results differ:\n in-process: %s\n subprocess: %s", inTail, subTail)
+	}
+
+	// monitor.eventsView (the bounded ASCENDING filtered monitor event page) must
+	// agree across transports. Filter to the seeded task so the comment→task
+	// backfill + isEventIncluded path is exercised identically on both transports.
+	inEv, err := inproc.Call(context.Background(), "wrkq.monitor.eventsView", map[string]any{"tasks": []string{taskID}, "cursor": 0})
+	if err != nil {
+		t.Fatalf("in-process monitor.eventsView: %v", err)
+	}
+	subEv, err := sub.Call(ctx, "wrkq.monitor.eventsView", map[string]any{"tasks": []string{taskID}, "cursor": 0})
+	if err != nil {
+		t.Fatalf("subprocess monitor.eventsView: %v", err)
+	}
+	if !jsonEqual(t, inEv, subEv) {
+		t.Errorf("monitor.eventsView transport results differ:\n in-process: %s\n subprocess: %s", inEv, subEv)
+	}
+
+	// monitor.stateView (the single authoritative --until condition snapshot) must
+	// agree across transports. Evaluate state=open against the seeded task.
+	inSt, err := inproc.Call(context.Background(), "wrkq.monitor.stateView", map[string]any{"tasks": []string{taskID}, "condition": "state=open"})
+	if err != nil {
+		t.Fatalf("in-process monitor.stateView: %v", err)
+	}
+	subSt, err := sub.Call(ctx, "wrkq.monitor.stateView", map[string]any{"tasks": []string{taskID}, "condition": "state=open"})
+	if err != nil {
+		t.Fatalf("subprocess monitor.stateView: %v", err)
+	}
+	if !jsonEqual(t, inSt, subSt) {
+		t.Errorf("monitor.stateView transport results differ:\n in-process: %s\n subprocess: %s", inSt, subSt)
+	}
+
 	// task.lsView multi-path form ("paths") — the server owns the per-path query
 	// plus the combined merge-sort — must also agree across transports.
 	inLsM, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}})

@@ -219,6 +219,36 @@ func TestHistoryListViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestHistoryTailViewDTOFingerprint guards the watch/monitor-raw bounded-tail read
+// model shapes (T-05116). WrkqWatchEvent is the legacy watchEvent row shape in
+// LEGACY STRUCT ORDER (NOT alphabetical) — it INCLUDES resource_id, uses a STRING
+// timestamp, and resource_uuid is a nullable pointer (omitempty), all DISTINCT from
+// WrkqLogEvent. Any field/tag drift is a PROTOCOL CONTRACT change.
+func TestHistoryTailViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqHistoryTailView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqWatchEvent{}))
+	const want = "WrkqHistoryTailView{items,high_water}\n" +
+		"WrkqWatchEvent{id,timestamp,actor_uuid,omitempty,actor_slug,omitempty,actor_id,omitempty,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,etag,omitempty,payload,omitempty}"
+	if got != want {
+		t.Errorf("history tail view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestMonitorViewDTOFingerprint guards the monitor bounded-polling read-model shapes
+// (T-05115). WrkqMonitorEvent is the legacy monitorEventLine data row MINUS the
+// client-owned `type` discriminator, in legacy struct order. Any field/tag drift is
+// a PROTOCOL CONTRACT change.
+func TestMonitorViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqMonitorEventsView{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqMonitorEvent{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqMonitorStateView{}))
+	const want = "WrkqMonitorEventsView{items,high_water}\n" +
+		"WrkqMonitorEvent{id,timestamp,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,payload,omitempty}\n" +
+		"WrkqMonitorStateView{met,unmet}"
+	if got != want {
+		t.Errorf("monitor view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestTreeViewDTOFingerprint guards the tree projection shapes (same rationale as
 // the cat/ls fingerprints). The wire_* carriers are part of the contract: the
 // mirror depends on them to reconstruct legacy's NDJSON stream + JSON `path`.

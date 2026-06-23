@@ -290,6 +290,9 @@ wrkq.task.treeView    [CLI compatibility tree projection — see note]
 wrkq.task.blockedView [CLI compatibility projection — see note]
 wrkq.task.inboxView   [CLI compatibility list projection — see note]
 wrkq.history.listView [CLI compatibility history read model — see note]
+wrkq.history.tailView [CLI compatibility bounded raw tail — see monitor/watch note]
+wrkq.monitor.eventsView [CLI compatibility bounded filtered event page — see monitor/watch note]
+wrkq.monitor.stateView  [CLI compatibility --until condition snapshot — see monitor/watch note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
 wrkq.task.acknowledge
@@ -406,6 +409,54 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > the view never reads project-root env/flags). Compat read model, not a canonical
 > resource. Cataloged + fingerprinted (TestHistoryListViewDTOFingerprint;
 > registering it changes the method catalog and `protocolSchemaHash`).
+
+> **`wrkq.monitor.eventsView` / `wrkq.monitor.stateView` / `wrkq.history.tailView`**
+> back the live-tailing surfaces `wrkq monitor watch|wait` and `wrkq watch`
+> (+ `monitor watch --raw`). Daedalus ruled (#10211) monitor + watch IN SCOPE as
+> **BOUNDED POLLING over RPC — NO server push/subscribe/stream in v1**
+> (`wrkq.wrkf-rpc.bounded-polling-streaming` arch record, shared by both). The
+> SERVER owns only stateless bounded read models; the CLIENT (wrkq-rpccli) owns the
+> blocking poll loop, the interval, the monotonic high-water cursor carried across
+> polls, the timeout/stall clocks, the per-event NDJSON lines, EXACTLY ONE terminal
+> NDJSON record, the exit codes (0=met, 1=timeout/stall, 2=selector/usage,
+> 3=stream), the `watch` deprecation warning, and human/NDJSON rendering. These read
+> the generic `event_log` table (NOT `workflow_events`; `wrkf.event.query` is a
+> distinct substrate).
+> - **`wrkq.monitor.eventsView`** is the bounded ASCENDING filtered event page for
+>   `monitor watch`. Server-owned: selector resolution (a bad selector →
+>   `WRKQ_VALIDATION`, the legacy exit-2 path), `resource_id` hydration, comment→task
+>   backfill, `isEventIncluded` / `isStateChangeEvent`, event-type filtering, and the
+>   high-water cursor of the LAST RAW row scanned (so a filtered-out tail still
+>   advances the client past it). Params:
+>   `{ tasks?, stateOnly?, eventTypes?, cursor, limit? }` →
+>   `WrkqMonitorEventsView{ items: WrkqMonitorEvent[], high_water }`. `tasks` empty =
+>   match ALL applicable task/comment events. The per-page `limit` is hard-capped
+>   server-side (`monitorMaxPageLimit`). `WrkqMonitorEvent` is the legacy
+>   monitorEventLine data row MINUS the client-owned `type` discriminator (the mirror
+>   re-stamps `"wrkq.monitor.event"` on render):
+>   `{ id, timestamp, resource_type, resource_uuid?, resource_id?, event_type, payload? }`.
+> - **`wrkq.monitor.stateView`** is the SINGLE authoritative `--until` condition
+>   snapshot for `monitor watch --until` / `monitor wait`. It evaluates the condition
+>   ONCE against current task state and NEVER sleeps/times out/stalls/emits terminal
+>   lines — the client owns the loop and re-calls it each cycle. Params:
+>   `{ tasks, condition }` → `WrkqMonitorStateView{ met, unmet }`. A missing/bad
+>   condition or selector → `WRKQ_VALIDATION` (exit 2); a watched task that no longer
+>   exists → `WRKQ_INTERNAL` (the legacy exit-3 "one or more watched tasks no longer
+>   exist"). Because eventsView + stateView are TWO independent snapshots, the
+>   client's terminal decision is intentionally RACE-TOLERANT.
+> - **`wrkq.history.tailView`** is a SIBLING of `wrkq.history.listView` in the
+>   `history` namespace (generic audit-log tailing) backing `wrkq watch` /
+>   `monitor watch --raw`: a bounded ASCENDING raw `event_log` page with actor
+>   slug/id + `resource_id` hydration. Params: `{ cursor, limit? }` →
+>   `WrkqHistoryTailView{ items: WrkqWatchEvent[], high_water }`. It MUST NOT reuse
+>   `WrkqLogEvent` — `WrkqWatchEvent` is the legacy watchEvent row shape, which
+>   INCLUDES `resource_id`, uses a STRING timestamp (raw `event_log.timestamp`), and
+>   has a nullable `resource_uuid` (omitempty): `{ id, timestamp, actor_uuid?,
+>   actor_slug?, actor_id?, principal_ref?, scope_ref?, resource_type,
+>   resource_uuid?, resource_id?, event_type, etag?, payload? }`.
+> All three are cataloged + fingerprinted (`TestMonitorViewDTOFingerprint`,
+> `TestHistoryTailViewDTOFingerprint`; registering them changes the method catalog
+> and `protocolSchemaHash`). Compat read models, not canonical resources.
 
 > **`wrkq.task.catView` is a CLI compatibility read model, not a domain
 > resource.** Unlike `wrkq.task.show` (the stable camelCase `WrkqTask` DTO), it

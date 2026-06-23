@@ -67,6 +67,33 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqLogEvent") {
 		t.Error("WrkqLogEvent missing from dtoCatalog")
 	}
+	// monitor + watch bounded-polling read models (T-05115 / T-05116): each new
+	// method + DTO must be in BOTH catalogs so their NAMES enter the protocol
+	// schema-hash input.
+	if !contains(methodCatalog, "wrkq.history.tailView") {
+		t.Error("wrkq.history.tailView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqHistoryTailView") {
+		t.Error("WrkqHistoryTailView missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqWatchEvent") {
+		t.Error("WrkqWatchEvent missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.monitor.eventsView") {
+		t.Error("wrkq.monitor.eventsView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqMonitorEventsView") {
+		t.Error("WrkqMonitorEventsView missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqMonitorEvent") {
+		t.Error("WrkqMonitorEvent missing from dtoCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.monitor.stateView") {
+		t.Error("wrkq.monitor.stateView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqMonitorStateView") {
+		t.Error("WrkqMonitorStateView missing from dtoCatalog")
+	}
 	if !contains(methodCatalog, "wrkq.task.treeView") {
 		t.Error("wrkq.task.treeView missing from methodCatalog")
 	}

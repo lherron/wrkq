@@ -1469,6 +1469,8 @@ Contract:
 - **Lifecycle.** With no `--until`, the child follows indefinitely. The bridge owns teardown: when its consumer disconnects it cancels/kills the child process (e.g. `exec.CommandContext` cancel), and the child is reaped promptly.
 - The TypeScript `@wrkq/client` exposes this, if at all, as a **monitor child-process helper** — never as a JSON-RPC streaming method.
 
+**Bounded-polling read models (T-05115 / T-05116, daedalus #10211).** The `monitor watch|wait` / `watch` CLI surfaces are now themselves RPC-backed, but still as **request/response bounded polling — NOT streaming**. The server exposes three stateless bounded read models the CLI poll-loops over: `wrkq.monitor.eventsView` (one bounded ASCENDING filtered `event_log` page + high-water cursor), `wrkq.monitor.stateView` (a SINGLE `--until` condition snapshot — never sleeps/emits terminal lines), and `wrkq.history.tailView` (one bounded ASCENDING raw `event_log` page, the watchEvent shape). The CLIENT owns the blocking loop, timeout/stall clocks, the high-water cursor across polls, the exactly-one terminal NDJSON record, and exit codes (see the `wrkq.wrkf-rpc.bounded-polling-streaming` arch record). These remain **read-only CLI-compatibility projections**, so — consistent with the other compat read views (`*.catView` / `*.listView` / `history.listView`) — they are **NOT added as `@wrkq/client` JSON-RPC facade methods**; a TS consumer that wants a live feed still uses the monitor child-process helper above (which these read models now back end-to-end).
+
 This contract is proven end-to-end by `internal/workrpc/event_bridge_e2e_test.go` (mutate → observe event → refetch DTO; `--since`/`--last` resume; child reaped on disconnect).
 
 ---

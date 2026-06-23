@@ -2407,6 +2407,110 @@ var parityCases = []parityCase{
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		normalizeUUID: true,
 	},
+	// ── monitor (bounded polling via wrkq.monitor.eventsView + .stateView) ──────
+	// monitor wait: condition already met → exactly one terminal line (result=met),
+	// exit 0. The single stateView snapshot is authoritative; no events stream.
+	{
+		name:    "monitor/wait-already-met",
+		setup:   [][]string{{"touch", "inbox/done", "-t", "done"}, {"set", "inbox/done", "--state", "completed"}},
+		args:    []string{"monitor", "wait", "inbox/done", "--until", "state=completed"},
+		mutates: false,
+	},
+	// monitor wait: condition not met within a short timeout → terminal result=timeout,
+	// exit 1 + the "monitor wait ended: timeout" stderr. Bounded so the loop exits fast.
+	{
+		name:    "monitor/wait-timeout",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"monitor", "wait", "inbox/open", "--until", "state=completed", "--timeout", "150ms"},
+		mutates: false,
+	},
+	// monitor wait: missing --until → usage error (exit 2), reproduced caller-side.
+	{
+		name:    "monitor/wait-missing-until",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"monitor", "wait", "inbox/open"},
+		mutates: false,
+	},
+	// monitor wait: no task selectors → usage error (exit 2).
+	{
+		name:    "monitor/wait-no-selector",
+		setup:   nil,
+		args:    []string{"monitor", "wait", "--until", "state=completed"},
+		mutates: false,
+	},
+	// monitor wait: invalid task selector → server-resolved validation error (exit 2)
+	// with the legacy raw line + main's "Error:" line.
+	{
+		name:    "monitor/wait-bad-selector",
+		setup:   nil,
+		args:    []string{"monitor", "wait", "T-09999999", "--until", "state=completed"},
+		mutates: false,
+	},
+	// monitor wait: invalid --until condition → validation error (exit 2).
+	{
+		name:    "monitor/wait-bad-condition",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"monitor", "wait", "inbox/open", "--until", "bogus"},
+		mutates: false,
+	},
+	// monitor watch --until: condition already met → exactly one terminal line,
+	// exit 0. Race-tolerant: eventsView + stateView are two snapshots.
+	{
+		name:    "monitor/watch-until-met",
+		setup:   [][]string{{"touch", "inbox/done", "-t", "done"}, {"set", "inbox/done", "--state", "completed"}},
+		args:    []string{"monitor", "watch", "inbox/done", "--until", "state=completed", "--timeout", "5s"},
+		mutates: false,
+	},
+	// monitor watch --until: not met within a short timeout → terminal result=timeout,
+	// exit 1. Bounded so the streaming loop terminates.
+	{
+		name:    "monitor/watch-until-timeout",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"monitor", "watch", "inbox/open", "--until", "state=completed", "--timeout", "150ms"},
+		mutates: false,
+	},
+	// monitor watch --until: no selector → usage error (exit 2) before any streaming.
+	{
+		name:    "monitor/watch-until-no-selector",
+		setup:   nil,
+		args:    []string{"monitor", "watch", "--until", "state=completed"},
+		mutates: false,
+	},
+	// monitor watch: invalid --format → usage error (exit 2).
+	{
+		name:    "monitor/watch-bad-format",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"monitor", "watch", "inbox/open", "--format", "bogus"},
+		mutates: false,
+	},
+
+	// ── watch (bounded raw tail via wrkq.history.tailView) ──────────────────────
+	// watch --follow=false --ndjson: drain the current backlog as NDJSON and exit 0.
+	// The deprecation warning is printed caller-side to stderr. normalizeUUID +
+	// normalize() neutralize payload UUIDs + timestamps.
+	{
+		name:          "watch/ndjson-no-follow",
+		setup:         [][]string{{"touch", "inbox/aa", "-t", "Alpha"}, {"touch", "inbox/bb", "-t", "Beta"}},
+		args:          []string{"watch", "--ndjson", "--follow=false"},
+		mutates:       false,
+		normalizeUUID: true,
+	},
+	// watch --follow=false --since: start from a mid-log cursor, drain the remainder.
+	{
+		name:          "watch/since-no-follow",
+		setup:         [][]string{{"touch", "inbox/aa", "-t", "Alpha"}, {"touch", "inbox/bb", "-t", "Beta"}},
+		args:          []string{"watch", "--since", "1", "--ndjson", "--follow=false"},
+		mutates:       false,
+		normalizeUUID: true,
+	},
+	// watch --follow=false on an empty backlog (since past the end) → no events, exit 0
+	// (still prints the deprecation warning to stderr).
+	{
+		name:    "watch/empty-no-follow",
+		setup:   [][]string{{"touch", "inbox/aa", "-t", "Alpha"}},
+		args:    []string{"watch", "--since", "9999", "--ndjson", "--follow=false"},
+		mutates: false,
+	},
 }
 
 // attachSrcFiles are the host source files materialized into each run/seed dir

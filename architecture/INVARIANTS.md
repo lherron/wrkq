@@ -58,6 +58,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `internal/rpccli/parity_test.go`, `internal/rpccli/transport_test.go`, `internal/wrkqapi/catview_fingerprint_test.go`, `internal/workrpc/catview_catalog_test.go`
 - **last_verified:** 2026-06-22
 
+## wrkq.wrkf-rpc.bounded-polling-streaming
+
+- **scope:** monitor + watch live-tailing crossing the wrkq/wrkf RPC boundary
+- **predicate:** The `wrkq monitor watch|wait` and `wrkq watch` (+ `monitor watch --raw`) live-tailing surfaces cross the client↔server RPC boundary as BOUNDED POLLING read models — there is NO server push / subscribe / long-lived stream in RPC v1 (daedalus ruling #10211). The SERVER owns ONLY stateless, bounded read models: wrkq.monitor.eventsView returns a single bounded ASCENDING event_log page (selector resolution, resource_id hydration, comment→task backfill, isEventIncluded / isStateChangeEvent, event-type filtering, and the high-water cursor of the LAST RAW row scanned); wrkq.monitor.stateView returns a SINGLE authoritative --until condition snapshot (met + still-unmet task ids) and NEVER sleeps/times out/stalls/emits terminal lines; wrkq.history.tailView returns a bounded ASCENDING raw event_log page (actor slug/id + resource_id hydration + high-water). Each page is hard-capped server-side (monitorMaxPageLimit) so a hammering client can never pull an unbounded slice in one frame. The CLIENT (wrkq-rpccli) owns ALL streaming control flow: the blocking poll loop + interval, the monotonic high-water cursor carried across polls, the timeout/stall clocks, the per-event NDJSON lines, EXACTLY ONE terminal NDJSON record before exit, the exit codes (0=met, 1=timeout/stall, 2=selector/usage, 3=stream), the deprecation warning (watch), and human/NDJSON rendering. eventsView and stateView are TWO independent snapshots, so the terminal decision is intentionally RACE-TOLERANT (a met condition may be observed before the matching event is paged in); tests assert race-tolerantly. The JSON-RPC server stdout stays JSON-RPC-pure — the per-event / terminal NDJSON is emitted ONLY by wrkq-rpccli after RPC-frame decode. The raw tail (watch / monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape: INCLUDES resource_id, STRING timestamp, nullable resource_uuid), DISTINCT from WrkqLogEvent.
+- **enforced_by:** `wrkq.monitor.eventsView/stateView + wrkq.history.tailView (bounded server read models) + the client-owned poll loop in internal/rpccli/monitor.go + watch.go; daedalus ruling hrcchat#10211 (T-05115 / T-05116)`
+- **source:** `internal/wrkqapi/monitorview.go`, `internal/rpccli/monitor.go`, `internal/rpccli/watch.go`, `internal/workrpc/registry.go`
+- **required_tests:** `internal/rpccli/parity_test.go`, `internal/rpccli/transport_test.go`, `internal/wrkqapi/monitorview_test.go`, `internal/wrkqapi/catview_fingerprint_test.go`, `internal/workrpc/catview_catalog_test.go`
+- **last_verified:** 2026-06-23
+
 ## wrkq.wrkf-rpc.stdout-purity
 
 - **scope:** wrkf RPC stdio transport

@@ -114,6 +114,9 @@ var methodCatalog = []string{
 	"wrkq.task.lsView",
 	"wrkq.task.findListView",
 	"wrkq.history.listView",
+	"wrkq.history.tailView",
+	"wrkq.monitor.eventsView",
+	"wrkq.monitor.stateView",
 	"wrkq.task.treeView",
 	"wrkq.task.blockedView",
 	"wrkq.task.inboxView",
@@ -225,6 +228,11 @@ var dtoCatalog = []string{
 	"WrkqFindListView",       // CLI compatibility list projection (find)
 	"WrkqHistoryListView",    // CLI compatibility history read model (log over event_log); nested WrkqLogEvent is part of this DTO
 	"WrkqLogEvent",           // element of history.listView (the legacy logEvent row shape)
+	"WrkqHistoryTailView",    // CLI compatibility bounded ASCENDING raw tail (watch / monitor --raw); nested WrkqWatchEvent is part of this DTO
+	"WrkqWatchEvent",         // element of history.tailView (the legacy watchEvent row shape — INCLUDES resource_id, distinct from WrkqLogEvent)
+	"WrkqMonitorEventsView",  // CLI compatibility bounded ASCENDING filtered event page (monitor watch); nested WrkqMonitorEvent is part of this DTO
+	"WrkqMonitorEvent",       // element of monitor.eventsView (the legacy monitorEventLine data row)
+	"WrkqMonitorStateView",   // CLI compatibility single --until condition snapshot (monitor watch/wait)
 	"WrkqTreeView",           // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
 	"WrkqTaskBlockedView",    // CLI compatibility projection (check blocked); nested WrkqTaskBlockedEntry is part of this DTO
 	"WrkqInboxView",          // CLI compatibility list projection (check-inbox); nested WrkqInboxEntry is part of this DTO
@@ -289,6 +297,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return wq.FindListView(ctx, p)
 	}))
 	s.Register("wrkq.history.listView", historyListViewHandler(wq))
+	s.Register("wrkq.history.tailView", apiHandler(func(ctx context.Context, p wrkqapi.HistoryTailViewParams) (any, error) {
+		return wq.HistoryTailView(ctx, p)
+	}))
+	s.Register("wrkq.monitor.eventsView", apiHandler(func(ctx context.Context, p wrkqapi.MonitorEventsViewParams) (any, error) {
+		return wq.MonitorEventsView(ctx, p)
+	}))
+	s.Register("wrkq.monitor.stateView", apiHandler(func(ctx context.Context, p wrkqapi.MonitorStateViewParams) (any, error) {
+		return wq.MonitorStateView(ctx, p)
+	}))
 	s.Register("wrkq.task.treeView", apiHandler(func(ctx context.Context, p wrkqapi.TreeViewParams) (any, error) {
 		return wq.TreeView(ctx, p)
 	}))
