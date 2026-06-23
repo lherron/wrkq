@@ -368,6 +368,59 @@ describe("wrkq namespace", () => {
     expect(updated.etag).toBe(2);
   });
 
+  test("webhook.add forwards wrkq.webhook.add and returns the changed mutation result", async () => {
+    const transport = new FakeTransport().onResult("wrkq.webhook.add", {
+      changed: true,
+      count: 1,
+      target: "https://hook.test/wrkq",
+      webhook_urls: ["https://hook.test/wrkq"],
+    });
+    const client = await clientWith(transport);
+
+    const result = await client.wrkq.webhook.add({
+      url: "https://hook.test/wrkq",
+      actor: "agent:larry",
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.webhook.add");
+    expect(frame.params).toMatchObject({ url: "https://hook.test/wrkq", actor: "agent:larry" });
+    expect(result.changed).toBe(true);
+    expect(result.count).toBe(1);
+    expect(result.target).toBe("https://hook.test/wrkq");
+    expect(result.webhook_urls).toEqual(["https://hook.test/wrkq"]);
+  });
+
+  test("webhook.remove forwards wrkq.webhook.remove and returns a no-change result", async () => {
+    const transport = new FakeTransport().onResult("wrkq.webhook.remove", {
+      changed: false,
+      webhook_urls: [],
+    });
+    const client = await clientWith(transport);
+
+    const result = await client.wrkq.webhook.remove({ url: "https://absent.test/wrkq" });
+
+    expect(transport.capturedRequests[0]!.method).toBe("wrkq.webhook.remove");
+    expect(result.changed).toBe(false);
+    expect(result.count).toBeUndefined();
+    expect(result.webhook_urls).toEqual([]);
+  });
+
+  test("webhook.listView forwards wrkq.webhook.listView and returns {url} rows", async () => {
+    const transport = new FakeTransport().onResult("wrkq.webhook.listView", [
+      { url: "https://a.test/wrkq" },
+      { url: "https://b.test/wrkq" },
+    ]);
+    const client = await clientWith(transport);
+
+    const rows = await client.wrkq.webhook.listView();
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.webhook.listView");
+    expect(frame.params).toEqual({});
+    expect(rows).toEqual([{ url: "https://a.test/wrkq" }, { url: "https://b.test/wrkq" }]);
+  });
+
   test("workflow.attach is a wrkq verb", async () => {
     const transport = new FakeTransport().onResult("wrkq.workflow.attach", {
       task: MOCK_TASK,

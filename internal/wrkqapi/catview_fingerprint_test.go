@@ -6,6 +6,42 @@ import (
 	"testing"
 )
 
+// TestWebhookMutationDTOFingerprint pins the wrkq.webhook.add/remove MUTATION
+// RESULT key order + the listView row shape (T-05119 daedalus #10211). The
+// mutation result deliberately OVERRIDES the struct-field-order convention and
+// preserves the legacy MAP-ALPHABETICAL key order: a changed result is
+// {changed,count,target,webhook_urls}; a no-change result is {changed,webhook_urls}.
+// It is built from a map (encoding/json sorts map keys), NOT a struct, so this
+// test reproduces the server's exact marshaling rather than reflecting a type.
+// Any drift here is a PROTOCOL CONTRACT change (bump this pin, update docs +
+// dtoCatalog, re-verify webhook parity deliberately).
+func TestWebhookMutationDTOFingerprint(t *testing.T) {
+	changed, _ := marshalAlpha(map[string]any{
+		"changed":      true,
+		"target":       "https://x.test",
+		"webhook_urls": []string{"https://x.test"},
+		"count":        1,
+	})
+	noChange, _ := marshalAlpha(map[string]any{
+		"changed":      false,
+		"webhook_urls": []string{},
+	})
+	const wantChanged = `{"changed":true,"count":1,"target":"https://x.test","webhook_urls":["https://x.test"]}`
+	const wantNoChange = `{"changed":false,"webhook_urls":[]}`
+	if string(changed) != wantChanged {
+		t.Errorf("webhook changed mutation key order drifted (protocol contract change):\n got: %s\nwant: %s", changed, wantChanged)
+	}
+	if string(noChange) != wantNoChange {
+		t.Errorf("webhook no-change mutation key order drifted (protocol contract change):\n got: %s\nwant: %s", noChange, wantNoChange)
+	}
+
+	row := dtoFingerprint(reflect.TypeOf(WebhookRow{}))
+	const wantRow = "WebhookRow{url}"
+	if row != wantRow {
+		t.Errorf("WebhookRow DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", row, wantRow)
+	}
+}
+
 // TestCatViewDTOFingerprint is the strong-path guard for the catView contract
 // (daedalus T-05090 follow-up): ProtocolSchemaHash() hashes DTO *names*, not
 // field shapes, so a field/tag change to the compatibility projection would NOT

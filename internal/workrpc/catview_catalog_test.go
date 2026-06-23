@@ -96,6 +96,22 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqContainer") {
 		t.Error("WrkqContainer missing from dtoCatalog (wrkq.container.update result DTO)")
 	}
+	// Global webhook family (T-05119): the DEDICATED mutation + list methods must be
+	// in methodCatalog so their NAMES enter the protocol schema-hash input. The
+	// listView row DTO (WebhookRow) is cataloged; the add/remove mutation result is
+	// a map-alphabetical JSON object (no struct), pinned by the fingerprint test.
+	if !contains(methodCatalog, "wrkq.webhook.add") {
+		t.Error("wrkq.webhook.add missing from methodCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.webhook.remove") {
+		t.Error("wrkq.webhook.remove missing from methodCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.webhook.listView") {
+		t.Error("wrkq.webhook.listView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WebhookRow") {
+		t.Error("WebhookRow missing from dtoCatalog (wrkq.webhook.listView row DTO)")
+	}
 	// Server-owned deep copy (T-05111): the new mutation method + its DTOs must be
 	// in BOTH catalogs so their NAMES enter the protocol schema-hash input.
 	if !contains(methodCatalog, "wrkq.task.copy") {

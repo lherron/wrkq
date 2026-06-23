@@ -435,6 +435,61 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 
+	// webhook ✓ DEDICATED family (wrkq.webhook.add/remove/listView, T-05119
+	// daedalus #10211). The GLOBAL webhook URLs live on the SINGLETON ROOT
+	// container; the server owns root resolution, URL validation, the idempotent
+	// add/remove delta, the webhook_urls write + attribution + container.updated
+	// event. The mirror owns ONLY output rendering. NOT wrkq.container.update
+	// (which rejects webhookUrls). No project scoping, no --if-match.
+	{
+		// list (non-TTY): empty → no rows emitted on either binary.
+		name: "webhook/list-empty",
+		args: []string{"webhook", "list"},
+	},
+	{
+		// list (non-TTY): one {"url":...} NDJSON line per stored URL, stored order.
+		name: "webhook/list-populated",
+		setup: [][]string{
+			{"webhook", "add", "https://a.test/wrkq"},
+			{"webhook", "add", "https://b.test/wrkq"},
+		},
+		args: []string{"webhook", "list"},
+	},
+	{
+		// add (non-TTY): indented JSON mutation result in MAP-ALPHABETICAL key
+		// order {changed,count,target,webhook_urls}; durable webhook_urls write.
+		name:    "webhook/add",
+		args:    []string{"webhook", "add", "https://hook.test/wrkq"},
+		mutates: true,
+	},
+	{
+		// add duplicate (non-TTY): idempotent → no-change result {changed,webhook_urls}.
+		name:    "webhook/add-duplicate-no-change",
+		setup:   [][]string{{"webhook", "add", "https://hook.test/wrkq"}},
+		args:    []string{"webhook", "add", "https://hook.test/wrkq"},
+		mutates: true,
+	},
+	{
+		// add invalid URL: server validation rejects with legacy wording
+		// "invalid webhook url: <url>" (no domain-code prefix leak).
+		name:    "webhook/add-invalid-url",
+		args:    []string{"webhook", "add", "not-a-url"},
+		mutates: true,
+	},
+	{
+		// rm (non-TTY): removes an existing URL → changed result; durable write.
+		name:    "webhook/rm",
+		setup:   [][]string{{"webhook", "add", "https://hook.test/wrkq"}},
+		args:    []string{"webhook", "rm", "https://hook.test/wrkq"},
+		mutates: true,
+	},
+	{
+		// rm missing URL (non-TTY): idempotent → no-change result {changed,webhook_urls}.
+		name:    "webhook/rm-missing-no-change",
+		args:    []string{"webhook", "rm", "https://absent.test/wrkq"},
+		mutates: true,
+	},
+
 	// rm ✓ caller-owned-confirmation seam (B0 exemplar). Durable mutation runs
 	// through wrkq.task.delete with an EXPLICIT mode (archive default / purge for
 	// --purge); the mirror owns scoping, the purge prompt+abort+--yes, dry-run, and
@@ -3480,17 +3535,21 @@ func snapshot(t *testing.T, dir string) string {
 		t.Fatalf("snapshot rows: %v", err)
 	}
 
-	crows, err := database.Query(`SELECT id, slug, kind FROM containers ORDER BY id`)
+	// webhook_urls is included so the DEDICATED global-webhook family (T-05119,
+	// stored on the root container) proves DURABLE write parity — the rendered
+	// output is byte-checked separately, but the on-disk webhook_urls value must
+	// also match between legacy and the RPC mirror.
+	crows, err := database.Query(`SELECT id, slug, kind, COALESCE(webhook_urls, '') FROM containers ORDER BY id`)
 	if err != nil {
 		t.Fatalf("snapshot container query: %v", err)
 	}
 	defer func() { _ = crows.Close() }()
 	for crows.Next() {
-		var id, slug, kind string
-		if err := crows.Scan(&id, &slug, &kind); err != nil {
+		var id, slug, kind, hooks string
+		if err := crows.Scan(&id, &slug, &kind, &hooks); err != nil {
 			t.Fatalf("snapshot container scan: %v", err)
 		}
-		b.WriteString("container|" + strings.Join([]string{id, slug, kind}, "|") + "\n")
+		b.WriteString("container|" + strings.Join([]string{id, slug, kind, hooks}, "|") + "\n")
 	}
 	if err := crows.Err(); err != nil {
 		t.Fatalf("snapshot container rows: %v", err)

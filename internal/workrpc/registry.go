@@ -150,6 +150,9 @@ var methodCatalog = []string{
 	"wrkq.container.show",
 	"wrkq.container.catView",
 	"wrkq.container.list",
+	"wrkq.webhook.add",
+	"wrkq.webhook.remove",
+	"wrkq.webhook.listView",
 	"wrkq.workflow.attach",
 	"wrkq.workflow.inspect",
 	"wrkq.workflow.timeline",
@@ -230,6 +233,7 @@ var dtoCatalog = []string{
 	"WrkqRelation",
 	"WrkqContainer",
 	"WrkqContainerListResult",
+	"WebhookRow", // element of wrkq.webhook.listView (legacy {url:<value>} row)
 	"WrkqLegacyActor",
 	"WrkqLegacyActorListResult",
 	"WrkqWorkflowAttachResult",
@@ -382,6 +386,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.container.list", apiHandler(func(ctx context.Context, p wrkqapi.ContainerListParams) (any, error) {
 		return wq.ContainerList(ctx, p)
+	}))
+	s.Register("wrkq.webhook.add", apiHandler(func(ctx context.Context, p wrkqapi.WebhookMutateParams) (any, error) {
+		return wq.WebhookAdd(ctx, p)
+	}))
+	s.Register("wrkq.webhook.remove", apiHandler(func(ctx context.Context, p wrkqapi.WebhookMutateParams) (any, error) {
+		return wq.WebhookRemove(ctx, p)
+	}))
+	s.Register("wrkq.webhook.listView", apiHandler(func(ctx context.Context, p wrkqapi.WebhookListViewParams) (any, error) {
+		return wq.WebhookListView(ctx, p)
 	}))
 	s.Register("wrkq.workflow.attach", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowAttachParams) (any, error) {
 		return wq.WorkflowAttach(ctx, p)

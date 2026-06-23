@@ -374,6 +374,28 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 		t.Errorf("container.update transport results differ:\n in-process: %s\n subprocess: %s", inUpd, subUpd)
 	}
 
+	// wrkq.webhook.* (the DEDICATED global-webhook family, T-05119) must agree
+	// across transports. Both transports share one DB and the webhook URLs live on
+	// the SINGLETON ROOT container, so add ONE URL in-process (the subprocess add
+	// would then idempotently no-change), then read it back via listView through
+	// BOTH transports and assert byte-identical rows. This proves the server-owned
+	// root resolution + webhook_urls read agree regardless of transport.
+	if _, err := inproc.Call(context.Background(), "wrkq.webhook.add",
+		map[string]any{"url": "https://xport-hook.test/wrkq"}); err != nil {
+		t.Fatalf("in-process webhook.add: %v", err)
+	}
+	inHooks, err := inproc.Call(context.Background(), "wrkq.webhook.listView", map[string]any{})
+	if err != nil {
+		t.Fatalf("in-process webhook.listView: %v", err)
+	}
+	subHooks, err := sub.Call(ctx, "wrkq.webhook.listView", map[string]any{})
+	if err != nil {
+		t.Fatalf("subprocess webhook.listView: %v", err)
+	}
+	if !jsonEqual(t, inHooks, subHooks) {
+		t.Errorf("webhook.listView transport results differ:\n in-process: %s\n subprocess: %s", inHooks, subHooks)
+	}
+
 	// task.copy (the server-owned deep copy, T-05111) must agree across transports.
 	// The source task already lives in rpccli-test-proj, so both calls use overwrite
 	// to target the SAME destination row → byte-identical result DTO (same dest

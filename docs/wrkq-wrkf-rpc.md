@@ -996,6 +996,56 @@ delete:
 The server is non-interactive end-to-end: it never prompts or reads stdin; the
 disposition is fully determined by `dryRun`/`expected`.
 
+#### Global webhook methods
+
+```
+wrkq.webhook.add
+wrkq.webhook.remove
+wrkq.webhook.listView  [CLI compatibility list projection]
+```
+
+These manage the **GLOBAL** webhook subscriptions — URLs stored on the
+**singleton root container** (`kind='root'`) and inherited by every project via
+the container chain. This is a **DEDICATED** family (T-05119 daedalus #10211),
+deliberately **separate** from `wrkq.container.update`: that method's patch surface
+stays narrow (`{ slug?, title? }` only) and **rejects** `webhookUrls`, so webhook
+mutation does not reopen the overbroad-mutation-sink it was kept narrow to avoid.
+The server owns the root resolution, URL validation, the idempotent add/remove
+delta, and the `webhook_urls` write + attribution + `container.updated` event.
+
+```ts
+interface WrkqWebhookMutateParams {
+  url: string;             // the single webhook target
+  expectEtag?: number;     // OPTIONAL root-container etag CAS; stale → WRKQ_CONFLICT
+  actor?: string;
+}
+// returns the legacy MUTATION RESULT in MAP-ALPHABETICAL key order (built from a
+// map, NOT a struct — this OVERRIDES the struct-field-order convention):
+//   changed:   { changed: true,  count, target, webhook_urls }
+//   no-change: { changed: false, webhook_urls }
+
+interface WrkqWebhookListViewParams {}   // empty
+interface WebhookRow { url: string }      // legacy {url:<value>} row
+// wrkq.webhook.listView returns WebhookRow[] in stored order
+```
+
+- **`wrkq.webhook.add`** validates the URL server-side (http/https with a host); an
+  invalid URL → `WRKQ_VALIDATION` (message `invalid webhook url: <url>`). It is
+  **idempotent**: adding an already-present URL is a no-change.
+- **`wrkq.webhook.remove`** removes by **exact match** (no validation, matching
+  legacy); removing an absent URL is a no-change.
+- The optional **`expectEtag`** is a CAS over the **root container's** etag. It is
+  **OFF by default** (absent → legacy no-CAS last-writer-wins). The `wrkq webhook`
+  CLI mirror NEVER sends it, so it is **byte-for-byte** with legacy; a raw RPC
+  caller MAY opt in to reduce the concurrent last-writer-wins risk (a stale etag →
+  `WRKQ_CONFLICT`).
+
+`wrkq webhook` (list / add / rm) mirrors this family: the CLI owns ONLY the TTY vs
+non-TTY output rendering (non-TTY list = one `{"url":<value>}` NDJSON line per URL;
+non-TTY add/rm = the indented map-alphabetical mutation JSON; TTY = the legacy human
+lines). There is **no** `--project` scoping (the target is always the root) and
+**no** `--if-match` flag (legacy has no CAS here).
+
 #### Task-workflow methods
 
 ```

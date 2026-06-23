@@ -51,7 +51,8 @@ var topLevelCommands = []mirroredCommand{
 	{use: "usage", aliases: []string{"info"}},
 	{use: "version"},
 	{use: "watch [PATH...]"},
-	{use: "webhook"},
+	// webhook is RPC-backed (DEDICATED family wrkq.webhook.add/remove/listView,
+	// T-05119); registered separately.
 	{use: "whoami"},
 }
 
@@ -96,6 +97,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRestoreCmd())
 	root.AddCommand(newRenameContainerCmd())
 	root.AddCommand(newCpCmd())
+	root.AddCommand(newWebhookCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

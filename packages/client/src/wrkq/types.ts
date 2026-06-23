@@ -365,6 +365,40 @@ export interface WrkqContainerListResult {
 }
 
 /**
+ * Global webhook subscriptions live on the SINGLETON ROOT container and are
+ * inherited by every project. This is a DEDICATED family (wrkq.webhook.add /
+ * remove / listView, T-05119 daedalus #10211), deliberately separate from
+ * wrkq.container.update (whose narrow patch surface rejects webhookUrls). Mirrors
+ * docs/wrkq-wrkf-rpc.md §6.2 "Global webhook methods".
+ */
+export interface WrkqWebhookMutateParams {
+  url: string;
+  /** Optional root-container etag CAS; absent = legacy no-CAS. Stale → WRKQ_CONFLICT. */
+  expectEtag?: number;
+  actor?: string;
+}
+
+/**
+ * The legacy MUTATION RESULT for wrkq.webhook.add / remove, in MAP-ALPHABETICAL
+ * key order (this OVERRIDES the struct-field-order convention): a changed result
+ * carries { changed, count, target, webhook_urls }; a no-change result carries
+ * only { changed, webhook_urls }. count/target are present only when changed.
+ */
+export interface WrkqWebhookMutateResult {
+  changed: boolean;
+  count?: number;
+  target?: string;
+  webhook_urls: string[];
+}
+
+export type WrkqWebhookListViewParams = Record<string, never>;
+
+/** Legacy {url:<value>} row returned by wrkq.webhook.listView. */
+export interface WrkqWebhookRow {
+  url: string;
+}
+
+/**
  * WrkqContainerUpdateParams renames a container in place. The FIRST patch surface
  * is deliberately NARROW — only { slug?, title? }; any other key →
  * WRKQ_VALIDATION (T-05112 daedalus hrcchat#10196). Mirrors docs/wrkq-wrkf-rpc.md

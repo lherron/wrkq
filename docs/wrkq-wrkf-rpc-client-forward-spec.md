@@ -985,6 +985,54 @@ Contract (daedalus, T-04847 C-04823 §3):
 - Removal order: emit `task.purged` (per contained task) + `container.deleted` events, delete tasks then containers leaf-to-root in one transaction; attachment **files** are removed *after* the DB commit, and any file-removal failures are reported (non-fatally) in `fileCleanupErrors`.
 - A path-invisible / root container is rejected (`WRKQ_VALIDATION`).
 
+#### Global webhook methods (DEDICATED family — Tranche D)
+
+`wrkq.webhook.add` / `wrkq.webhook.remove` / `wrkq.webhook.listView` (T-05119,
+daedalus #10211) manage the **GLOBAL** webhook subscriptions stored on the
+**singleton root container** and inherited by every project. This is a DEDICATED
+family, deliberately **separate** from `wrkq.container.update` (whose narrow
+`{ slug?, title? }` patch surface **rejects** `webhookUrls`). The server owns the
+root resolution, URL validation, the idempotent add/remove delta, and the
+`webhook_urls` write + attribution + `container.updated` event. `add`/`remove` are
+**producer** mutations; `listView` is a CLI compatibility list projection.
+
+```text
+wrkq.webhook.add
+wrkq.webhook.remove
+wrkq.webhook.listView
+```
+
+```ts
+interface WrkqWebhookMutateParams {
+  url: string;
+  expectEtag?: number;   // OPTIONAL root-container etag CAS; absent = legacy no-CAS
+  actor?: string;
+}
+// → WrkqWebhookMutateResult, in MAP-ALPHABETICAL key order (overrides the
+//   struct-field-order convention):
+//     changed:   { changed: true,  count, target, webhook_urls }
+//     no-change: { changed: false, webhook_urls }
+interface WrkqWebhookMutateResult {
+  changed: boolean;
+  count?: number;          // present only when changed
+  target?: string;         // present only when changed
+  webhook_urls: string[];
+}
+
+type WrkqWebhookListViewParams = Record<string, never>;   // empty
+interface WrkqWebhookRow { url: string }                  // legacy {url:<value>} row
+// wrkq.webhook.listView → WrkqWebhookRow[]
+```
+
+- `add` validates the URL server-side (http/https with a host); invalid →
+  `WRKQ_VALIDATION` (`invalid webhook url: <url>`). It is idempotent (duplicate add
+  = no-change).
+- `remove` matches by exact value (no validation, legacy parity); removing an
+  absent URL = no-change.
+- `expectEtag` is **OFF by default** (legacy no-CAS last-writer-wins). The CLI
+  `wrkq webhook` mirror never sends it; a raw RPC / client caller MAY opt in to
+  reduce the concurrent last-writer-wins risk (stale etag → `WRKQ_CONFLICT`).
+
 #### Task workflow methods
 
 Workflow attachment to a task lives here:

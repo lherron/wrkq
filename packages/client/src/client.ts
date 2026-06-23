@@ -134,6 +134,11 @@ class WorkClientImpl implements WorkClient {
       show: (p) => this.call("wrkq.container.show", p),
       list: (p) => this.call("wrkq.container.list", p ?? {}),
     },
+    webhook: {
+      add: (p) => this.call("wrkq.webhook.add", p),
+      remove: (p) => this.call("wrkq.webhook.remove", p),
+      listView: (p) => this.call("wrkq.webhook.listView", p ?? {}),
+    },
     workflow: {
       attach: (p) => this.call("wrkq.workflow.attach", p),
       inspect: (p) => this.call("wrkq.workflow.inspect", p),

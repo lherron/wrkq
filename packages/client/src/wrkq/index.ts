@@ -15,5 +15,6 @@ export type {
   WrkqLegacyActorFacade,
   WrkqRelationFacade,
   WrkqTaskFacade,
+  WrkqWebhookFacade,
   WrkqWorkflowFacade,
 } from "./facade.js";

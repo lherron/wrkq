@@ -53,6 +53,10 @@ import type {
   WrkqTaskRestoreParams,
   WrkqTaskShowParams,
   WrkqTaskUpdateParams,
+  WrkqWebhookListViewParams,
+  WrkqWebhookMutateParams,
+  WrkqWebhookMutateResult,
+  WrkqWebhookRow,
   WrkqWorkflowAttachParams,
   WrkqWorkflowAttachResult,
   WrkqWorkflowInspectParams,
@@ -105,6 +109,17 @@ export interface WrkqContainerFacade {
   list(params?: WrkqContainerListParams): Promise<WrkqContainerListResult>;
 }
 
+/**
+ * Global webhook subscriptions on the singleton root container (DEDICATED family,
+ * T-05119). add/remove are PRODUCER mutations; listView is a CLI compatibility
+ * list projection. NOT wrkq.container.update (which rejects webhookUrls).
+ */
+export interface WrkqWebhookFacade {
+  add(params: WrkqWebhookMutateParams): Promise<WrkqWebhookMutateResult>;
+  remove(params: WrkqWebhookMutateParams): Promise<WrkqWebhookMutateResult>;
+  listView(params?: WrkqWebhookListViewParams): Promise<WrkqWebhookRow[]>;
+}
+
 export interface WrkqWorkflowFacade {
   attach(params: WrkqWorkflowAttachParams): Promise<WrkqWorkflowAttachResult>;
   inspect(params: WrkqWorkflowInspectParams): Promise<WrkqWorkflowInspectResult>;
@@ -138,6 +153,7 @@ export interface WrkqFacade {
   readonly attachment: WrkqAttachmentFacade;
   readonly relation: WrkqRelationFacade;
   readonly container: WrkqContainerFacade;
+  readonly webhook: WrkqWebhookFacade;
   readonly workflow: WrkqWorkflowFacade;
   readonly admin: WrkqAdminFacade;
 }
