@@ -1,0 +1,55 @@
+id: wrkq.attribution.caller-principal-exact
+kind: invariant
+status: active
+owner_project: wrkq
+scope: write-attribution principal resolution for every wrkqapi mutation crossing the wrkq RPC boundary
+predicate: >
+  Every wrkqapi write resolves its durable attribution through the SINGLE shared
+  helper internal/wrkqapi.API.attributionFor(actor), which records the SAME
+  caller-resolved principal legacy would record and NEVER silently rewrites a
+  caller identity to the system actor. Resolution, in order:
+
+    1. Empty selector (no actor param) AND empty configured default_actor →
+       the built-in agent:wrkq-system actor (the EXPLICIT no-actor/default path).
+    2. The "system:*" no-actor default SENTINELS (bootstrap.DefaultActor →
+       "system:wrkq"; wrkfcli → "system:wrkf") → agent:wrkq-system. These denote
+       the built-in system actor, not a caller principal.
+    3. An actor UUID matching an actors row → that row's agent:<slug> (+ legacy uuid).
+    4. Otherwise attribution.NormalizeCompat(actor): a canonical agent:<id> ref →
+       itself; a bare compat slug → agent:<slug>; with best-effort legacy-actor-row
+       UUID backfill by slug. NO legacy actor row is required to record the principal.
+    5. A NON-EMPTY but INVALID selector (a full scope ref like
+       agent:<id>:project:<p>, "system:<x>" forms that are not sentinels handled in
+       (2) are still mapped in (2); any other unparsable principal) → WRKQ_VALIDATION.
+
+  A malformed explicit actor MUST be rejected BEFORE any successful mutation-family
+  response — including idempotent / no-change deltas (duplicate add, missing remove,
+  no-op update) and dry-run projections. No write, no event, and no successful no-op
+  may silently accept an invalid explicit actor. Coercing an invalid or non-sentinel
+  caller selector to agent:wrkq-system is forbidden: it destroys audit truth.
+authority:
+  repo: wrkq
+  surface: internal/wrkqapi.API.attributionFor + every wrkqapi mutation call site (the JSON-RPC server, shared by wrkq + wrkf entrypoints)
+enforced_by: "internal/wrkqapi/api.go attributionFor returns (Attribution, error); every wrkqapi write threads that error so an invalid explicit actor is WRKQ_VALIDATION before any write/event/no-op/dry-run; daedalus ruling hrcchat#10261 / #10285 / #10291 (T-05119)"
+exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site"
+source:
+  - internal/wrkqapi/api.go                    # attributionFor: empty→system, system:* sentinel→system, UUID→row, NormalizeCompat→principal, invalid→WRKQ_VALIDATION
+  - internal/attribution/principal.go          # NormalizeCompat / NormalizeCanonical / ValidatePrincipalRef (principal grammar = agent:<id>)
+  - internal/workrpc/bootstrap/bootstrap.go    # DefaultActor sentinel "system:wrkq"
+  - internal/wrkfcli/root.go                   # wrkf entrypoint default actor sentinel "system:wrkf"
+  - internal/wrkqapi/webhooks.go               # validates actor BEFORE the no-change branch (no successful no-op for an invalid actor)
+required_tests:
+  - internal/wrkqapi/api_attribution_test.go   # TestAttributionFor_ResolvesAndRejects (empty→system, default_actor honor, system:* sentinels→system, canonical/bare→exact, full-scope-ref/role-ref→error)
+  - internal/workrpc/webhook_test.go           # TestWrkqWebhookAdd_ExactAttribution (changed-add exact + invalid reject) + TestWrkqWebhook_NoChangeInvalidActorRejected (duplicate add / missing remove invalid actor → WRKQ_VALIDATION, etag unchanged, no event)
+  - internal/workrpc/commentdelete_mode_test.go # TestCommentAdd_ExactAttribution (non-webhook producer records the caller principal exactly)
+  - internal/rpccli/parity_test.go             # webhook/add-with-principal mutates row (cross-binary updated_by_principal_ref parity)
+last_verified:
+  date: 2026-06-23
+  evidence: "go test -tags sqlite_fts5 ./internal/wrkqapi ./internal/workrpc ./internal/rpccli green; attributionFor records caller principal exactly (canonical/bare/uuid), system:* sentinels + empty/default → wrkq-system, invalid non-empty actor → WRKQ_VALIDATION before any write/event/no-op/dry-run (asserted incl. webhook no-change deltas). daedalus rulings hrcchat#10261 / #10285 / #10291 (T-05119)"
+reopen_when:
+  - attributionFor stops returning an error (reverts to swallowing invalid selectors into wrkq-system)
+  - any wrkqapi mutation returns a successful response (including no-change/dry-run) without validating a non-empty explicit actor
+  - a new actor sentinel namespace beyond "system:*" is introduced without updating this record + tests
+  - the principal grammar (attribution.ValidatePrincipalRef = agent:<id>) changes
+supersedes: []
+superseded_by: null

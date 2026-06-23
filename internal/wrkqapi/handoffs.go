@@ -315,6 +315,18 @@ func validateHandoffCreate(p HandoffCreateParams) (scope.ResolvedScope, error) {
 			"scopeRef must be exactly the canonical project scope for agentId/projectId ("+expected+")",
 			map[string]any{"field": "scopeRef", "scopeRef": canonical, "expected": expected})
 	}
+	// The effective canonical ref must be a WELL-FORMED canonical project scope by the
+	// internal/scope grammar. String equality above is not sufficient: invalid
+	// scope-token characters in agentId/projectId (e.g. agentId="co:dy") build an
+	// expected string that the supplied scopeRef can equal yet which is unparsable —
+	// it would persist an invalid scope_ref. Parse and require an exact project scope
+	// (no task/role, agent/project matching) before any write or dry-run projection.
+	parsed, perr := scope.ParseScopeRef(canonical)
+	if perr != nil || parsed.AgentID != agentID || parsed.ProjectID != projectID || parsed.TaskID != "" || parsed.RoleName != "" {
+		return scope.ResolvedScope{}, NewValidationError(
+			"handoff create requires a valid canonical project scope (agent:<agentId>:project:<projectId>)",
+			map[string]any{"field": "scope", "scopeRef": canonical})
+	}
 	return scope.ResolvedScope{
 		AgentID:      agentID,
 		ProjectID:    projectID,

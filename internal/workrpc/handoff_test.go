@@ -129,6 +129,42 @@ func TestHandoffCreate_IncoherentScopeRejected(t *testing.T) {
 	}
 }
 
+// TestHandoffCreate_InvalidScopeTokenRejected covers daedalus's T-05117 #10292
+// condition: invalid scope-token characters in agentId/projectId build an `expected`
+// string that the supplied scopeRef can equal yet which is UNPARSABLE by the scope
+// grammar. The effective canonical ref must be validated as a well-formed project
+// scope before any write OR dry-run projection, else WRKQ_VALIDATION.
+func TestHandoffCreate_InvalidScopeTokenRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+	}{
+		{
+			"invalid-agentId-token-write",
+			map[string]any{"scopeRef": "agent:co:dy:project:wrkq", "agentId": "co:dy", "projectId": "wrkq", "title": "x", "body": "y"},
+		},
+		{
+			// dry-run must also reject — no projected handoff with an invalid scope_ref.
+			"invalid-agentId-token-dryrun",
+			map[string]any{"scopeRef": "agent:co:dy:project:wrkq", "agentId": "co:dy", "projectId": "wrkq", "title": "x", "body": "y", "dryRun": true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := migratedDB(t)
+			frames := p2Run(t, dbPath, mkRPC("c1", "wrkq.handoff.create", tc.params))
+			if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
+				t.Errorf("invalid scope token want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
+			}
+			if n := countAllHandoffs(t, dbPath); n != 0 {
+				t.Errorf("rejected create must write no handoff row, found %d", n)
+			}
+		})
+	}
+}
+
 // TestHandoffCreate_EmptyScopeRefSynthesizesCanonical covers daedalus #5: an empty
 // scopeRef synthesizes the canonical project ref from agentId/projectId and persists
 // it (scope_kind=project), so canonical project listView sees the handoff.

@@ -298,6 +298,61 @@ func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	}
 }
 
+// TestWrkqWebhook_NoChangeInvalidActorRejected covers daedalus's T-05119 #10291
+// condition: an invalid explicit actor must be rejected with WRKQ_VALIDATION even on
+// an idempotent NO-CHANGE delta (duplicate add / missing remove), so a malformed
+// identity never receives a successful no-op response. No write, no event.
+func TestWrkqWebhook_NoChangeInvalidActorRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	const badActor = "agent:cody:project:wrkq" // a full scope ref is not a valid principal
+
+	t.Run("duplicate-add", func(t *testing.T) {
+		dbPath := migratedDB(t)
+		rootUUID := g1RootUUID(t, dbPath)
+		// Seed so a second add of the same URL is a no-change delta.
+		p2ResultOrFail(t, p2Run(t, dbPath,
+			mkRPC("s1", "wrkq.webhook.add", map[string]any{"url": "https://nc.test/wrkq"}),
+		)[1], "seed add")
+		etagBefore := g1EtagOf(t, dbPath, rootUUID)
+		eventsBefore := g1CountEvents(t, dbPath, "container.updated", rootUUID)
+
+		frames := p2Run(t, dbPath,
+			mkRPC("w1", "wrkq.webhook.add", map[string]any{"url": "https://nc.test/wrkq", "actor": badActor}),
+		)
+		if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
+			t.Errorf("no-change duplicate add with invalid actor want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
+		}
+		if etag := g1EtagOf(t, dbPath, rootUUID); etag != etagBefore {
+			t.Errorf("rejected no-op must not bump etag: want %d, got %d", etagBefore, etag)
+		}
+		if ev := g1CountEvents(t, dbPath, "container.updated", rootUUID); ev != eventsBefore {
+			t.Errorf("rejected no-op must log no event: want %d, got %d", eventsBefore, ev)
+		}
+	})
+
+	t.Run("missing-remove", func(t *testing.T) {
+		dbPath := migratedDB(t)
+		rootUUID := g1RootUUID(t, dbPath)
+		etagBefore := g1EtagOf(t, dbPath, rootUUID)
+		eventsBefore := g1CountEvents(t, dbPath, "container.updated", rootUUID)
+
+		frames := p2Run(t, dbPath,
+			mkRPC("w1", "wrkq.webhook.remove", map[string]any{"url": "https://absent.test/wrkq", "actor": badActor}),
+		)
+		if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
+			t.Errorf("no-change missing remove with invalid actor want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
+		}
+		if etag := g1EtagOf(t, dbPath, rootUUID); etag != etagBefore {
+			t.Errorf("rejected no-op must not bump etag: want %d, got %d", etagBefore, etag)
+		}
+		if ev := g1CountEvents(t, dbPath, "container.updated", rootUUID); ev != eventsBefore {
+			t.Errorf("rejected no-op must log no event: want %d, got %d", eventsBefore, ev)
+		}
+	})
+}
+
 // TestWrkqWebhookAdd_StaleEtagConflict: the OPTIONAL expectEtag CAS rejects a stale
 // etag with WRKQ_CONFLICT (the CLI mirror never sends it, so legacy no-CAS
 // last-writer-wins is preserved; raw RPC callers may opt in to reduce that risk).

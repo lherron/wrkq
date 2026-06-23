@@ -90,6 +90,14 @@ func (a *API) WebhookRemove(ctx context.Context, p WebhookMutateParams) (json.Ra
 // encoding/json sorts the keys): changed = {changed,count,target,webhook_urls};
 // no-change = {changed,webhook_urls}.
 func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor string) (json.RawMessage, error) {
+	// Validate the explicit actor BEFORE returning any mutation-family response —
+	// including the idempotent no-change branch — so a malformed explicit actor
+	// (e.g. a full scope ref) never yields a successful no-op. attributionFor
+	// rejects invalid non-empty selectors with WRKQ_VALIDATION (daedalus #10291).
+	attr, aerr := a.attributionFor(actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 	rootUUID, err := store.RootContainerUUID(a.db)
 	if err != nil {
 		return nil, NewInternalError(err)
@@ -112,10 +120,6 @@ func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor s
 		return nil, NewInternalError(merr)
 	}
 	fields := map[string]interface{}{"webhook_urls": string(payload)}
-	attr, aerr := a.attributionFor(actor)
-	if aerr != nil {
-		return nil, aerr
-	}
 	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(attr, rootUUID, fields, expectEtag); uerr != nil {
 		return nil, mapWebhookStoreError(uerr)
 	}

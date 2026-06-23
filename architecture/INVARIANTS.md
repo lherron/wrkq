@@ -5,6 +5,15 @@
 Projection of active `invariant` records under `architecture/records/invariants/`.
 The YAML records are the source of truth; regenerate with `just architecture-records --write`.
 
+## wrkq.attribution.caller-principal-exact
+
+- **scope:** write-attribution principal resolution for every wrkqapi mutation crossing the wrkq RPC boundary
+- **predicate:** Every wrkqapi write resolves its durable attribution through the SINGLE shared helper internal/wrkqapi.API.attributionFor(actor), which records the SAME caller-resolved principal legacy would record and NEVER silently rewrites a caller identity to the system actor. Resolution, in order: 1. Empty selector (no actor param) AND empty configured default_actor → the built-in agent:wrkq-system actor (the EXPLICIT no-actor/default path). 2. The "system:*" no-actor default SENTINELS (bootstrap.DefaultActor → "system:wrkq"; wrkfcli → "system:wrkf") → agent:wrkq-system. These denote the built-in system actor, not a caller principal. 3. An actor UUID matching an actors row → that row's agent:<slug> (+ legacy uuid). 4. Otherwise attribution.NormalizeCompat(actor): a canonical agent:<id> ref → itself; a bare compat slug → agent:<slug>; with best-effort legacy-actor-row UUID backfill by slug. NO legacy actor row is required to record the principal. 5. A NON-EMPTY but INVALID selector (a full scope ref like agent:<id>:project:<p>, "system:<x>" forms that are not sentinels handled in (2) are still mapped in (2); any other unparsable principal) → WRKQ_VALIDATION. A malformed explicit actor MUST be rejected BEFORE any successful mutation-family response — including idempotent / no-change deltas (duplicate add, missing remove, no-op update) and dry-run projections. No write, no event, and no successful no-op may silently accept an invalid explicit actor. Coercing an invalid or non-sentinel caller selector to agent:wrkq-system is forbidden: it destroys audit truth.
+- **enforced_by:** `internal/wrkqapi/api.go attributionFor returns (Attribution, error); every wrkqapi write threads that error so an invalid explicit actor is WRKQ_VALIDATION before any write/event/no-op/dry-run; daedalus ruling hrcchat#10261 / #10285 / #10291 (T-05119)`
+- **source:** `internal/wrkqapi/api.go`, `internal/attribution/principal.go`, `internal/workrpc/bootstrap/bootstrap.go`, `internal/wrkfcli/root.go`, `internal/wrkqapi/webhooks.go`
+- **required_tests:** `internal/wrkqapi/api_attribution_test.go`, `internal/workrpc/webhook_test.go`, `internal/workrpc/commentdelete_mode_test.go`, `internal/rpccli/parity_test.go`
+- **last_verified:** 2026-06-23
+
 ## wrkq.handoff.caller-owned-scope
 
 - **scope:** agent/project scope + actor resolution for handoff mutations crossing the wrkq RPC boundary
