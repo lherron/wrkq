@@ -614,6 +614,54 @@ task ref + the `toPath` destination and the legacy output rendering, and it call
 validation-before-resolution precedence holds end to end. Container restore has no
 RPC method yet and is hard-gated in the mirror.
 
+#### Handoff methods
+
+```
+wrkq.handoff.create      [new mutation method — caller-owned scope; see handoff note]
+wrkq.handoff.get
+wrkq.handoff.listView    [caller-scoped list projection]
+wrkq.handoff.acknowledge [new mutation method — server-owned etag CAS]
+```
+(`wrkq.handoff.searchView` is DEFERRED until the search/index slice lands.)
+
+> **Handoff family** (T-05117, daedalus hrcchat#10211) backs `wrkq handoff
+> create/get/list/acknowledge`. Handoffs are agent-scoped session-continuity
+> records. Scope is **caller-owned but NOT project-root**: the mirror resolves
+> `--scope` / agent-runtime env (`ASP_SCOPE_REF` → `ASP_HANDLE` →
+> `ASP_AGENT_ID`+`ASP_PROJECT`) via `scope.Resolve` and **enforces self-scope for
+> create** (`scope.EnforceSelfScope`) BEFORE submitting. The SERVER receives the
+> EXPLICIT effective scope/actor fields (`scopeRef`/`agentId`/`projectId` +
+> `actorAgentId`/`principalRef`) and MUST NOT read `ASP_SCOPE_REF` / `ASP_HANDLE` /
+> `ASP_AGENT_ID` / `ASP_PROJECT`. (Risk, LOW: server-side self-scope is
+> unenforceable without an authenticated transport — caller-side enforcement +
+> explicit params is correct for workrpc; a future `wrkqd` may add server
+> validation WITHOUT changing the DTO.)
+>
+> The `WrkqHandoff` DTO reproduces the legacy `handoffJSON` field ORDER + tags
+> EXACTLY (snake_case, pointer/omitempty parity) so the mirror re-marshals it into
+> byte-identical `wrkq handoff` output; cataloged + fingerprinted
+> (`TestHandoffDTOFingerprint`).
+>
+> - **`wrkq.handoff.create`** writes a pending handoff (`handoff.created`) or
+>   returns an idempotent replay (`idempotentReplay=true`); a same-key replay with a
+>   different title/body is `WRKQ_CONFLICT`
+>   (`HandoffIdempotencyPayloadMismatchError`). `dryRun` projects the prospective
+>   handoff (next id + etag 1 + pending) WITHOUT writing.
+> - **`wrkq.handoff.get`** returns one handoff by friendly ID or UUID;
+>   missing → `WRKQ_NOT_FOUND` (the store keeps the legacy "handoff not found:
+>   <ref>" prefix so the mirror reproduces the CLI wording + exit 4).
+> - **`wrkq.handoff.listView`** is the caller-scoped page: `{ scopeRef, status?,
+>   limit?, cursor? }` → `{ items: WrkqHandoff[], nextCursor }`, owning the legacy
+>   cursor pagination server-side. `scopeRef` is the CALLER-resolved canonical
+>   project scope; the server never derives it from env.
+> - **`wrkq.handoff.acknowledge`** transitions pending → acknowledged
+>   (`handoff.acknowledged`). The server owns the etag CAS (`ifMatch` mismatch →
+>   `WRKQ_CONFLICT`, the mirror maps to exit 6 "etag mismatch"), the
+>   "already acknowledged" mapping (`WRKQ_CONFLICT` reason `already_acknowledged` →
+>   mirror exit 5), and `dryRun` (returns the projected post-state, no write). The
+>   caller passes the resolved acting identity (`actorAgentId`/`principalRef`/acting
+>   `scopeRef`); the server never reads env.
+
 #### Comment methods
 
 ```

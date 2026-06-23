@@ -1188,6 +1188,69 @@ interface WrkqLegacyActorUpdateParams {
 - `meta: null` in a patch clears meta (distinct from omitting the key).
 - Mutations emit `actor.created` / `actor.updated` audit events.
 
+#### Handoff methods (Tranche D, T-05117)
+
+```text
+wrkq.handoff.create        # producer; caller-owned scope (NOT project-root)
+wrkq.handoff.get
+wrkq.handoff.listView      # caller-scoped page
+wrkq.handoff.acknowledge   # producer; server-owned etag CAS + handoff.acknowledged
+```
+(`wrkq.handoff.searchView` is DEFERRED until the search/index slice lands.)
+
+The published `@wrkq/client` surface adds `client.wrkq.handoff.{create,get,
+listView,acknowledge}`. Scope is **caller-owned but NOT project-root**: the caller
+resolves the effective agent/project scope (and, for `create`, enforces self-scope)
+and passes EXPLICIT `scopeRef`/`agentId`/`projectId` + actor fields. The server
+reads NO agent-runtime env (`ASP_SCOPE_REF`/`ASP_HANDLE`/`ASP_AGENT_ID`/
+`ASP_PROJECT`). Authoritative shapes are `docs/wrkq-wrkf-rpc.md` §6.2 ("Handoff
+methods").
+
+```ts
+interface WrkqHandoffCreateParams {
+  scopeRef: string; // caller-resolved canonical project scope
+  agentId: string;
+  projectId: string;
+  title: string;
+  body: string;
+  meta?: string; // raw JSON-object STRING (legacy --meta)
+  idempotencyKey?: string;
+  actorAgentId?: string; // defaults to the scope agent
+  principalRef?: string;
+  dryRun?: boolean; // project the prospective handoff, no write
+}
+interface WrkqHandoffCreateResult {
+  handoff: WrkqHandoff; // snake_case DTO (legacy handoffJSON byte-parity)
+  idempotentReplay: boolean;
+}
+interface WrkqHandoffListViewParams {
+  scopeRef: string;
+  status?: "pending" | "acknowledged" | "all";
+  limit?: number;
+  cursor?: string;
+}
+interface WrkqHandoffListResult {
+  items: WrkqHandoff[];
+  nextCursor?: string;
+}
+interface WrkqHandoffAcknowledgeParams {
+  handoff: string;
+  note?: string;
+  actorAgentId: string;
+  principalRef?: string;
+  scopeRef?: string;
+  dryRun?: boolean;
+  ifMatch?: number; // server etag CAS; mismatch → WRKQ_CONFLICT
+}
+```
+
+- A same-key `create` replay with the same payload returns `idempotentReplay:true`;
+  with a different title/body it is `WRKQ_CONFLICT`.
+- `acknowledge` on an already-acknowledged handoff is `WRKQ_CONFLICT`
+  (`reason:"already_acknowledged"`); an `ifMatch` mismatch is `WRKQ_CONFLICT`.
+- `WrkqHandoff` fields are DELIBERATELY snake_case (the wrkq CLI re-marshals them
+  verbatim) — unlike the camelCase task/comment DTOs.
+
 ### 6.3 wrkf namespace
 
 `wrkf.*` owns workflow behavior. It may reference task selectors to resolve attached workflow instances, but direct task mutation methods are forbidden.

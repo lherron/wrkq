@@ -58,6 +58,11 @@ type parityCase struct {
 	// wrote them into (the mirror's RPC server reads from the EXPLICITLY-configured
 	// attach dir, never the HOME auto-default).
 	seededAttachStore bool
+	// seedEnv adds extra environment variables to the SETUP/seed run only (not the
+	// command-under-test). Handoff seeding (`wrkq handoff create` in setup) needs an
+	// agent/project scope env (ASP_SCOPE_REF) since handoff scope is caller-owned;
+	// the seed always uses the LEGACY wrkq binary so both fixtures are byte-identical.
+	seedEnv []string
 }
 
 var parityCases = []parityCase{
@@ -2315,6 +2320,93 @@ var parityCases = []parityCase{
 		mutates:       true,
 		normalizeUUID: true,
 	},
+
+	// ─── handoff family (T-05117) ───────────────────────────────────────────────
+	// Handoff scope is CALLER-owned: the seed + command share an ASP_SCOPE_REF env.
+	// create echoes a fresh UUID + timestamps → normalizeUUID + <TS> normalization.
+	{
+		name:          "handoff/create-json",
+		args:          []string{"handoff", "create", "-t", "Next steps", "--body-file", "body.md", "--json"},
+		files:         map[string]string{"body.md": "carry-over notes\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
+	{
+		name:          "handoff/create-dry-run",
+		args:          []string{"handoff", "create", "-t", "Dry", "--body-file", "body.md", "--dry-run", "--json"},
+		files:         map[string]string{"body.md": "dry body\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
+	{
+		name:    "handoff/create-missing-title-errors",
+		args:    []string{"handoff", "create", "--body-file", "body.md", "--json"},
+		files:   map[string]string{"body.md": "body\n"},
+		env:     []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv: []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+	},
+	{
+		name:          "handoff/get-json",
+		setup:         [][]string{{"handoff", "create", "-t", "Findable", "--body-file", "body.md", "--json"}},
+		args:          []string{"handoff", "get", "H-00001", "--json"},
+		files:         map[string]string{"body.md": "findable body\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
+	{
+		name:    "handoff/get-not-found-errors",
+		args:    []string{"handoff", "get", "H-99999", "--json"},
+		env:     []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv: []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+	},
+	{
+		name:          "handoff/list-ndjson",
+		setup:         [][]string{{"handoff", "create", "-t", "Listed", "--body-file", "body.md", "--json"}},
+		args:          []string{"handoff", "list", "--ndjson"},
+		files:         map[string]string{"body.md": "listed body\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
+	{
+		name:    "handoff/list-empty-json",
+		args:    []string{"handoff", "list", "--json"},
+		env:     []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv: []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+	},
+	{
+		name:          "handoff/acknowledge-json",
+		setup:         [][]string{{"handoff", "create", "-t", "Ack me", "--body-file", "body.md", "--json"}},
+		args:          []string{"handoff", "acknowledge", "H-00001", "--note", "loaded next session", "--json"},
+		files:         map[string]string{"body.md": "ack body\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
+	{
+		name: "handoff/acknowledge-already-errors",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Twice", "--body-file", "body.md", "--json"},
+			{"handoff", "acknowledge", "H-00001", "--json"},
+		},
+		args:          []string{"handoff", "acknowledge", "H-00001", "--json"},
+		files:         map[string]string{"body.md": "twice body\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
+	{
+		name:          "handoff/acknowledge-dry-run",
+		setup:         [][]string{{"handoff", "create", "-t", "Dry ack", "--body-file", "body.md", "--json"}},
+		args:          []string{"handoff", "acknowledge", "H-00001", "--dry-run", "--json"},
+		files:         map[string]string{"body.md": "dry ack body\n"},
+		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeUUID: true,
+	},
 }
 
 // attachSrcFiles are the host source files materialized into each run/seed dir
@@ -2443,7 +2535,7 @@ func TestParity(t *testing.T) {
 			// Seed ONE base fixture, then give each binary a byte-identical copy
 			// (incl. random UUIDs), so output comparison catches real id bugs
 			// rather than masking legitimately-different independent seeds.
-			var seedEnv []string
+			seedEnv := append([]string{}, tc.seedEnv...)
 			runEnv := tc.env
 			if tc.seededAttachStore {
 				// Shared absolute store: the seed `attach put` writes the bytes here;
@@ -2451,7 +2543,7 @@ func TestParity(t *testing.T) {
 				// dir-independent). Computed at run time so it cannot live in the static
 				// case literal.
 				store := filepath.Join(t.TempDir(), "attach-store")
-				seedEnv = []string{"WRKQ_ATTACH_DIR=" + store}
+				seedEnv = append(seedEnv, "WRKQ_ATTACH_DIR="+store)
 				runEnv = append(append([]string{}, tc.env...), "WRKQ_ATTACH_DIR="+store)
 			}
 			base := seedFixtureFilesEnv(t, bins, tc.setup, tc.files, seedEnv)

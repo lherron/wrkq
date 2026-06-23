@@ -145,6 +145,12 @@ class WorkClientImpl implements WorkClient {
       timeline: (p) => this.call("wrkq.workflow.timeline", p),
       refresh: (p) => this.call("wrkq.workflow.refresh", p),
     },
+    handoff: {
+      create: (p) => this.call("wrkq.handoff.create", p),
+      get: (p) => this.call("wrkq.handoff.get", p),
+      listView: (p) => this.call("wrkq.handoff.listView", p),
+      acknowledge: (p) => this.call("wrkq.handoff.acknowledge", p),
+    },
     admin: {
       legacyActor: {
         list: (p) => this.call("wrkq.admin.legacyActor.list", p ?? {}),

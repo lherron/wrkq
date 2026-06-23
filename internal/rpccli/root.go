@@ -33,7 +33,9 @@ var topLevelCommands = []mirroredCommand{
 	// fan-out/prompt/dry-run/output); registered separately.
 	// diff is RPC-backed (real parity command); registered separately.
 	// find is RPC-backed (real parity command); registered separately.
-	{use: "handoff"},
+	// handoff is RPC-backed (wrkq.handoff.create/get/listView/acknowledge; caller-
+	// owned scope resolution + self-scope enforcement client-side; searchView
+	// deferred); registered separately.
 	{use: "index"},
 	// log is RPC-backed (real parity command); registered separately.
 	// ls is RPC-backed (real parity command); registered separately.
@@ -100,6 +102,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newCpCmd())
 	root.AddCommand(newWebhookCmd())
 	root.AddCommand(newBundleCmd())
+	root.AddCommand(newHandoffCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

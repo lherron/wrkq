@@ -185,6 +185,44 @@ func CreateHandoff(ctx context.Context, tx *sql.Tx, args CreateHandoffArgs) (Cre
 	return CreateHandoffResult{Handoff: handoff}, nil
 }
 
+// ProjectHandoff builds the prospective handoff for a dry-run create WITHOUT
+// writing: it computes the next friendly ID + a fresh UUID, defaults to pending
+// status / etag 1, and stamps created_at/updated_at to now. It mirrors the
+// legacy CLI projectedHandoff so dry-run output is byte-identical across the RPC
+// boundary. queryer may be a *db.DB or *sql.Tx (any QueryRowContext provider).
+func ProjectHandoff(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}, args CreateHandoffArgs) Handoff {
+	nextID := id.FormatHandoff(1)
+	var nextSeq int
+	if err := queryer.QueryRowContext(ctx, `SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM handoffs`).Scan(&nextSeq); err == nil && nextSeq > 0 {
+		nextID = id.FormatHandoff(nextSeq)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	return Handoff{
+		UUID:                  uuid.New().String(),
+		ID:                    nextID,
+		ScopeRef:              args.ScopeRef,
+		ScopeKind:             args.ScopeKind,
+		AgentID:               args.AgentID,
+		ProjectID:             args.ProjectID,
+		AgentActorUUID:        args.AgentActorUUID,
+		AgentPrincipalRef:     args.AgentPrincipalRef,
+		ProjectContainerUUID:  args.ProjectContainerUUID,
+		CreatedByAgentID:      args.CreatedByAgentID,
+		CreatedByActorUUID:    args.CreatedByActorUUID,
+		CreatedByPrincipalRef: args.CreatedByPrincipalRef,
+		Title:                 args.Title,
+		Body:                  args.Body,
+		Status:                HandoffStatusPending,
+		IdempotencyKey:        args.IdempotencyKey,
+		Meta:                  args.Meta,
+		ETag:                  1,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+}
+
 // GetHandoff retrieves a handoff by friendly ID or UUID.
 func GetHandoff(ctx context.Context, database *db.DB, idOrUUID string) (Handoff, error) {
 	if database == nil {

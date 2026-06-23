@@ -430,6 +430,54 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !jsonEqual(t, normalizeBundleManifestTS(t, inBundle), normalizeBundleManifestTS(t, subBundle)) {
 		t.Errorf("bundle.exportView transport results differ:\n in-process: %s\n subprocess: %s", inBundle, subBundle)
 	}
+
+	// Handoff family (T-05117). Seed one pending handoff via the in-process
+	// transport with an EXPLICIT caller-resolved scope (the server never reads
+	// env), then read it back through BOTH transports — get + listView — and assert
+	// byte-identical results. This proves the handoff create/get/listView envelope
+	// is transport-agnostic and that the create wrote a durable, addressable row.
+	hoParams := map[string]any{
+		"scopeRef":  "agent:cody:project:wrkq",
+		"agentId":   "cody",
+		"projectId": "wrkq",
+		"title":     "xport handoff",
+		"body":      "carry-over notes",
+	}
+	hoRaw, err := inproc.Call(context.Background(), "wrkq.handoff.create", hoParams)
+	if err != nil {
+		t.Fatalf("in-process handoff.create: %v", err)
+	}
+	var hoRes struct {
+		Handoff struct {
+			ID string `json:"id"`
+		} `json:"handoff"`
+	}
+	if uerr := json.Unmarshal(hoRaw, &hoRes); uerr != nil || hoRes.Handoff.ID == "" {
+		t.Fatalf("handoff.create result decode: %v (%s)", uerr, hoRaw)
+	}
+	inGet, err := inproc.Call(context.Background(), "wrkq.handoff.get", map[string]string{"handoff": hoRes.Handoff.ID})
+	if err != nil {
+		t.Fatalf("in-process handoff.get: %v", err)
+	}
+	subGet, err := sub.Call(ctx, "wrkq.handoff.get", map[string]string{"handoff": hoRes.Handoff.ID})
+	if err != nil {
+		t.Fatalf("subprocess handoff.get: %v", err)
+	}
+	if !jsonEqual(t, inGet, subGet) {
+		t.Errorf("handoff.get transport results differ:\n in-process: %s\n subprocess: %s", inGet, subGet)
+	}
+	listParams := map[string]any{"scopeRef": "agent:cody:project:wrkq", "status": "pending", "limit": 50}
+	inList, err := inproc.Call(context.Background(), "wrkq.handoff.listView", listParams)
+	if err != nil {
+		t.Fatalf("in-process handoff.listView: %v", err)
+	}
+	subList, err := sub.Call(ctx, "wrkq.handoff.listView", listParams)
+	if err != nil {
+		t.Fatalf("subprocess handoff.listView: %v", err)
+	}
+	if !jsonEqual(t, inList, subList) {
+		t.Errorf("handoff.listView transport results differ:\n in-process: %s\n subprocess: %s", inList, subList)
+	}
 }
 
 // normalizeBundleManifestTS blanks the manifest.timestamp (time.Now per call) in a

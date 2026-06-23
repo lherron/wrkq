@@ -13,7 +13,9 @@ import (
 
 func main() {
 	if err := rpccli.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
+		if !rpccli.ErrorAlreadyReported(err) {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
+		os.Exit(rpccli.ExitCodeForError(err))
 	}
 }

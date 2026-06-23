@@ -150,6 +150,25 @@ func TestTaskCopyDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestHandoffDTOFingerprint guards the handoff resource DTO + envelope shapes
+// (T-05117, daedalus hrcchat#10211). WrkqHandoff reproduces the LEGACY handoffJSON
+// field ORDER + tags EXACTLY (internal/cli/handoff_create.go:30-56) so the mirror
+// re-marshals it into byte-identical `wrkq handoff` output. Any field/tag drift is
+// a PROTOCOL CONTRACT change: bump this fingerprint, update docs/dtoCatalog, and
+// re-verify handoff parity deliberately.
+func TestHandoffDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqHandoff{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqHandoffCreateResult{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqHandoffListResult{}))
+	const want = "WrkqHandoff{uuid,id,scope_ref,scope_kind,agent_id,project_id,agent_actor_uuid,agent_principal_ref,omitempty,project_container_uuid,created_by_agent_id,created_by_actor_uuid,created_by_principal_ref,omitempty,title,body,status,idempotency_key,acknowledged_at,acknowledged_by_agent_id,acknowledged_by_actor_uuid,acknowledged_by_principal_ref,omitempty,acknowledgement_note,meta,etag,created_at,updated_at}\n" +
+		"WrkqHandoffCreateResult{handoff,idempotentReplay}\n" +
+		"WrkqHandoffListResult{items,nextCursor,omitempty}"
+	if got != want {
+		t.Errorf("handoff DTO shape drifted (protocol contract change):\n got:\n%s\nwant:\n%s\n"+
+			"Update this fingerprint, docs/wrkq-wrkf-rpc.md, dtoCatalog, and re-verify handoff parity deliberately.", got, want)
+	}
+}
+
 // TestFindListViewDTOFingerprint guards the find projection shapes.
 func TestFindListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))

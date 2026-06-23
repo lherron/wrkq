@@ -33,6 +33,13 @@ import type {
   WrkqContainerListResult,
   WrkqContainerShowParams,
   WrkqContainerUpdateParams,
+  WrkqHandoff,
+  WrkqHandoffAcknowledgeParams,
+  WrkqHandoffCreateParams,
+  WrkqHandoffCreateResult,
+  WrkqHandoffGetParams,
+  WrkqHandoffListResult,
+  WrkqHandoffListViewParams,
   WrkqLegacyActor,
   WrkqLegacyActorCreateParams,
   WrkqLegacyActorListParams,
@@ -159,6 +166,19 @@ export interface WrkqBundleFacade {
   exportView(params: WrkqBundleExportViewParams): Promise<WrkqBundleExportView>;
 }
 
+/**
+ * Handoff family (wrkq.handoff.*). Scope is CALLER-owned but NOT project-root:
+ * callers resolve the effective agent/project scope (and enforce self-scope for
+ * create) and pass EXPLICIT scope/actor fields. The server reads no agent-runtime
+ * env. searchView is DEFERRED until the search/index slice lands.
+ */
+export interface WrkqHandoffFacade {
+  create(params: WrkqHandoffCreateParams): Promise<WrkqHandoffCreateResult>;
+  get(params: WrkqHandoffGetParams): Promise<WrkqHandoff>;
+  listView(params: WrkqHandoffListViewParams): Promise<WrkqHandoffListResult>;
+  acknowledge(params: WrkqHandoffAcknowledgeParams): Promise<WrkqHandoff>;
+}
+
 export interface WrkqFacade {
   readonly task: WrkqTaskFacade;
   readonly comment: WrkqCommentFacade;
@@ -167,6 +187,7 @@ export interface WrkqFacade {
   readonly container: WrkqContainerFacade;
   readonly webhook: WrkqWebhookFacade;
   readonly workflow: WrkqWorkflowFacade;
+  readonly handoff: WrkqHandoffFacade;
   readonly admin: WrkqAdminFacade;
   readonly bundle: WrkqBundleFacade;
 }

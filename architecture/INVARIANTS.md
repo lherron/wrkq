@@ -5,6 +5,15 @@
 Projection of active `invariant` records under `architecture/records/invariants/`.
 The YAML records are the source of truth; regenerate with `just architecture-records --write`.
 
+## wrkq.handoff.caller-owned-scope
+
+- **scope:** agent/project scope + actor resolution for handoff mutations crossing the wrkq RPC boundary
+- **predicate:** Handoff scope is CALLER-owned but NOT project-root. The CLI caller layer (legacy internal/cli AND the RPC-backed mirror internal/rpccli) resolves the effective agent/project scope via internal/scope.Resolve from --scope OR agent-runtime env (ASP_SCOPE_REF -> ASP_HANDLE -> ASP_AGENT_ID+ASP_PROJECT), and for CREATE it enforces self-scope (scope.EnforceSelfScope: refuse writing a handoff that targets another agent) BEFORE submitting. The handoff RPC methods (wrkq.handoff.create / get / listView / acknowledge) receive ONLY the EXPLICIT effective fields — scopeRef / agentId / projectId for create+list, actorAgentId / principalRef / acting scopeRef for create+acknowledge. They MUST NOT read ASP_SCOPE_REF, ASP_HANDLE, ASP_AGENT_ID, or ASP_PROJECT: scope resolution + self-scope enforcement are caller semantics, not a server read-model concern. The server owns ONLY the durable semantics it can prove without authenticated identity: the handoff.created / handoff.acknowledged events, the idempotency replay + payload-mismatch conflict, the acknowledge etag CAS, the "already acknowledged" mapping, and the not-found contract. RISK (LOW, accepted): server-side self-scope is UNENFORCEABLE without an authenticated transport, so caller-side enforcement + explicit params is the correct factoring for workrpc. A future authenticated wrkqd MAY add server-side validation WITHOUT changing the DTO field shape.
+- **enforced_by:** `internal/scope.Resolve + scope.EnforceSelfScope at the caller call sites + explicit effective-scope params on the handoff methods (the server never reads ASP_* env); daedalus ruling hrcchat#10211 (T-05117)`
+- **source:** `internal/scope/resolve.go`, `internal/rpccli/handoff.go`, `internal/wrkqapi/handoffs.go`, `internal/workrpc/registry.go`, `internal/cli/handoff_create.go`, `internal/cli/handoff_acknowledge.go`
+- **required_tests:** `internal/wrkqapi/catview_fingerprint_test.go`, `internal/workrpc/catview_catalog_test.go`, `internal/workrpc/handoff_test.go`, `internal/rpccli/handoff_test.go`, `internal/rpccli/parity_test.go`, `internal/rpccli/transport_test.go`, `internal/rpccli/importguard_test.go`
+- **last_verified:** 2026-06-23
+
 ## wrkq.layer-boundary.domain-isolation
 
 - **scope:** Go package import layering

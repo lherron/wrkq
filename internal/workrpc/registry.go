@@ -158,6 +158,10 @@ var methodCatalog = []string{
 	"wrkq.workflow.inspect",
 	"wrkq.workflow.timeline",
 	"wrkq.workflow.refresh",
+	"wrkq.handoff.create",
+	"wrkq.handoff.get",
+	"wrkq.handoff.listView",
+	"wrkq.handoff.acknowledge",
 	"wrkf.workflow.validate",
 	"wrkf.workflow.show",
 	"wrkf.workflow.list",
@@ -241,6 +245,9 @@ var dtoCatalog = []string{
 	"WrkqLegacyActorListResult",
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
+	"WrkqHandoff",             // handoff resource DTO (legacy handoffJSON field order)
+	"WrkqHandoffCreateResult", // wrkq.handoff.create envelope (handoff + idempotentReplay)
+	"WrkqHandoffListResult",   // wrkq.handoff.listView page envelope
 	"WrkfInstance",
 	"WrkfEvent",
 	"WrkfEventQueryResult",
@@ -413,6 +420,22 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
 		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
+	}))
+
+	// Handoff family (T-05117). Scope is CALLER-owned (resolved + self-scope
+	// enforced by the mirror); the server receives EXPLICIT effective scope/actor
+	// fields and never reads ASP_SCOPE_REF / ASP_HANDLE / ASP_AGENT_ID / ASP_PROJECT.
+	s.Register("wrkq.handoff.create", apiHandler(func(ctx context.Context, p wrkqapi.HandoffCreateParams) (any, error) {
+		return wq.HandoffCreate(ctx, p)
+	}))
+	s.Register("wrkq.handoff.get", apiHandler(func(ctx context.Context, p wrkqapi.HandoffGetParams) (any, error) {
+		return wq.HandoffGet(ctx, p)
+	}))
+	s.Register("wrkq.handoff.listView", apiHandler(func(ctx context.Context, p wrkqapi.HandoffListViewParams) (any, error) {
+		return wq.HandoffListView(ctx, p)
+	}))
+	s.Register("wrkq.handoff.acknowledge", apiHandler(func(ctx context.Context, p wrkqapi.HandoffAcknowledgeParams) (any, error) {
+		return wq.HandoffAcknowledge(ctx, p)
 	}))
 }
 

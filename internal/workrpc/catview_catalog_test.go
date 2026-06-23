@@ -134,6 +134,20 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqBundleTaskDoc") {
 		t.Error("WrkqBundleTaskDoc missing from dtoCatalog")
 	}
+	// Handoff family (T-05117): the four new methods + the three new DTOs must be
+	// in BOTH catalogs so their NAMES enter the protocol schema-hash input.
+	for _, m := range []string{
+		"wrkq.handoff.create", "wrkq.handoff.get", "wrkq.handoff.listView", "wrkq.handoff.acknowledge",
+	} {
+		if !contains(methodCatalog, m) {
+			t.Errorf("%s missing from methodCatalog", m)
+		}
+	}
+	for _, d := range []string{"WrkqHandoff", "WrkqHandoffCreateResult", "WrkqHandoffListResult"} {
+		if !contains(dtoCatalog, d) {
+			t.Errorf("%s missing from dtoCatalog", d)
+		}
+	}
 }
 
 func contains(haystack []string, needle string) bool {
