@@ -38,11 +38,17 @@ type logEvent struct {
 // since/until filtering, and cursor.Apply + limit+1 + BuildNextCursor over
 // event_log.id DESC. The CLI owns presentation (json/ndjson/oneline/detailed/patch).
 //
-// Implemented surface (byte-proven against legacy): --json, NDJSON (non-TTY
-// default + --porcelain), --oneline, the detailed default, and --patch (over
-// stable single-key payloads — multi-key payload nondeterminism is shared with
-// legacy, see the parity fixtures). --since / --until, --limit, --cursor, and the
-// porcelain next_cursor→stderr contract all match legacy.
+// Implemented surface, two tiers:
+//   - BYTE-PROVEN against legacy: --json, NDJSON (non-TTY default), --porcelain,
+//     and the cursor / --since / --until / --limit / error / resource-resolution
+//     modes (--porcelain next_cursor→stderr matches legacy).
+//   - Implemented legacy renderer, documented NON-byte-stable (NOT byte-parity):
+//     --oneline, the TTY detailed default, and --patch. Their Summary/Changes
+//     lines iterate the decoded payload map, whose key order Go randomizes, so
+//     legacy's OWN output is not byte-stable for multi-key payloads. Hard-gating
+//     would make the mirror narrower than legacy without improving correctness;
+//     instead these are exposed and guarded by an order-insensitive SEMANTIC test
+//     (TestLogHumanModesSemanticParity), not byte equality.
 func newLogCmd() *cobra.Command {
 	var since, until, cursorTok string
 	var oneline, patch, asJSON, porcelain bool

@@ -2011,6 +2011,109 @@ func TestLogCursorReplay(t *testing.T) {
 	}
 }
 
+// TestLogHumanModesSemanticParity is the order-insensitive SEMANTIC guard daedalus
+// requires (hrcchat#10142) for log's exposed-but-non-byte-stable human modes
+// (--oneline, --patch). Those modes render the decoded payload MAP, whose key order
+// Go randomizes, so legacy's OWN output is not byte-stable for multi-key payloads — a
+// byte-equality test would be flaky. Instead, over a MULTI-KEY-payload fixture, we
+// assert both binaries SUCCEED and carry the SAME content (identical token multiset:
+// event ids/types/actors/payload key=value pairs), comparing order-insensitively
+// rather than byte-for-byte. NOT a byte-equality test (deliberately).
+func TestLogHumanModesSemanticParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	// T-00001 (under inbox=P-00001): a create event + a MULTI-KEY update event
+	// (state+priority in one set). Payloads are short, so --oneline does not
+	// truncate (truncation would drop different pairs per random map order, which
+	// is genuine legacy nondeterminism, not a mirror divergence).
+	setup := [][]string{
+		{"touch", "inbox/log-multi", "-t", "Multi", "--priority", "3"},
+		{"set", "inbox/log-multi", "--state", "in_progress", "--priority", "1"},
+	}
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	sameMultiset := func(a, b map[string]int) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for k, c := range a {
+			if b[k] != c {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Legacy renders these modes by iterating the decoded payload map (random order),
+	// and `formatEventSummary` truncates any summary >60 chars to `[:57]+"..."` — so the
+	// one-line "Summary:" string is BOTH order-dependent AND lossy. We therefore compare
+	// only what is deterministic+lossless per mode, order-insensitively (never byte order).
+	//
+	// --patch detailed output is, per event: fixed-order header lines (Event/Timestamp/
+	// Principal/Scope/Actor/ETag), one truncated "  Summary:" line, then a "  Changes:"
+	// block of full "    key: value" payload lines (untruncated; only line ORDER is
+	// random). patchLineSet keeps every non-empty line EXCEPT the truncated Summary, so
+	// the multiset covers event headers (ids/types/actors) + the full payload pairs.
+	patchLineSet := func(s string) map[string]int {
+		m := map[string]int{}
+		for _, ln := range nonEmptyLines(normalize(s)) {
+			if strings.Contains(ln, "Summary:") {
+				continue
+			}
+			m[strings.TrimSpace(ln)]++
+		}
+		return m
+	}
+	// --oneline is ONE truncated summary line per event; only its leading skeleton
+	// (timestamp, event type, "by", actor) is deterministic. skeleton drops payload
+	// key=value tokens and any truncated fragment.
+	skeleton := func(s string) map[string]int {
+		m := map[string]int{}
+		for _, tok := range strings.Fields(normalize(s)) {
+			if strings.Contains(tok, "=") || strings.Contains(tok, "...") {
+				continue
+			}
+			m[strings.TrimRight(tok, ",")]++
+		}
+		return m
+	}
+
+	for _, mode := range []string{"--oneline", "--patch"} {
+		args := []string{"log", "T-00001", mode}
+		oldRes := runCLI(t, bins.wrkq, oldDir, args)
+		newRes := runCLI(t, bins.mirror, newDir, args)
+		if oldRes.exit != 0 {
+			t.Fatalf("legacy log %s exit %d: %s", mode, oldRes.exit, oldRes.stderr)
+		}
+		if newRes.exit != 0 {
+			t.Fatalf("mirror log %s exit %d: %s", mode, newRes.exit, newRes.stderr)
+		}
+		if strings.TrimSpace(oldRes.stdout) == "" {
+			t.Fatalf("legacy log %s produced no output (multi-key fixture should render events)", mode)
+		}
+		if lo, ln := len(nonEmptyLines(oldRes.stdout)), len(nonEmptyLines(newRes.stdout)); lo != ln {
+			t.Errorf("log %s line count differs: old=%d new=%d", mode, lo, ln)
+		}
+		switch mode {
+		case "--patch":
+			// Strong guard: event headers + full payload key=value pairs must match as a
+			// set (excludes only the truncated Summary line).
+			if om, nm := patchLineSet(oldRes.stdout), patchLineSet(newRes.stdout); !sameMultiset(om, nm) {
+				t.Errorf("log --patch line multiset differs (excl. truncated Summary):\n old=%v\n new=%v", om, nm)
+			}
+		case "--oneline":
+			// Summary is truncated → only the deterministic skeleton is comparable.
+			if om, nm := skeleton(oldRes.stdout), skeleton(newRes.stdout); !sameMultiset(om, nm) {
+				t.Errorf("log --oneline deterministic skeleton differs (event types/actors/timestamps):\n old=%v\n new=%v", om, nm)
+			}
+		}
+	}
+}
+
 // TestFindHardGates proves the mirror REFUSES (clean non-zero exit) the legacy
 // find surface it does not yet implement, so a narrower behavior can never
 // masquerade as parity. Legacy would succeed for these, so they cannot be
