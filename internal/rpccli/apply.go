@@ -141,8 +141,9 @@ func runApply(cmd *cobra.Command, args []string, format string, withMetadata, dr
 		return fmt.Errorf("no description or specification found in input (body-only mode requires description or specification)")
 	}
 
-	// Legacy etag precheck owned by the CLI (distinct error text); the patch call
-	// itself does NOT send expectEtag so this message stays the source of truth.
+	// Legacy etag precheck owned by the CLI (its distinct error text is the source
+	// of truth for the user-facing mismatch message). The patch call ALSO sends
+	// expectEtag (see below) as an extra server-side CAS race guard.
 	if ifMatch > 0 && current.ETag != ifMatch {
 		return fmt.Errorf("etag mismatch: task was modified (expected etag %d, current etag %d). Use --if-match %d to update, or --if-match 0 to force",
 			ifMatch, current.ETag, current.ETag)
