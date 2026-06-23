@@ -27,7 +27,7 @@ delete process.env.WRKQ_PROJECT;
 const WRKQ = process.env.WRKQ_BIN ?? "wrkq";
 const WRKF = process.env.WRKF_BIN ?? "wrkf";
 const WRKQADM = process.env.WRKQADM_BIN ?? "wrkqadm";
-const ACTOR = "human:local-human";
+const ACTOR = "agent:local-human";
 
 const WORKFLOW = {
   schemaVersion: "wrkf.workflow-template.v0",

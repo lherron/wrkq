@@ -52,7 +52,10 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 		}
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -269,7 +272,10 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, err
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {

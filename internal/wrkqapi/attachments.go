@@ -108,7 +108,10 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 		return nil, NewValidationError(verr.Error(), map[string]any{"field": "path"})
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -291,7 +294,10 @@ func (a *API) AttachmentRemove(ctx context.Context, p AttachmentRemoveParams) (*
 		return nil, lerr
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {

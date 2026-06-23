@@ -52,7 +52,10 @@ func (a *API) RelationAdd(ctx context.Context, p RelationAddParams) (*WrkqRelati
 		}
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -195,7 +198,10 @@ func (a *API) RelationRemove(ctx context.Context, p RelationRemoveParams) (*Wrkq
 		return nil, terr
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {

@@ -428,8 +428,12 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 >   backfill, `isEventIncluded` / `isStateChangeEvent`, event-type filtering, and the
 >   high-water cursor of the LAST RAW row scanned (so a filtered-out tail still
 >   advances the client past it). Params:
->   `{ tasks?, stateOnly?, eventTypes?, cursor, limit? }` →
->   `WrkqMonitorEventsView{ items: WrkqMonitorEvent[], high_water }`. `tasks` empty =
+>   `{ tasks?, stateOnly?, eventTypes?, cursor, limit?, lastN? }` →
+>   `WrkqMonitorEventsView{ items: WrkqMonitorEvent[], high_water }`. When `lastN > 0`
+>   eventsView is a `--last N` START-CURSOR RESOLUTION call: it returns an EMPTY page
+>   with `high_water` = the legacy `COALESCE(MIN(id),0)-1` over the last N EXISTING
+>   event_log rows (by id DESC), gap-independent; the client then streams forward from
+>   that cursor. `tasks` empty =
 >   match ALL applicable task/comment events. The per-page `limit` is hard-capped
 >   server-side (`monitorMaxPageLimit`). `WrkqMonitorEvent` is the legacy
 >   monitorEventLine data row MINUS the client-owned `type` discriminator (the mirror

@@ -37,7 +37,11 @@ func (a *API) ContainerCreate(ctx context.Context, p ContainerCreateParams) (*Wr
 		return nil, NewValidationError(serr.Error(), map[string]any{"field": "slug"})
 	}
 
-	result, err := a.store.Containers.CreateWithAttribution(a.attributionFor(p.Actor), store.ContainerCreateParams{
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	result, err := a.store.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
 		Slug:       normalizedSlug,
 		Title:      strings.TrimSpace(p.Title),
 		ParentUUID: parentUUID,
@@ -127,7 +131,11 @@ func (a *API) ContainerUpdate(ctx context.Context, p ContainerUpdateParams) (*Wr
 		}
 	}
 
-	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(a.attributionFor(p.Actor), containerUUID, fields, p.ExpectETag); uerr != nil {
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(attr, containerUUID, fields, p.ExpectETag); uerr != nil {
 		return nil, mapContainerStoreError(uerr, selector)
 	}
 
@@ -291,7 +299,11 @@ func (a *API) ContainerDelete(ctx context.Context, p ContainerDeleteParams) (*Wr
 	if err := a.rejectRootContainer(containerUUID); err != nil {
 		return nil, err
 	}
-	if err := a.store.Containers.DeleteWithAttribution(a.attributionFor(p.Actor), containerUUID, p.ExpectETag); err != nil {
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	if err := a.store.Containers.DeleteWithAttribution(attr, containerUUID, p.ExpectETag); err != nil {
 		return nil, mapContainerStoreError(err, selector)
 	}
 	return &WrkqContainerDeleteResult{Deleted: true}, nil
@@ -337,7 +349,11 @@ func (a *API) ContainerDeleteRecursive(ctx context.Context, p ContainerDeleteRec
 		Attachments:   p.Expected.Attachments,
 		Bytes:         p.Expected.Bytes,
 	}
-	result, derr := a.store.Containers.DeleteRecursiveWithAttribution(a.attributionFor(p.Actor), containerUUID, p.ExpectETag, expected)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	result, derr := a.store.Containers.DeleteRecursiveWithAttribution(attr, containerUUID, p.ExpectETag, expected)
 	if derr != nil {
 		return nil, mapContainerStoreError(derr, selector)
 	}

@@ -23,13 +23,17 @@ predicate: >
   CONSISTENCY.
 
   Explicit-param consistency (protocol integrity, NOT authenticated self-scope):
-  for CREATE the explicit create scope tuple MUST be internally coherent — scopeRef,
-  agentId, and projectId describe the SAME canonical project scope. When a scopeRef
-  is supplied it must parse and its agent/project must equal agentId/projectId, or
-  the server rejects WRKQ_VALIDATION before any write or dry-run projection. The
-  server can prove this from the params alone (no env, no auth), so accepting an
-  inconsistent tuple would be hidden coupling — and would corrupt scope filtering,
-  idempotency scope, and event-payload interpretation — not caller-owned scope.
+  for CREATE the explicit scope tuple is coherent IFF
+  `scopeRef == "agent:"+trim(agentId)+":project:"+trim(projectId)` when scopeRef is
+  present. A supplied scopeRef must be EXACTLY that canonical project ref — fail
+  fast, do NOT silently normalize. Task/role-qualified refs, agent-only refs,
+  unparsable refs, and mismatched agent/project refs are ALL WRKQ_VALIDATION before
+  any write, event, or dry-run projection. An empty scopeRef synthesizes the
+  canonical project ref from agentId/projectId. The server proves this from the
+  params alone (no env, no auth); accepting a same-agent/project TASK ref would
+  otherwise persist with scope_kind=project so canonical project listView misses the
+  handoff while a task-scoped listView sees it — corrupting scope filtering,
+  idempotency scope, and event-payload interpretation.
 
   RISK (LOW, accepted): server-side self-scope is UNENFORCEABLE without an
   authenticated transport, so caller-side enforcement + explicit params is the

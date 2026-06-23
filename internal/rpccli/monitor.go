@@ -182,7 +182,8 @@ Invalid selectors fail with exit code 2 before any streaming.
 			}
 
 			// --last: replay the last N events. Resolve the start cursor server-side
-			// from the tail high-water minus N (the bounded tail returns high_water).
+			// from actual row identity (COALESCE(MIN(id),0)-1 over the last N existing
+			// event_log rows) via eventsView lastN — gap-independent, not high_water-N.
 			startCursor := since
 			if last > 0 {
 				c, err := cursorForLastEvents(cmd.Context(), tr, last)

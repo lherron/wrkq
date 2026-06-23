@@ -94,7 +94,10 @@ func (a *API) ActorCreate(ctx context.Context, p ActorCreateParams) (*WrkqLegacy
 		metaBind = *metaStr
 	}
 
-	attr := a.attributionFor("")
+	attr, aerr := a.attributionFor("")
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -212,7 +215,10 @@ func (a *API) ActorUpdate(ctx context.Context, p ActorUpdateParams) (*WrkqLegacy
 		}
 	}
 
-	attr := a.attributionFor("")
+	attr, aerr := a.attributionFor("")
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {

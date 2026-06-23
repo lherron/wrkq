@@ -249,11 +249,11 @@ func TestWrkqWebhookAdd_EventAttribution(t *testing.T) {
 	}
 }
 
-// TestWrkqWebhookAdd_StaleEtagConflict: the OPTIONAL expectEtag CAS rejects a stale
 // TestWrkqWebhookAdd_ExactAttribution covers daedalus's T-05119 condition: a
 // caller-supplied canonical principal (--as agent:flag-principal, no legacy actor
 // row) must be recorded EXACTLY — both the container.updated event principal_ref
 // and the root container's updated_by_principal_ref — not coerced to wrkq-system.
+// A NON-EMPTY invalid actor (e.g. a full scope ref) is rejected WRKQ_VALIDATION.
 func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -282,8 +282,23 @@ func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	if _, _, pr := g1LatestEvent(t, dbPath, "container.updated", rootUUID); pr != "agent:bareslug" {
 		t.Errorf("bare-slug event principal_ref: want agent:bareslug, got %q", pr)
 	}
+
+	// A NON-EMPTY invalid actor (a full scope ref) must be REJECTED, not coerced to
+	// wrkq-system — coercion would destroy audit truth (daedalus #10285). The root
+	// container must be left unmutated.
+	etagBefore := g1EtagOf(t, dbPath, rootUUID)
+	frames3 := p2Run(t, dbPath,
+		mkRPC("w3", "wrkq.webhook.add", map[string]any{"url": "https://attr3.test/wrkq", "actor": "agent:cody:project:wrkq"}),
+	)
+	if code := p2ErrCode(frames3[1]); code != "WRKQ_VALIDATION" {
+		t.Errorf("invalid actor want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames3[1])
+	}
+	if etagAfter := g1EtagOf(t, dbPath, rootUUID); etagAfter != etagBefore {
+		t.Errorf("rejected add must not mutate root container: etag %d → %d", etagBefore, etagAfter)
+	}
 }
 
+// TestWrkqWebhookAdd_StaleEtagConflict: the OPTIONAL expectEtag CAS rejects a stale
 // etag with WRKQ_CONFLICT (the CLI mirror never sends it, so legacy no-CAS
 // last-writer-wins is preserved; raw RPC callers may opt in to reduce that risk).
 func TestWrkqWebhookAdd_StaleEtagConflict(t *testing.T) {

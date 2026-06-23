@@ -90,27 +90,62 @@ func TestHandoffCreate_IdempotentReplayAndMismatch(t *testing.T) {
 }
 
 // TestHandoffCreate_IncoherentScopeRejected covers daedalus's T-05117 condition:
-// an explicit create scopeRef that disagrees with agentId/projectId is a protocol-
-// integrity violation the server can prove from params alone. It must reject with
-// WRKQ_VALIDATION and write neither a handoff row nor a handoff.created event.
+// an explicit create scopeRef must be EXACTLY the canonical project ref for
+// agentId/projectId. Anything else — mismatched agent/project, a same-agent/project
+// task- or role-qualified ref, an agent-only ref, or an unparsable ref — is a
+// protocol-integrity violation the server proves from params alone: WRKQ_VALIDATION
+// with no handoff row and no handoff.created event (fail fast, no silent normalize).
 func TestHandoffCreate_IncoherentScopeRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
+	for _, tc := range []struct {
+		name     string
+		scopeRef string
+	}{
+		{"mismatched-agent-project", "agent:someoneelse:project:otherproj"},
+		{"same-agent-project-task-qualified", "agent:cody:project:wrkq:task:T-05117"},
+		{"same-agent-project-role-qualified", "agent:cody:project:wrkq:role:reviewer"},
+		{"agent-only", "agent:cody"},
+		{"unparsable", "not-a-scope-ref"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := migratedDB(t)
+			bad := hoCreateParams("evil", "evil body", nil)
+			bad["scopeRef"] = tc.scopeRef
+			frames := p2Run(t, dbPath,
+				mkRPC("c1", "wrkq.handoff.create", bad),
+			)
+			if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
+				t.Errorf("non-canonical scopeRef %q want WRKQ_VALIDATION, got %q (frame=%#v)", tc.scopeRef, code, frames[1])
+			}
+			if n := countAllHandoffs(t, dbPath); n != 0 {
+				t.Errorf("rejected create must write no handoff row, found %d", n)
+			}
+			if n := countAllHandoffEvents(t, dbPath, "handoff.created"); n != 0 {
+				t.Errorf("rejected create must write no handoff.created event, found %d", n)
+			}
+		})
+	}
+}
+
+// TestHandoffCreate_EmptyScopeRefSynthesizesCanonical covers daedalus #5: an empty
+// scopeRef synthesizes the canonical project ref from agentId/projectId and persists
+// it (scope_kind=project), so canonical project listView sees the handoff.
+func TestHandoffCreate_EmptyScopeRefSynthesizesCanonical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
 	dbPath := migratedDB(t)
-	bad := hoCreateParams("evil", "evil body", nil)
-	bad["scopeRef"] = "agent:someoneelse:project:otherproj" // disagrees with agentId=cody/projectId=wrkq
-	frames := p2Run(t, dbPath,
-		mkRPC("c1", "wrkq.handoff.create", bad),
-	)
-	if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-		t.Errorf("incoherent scopeRef want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
+	p := map[string]any{"agentId": hoAgentID, "projectId": hoProjectID, "title": "no scopeRef", "body": "synth canonical"}
+	frames := p2Run(t, dbPath, mkRPC("c1", "wrkq.handoff.create", p))
+	res := p2ResultOrFail(t, frames[1], "wrkq.handoff.create (empty scopeRef)")
+	handoff, _ := res["handoff"].(map[string]any)
+	if handoff == nil {
+		t.Fatalf("create result missing handoff: %#v", res)
 	}
-	if n := countAllHandoffs(t, dbPath); n != 0 {
-		t.Errorf("rejected create must write no handoff row, found %d", n)
-	}
-	if n := countAllHandoffEvents(t, dbPath, "handoff.created"); n != 0 {
-		t.Errorf("rejected create must write no handoff.created event, found %d", n)
+	if got := handoff["scope_ref"]; got != hoScopeRef {
+		t.Errorf("synthesized scope_ref: want %q, got %q", hoScopeRef, got)
 	}
 }
 

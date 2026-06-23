@@ -112,7 +112,11 @@ func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor s
 		return nil, NewInternalError(merr)
 	}
 	fields := map[string]interface{}{"webhook_urls": string(payload)}
-	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(a.attributionFor(actor), rootUUID, fields, expectEtag); uerr != nil {
+	attr, aerr := a.attributionFor(actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(attr, rootUUID, fields, expectEtag); uerr != nil {
 		return nil, mapWebhookStoreError(uerr)
 	}
 

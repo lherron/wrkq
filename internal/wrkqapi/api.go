@@ -82,15 +82,26 @@ const systemActorUUID = "00000000-0000-4000-8000-0000000000a0"
 // record (--as agent:x -> agent:x; bare slug -> agent:<slug>) WITHOUT requiring
 // a legacy actor row. A legacy actor row, when present, backfills the display
 // UUID. Only a truly empty selector (no actor, no default) falls back to the
-// built-in wrkq-system actor (daedalus #10261, T-05119).
-func (a *API) attributionFor(actor string) attribution.Attribution {
+// built-in wrkq-system actor; a NON-EMPTY but invalid selector is rejected with
+// WRKQ_VALIDATION rather than silently rewriting attribution to system, which
+// would destroy audit truth (daedalus #10261 / #10285, T-05119).
+func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
 		actor = strings.TrimSpace(a.defaultActor)
 	}
 	if actor == "" {
 		u := systemActorUUID
-		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}
+		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}, nil
+	}
+	// The built-in entrypoint no-actor default sentinels live in the "system:"
+	// namespace (bootstrap.DefaultActor → "system:wrkq"; wrkfcli → "system:wrkf").
+	// These denote the built-in SYSTEM actor, not a caller principal, so they map to
+	// agent:wrkq-system rather than being rejected as an invalid selector. This is
+	// the explicit "intended no-actor default" path (daedalus #10285).
+	if strings.HasPrefix(actor, "system:") {
+		u := systemActorUUID
+		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}, nil
 	}
 	// A UUID selector resolves directly off the actor row (canonical principal +
 	// legacy uuid).
@@ -99,15 +110,18 @@ func (a *API) attributionFor(actor string) attribution.Attribution {
 		"SELECT uuid, slug FROM actors WHERE uuid = ? LIMIT 1", actor,
 	).Scan(&uuid, &slug); err == nil {
 		u := uuid
-		return attribution.Attribution{PrincipalRef: "agent:" + slug, LegacyActorUUID: &u}
+		return attribution.Attribution{PrincipalRef: "agent:" + slug, LegacyActorUUID: &u}, nil
 	}
 	// Otherwise resolve the caller selector to a principal ref the way legacy does
 	// (attribution.NormalizeCompat), preserving canonical attribution even when no
-	// legacy actor row exists; best-effort backfill the display UUID by slug.
+	// legacy actor row exists. A NON-EMPTY invalid selector (e.g. a full scope ref
+	// or "system:wrkq") is a protocol-integrity error — fail fast, do NOT coerce to
+	// wrkq-system. Best-effort backfill the display UUID by slug.
 	principal, err := attribution.NormalizeCompat(actor)
 	if err != nil {
-		u := systemActorUUID
-		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}
+		return attribution.Attribution{}, NewValidationError(
+			"invalid actor: "+err.Error(),
+			map[string]any{"field": "actor", "actor": actor})
 	}
 	attr := attribution.Attribution{PrincipalRef: principal}
 	var u string
@@ -116,7 +130,7 @@ func (a *API) attributionFor(actor string) attribution.Attribution {
 	).Scan(&u); err == nil {
 		attr.LegacyActorUUID = &u
 	}
-	return attr
+	return attr, nil
 }
 
 // ─── shared canonical request hashing ────────────────────────────────────────

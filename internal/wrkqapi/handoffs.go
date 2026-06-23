@@ -297,27 +297,23 @@ func validateHandoffCreate(p HandoffCreateParams) (scope.ResolvedScope, error) {
 			"handoff create requires an agent/project scope (agentId + projectId)",
 			map[string]any{"field": "scope"})
 	}
+	expected := "agent:" + agentID + ":project:" + projectID
 	canonical := strings.TrimSpace(p.ScopeRef)
 	if canonical == "" {
-		canonical = "agent:" + agentID + ":project:" + projectID
-	} else {
-		// Protocol integrity (NOT authenticated self-scope enforcement): when an
-		// explicit scopeRef is supplied it must be internally coherent with
-		// agentId/projectId — i.e. describe the SAME canonical project scope. The
-		// server can prove this from the params alone (no env, no auth), so an
-		// inconsistent tuple is rejected rather than silently stored, where it
-		// would corrupt scope filtering, idempotency scope, and event payloads.
-		parsed, err := scope.ParseScopeRef(canonical)
-		if err != nil {
-			return scope.ResolvedScope{}, NewValidationError(
-				"invalid scopeRef: "+err.Error(),
-				map[string]any{"field": "scopeRef", "scopeRef": canonical})
-		}
-		if parsed.AgentID != agentID || parsed.ProjectID != projectID {
-			return scope.ResolvedScope{}, NewValidationError(
-				"scopeRef must describe the same canonical project scope as agentId/projectId",
-				map[string]any{"field": "scopeRef", "scopeRef": canonical, "agentId": agentID, "projectId": projectID})
-		}
+		// Empty scopeRef synthesizes the canonical project ref from agentId/projectId.
+		canonical = expected
+	} else if canonical != expected {
+		// Protocol integrity (NOT authenticated self-scope enforcement): an explicit
+		// scopeRef must be EXACTLY the canonical project ref for agentId/projectId.
+		// Fail fast — do NOT silently normalize a non-canonical ref. Task/role-
+		// qualified refs, agent-only refs, unparsable refs, and mismatched
+		// agent/project refs are all rejected, because a same-agent/project task ref
+		// would otherwise persist with scope_kind=project and split scope filtering,
+		// idempotency scope, and event-payload interpretation. The server proves this
+		// from the params alone (no env, no auth).
+		return scope.ResolvedScope{}, NewValidationError(
+			"scopeRef must be exactly the canonical project scope for agentId/projectId ("+expected+")",
+			map[string]any{"field": "scopeRef", "scopeRef": canonical, "expected": expected})
 	}
 	return scope.ResolvedScope{
 		AgentID:      agentID,

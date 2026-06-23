@@ -383,7 +383,10 @@ func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttach
 		return nil, NewInternalError(rerr)
 	}
 
-	attr := a.attributionFor(up.actor)
+	attr, aerr := a.attributionFor(up.actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	tx, err := a.db.Begin()
 	if err != nil {

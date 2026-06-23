@@ -104,7 +104,10 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		assigneePrincipalRef = &trimmed
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 	result, err := a.store.Tasks.CreateWithAttribution(attr, store.CreateParams{
 		Slug:                 slug,
 		Title:                p.Title,
@@ -184,7 +187,11 @@ func (a *API) defaultProjectUUID() (string, error) {
 	if err != sql.ErrNoRows {
 		return "", NewInternalError(err)
 	}
-	res, cerr := a.store.Containers.CreateWithAttribution(a.attributionFor(""), store.ContainerCreateParams{
+	attr, aerr := a.attributionFor("")
+	if aerr != nil {
+		return "", aerr
+	}
+	res, cerr := a.store.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
 		Slug:  "inbox",
 		Title: "Inbox",
 		Kind:  "project",
@@ -453,7 +460,10 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		return a.loadTask(uuid)
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 	_, err = a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, fields, currentEtag, "rpc")
 	if err != nil {
 		var mismatch *domain.ETagMismatchError
@@ -502,7 +512,10 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 	if p.ExpectEtag != nil {
 		ifMatch = currentEtag
 	}
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 	if _, merr := a.store.Tasks.MoveWithViaAttribution(attr, uuid, targetUUID, ifMatch, "rpc"); merr != nil {
 		return nil, mapStoreError(merr, p.Task)
 	}
@@ -544,7 +557,10 @@ func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*Wr
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{"acknowledged_at": now}, 0, "rpc"); uerr != nil {
 		return nil, mapStoreError(uerr, p.Task)
 	}
@@ -588,7 +604,10 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		return nil, NewInternalError(scanErr)
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 
 	switch mode {
 	case "archive":
@@ -747,7 +766,10 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		}
 	}
 
-	attr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
 	opts := restoreOptions{
 		targetState:          targetState,
 		newProjectUUID:       newProjectUUID,
