@@ -25,19 +25,25 @@ authority:
 enforced_by: "explicit mode/expected-impact params on the mutation methods + the caller-side confirmation seam (internal/rpccli/confirm.go) + the prompt-ownership / non-interactivity tests; daedalus B-ruling hrcchat#10185 (T-05100)"
 source:
   - internal/wrkqapi/tasks.go                         # TaskDelete mode (archive/purge/absent), no prompt/TTY/stdin read
-  - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY)
+  - internal/wrkqapi/comments.go                      # CommentDelete mode (soft/purge) + ifMatch CAS, non-interactive
+  - internal/wrkqapi/containers.go                    # ContainerDeleteRecursive two-phase (dryRun impact / expected CAS), non-interactive
+  - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY) — rm/comment-rm/rmdir-force variants
   - internal/rpccli/rm.go                             # rm mirror: explicit mode + scoper + confirm; container targets hard-gated
-  - internal/workrpc/registry.go                      # wrkq.task.delete registration (param-only mode change)
+  - internal/rpccli/comment_rm.go                     # comment rm mirror: explicit mode + [y/N] prompt + if-match warn-skip + dry-run
+  - internal/rpccli/containers.go                     # rmdir --force mirror: two-phase deleteRecursive preflight→confirm→commit(expected)
+  - internal/workrpc/registry.go                      # wrkq.task.delete / comment.delete (param-only mode change) + container.deleteRecursive registration
   - internal/workrpc/taskdelete_mode_test.go          # server delete-mode + non-interactivity acceptance tests
-  - internal/rpccli/pty_rm_darwin_test.go             # PTY prompt-ownership test (warning/yes/abort/--yes)
+  - internal/workrpc/commentdelete_mode_test.go       # server comment-delete mode/ifMatch + non-interactivity acceptance tests
+  - internal/rpccli/pty_rm_darwin_test.go             # PTY prompt-ownership tests (rm/comment-rm/rmdir-force)
 required_tests:
   - internal/workrpc/taskdelete_mode_test.go          # TestTaskDelete_* (no-mode preserved, archive, purge+cleanup, invalid→VALIDATION, non-interactive)
-  - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership (mirror owns prompt text/accept/abort/--yes on a real TTY)
-  - internal/rpccli/parity_test.go                    # TestParity/rm/* (archive default, --purge prompt/abort/--yes, dry-run, multi-target, output modes, nullglob, project-root)
+  - internal/workrpc/commentdelete_mode_test.go       # TestCommentDelete_* (soft default/explicit, purge, invalid→VALIDATION, ifMatch→CONFLICT/match, non-interactive)
+  - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership / TestCommentRmPromptOwnership / TestRmdirForcePromptOwnership (mirror owns each prompt's exact text/accept-token/abort/--yes on a real TTY)
+  - internal/rpccli/parity_test.go                    # TestParity/rm/*, TestParity/comment-rm/*, TestParity/rmdir/* (incl. --force two-phase) + comment row in the durable snapshot
   - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror routes durable mutation through the RPC boundary only)
 last_verified:
   date: 2026-06-22
-  evidence: "go test internal/rpccli (TestParity/rm + TestRmPurgePromptOwnership + TestCoreRuleImportGuard) + internal/workrpc (TestTaskDelete_*) green; rm byte-matches legacy for task archive/purge; daedalus B-ruling hrcchat#10185 (T-05100)"
+  evidence: "go test internal/rpccli (TestParity/rm + TestParity/comment-rm + TestParity/rmdir + TestRmPurgePromptOwnership + TestCommentRmPromptOwnership + TestRmdirForcePromptOwnership + TestCoreRuleImportGuard) + internal/workrpc (TestTaskDelete_* + TestCommentDelete_*) green; rm/comment-rm byte-match legacy for archive/soft/purge, rmdir --force byte-matches legacy via two-phase deleteRecursive; daedalus B-ruling hrcchat#10185 + seam-blessing #10190 (T-05100)"
 reopen_when:
   - a mutation method begins prompting, reading stdin, or inspecting a TTY
   - a destructive disposition becomes a hidden default (no explicit mode/intent)

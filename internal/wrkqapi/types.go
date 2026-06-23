@@ -300,9 +300,17 @@ type CommentShowParams struct {
 }
 
 // CommentDeleteParams mirrors WrkqCommentDeleteParams.
+//
+// Mode is the EXPLICIT disposition (caller-owned-confirmation invariant): the
+// server never prompts. Absent/"soft" → reversible soft-delete (sets
+// deleted_at); "purge" → hard-delete the row. Any other value → WRKQ_VALIDATION.
+// IfMatch, when > 0, is an optimistic-concurrency precondition on the comment
+// etag (mismatch → WRKQ_CONFLICT); 0 skips the check.
 type CommentDeleteParams struct {
-	ID    string `json:"id"`
-	Actor string `json:"actor,omitempty"`
+	ID      string `json:"id"`
+	Mode    string `json:"mode,omitempty"`
+	IfMatch int64  `json:"ifMatch,omitempty"`
+	Actor   string `json:"actor,omitempty"`
 }
 
 // ─── Attachments ─────────────────────────────────────────────────────────────

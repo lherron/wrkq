@@ -217,14 +217,29 @@ func (a *API) CommentShow(ctx context.Context, p CommentShowParams) (*WrkqCommen
 	return a.loadComment(commentUUID, taskID)
 }
 
-// CommentDelete soft-deletes a comment (sets deleted_at) and returns the updated
-// WrkqComment DTO. Mirrors internal/cli/comment_rm.go default (non-purge).
+// CommentDelete disposes of a comment per the caller-owned-confirmation
+// invariant: the disposition is the EXPLICIT, caller-supplied mode (absent/"soft"
+// → reversible soft-delete; "purge" → hard-delete). The server never prompts,
+// inspects a TTY, or reads stdin. Mirrors internal/cli/comment_rm.go semantics
+// (soft-delete sets deleted_at + logs comment.deleted; purge DELETEs the row +
+// logs comment.purged). IfMatch (>0) is a machine-checkable etag precondition
+// (mismatch → WRKQ_CONFLICT). For soft-delete it returns the updated DTO; for
+// purge (row gone) it returns the pre-purge DTO snapshot.
 func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqComment, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(p.ID) == "" {
 		return nil, NewValidationError("comment id is required", map[string]any{"field": "id"})
+	}
+	mode := strings.TrimSpace(p.Mode)
+	switch mode {
+	case "", "soft", "purge":
+	default:
+		return nil, NewValidationError("invalid comment delete mode: "+mode, map[string]any{
+			"field":    "mode",
+			"expected": "soft | purge",
+		})
 	}
 	commentUUID, taskUUID, err := a.resolveComment(p.ID)
 	if err != nil {
@@ -234,6 +249,26 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 	if err != nil {
 		return nil, err
 	}
+
+	if p.IfMatch > 0 {
+		var etag int64
+		if serr := a.db.QueryRow("SELECT etag FROM comments WHERE uuid = ?", commentUUID).Scan(&etag); serr != nil {
+			return nil, NewInternalError(serr)
+		}
+		if etag != p.IfMatch {
+			return nil, NewConflictError("comment etag precondition failed", map[string]any{
+				"currentEtag":  etag,
+				"expectedEtag": p.IfMatch,
+			})
+		}
+	}
+
+	// Snapshot the DTO before a purge removes the row.
+	preDTO, err := a.loadComment(commentUUID, taskID)
+	if err != nil {
+		return nil, err
+	}
+
 	attr := a.attributionFor(p.Actor)
 
 	tx, err := a.db.Begin()
@@ -241,6 +276,28 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, NewInternalError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if mode == "purge" {
+		if _, eerr := tx.Exec("DELETE FROM comments WHERE uuid = ?", commentUUID); eerr != nil {
+			return nil, NewInternalError(eerr)
+		}
+		payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID + `","hard_delete":true}`
+		if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
+			ActorUUID:    attr.LegacyActorUUID,
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
+			ResourceType: "comment",
+			ResourceUUID: &commentUUID,
+			EventType:    "comment.purged",
+			Payload:      &payload,
+		}); eerr != nil {
+			return nil, NewInternalError(eerr)
+		}
+		if cerr := tx.Commit(); cerr != nil {
+			return nil, NewInternalError(cerr)
+		}
+		return preDTO, nil
+	}
 
 	if _, eerr := tx.Exec(`
 		UPDATE comments

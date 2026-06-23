@@ -125,3 +125,118 @@ func TestRmPurgePromptOwnership(t *testing.T) {
 		})
 	}
 }
+
+// TestCommentRmPromptOwnership proves the mirror owns the legacy `comment rm`
+// confirmation on a real TTY: the inline "[y/N]: " line (NO warning block; rm's
+// "yes" shape is deliberately NOT reused — daedalus #10190), prompting EVEN for
+// soft-delete, accepting EXACTLY "y"/"Y", the abort branch ("n" → per-comment
+// skip), and --yes (no prompt). The mirror's terminal output + exit code + the
+// durable comment snapshot byte-match legacy `wrkq comment rm`.
+func TestCommentRmPromptOwnership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + drives a real pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		args  []string
+		input string
+	}{
+		{name: "accept-y", args: []string{"comment", "rm", "C-00001"}, input: "y\n"},
+		{name: "accept-Y", args: []string{"comment", "rm", "C-00001"}, input: "Y\n"},
+		{name: "abort-n", args: []string{"comment", "rm", "C-00001"}, input: "n\n"},
+		{name: "purge-prompts-too", args: []string{"comment", "rm", "C-00001", "--purge"}, input: "y\n"},
+		{name: "yes-flag-skips-prompt", args: []string{"comment", "rm", "C-00001", "--yes"}, input: ""},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			setup := [][]string{{"touch", "inbox/cm", "-t", "CM"}, {"comment", "add", "inbox/cm", "a comment body"}}
+			base := seedFixture(t, bins, setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+
+			// The prompting cases MUST render the legacy "[y/N]:" line (and NO
+			// "Type 'yes' to confirm" — that is rm's distinct shape).
+			if tc.name != "yes-flag-skips-prompt" {
+				if !strings.Contains(oldOut, "[y/N]:") {
+					t.Fatalf("legacy comment-rm prompt missing %q (got %q)", "[y/N]:", oldOut)
+				}
+				if strings.Contains(oldOut, "Type 'yes' to confirm") {
+					t.Fatalf("comment-rm must NOT reuse rm's confirm shape (got %q)", oldOut)
+				}
+			}
+			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
+				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
+			}
+		})
+	}
+}
+
+// TestRmdirForcePromptOwnership proves the mirror owns the legacy `rmdir --force`
+// confirmation on a real TTY: the destructive WARNING block (with the rendered
+// counts) + "Are you sure? (yes/no): " requiring EXACTLY "yes", the accept/abort
+// branches, and --yes (no prompt). The terminal output + exit code + durable
+// snapshot byte-match legacy `wrkq rmdir --force`.
+func TestRmdirForcePromptOwnership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + drives a real pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		args  []string
+		input string
+	}{
+		{name: "accept", args: []string{"rmdir", "doomed", "--force"}, input: "yes\n"},
+		{name: "abort-no", args: []string{"rmdir", "doomed", "--force"}, input: "no\n"},
+		{name: "abort-y-not-yes", args: []string{"rmdir", "doomed", "--force"}, input: "y\n"},
+		{name: "yes-flag-skips-prompt", args: []string{"rmdir", "doomed", "--force", "--yes"}, input: ""},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			setup := [][]string{{"mkdir", "doomed"}, {"touch", "doomed/t1", "-t", "One"}, {"touch", "doomed/t2", "-t", "Two"}}
+			base := seedFixture(t, bins, setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+
+			if tc.name != "yes-flag-skips-prompt" {
+				for _, want := range []string{"WARNING: This will permanently delete", "Are you sure? (yes/no):"} {
+					if !strings.Contains(oldOut, want) {
+						t.Fatalf("legacy rmdir --force prompt missing %q (got %q)", want, oldOut)
+					}
+				}
+			}
+			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
+				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
+			}
+		})
+	}
+}

@@ -649,7 +649,33 @@ interface WrkqComment {
   deletedAt?: string;
   createdByPrincipalRef?: string;
 }
+
+interface WrkqCommentDeleteParams {
+  id: string;                 // comment friendly id (C-XXXXX) or uuid
+  mode?: "soft" | "purge";    // EXPLICIT disposition; absent ≡ "soft"
+  ifMatch?: number;           // etag precondition (>0); mismatch → WRKQ_CONFLICT
+  actor?: string;
+}
 ```
+
+`wrkq.comment.delete` disposes of a comment per the **caller-owned-confirmation**
+invariant: the disposition is the EXPLICIT, caller-supplied `mode` — the server
+never prompts, inspects a TTY, or reads stdin. Modes:
+
+- **absent / `"soft"`**: reversible soft-delete — sets `deletedAt` +
+  deletion provenance, bumps `etag`, logs `comment.deleted`. The row is preserved
+  and returned.
+- **`"purge"`**: hard-delete the comment row + logs `comment.purged`.
+  Irreversible; never a default. Returns the pre-purge DTO snapshot.
+- any other value → `WRKQ_VALIDATION`.
+
+`ifMatch` (> 0) is a machine-checkable etag precondition (mismatch →
+`WRKQ_CONFLICT`); `0`/absent skips the check. The CLI mirror (`wrkq comment rm`)
+owns ALL human interaction — the legacy `[y/N]` prompt (accepting `y`/`Y`, and
+prompting EVEN for soft-delete, distinct from `rm --purge`'s "yes" shape), abort,
+`--yes`, the `--if-match` warn-and-skip, the unknown-ref warn-and-continue,
+dry-run, and the non-TTY JSON-array rendering — and ALWAYS passes an explicit
+`mode` (`soft` for the default, `purge` for `--purge`).
 
 #### Attachment methods
 
@@ -856,9 +882,55 @@ interface WrkqContainer {
 }
 
 interface WrkqContainerListResult { items: WrkqContainer[]; nextCursor?: string }
+
+interface WrkqContainerDeleteParams {
+  container?: string; path?: string; project?: string;
+  expectEtag?: number;     // optional etag CAS
+  actor?: string;
+}
+
+interface WrkqContainerDeleteRecursiveParams {
+  container?: string; path?: string; project?: string;
+  dryRun?: boolean;        // phase 1: return impact, no mutation
+  expectEtag?: number;     // root-container etag CAS
+  expected?: {             // phase 2 (commit): impact CAS / race guard
+    containers: number;    // recursive descendant count INCLUDING the target
+    tasks: number;
+    attachments: number;
+    bytes: number;
+  };
+  actor?: string;
+}
+
+// dryRun shape: { container, containers, tasks, attachments, bytes }
+// commit shape: { deleted, containersDeleted, tasksDeleted, attachmentsDeleted,
+//                 bytesFreed, fileCleanupErrors? }
+interface WrkqContainerDeleteRecursiveResult { /* see above */ }
 ```
 
 `container.show` resolves by `path` or `project`; a miss → `WRKQ_NOT_FOUND`.
+
+`wrkq.container.delete` hard-deletes an EMPTY container (root rejected →
+`WRKQ_VALIDATION`; non-empty → `WRKQ_VALIDATION` "not empty"). `wrkq rmdir`
+(no `--force`) mirrors it.
+
+`wrkq.container.deleteRecursive` is the **TWO-PHASE** destructive subtree purge
+per the **caller-owned-confirmation** invariant — there is NO one-call recursive
+delete:
+
+1. **`dryRun: true`** preflights and returns the impact `{ containers, tasks,
+   attachments, bytes }` (recursive; `containers` INCLUDES the target itself) with
+   no mutation.
+2. The CLI mirror (`wrkq rmdir --force`) renders the legacy WARNING block from the
+   impact and prompts `Are you sure? (yes/no):` (requiring EXACTLY `yes`) — only
+   when the container is non-empty — then **commits** by echoing
+   `expected: { … }` with the exact preflight numbers. The server recomputes the
+   impact inside the delete transaction and compares: a mismatch (concurrent
+   change between preflight and commit) → `WRKQ_CONFLICT` (the race guard).
+   Commit cleans attachment files after the DB commit. Root rejected.
+
+The server is non-interactive end-to-end: it never prompts or reads stdin; the
+disposition is fully determined by `dryRun`/`expected`.
 
 #### Task-workflow methods
 

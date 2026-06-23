@@ -19,7 +19,7 @@ func newCommentCmd() *cobra.Command {
 	cmd.AddCommand(newCommentAddCmd())
 	cmd.AddCommand(newCommentCatCmd())
 	cmd.AddCommand(newCommentLsCmd())
-	cmd.AddCommand(newStubCmd(mirroredCommand{use: "rm <comment-id|c:token>..."}))
+	cmd.AddCommand(newCommentRmCmd())
 	return cmd
 }
 

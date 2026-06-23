@@ -296,9 +296,64 @@ var parityCases = []parityCase{
 		args:    []string{"rmdir", "gone"},
 		mutates: true,
 	},
-	// NOTE: `rmdir --force` (recursive) is intentionally NOT covered yet ✓ legacy
-	// uses an interactive confirmation flow and the RPC deleteRecursive requires an
-	// "expected impact" confirmation param. That reconciliation is a tracked gap.
+	// rmdir --force ✓ two-phase wrkq.container.deleteRecursive on the
+	// caller-owned-confirmation seam: a dryRun preflight returns the impact, the
+	// mirror renders the legacy WARNING block + prompts "Are you sure? (yes/no):"
+	// (requiring exact "yes"), then commits echoing expected:{...} (CAS race
+	// guard). Single-level non-empty containers are byte-proven (immediate counts
+	// == recursive impact); the prompt only renders for non-empty.
+	{
+		// --force --yes: non-empty container, prompt skipped, recursive delete.
+		name: "rmdir/force-yes",
+		setup: [][]string{
+			{"mkdir", "doomed"},
+			{"touch", "doomed/t1", "-t", "One"},
+			{"touch", "doomed/t2", "-t", "Two"},
+		},
+		args:    []string{"rmdir", "doomed", "--force", "--yes"},
+		mutates: true,
+	},
+	{
+		// --force prompt ACCEPT via stdin "yes": WARNING block + confirm line + delete.
+		name: "rmdir/force-prompt-accept",
+		setup: [][]string{
+			{"mkdir", "doomed"},
+			{"touch", "doomed/t1", "-t", "One"},
+		},
+		args:    []string{"rmdir", "doomed", "--force"},
+		stdin:   []byte("yes\n"),
+		mutates: true,
+	},
+	{
+		// --force prompt ABORT via stdin "no": WARNING + "aborted" error, no mutation.
+		name: "rmdir/force-prompt-abort",
+		setup: [][]string{
+			{"mkdir", "doomed"},
+			{"touch", "doomed/t1", "-t", "One"},
+		},
+		args:    []string{"rmdir", "doomed", "--force"},
+		stdin:   []byte("no\n"),
+		mutates: true,
+	},
+	{
+		// --force prompt EMPTY stdin (non-TTY, no input): EOF → abort, no hang/mutation.
+		name: "rmdir/force-prompt-empty-stdin-abort",
+		setup: [][]string{
+			{"mkdir", "doomed"},
+			{"touch", "doomed/t1", "-t", "One"},
+		},
+		args:    []string{"rmdir", "doomed", "--force"},
+		stdin:   []byte(""),
+		mutates: true,
+	},
+	{
+		// --force on an EMPTY container: no prompt (nothing to delete recursively),
+		// recursive path still removes it. Proves force+empty doesn't prompt.
+		name:    "rmdir/force-empty-no-prompt",
+		setup:   [][]string{{"mkdir", "hollow"}},
+		args:    []string{"rmdir", "hollow", "--force"},
+		mutates: true,
+	},
 
 	// rm ✓ caller-owned-confirmation seam (B0 exemplar). Durable mutation runs
 	// through wrkq.task.delete with an EXPLICIT mode (archive default / purge for
@@ -625,6 +680,111 @@ var parityCases = []parityCase{
 		name:          "comment/add",
 		setup:         [][]string{{"touch", "inbox/ct", "-t", "CT"}},
 		args:          []string{"comment", "add", "inbox/ct", "hello world"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+
+	// comment rm ✓ caller-owned-confirmation seam via wrkq.comment.delete with an
+	// EXPLICIT mode (soft default / purge for --purge). The mirror owns the [y/N]
+	// prompt (accept y/Y, prompts EVEN for soft-delete), abort/--yes, --if-match
+	// warn-skip, unknown-ref warn-continue, dry-run, and the non-TTY JSON array.
+	{
+		// Soft-delete default via --yes (no prompt): sets deleted_at + bumps etag.
+		name:          "comment-rm/soft-yes",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001", "--yes"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// --purge --yes: hard-delete the comment row.
+		name:          "comment-rm/purge-yes",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001", "--purge", "--yes"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Prompt ACCEPT via stdin "y": soft-delete proceeds.
+		name:          "comment-rm/prompt-accept-y",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001"},
+		stdin:         []byte("y\n"),
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Prompt ABORT via stdin "n": per-comment skip, no mutation. Empty result array.
+		name:          "comment-rm/prompt-abort-n",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001"},
+		stdin:         []byte("n\n"),
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Prompt EMPTY stdin (non-TTY, no input): EOF → declined → skip, no hang.
+		name:          "comment-rm/prompt-empty-stdin-skip",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001"},
+		stdin:         []byte(""),
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Unknown comment: warn-and-continue (NOT fatal), empty result array, exit 0.
+		name:    "comment-rm/unknown-warn-continue",
+		setup:   [][]string{{"touch", "inbox/cr", "-t", "CR"}},
+		args:    []string{"comment", "rm", "C-09999", "--yes"},
+		mutates: true,
+	},
+	{
+		// Invalid ref SHAPE: hard error, aborts the whole loop.
+		name:    "comment-rm/invalid-ref-errors",
+		setup:   [][]string{{"touch", "inbox/cr", "-t", "CR"}},
+		args:    []string{"comment", "rm", "not-a-ref", "--yes"},
+		mutates: true,
+	},
+	{
+		// --if-match MISMATCH: warn + skip, no mutation, empty result array.
+		name:          "comment-rm/if-match-mismatch-skip",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001", "--if-match", "999", "--yes"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// --if-match MATCH (fresh comment etag=1): delete proceeds.
+		name:          "comment-rm/if-match-match",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001", "--if-match", "1", "--yes"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Dry-run (non-TTY): emits the {id, task_id, action, dry_run} JSON array, no mutation.
+		name:          "comment-rm/dry-run-json",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "C-00001", "--dry-run"},
+		normalizeUUID: true,
+	},
+	{
+		// Multi-arg with --yes: both soft-deleted, ordered result array.
+		name: "comment-rm/multi-yes",
+		setup: [][]string{
+			{"touch", "inbox/cr", "-t", "CR"},
+			{"comment", "add", "inbox/cr", "body one"},
+			{"comment", "add", "inbox/cr", "body two"},
+		},
+		args:          []string{"comment", "rm", "C-00001", "C-00002", "--yes"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// c: typed-selector prefix is accepted (stripped before resolve).
+		name:          "comment-rm/c-prefix-yes",
+		setup:         [][]string{{"touch", "inbox/cr", "-t", "CR"}, {"comment", "add", "inbox/cr", "body one"}},
+		args:          []string{"comment", "rm", "c:C-00001", "--yes"},
 		mutates:       true,
 		normalizeUUID: true,
 	},
@@ -3091,6 +3251,29 @@ func snapshot(t *testing.T, dir string) string {
 	}
 	if err := crows.Err(); err != nil {
 		t.Fatalf("snapshot container rows: %v", err)
+	}
+
+	// Comments: id, deleted presence (not the wall-clock value), and etag. Lets
+	// `comment rm` (soft-delete bumps etag + sets deleted_at; purge removes the
+	// row) prove durable parity, not just rendered output.
+	mrows, err := database.Query(`
+		SELECT id, etag,
+		       CASE WHEN deleted_at IS NOT NULL AND deleted_at != '' THEN 'del' ELSE '-' END
+		FROM comments ORDER BY id`)
+	if err != nil {
+		t.Fatalf("snapshot comment query: %v", err)
+	}
+	defer func() { _ = mrows.Close() }()
+	for mrows.Next() {
+		var id, deleted string
+		var etag int
+		if err := mrows.Scan(&id, &etag, &deleted); err != nil {
+			t.Fatalf("snapshot comment scan: %v", err)
+		}
+		b.WriteString("comment|" + strings.Join([]string{id, strconv.Itoa(etag), deleted}, "|") + "\n")
+	}
+	if err := mrows.Err(); err != nil {
+		t.Fatalf("snapshot comment rows: %v", err)
 	}
 	return b.String()
 }
