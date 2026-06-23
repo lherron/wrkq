@@ -419,6 +419,64 @@ describe("wrkq namespace", () => {
     expect(frame.method).toBe("wrkq.webhook.listView");
     expect(frame.params).toEqual({});
     expect(rows).toEqual([{ url: "https://a.test/wrkq" }, { url: "https://b.test/wrkq" }]);
+  test("bundle.exportView forwards wrkq.bundle.exportView and returns the LOGICAL snapshot", async () => {
+    const MOCK_BUNDLE = {
+      manifest: {
+        machine_interface_version: 1,
+        version: "0.1.0",
+        timestamp: "2026-06-23T00:00:00Z",
+        actor: "agent:larry",
+        path_prefixes: ["alpha"],
+        with_attachments: false,
+        with_events: true,
+        include_refs: true,
+        ref_count: 1,
+      },
+      tasks: [{ path: "alpha/task-one", base_etag: 1, uuid: "u-1", content: "---\n...\n---\n" }],
+      containers: ["alpha"],
+      refs: [{ path: "beta/task-three", uuid: "u-3", content: "---\nref: true\n---\n" }],
+      events: [
+        {
+          id: 1,
+          timestamp: "2026-06-23T00:00:00Z",
+          actor_uuid: "a-1",
+          resource_type: "task",
+          resource_uuid: "u-1",
+          event_type: "task.created",
+          etag: 1,
+        },
+      ],
+      attachments: [{ task_uuid: "u-1", filename: "a.bin" }],
+    };
+    const transport = new FakeTransport().onResult("wrkq.bundle.exportView", MOCK_BUNDLE);
+    const client = await clientWith(transport);
+
+    const snap = await client.wrkq.bundle.exportView({
+      actor: "agent:larry",
+      pathPrefixes: ["alpha"],
+      includeRefs: true,
+      withEvents: true,
+      version: "0.1.0",
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.bundle.exportView");
+    expect(frame.params).toMatchObject({
+      actor: "agent:larry",
+      pathPrefixes: ["alpha"],
+      includeRefs: true,
+      withEvents: true,
+    });
+    // The snapshot is LOGICAL: snake_case manifest/doc/event keys (legacy on-disk
+    // byte parity), no server-host paths, attachments are descriptors only.
+    expect(snap.manifest.machine_interface_version).toBe(1);
+    expect(snap.manifest.with_events).toBe(true);
+    expect(snap.tasks[0]!.path).toBe("alpha/task-one");
+    expect(snap.tasks[0]!.content).toContain("---");
+    expect(snap.containers).toEqual(["alpha"]);
+    expect(snap.refs?.[0]!.uuid).toBe("u-3");
+    expect(snap.events?.[0]!.event_type).toBe("task.created");
+    expect(snap.attachments?.[0]).toEqual({ task_uuid: "u-1", filename: "a.bin" });
   });
 
   test("workflow.attach is a wrkq verb", async () => {

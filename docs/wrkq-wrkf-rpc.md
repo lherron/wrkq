@@ -1045,6 +1045,50 @@ non-TTY output rendering (non-TTY list = one `{"url":<value>}` NDJSON line per U
 non-TTY add/rm = the indented map-alphabetical mutation JSON; TTY = the legacy human
 lines). There is **no** `--project` scoping (the target is always the root) and
 **no** `--if-match` flag (legacy has no CAS here).
+#### Bundle methods
+
+```
+wrkq.bundle.exportView  [new read method — server-owned LOGICAL snapshot; CLI materializes files]
+```
+
+> **`wrkq.bundle.exportView`** is a NEW read method (T-05118, daedalus
+> hrcchat#10211) backing `wrkq bundle create`. It is **NOT** a server-filesystem
+> exporter: it returns a server-owned **LOGICAL** bundle snapshot read under **ONE
+> read transaction** (task/container/ref/event consistency), and the CLI
+> **materializes** the bundle directory (manifest.json, tasks/*.md, refs/*.md,
+> containers.txt, events.ndjson) on the **CALLER host**. The method never returns
+> server-local output paths as correctness data. Params (already project-root
+> scoped by the caller — the server NEVER reads project-root env/flags):
+> `WrkqBundleExportViewParams{ actor?, since?, until?, project?, pathPrefixes?,
+> includeRefs?, withAttachments?, withEvents?, version?, commit?, buildDate? }`.
+> The server resolves the `project` selector → UUID + `v_container_paths` path and
+> anchors the path-prefixes (matching the legacy CLI), then runs the logical
+> export. Result `WrkqBundleExportView{ manifest, tasks, containers, refs?,
+> events?, attachments? }`:
+> - `manifest` is the `bundle.Manifest` field-order struct (the manifest.json wire
+>   shape; field order is the contract, **not** alphabetical);
+> - `tasks`/`refs` are `WrkqBundleTaskDoc{ path, base_etag?, uuid?, content }` — the
+>   full rendered markdown the CLI writes verbatim to `tasks/<path>.md` /
+>   `refs/<path>.md`;
+> - `containers` is the **parent-before-child** ordered container path list;
+> - `events` (when `withEvents`) is the legacy events.ndjson **row order**
+>   (`id, timestamp, actor_uuid, resource_type, resource_uuid, event_type, etag,
+>   payload?`), ordered by `(timestamp, id)`;
+> - `attachments` is **DESCRIPTORS only** (`{ task_uuid, filename }`), **never
+>   bytes**.
+>
+> **ATTACHMENT BYTES**: per the `wrkq.wrkf-rpc.attachment-byte-transfer` arch
+> record, attachment bytes do **NOT** cross inline in the snapshot. `wrkq-rpccli
+> bundle create` **HARD-GATES** `--with-attachments` with a clean validation error
+> until the chunked byte-transfer path (`wrkq.attachment.getBytes`) is wired into
+> bundle materialization — a fat one-frame attachment bundle is **not** allowed.
+> The legacy `wrkq` binary still materializes `--with-attachments` for direct-DB
+> use. Cataloged + fingerprinted (registering it changes the method catalog +
+> `protocolSchemaHash`; the `bundle.Manifest`/`EventRow`/`AttachmentDescriptor`
+> shapes are pinned by the DTO fingerprint). The final CLI JSON result map
+> (`bundle_dir, containers_count, manifest, tasks_count`) is rendered CLI-side in
+> the legacy **alphabetical** map order; `bundle_dir` is a caller-host path, not
+> correctness data.
 
 #### Task-workflow methods
 

@@ -412,6 +412,42 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	if !jsonEqual(t, inCopy, subCopy) {
 		t.Errorf("task.copy transport results differ:\n in-process: %s\n subprocess: %s", inCopy, subCopy)
 	}
+
+	// wrkq.bundle.exportView (T-05118): the LOGICAL bundle snapshot must agree across
+	// transports. The seeded task lives in rpccli-test-proj; scope the export to that
+	// path-prefix. The manifest carries a wall-clock `timestamp` (time.Now per call),
+	// so normalize it away before comparing — everything else (manifest fields, task
+	// docs, containers, events ordering) must be byte-identical across transports.
+	bundleParams := map[string]any{"pathPrefixes": []string{"rpccli-test-proj"}, "withEvents": true, "includeRefs": true}
+	inBundle, err := inproc.Call(context.Background(), "wrkq.bundle.exportView", bundleParams)
+	if err != nil {
+		t.Fatalf("in-process bundle.exportView: %v", err)
+	}
+	subBundle, err := sub.Call(ctx, "wrkq.bundle.exportView", bundleParams)
+	if err != nil {
+		t.Fatalf("subprocess bundle.exportView: %v", err)
+	}
+	if !jsonEqual(t, normalizeBundleManifestTS(t, inBundle), normalizeBundleManifestTS(t, subBundle)) {
+		t.Errorf("bundle.exportView transport results differ:\n in-process: %s\n subprocess: %s", inBundle, subBundle)
+	}
+}
+
+// normalizeBundleManifestTS blanks the manifest.timestamp (time.Now per call) in a
+// bundle.exportView result so two independent snapshots are otherwise byte-comparable.
+func normalizeBundleManifestTS(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("normalizeBundleManifestTS unmarshal: %v", err)
+	}
+	if man, ok := m["manifest"].(map[string]any); ok {
+		man["timestamp"] = "<TS>"
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("normalizeBundleManifestTS marshal: %v", err)
+	}
+	return out
 }
 
 // TestTransportEquivalence_AttachmentBytes covers the byte-transfer methods

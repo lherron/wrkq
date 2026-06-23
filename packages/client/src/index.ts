@@ -32,6 +32,7 @@ export type {
 // Namespace facade types + DTOs (also available via subpaths).
 export type {
   WrkqAdminFacade,
+  WrkqBundleFacade,
   WrkqFacade,
   WrkqLegacyActorFacade,
 } from "./wrkq/facade.js";

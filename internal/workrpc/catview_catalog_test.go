@@ -123,6 +123,17 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqTaskCopyResult") {
 		t.Error("WrkqTaskCopyResult missing from dtoCatalog")
 	}
+	// Bundle logical snapshot (T-05118): the new read-view method + its DTOs must be
+	// in BOTH catalogs so their NAMES enter the protocol schema-hash input.
+	if !contains(methodCatalog, "wrkq.bundle.exportView") {
+		t.Error("wrkq.bundle.exportView missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqBundleExportView") {
+		t.Error("WrkqBundleExportView missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqBundleTaskDoc") {
+		t.Error("WrkqBundleTaskDoc missing from dtoCatalog")
+	}
 }
 
 func contains(haystack []string, needle string) bool {

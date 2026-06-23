@@ -152,6 +152,9 @@ class WorkClientImpl implements WorkClient {
         update: (p) => this.call("wrkq.admin.legacyActor.update", p),
       },
     },
+    bundle: {
+      exportView: (p) => this.call("wrkq.bundle.exportView", p),
+    },
   };
 
   readonly wrkf: WrkfFacade = {

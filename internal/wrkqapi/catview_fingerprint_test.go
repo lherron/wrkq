@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/bundle"
 )
 
 // TestWebhookMutationDTOFingerprint pins the wrkq.webhook.add/remove MUTATION
@@ -154,6 +156,34 @@ func TestFindListViewDTOFingerprint(t *testing.T) {
 	const want = "WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,created_at,updated_at,etag}"
 	if got != want {
 		t.Errorf("find list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestBundleExportViewDTOFingerprint guards the bundle logical-snapshot read model
+// shapes (T-05118). WrkqBundleExportView crosses the RPC boundary as the
+// server-owned LOGICAL bundle (the CLI materializes files from it), so any
+// field/tag drift — including the embedded bundle.Manifest (the manifest.json wire
+// shape), bundle.EventRow (events.ndjson row order), and bundle.AttachmentDescriptor
+// (descriptors only, NO bytes) — is a PROTOCOL CONTRACT change and must be made
+// deliberately (bump fingerprint, update docs/dtoCatalog, re-verify bundle parity).
+func TestBundleExportViewDTOFingerprint(t *testing.T) {
+	got := strings.Join([]string{
+		dtoFingerprint(reflect.TypeOf(WrkqBundleExportView{})),
+		dtoFingerprint(reflect.TypeOf(WrkqBundleTaskDoc{})),
+		dtoFingerprint(reflect.TypeOf(bundle.Manifest{})),
+		dtoFingerprint(reflect.TypeOf(bundle.EventRow{})),
+		dtoFingerprint(reflect.TypeOf(bundle.AttachmentDescriptor{})),
+	}, "\n")
+
+	const want = "WrkqBundleExportView{manifest,tasks,containers,refs,omitempty,events,omitempty,attachments,omitempty}\n" +
+		"WrkqBundleTaskDoc{path,base_etag,omitempty,uuid,omitempty,content}\n" +
+		"Manifest{machine_interface_version,version,omitempty,commit,omitempty,build_date,omitempty,timestamp,actor,omitempty,since,omitempty,until,omitempty,since_cursor,omitempty,project,omitempty,project_uuid,omitempty,path_prefixes,omitempty,with_attachments,with_events,include_refs,omitempty,ref_count,omitempty}\n" +
+		"EventRow{id,timestamp,actor_uuid,resource_type,resource_uuid,event_type,etag,payload,omitempty}\n" +
+		"AttachmentDescriptor{task_uuid,filename}"
+
+	if got != want {
+		t.Errorf("bundle export view DTO shape drifted (protocol contract change):\n got:\n%s\nwant:\n%s\n"+
+			"Update this fingerprint, docs/wrkq-wrkf-rpc.md, dtoCatalog, and re-verify bundle parity deliberately.", got, want)
 	}
 }
 

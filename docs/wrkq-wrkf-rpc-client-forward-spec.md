@@ -1032,6 +1032,59 @@ interface WrkqWebhookRow { url: string }                  // legacy {url:<value>
 - `expectEtag` is **OFF by default** (legacy no-CAS last-writer-wins). The CLI
   `wrkq webhook` mirror never sends it; a raw RPC / client caller MAY opt in to
   reduce the concurrent last-writer-wins risk (stale etag → `WRKQ_CONFLICT`).
+#### Bundle methods
+
+```text
+wrkq.bundle.exportView        # server-owned LOGICAL snapshot (Tranche D); see below
+```
+
+##### `wrkq.bundle.exportView` (logical snapshot — Tranche D)
+
+`wrkq.bundle.exportView` (T-05118, daedalus hrcchat#10211) backs `wrkq bundle
+create`. It is a **READ** method, **not** a server-filesystem exporter: it returns
+a server-owned **LOGICAL** bundle snapshot read under **ONE** transaction
+(task/container/ref/event consistency); the **CALLER** materializes the bundle
+directory (manifest.json, tasks/*.md, refs/*.md, containers.txt, events.ndjson).
+The method returns NO server-host output path. The caller applies project-root
+scoping to `project`/`pathPrefixes` before calling; the server resolves the
+project selector → UUID + path and anchors the prefixes (matching the legacy CLI).
+At least one of `actor`/`since`/`until`/`project`/`pathPrefixes` is required
+(`WRKQ_VALIDATION` otherwise).
+
+```ts
+interface WrkqBundleExportViewParams {
+  actor?: string;
+  since?: string;          // event:<id> / ts:<rfc3339> / RFC3339
+  until?: string;          // RFC3339
+  project?: string;        // already project-root scoped
+  pathPrefixes?: string[]; // already project-root scoped
+  includeRefs?: boolean;
+  withAttachments?: boolean; // descriptors only; CLI mirror HARD-GATES this flag
+  withEvents?: boolean;
+  version?: string; commit?: string; buildDate?: string; // stamped into manifest
+}
+
+interface WrkqBundleExportView {
+  manifest: WrkqBundleManifest;     // manifest.json wire shape (field ORDER is contract)
+  tasks: WrkqBundleTaskDoc[];        // { path, base_etag?, uuid?, content }
+  containers: string[];              // parent-before-child path order
+  refs?: WrkqBundleTaskDoc[];
+  events?: WrkqBundleEventRow[];     // events.ndjson row order, by (timestamp, id)
+  attachments?: WrkqBundleAttachmentDescriptor[]; // { task_uuid, filename } — NO bytes
+}
+```
+
+Contract:
+
+- The snapshot keys inside `manifest`/`tasks`/`refs`/`events`/`attachments` are
+  deliberately **snake_case** — they are the legacy on-disk byte shapes the CLI
+  writes verbatim. Do NOT camelCase them.
+- **Attachment bytes never cross in the snapshot** (`wrkq.wrkf-rpc.attachment-byte-transfer`):
+  `attachments` carries descriptors only. `wrkq-rpccli bundle create` **HARD-GATES**
+  `--with-attachments` with a clean validation error until chunked byte-transfer
+  (`wrkq.attachment.getBytes`) is wired into materialization; a fat one-frame
+  attachment bundle is not allowed. The legacy `wrkq` binary still supports
+  `--with-attachments` for direct-DB use.
 
 #### Task workflow methods
 

@@ -15,6 +15,8 @@ import type {
   WrkqAttachmentListResult,
   WrkqAttachmentRemoveParams,
   WrkqAttachmentShowParams,
+  WrkqBundleExportView,
+  WrkqBundleExportViewParams,
   WrkqComment,
   WrkqCommentAddParams,
   WrkqCommentDeleteParams,
@@ -147,6 +149,16 @@ export interface WrkqAdminFacade {
   readonly legacyActor: WrkqLegacyActorFacade;
 }
 
+/**
+ * Bundle namespace (wrkq.bundle.*). exportView returns the server-owned LOGICAL
+ * bundle snapshot (read under one transaction); the CALLER materializes the
+ * bundle directory from it. The snapshot carries NO server-host paths and NO
+ * attachment bytes (descriptors only). Mirrors docs/wrkq-wrkf-rpc.md §6.2.
+ */
+export interface WrkqBundleFacade {
+  exportView(params: WrkqBundleExportViewParams): Promise<WrkqBundleExportView>;
+}
+
 export interface WrkqFacade {
   readonly task: WrkqTaskFacade;
   readonly comment: WrkqCommentFacade;
@@ -156,4 +168,5 @@ export interface WrkqFacade {
   readonly webhook: WrkqWebhookFacade;
   readonly workflow: WrkqWorkflowFacade;
   readonly admin: WrkqAdminFacade;
+  readonly bundle: WrkqBundleFacade;
 }

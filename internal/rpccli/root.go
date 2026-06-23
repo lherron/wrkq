@@ -25,7 +25,8 @@ var topLevelCommands = []mirroredCommand{
 	{use: "agent-context"},
 	{use: "agent-info"},
 	// apply is RPC-backed (wrkq.task.update via the caller-side parse/gate); registered separately.
-	{use: "bundle"},
+	// bundle is RPC-backed (wrkq.bundle.exportView LOGICAL snapshot; the CLI
+	// materializes files on the caller host); registered separately.
 	// cat is the one real command this slice; registered separately.
 	// check / check-inbox are RPC-backed (real parity commands); registered separately.
 	// cp is RPC-backed (server-owned deep copy via wrkq.task.copy; caller owns
@@ -98,6 +99,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRenameContainerCmd())
 	root.AddCommand(newCpCmd())
 	root.AddCommand(newWebhookCmd())
+	root.AddCommand(newBundleCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

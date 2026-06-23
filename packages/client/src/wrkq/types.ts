@@ -558,3 +558,104 @@ export interface WrkqLegacyActorUpdateParams {
   expectUpdatedAt?: string;
   idempotencyKey?: string;
 }
+
+// ── Bundle logical snapshot (wrkq.bundle.exportView) ─────────────────────────
+
+/**
+ * WrkqBundleExportViewParams selects the bundle filter/scope set. The caller
+ * applies project-root scoping to `project`/`pathPrefixes` BEFORE calling; the
+ * server never reads project-root env/flags. At least one of
+ * actor/since/until/project/pathPrefixes is required (else WRKQ_VALIDATION).
+ * Mirrors docs/wrkq-wrkf-rpc.md §6.2 (T-05118, daedalus hrcchat#10211).
+ */
+export interface WrkqBundleExportViewParams {
+  actor?: string;
+  /** Cursor (event:<id> or ts:<rfc3339>) or RFC3339 timestamp. */
+  since?: string;
+  /** End timestamp (RFC3339). */
+  until?: string;
+  /** Project selector (path/uuid), already project-root scoped. */
+  project?: string;
+  /** Path prefixes (already project-root scoped). */
+  pathPrefixes?: string[];
+  includeRefs?: boolean;
+  /**
+   * Attachment bytes do NOT cross in the snapshot (descriptors only). The CLI
+   * mirror HARD-GATES --with-attachments; raw clients should leave this false.
+   */
+  withAttachments?: boolean;
+  withEvents?: boolean;
+  /** Build identity stamped verbatim into the manifest. */
+  version?: string;
+  commit?: string;
+  buildDate?: string;
+}
+
+/**
+ * WrkqBundleManifest is the manifest.json wire shape. Field NAMES are
+ * snake_case (the legacy manifest JSON keys); the on-disk field ORDER is the
+ * server contract (NOT alphabetical), preserved when the CLI materializes.
+ */
+export interface WrkqBundleManifest {
+  machine_interface_version: number;
+  version?: string;
+  commit?: string;
+  build_date?: string;
+  timestamp: string;
+  actor?: string;
+  since?: string;
+  until?: string;
+  since_cursor?: string;
+  project?: string;
+  project_uuid?: string;
+  path_prefixes?: string[];
+  with_attachments: boolean;
+  with_events: boolean;
+  include_refs?: boolean;
+  ref_count?: number;
+}
+
+/**
+ * WrkqBundleTaskDoc is one task/ref document: bundle `path` (no .md suffix),
+ * base_etag, uuid, and the full rendered markdown `content` written verbatim to
+ * tasks/<path>.md or refs/<path>.md when the snapshot is materialized.
+ */
+export interface WrkqBundleTaskDoc {
+  path: string;
+  base_etag?: number;
+  uuid?: string;
+  content: string;
+}
+
+/** One exported event row (events.ndjson row shape + order). */
+export interface WrkqBundleEventRow {
+  id: number;
+  timestamp: string;
+  actor_uuid: string | null;
+  resource_type: string;
+  resource_uuid: string;
+  event_type: string;
+  etag: number | null;
+  payload?: string;
+}
+
+/** One attachment descriptor (NO bytes — descriptors only). */
+export interface WrkqBundleAttachmentDescriptor {
+  task_uuid: string;
+  filename: string;
+}
+
+/**
+ * WrkqBundleExportView is the server-owned LOGICAL bundle snapshot read under one
+ * transaction. It carries NOTHING about the caller-host filesystem; the CLI
+ * materializes the directory from it. snake_case keys inside the doc/manifest/
+ * event/descriptor shapes are deliberate (legacy on-disk byte parity).
+ */
+export interface WrkqBundleExportView {
+  manifest: WrkqBundleManifest;
+  tasks: WrkqBundleTaskDoc[];
+  containers: string[];
+  refs?: WrkqBundleTaskDoc[];
+  events?: WrkqBundleEventRow[];
+  attachments?: WrkqBundleAttachmentDescriptor[];
+}

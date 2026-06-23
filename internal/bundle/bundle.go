@@ -4,9 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -317,17 +317,65 @@ type TaskExport struct {
 	Content  string // Full cat output including frontmatter
 }
 
-// Create creates a new bundle from database content
-func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
-	// Create output directory structure
-	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create bundle directory: %w", err)
-	}
+// EventRow is one exported event in the legacy events.ndjson row shape and field
+// order (the encoder used by legacy exportEvents). It is the ONLY public carrier
+// of an event row so the RPC snapshot and the legacy writer share the EXACT same
+// JSON tag order — events.ndjson byte parity depends on this being the wire shape.
+type EventRow struct {
+	ID           int     `json:"id"`
+	Timestamp    string  `json:"timestamp"`
+	ActorUUID    *string `json:"actor_uuid"`
+	ResourceType string  `json:"resource_type"`
+	ResourceUUID string  `json:"resource_uuid"`
+	EventType    string  `json:"event_type"`
+	Etag         *int    `json:"etag"`
+	Payload      *string `json:"payload,omitempty"`
+}
 
-	tasksDir := filepath.Join(opts.OutputDir, "tasks")
-	if err := os.MkdirAll(tasksDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create tasks directory: %w", err)
+// AttachmentDescriptor names one attachment that WOULD be exported under
+// --with-attachments. The RPC snapshot carries descriptors only (no bytes): bytes
+// cross the protocol via the chunked wrkq.attachment.getBytes path, never inline
+// in the snapshot (wrkq.wrkf-rpc.attachment-byte-transfer arch record).
+type AttachmentDescriptor struct {
+	TaskUUID string `json:"task_uuid"`
+	Filename string `json:"filename"`
+}
+
+// Snapshot is the in-memory LOGICAL bundle: everything Collect read from the DB
+// under one transaction, with NO filesystem materialization. Materialize turns a
+// Snapshot into the on-disk bundle directory. Splitting collect (durable read) from
+// materialize (caller-host file write) is what lets the RPC server own the read
+// while the CLI materializes files identically to legacy.
+type Snapshot struct {
+	Manifest    *Manifest
+	Tasks       []*TaskExport
+	Containers  []string
+	Refs        []*TaskDocument
+	Events      []EventRow
+	Attachments []AttachmentDescriptor
+}
+
+// Create creates a new bundle from database content. It is now the legacy
+// composition of Collect (durable read) + Materialize (file write): byte-identical
+// to the pre-split behavior because both phases run the same code the RPC path uses.
+func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
+	snap, err := Collect(db, opts)
+	if err != nil {
+		return nil, err
 	}
+	return Materialize(snap, opts.OutputDir)
+}
+
+// Collect runs the LOGICAL bundle export under ONE read transaction and returns an
+// in-memory Snapshot. No files are written. This is the server-owned half of the
+// bundle export: task/container/ref/event reads are internally consistent. With
+// opts.WithAttachments it records attachment DESCRIPTORS only (no bytes).
+func Collect(db *sql.DB, opts CreateOptions) (*Snapshot, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin read transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	// Parse since cursor (event:<id> or ts:<rfc3339>) or RFC3339 timestamp
 	rawSince := opts.SinceCursor
@@ -399,7 +447,7 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 
 	query += ` ORDER BY container_path, t.slug`
 
-	rows, err := db.Query(query, args...)
+	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tasks: %w", err)
 	}
@@ -418,7 +466,7 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		}
 
 		// Compute base_etag (earliest etag from the filtered event log)
-		baseEtag, err := computeBaseEtag(db, taskUUID, opts, sinceEventID, sinceTimestamp)
+		baseEtag, err := computeBaseEtagTx(tx, taskUUID, opts, sinceEventID, sinceTimestamp)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compute base_etag for task %s: %w", taskUUID, err)
 		}
@@ -441,7 +489,7 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		}
 
 		// Export task content
-		content, err := exportTask(db, taskUUID)
+		content, err := exportTaskTx(tx, taskUUID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to export task %s: %w", taskUUID, err)
 		}
@@ -455,64 +503,47 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 			BaseEtag: baseEtag,
 			Content:  content,
 		})
-
-		// Write task file
-		taskFilePath := filepath.Join(tasksDir, taskPath+".md")
-		taskFileDir := filepath.Dir(taskFilePath)
-		if err := os.MkdirAll(taskFileDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create task directory: %w", err)
-		}
-		if err := os.WriteFile(taskFilePath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("failed to write task file: %w", err)
-		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating tasks: %w", err)
 	}
 
-	// Export refs/ stubs if requested
+	// Collect refs/ stubs if requested (logical only — no file writes)
 	var refs []*TaskDocument
 	if opts.IncludeRefs {
 		var err error
-		refs, err = exportRefs(db, opts.OutputDir, tasks)
+		refs, err = collectRefs(tx, tasks)
 		if err != nil {
 			return nil, fmt.Errorf("failed to export refs: %w", err)
 		}
 	}
 
-	// Write containers.txt (sorted to ensure parent-before-child order)
+	// Build containers list (sorted parent-before-child)
 	var containers []string
 	for container := range containerMap {
 		containers = append(containers, container)
 	}
-	// Sort by depth (number of slashes) then alphabetically
-	// This ensures parents come before children
 	sortContainersByDepth(containers)
 
-	if len(containers) > 0 {
-		containersPath := filepath.Join(opts.OutputDir, "containers.txt")
-		containersContent := strings.Join(containers, "\n") + "\n"
-		if err := os.WriteFile(containersPath, []byte(containersContent), 0644); err != nil {
-			return nil, fmt.Errorf("failed to write containers.txt: %w", err)
-		}
-	}
-
-	// Copy attachments if requested
+	// Record attachment descriptors if requested (no bytes).
+	var attachments []AttachmentDescriptor
 	if opts.WithAttachments {
-		if err := exportAttachments(db, opts.OutputDir, tasks); err != nil {
-			return nil, fmt.Errorf("failed to export attachments: %w", err)
+		attachments, err = collectAttachmentDescriptors(tx, tasks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to collect attachments: %w", err)
 		}
 	}
 
-	// Export event log if requested
+	// Collect event log if requested
+	var events []EventRow
 	if opts.WithEvents {
-		if err := exportEvents(db, opts.OutputDir, opts); err != nil {
+		events, err = collectEvents(tx, opts)
+		if err != nil {
 			return nil, fmt.Errorf("failed to export events: %w", err)
 		}
 	}
 
-	// Generate and write manifest
 	manifest := &Manifest{
 		MachineInterfaceVersion: 1,
 		Version:                 opts.Version,
@@ -532,8 +563,84 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 		RefCount:                len(refs),
 	}
 
-	manifestPath := filepath.Join(opts.OutputDir, "manifest.json")
-	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
+	return &Snapshot{
+		Manifest:    manifest,
+		Tasks:       tasks,
+		Containers:  containers,
+		Refs:        refs,
+		Events:      events,
+		Attachments: attachments,
+	}, nil
+}
+
+// Materialize writes a Snapshot to outputDir as the on-disk bundle (manifest.json,
+// tasks/*.md, refs/*.md, containers.txt, events.ndjson). It is host-side: the RPC
+// mirror and legacy `wrkq bundle create` both call this so the files are
+// byte-identical. Attachment BYTE materialization is NOT done here (descriptors
+// only); callers that need bytes fetch them via wrkq.attachment.getBytes.
+func Materialize(snap *Snapshot, outputDir string) (*Bundle, error) {
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create bundle directory: %w", err)
+	}
+	tasksDir := filepath.Join(outputDir, "tasks")
+	if err := os.MkdirAll(tasksDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create tasks directory: %w", err)
+	}
+
+	for _, task := range snap.Tasks {
+		taskFilePath := filepath.Join(tasksDir, task.Path+".md")
+		if err := os.MkdirAll(filepath.Dir(taskFilePath), 0755); err != nil {
+			return nil, fmt.Errorf("failed to create task directory: %w", err)
+		}
+		if err := os.WriteFile(taskFilePath, []byte(task.Content), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write task file: %w", err)
+		}
+	}
+
+	if len(snap.Refs) > 0 {
+		refsDir := filepath.Join(outputDir, "refs")
+		if err := os.MkdirAll(refsDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create refs directory: %w", err)
+		}
+		for _, ref := range snap.Refs {
+			refFilePath := filepath.Join(refsDir, ref.Path+".md")
+			if err := os.MkdirAll(filepath.Dir(refFilePath), 0755); err != nil {
+				return nil, fmt.Errorf("failed to create ref directory: %w", err)
+			}
+			if err := os.WriteFile(refFilePath, []byte(ref.OriginalContent), 0644); err != nil {
+				return nil, fmt.Errorf("failed to write ref file: %w", err)
+			}
+		}
+	}
+
+	if len(snap.Containers) > 0 {
+		containersPath := filepath.Join(outputDir, "containers.txt")
+		containersContent := strings.Join(snap.Containers, "\n") + "\n"
+		if err := os.WriteFile(containersPath, []byte(containersContent), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write containers.txt: %w", err)
+		}
+	}
+
+	if snap.Manifest != nil && snap.Manifest.WithEvents {
+		eventsPath := filepath.Join(outputDir, "events.ndjson")
+		f, err := os.Create(eventsPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create events file: %w", err)
+		}
+		encoder := json.NewEncoder(f)
+		for i := range snap.Events {
+			if err := encoder.Encode(snap.Events[i]); err != nil {
+				_ = f.Close()
+				return nil, fmt.Errorf("failed to encode event: %w", err)
+			}
+		}
+		if err := f.Close(); err != nil {
+			return nil, fmt.Errorf("failed to close events file: %w", err)
+		}
+	}
+
+	manifestPath := filepath.Join(outputDir, "manifest.json")
+	manifestJSON, err := json.MarshalIndent(snap.Manifest, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal manifest: %w", err)
 	}
@@ -542,16 +649,24 @@ func Create(db *sql.DB, opts CreateOptions) (*Bundle, error) {
 	}
 
 	return &Bundle{
-		Dir:        opts.OutputDir,
-		Manifest:   manifest,
-		Containers: containers,
-		Tasks:      convertTaskExportsToTaskDocuments(tasks),
-		Refs:       refs,
+		Dir:        outputDir,
+		Manifest:   snap.Manifest,
+		Containers: snap.Containers,
+		Tasks:      convertTaskExportsToTaskDocuments(snap.Tasks),
+		Refs:       snap.Refs,
 	}, nil
 }
 
-// computeBaseEtag computes the base etag for a task based on the earliest event in the filtered set
-func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions, sinceEventID *int64, sinceTimestamp string) (int, error) {
+// queryRower is the subset of *sql.DB / *sql.Tx that the collect helpers use, so
+// the SAME read logic runs both legacy (was *sql.DB) and inside Collect's single
+// read transaction (*sql.Tx).
+type queryRower interface {
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
+// computeBaseEtagTx computes the base etag for a task based on the earliest event in the filtered set
+func computeBaseEtagTx(db queryRower, taskUUID string, opts CreateOptions, sinceEventID *int64, sinceTimestamp string) (int, error) {
 	// Query the earliest event for this task before any changes in the filtered window
 	// This gives us the etag the task had when the filtered changes started
 	query := `
@@ -603,8 +718,8 @@ func computeBaseEtag(db *sql.DB, taskUUID string, opts CreateOptions, sinceEvent
 	return baseEtag, nil
 }
 
-// exportTask exports a single task in wrkq cat format
-func exportTask(db *sql.DB, taskUUID string) (string, error) {
+// exportTaskTx exports a single task in wrkq cat format
+func exportTaskTx(db queryRower, taskUUID string) (string, error) {
 	var id, slug, title, state, description, specification string
 	var priority int
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
@@ -705,79 +820,54 @@ func addBundleFieldsToFrontmatter(content string, path string, baseEtag int) str
 	return fmt.Sprintf("---\n%s\nbase_etag: %d\npath: %s\n---\n\n%s", frontmatter, baseEtag, path, body)
 }
 
-// exportAttachments copies attachments for all tasks in the bundle
-func exportAttachments(db *sql.DB, bundleDir string, tasks []*TaskExport) error {
-	attachmentsDir := filepath.Join(bundleDir, "attachments")
-
-	// Query to find attachment directory
+// collectAttachmentDescriptors records, in legacy export order (tasks in their
+// collect order, attachments per task in DB order), which attachment files WOULD
+// be exported under --with-attachments. It returns DESCRIPTORS only (no bytes,
+// no file copy). A missing config attach_dir means no attachments are configured
+// and yields an empty descriptor set (legacy returned early without writing).
+func collectAttachmentDescriptors(db queryRower, tasks []*TaskExport) ([]AttachmentDescriptor, error) {
 	var attachDir string
-	err := db.QueryRow("SELECT value FROM config WHERE key = 'attach_dir'").Scan(&attachDir)
-	if err != nil {
-		// No attachments configured
-		return nil
+	if err := db.QueryRow("SELECT value FROM config WHERE key = 'attach_dir'").Scan(&attachDir); err != nil {
+		// No attachments configured.
+		return nil, nil
 	}
 
+	var descriptors []AttachmentDescriptor
 	for _, task := range tasks {
-		// Check if task has attachments
-		var hasAttachments bool
-		err := db.QueryRow(`
-			SELECT EXISTS(SELECT 1 FROM attachments WHERE task_uuid = ? AND deleted_at IS NULL)
-		`, task.UUID).Scan(&hasAttachments)
-		if err != nil {
-			return fmt.Errorf("failed to check attachments for task %s: %w", task.UUID, err)
-		}
-
-		if !hasAttachments {
-			continue
-		}
-
-		// Create attachments/<task_uuid>/ directory
-		taskAttachDir := filepath.Join(attachmentsDir, task.UUID)
-		if err := os.MkdirAll(taskAttachDir, 0755); err != nil {
-			return fmt.Errorf("failed to create attachment directory: %w", err)
-		}
-
-		// Copy attachment files
 		rows, err := db.Query(`
 			SELECT filename FROM attachments
 			WHERE task_uuid = ? AND deleted_at IS NULL
 		`, task.UUID)
 		if err != nil {
-			return fmt.Errorf("failed to query attachments: %w", err)
+			return nil, fmt.Errorf("failed to query attachments: %w", err)
 		}
-		defer func() { _ = rows.Close() }()
-
 		for rows.Next() {
 			var filename string
 			if err := rows.Scan(&filename); err != nil {
-				return err
+				_ = rows.Close()
+				return nil, err
 			}
-
-			srcPath := filepath.Join(attachDir, "tasks", task.UUID, filename)
-			dstPath := filepath.Join(taskAttachDir, filename)
-
-			if err := copyFile(srcPath, dstPath); err != nil {
-				return fmt.Errorf("failed to copy attachment %s: %w", filename, err)
-			}
+			descriptors = append(descriptors, AttachmentDescriptor{TaskUUID: task.UUID, Filename: filename})
 		}
-
 		if err := rows.Err(); err != nil {
-			return err
+			_ = rows.Close()
+			return nil, err
 		}
+		_ = rows.Close()
 	}
-
-	return nil
+	return descriptors, nil
 }
 
-// exportEvents exports the event log as NDJSON
-func exportEvents(db *sql.DB, bundleDir string, opts CreateOptions) error {
+// collectEvents reads the filtered event log (same filters + ordering as legacy
+// exportEvents) into EventRow records. No file is written.
+func collectEvents(db queryRower, opts CreateOptions) ([]EventRow, error) {
 	rawSince := opts.SinceCursor
 	if rawSince == "" {
 		rawSince = opts.Since
 	}
 	sinceEventID, sinceTimestamp, _, err := parseSinceFilter(rawSince)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	query := `
@@ -810,64 +900,21 @@ func exportEvents(db *sql.DB, bundleDir string, opts CreateOptions) error {
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to query events: %w", err)
+		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	eventsPath := filepath.Join(bundleDir, "events.ndjson")
-	f, err := os.Create(eventsPath)
-	if err != nil {
-		return fmt.Errorf("failed to create events file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	encoder := json.NewEncoder(f)
-
+	events := []EventRow{}
 	for rows.Next() {
-		var event struct {
-			ID           int     `json:"id"`
-			Timestamp    string  `json:"timestamp"`
-			ActorUUID    *string `json:"actor_uuid"`
-			ResourceType string  `json:"resource_type"`
-			ResourceUUID string  `json:"resource_uuid"`
-			EventType    string  `json:"event_type"`
-			Etag         *int    `json:"etag"`
-			Payload      *string `json:"payload,omitempty"`
-		}
-
+		var event EventRow
 		if err := rows.Scan(&event.ID, &event.Timestamp, &event.ActorUUID,
 			&event.ResourceType, &event.ResourceUUID, &event.EventType,
 			&event.Etag, &event.Payload); err != nil {
-			return fmt.Errorf("failed to scan event: %w", err)
+			return nil, fmt.Errorf("failed to scan event: %w", err)
 		}
-
-		if err := encoder.Encode(event); err != nil {
-			return fmt.Errorf("failed to encode event: %w", err)
-		}
+		events = append(events, event)
 	}
-
-	return rows.Err()
-}
-
-// copyFile copies a file from src to dst
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srcFile.Close() }()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dstFile.Close() }()
-
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return err
-	}
-
-	return dstFile.Sync()
+	return events, rows.Err()
 }
 
 // convertTaskExportsToTaskDocuments converts TaskExport slice to TaskDocument slice
@@ -947,7 +994,11 @@ func parseSinceFilter(raw string) (*int64, string, string, error) {
 	return nil, raw, "", nil
 }
 
-func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocument, error) {
+// collectRefs gathers ref/ stub TaskDocuments (logical only; OriginalContent holds
+// the rendered stub). Materialize writes them to refs/<path>.md. The DISCOVERY set
+// (relations out/in + parent task refs, excluding already-included tasks) and the
+// stub rendering match legacy exportRefs exactly.
+func collectRefs(db queryRower, tasks []*TaskExport) ([]*TaskDocument, error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -1027,13 +1078,16 @@ func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocum
 		return nil, nil
 	}
 
-	refsDir := filepath.Join(bundleDir, "refs")
-	if err := os.MkdirAll(refsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create refs directory: %w", err)
+	// Deterministic order (legacy ranged a map → file-per-ref so order was
+	// immaterial; the snapshot is a slice, so sort by uuid for a stable wire shape).
+	orderedUUIDs := make([]string, 0, len(refUUIDs))
+	for uuid := range refUUIDs {
+		orderedUUIDs = append(orderedUUIDs, uuid)
 	}
+	sort.Strings(orderedUUIDs)
 
 	var refs []*TaskDocument
-	for uuid := range refUUIDs {
+	for _, uuid := range orderedUUIDs {
 		content, refPath, err := exportRefStub(db, uuid)
 		if err != nil {
 			return nil, err
@@ -1041,16 +1095,6 @@ func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocum
 		if refPath == "" {
 			refPath = uuid
 		}
-
-		refFilePath := filepath.Join(refsDir, refPath+".md")
-		refFileDir := filepath.Dir(refFilePath)
-		if err := os.MkdirAll(refFileDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create ref directory: %w", err)
-		}
-		if err := os.WriteFile(refFilePath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("failed to write ref file: %w", err)
-		}
-
 		refs = append(refs, &TaskDocument{
 			Path:            refPath,
 			UUID:            uuid,
@@ -1061,7 +1105,7 @@ func exportRefs(db *sql.DB, bundleDir string, tasks []*TaskExport) ([]*TaskDocum
 	return refs, nil
 }
 
-func exportRefStub(db *sql.DB, taskUUID string) (string, string, error) {
+func exportRefStub(db queryRower, taskUUID string) (string, string, error) {
 	var (
 		id            string
 		slug          string
