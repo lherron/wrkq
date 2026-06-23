@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -327,6 +328,50 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	}
 	if !jsonEqual(t, inLsM, subLsM) {
 		t.Errorf("task.lsView (paths) transport results differ:\n in-process: %s\n subprocess: %s", inLsM, subLsM)
+	}
+
+	// wrkq.container.update (T-05112): the new slug/title patch mutation must agree
+	// across transports. Both transports share one DB, so seed a SEPARATE container
+	// per side, rename each identically, and compare the results with the
+	// per-container identity fields (uuid/id/path) normalized away — the renamed
+	// slug/title/kind/etag must match.
+	// Both transports share one DB and both seeds are top-level projects (unique
+	// slug-in-parent), so each side renames to a DISTINCT slug; the per-side
+	// identity + slug fields are normalized away and the remaining shape (title,
+	// kind, etag) must match.
+	normContainer := func(raw json.RawMessage) map[string]any {
+		var m map[string]any
+		if uerr := json.Unmarshal(raw, &m); uerr != nil {
+			t.Fatalf("normContainer unmarshal: %v", uerr)
+		}
+		delete(m, "uuid")
+		delete(m, "id")
+		delete(m, "slug")
+		delete(m, "path")
+		delete(m, "createdAt")
+		delete(m, "updatedAt")
+		return m
+	}
+	if _, err := inproc.Call(context.Background(), "wrkq.container.create",
+		map[string]any{"path": "xport-rename-a", "kind": "project"}); err != nil {
+		t.Fatalf("in-process seed container: %v", err)
+	}
+	if _, err := sub.Call(ctx, "wrkq.container.create",
+		map[string]any{"path": "xport-rename-b", "kind": "project"}); err != nil {
+		t.Fatalf("subprocess seed container: %v", err)
+	}
+	inUpd, err := inproc.Call(context.Background(), "wrkq.container.update",
+		map[string]any{"container": "xport-rename-a", "patch": map[string]any{"slug": "xport-renamed-a", "title": "Renamed"}})
+	if err != nil {
+		t.Fatalf("in-process container.update: %v", err)
+	}
+	subUpd, err := sub.Call(ctx, "wrkq.container.update",
+		map[string]any{"container": "xport-rename-b", "patch": map[string]any{"slug": "xport-renamed-b", "title": "Renamed"}})
+	if err != nil {
+		t.Fatalf("subprocess container.update: %v", err)
+	}
+	if !reflect.DeepEqual(normContainer(inUpd), normContainer(subUpd)) {
+		t.Errorf("container.update transport results differ:\n in-process: %s\n subprocess: %s", inUpd, subUpd)
 	}
 }
 

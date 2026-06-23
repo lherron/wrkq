@@ -845,6 +845,7 @@ deletes by composite key; a 0-row delete → `WRKQ_NOT_FOUND`.
 wrkq.container.show
 wrkq.container.catView  [CLI compatibility projection]
 wrkq.container.list
+wrkq.container.update
 ```
 
 > **`wrkq.container.catView`** is a CLI compatibility read model, **not** a
@@ -883,6 +884,15 @@ interface WrkqContainer {
 
 interface WrkqContainerListResult { items: WrkqContainer[]; nextCursor?: string }
 
+interface WrkqContainerUpdateParams {
+  container: string;       // path / friendly-id / uuid selector
+  patch: { slug?: string; title?: string };  // NARROW — any other key → WRKQ_VALIDATION
+  expectEtag?: number;     // optional etag CAS; stale → WRKQ_CONFLICT
+  actor?: string;
+  idempotencyKey?: string;
+}
+// returns the updated WrkqContainer
+
 interface WrkqContainerDeleteParams {
   container?: string; path?: string; project?: string;
   expectEtag?: number;     // optional etag CAS
@@ -909,6 +919,28 @@ interface WrkqContainerDeleteRecursiveResult { /* see above */ }
 ```
 
 `container.show` resolves by `path` or `project`; a miss → `WRKQ_NOT_FOUND`.
+
+`wrkq.container.update` renames a container **in place** — the FIRST patch surface
+is deliberately **NARROW**: only `{ slug?, title? }` (T-05112 daedalus ruling
+hrcchat#10196). It is **identity-preserving**: the container's UUID, friendly ID,
+children, and history all survive (an in-place `UPDATE`, never delete+recreate),
+and `v_container_paths` rebuilds so the container's path and all descendant paths
+reflect the new slug. The slug is normalized + validated **server-side**; the
+method records attribution and logs a `container.updated` event (carrying the
+changed fields + bumped etag). Error mapping is **typed** (never a raw store leak):
+
+- empty / absent patch, an unknown patch key (`kind`/`parentUuid`/`webhookUrls`/
+  `archived`/…), or an invalid slug → `WRKQ_VALIDATION`;
+- a slug collision with an existing sibling (unique-in-parent), or a stale
+  `expectEtag` → `WRKQ_CONFLICT`;
+- an unresolvable `container` selector → `WRKQ_NOT_FOUND`.
+
+Adding any field beyond `slug`/`title` (kind, parent, webhook URLs, archive state,
+…) requires **explicit separate daedalus review** — do not widen this method into
+an overbroad mutation sink. `wrkq rename-container` mirrors it: the CLI owns the
+`--dry-run` rendering and the project-root scoping of the container selector; the
+slug/title patch + CAS + event are server-owned. The method is **non-destructive**
+(no prompt).
 
 `wrkq.container.delete` hard-deletes an EMPTY container (root rejected →
 `WRKQ_VALIDATION`; non-empty → `WRKQ_VALIDATION` "not empty"). `wrkq rmdir`

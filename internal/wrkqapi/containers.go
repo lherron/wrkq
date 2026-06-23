@@ -3,6 +3,7 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -13,6 +14,9 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 )
+
+// nsContainerUpdate is the idempotency namespace for wrkq.container.update.
+const nsContainerUpdate = "wrkq.container.update"
 
 // ContainerCreate creates a project/directory container and returns the stable
 // container DTO with server-computed path and etag.
@@ -63,6 +67,117 @@ func (a *API) ContainerShow(ctx context.Context, p ContainerShowParams) (*WrkqCo
 		return nil, NewNotFoundError(selector, "container")
 	}
 	return a.loadContainer(containerUUID)
+}
+
+// ContainerUpdate patches a container's slug and/or title in place and returns the
+// updated container DTO. The container's UUID, friendly ID, children, and history
+// are preserved (it is an in-place UPDATE, never delete+recreate); path views
+// reflect the new slug because v_container_paths is computed from the live slug.
+//
+// The patch surface is deliberately NARROW (T-05112 daedalus ruling): ONLY
+// {slug?, title?} are accepted. Any other key (kind/parentUuid/webhookUrls/
+// archive/etc.) → WRKQ_VALIDATION; those need explicit separate review. An empty
+// patch → WRKQ_VALIDATION. The slug is normalized + validated server-side; an
+// invalid slug → WRKQ_VALIDATION, a slug collision (unique-in-parent) → typed
+// WRKQ_CONFLICT (not a raw store-error leak). A stale expectEtag → WRKQ_CONFLICT.
+// The store records attribution and logs a container.updated event with the
+// changed fields, bumping the etag.
+func (a *API) ContainerUpdate(ctx context.Context, p ContainerUpdateParams) (*WrkqContainer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	selector := strings.TrimSpace(p.Container)
+	if selector == "" {
+		return nil, NewValidationError("container is required", map[string]any{"field": "container"})
+	}
+
+	// Parse + validate the patch before resolving so a malformed/overbroad patch
+	// fails fast with WRKQ_VALIDATION.
+	fields, err := parseContainerPatch(p.Patch)
+	if err != nil {
+		return nil, err
+	}
+
+	containerUUID, _, rerr := selectors.ResolveContainer(a.db, selector)
+	if rerr != nil {
+		return nil, NewNotFoundError(selector, "container")
+	}
+
+	var requestHash string
+	if p.IdempotencyKey != "" {
+		hp := p
+		hp.IdempotencyKey = ""
+		requestHash = canonicalRequestHash(hp)
+		if raw, ok, replayErr := a.idempotentReplay(nsContainerUpdate, p.IdempotencyKey, requestHash); replayErr != nil {
+			return nil, replayErr
+		} else if ok {
+			var dto WrkqContainer
+			if uerr := json.Unmarshal(raw, &dto); uerr != nil {
+				return nil, NewInternalError(uerr)
+			}
+			return &dto, nil
+		}
+	}
+
+	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(a.attributionFor(p.Actor), containerUUID, fields, p.ExpectETag); uerr != nil {
+		return nil, mapContainerStoreError(uerr, selector)
+	}
+
+	dto, err := a.loadContainer(containerUUID)
+	if err != nil {
+		return nil, err
+	}
+	if p.IdempotencyKey != "" {
+		if serr := a.idempotentStore(nsContainerUpdate, p.IdempotencyKey, requestHash, dto); serr != nil {
+			return nil, serr
+		}
+	}
+	return dto, nil
+}
+
+// parseContainerPatch validates the raw container patch. Only slug and title are
+// mutable; any other key (including unknown fields and immutable identity/kind/
+// parent fields) returns WRKQ_VALIDATION. An empty/absent patch is rejected. The
+// slug is normalized + validated; the returned field map is consumed by the store
+// UPDATE (which logs the changed fields onto the container.updated event).
+func parseContainerPatch(raw json.RawMessage) (map[string]interface{}, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, NewValidationError("patch is required", map[string]any{"field": "patch"})
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return nil, NewValidationError("patch must be an object", map[string]any{"field": "patch"})
+	}
+	if len(keys) == 0 {
+		return nil, NewValidationError("patch must change at least one field (slug or title)", map[string]any{"field": "patch"})
+	}
+
+	fields := map[string]interface{}{}
+	for key, value := range keys {
+		switch key {
+		case "slug":
+			var s string
+			if err := json.Unmarshal(value, &s); err != nil {
+				return nil, NewValidationError("slug must be a string", map[string]any{"field": "slug"})
+			}
+			normalized, serr := paths.NormalizeSlug(s)
+			if serr != nil {
+				return nil, NewValidationError(serr.Error(), map[string]any{"field": "slug"})
+			}
+			fields["slug"] = normalized
+		case "title":
+			var t string
+			if err := json.Unmarshal(value, &t); err != nil {
+				return nil, NewValidationError("title must be a string", map[string]any{"field": "title"})
+			}
+			fields["title"] = strings.TrimSpace(t)
+		default:
+			return nil, NewValidationError("unknown or immutable patch field: "+key, map[string]any{"field": key})
+		}
+	}
+	return fields, nil
 }
 
 // ContainerList returns containers, optionally scoped to a project's children

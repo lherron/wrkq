@@ -37,7 +37,8 @@ var topLevelCommands = []mirroredCommand{
 	// ls is RPC-backed (real parity command); registered separately.
 	{use: "monitor"},
 	{use: "projects"},
-	{use: "rename-container <path|id> <new-slug>"},
+	// rename-container is RPC-backed (new wrkq.container.update, narrow slug/title
+	// patch + etag CAS, T-05112); registered separately.
 	// restore is RPC-backed (extended wrkq.task.restore, caller-owned-confirmation
 	// seam: task flags server-side, container targets hard-gated); registered separately.
 	// rm is RPC-backed (caller-owned-confirmation seam); registered separately.
@@ -92,6 +93,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRmCmd())
 	root.AddCommand(newApplyCmd())
 	root.AddCommand(newRestoreCmd())
+	root.AddCommand(newRenameContainerCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

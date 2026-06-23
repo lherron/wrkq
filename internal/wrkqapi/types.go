@@ -570,6 +570,19 @@ type ContainerListParams struct {
 	Cursor          string `json:"cursor,omitempty"`
 }
 
+// ContainerUpdateParams mirrors WrkqContainerUpdateParams. Patch is a raw message
+// so unknown fields can be REJECTED (WRKQ_VALIDATION) rather than silently
+// dropped, and the FIRST patch surface stays narrow: only {slug?, title?}. Any
+// other key (kind/parentUuid/webhookUrls/archive/etc.) requires explicit future
+// daedalus review (T-05112) before being accepted here.
+type ContainerUpdateParams struct {
+	Container      string          `json:"container"`
+	Patch          json.RawMessage `json:"patch"`
+	ExpectETag     int64           `json:"expectEtag,omitempty"`
+	Actor          string          `json:"actor,omitempty"`
+	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+}
+
 // ContainerDeleteParams mirrors WrkqContainerDeleteParams.
 type ContainerDeleteParams struct {
 	Container  string `json:"container,omitempty"`

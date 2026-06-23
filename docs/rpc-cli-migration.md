@@ -102,6 +102,9 @@ projection (T-05090), so its fingerprint pin is unchanged.
 | `mkdir` | `rpc-backed` | **Proven parity** (TestParity): RPC-backed via `wrkq.container.create` with legacy top-level→project / nested→directory kind inference. |
 | `rename-container` | `not-started` | **RPC GAP — needs new server method.** Legacy renames a container's `slug` + `title` via `store.Containers.UpdateFieldsWithAttribution` (identity-preserving: same uuid/friendly-id, etag bump, `--if-match` CAS, `--dry-run`). The `wrkq.container` RPC surface has NO update/rename method (only create / delete / deleteRecursive / show / catView / list). A delete+recreate fake would LOSE identity + events + nested children, so it is NOT viable. Proposed: `wrkq.container.update` (or `.rename`) carrying a slug/title patch + `expectEtag`. See "Open gaps" below for the DTO + daedalus question. |
 | `rmdir` | `rpc-backed (full)` | **Empty-container parity proven** via `wrkq.container.delete`. **`--force` (recursive) NOW proven** via the TWO-PHASE `wrkq.container.deleteRecursive` on the caller-owned-confirmation seam: a `dryRun:true` preflight returns the impact `{containers,tasks,attachments,bytes}` (recursive; `containers` includes the target), the mirror renders the legacy WARNING block + prompts `Are you sure? (yes/no):` (requiring EXACTLY `yes`) — only when non-empty — then commits echoing `expected:{…}` with the exact preflight numbers (the CAS race guard; stale impact → `WRKQ_CONFLICT`). The mirror also reproduces legacy's per-container `✓ Removed: <id> (<path>)` TTY line vs the non-TTY `[{path,removed,forced}]` JSON. **PROMPT-COUNT SEMANTICS (daedalus-accepted divergence, hrcchat#10198):** the prompt counts come from the dry-run impact, which is RECURSIVE and ARCHIVED-INCLUSIVE (`Tasks` = all descendant tasks; child-container line = `Containers-1` descendant containers). Legacy's prompt rendered IMMEDIATE, active-only (archived-excluded) counts. For a single-level container holding only ACTIVE contents these coincide and are byte-proven; for nested or archived contents the mirror's counts intentionally reflect the TRUE recursive destructive impact, NOT legacy's immediate active-only count. The committed delete is byte-equivalent either way (deleteRecursive is recursive in legacy too). TestParity/rmdir (6 cases): empty, force-yes, force-prompt-accept, force-prompt-abort, force-prompt-empty-stdin-abort, force-empty-no-prompt. PTY prompt-ownership: TestRmdirForcePromptOwnership (accept/abort-no/abort-y-not-yes/--yes-skips). Server `deleteRecursive` dryRun/expected/CAS already existed (no new method). |
+| `rmdir` | `rpc-backed (partial)` | **Empty-container parity proven** via `wrkq.container.delete`. `--force` (recursive) is a gap: legacy uses interactive confirmation; RPC `deleteRecursive` needs an expected-impact param. |
+| `rename-container` | `rpc-backed` | **Full parity proven** (Tranche B, T-05112) via the NEW method `wrkq.container.update` (daedalus hrcchat#10196). The FIRST patch surface is NARROW — `patch{slug?, title?}` only; any other key → `WRKQ_VALIDATION` (no overbroad mutation sink; kind/parent/webhook/archive need explicit future review). Identity-preserving: the server does an in-place `UpdateFieldsWithAttribution` (same uuid/friendly-id/children/history, etag bump, `container.updated` event), normalizes/validates the slug server-side, and maps a slug collision / stale `expectEtag` to typed `WRKQ_CONFLICT` (not a raw store leak); `v_container_paths` rebuilds so the path + descendant paths reflect the new slug. The mirror owns ONLY the project-root scoping of the container selector + the legacy `--dry-run` / TTY / non-TTY output rendering (it normalizes the slug client-side purely to reproduce the dry-run display + invalid-slug wording; the server re-validates authoritatively). NON-destructive (no prompt). Cases (TestParity/rename-container/*): default-title, custom-title, dry-run, dry-run-custom-title, if-match-ok, if-match-stale, unknown-container, invalid-slug, slug-conflict, project-root-scoping. Server protocol/behavior: container_update_test.go (empty/missing patch, slug normalize/validate, title patch, unknown-field rejection, stale-etag conflict, slug-conflict typed, identity retained, children attached, path views, event payload/etag/attribution, unknown→not-found). |
+| `rmdir` | `rpc-backed (full)` | **Empty-container parity proven** via `wrkq.container.delete`. **`--force` (recursive) NOW proven** via the TWO-PHASE `wrkq.container.deleteRecursive` on the caller-owned-confirmation seam: a `dryRun:true` preflight returns the impact `{containers,tasks,attachments,bytes}` (recursive; `containers` includes the target), the mirror renders the legacy WARNING block + prompts `Are you sure? (yes/no):` (requiring EXACTLY `yes`) — only when non-empty — then commits echoing `expected:{…}` with the exact preflight numbers (the CAS race guard; stale impact → `WRKQ_CONFLICT`). The mirror also reproduces legacy's per-container `✓ Removed: <id> (<path>)` TTY line vs the non-TTY `[{path,removed,forced}]` JSON. Single-level non-empty containers are byte-proven (immediate counts == recursive impact). TestParity/rmdir (6 cases): empty, force-yes, force-prompt-accept, force-prompt-abort, force-prompt-empty-stdin-abort, force-empty-no-prompt. PTY prompt-ownership: TestRmdirForcePromptOwnership (accept/abort-no/abort-y-not-yes/--yes-skips). Server `deleteRecursive` dryRun/expected/CAS already existed (no new method). |
 | `handoff` | `not-started` | `rpc-gap` candidate |
 | `search` | `not-started` | `rpc-gap` / index-owner question |
 | `index` | `not-started` | `local-only` / admin candidate |
@@ -221,32 +224,25 @@ retaining the multi-source fan-out / prompt / dry-run / output rendering? Or
 should the attachment-file copy be a separate explicit mode/boundary (cf. the
 attach byte-transfer ruling, T-05103)?*
 
-### `rename-container` → proposed `wrkq.container.update` (or `.rename`)
+### `rename-container` → `wrkq.container.update` ✅ RESOLVED (T-05112)
 
-**Legacy behavior** (`internal/cli/rename_container.go`): renames a container's
-`slug` + `title` (title defaults to the new slug, or `--title`) via
-`store.Containers.UpdateFieldsWithAttribution`, identity-preserving (same
-uuid/friendly-id, etag bump, attribution). Flags: `--title`, `--if-match` (CAS),
-`--dry-run`.
+**Daedalus APPROVED** (hrcchat#10196): the NEW method `wrkq.container.update` (NOT
+`.rename`), DTO `WrkqContainerUpdateParams{ container, patch{slug?,title?},
+expectEtag, actor, idempotencyKey }` → `WrkqContainer` (the updated record). The
+FIRST patch surface is deliberately **NARROW** — only `slug`/`title`; any other
+key (`kind`/`parentUuid`/`webhookUrls`/`archived`/…) → `WRKQ_VALIDATION`, and
+widening it requires explicit separate review (no overbroad mutation sink).
 
-**Why no existing method maps**: `wrkq.container` exposes only create / delete /
-deleteRecursive / show / catView / list — NO update or rename. A delete+recreate
-fake would lose the container's identity (uuid/friendly-id), its event history,
-and its nested children — NOT viable.
-
-**Proposed**: `wrkq.container.update` (general field patch) or a narrow
-`wrkq.container.rename`, DTO `WrkqContainerUpdateParams{ container,
-patch{slug?,title?}, expectEtag, actor }` → `WrkqContainer` (the updated record).
-The CLI owns slug normalization, the dry-run render, project-root scoping, and the
-old→new display; the server owns the identity-preserving field update + etag CAS +
-slug-conflict validation.
-
-**Daedalus question**: *Approve `wrkq.container.update` with a slug/title patch +
-`expectEtag` (full checklist) — preferred as a general container-mutation method
-that also seats future container edits — or a narrower `wrkq.container.rename`?
-Either must preserve container identity (uuid/friendly-id) and reject a
-slug-conflict with `WRKQ_CONFLICT`/`WRKQ_VALIDATION` rather than the raw store
-error.*
+Implemented identity-preserving via the server-side in-place
+`store.Containers.UpdateFieldsWithAttribution` (same uuid/friendly-id/children/
+history, etag bump, `container.updated` event + attribution); the slug is
+normalized + validated server-side; a slug collision (unique-in-parent) and a
+stale `expectEtag` map to typed `WRKQ_CONFLICT` (not a raw store leak), and
+`v_container_paths` rebuilds so the path + descendant paths reflect the new slug.
+The mirror (`wrkq rename-container`) owns the project-root scoping + `--dry-run` /
+TTY / non-TTY rendering; it normalizes the slug client-side purely to reproduce
+the dry-run display + invalid-slug wording (the server re-validates). The command
+is **non-destructive** (no prompt).
 
 ## Parity harness (data-driven)
 

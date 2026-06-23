@@ -355,6 +355,87 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 
+	// rename-container ✓ NEW server method wrkq.container.update (narrow {slug,title}
+	// patch + etag CAS, identity-preserving; T-05112). NON-destructive (no prompt).
+	// The mirror owns dry-run rendering + project-root scoping; slug
+	// normalization/validation, CAS, attribution + container.updated are
+	// server-owned. The durable snapshot proves the slug change survives in place.
+	{
+		// Default: title defaults to the new slug; slug + title both change in place.
+		name:    "rename-container/default-title",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "newproj"},
+		mutates: true,
+	},
+	{
+		// --title: a custom title overrides the new-slug default.
+		name:    "rename-container/custom-title",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "newproj", "--title", "Brand New Project"},
+		mutates: true,
+	},
+	{
+		// dry-run (non-TTY): renders the JSON preview, NO mutation.
+		name:    "rename-container/dry-run",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "newproj", "--dry-run"},
+		mutates: true,
+	},
+	{
+		// dry-run with --title (non-TTY): preview echoes the custom title, NO mutation.
+		name:    "rename-container/dry-run-custom-title",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "newproj", "--dry-run", "--title", "Preview Title"},
+		mutates: true,
+	},
+	{
+		// --if-match with the matching etag: succeeds. A freshly-created container
+		// has etag 1.
+		name:    "rename-container/if-match-ok",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "newproj", "--if-match", "1"},
+		mutates: true,
+	},
+	{
+		// --if-match with a STALE etag: server CAS rejects (WRKQ_CONFLICT), no mutation.
+		name:    "rename-container/if-match-stale",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "newproj", "--if-match", "99"},
+		mutates: true,
+	},
+	{
+		// Unknown container: legacy "container not found: <selector>", no mutation.
+		name:    "rename-container/unknown-container",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "ghostproj", "newproj"},
+		mutates: true,
+	},
+	{
+		// Invalid slug: client-side NormalizeSlug rejects with the legacy wording.
+		name:    "rename-container/invalid-slug",
+		setup:   [][]string{{"mkdir", "oldproj"}},
+		args:    []string{"rename-container", "oldproj", "!!!"},
+		mutates: true,
+	},
+	{
+		// Slug conflict: renaming to an existing sibling slug → server UNIQUE →
+		// WRKQ_CONFLICT (typed, not a raw store leak), no mutation. Two top-level
+		// projects; rename one onto the other's slug.
+		name:    "rename-container/slug-conflict",
+		setup:   [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:    []string{"rename-container", "alpha", "beta"},
+		mutates: true,
+	},
+	{
+		// project-root scoping: a relative selector is resolved under WRKQ_PROJECT_ROOT
+		// before becoming an RPC param. Rename a child container of myproj.
+		name:    "rename-container/project-root-scoping",
+		setup:   [][]string{{"mkdir", "myproj"}, {"mkdir", "myproj/child"}},
+		args:    []string{"rename-container", "child", "renamed-child"},
+		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
+		mutates: true,
+	},
+
 	// rm ✓ caller-owned-confirmation seam (B0 exemplar). Durable mutation runs
 	// through wrkq.task.delete with an EXPLICIT mode (archive default / purge for
 	// --purge); the mirror owns scoping, the purge prompt+abort+--yes, dry-run, and

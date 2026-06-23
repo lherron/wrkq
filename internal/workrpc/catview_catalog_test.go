@@ -87,6 +87,15 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqAttachmentAddBytesResult") {
 		t.Error("WrkqAttachmentAddBytesResult missing from dtoCatalog")
 	}
+	// Container update (T-05112): the new mutation method must be in methodCatalog
+	// so its NAME enters the protocol schema-hash input. Its result reuses the
+	// existing WrkqContainer DTO (already cataloged), so no new DTO entry is added.
+	if !contains(methodCatalog, "wrkq.container.update") {
+		t.Error("wrkq.container.update missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqContainer") {
+		t.Error("WrkqContainer missing from dtoCatalog (wrkq.container.update result DTO)")
+	}
 }
 
 func contains(haystack []string, needle string) bool {
