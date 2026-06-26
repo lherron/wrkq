@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -20,19 +22,19 @@ import (
 //
 // Implemented surface (byte-proven against legacy, non-TTY): the bare non-TTY
 // default (NDJSON of results), --json (indented full response), --ndjson,
-// --porcelain, path/assignee/state/kind/sort/limit filters, --fresh staleness gate.
-// The interactive human renderer is HARD-GATED: it only fires on a real TTY and
-// embeds ANSI color + term highlighting that cannot be byte-reproduced hermetically.
+// --porcelain, --human/--pretty, path/assignee/state/kind/sort/limit filters,
+// and --fresh staleness gate. --pretty forces the human renderer in non-TTY mode;
+// color remains terminal-gated, so the forced output is deterministic.
 func newSearchCmd() *cobra.Command {
 	var state, kind, assignee, sort string
 	var limit, candidateLimit int
-	var reverse, asJSON, ndjson, porcelain, human, explain, fresh bool
+	var reverse, asJSON, ndjson, porcelain, human, pretty, explain, fresh bool
 	cmd := &cobra.Command{
 		Use:   "search <query> [PATH...]",
 		Short: "Search task and comment text",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mode, stable, err := resolveSearchMode(cmd, asJSON, ndjson, porcelain, human)
+			mode, stable, err := resolveSearchMode(cmd, asJSON, ndjson, porcelain, human, pretty)
 			if err != nil {
 				return err
 			}
@@ -94,6 +96,12 @@ func newSearchCmd() *cobra.Command {
 			switch mode {
 			case "json":
 				return writeSearchJSON(out, raw, stable)
+			case "human":
+				if resp.Stale {
+					fmt.Fprintln(cmd.ErrOrStderr(), style.Paint(style.ColStateStop, fmt.Sprintf("search index is stale by %d event(s)", respStatusStaleEventCount(resp.Status))))
+				}
+				renderSearchHuman(out, query, resp.Results)
+				return nil
 			default: // ndjson
 				return writeSearchNDJSON(out, resp.Results)
 			}
@@ -110,6 +118,7 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Stable machine-readable output")
 	cmd.Flags().BoolVar(&human, "human", false, "Force human-readable output")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force human-readable output even when not a TTY")
 	cmd.Flags().BoolVar(&explain, "explain", false, "Include ranking diagnostics in JSON output")
 	cmd.Flags().BoolVar(&fresh, "fresh", false, "Fail if the search index is stale")
 	return cmd
@@ -118,9 +127,9 @@ func newSearchCmd() *cobra.Command {
 // resolveSearchMode reproduces legacy search's mode decision. search is
 // outputShapeList over allowed {human, json, ndjson} with DefaultTTY=human, so the
 // non-TTY default resolves to NDJSON. --json/--ndjson select directly; --porcelain
-// is the canonical machine mode for a list (NDJSON, stable). The human/TTY pretty
-// renderer (ANSI color + term highlighting) is hard-gated (non-byte-reproducible).
-func resolveSearchMode(cmd *cobra.Command, asJSON, ndjson, porcelain, human bool) (mode string, stable bool, err error) {
+// is the canonical machine mode for a list (NDJSON, stable). --human and --pretty
+// force the same human renderer legacy uses on a TTY.
+func resolveSearchMode(cmd *cobra.Command, asJSON, ndjson, porcelain, human, pretty bool) (mode string, stable bool, err error) {
 	count := 0
 	var explicit string
 	if asJSON {
@@ -138,10 +147,13 @@ func resolveSearchMode(cmd *cobra.Command, asJSON, ndjson, porcelain, human bool
 	if count > 1 {
 		return "", false, fmt.Errorf("choose only one output mode")
 	}
-	if explicit == "human" {
-		return "", false, fmt.Errorf("search: human output not yet implemented in wrkq-rpccli (use --json / --ndjson / --porcelain)")
+	if pretty {
+		return "human", porcelain, nil
 	}
 	if explicit != "" {
+		if explicit == "human" {
+			return "human", porcelain, nil
+		}
 		return explicit, false, nil
 	}
 	// Bare --porcelain (no --json/--ndjson/--output) → canonical machine mode for a
@@ -164,14 +176,16 @@ func resolveSearchMode(cmd *cobra.Command, asJSON, ndjson, porcelain, human bool
 			return "ndjson", true, nil
 		case "raw":
 			return "", false, fmt.Errorf("output mode %q is not supported for this command", m)
-		case "human", "table", "yaml", "tsv":
-			return "", false, fmt.Errorf("search: %s output not yet implemented in wrkq-rpccli (hard-gated pending parity)", m)
+		case "human":
+			return "human", false, nil
+		case "table", "yaml", "tsv":
+			return "", false, fmt.Errorf("output mode %q is not supported for this command", m)
 		default:
 			return "", false, fmt.Errorf("invalid output mode %q: choose table, human, json, ndjson, porcelain, yaml, tsv, or raw", outF.Value.String())
 		}
 	}
 	if isStdoutTTY(cmd.OutOrStdout()) {
-		return "", false, fmt.Errorf("search: pretty/human output not yet implemented in wrkq-rpccli (use --json / --ndjson / --porcelain)")
+		return "human", false, nil
 	}
 	return "ndjson", false, nil
 }
@@ -241,4 +255,173 @@ func writeSearchNDJSON(w io.Writer, results []searchResult) error {
 		}
 	}
 	return nil
+}
+
+func respStatusStaleEventCount(raw json.RawMessage) int64 {
+	var status struct {
+		StaleEventCount int64 `json:"stale_event_count"`
+	}
+	_ = json.Unmarshal(raw, &status)
+	return status.StaleEventCount
+}
+
+const (
+	searchHumanHitColor      = "1;33"
+	searchHumanTitleBudget   = 72
+	searchHumanSnippetBudget = 150
+)
+
+func renderSearchHuman(w io.Writer, query string, results []searchResult) {
+	if len(results) == 0 {
+		fmt.Fprintln(w, style.Paint(style.ColDim, fmt.Sprintf("no matches for %q", query)))
+		return
+	}
+
+	noun := "results"
+	if len(results) == 1 {
+		noun = "result"
+	}
+	fmt.Fprintf(w, "%s %s   %s\n\n",
+		style.Paint(style.ColDim, "search"),
+		query,
+		style.Paint(style.ColDim, fmt.Sprintf("%d %s", len(results), noun)))
+
+	idW, cidW := 0, 0
+	for _, r := range results {
+		if n := len(r.TaskID); n > idW {
+			idW = n
+		}
+		if r.CommentID != nil {
+			if n := len(*r.CommentID); n > cidW {
+				cidW = n
+			}
+		}
+	}
+
+	gutter := idW + 2
+	if cidW > 0 {
+		gutter += cidW + 2
+	}
+	indent := strings.Repeat(" ", gutter)
+	terms := strings.Fields(strings.ToLower(query))
+
+	for _, r := range results {
+		var line strings.Builder
+		line.WriteString(style.Paint(style.ColDim, searchPadRight(r.TaskID, idW)))
+		if cidW > 0 {
+			cid := ""
+			if r.CommentID != nil {
+				cid = *r.CommentID
+			}
+			line.WriteString("  " + style.Paint(style.ColDim, searchPadRight(cid, cidW)))
+		}
+		title := searchFirstNonEmpty(r.Title, searchLastPathSegment(r.Path))
+		line.WriteString("  " + searchTruncateRunes(title, searchHumanTitleBudget))
+		if r.State != "" {
+			line.WriteString("  " + style.Paint(style.StateColor(r.State), "<"+r.State+">"))
+		}
+		fmt.Fprintln(w, line.String())
+
+		fmt.Fprintf(w, "%s%s\n", indent,
+			style.Paint(style.ColDim, fmt.Sprintf("%s  ·  %.3f", r.Path, r.Score)))
+
+		if snip := searchClipSnippet(r.Snippet, searchHumanSnippetBudget); snip != "" {
+			fmt.Fprintf(w, "%s%s\n", indent, searchHighlightTerms(snip, terms))
+		}
+	}
+}
+
+func searchHighlightTerms(text string, terms []string) string {
+	if !style.ColorEnabled || len(terms) == 0 {
+		return style.Paint(style.ColDim, text)
+	}
+	lower := strings.ToLower(text)
+	var spans [][2]int
+	for _, t := range terms {
+		if t == "" {
+			continue
+		}
+		for from := 0; ; {
+			i := strings.Index(lower[from:], t)
+			if i < 0 {
+				break
+			}
+			s := from + i
+			spans = append(spans, [2]int{s, s + len(t)})
+			from = s + len(t)
+		}
+	}
+	if len(spans) == 0 {
+		return style.Paint(style.ColDim, text)
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+
+	dim := "\033[" + style.ColDim + "m"
+	hit := "\033[" + searchHumanHitColor + "m"
+	const reset = "\033[0m"
+	var b strings.Builder
+	b.WriteString(dim)
+	pos := 0
+	for _, sp := range spans {
+		if sp[0] < pos {
+			continue
+		}
+		b.WriteString(text[pos:sp[0]])
+		b.WriteString(reset + hit + text[sp[0]:sp[1]] + reset + dim)
+		pos = sp[1]
+	}
+	b.WriteString(text[pos:])
+	b.WriteString(reset)
+	return b.String()
+}
+
+func searchPadRight(s string, w int) string {
+	if len(s) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-len(s))
+}
+
+func searchTruncateRunes(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n == 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
+}
+
+func searchClipSnippet(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n])
+	if sp := strings.LastIndexByte(cut, ' '); sp > n/2 {
+		cut = cut[:sp]
+	}
+	cut = strings.TrimRight(cut, " ,.;:—-")
+	return cut + "…"
+}
+
+func searchFirstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func searchLastPathSegment(p string) string {
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }

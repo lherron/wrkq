@@ -491,7 +491,7 @@ func TestWrkqTaskMove_TargetPathNotFound_ReturnsError(t *testing.T) {
 	frames := p2Run(t, dbPath,
 		mkRPC("mv1", "wrkq.task.move", map[string]any{
 			"task":       taskID,
-			"targetPath": "g5-container-does-not-exist-at-all",
+			"targetPath": "g5-container-does-not-exist-at-all/moved-task",
 		}),
 	)
 

@@ -25,6 +25,7 @@ var (
 	lsJSON          bool
 	lsNDJSON        bool
 	lsPorcelain     bool
+	lsPretty        bool
 	lsRecursive     bool
 	lsType          string
 	lsOne           bool
@@ -65,6 +66,7 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsJSON, "json", false, "Output as JSON")
 	lsCmd.Flags().BoolVar(&lsNDJSON, "ndjson", false, "Output as newline-delimited JSON")
 	lsCmd.Flags().BoolVar(&lsPorcelain, "porcelain", false, "Machine-readable output")
+	lsCmd.Flags().BoolVar(&lsPretty, "pretty", false, "Force human-readable table output even when not a TTY")
 	lsCmd.Flags().BoolVarP(&lsRecursive, "recursive", "R", false, "List recursively")
 	lsCmd.Flags().StringVar(&lsType, "type", "", "Filter by type (p=project, t=task)")
 	lsCmd.Flags().BoolVarP(&lsOne, "one", "1", false, "One entry per line")
@@ -393,6 +395,9 @@ func runLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if lsPretty {
+		sel = outputSelection{Mode: outputModeTable}
 	}
 	if cmd.Flag("json") == nil {
 		switch {

@@ -524,6 +524,39 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	}
 }
 
+func TestTransportEquivalence_LegacyVsMirrorRPCStdio(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds wrkq + wrkq-rpccli binaries; skipped under -short")
+	}
+	dbPath, taskID := migratedDBWithTask(t)
+	bins := buildParityBinaries(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	legacy, err := NewSubprocess(ctx, bins.wrkq, dbPath, nil)
+	if err != nil {
+		t.Fatalf("legacy NewSubprocess: %v", err)
+	}
+	defer func() { _ = legacy.Close() }()
+	mirror, err := NewSubprocess(ctx, bins.mirror, dbPath, nil)
+	if err != nil {
+		t.Fatalf("mirror NewSubprocess: %v", err)
+	}
+	defer func() { _ = mirror.Close() }()
+
+	legacyResult, err := legacy.Call(ctx, "wrkq.task.show", map[string]string{"task": taskID})
+	if err != nil {
+		t.Fatalf("legacy task.show: %v", err)
+	}
+	mirrorResult, err := mirror.Call(ctx, "wrkq.task.show", map[string]string{"task": taskID})
+	if err != nil {
+		t.Fatalf("mirror task.show: %v", err)
+	}
+	if !jsonEqual(t, legacyResult, mirrorResult) {
+		t.Errorf("rpc --stdio task.show results differ:\n legacy: %s\n mirror: %s", legacyResult, mirrorResult)
+	}
+}
+
 // normalizeBundleManifestTS blanks the manifest.timestamp (time.Now per call) in a
 // bundle.exportView result so two independent snapshots are otherwise byte-comparable.
 func normalizeBundleManifestTS(t *testing.T, raw json.RawMessage) json.RawMessage {

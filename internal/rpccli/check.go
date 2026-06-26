@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
@@ -13,11 +15,10 @@ import (
 // server-owned compatibility projection that reproduces legacy BlockedResult and
 // the store.Tasks.BlockedBy dependency query).
 //
-// Parity-proven surface (non-TTY): default/`--json` JSON output + exit-code
+// Parity-proven surface: non-TTY/default/`--json` JSON output + exit-code
 // semantics (blocked → exit 1 with both the JSON body on stdout and an
-// Error line on stderr). `--quiet` is implemented (exit-code only). The TTY
-// human-readable table is hard-gated (not yet implemented) so a narrower
-// behavior can never masquerade as parity.
+// Error line on stderr), `--quiet` exit-code-only, and the legacy TTY human
+// message.
 func newCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
@@ -71,11 +72,32 @@ func newCheckBlockedCmd() *cobra.Command {
 				return nil
 			}
 
-			// Legacy non-TTY (and --json) path: indented JSON to stdout, then an
-			// error (exit 1) when blocked. The human-readable table path is the only
-			// branch we cannot yet reproduce; hard-gate it on a real TTY.
 			if !asJSON && isStdoutTTY(cmd.OutOrStdout()) {
-				return errors.New("check blocked: human-readable output not yet implemented in wrkq-rpccli (use --json)")
+				if view.IsBlocked {
+					var blockers []struct {
+						ID    string `json:"id"`
+						Title string `json:"title"`
+						State string `json:"state"`
+					}
+					for _, rawBlocker := range view.Blockers {
+						var blocker struct {
+							ID    string `json:"id"`
+							Title string `json:"title"`
+							State string `json:"state"`
+						}
+						if err := json.Unmarshal(rawBlocker, &blocker); err != nil {
+							return err
+						}
+						blockers = append(blockers, blocker)
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(), "Error: Task %s is blocked by %d incomplete task(s):\n", view.TaskID, len(blockers))
+					for _, blocker := range blockers {
+						fmt.Fprintf(cmd.ErrOrStderr(), "  - %s: %s (state: %s)\n", blocker.ID, blocker.Title, blocker.State)
+					}
+					return fmt.Errorf("task %s is blocked", view.TaskID)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Task %s is not blocked\n", view.TaskID)
+				return nil
 			}
 
 			enc := json.NewEncoder(cmd.OutOrStdout())
@@ -99,8 +121,8 @@ func newCheckBlockedCmd() *cobra.Command {
 // inbox + ack-pending queries). The project-root inbox path and project id are
 // scoped CALLER-side and passed as params; the view never reads project-root.
 //
-// Parity-proven surface (non-TTY): default ndjson, `--json` (indented array),
-// `--ndjson`/`--porcelain` (ndjson). The TTY table is hard-gated.
+// Parity-proven surface: default ndjson, `--json` (indented array),
+// `--ndjson`/`--porcelain` (ndjson), and the legacy TTY table.
 func newCheckInboxCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain bool
 	cmd := &cobra.Command{
@@ -156,7 +178,45 @@ func newCheckInboxCmd() *cobra.Command {
 				}
 				return nil
 			}
-			return errors.New("check-inbox: table output not yet implemented in wrkq-rpccli (use --json / --ndjson / --porcelain)")
+			var entries []struct {
+				ID       string `json:"id"`
+				Slug     string `json:"slug"`
+				Title    string `json:"title"`
+				State    string `json:"state,omitempty"`
+				Priority *int   `json:"priority,omitempty"`
+				Kind     string `json:"kind,omitempty"`
+			}
+			for _, it := range view.Items {
+				var entry struct {
+					ID       string `json:"id"`
+					Slug     string `json:"slug"`
+					Title    string `json:"title"`
+					State    string `json:"state,omitempty"`
+					Priority *int   `json:"priority,omitempty"`
+					Kind     string `json:"kind,omitempty"`
+				}
+				if err := json.Unmarshal(it, &entry); err != nil {
+					return err
+				}
+				entries = append(entries, entry)
+			}
+			headers := []string{"ID", "Slug", "Title", "State", "Priority", "Kind"}
+			rowsData := make([][]string, 0, len(entries))
+			for _, entry := range entries {
+				priority := ""
+				if entry.Priority != nil {
+					priority = strconv.Itoa(*entry.Priority)
+				}
+				rowsData = append(rowsData, []string{
+					entry.ID,
+					entry.Slug,
+					entry.Title,
+					entry.State,
+					priority,
+					entry.Kind,
+				})
+			}
+			return render.NewRenderer(out, render.Options{Format: render.FormatTable}).RenderTable(headers, rowsData)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")

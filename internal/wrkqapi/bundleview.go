@@ -53,9 +53,10 @@ type WrkqBundleTaskDoc struct {
 // It is NOT a server-filesystem exporter and does NOT return server-local output
 // paths. manifest is the bundle.Manifest field-order struct (the manifest.json
 // wire shape). events are legacy events.ndjson row order. attachments are
-// DESCRIPTORS only (no bytes): under --with-attachments the mirror either fetches
-// bytes via the chunked wrkq.attachment.getBytes path OR hard-gates the flag —
-// the snapshot never inlines attachment bytes (wrkq.wrkf-rpc.attachment-byte-transfer).
+// DESCRIPTORS only (no bytes): current legacy bundle materialization sets
+// manifest.with_attachments and records descriptors, but does not write attachment
+// files. The snapshot never inlines attachment bytes; any future file
+// materialization must fetch through wrkq.attachment.getBytes.
 type WrkqBundleExportView struct {
 	Manifest    *bundle.Manifest              `json:"manifest"`
 	Tasks       []WrkqBundleTaskDoc           `json:"tasks"`

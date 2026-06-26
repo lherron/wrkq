@@ -2,6 +2,8 @@ package rpccli
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/db"
 )
@@ -37,6 +40,10 @@ type parityCase struct {
 	// CREATE commands whose output echoes a freshly-generated (non-deterministic)
 	// UUID; leave false for reads so a wrong-UUID bug is still caught.
 	normalizeUUID bool
+	// normalizeRunDir neutralizes the old/new copied fixture directories in rendered
+	// output. Use only for commands whose legitimate output includes the configured
+	// database path (e.g. whoami).
+	normalizeRunDir bool
 	// env adds extra environment variables (beyond the hermetic HOME/PATH) for the
 	// command-under-test run on BOTH binaries — e.g. WRKQ_PROJECT_ROOT/ASP_PROJECT
 	// to prove project-root scoping. The setup/seed always runs root-less.
@@ -119,6 +126,110 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 
+	// version ✓ local-only mirror command. Non-TTY default is indented JSON.
+	{
+		name: "version/default-json",
+		args: []string{"version"},
+	},
+	{
+		name: "version/explicit-json",
+		args: []string{"version", "--json"},
+	},
+	// usage/info + agent-info ✓ local-only embedded documentation renderers.
+	// Non-TTY default is indented JSON; TTY raw markdown is covered by installed smoke.
+	{
+		name: "usage/default-json",
+		args: []string{"usage"},
+	},
+	{
+		name: "usage/explicit-json",
+		args: []string{"usage", "--json"},
+	},
+	{
+		name: "usage/info-alias-json",
+		args: []string{"info", "--json"},
+	},
+	{
+		name: "agent-info/default-json",
+		args: []string{"agent-info"},
+	},
+	{
+		name: "agent-info/explicit-json",
+		args: []string{"agent-info", "--json"},
+	},
+	// whoami ✓ local/config attribution parity. It resolves --as/env/scope/default
+	// with the shared attribution package and emits the configured DB path.
+	{
+		name:            "whoami/default-json",
+		args:            []string{"whoami"},
+		normalizeRunDir: true,
+	},
+	{
+		name:            "whoami/explicit-json",
+		args:            []string{"whoami", "--json"},
+		normalizeRunDir: true,
+	},
+	{
+		name:            "whoami/scope-ref-with-explicit-principal",
+		args:            []string{"whoami", "--json"},
+		env:             []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeRunDir: true,
+	},
+	// agent-context ✓ local scope resolution with best-effort RPC-backed identity
+	// lookups. It must also preserve the legacy unresolved-scope exit-2 contract.
+	{
+		name:            "agent-context/default-json-with-lookups",
+		args:            []string{"agent-context"},
+		env:             []string{"ASP_SCOPE_REF=agent:local-human:project:inbox"},
+		normalizeRunDir: true,
+	},
+	{
+		name:            "agent-context/explicit-json-override",
+		args:            []string{"agent-context", "--scope", "local-human@inbox", "--json"},
+		env:             []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		normalizeRunDir: true,
+	},
+	{
+		name:            "agent-context/porcelain-compact",
+		args:            []string{"agent-context", "--scope", "local-human@inbox", "--output", "porcelain"},
+		normalizeRunDir: true,
+	},
+	{
+		name:            "agent-context/unresolved-json-exit2",
+		args:            []string{"agent-context", "--json"},
+		normalizeRunDir: true,
+	},
+	// rpc --stdio ✓ protocol-serving command. The real stdio loop is covered by
+	// TestTransportEquivalence_LegacyVsMirrorRPCStdio; this row covers the normal
+	// CLI validation path when the required transport flag is omitted.
+	{
+		name: "rpc/missing-stdio",
+		args: []string{"rpc"},
+	},
+	// server ✓ local daemon-control surface. Non-invasive status/stop/error paths
+	// are byte-proven here; start/health/stop against a real daemon are covered by
+	// installed smoke to avoid background process churn in the parity table.
+	{
+		name: "server/status-json",
+		args: []string{"server", "--addr", "127.0.0.1:9", "status", "--json"},
+		env:  []string{"WRKQ_LAUNCHD_LABEL=com.praesidium.wrkq-rpccli-test-never"},
+	},
+	{
+		name: "server/status-default-json",
+		args: []string{"server", "--addr", "127.0.0.1:9", "status"},
+		env:  []string{"WRKQ_LAUNCHD_LABEL=com.praesidium.wrkq-rpccli-test-never"},
+	},
+	{
+		name: "server/stop-not-running-json",
+		args: []string{"server", "--addr", "127.0.0.1:9", "stop"},
+		env:  []string{"WRKQ_LAUNCHD_LABEL=com.praesidium.wrkq-rpccli-test-never"},
+	},
+	{
+		name: "server/start-conflicting-modes",
+		args: []string{"server", "start", "--foreground", "--daemon"},
+		env:  []string{"WRKQ_LAUNCHD_LABEL=com.praesidium.wrkq-rpccli-test-never"},
+	},
+
 	// stat ✓ first RPC-backed READ command (re-projects wrkq.task.show /
 	// wrkq.container.show into the legacy stat metadata shape). Read-only.
 	{
@@ -150,6 +261,65 @@ var parityCases = []parityCase{
 		name:  "stat/completed-task",
 		setup: [][]string{{"touch", "inbox/done", "-t", "Done"}, {"set", "inbox/done", "--state", "completed"}},
 		args:  []string{"stat", "inbox/done"},
+	},
+
+	// projects ✓ RPC-backed via wrkq.project.listView. It intentionally ignores
+	// project-root scoping and lists only top-level project containers.
+	{
+		name:  "projects/default-ndjson",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}, {"mkdir", "alpha/child"}},
+		args:  []string{"projects"},
+	},
+	{
+		name:  "projects/json",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "--json"},
+	},
+	{
+		name:  "projects/ndjson",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "--ndjson"},
+	},
+	{
+		name:  "projects/table",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "--output", "table"},
+	},
+	{
+		name:  "projects/yaml",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "--output", "yaml"},
+	},
+	{
+		name:  "projects/tsv",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "--output", "tsv"},
+	},
+	{
+		name:  "projects/one",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "-1"},
+	},
+	{
+		name:  "projects/nul",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "-0"},
+	},
+	{
+		name:  "projects/porcelain-limit-cursor",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "--porcelain", "--limit", "1"},
+	},
+	{
+		name:  "projects/project-root-ignored",
+		setup: [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:  []string{"projects", "-1"},
+		env:   []string{"WRKQ_PROJECT_ROOT=alpha"},
+	},
+	{
+		name:  "projects/output-raw-unsupported",
+		setup: [][]string{{"mkdir", "alpha"}},
+		args:  []string{"projects", "--output", "raw"},
 	},
 
 	// cat ✓ RPC-backed via wrkq.task.catView (server-owned compat projection).
@@ -212,6 +382,55 @@ var parityCases = []parityCase{
 			{"relation", "add", "inbox/blk", "blocks", "inbox/main"},
 		},
 		args: []string{"cat", "inbox/main", "--output", "raw"},
+	},
+	// ── cat --pretty: the shared styled card forced non-TTY (E-pretty) ──
+	// Both binaries call the SAME internal/style renderer, so output is identical
+	// by construction. WRKQ_NOW pins the "updated … ago" relative phrase so the
+	// freshly-seeded updated_at renders deterministically on both sides; color is
+	// off (non-TTY) so the card is plain text and byte-comparable.
+	{
+		name:  "cat/pretty-basic",
+		setup: [][]string{{"touch", "inbox/pretty", "-t", "Pretty", "-d", "Some **bold** body.\n- one\n- two"}},
+		args:  []string{"cat", "inbox/pretty", "--pretty"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		name:  "cat/pretty",
+		setup: [][]string{{"touch", "inbox/pretty", "-t", "Pretty", "-d", "Some **bold** body.\n- one\n- two"}},
+		args:  []string{"cat", "inbox/pretty", "--pretty"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		name:  "cat/pretty-no-frontmatter",
+		setup: [][]string{{"touch", "inbox/pretty", "-t", "Pretty", "-d", "body only"}},
+		args:  []string{"cat", "inbox/pretty", "--pretty", "--no-frontmatter"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		name: "cat/pretty-with-comment",
+		setup: [][]string{
+			{"touch", "inbox/pretty", "-t", "Pretty", "-d", "main body"},
+			{"comment", "add", "inbox/pretty", "a styled comment"},
+		},
+		args: []string{"cat", "inbox/pretty", "--pretty"},
+		env:  []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		name: "cat/pretty-with-blocker",
+		setup: [][]string{
+			{"touch", "inbox/main", "-t", "Main", "-d", "blocked desc"},
+			{"touch", "inbox/blk", "-t", "Blocker"},
+			{"relation", "add", "inbox/blk", "blocks", "inbox/main"},
+		},
+		args: []string{"cat", "inbox/main", "--pretty"},
+		env:  []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		// --pretty wins over an explicit machine mode (styled card, not JSON).
+		name:  "cat/pretty-overrides-json",
+		setup: [][]string{{"touch", "inbox/pretty", "-t", "Pretty", "-d", "body"}},
+		args:  []string{"cat", "inbox/pretty", "--pretty", "--json"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
 	},
 	{
 		name:  "cat/raw-table-not-supported",
@@ -517,12 +736,11 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 
-	// rm ✓ caller-owned-confirmation seam (B0 exemplar). Durable mutation runs
-	// through wrkq.task.delete with an EXPLICIT mode (archive default / purge for
-	// --purge); the mirror owns scoping, the purge prompt+abort+--yes, dry-run, and
-	// the exit-code taxonomy. TASK targets are byte-proven here; container targets
-	// are hard-gated (no archive mode on wrkq.container.delete yet) and therefore
-	// excluded from parity — a deliberate B0 divergence, NOT a regression.
+	// rm ✓ caller-owned-confirmation seam. Task mutation runs through wrkq.task.delete
+	// with an EXPLICIT mode (archive default / purge for --purge). Container mutation
+	// uses wrkq.container.archive for the default soft-delete and wrkq.container.delete
+	// for empty-container purge. The mirror owns scoping, purge prompt+abort+--yes,
+	// dry-run, and exit-code taxonomy.
 	{
 		// Default = legacy soft-archive (state=archived + archived_at via mode:archive).
 		name:    "rm/archive-default",
@@ -648,10 +866,69 @@ var parityCases = []parityCase{
 		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
 		mutates: true,
 	},
+	{
+		name:    "rm/container-archive-default",
+		setup:   [][]string{{"mkdir", "doomed"}},
+		args:    []string{"rm", "doomed"},
+		mutates: true,
+	},
+	{
+		name:  "rm/container-dry-run-json",
+		setup: [][]string{{"mkdir", "doomed"}},
+		args:  []string{"rm", "doomed", "--dry-run"},
+	},
+	{
+		name:    "rm/container-purge-empty-yes",
+		setup:   [][]string{{"mkdir", "doomed"}},
+		args:    []string{"rm", "doomed", "--purge", "--yes"},
+		mutates: true,
+	},
+	{
+		name:    "rm/container-purge-prompt-accept",
+		setup:   [][]string{{"mkdir", "doomed"}},
+		args:    []string{"rm", "doomed", "--purge"},
+		stdin:   []byte("yes\n"),
+		mutates: true,
+	},
+	{
+		name:    "rm/container-purge-nonempty-errors",
+		setup:   [][]string{{"mkdir", "doomed"}, {"touch", "doomed/child", "-t", "Child"}},
+		args:    []string{"rm", "doomed", "--purge", "--yes"},
+		mutates: true,
+	},
+	{
+		name: "rm/mixed-task-container-archive",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+			{"mkdir", "doomed"},
+		},
+		args:    []string{"rm", "inbox/aaa", "doomed"},
+		mutates: true,
+	},
+	{
+		// --recursive and --force are accepted by legacy rm but recursive container
+		// deletion is deliberately the rmdir --force surface. For task archives these
+		// flags are parsed and ignored.
+		name:    "rm/recursive-force-task-archive",
+		setup:   [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}},
+		args:    []string{"rm", "inbox/aaa", "--recursive", "--force"},
+		mutates: true,
+	},
+	{
+		// --jobs threads through the shared bulk executor. --ordered is not an rm
+		// flag, so jobs-only is the remaining bulk-flag compatibility surface here.
+		name: "rm/jobs-multi",
+		setup: [][]string{
+			{"touch", "inbox/aaa", "-t", "Alpha"},
+			{"touch", "inbox/bbb", "-t", "Beta"},
+		},
+		args:    []string{"rm", "inbox/aaa", "inbox/bbb", "--jobs", "2"},
+		mutates: true,
+	},
 
-	// restore ✓ RPC-backed via the EXTENDED wrkq.task.restore (server carries the
-	// whole legacy semantic op: move-on-restore, field updates, --comment, --state,
-	// cascade, slug-conflict/etag precedence). Container restore is hard-gated.
+	// restore ✓ RPC-backed via the EXTENDED wrkq.task.restore for tasks (server
+	// carries move-on-restore, field updates, --comment, --state, cascade,
+	// slug-conflict/etag precedence) and wrkq.container.restore for containers.
 	{
 		name:    "restore/basic-archived",
 		setup:   [][]string{{"touch", "inbox/gone", "-t", "Gone"}, {"rm", "inbox/gone"}},
@@ -812,6 +1089,18 @@ var parityCases = []parityCase{
 		env:     []string{"WRKQ_PROJECT_ROOT=myproj"},
 		mutates: true,
 	},
+	{
+		name:    "restore/container-archived",
+		setup:   [][]string{{"mkdir", "archivedproj"}, {"rm", "archivedproj"}},
+		args:    []string{"restore", "archivedproj"},
+		mutates: true,
+	},
+	{
+		name:    "restore/container-by-id",
+		setup:   [][]string{{"mkdir", "archivedproj"}, {"rm", "archivedproj"}},
+		args:    []string{"restore", "P-00002"},
+		mutates: true,
+	},
 
 	// touch ✓ RPC-backed via wrkq.task.create, re-projected to the legacy
 	// touchResult array. Core flags only (due-at/start-at/etc. hard-error as gaps).
@@ -837,6 +1126,43 @@ var parityCases = []parityCase{
 		normalizeUUID: true,
 	},
 	{
+		name:          "touch/description-file",
+		setup:         nil,
+		args:          []string{"touch", "inbox/from-file", "-t", "From File", "-d", "@body.md"},
+		files:         map[string]string{"body.md": "file-backed description\n\nwith paragraphs\n"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:          "touch/stdin-description",
+		setup:         nil,
+		args:          []string{"touch", "inbox/from-stdin", "-t", "From Stdin", "-d", "-"},
+		stdin:         []byte("stdin-backed description\n"),
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:          "touch/meta-file",
+		setup:         nil,
+		args:          []string{"touch", "inbox/meta-file", "-t", "Meta File", "--meta-file", "meta.json"},
+		files:         map[string]string{"meta.json": `{"source":"file","rank":2}`},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:          "touch/date-routing-resolution",
+		setup:         nil,
+		args:          []string{"touch", "inbox/routed", "-t", "Routed", "--due-at", "2026-07-01", "--start-at", "2026-06-30", "--requested-by", "wrkq", "--assigned-project", "agent-spaces", "--resolution", "needs_info"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		name:    "touch/force-uuid",
+		setup:   nil,
+		args:    []string{"touch", "inbox/forced", "-t", "Forced", "--force-uuid", "550e8400-e29b-41d4-a716-446655440000"},
+		mutates: true,
+	},
+	{
 		name:    "touch/duplicate-errors",
 		setup:   [][]string{{"touch", "inbox/dup", "-t", "Dup"}},
 		args:    []string{"touch", "inbox/dup", "-t", "Dup"},
@@ -850,6 +1176,106 @@ var parityCases = []parityCase{
 		args:    []string{"mv", "inbox/movable", "dest"},
 		mutates: true,
 	},
+	{
+		name:    "mv/task-into-container-dry-run",
+		setup:   [][]string{{"touch", "inbox/movable", "-t", "M"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/movable", "dest", "--dry-run"},
+		mutates: false,
+	},
+	{
+		name:    "mv/task-into-container-if-match",
+		setup:   [][]string{{"touch", "inbox/movable", "-t", "M"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/movable", "dest", "--if-match", "2"},
+		mutates: true,
+	},
+	{
+		name:    "mv/task-rename",
+		setup:   [][]string{{"touch", "inbox/old-name", "-t", "Old"}},
+		args:    []string{"mv", "inbox/old-name", "inbox/new-name"},
+		mutates: true,
+	},
+	{
+		name:    "mv/task-rename-dry-run",
+		setup:   [][]string{{"touch", "inbox/old-dry", "-t", "Old Dry"}},
+		args:    []string{"mv", "inbox/old-dry", "inbox/new-dry", "--dry-run"},
+		mutates: false,
+	},
+	{
+		name:    "mv/task-move-new-path",
+		setup:   [][]string{{"touch", "inbox/move-new-path", "-t", "Move"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/move-new-path", "dest/moved-new-path"},
+		mutates: true,
+	},
+	{
+		name:    "mv/task-overwrite",
+		setup:   [][]string{{"touch", "inbox/source-overwrite", "-t", "Source"}, {"touch", "inbox/dest-overwrite", "-t", "Dest"}},
+		args:    []string{"mv", "inbox/source-overwrite", "inbox/dest-overwrite", "--overwrite-task"},
+		mutates: true,
+	},
+	{
+		name:    "mv/multi-task-into-container",
+		setup:   [][]string{{"touch", "inbox/multi-a", "-t", "A"}, {"touch", "inbox/multi-b", "-t", "B"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/multi-a", "inbox/multi-b", "dest"},
+		mutates: true,
+	},
+	{
+		name:    "mv/container-into-container",
+		setup:   [][]string{{"mkdir", "inbox/src"}, {"touch", "inbox/src/child", "-t", "Child"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/src", "dest"},
+		mutates: true,
+	},
+	{
+		name:  "mv/container-into-container-dry-run",
+		setup: [][]string{{"mkdir", "inbox/src"}, {"mkdir", "dest"}},
+		args:  []string{"mv", "inbox/src", "dest", "--dry-run"},
+	},
+	{
+		name:    "mv/container-rename-nested",
+		setup:   [][]string{{"mkdir", "proj"}, {"mkdir", "proj/old-name"}, {"touch", "proj/old-name/child", "-t", "Child"}},
+		args:    []string{"mv", "proj/old-name", "proj/new-name"},
+		mutates: true,
+	},
+	{
+		name:    "mv/container-move-new-path",
+		setup:   [][]string{{"mkdir", "proj"}, {"mkdir", "proj/old-name"}, {"touch", "proj/old-name/child", "-t", "Child"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "proj/old-name", "dest/new-name"},
+		mutates: true,
+	},
+	{
+		name:  "mv/container-dest-conflict-errors",
+		setup: [][]string{{"mkdir", "proj"}, {"mkdir", "proj/old-name"}, {"mkdir", "proj/new-name"}},
+		args:  []string{"mv", "proj/old-name", "proj/new-name"},
+	},
+	{
+		name:  "mv/container-top-level-rename-legacy-error",
+		setup: [][]string{{"mkdir", "proj"}},
+		args:  []string{"mv", "proj", "newproj"},
+	},
+	{
+		name:    "mv/multi-task-and-container-into-container",
+		setup:   [][]string{{"touch", "inbox/multi-a", "-t", "A"}, {"mkdir", "inbox/src"}, {"touch", "inbox/src/child", "-t", "Child"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/multi-a", "inbox/src", "dest"},
+		mutates: true,
+	},
+	{
+		// Legacy parses --type/--yes but runMv never consults them.
+		name:    "mv/type-and-yes-ignored-task",
+		setup:   [][]string{{"touch", "inbox/typed-task", "-t", "Typed"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/typed-task", "dest", "--type", "p", "--yes"},
+		mutates: true,
+	},
+	{
+		name:    "mv/type-and-yes-ignored-container",
+		setup:   [][]string{{"mkdir", "inbox/typed-container"}, {"mkdir", "dest"}},
+		args:    []string{"mv", "inbox/typed-container", "dest", "--type", "t", "--yes"},
+		mutates: true,
+	},
+	{
+		// Legacy parses --nullglob on mv but never consults it.
+		name:  "mv/nullglob-missing-source-still-errors",
+		setup: [][]string{{"mkdir", "dest"}},
+		args:  []string{"mv", "missing-source", "dest", "--nullglob"},
+	},
 
 	// set — field updates via wrkq.task.update patch (success cases).
 	{
@@ -862,6 +1288,78 @@ var parityCases = []parityCase{
 		name:    "set/multi-field",
 		setup:   [][]string{{"touch", "inbox/s2", "-t", "S2"}},
 		args:    []string{"set", "inbox/s2", "--priority", "1", "--title", "New Title", "--labels", `["z"]`},
+		mutates: true,
+	},
+	{
+		name:    "set/dry-run-json",
+		setup:   [][]string{{"touch", "inbox/sdry", "-t", "Dry"}},
+		args:    []string{"set", "inbox/sdry", "--state", "in_progress", "--dry-run"},
+		mutates: false,
+	},
+	{
+		name:    "set/if-match-ok",
+		setup:   [][]string{{"touch", "inbox/scas", "-t", "CAS"}},
+		args:    []string{"set", "inbox/scas", "--state", "in_progress", "--if-match", "2"},
+		mutates: true,
+	},
+	{
+		name:    "set/description-file",
+		setup:   [][]string{{"touch", "inbox/sfile", "-t", "File"}},
+		args:    []string{"set", "inbox/sfile", "--description", "@body.md"},
+		files:   map[string]string{"body.md": "updated from file\n"},
+		mutates: true,
+	},
+	{
+		name:    "set/stdin-refs",
+		setup:   [][]string{{"touch", "inbox/stdin-a", "-t", "A"}, {"touch", "inbox/stdin-b", "-t", "B"}},
+		args:    []string{"set", "-", "--state", "in_progress", "--continue-on-error"},
+		stdin:   []byte("inbox/stdin-a\ninbox/stdin-b\n"),
+		mutates: true,
+	},
+	{
+		name:    "set/meta-file",
+		setup:   [][]string{{"touch", "inbox/smeta", "-t", "Meta"}},
+		args:    []string{"set", "inbox/smeta", "--meta-file", "meta.json"},
+		files:   map[string]string{"meta.json": `{"phase":"rpccli","ok":true}`},
+		mutates: true,
+	},
+	{
+		name:    "set/slug-assignee",
+		setup:   [][]string{{"touch", "inbox/sidentity", "-t", "Identity"}},
+		args:    []string{"set", "inbox/sidentity", "--slug", "New Identity", "--assignee", "cody"},
+		mutates: true,
+	},
+	{
+		name:    "set/routing-resolution-cp",
+		setup:   [][]string{{"touch", "inbox/sroute", "-t", "Route"}},
+		args:    []string{"set", "inbox/sroute", "--requested-by", "P-REQ", "--assigned-project", "P-ASG", "--resolution", "done", "--cp-project-id", "cp-proj", "--cp-work-item-id", "wi-1", "--cp-run-id", "run-1", "--session-id", "sess-1", "--run-status", "running"},
+		mutates: true,
+	},
+	{
+		name:    "set/parent-task",
+		setup:   [][]string{{"touch", "inbox/parent", "-t", "Parent"}, {"touch", "inbox/child", "-t", "Child"}},
+		args:    []string{"set", "inbox/child", "--parent-task", "inbox/parent"},
+		mutates: true,
+	},
+	{
+		name:    "set/parent-clear",
+		setup:   [][]string{{"touch", "inbox/parent", "-t", "Parent"}, {"touch", "inbox/child", "-t", "Child", "--parent-task", "inbox/parent"}},
+		args:    []string{"set", "inbox/child", "--parent-id", ""},
+		mutates: true,
+	},
+	{
+		name:    "set/parent-dry-run-json",
+		setup:   [][]string{{"touch", "inbox/parent", "-t", "Parent"}, {"touch", "inbox/child", "-t", "Child"}},
+		args:    []string{"set", "inbox/child", "--parent-task", "inbox/parent", "--dry-run"},
+		mutates: false,
+	},
+	{
+		// Bulk flags are legacy-accepted. --ordered forces sequential execution,
+		// --jobs controls the bulk executor, and --batch-size is parsed but unused in
+		// legacy; all three must be accepted by the mirror.
+		name:    "set/bulk-flags",
+		setup:   [][]string{{"touch", "inbox/bulk-a", "-t", "A"}, {"touch", "inbox/bulk-b", "-t", "B"}},
+		args:    []string{"set", "inbox/bulk-a", "inbox/bulk-b", "--state", "completed", "--jobs", "2", "--ordered", "--batch-size", "4"},
 		mutates: true,
 	},
 
@@ -1063,6 +1561,60 @@ var parityCases = []parityCase{
 		name:  "container-cat/unknown-ref-errors",
 		setup: nil,
 		args:  []string{"container", "cat", "P-09999999", "--json"},
+	},
+	// container set via wrkq.container.webhookSet (dedicated per-container webhook
+	// mutation, deliberately separate from narrow wrkq.container.update).
+	{
+		name:    "container-set/webhook-urls-json",
+		setup:   [][]string{{"mkdir", "hooked"}},
+		args:    []string{"container", "set", "hooked", "--webhook-urls", `["https://example.test/a","https://example.test/b"]`},
+		mutates: true,
+	},
+	{
+		name:    "container-set/webhook-url-repeat",
+		setup:   [][]string{{"mkdir", "hooked"}},
+		args:    []string{"container", "set", "hooked", "--webhook-url", "https://example.test/a", "--webhook-url", "https://example.test/b"},
+		mutates: true,
+	},
+	{
+		name:    "container-set/add-remove",
+		setup:   [][]string{{"mkdir", "hooked"}, {"container", "set", "hooked", "--webhook-urls", `["https://example.test/old","https://example.test/keep"]`}},
+		args:    []string{"container", "set", "hooked", "--add-webhook-url", "https://example.test/new", "--remove-webhook-url", "https://example.test/old"},
+		mutates: true,
+	},
+	{
+		name:    "container-set/all-add",
+		setup:   [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+		args:    []string{"container", "set", "--all", "--add-webhook-url", "https://example.test/all"},
+		mutates: true,
+	},
+	{
+		name:  "container-set/no-updates-errors",
+		setup: [][]string{{"mkdir", "hooked"}},
+		args:  []string{"container", "set", "hooked"},
+	},
+	{
+		name: "container-set/all-without-delta-errors",
+		args: []string{"container", "set", "--all"},
+	},
+	{
+		name:  "container-set/all-with-arg-errors",
+		setup: [][]string{{"mkdir", "hooked"}},
+		args:  []string{"container", "set", "hooked", "--all", "--add-webhook-url", "https://example.test/all"},
+	},
+	{
+		name:  "container-set/invalid-json-errors",
+		setup: [][]string{{"mkdir", "hooked"}},
+		args:  []string{"container", "set", "hooked", "--webhook-urls", `["unterminated"`},
+	},
+	{
+		name:  "container-set/invalid-url-errors",
+		setup: [][]string{{"mkdir", "hooked"}},
+		args:  []string{"container", "set", "hooked", "--webhook-url", "ftp://example.test/hook"},
+	},
+	{
+		name: "container-set/missing-container-errors",
+		args: []string{"container", "set", "missing", "--webhook-url", "https://example.test/a"},
 	},
 	{
 		name:  "comment-cat/by-id",
@@ -1668,6 +2220,59 @@ var parityCases = []parityCase{
 		setup: findMixed,
 		args:  []string{"find", "proj", "--output", "raw"},
 	},
+	// ── UNGATED render modes now byte-proven against legacy (E2) ──
+	// The typed paths decode the byte-proven findListView projection back into
+	// the legacy findResult struct so internal/render output is byte-identical
+	// (yaml.v3 keys off the Go field names). Mirrors the ls ungate.
+	{
+		// --print0: NUL-joined Path values + trailing NUL; precedence over mode.
+		name:  "find/print0",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--print0"},
+	},
+	{
+		name:  "find/print0-empty",
+		setup: findMixed,
+		args:  []string{"find", "nope", "--print0"},
+	},
+	{
+		name:  "find/output-table",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--output", "table"},
+	},
+	{
+		name:  "find/pretty",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--pretty"},
+	},
+	{
+		// human has no legacy render branch -> table fall-through (identical bytes).
+		name:  "find/output-human",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--output", "human"},
+	},
+	{
+		name:  "find/output-yaml",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--output", "yaml"},
+	},
+	{
+		name:  "find/output-tsv",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--type", "t", "--output", "tsv"},
+	},
+	{
+		// Mixed-type yaml exercises containers (nil state/priority -> null in yaml).
+		name:  "find/output-yaml-mixed",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--output", "yaml"},
+	},
+	{
+		// Both binaries reject two output flags with the identical message.
+		name:  "find/conflicting-modes",
+		setup: findMixed,
+		args:  []string{"find", "proj", "--json", "--ndjson"},
+	},
 
 	// log via wrkq.history.listView (server-owned compat history read model over the
 	// generic event_log table — distinct from wrkf.event.query/workflow_events). The
@@ -1797,8 +2402,8 @@ var parityCases = []parityCase{
 
 	// tree via wrkq.task.treeView (server-owned compat tree projection: recursive
 	// traversal, container pruning, "all done" rollups, subtask nesting, hidden
-	// counting). Only deterministic modes are parity-tested; the pretty/human
-	// renderer is TTY-only + non-deterministic ("opened N ago") and is hard-gated.
+	// counting). Forced --pretty pins WRKQ_NOW so "opened N ago" text is
+	// deterministic; color remains off in the non-TTY harness.
 	{
 		name:  "tree/top-level-ndjson-default",
 		setup: treeMixed,
@@ -1815,6 +2420,16 @@ var parityCases = []parityCase{
 		args:  []string{"tree", "proj", "--json"},
 	},
 	{
+		name:  "tree/multi-path-ignores-extra",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "inbox", "--json"},
+	},
+	{
+		name:  "tree/fields-ignored",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--json", "--fields", "id,slug"},
+	},
+	{
 		name:  "tree/subtree-ndjson",
 		setup: treeMixed,
 		args:  []string{"tree", "proj", "--ndjson"},
@@ -1823,6 +2438,12 @@ var parityCases = []parityCase{
 		name:  "tree/subtree-porcelain",
 		setup: treeMixed,
 		args:  []string{"tree", "proj", "--porcelain"},
+	},
+	{
+		name:  "tree/pretty",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--pretty"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
 	},
 	{
 		name:  "tree/depth-limit",
@@ -1874,6 +2495,33 @@ var parityCases = []parityCase{
 		name:  "tree/output-raw-unsupported",
 		setup: treeMixed,
 		args:  []string{"tree", "proj", "--output", "raw"},
+	},
+	{
+		name:  "tree/output-table",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--output", "table"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		name:  "tree/output-human",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--output", "human"},
+		env:   []string{"WRKQ_NOW=2026-06-25T12:00:00Z"},
+	},
+	{
+		name:  "tree/output-yaml-unsupported",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--output", "yaml"},
+	},
+	{
+		name:  "tree/output-tsv-unsupported",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--output", "tsv"},
+	},
+	{
+		name:  "tree/conflicting-modes-errors",
+		setup: treeMixed,
+		args:  []string{"tree", "proj", "--json", "--ndjson"},
 	},
 
 	// check blocked ✓ RPC-backed via wrkq.task.blockedView (server compat projection
@@ -1978,6 +2626,11 @@ var parityCases = []parityCase{
 		name:  "ls/output-table",
 		setup: lsMixed,
 		args:  []string{"ls", "proj", "--output", "table"},
+	},
+	{
+		name:  "ls/pretty",
+		setup: lsMixed,
+		args:  []string{"ls", "proj", "--pretty"},
 	},
 	{
 		name:  "ls/output-human",
@@ -2247,6 +2900,22 @@ var parityCases = []parityCase{
 		normalizeUUID: true,
 	},
 	{
+		// Legacy accepts -r/--recursive but still resolves only source tasks; for a
+		// task source this is the same deep task copy as the default path.
+		name:          "cp/recursive-task-source",
+		setup:         [][]string{{"touch", "inbox/orig", "-t", "Orig"}, {"mkdir", "dest"}},
+		args:          []string{"cp", "inbox/orig", "dest", "--recursive"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
+		// Container recursion is not implemented in legacy either: the source still
+		// goes through task resolution and therefore errors as "task not found".
+		name:  "cp/recursive-container-source-errors",
+		setup: [][]string{{"mkdir", "inbox/src"}, {"touch", "inbox/src/aa", "-t", "A"}, {"mkdir", "dest"}},
+		args:  []string{"cp", "inbox/src", "dest", "--recursive"},
+	},
+	{
 		// --overwrite onto an existing slug updates the existing row (deterministic
 		// dest uuid → no normalization, so a wrong-uuid bug is still caught).
 		name: "cp/overwrite-existing",
@@ -2428,6 +3097,114 @@ var parityCases = []parityCase{
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		normalizeUUID: true,
 	},
+	{
+		name: "handoff/search-json",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Quartz notes", "--body-file", "body.md", "--json"},
+			{"handoff", "create", "-t", "Other topic", "--body-file", "other.md", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "quartz", "--json"},
+		files:             map[string]string{"body.md": "carry quartz details\n", "other.md": "unrelated body\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+		normalizeUUID:     true,
+	},
+	{
+		name: "handoff/search-default-ndjson",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Quartz notes", "--body-file", "body.md", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "quartz"},
+		files:             map[string]string{"body.md": "carry quartz details\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+		normalizeUUID:     true,
+	},
+	{
+		name: "handoff/search-human",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Quartz handoff", "--body-file", "body.md", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "quartz", "--human"},
+		files:             map[string]string{"body.md": "carry quartz details\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name: "handoff/search-human-empty",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Other handoff", "--body-file", "body.md", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "missing", "--human"},
+		files:             map[string]string{"body.md": "no match here\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name: "handoff/search-acknowledged-status",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Quartz pending", "--body-file", "body.md", "--json"},
+			{"handoff", "create", "-t", "Quartz done", "--body-file", "done.md", "--json"},
+			{"handoff", "acknowledge", "H-00002", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "quartz", "--status", "acknowledged", "--json"},
+		files:             map[string]string{"body.md": "pending quartz\n", "done.md": "done quartz\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+		normalizeUUID:     true,
+	},
+	{
+		name: "handoff/search-pagination",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Quartz A", "--body-file", "body.md", "--json"},
+			{"handoff", "create", "-t", "Quartz B", "--body-file", "body.md", "--json"},
+			{"handoff", "create", "-t", "Quartz C", "--body-file", "body.md", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "quartz", "--limit", "2", "--porcelain"},
+		files:             map[string]string{"body.md": "quartz payload\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+		normalizeUUID:     true,
+	},
+	{
+		name: "handoff/search-invalid-status",
+		setup: [][]string{
+			{"handoff", "create", "-t", "Quartz", "--body-file", "body.md", "--json"},
+			{"index", "rebuild"},
+		},
+		args:              []string{"handoff", "search", "quartz", "--status", "bogus", "--json"},
+		files:             map[string]string{"body.md": "quartz payload\n"},
+		env:               []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		seedEnv:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:    "handoff/search-disabled-errors",
+		setup:   [][]string{{"handoff", "create", "-t", "Quartz", "--body-file", "body.md", "--json"}},
+		args:    []string{"handoff", "search", "quartz", "--json"},
+		files:   map[string]string{"body.md": "quartz payload\n"},
+		env:     []string{"ASP_SCOPE_REF=agent:cody:project:wrkq", "WRKQ_SEARCH_ENABLED=0"},
+		seedEnv: []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
+	},
 	// ── monitor (bounded polling via wrkq.monitor.eventsView + .stateView) ──────
 	// monitor wait: condition already met → exactly one terminal line (result=met),
 	// exit 0. The single stateView snapshot is authoritative; no events stream.
@@ -2504,6 +3281,16 @@ var parityCases = []parityCase{
 		args:    []string{"monitor", "watch", "inbox/open", "--format", "bogus"},
 		mutates: false,
 	},
+	// monitor watch --scope is a legacy hard gate, not an RPC-only narrowing:
+	// non-raw watch returns the single-print usage error before streaming. The raw
+	// branch bypasses this gate and follows indefinitely, so it is documented rather
+	// than placed in this bounded parity harness.
+	{
+		name:    "monitor/watch-scope-legacy-gate",
+		setup:   [][]string{{"touch", "inbox/open", "-t", "open"}},
+		args:    []string{"monitor", "watch", "inbox/open", "--scope", "agent:cody:project:wrkq"},
+		mutates: false,
+	},
 
 	// ── watch (bounded raw tail via wrkq.history.tailView) ──────────────────────
 	// watch --follow=false --ndjson: drain the current backlog as NDJSON and exit 0.
@@ -2536,8 +3323,8 @@ var parityCases = []parityCase{
 	// SERVER-OWNED sidecar + embedder behind wrkq.search.* / wrkq.index.*. All
 	// cases use the deterministic `none` dense provider (pure lexical/FTS — no
 	// llama, no non-determinism), so old-vs-new byte-parity holds for status,
-	// lexical search, stale, and lifecycle. The TTY human renderers are hard-gated;
-	// every case below exercises a non-TTY (piped) output mode.
+	// lexical search, stale, and lifecycle. Forced --pretty renders the human
+	// layout without ANSI in the non-TTY harness and is byte-proven here.
 
 	// index status: a fresh per-dir sidecar (empty/stale) — deterministic JSON.
 	{
@@ -2603,6 +3390,24 @@ var parityCases = []parityCase{
 		args:        []string{"search", "searchable", "--json"},
 		searchIndex: true,
 	},
+	{
+		name:        "search/output-table-unsupported",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"search", "searchable", "--output", "table"},
+		searchIndex: true,
+	},
+	{
+		name:        "search/output-yaml-unsupported",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"search", "searchable", "--output", "yaml"},
+		searchIndex: true,
+	},
+	{
+		name:        "search/output-tsv-unsupported",
+		setup:       [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+		args:        []string{"search", "searchable", "--output", "tsv"},
+		searchIndex: true,
+	},
 
 	// search WITH a prebuilt shared sidecar: the seed `index rebuild` populates a
 	// shared absolute sidecar; the read-only `search` finds the lexical match on
@@ -2618,6 +3423,13 @@ var parityCases = []parityCase{
 		name:              "search/ndjson-hit",
 		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
 		args:              []string{"search", "alpha", "--ndjson"},
+		searchIndex:       true,
+		searchSeedRebuild: true,
+	},
+	{
+		name:              "search/pretty",
+		setup:             [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "alpha beta gamma"}, {"index", "rebuild"}},
+		args:              []string{"search", "alpha", "--pretty"},
 		searchIndex:       true,
 		searchSeedRebuild: true,
 	},
@@ -2854,6 +3666,10 @@ func TestParity(t *testing.T) {
 				if tc.normalizeUUID {
 					s = uuidRe.ReplaceAllString(s, "<UUID>")
 				}
+				if tc.normalizeRunDir {
+					s = strings.ReplaceAll(s, oldDir, "<RUN_DIR>")
+					s = strings.ReplaceAll(s, newDir, "<RUN_DIR>")
+				}
 				return s
 			}
 			if got, want := norm(newRes.stdout), norm(oldRes.stdout); got != want {
@@ -2872,6 +3688,42 @@ func TestParity(t *testing.T) {
 }
 
 // Ã¢ÂÂÃ¢ÂÂ harness internals Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+
+func TestAgentContextNoDBParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds wrkq + wrkq-rpccli and runs both CLIs")
+	}
+	bins := buildParityBinaries(t)
+	dbPath := filepath.Join(t.TempDir(), "missing.db")
+	run := func(bin string) cliResult {
+		cmd := exec.Command(bin, "--db", dbPath, "--as", "local-human", "agent-context", "--json")
+		cmd.Env = append(hermeticEnv(), "ASP_SCOPE_REF=agent:cody:project:wrkq")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		exit := 0
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				exit = ee.ExitCode()
+			} else {
+				t.Fatalf("run %s: %v", bin, err)
+			}
+		}
+		return cliResult{exit: exit, stdout: stdout.String(), stderr: stderr.String()}
+	}
+	oldRes := run(bins.wrkq)
+	newRes := run(bins.mirror)
+	if oldRes.exit != newRes.exit {
+		t.Fatalf("exit code: old=%d new=%d\nold stderr=%q\nnew stderr=%q", oldRes.exit, newRes.exit, oldRes.stderr, newRes.stderr)
+	}
+	if oldRes.stdout != newRes.stdout {
+		t.Fatalf("stdout mismatch:\nold=%q\nnew=%q", oldRes.stdout, newRes.stdout)
+	}
+	if oldRes.stderr != newRes.stderr {
+		t.Fatalf("stderr mismatch:\nold=%q\nnew=%q", oldRes.stderr, newRes.stderr)
+	}
+}
 
 // TestCommentLsCursorReplay proves the paginated list-view cursor contract beyond
 // first-page emission: cursor replay across page boundaries, per-page byte parity
@@ -3407,68 +4259,68 @@ func TestLogHumanModesSemanticParity(t *testing.T) {
 	}
 }
 
-// TestFindHardGates proves the mirror REFUSES (clean non-zero exit) the legacy
-// find surface it does not yet implement, so a narrower behavior can never
-// masquerade as parity. Legacy would succeed for these, so they cannot be
-// byte-parity cases; the gate is asserted on the mirror alone.
-func TestFindHardGates(t *testing.T) {
+// TestLogDetailedTTYSemanticParity covers the exposed interactive default for
+// `wrkq log <id>`. Like --patch, it renders Summary via decoded payload map
+// iteration, so this is intentionally semantic rather than byte equality.
+func TestLogDetailedTTYSemanticParity(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds binaries + runs the mirror CLI")
+		t.Skip("builds binaries + runs both CLIs on a pty")
 	}
 	bins := buildParityBinaries(t)
-	base := seedFixture(t, bins, findMixed)
-	dir := copyFixture(t, base)
-
-	gated := []struct {
-		name string
-		args []string
-	}{
-		{"print0", []string{"find", "proj", "--print0"}},
-		{"output-yaml", []string{"find", "proj", "--output", "yaml"}},
-		{"output-tsv", []string{"find", "proj", "--output", "tsv"}},
-		{"output-table", []string{"find", "proj", "--output", "table"}},
-		{"output-human", []string{"find", "proj", "--output", "human"}},
-		{"conflicting-modes", []string{"find", "proj", "--json", "--ndjson"}},
+	setup := [][]string{
+		{"touch", "inbox/log-multi", "-t", "Multi", "--priority", "3"},
+		{"set", "inbox/log-multi", "--state", "in_progress", "--priority", "1"},
 	}
-	for _, g := range gated {
-		g := g
-		t.Run(g.name, func(t *testing.T) {
-			res := runCLI(t, bins.mirror, dir, g.args)
-			if res.exit == 0 {
-				t.Errorf("expected non-zero exit (hard-gate) for %v, got 0\n stdout: %q", g.args, res.stdout)
+	base := seedFixture(t, bins, setup)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, []string{"log", "T-00001"})
+	newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, []string{"log", "T-00001"})
+	if oldExit != 0 || newExit != 0 {
+		t.Fatalf("log TTY exits: old=%d out=%q; new=%d out=%q", oldExit, oldOut, newExit, newOut)
+	}
+	if strings.TrimSpace(oldOut) == "" || strings.TrimSpace(newOut) == "" {
+		t.Fatalf("log TTY produced empty output: old=%q new=%q", oldOut, newOut)
+	}
+
+	lineSet := func(s string) map[string]int {
+		m := map[string]int{}
+		for _, ln := range nonEmptyLines(normalize(s)) {
+			if strings.Contains(ln, "Summary:") {
+				continue
 			}
-			if strings.TrimSpace(res.stderr) == "" {
-				t.Errorf("expected a gate error message on stderr for %v", g.args)
-			}
-		})
+			m[strings.TrimSpace(ln)]++
+		}
+		return m
+	}
+	oldSet := lineSet(oldOut)
+	newSet := lineSet(newOut)
+	if len(oldSet) != len(newSet) {
+		t.Fatalf("log TTY skeleton line-set size differs:\nold=%v\nnew=%v", oldSet, newSet)
+	}
+	for line, count := range oldSet {
+		if newSet[line] != count {
+			t.Fatalf("log TTY skeleton differs on %q: old=%d new=%d\nold=%v\nnew=%v", line, count, newSet[line], oldSet, newSet)
+		}
+	}
+	for _, want := range []string{"\x1b[33mEvent ", "task.created", "task.updated", "Principal:", "ETag:"} {
+		if !strings.Contains(oldOut, want) {
+			t.Fatalf("legacy log TTY output missing %q (got %q)", want, oldOut)
+		}
 	}
 }
 
-// TestCpRecursiveHardGate proves the mirror REFUSES `cp --recursive` (container
-// copy), which is NOT in this tranche (T-05111 is single-task copy only via
-// wrkq.task.copy). Legacy would SUCCEED (recursive container copy), so this
-// cannot be a byte-parity row; the clean non-zero gate + the no-mutation
-// guarantee are asserted on the mirror alone. Container/recursive copy is a
-// future slice, deliberately NOT here.
+// TestFindHardGates RETIRED (E2): find's --print0 + table/human/yaml/tsv render
+// modes are now byte-proven against legacy in TestParity (find/print0,
+// find/output-table|human|yaml|tsv), and --output raw + conflicting-modes are
+// byte-parity error cases. No find surface remains hard-gated.
+
+// TestCpRecursiveHardGate is retained as a named guard for the broad rpccli
+// suite. Live legacy code accepts -r/--recursive but still resolves only source
+// tasks, so the former mirror-only hard gate was removed and the behavior now
+// lives in TestParity/cp/recursive-* rows.
 func TestCpRecursiveHardGate(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds binaries + runs the mirror CLI")
-	}
-	bins := buildParityBinaries(t)
-	setup := [][]string{{"touch", "inbox/aa", "-t", "A"}, {"mkdir", "dest"}}
-	base := seedFixture(t, bins, setup)
-	dir := copyFixture(t, base)
-	before := snapshot(t, dir)
-	res := runCLI(t, bins.mirror, dir, []string{"cp", "inbox/aa", "dest", "--recursive"})
-	if res.exit == 0 {
-		t.Errorf("expected non-zero exit (cp --recursive hard-gate), got 0\n stdout: %q", res.stdout)
-	}
-	if strings.TrimSpace(res.stderr) == "" {
-		t.Error("expected a gate error message on stderr")
-	}
-	if after := snapshot(t, dir); after != before {
-		t.Errorf("cp --recursive hard-gate must NOT mutate:\n before:\n%s\n after:\n%s", before, after)
-	}
 }
 
 // bundleSetup seeds a multi-project fixture with a relation (for --include-refs),
@@ -3583,8 +4435,10 @@ func TestBundleParity(t *testing.T) {
 	bins := buildParityBinaries(t)
 
 	cases := []struct {
-		name string
-		args []string
+		name  string
+		args  []string
+		setup [][]string
+		files map[string]string
 		// materializes is true when the command writes a bundle dir under relOut.
 		materializes bool
 		relOut       string
@@ -3602,6 +4456,13 @@ func TestBundleParity(t *testing.T) {
 		{
 			name:         "actor-filter/no-events",
 			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--no-events", "--json"},
+			materializes: true, relOut: "bundle-out",
+		},
+		{
+			name:         "actor-filter/with-attachments",
+			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--with-attachments", "--json"},
+			setup:        [][]string{{"attach", "put", "alpha/task-one", "bundle-att.txt"}},
+			files:        map[string]string{"bundle-att.txt": "bundle attachment payload\n"},
 			materializes: true, relOut: "bundle-out",
 		},
 		{
@@ -3647,7 +4508,9 @@ func TestBundleParity(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			base := seedFixture(t, bins, bundleSetup)
+			setup := append([][]string{}, bundleSetup...)
+			setup = append(setup, tc.setup...)
+			base := seedFixtureFiles(t, bins, setup, tc.files)
 			oldDir := copyFixture(t, base)
 			newDir := copyFixture(t, base)
 
@@ -3671,145 +4534,25 @@ func TestBundleParity(t *testing.T) {
 	}
 }
 
-// TestBundleWithAttachmentsHardGate proves the mirror REFUSES --with-attachments
-// (clean non-zero exit, no bundle written) while the LEGACY binary still SUCCEEDS
-// with --with-attachments. Bundle attachment bytes are intentionally NOT carried
-// in the snapshot (descriptors only; wrkq.wrkf-rpc.attachment-byte-transfer), and
-// a fat one-frame attachment bundle is not allowed — so this cannot be a byte
-// parity row; the gate is asserted on the mirror alone, and legacy's continued
-// support is asserted separately.
+// TestBundleWithAttachmentsHardGate is retained as a named guard for the broad
+// rpccli suite. The mirror no longer hard-gates --with-attachments: current
+// legacy bundle behavior sets manifest.with_attachments and carries descriptors
+// only, with no attachment file materialization. That behavior is now byte-proven
+// in TestBundleParity/actor-filter/with-attachments.
 func TestBundleWithAttachmentsHardGate(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds binaries + runs both CLIs")
-	}
-	bins := buildParityBinaries(t)
-
-	t.Run("mirror-hard-gates", func(t *testing.T) {
-		t.Parallel()
-		base := seedFixture(t, bins, bundleSetup)
-		dir := copyFixture(t, base)
-		res := runCLI(t, bins.mirror, dir, []string{
-			"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--with-attachments", "--json",
-		})
-		if res.exit == 0 {
-			t.Errorf("expected non-zero exit (--with-attachments hard-gate), got 0\n stdout: %q", res.stdout)
-		}
-		if strings.TrimSpace(res.stderr) == "" {
-			t.Error("expected a clean gate error message on stderr")
-		}
-		// No bundle directory must have been written by the gated mirror.
-		if _, err := os.Stat(filepath.Join(dir, "bundle-out", "manifest.json")); err == nil {
-			t.Error("mirror wrote a bundle directory despite hard-gating --with-attachments")
-		}
-	})
-
-	t.Run("legacy-still-supports", func(t *testing.T) {
-		t.Parallel()
-		base := seedFixture(t, bins, bundleSetup)
-		dir := copyFixture(t, base)
-		res := runCLI(t, bins.wrkq, dir, []string{
-			"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--with-attachments", "--json",
-		})
-		if res.exit != 0 {
-			t.Fatalf("legacy bundle --with-attachments must still succeed, got exit %d\n stderr: %s", res.exit, res.stderr)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "bundle-out", "manifest.json")); err != nil {
-			t.Errorf("legacy --with-attachments did not materialize a bundle: %v", err)
-		}
-	})
 }
 
-// TestRmContainerHardGate proves the mirror REFUSES container `rm` targets on
-// the B0 caller-owned-confirmation seam: wrkq.container.delete has no archive
-// mode, so container rm cannot be byte-proven and is hard-gated (clean non-zero,
-// abort-before-mutation). Legacy would SUCCEED (it archives the container), so
-// these cannot be parity rows; the gate + the no-mutation guarantee are asserted
-// on the mirror alone. Container archive is a future slice, deliberately NOT in
-// B0.
+// TestRmContainerHardGate is retained as a named guard for the broad rpccli suite.
+// The old gate is retired: container rm now has real byte parity in TestParity
+// (rm/container-*), using wrkq.container.archive for default soft-delete and
+// wrkq.container.delete for empty-container purge.
 func TestRmContainerHardGate(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds binaries + runs the mirror CLI")
-	}
-	bins := buildParityBinaries(t)
-	setup := [][]string{
-		{"mkdir", "myproj"},
-		{"touch", "inbox/keepme", "-t", "Keep Me"},
-	}
-
-	t.Run("pure-container-target", func(t *testing.T) {
-		t.Parallel()
-		base := seedFixture(t, bins, setup)
-		dir := copyFixture(t, base)
-		before := snapshot(t, dir)
-		res := runCLI(t, bins.mirror, dir, []string{"rm", "myproj"})
-		if res.exit == 0 {
-			t.Errorf("expected non-zero exit (container hard-gate), got 0\n stdout: %q", res.stdout)
-		}
-		if strings.TrimSpace(res.stderr) == "" {
-			t.Error("expected a gate error message on stderr")
-		}
-		if after := snapshot(t, dir); after != before {
-			t.Errorf("container hard-gate must NOT mutate:\n before:\n%s\n after:\n%s", before, after)
-		}
-	})
-
-	t.Run("mixed-task-and-container-abort-before-mutation", func(t *testing.T) {
-		t.Parallel()
-		base := seedFixture(t, bins, setup)
-		dir := copyFixture(t, base)
-		before := snapshot(t, dir)
-		// Task FIRST, container second: the gate must abort the WHOLE batch before
-		// ANY mutation, so the leading task must NOT be archived/deleted.
-		res := runCLI(t, bins.mirror, dir, []string{"rm", "inbox/keepme", "myproj"})
-		if res.exit == 0 {
-			t.Errorf("expected non-zero exit (mixed batch hard-gate), got 0\n stdout: %q", res.stdout)
-		}
-		if strings.TrimSpace(res.stderr) == "" {
-			t.Error("expected a gate error message on stderr")
-		}
-		after := snapshot(t, dir)
-		if after != before {
-			t.Errorf("mixed batch must abort BEFORE mutating the task (no partial apply):\n before:\n%s\n after:\n%s", before, after)
-		}
-		// Defense-in-depth: the leading task must still be present and 'open'.
-		if !strings.Contains(after, "|keepme|open|") {
-			t.Errorf("leading task must remain open (un-deleted) after the gate abort; snapshot:\n%s", after)
-		}
-	})
 }
 
-// TestRestoreContainerHardGate proves the mirror REFUSES container `restore`
-// targets on the caller-owned-confirmation seam: there is no wrkq.container.restore
-// method, so a container restore cannot be byte-proven and is hard-gated (clean
-// non-zero, no mutation). Legacy SUCCEEDS (it un-archives the container), so this
-// cannot be a parity row; the gate + no-mutation guarantee are asserted on the
-// mirror alone. Container restore is a future slice (the container archive/restore
-// mode), deliberately NOT in this slice.
+// TestRestoreContainerHardGate is retained as a named guard for the broad rpccli
+// suite. The old gate is retired: container restore now has real byte parity in
+// TestParity (restore/container-*), using wrkq.container.restore.
 func TestRestoreContainerHardGate(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds binaries + runs the mirror CLI")
-	}
-	bins := buildParityBinaries(t)
-	// Seed an ARCHIVED container (legacy restore would un-archive it). rm archives
-	// the named container; the mirror refuses to remove containers, so archive it
-	// with the LEGACY binary in setup so the target is genuinely restorable.
-	setup := [][]string{
-		{"mkdir", "myproj"},
-		{"rm", "myproj"},
-	}
-	base := seedFixture(t, bins, setup)
-	dir := copyFixture(t, base)
-	before := snapshot(t, dir)
-	res := runCLI(t, bins.mirror, dir, []string{"restore", "myproj"})
-	if res.exit == 0 {
-		t.Errorf("expected non-zero exit (container restore hard-gate), got 0\n stdout: %q", res.stdout)
-	}
-	if strings.TrimSpace(res.stderr) == "" {
-		t.Error("expected a gate error message on stderr")
-	}
-	if after := snapshot(t, dir); after != before {
-		t.Errorf("container restore hard-gate must NOT mutate:\n before:\n%s\n after:\n%s", before, after)
-	}
 }
 
 // TestLsHardGates previously proved the mirror REFUSED the legacy ls surfaces it
@@ -3819,41 +4562,55 @@ func TestRestoreContainerHardGate(t *testing.T) {
 // ls/conflicting-modes-errors). No ls surface remains hard-gated, so the gate test
 // is retired — its coverage moved into the equivalence harness.
 
-// TestTreeHardGates proves the mirror REFUSES (clean non-zero exit, not silent
-// degradation) every legacy tree surface it does not yet implement, so a narrower
-// behavior can never masquerade as parity. Legacy would succeed for these, so they
-// cannot be byte-parity cases; we assert the gate on the mirror alone. The
-// pretty/human renderer is the load-bearing gate: it is TTY-only and embeds
-// wall-clock-relative "opened N ago" strings, so it cannot be byte-reproduced.
+// TestTreeHardGates is retained as a named guard for the broad rpccli suite. The
+// previous gates moved into TestParity: output modes, extra paths, --fields, and
+// conflicting modes now match legacy behavior. No tree surface remains hard-gated.
 func TestTreeHardGates(t *testing.T) {
+}
+
+// TestContainerSetTTYHumanParity proves the TTY-only human renderers for
+// per-container and --all webhook URL updates. The pipe-based parity harness
+// covers non-TTY indented JSON and validation errors; this attaches stdout/stderr
+// to a real pty so legacy and mirror both take the interactive branch.
+func TestContainerSetTTYHumanParity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + runs the mirror CLI")
 	}
 	bins := buildParityBinaries(t)
-	base := seedFixture(t, bins, treeMixed)
-	dir := copyFixture(t, base)
-
-	gated := []struct {
-		name string
-		args []string
+	tests := []struct {
+		name      string
+		setup     [][]string
+		args      []string
+		verifyArg []string
 	}{
-		{"output-human", []string{"tree", "proj", "--output", "human"}},
-		{"output-table", []string{"tree", "proj", "--output", "table"}},
-		{"output-yaml", []string{"tree", "proj", "--output", "yaml"}},
-		{"output-tsv", []string{"tree", "proj", "--output", "tsv"}},
-		{"multi-path", []string{"tree", "proj", "inbox", "--json"}},
-		{"fields", []string{"tree", "proj", "--json", "--fields", "id,slug"}},
-		{"conflicting-modes", []string{"tree", "proj", "--json", "--ndjson"}},
+		{
+			name:      "single",
+			setup:     [][]string{{"mkdir", "hooked"}},
+			args:      []string{"container", "set", "hooked", "--webhook-url", "https://example.test/a"},
+			verifyArg: []string{"container", "cat", "hooked", "--json"},
+		},
+		{
+			name:      "all",
+			setup:     [][]string{{"mkdir", "alpha"}, {"mkdir", "beta"}},
+			args:      []string{"container", "set", "--all", "--add-webhook-url", "https://example.test/all"},
+			verifyArg: []string{"container", "cat", "alpha", "--json"},
+		},
 	}
-	for _, g := range gated {
-		g := g
-		t.Run(g.name, func(t *testing.T) {
-			res := runCLI(t, bins.mirror, dir, g.args)
-			if res.exit == 0 {
-				t.Errorf("expected non-zero exit (hard-gate) for %v, got 0\n stdout: %q", g.args, res.stdout)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base := seedFixture(t, bins, tc.setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, tc.args)
+			newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, tc.args)
+			if oldExit != newExit || oldOut != newOut {
+				t.Fatalf("TTY mismatch\nold exit=%d out=%q\nnew exit=%d out=%q", oldExit, oldOut, newExit, newOut)
 			}
-			if strings.TrimSpace(res.stderr) == "" {
-				t.Errorf("expected a gate error message on stderr for %v", g.args)
+			oldVerify := runCLI(t, bins.wrkq, oldDir, tc.verifyArg)
+			newVerify := runCLI(t, bins.mirror, newDir, tc.verifyArg)
+			if oldVerify.exit != newVerify.exit || oldVerify.stdout != newVerify.stdout || oldVerify.stderr != newVerify.stderr {
+				t.Fatalf("post-mutation container cat mismatch\nold=%+v\nnew=%+v", oldVerify, newVerify)
 			}
 		})
 	}
@@ -3927,6 +4684,471 @@ func TestRelationLsTTYTableParity(t *testing.T) {
 				t.Fatalf("legacy empty TTY output missing sentinel (got %q)", oldOut)
 			}
 		})
+	}
+}
+
+// TestDiffTTYHumanParity proves the interactive human/color renderer for
+// `wrkq diff`. Non-TTY diff defaults to JSON in TestParity; a real TTY takes the
+// colorized human branch.
+func TestDiffTTYHumanParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		setup [][]string
+		args  []string
+		want  []string
+	}{
+		{
+			name: "changed",
+			setup: [][]string{
+				{"touch", "inbox/da", "-t", "Title A", "--priority", "2", "-d", "desc a"},
+				{"touch", "inbox/db", "-t", "Title B", "--priority", "1", "-d", "desc b"},
+			},
+			args: []string{"diff", "inbox/da", "inbox/db"},
+			want: []string{"Comparing T-00001 (da) vs T-00002 (db)", "4 field(s) changed:",
+				"\x1b[33mslug:\x1b[0m", "\x1b[31m- Title A\x1b[0m", "\x1b[32m+ Title B\x1b[0m"},
+		},
+		{
+			name:  "same",
+			setup: [][]string{{"touch", "inbox/da", "-t", "Same"}},
+			args:  []string{"diff", "inbox/da", "inbox/da"},
+			want:  []string{"No differences between T-00001 and T-00001"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := seedFixture(t, bins, tc.setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, tc.args)
+			newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, tc.args)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("tty diff human mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(oldOut, want) {
+					t.Fatalf("legacy diff TTY output missing %q (got %q)", want, oldOut)
+				}
+			}
+		})
+	}
+}
+
+// TestAttachLsTTYTableParity proves the legacy-only TTY table for `attach ls`.
+// Non-TTY attach ls emits NDJSON; an interactive terminal renders a padded table.
+func TestAttachLsTTYTableParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		setup [][]string
+		files map[string]string
+		args  []string
+	}{
+		{
+			name:  "empty",
+			setup: [][]string{{"touch", "inbox/at", "-t", "Attach Task"}},
+			args:  []string{"attach", "ls", "inbox/at"},
+		},
+		{
+			name: "populated",
+			setup: [][]string{
+				{"touch", "inbox/at", "-t", "Attach Task"},
+				{"attach", "put", "inbox/at", "alpha.txt"},
+				{"attach", "put", "inbox/at", "beta.md"},
+			},
+			files: attachSrcFiles,
+			args:  []string{"attach", "ls", "inbox/at"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := seedFixtureFiles(t, bins, tc.setup, tc.files)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, tc.args)
+			newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, tc.args)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("tty attach table mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+			if tc.name == "populated" {
+				for _, want := range []string{"ID", "Filename", "Size", "MIME Type", "Created", "alpha.txt", "beta.md"} {
+					if !strings.Contains(oldOut, want) {
+						t.Fatalf("legacy attach TTY table missing %q (got %q)", want, oldOut)
+					}
+				}
+			} else if strings.TrimSpace(oldOut) != "" {
+				t.Fatalf("legacy empty attach TTY output should be empty (got %q)", oldOut)
+			}
+		})
+	}
+}
+
+// TestCheckBlockedTTYHumanParity proves the legacy TTY-only human output for
+// `check blocked`: success text on stdout for an unblocked task, and the
+// multi-line blocker report plus Cobra error line on stderr for a blocked task.
+func TestCheckBlockedTTYHumanParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		setup [][]string
+		args  []string
+		want  []string
+	}{
+		{
+			name:  "unblocked",
+			setup: [][]string{{"touch", "inbox/free", "-t", "Free"}},
+			args:  []string{"check", "blocked", "inbox/free"},
+			want:  []string{"Task T-00001 is not blocked"},
+		},
+		{
+			name: "blocked",
+			setup: [][]string{
+				{"touch", "inbox/main", "-t", "Main"},
+				{"touch", "inbox/blk", "-t", "Blocker"},
+				{"relation", "add", "inbox/blk", "blocks", "inbox/main"},
+			},
+			args: []string{"check", "blocked", "inbox/main"},
+			want: []string{
+				"Error: Task T-00001 is blocked by 1 incomplete task(s):",
+				"  - T-00002: Blocker (state: open)",
+				"Error: task T-00001 is blocked",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := seedFixture(t, bins, tc.setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, tc.args)
+			newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, tc.args)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("tty check blocked mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(oldOut, want) {
+					t.Fatalf("legacy check blocked TTY output missing %q (got %q)", want, oldOut)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckInboxTTYTableParity proves the legacy TTY-only table for
+// `check-inbox`. Non-TTY check-inbox emits NDJSON, while an interactive terminal
+// renders the padded ID/Slug/Title/State/Priority/Kind table.
+func TestCheckInboxTTYTableParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name  string
+		setup [][]string
+		args  []string
+	}{
+		{
+			name:  "empty",
+			setup: nil,
+			args:  []string{"check-inbox"},
+		},
+		{
+			name: "populated",
+			setup: [][]string{
+				{"touch", "inbox/one", "-t", "One", "--priority", "2"},
+				{"touch", "inbox/two", "-t", "Two", "--priority", "1"},
+			},
+			args: []string{"check-inbox"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := seedFixture(t, bins, tc.setup)
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, tc.args)
+			newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, tc.args)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("tty check-inbox table mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+			if tc.name == "populated" {
+				for _, want := range []string{"ID", "Slug", "Title", "State", "Priority", "Kind", "two", "One"} {
+					if !strings.Contains(oldOut, want) {
+						t.Fatalf("legacy check-inbox TTY table missing %q (got %q)", want, oldOut)
+					}
+				}
+			} else if strings.TrimSpace(oldOut) != "" {
+				t.Fatalf("legacy empty check-inbox TTY output should be empty (got %q)", oldOut)
+			}
+		})
+	}
+}
+
+// TestIndexTTYHumanParity proves the legacy TTY-only human renderers for the
+// index command family. Non-TTY index commands emit JSON; interactive terminals
+// render key:value status text or lifecycle one-liners.
+func TestIndexTTYHumanParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+
+	cases := []struct {
+		name    string
+		setup   [][]string
+		args    []string
+		want    []string
+		seedEnv []string
+	}{
+		{
+			name:  "status",
+			setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+			args:  []string{"index", "status"},
+			want:  []string{"path: ", "status: ", "last_indexed_event_id:", "canonical_max_event_id:", "stale_event_count:", "chunks:"},
+		},
+		{
+			name:  "rebuild",
+			setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task", "-d", "indexable body text"}},
+			args:  []string{"index", "rebuild"},
+			want:  []string{"rebuilt search index: ", " chunks, last event "},
+		},
+		{
+			name:  "update",
+			setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+			args:  []string{"index", "update"},
+			want:  []string{"updated search index: ", " chunks, last event "},
+		},
+		{
+			name:  "vacuum",
+			setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+			args:  []string{"index", "vacuum"},
+			want:  []string{"vacuumed search index"},
+		},
+		{
+			name:  "pause",
+			setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}},
+			args:  []string{"index", "pause"},
+			want:  []string{"paused search indexing"},
+		},
+		{
+			name:  "resume",
+			setup: [][]string{{"touch", "inbox/find-me", "-t", "Searchable Task"}, {"index", "pause"}},
+			args:  []string{"index", "resume"},
+			want:  []string{"resumed search indexing"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sidecar := filepath.Join(t.TempDir(), "search.sqlite")
+			searchEnv := []string{
+				"WRKQ_SEARCH_ENABLED=1",
+				"WRKQ_SEARCH_DENSE_PROVIDER=none",
+				"WRKQ_SEARCH_DB_PATH=" + sidecar,
+			}
+			base := seedFixtureFilesEnv(t, bins, tc.setup, nil, append(searchEnv, tc.seedEnv...))
+			oldDir := copyFixture(t, base)
+			newDir := copyFixture(t, base)
+
+			oldOut, oldExit := runCLIOnTTYEnv(t, bins.wrkq, oldDir, tc.args, searchEnv)
+			newOut, newExit := runCLIOnTTYEnv(t, bins.mirror, newDir, tc.args, searchEnv)
+
+			if oldExit != newExit {
+				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
+			}
+			if normalize(newOut) != normalize(oldOut) {
+				t.Errorf("tty index human mismatch:\n old: %q\n new: %q", oldOut, newOut)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(oldOut, want) {
+					t.Fatalf("legacy index TTY output missing %q (got %q)", want, oldOut)
+				}
+			}
+		})
+	}
+}
+
+func TestTouchCreatesArtifactDirParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs CLIs")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, nil)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+	oldHome := filepath.Join(oldDir, "praesidium-home")
+	newHome := filepath.Join(newDir, "praesidium-home")
+
+	old := runCLIEnv(t, bins.wrkq, oldDir, []string{"touch", "inbox/artifact-old", "-t", "Artifact"}, []string{"PRAESIDIUM_HOME=" + oldHome})
+	new := runCLIEnv(t, bins.mirror, newDir, []string{"touch", "inbox/artifact-new", "-t", "Artifact"}, []string{"PRAESIDIUM_HOME=" + newHome})
+	if old.exit != 0 || new.exit != 0 {
+		t.Fatalf("touch failed: old exit=%d stderr=%q; new exit=%d stderr=%q", old.exit, old.stderr, new.exit, new.stderr)
+	}
+	for name, home := range map[string]string{"old": oldHome, "new": newHome} {
+		dir := filepath.Join(home, "var", "wrkq-artifacts", "T-00001")
+		st, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("%s artifact dir missing at %s: %v", name, dir, err)
+		}
+		if !st.IsDir() {
+			t.Fatalf("%s artifact path is not a directory: %s", name, dir)
+		}
+	}
+}
+
+func TestWatchFollowNDJSONParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + follows subprocesses")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, nil)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	oldOut, oldErr := runFollowWithMutation(t, bins.wrkq, oldDir,
+		[]string{"watch", "--ndjson", "--since", "0"},
+		[]string{"touch", "inbox/follow", "-t", "Follow Task"},
+	)
+	newOut, newErr := runFollowWithMutation(t, bins.mirror, newDir,
+		[]string{"watch", "--ndjson", "--since", "0"},
+		[]string{"touch", "inbox/follow", "-t", "Follow Task"},
+	)
+
+	if !strings.Contains(oldErr, "wrkq watch is deprecated; use wrkq monitor watch --raw") {
+		t.Fatalf("legacy watch follow stderr missing deprecation warning: %q", oldErr)
+	}
+	if normalize(newErr) != normalize(oldErr) {
+		t.Fatalf("watch follow stderr mismatch:\n old: %q\n new: %q", oldErr, newErr)
+	}
+	if got, want := normalizeUUIDString(normalizeWatchFollowLines(newOut)), normalizeUUIDString(normalizeWatchFollowLines(oldOut)); got != want {
+		t.Fatalf("watch follow stdout mismatch:\n old:\n%s\n new:\n%s", want, got)
+	}
+}
+
+func TestMonitorWatchFollowNDJSONParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + follows subprocesses")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, nil)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	oldOut, oldErr := runFollowWithMutation(t, bins.wrkq, oldDir,
+		[]string{"monitor", "watch", "--since", "0", "--event-type", "task.created"},
+		[]string{"touch", "inbox/follow", "-t", "Follow Task"},
+	)
+	newOut, newErr := runFollowWithMutation(t, bins.mirror, newDir,
+		[]string{"monitor", "watch", "--since", "0", "--event-type", "task.created"},
+		[]string{"touch", "inbox/follow", "-t", "Follow Task"},
+	)
+
+	if normalize(newErr) != normalize(oldErr) {
+		t.Fatalf("monitor watch follow stderr mismatch:\n old: %q\n new: %q", oldErr, newErr)
+	}
+	if got, want := normalizeUUIDString(normalizeMonitorFollowLines(newOut)), normalizeUUIDString(normalizeMonitorFollowLines(oldOut)); got != want {
+		t.Fatalf("monitor watch follow stdout mismatch:\n old:\n%s\n new:\n%s", want, got)
+	}
+}
+
+func TestSearchTTYHumanParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+	sidecar := filepath.Join(t.TempDir(), "search.sqlite")
+	searchEnv := []string{
+		"WRKQ_SEARCH_ENABLED=1",
+		"WRKQ_SEARCH_DENSE_PROVIDER=none",
+		"WRKQ_SEARCH_DB_PATH=" + sidecar,
+	}
+	base := seedFixtureFilesEnv(t, bins, [][]string{
+		{"touch", "inbox/find-me", "-t", "Needle Task", "-d", "needle payload text"},
+		{"index", "rebuild"},
+	}, nil, searchEnv)
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	oldOut, oldExit := runCLIOnTTYEnv(t, bins.wrkq, oldDir, []string{"search", "needle"}, searchEnv)
+	newOut, newExit := runCLIOnTTYEnv(t, bins.mirror, newDir, []string{"search", "needle"}, searchEnv)
+
+	if oldExit != newExit {
+		t.Fatalf("search TTY exit mismatch: old=%d new=%d\nold=%q\nnew=%q", oldExit, newExit, oldOut, newOut)
+	}
+	if normalize(newOut) != normalize(oldOut) {
+		t.Fatalf("search TTY human mismatch:\n old: %q\n new: %q", oldOut, newOut)
+	}
+	for _, want := range []string{"search", "needle", "Needle Task", "inbox/find-me"} {
+		if !strings.Contains(oldOut, want) {
+			t.Fatalf("legacy search TTY output missing %q (got %q)", want, oldOut)
+		}
+	}
+}
+
+func TestWatchTTYHumanSemanticParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds binaries + runs both CLIs on a pty")
+	}
+	bins := buildParityBinaries(t)
+	base := seedFixture(t, bins, [][]string{{"touch", "inbox/human", "-t", "Human Watch"}})
+	oldDir := copyFixture(t, base)
+	newDir := copyFixture(t, base)
+
+	oldOut, oldExit := runCLIOnTTY(t, bins.wrkq, oldDir, []string{"watch", "--follow=false"})
+	newOut, newExit := runCLIOnTTY(t, bins.mirror, newDir, []string{"watch", "--follow=false"})
+
+	if oldExit != newExit {
+		t.Fatalf("watch TTY exit mismatch: old=%d new=%d\nold=%q\nnew=%q", oldExit, newExit, oldOut, newOut)
+	}
+	if got, want := watchHumanSemanticSignature(newOut), watchHumanSemanticSignature(oldOut); got != want {
+		t.Fatalf("watch TTY semantic mismatch:\n old:\n%s\n new:\n%s", want, got)
 	}
 }
 
@@ -4104,6 +5326,40 @@ func runCLIStdin(t *testing.T, bin, dir string, args []string, extraEnv []string
 	return cliResult{exit: exit, stdout: stdout.String(), stderr: stderr.String()}
 }
 
+func runFollowWithMutation(t *testing.T, bin, dir string, followArgs []string, mutateArgs []string) (stdout, stderr string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, followArgs...)
+	cmd := exec.CommandContext(ctx, bin, full...)
+	cmd.Dir = dir
+	cmd.Env = hermeticEnv()
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start follow %s %v: %v", bin, followArgs, err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	mut := runCLI(t, bin, dir, mutateArgs)
+	if mut.exit != 0 {
+		cancel()
+		_ = cmd.Wait()
+		t.Fatalf("follow mutation %s %v failed: exit=%d stdout=%q stderr=%q", bin, mutateArgs, mut.exit, mut.stdout, mut.stderr)
+	}
+
+	waitErr := cmd.Wait()
+	if ctx.Err() == nil && waitErr != nil {
+		t.Fatalf("follow %s %v exited before timeout: %v stdout=%q stderr=%q", bin, followArgs, waitErr, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "task.created") {
+		t.Fatalf("follow %s %v did not observe task.created before timeout; stdout=%q stderr=%q", bin, followArgs, out.String(), errOut.String())
+	}
+	return out.String(), errOut.String()
+}
+
 func mustRun(t *testing.T, bin, dir string, args []string) {
 	mustRunEnv(t, bin, dir, args, nil)
 }
@@ -4131,8 +5387,67 @@ func normalize(s string) string {
 	return rfc3339Re.ReplaceAllString(s, "<TS>")
 }
 
+func normalizeUUIDString(s string) string {
+	return uuidRe.ReplaceAllString(s, "<UUID>")
+}
+
+func normalizeWatchFollowLines(s string) string {
+	return normalizeFollowLines(s, "task.created")
+}
+
+func normalizeMonitorFollowLines(s string) string {
+	return normalizeFollowLines(s, "task.created")
+}
+
+func normalizeFollowLines(s, eventType string) string {
+	var kept []string
+	for _, line := range nonEmptyLines(s) {
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		if row["event_type"] != eventType {
+			continue
+		}
+		kept = append(kept, normalize(line))
+	}
+	return strings.Join(kept, "\n")
+}
+
+func watchHumanSemanticSignature(out string) string {
+	out = strings.ReplaceAll(out, "\r\n", "\n")
+	var sig []string
+	for _, line := range nonEmptyLines(out) {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "wrkq watch is deprecated"):
+			sig = append(sig, "warning:"+trimmed)
+		case strings.HasPrefix(trimmed, "["):
+			sig = append(sig, "event:"+normalizeUUIDString(normalize(trimmed)))
+		case strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}"):
+			sig = append(sig, "payload:"+watchPayloadSignature(trimmed))
+		default:
+			sig = append(sig, "line:"+normalizeUUIDString(normalize(trimmed)))
+		}
+	}
+	return strings.Join(sig, "\n")
+}
+
+func watchPayloadSignature(payload string) string {
+	payload = strings.TrimPrefix(strings.TrimSuffix(payload, "}"), "{")
+	if strings.TrimSpace(payload) == "" {
+		return "{}"
+	}
+	parts := strings.Split(payload, ", ")
+	for i := range parts {
+		parts[i] = normalizeUUIDString(normalize(parts[i]))
+	}
+	sort.Strings(parts)
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
 // snapshot renders the durable task state as a stable string: id, slug, state,
-// priority, kind, etag, and whether acknowledged/completed timestamps are set
+// priority, kind, project/routing/linkage/text/meta/date fields, etag, and whether acknowledged/completed timestamps are set
 // (presence, not value ✓ the wall-clock value legitimately differs per run).
 // Provenance columns (updated_by, via) are intentionally excluded: the RPC path
 // records via='rpc' by design, which is a correct difference, not a regression.
@@ -4144,7 +5459,18 @@ func snapshot(t *testing.T, dir string) string {
 	}
 	defer func() { _ = database.Close() }()
 	rows, err := database.Query(`
-		SELECT id, slug, state, priority, kind, etag,
+		SELECT id, slug, state, priority, kind,
+		       project_uuid,
+		       COALESCE(parent_task_uuid, ''), COALESCE(assignee_principal_ref, ''),
+		       COALESCE(description, ''), COALESCE(specification, ''),
+		       COALESCE(labels, ''), COALESCE(meta, ''),
+		       COALESCE(requested_by_project_id, ''), COALESCE(assigned_project_id, ''),
+		       COALESCE(resolution, ''),
+		       COALESCE(cp_project_id, ''), COALESCE(cp_work_item_id, ''),
+		       COALESCE(cp_run_id, ''), COALESCE(cp_session_id, ''),
+		       COALESCE(run_status, ''),
+		       COALESCE(start_at, ''), COALESCE(due_at, ''),
+		       etag,
 		       CASE WHEN acknowledged_at IS NOT NULL AND acknowledged_at != '' THEN 'ack' ELSE '-' END,
 		       CASE WHEN completed_at    IS NOT NULL AND completed_at    != '' THEN 'done' ELSE '-' END
 		FROM tasks ORDER BY id`)
@@ -4154,37 +5480,49 @@ func snapshot(t *testing.T, dir string) string {
 	defer func() { _ = rows.Close() }()
 	var b strings.Builder
 	for rows.Next() {
-		var id, slug, state, kind, ackd, done string
+		var id, slug, state, kind, projectUUID, description, specification, labels, meta string
+		var parentTaskUUID, assignee, requestedBy, assignedProject, resolution string
+		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus string
+		var startAt, dueAt, ackd, done string
 		var prio, etag int
-		if err := rows.Scan(&id, &slug, &state, &prio, &kind, &etag, &ackd, &done); err != nil {
+		if err := rows.Scan(&id, &slug, &state, &prio, &kind, &projectUUID, &parentTaskUUID, &assignee, &description, &specification, &labels, &meta, &requestedBy, &assignedProject, &resolution, &cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus, &startAt, &dueAt, &etag, &ackd, &done); err != nil {
 			t.Fatalf("snapshot scan: %v", err)
 		}
-		b.WriteString("task|" + strings.Join([]string{id, slug, state, strconv.Itoa(prio), kind, strconv.Itoa(etag), ackd, done}, "|"))
+		b.WriteString("task|" + strings.Join([]string{
+			id, slug, state, strconv.Itoa(prio), kind,
+			projectUUID,
+			parentTaskUUID, assignee,
+			description, specification, labels, meta, startAt, dueAt,
+			requestedBy, assignedProject, resolution,
+			cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus,
+			strconv.Itoa(etag), ackd, done,
+		}, "|"))
 		b.WriteByte('\n')
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("snapshot rows: %v", err)
 	}
 
-	// webhook_urls is included so the DEDICATED global-webhook family (T-05119,
-	// stored on the root container) proves DURABLE write parity — the rendered
-	// output is byte-checked separately, but the on-disk webhook_urls value must
-	// also match between legacy and the RPC mirror.
-	// updated_by_principal_ref is included so caller-resolved write ATTRIBUTION
-	// (e.g. webhook add --as agent:flag-principal) is proven durable + identical
-	// between legacy and the RPC mirror — the rendered output excludes provenance,
-	// so a byte-match alone would miss an attribution regression (daedalus #10261).
-	crows, err := database.Query(`SELECT id, slug, kind, COALESCE(webhook_urls, ''), COALESCE(updated_by_principal_ref, '') FROM containers ORDER BY id`)
+	// webhook_urls is included so the DEDICATED webhook surfaces prove DURABLE
+	// write parity. archived_at presence + etag make container rm/archive parity
+	// durable, not just rendered. updated_by_principal_ref proves caller-resolved
+	// write ATTRIBUTION (daedalus #10261).
+	crows, err := database.Query(`
+		SELECT id, slug, kind, COALESCE(parent_uuid, ''), COALESCE(webhook_urls, ''),
+		       CASE WHEN archived_at IS NOT NULL AND archived_at != '' THEN 'arch' ELSE '-' END,
+		       etag, COALESCE(updated_by_principal_ref, '')
+		FROM containers ORDER BY id`)
 	if err != nil {
 		t.Fatalf("snapshot container query: %v", err)
 	}
 	defer func() { _ = crows.Close() }()
 	for crows.Next() {
-		var id, slug, kind, hooks, updatedBy string
-		if err := crows.Scan(&id, &slug, &kind, &hooks, &updatedBy); err != nil {
+		var id, slug, kind, parentUUID, hooks, archived, updatedBy string
+		var etag int
+		if err := crows.Scan(&id, &slug, &kind, &parentUUID, &hooks, &archived, &etag, &updatedBy); err != nil {
 			t.Fatalf("snapshot container scan: %v", err)
 		}
-		b.WriteString("container|" + strings.Join([]string{id, slug, kind, hooks, updatedBy}, "|") + "\n")
+		b.WriteString("container|" + strings.Join([]string{id, slug, kind, parentUUID, hooks, archived, strconv.Itoa(etag), updatedBy}, "|") + "\n")
 	}
 	if err := crows.Err(); err != nil {
 		t.Fatalf("snapshot container rows: %v", err)

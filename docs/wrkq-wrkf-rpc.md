@@ -309,7 +309,10 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > protocol), a `task.copied` event, and a post-commit `created` webhook carrying a
 > synthetic `source_uuid` change. The CLI owns multi-source fan-out, stdin
 > sources, the `>5`-source prompt/abort/`--yes`, the dry-run plan,
-> nullglob/continue-on-error/jobs, output rendering, and project-root scoping:
+> nullglob/continue-on-error/jobs, output rendering, project-root scoping, and
+> `-r/--recursive` compatibility. Legacy parses `--recursive` but still resolves
+> only source tasks; the mirror accepts and ignores it for task sources, while
+> container sources continue to fail through task resolution.
 > `WrkqTaskCopyParams{ source, destination, overwrite?, withAttachments?,
 > shallow?, expectEtag?, actor?, idempotencyKey? }` → `WrkqTaskCopyResult{
 > source_id, source_uuid, dest_id, dest_uuid, dest_path, attachments_copied?,
@@ -375,9 +378,10 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > They are non-canonical compat carriers (named `wire_*`) and the CLI **strips them from
 > the user-facing `tree --json` projection** (legacy never exposed them) — they are
 > hidden from `tree --json`, NOT from the RPC response.
-> The CLI owns ONLY byte rendering (json / ndjson / porcelain); the interactive
-> pretty/human renderer is TTY-only and not mirrored (non-deterministic
-> `opened N ago` + ANSI). Cataloged + fingerprinted (TestTreeViewDTOFingerprint).
+> The CLI owns ONLY byte rendering (json / ndjson / porcelain / forced
+> `--pretty`). The forced pretty renderer uses these same carriers; parity tests
+> pin `WRKQ_NOW` for relative `opened N ago` text while ANSI remains terminal-gated.
+> Cataloged + fingerprinted (TestTreeViewDTOFingerprint).
 
 > **`wrkq.history.listView`** is the CLI compatibility **history read model** for
 > `wrkq log`, **not** `wrkf.event.query`. It reads the generic `event_log` table
@@ -439,6 +443,9 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 >   monitorEventLine data row MINUS the client-owned `type` discriminator (the mirror
 >   re-stamps `"wrkq.monitor.event"` on render):
 >   `{ id, timestamp, resource_type, resource_uuid?, resource_id?, event_type, payload? }`.
+>   There is intentionally no `scope` param today: legacy non-raw
+>   `monitor watch --scope` returns `--scope is not implemented yet`, and
+>   `monitor watch --raw` bypasses that legacy gate into the unfiltered raw tail.
 > - **`wrkq.monitor.stateView`** is the SINGLE authoritative `--until` condition
 >   snapshot for `monitor watch --until` / `monitor wait`. It evaluates the condition
 >   ONCE against current task state and NEVER sleeps/times out/stalls/emits terminal
@@ -518,8 +525,15 @@ interface WrkqTaskCreateParams {
   state?: WrkqTaskState;
   parentTask?: string;
   assigneePrincipalRef?: string | null;
+  requestedBy?: string;
+  assignedProject?: string;
+  resolution?: "done" | "wont_do" | "duplicate" | "needs_info";
   labels?: string[];
   meta?: Record<string, unknown>;
+  metaRaw?: string; // compatibility carrier: validated JSON object/null stored verbatim
+  dueAt?: string;
+  startAt?: string;
+  forceUuid?: string; // lowercase UUIDv4, mirrors `wrkq touch --force-uuid`
   idempotencyKey?: string;
 }
 
@@ -546,20 +560,38 @@ returns `hasDescription` and `hasSpecification`, computed with
 interface WrkqTaskUpdateParams {
   task: string;
   patch: {
+    slug?: string;
     title?: string;
     description?: string;
     specification?: string;
     state?: WrkqTaskState;
     priority?: number;
     kind?: string;
+    parentTask?: string; // task selector; empty string clears parent
     labels?: string[];
     meta?: Record<string, unknown>;
+    metaRaw?: string; // compatibility carrier: validated JSON object/null stored verbatim
     assigneePrincipalRef?: string | null;
+    requestedBy?: string;
+    assignedProject?: string;
+    resolution?: "done" | "wont_do" | "duplicate" | "needs_info";
+    cpProjectId?: string;
+    cpWorkItemId?: string;
+    cpRunId?: string;
+    sessionId?: string; // stored as cp_session_id
+    runStatus?: "queued" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
     dueAt?: string | null;
     startAt?: string | null;
   };
   expectEtag?: number;   // CAS precondition; see §9.1
   idempotencyKey?: string;
+}
+
+interface WrkqTaskMoveParams {
+  task: string;
+  targetPath: string;     // existing container, or parent path + final task slug
+  overwriteTask?: boolean; // replace existing destination task when targetPath names one
+  expectEtag?: number;    // CAS precondition; see §9.1
 }
 
 interface WrkqTask {
@@ -619,6 +651,11 @@ interface WrkqTaskRestoreParams {
 }
 ```
 
+`metaRaw` exists for CLI-compatibility projections that must preserve the legacy
+stored JSON bytes, including key order, for `--meta` / `--meta-file` parity. Normal
+RPC callers should prefer structured `meta`; when `metaRaw` is supplied, the
+server validates it as a JSON object or `null` and stores that exact trimmed text.
+
 `wrkq.task.acknowledge` records a terminal-state receipt (`acknowledgedAt`).
 The task must be `completed` or `cancelled` unless `force: true`
 (else `WRKQ_VALIDATION`). An already-acknowledged task is a no-op: the current
@@ -667,7 +704,8 @@ mirror carries no confirmation flow — it owns only the caller-side scoping of 
 task ref + the `toPath` destination and the legacy output rendering, and it calls
 `wrkq.task.restore` first (no speculative `task.show`) so the server's
 validation-before-resolution precedence holds end to end. Container restore has no
-RPC method yet and is hard-gated in the mirror.
+longer shares this task method; it is handled by the narrow
+`wrkq.container.restore` method below after a genuine task miss.
 
 #### Handoff methods
 
@@ -675,12 +713,12 @@ RPC method yet and is hard-gated in the mirror.
 wrkq.handoff.create      [new mutation method — caller-owned scope; see handoff note]
 wrkq.handoff.get
 wrkq.handoff.listView    [caller-scoped list projection]
+wrkq.handoff.searchView  [caller-scoped search projection]
 wrkq.handoff.acknowledge [new mutation method — server-owned etag CAS]
 ```
-(`wrkq.handoff.searchView` is DEFERRED until the search/index slice lands.)
 
 > **Handoff family** (T-05117, daedalus hrcchat#10211) backs `wrkq handoff
-> create/get/list/acknowledge`. Handoffs are agent-scoped session-continuity
+> create/get/list/search/acknowledge`. Handoffs are agent-scoped session-continuity
 > records. Scope is **caller-owned but NOT project-root**: the mirror resolves
 > `--scope` / agent-runtime env (`ASP_SCOPE_REF` → `ASP_HANDLE` →
 > `ASP_AGENT_ID`+`ASP_PROJECT`) via `scope.Resolve` and **enforces self-scope for
@@ -709,6 +747,14 @@ wrkq.handoff.acknowledge [new mutation method — server-owned etag CAS]
 >   limit?, cursor? }` → `{ items: WrkqHandoff[], nextCursor }`, owning the legacy
 >   cursor pagination server-side. `scopeRef` is the CALLER-resolved canonical
 >   project scope; the server never derives it from env.
+> - **`wrkq.handoff.searchView`** is the caller-scoped search page:
+>   `{ query, scopeRef, status?, limit?, cursor? }` →
+>   `{ handoffs: WrkqHandoff[], next_cursor, truncated, stale?, stale_event_count?,
+>   index_warning? }`. The server owns the search sidecar, best-effort
+>   `IndexPending`, `resource_type=handoff` search, result hydration, and the
+>   legacy base64 offset cursor. The mirror still owns caller-side scope
+>   diagnostics and renders the legacy `handoffSearchOutput` JSON/NDJSON/human
+>   shape.
 > - **`wrkq.handoff.acknowledge`** transitions pending → acknowledged
 >   (`handoff.acknowledged`). The server owns the etag CAS (`ifMatch` mismatch →
 >   `WRKQ_CONFLICT`, the mirror maps to exit 6 "etag mismatch"), the
@@ -975,7 +1021,12 @@ deletes by composite key; a 0-row delete → `WRKQ_NOT_FOUND`.
 wrkq.container.show
 wrkq.container.catView  [CLI compatibility projection]
 wrkq.container.list
+wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
 wrkq.container.update
+wrkq.container.move
+wrkq.container.webhookSet
+wrkq.container.archive
+wrkq.container.restore
 ```
 
 > **`wrkq.container.catView`** is a CLI compatibility read model, **not** a
@@ -988,6 +1039,13 @@ wrkq.container.update
 > Cataloged + fingerprinted. All `wrkq container cat` render modes
 > (json/ndjson/porcelain/markdown/raw) are produced **CLI-side** from this one
 > projection — no scalar is missing — so no per-mode RPC surface exists.
+
+> **`wrkq.project.listView`** is a CLI compatibility read model for
+> `wrkq projects`. It returns only root-child project containers, ignores
+> project-root scoping, filters archived projects unless requested, and paginates
+> by slug using the legacy cursor envelope:
+> `{ items: WrkqProjectEntry[], next_cursor? }`, where each entry is the legacy
+> `{type,id,slug,title,path}` row.
 
 ```ts
 interface WrkqContainerShowParams { path?: string; project?: string }
@@ -1023,9 +1081,44 @@ interface WrkqContainerUpdateParams {
 }
 // returns the updated WrkqContainer
 
+interface WrkqContainerMoveParams {
+  container: string;        // path / friendly-id / uuid selector
+  destination: string;      // existing container selector OR new container path
+  destinationIsContainer?: boolean; // true => move into existing destination
+  dryRun?: boolean;         // validate only; no mutation
+  expectEtag?: number;      // optional etag CAS; stale → WRKQ_CONFLICT
+  actor?: string;
+}
+// returns the source WrkqContainer after validation/mutation
+
+interface WrkqContainerWebhookSetParams {
+  container?: string;       // required unless all=true; path / friendly-id / uuid selector
+  all?: boolean;            // apply add/remove delta to all non-archived containers
+  replace?: boolean;        // true => webhookUrls replaces the stored list
+  webhookUrls?: string[];   // replacement list; trimmed + http(s)-with-host validated
+  addWebhookUrls?: string[];    // delta add list; trimmed + validated
+  removeWebhookUrls?: string[]; // delta remove list; exact-match removal, no URL validation
+  expectEtag?: number;      // optional single-container etag CAS; stale → WRKQ_CONFLICT
+  actor?: string;
+}
+// returns the legacy map-shaped `container set` result in MAP-ALPHABETICAL key order:
+//   single: { container_path, container_uuid, count, updated, webhook_urls }
+//   all:    { all, updated }
+
 interface WrkqContainerDeleteParams {
   container?: string; path?: string; project?: string;
   expectEtag?: number;     // optional etag CAS
+  actor?: string;
+}
+
+interface WrkqContainerArchiveParams {
+  container?: string; path?: string; project?: string;
+  expectEtag?: number;     // optional etag CAS
+  actor?: string;
+}
+
+interface WrkqContainerRestoreParams {
+  container?: string; path?: string; project?: string;
   actor?: string;
 }
 
@@ -1049,6 +1142,18 @@ interface WrkqContainerDeleteRecursiveResult { /* see above */ }
 ```
 
 `container.show` resolves by `path` or `project`; a miss → `WRKQ_NOT_FOUND`.
+
+`wrkq.container.move` backs the container-source branch of legacy `wrkq mv`. It is
+deliberately **separate** from `wrkq.container.update`: update remains the narrow
+slug/title surface for `rename-container`, while move handles the legacy `mv`
+command's parent/slug semantics. With `destinationIsContainer=true`, the server
+resolves `destination` as an existing container and moves the source under it via
+the store's `container.moved` path. Otherwise, `destination` is treated as a new
+path: the server resolves the parent container plus final slug, performs the
+legacy sibling-conflict check, then updates `slug` and `parent_uuid` in one store
+update. `dryRun` performs the same validation without mutating. The CLI mirror
+owns project-root scoping, source-type probing (task first, then container), and
+legacy output rendering.
 
 `wrkq.container.update` renames a container **in place** — the FIRST patch surface
 is deliberately **NARROW**: only `{ slug?, title? }` (T-05112 daedalus ruling
@@ -1076,6 +1181,29 @@ an overbroad mutation sink. `wrkq rename-container` mirrors it: the CLI owns the
 `--dry-run` rendering and the project-root scoping of the container selector; the
 slug/title patch + CAS + event are server-owned. The method is **non-destructive**
 (no prompt).
+
+`wrkq.container.webhookSet` is the dedicated compatibility mutation for
+`wrkq container set`, not an extension of `wrkq.container.update`. It updates only
+`webhook_urls` on one resolved container or applies an add/remove delta to all
+non-archived containers. Replacement and added URLs are validated as http/https
+URLs with a host; removals are exact string matches and are not URL-validated,
+matching legacy. The server records attribution and emits the normal
+`container.updated` event through the store update path. The CLI mirror owns
+legacy flag precedence, project-root scoping for the single-container selector,
+and TTY vs non-TTY rendering.
+
+`wrkq.container.archive` soft-archives one resolved container by setting
+`archived_at` and logging `container.archived`; it is the server-owned mutation
+behind legacy `wrkq rm <container>` without `--purge`. It intentionally does not
+perform recursive deletion. `wrkq rm <container> --purge` uses
+`wrkq.container.delete`, which remains empty-only; recursive subtree purge stays
+on `wrkq.container.deleteRecursive` via `wrkq rmdir --force`.
+
+`wrkq.container.restore` clears `archived_at` for one resolved container and logs
+`container.restored` with the legacy `{"action":"restored"}` payload. It does not
+bump the container etag, matching legacy restore behavior. The `wrkq restore`
+mirror calls `wrkq.task.restore` first so task flag validation precedence remains
+unchanged; only a genuine task miss falls through to this container method.
 
 `wrkq.container.delete` hard-deletes an EMPTY container (root rejected →
 `WRKQ_VALIDATION`; non-empty → `WRKQ_VALIDATION` "not empty"). `wrkq rmdir`
@@ -1181,12 +1309,14 @@ wrkq.bundle.exportView  [new read method — server-owned LOGICAL snapshot; CLI 
 >   bytes**.
 >
 > **ATTACHMENT BYTES**: per the `wrkq.wrkf-rpc.attachment-byte-transfer` arch
-> record, attachment bytes do **NOT** cross inline in the snapshot. `wrkq-rpccli
-> bundle create` **HARD-GATES** `--with-attachments` with a clean validation error
-> until the chunked byte-transfer path (`wrkq.attachment.getBytes`) is wired into
-> bundle materialization — a fat one-frame attachment bundle is **not** allowed.
-> The legacy `wrkq` binary still materializes `--with-attachments` for direct-DB
-> use. Cataloged + fingerprinted (registering it changes the method catalog +
+> record, attachment bytes do **NOT** cross inline in the snapshot. Current legacy
+> `bundle create --with-attachments` behavior is descriptor-only: the manifest
+> records `with_attachments=true`, `attachments` carries `{task_uuid, filename}`
+> descriptors, and the shared materializer does not write attachment files. The
+> RPC mirror matches that behavior. If future bundle materialization writes
+> attachment files, it must fetch bytes through the chunked byte-transfer path
+> (`wrkq.attachment.getBytes`); a fat one-frame attachment bundle is **not**
+> allowed. Cataloged + fingerprinted (registering it changes the method catalog +
 > `protocolSchemaHash`; the `bundle.Manifest`/`EventRow`/`AttachmentDescriptor`
 > shapes are pinned by the DTO fingerprint). The final CLI JSON result map
 > (`bundle_dir, containers_count, manifest, tasks_count`) is rendered CLI-side in

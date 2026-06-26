@@ -2,6 +2,9 @@ package wrkqapi
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/lherron/wrkq/internal/search/embed"
 	"github.com/lherron/wrkq/internal/search/indexdb"
 	"github.com/lherron/wrkq/internal/search/indexer"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 // SearchConfig carries the SERVER's search/index host configuration. The server
@@ -123,6 +127,10 @@ type IndexStatusParams struct{}
 // surface parity; the server always runs synchronously.
 type IndexLifecycleParams struct {
 	Foreground bool `json:"foreground,omitempty"`
+}
+
+type handoffSearchCursorPayload struct {
+	Offset int `json:"offset"`
 }
 
 // ─── search host plumbing (server owns the sidecar + embedder) ────────────────
@@ -248,6 +256,127 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 		out.Results = append(out.Results, projectResult(r))
 	}
 	return out, nil
+}
+
+// HandoffSearchView backs wrkq.handoff.searchView. SERVER-OWNED: it opens the
+// search sidecar, indexes pending canonical handoff changes best-effort (warning
+// returned for stderr parity), searches resource_type=handoff, hydrates the
+// handoff rows, and returns the legacy offset cursor envelope. Scope is still
+// caller-owned: the mirror sends the already-resolved canonical scopeRef.
+func (a *API) HandoffSearchView(ctx context.Context, p HandoffSearchViewParams) (*WrkqHandoffSearchResult, error) {
+	query := strings.TrimSpace(p.Query)
+	if query == "" {
+		return nil, NewValidationError("query is required", map[string]any{"field": "query"})
+	}
+	scopeRef := strings.TrimSpace(p.ScopeRef)
+	if scopeRef == "" {
+		return nil, NewValidationError("scopeRef is required", map[string]any{"field": "scopeRef"})
+	}
+	status, err := normalizeHandoffSearchStatus(p.Status)
+	if err != nil {
+		return nil, NewValidationError(err.Error(), map[string]any{"field": "status"})
+	}
+	offset, err := decodeHandoffSearchCursor(strings.TrimSpace(p.Cursor))
+	if err != nil {
+		return nil, NewValidationError(err.Error(), map[string]any{"field": "cursor"})
+	}
+
+	idx, err := a.openSidecar()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = idx.Close() }()
+
+	embedder := a.denseEmbedder()
+	ix := indexer.New(a.db, idx, embedder)
+	ix.BatchSize = a.searchCfg.IndexBatchSize
+
+	sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	var warning string
+	if err := ix.IndexPending(sctx); err != nil {
+		warning = fmt.Sprintf("search index update failed: %v (proceeding with stale index)", err)
+	}
+
+	svc := search.NewService(a.db, idx, embedder)
+	resp, err := svc.Search(sctx, search.Options{
+		Query:        query,
+		ResourceType: "handoff",
+		ScopeRef:     scopeRef,
+		Status:       status,
+		Offset:       offset,
+		Limit:        p.Limit,
+	})
+	if err != nil {
+		return nil, classifySearchError(err)
+	}
+
+	out := &WrkqHandoffSearchResult{
+		Handoffs:     make([]WrkqHandoff, 0, len(resp.Results)),
+		Truncated:    false,
+		Stale:        resp.Stale,
+		IndexWarning: warning,
+	}
+	if resp.Status != nil {
+		out.StaleEventCount = resp.Status.StaleEventCount
+	}
+	for _, result := range resp.Results {
+		handoff, getErr := store.GetHandoff(sctx, a.db, result.ResourceUUID)
+		if getErr != nil {
+			continue
+		}
+		out.Handoffs = append(out.Handoffs, toWrkqHandoff(handoff))
+	}
+	nextOffset := resp.Offset + len(resp.Results)
+	if nextOffset < resp.TotalMatches {
+		token, encErr := encodeHandoffSearchCursor(nextOffset)
+		if encErr != nil {
+			return nil, NewInternalError(encErr)
+		}
+		out.NextCursor = &token
+		out.Truncated = true
+	}
+	return out, nil
+}
+
+func normalizeHandoffSearchStatus(status string) (string, error) {
+	switch strings.TrimSpace(status) {
+	case "", "pending":
+		return "pending", nil
+	case "acknowledged":
+		return "acknowledged", nil
+	case "all":
+		return "all", nil
+	default:
+		return "", fmt.Errorf("invalid --status %q: must be pending, acknowledged, or all", status)
+	}
+}
+
+func decodeHandoffSearchCursor(token string) (int, error) {
+	if token == "" {
+		return 0, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --cursor: %w", err)
+	}
+	var c handoffSearchCursorPayload
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return 0, fmt.Errorf("invalid --cursor: %w", err)
+	}
+	if c.Offset < 0 {
+		return 0, fmt.Errorf("invalid --cursor: offset must be non-negative")
+	}
+	return c.Offset, nil
+}
+
+func encodeHandoffSearchCursor(offset int) (string, error) {
+	raw, err := json.Marshal(handoffSearchCursorPayload{Offset: offset})
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
 }
 
 func projectResult(r search.Result) WrkqSearchResult {

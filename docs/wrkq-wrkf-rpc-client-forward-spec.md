@@ -1096,7 +1096,7 @@ interface WrkqBundleExportViewParams {
   project?: string;        // already project-root scoped
   pathPrefixes?: string[]; // already project-root scoped
   includeRefs?: boolean;
-  withAttachments?: boolean; // descriptors only; CLI mirror HARD-GATES this flag
+  withAttachments?: boolean; // descriptors only; current CLI mirror supports legacy descriptor-only behavior
   withEvents?: boolean;
   version?: string; commit?: string; buildDate?: string; // stamped into manifest
 }
@@ -1117,11 +1117,13 @@ Contract:
   deliberately **snake_case** — they are the legacy on-disk byte shapes the CLI
   writes verbatim. Do NOT camelCase them.
 - **Attachment bytes never cross in the snapshot** (`wrkq.wrkf-rpc.attachment-byte-transfer`):
-  `attachments` carries descriptors only. `wrkq-rpccli bundle create` **HARD-GATES**
-  `--with-attachments` with a clean validation error until chunked byte-transfer
-  (`wrkq.attachment.getBytes`) is wired into materialization; a fat one-frame
-  attachment bundle is not allowed. The legacy `wrkq` binary still supports
-  `--with-attachments` for direct-DB use.
+  `attachments` carries descriptors only. Current legacy `bundle create
+  --with-attachments` behavior is descriptor-only: it sets
+  `manifest.with_attachments=true` and records `{ task_uuid, filename }`
+  descriptors, but the shared materializer does not write attachment files. The
+  RPC mirror matches that behavior. If future bundle materialization writes
+  attachment files, bytes must be fetched through chunked byte-transfer
+  (`wrkq.attachment.getBytes`); a fat one-frame attachment bundle is not allowed.
 
 #### Task workflow methods
 

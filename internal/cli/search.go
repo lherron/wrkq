@@ -16,6 +16,7 @@ import (
 	"github.com/lherron/wrkq/internal/search/embed"
 	"github.com/lherron/wrkq/internal/search/indexdb"
 	"github.com/lherron/wrkq/internal/search/indexer"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -41,6 +42,7 @@ var (
 	searchNDJSON         bool
 	searchPorcelain      bool
 	searchHuman          bool
+	searchPretty         bool
 	searchExplain        bool
 	searchFresh          bool
 )
@@ -58,6 +60,7 @@ func init() {
 	searchCmd.Flags().BoolVar(&searchNDJSON, "ndjson", false, "Output as newline-delimited JSON")
 	searchCmd.Flags().BoolVar(&searchPorcelain, "porcelain", false, "Stable machine-readable output")
 	searchCmd.Flags().BoolVar(&searchHuman, "human", false, "Force human-readable output")
+	searchCmd.Flags().BoolVar(&searchPretty, "pretty", false, "Force human-readable output even when not a TTY")
 	searchCmd.Flags().BoolVar(&searchExplain, "explain", false, "Include ranking diagnostics in JSON output")
 	searchCmd.Flags().BoolVar(&searchFresh, "fresh", false, "Fail if the search index is stale")
 }
@@ -109,6 +112,9 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if searchPretty {
+		sel = outputSelection{Mode: outputModeHuman, Stable: searchPorcelain}
+	}
 	if cmd.Flag("json") == nil {
 		switch {
 		case (searchJSON && searchNDJSON) || (searchJSON && searchHuman) || (searchNDJSON && searchHuman):
@@ -132,7 +138,7 @@ func runSearch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	if resp.Stale {
-		fmt.Fprintln(cmd.ErrOrStderr(), paint(colStateStop, fmt.Sprintf("search index is stale by %d event(s)", resp.Status.StaleEventCount)))
+		fmt.Fprintln(cmd.ErrOrStderr(), style.Paint(style.ColStateStop, fmt.Sprintf("search index is stale by %d event(s)", resp.Status.StaleEventCount)))
 	}
 	renderSearchResults(cmd.OutOrStdout(), query, resp.Results)
 	return nil
@@ -159,7 +165,7 @@ const (
 // state badges line up whether or not a row matched on a comment.
 func renderSearchResults(w io.Writer, query string, results []search.Result) {
 	if len(results) == 0 {
-		fmt.Fprintln(w, paint(colDim, fmt.Sprintf("no matches for %q", query)))
+		fmt.Fprintln(w, style.Paint(style.ColDim, fmt.Sprintf("no matches for %q", query)))
 		return
 	}
 
@@ -168,9 +174,9 @@ func renderSearchResults(w io.Writer, query string, results []search.Result) {
 		noun = "result"
 	}
 	fmt.Fprintf(w, "%s %s   %s\n\n",
-		paint(colDim, "search"),
+		style.Paint(style.ColDim, "search"),
 		query,
-		paint(colDim, fmt.Sprintf("%d %s", len(results), noun)))
+		style.Paint(style.ColDim, fmt.Sprintf("%d %s", len(results), noun)))
 
 	// Measure the id / comment-id columns so the title column starts at a
 	// fixed offset across every row.
@@ -196,24 +202,24 @@ func renderSearchResults(w io.Writer, query string, results []search.Result) {
 	for _, r := range results {
 		// Primary line: id · comment-id · title · <state>
 		var line strings.Builder
-		line.WriteString(paint(colDim, padRight(r.TaskID, idW)))
+		line.WriteString(style.Paint(style.ColDim, padRight(r.TaskID, idW)))
 		if cidW > 0 {
 			cid := ""
 			if r.CommentID != nil {
 				cid = *r.CommentID
 			}
-			line.WriteString("  " + paint(colDim, padRight(cid, cidW)))
+			line.WriteString("  " + style.Paint(style.ColDim, padRight(cid, cidW)))
 		}
 		title := firstNonEmpty(r.Title, lastPathSegment(r.Path))
 		line.WriteString("  " + truncateRunes(title, searchTitleBudget))
 		if r.State != "" {
-			line.WriteString("  " + paint(stateColor(r.State), "<"+r.State+">"))
+			line.WriteString("  " + style.Paint(style.StateColor(r.State), "<"+r.State+">"))
 		}
 		fmt.Fprintln(w, line.String())
 
 		// Secondary line: path · score, aligned under the title.
 		fmt.Fprintf(w, "%s%s\n", indent,
-			paint(colDim, fmt.Sprintf("%s  ·  %.3f", r.Path, r.Score)))
+			style.Paint(style.ColDim, fmt.Sprintf("%s  ·  %.3f", r.Path, r.Score)))
 
 		// Tertiary line: the matched snippet, dim with highlighted terms.
 		if snip := clipSnippet(r.Snippet, searchSnippetBudget); snip != "" {
@@ -225,8 +231,8 @@ func renderSearchResults(w io.Writer, query string, results []search.Result) {
 // highlightTerms renders text in dim, lifting each occurrence of a query term
 // into the bold-amber hit accent. No-ops to plain dim when color is disabled.
 func highlightTerms(text string, terms []string) string {
-	if !colorEnabled || len(terms) == 0 {
-		return paint(colDim, text)
+	if !style.ColorEnabled || len(terms) == 0 {
+		return style.Paint(style.ColDim, text)
 	}
 	lower := strings.ToLower(text)
 	var spans [][2]int
@@ -245,11 +251,11 @@ func highlightTerms(text string, terms []string) string {
 		}
 	}
 	if len(spans) == 0 {
-		return paint(colDim, text)
+		return style.Paint(style.ColDim, text)
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
 
-	dim := "\033[" + colDim + "m"
+	dim := "\033[" + style.ColDim + "m"
 	hit := "\033[" + colHit + "m"
 	const reset = "\033[0m"
 	var b strings.Builder

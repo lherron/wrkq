@@ -28,6 +28,12 @@ func exitErrorReported(code int, err error) error {
 	return cliExitError{code: code, err: err, reported: true}
 }
 
+// exitError returns an error that exits with code while still allowing main to
+// print the generic Error: prefix.
+func exitError(code int, err error) error {
+	return cliExitError{code: code, err: err}
+}
+
 // ExitCodeForError returns the process exit code represented by err (1 by
 // default; the encoded code for a mirror exit error).
 func ExitCodeForError(err error) int {

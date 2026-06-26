@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -17,14 +18,13 @@ import (
 // rendering (json / ndjson / porcelain).
 //
 // Implemented surface (byte-proven against legacy, non-TTY): the bare non-TTY
-// default (NDJSON), --json, --ndjson, --porcelain, -L/--level, -a/--all, --open,
-// single path, project-root scoping. The interactive PRETTY (human) renderer is
-// HARD-GATED: it only fires on a real TTY (legacy gates the non-TTY default to
-// NDJSON for outputShapeList), and it embeds wall-clock-relative "opened N ago"
-// strings + ANSI color that cannot be byte-reproduced in a hermetic harness.
-// Multi-path and --fields are likewise hard-gated pending parity.
+// default (NDJSON), --json, --ndjson, --porcelain, --pretty, -L/--level,
+// -a/--all, --open, single path, and project-root scoping. --pretty forces the
+// human tree layout even when stdout is piped; WRKQ_NOW pins the relative
+// "opened N ago" text in parity tests and color remains terminal-gated, so the
+// forced output is deterministic.
 func newTreeCmd() *cobra.Command {
-	var asJSON, ndjson, porcelain, includeArchived, openOnly bool
+	var asJSON, ndjson, porcelain, pretty, includeArchived, openOnly bool
 	var depth int
 	var fields string
 	cmd := &cobra.Command{
@@ -32,13 +32,7 @@ func newTreeCmd() *cobra.Command {
 		Short: "Display containers and tasks in a tree structure",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 1 {
-				return fmt.Errorf("tree: multi-path not yet implemented in wrkq-rpccli (hard-gated pending parity)")
-			}
-			if fields != "" {
-				return fmt.Errorf("tree: --fields not yet implemented in wrkq-rpccli (hard-gated pending parity)")
-			}
-			mode, stable, err := resolveTreeMode(cmd, asJSON, ndjson, porcelain)
+			mode, stable, err := resolveTreeMode(cmd, asJSON, ndjson, porcelain, pretty)
 			if err != nil {
 				return err
 			}
@@ -50,12 +44,11 @@ func newTreeCmd() *cobra.Command {
 			defer closeFn()
 
 			// Legacy: empty args → applyProjectRootToPath("", defaultToRoot=true);
-			// single path → applyProjectRootToPath(arg, false). The scoper reproduces
-			// both via paths(args, true): no args defaults to the configured root,
-			// one path is root-prefixed.
+			// one or more paths → applyProjectRootToPath(args[0], false). Extra path
+			// args and --fields are accepted but ignored by legacy tree.
 			scoped := sc.paths(args, true)
 			path := ""
-			if len(scoped) == 1 {
+			if len(scoped) > 0 {
 				path = scoped[0]
 			}
 
@@ -88,6 +81,8 @@ func newTreeCmd() *cobra.Command {
 				return renderTreePorcelain(out, &view)
 			case "json":
 				return renderTreeJSON(out, &view, stable)
+			case "human":
+				return renderTreeHuman(out, &view)
 			default: // ndjson
 				return renderTreeNDJSON(out, &view)
 			}
@@ -96,18 +91,19 @@ func newTreeCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&depth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
 	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include archived and empty containers")
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only open tasks")
-	cmd.Flags().StringVar(&fields, "fields", "", "Fields to display (comma-separated) (hard-gated: not yet implemented)")
+	cmd.Flags().StringVar(&fields, "fields", "", "Fields to display (comma-separated)")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force human-readable tree output even when not a TTY")
 	return cmd
 }
 
 // resolveTreeMode reproduces legacy runTree's mode decision for tree's surface.
 // Legacy tree is outputShapeList with DefaultTTY=human and NO DefaultNonTTY, so a
-// non-TTY default resolves to NDJSON (defaultNonTTYOutputMode for list). The TTY
-// pretty/human renderer is hard-gated (non-deterministic, TTY-only).
-func resolveTreeMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode string, stable bool, err error) {
+// non-TTY default resolves to NDJSON (defaultNonTTYOutputMode for list). --pretty
+// forces the same human tree renderer in non-TTY mode.
+func resolveTreeMode(cmd *cobra.Command, asJSON, ndjson, porcelain, pretty bool) (mode string, stable bool, err error) {
 	count := 0
 	var explicit string
 	if asJSON {
@@ -120,6 +116,9 @@ func resolveTreeMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode s
 	}
 	if count > 1 {
 		return "", false, fmt.Errorf("choose only one output mode")
+	}
+	if pretty {
+		return "human", false, nil
 	}
 	// Legacy: bare --porcelain (no --json/--ndjson/--output) → the original
 	// tab-separated tree porcelain format (legacyPorcelain), NOT the list NDJSON.
@@ -146,17 +145,16 @@ func resolveTreeMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode s
 			// raw is not in tree's allowed output set → legacy errors with this exact
 			// message. Emit it verbatim for byte-parity (not a gate).
 			return "", false, fmt.Errorf("output mode %q is not supported for this command", m)
-		case "table", "human", "yaml", "tsv":
-			// Legacy RENDERS these; the mirror cannot, so hard-gate (no silent
-			// degradation). Not a parity case.
-			return "", false, fmt.Errorf("tree: %s output not yet implemented in wrkq-rpccli (hard-gated pending parity)", m)
+		case "table", "human":
+			return "human", false, nil
+		case "yaml", "tsv":
+			return "", false, fmt.Errorf("output mode %q is not supported for this command", m)
 		default:
 			return "", false, fmt.Errorf("invalid output mode %q: choose table, human, json, ndjson, porcelain, yaml, tsv, or raw", outF.Value.String())
 		}
 	}
 	if isStdoutTTY(cmd.OutOrStdout()) {
-		// Legacy non-porcelain TTY default is the pretty human tree (DefaultTTY).
-		return "", false, fmt.Errorf("tree: pretty/human output not yet implemented in wrkq-rpccli (use --json / --ndjson / --porcelain)")
+		return "human", false, nil
 	}
 	return "ndjson", false, nil
 }
@@ -372,4 +370,79 @@ func printTreePorcelain(w io.Writer, nodes []*treeWireNode, prefix string) {
 			printTreePorcelain(w, child.Children, prefix+"  ")
 		}
 	}
+}
+
+func renderTreeHuman(w io.Writer, view *treeWireView) error {
+	header := view.Path
+	if header == "" {
+		header = "."
+	}
+	if view.ProjectID != "" {
+		header += " " + style.Paint(style.ColDim, fmt.Sprintf("[%s]", view.ProjectID))
+	}
+	fmt.Fprintln(w, header)
+	printTreeHuman(w, view.Children, "")
+	if view.HiddenContainersNotDisplayed > 0 {
+		fmt.Fprintln(w, style.Paint(style.ColDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", view.HiddenContainersNotDisplayed)))
+	}
+	return nil
+}
+
+func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
+	for i, child := range nodes {
+		isLastChild := i == len(nodes)-1
+		connector := "├── "
+		if isLastChild {
+			connector = "└── "
+		}
+		fmt.Fprintf(w, "%s%s%s\n", prefix, style.Paint(style.ColDim, connector), formatTreeHumanNode(child))
+		if len(child.Children) > 0 {
+			newPrefix := prefix + style.Paint(style.ColDim, "│") + "   "
+			if isLastChild {
+				newPrefix = prefix + "    "
+			}
+			printTreeHuman(w, child.Children, newPrefix)
+		}
+	}
+}
+
+func formatTreeHumanNode(node *treeWireNode) string {
+	var parts []string
+	if node.Type == "task" {
+		parts = append(parts, style.Paint(style.ColDim, node.ID))
+		if node.Title != "" && node.Title != node.Slug {
+			parts = append(parts, node.Title)
+		}
+		if node.State != "" {
+			parts = append(parts, style.Paint(style.StateColor(node.State), fmt.Sprintf("<%s>", formatTreeHumanTaskState(node))))
+		}
+	} else {
+		displayTitle := node.Title
+		if node.Slug == "inbox" && strings.EqualFold(node.Title, "inbox") {
+			displayTitle = "Inbox"
+		}
+		parts = append(parts, style.Paint(style.ColDir, node.Slug+"/"))
+		if displayTitle != node.Slug {
+			parts = append(parts, style.Paint(style.ColDim, fmt.Sprintf("(%s)", displayTitle)))
+		}
+		parts = append(parts, style.Paint(style.ColDim, fmt.Sprintf("[%s]", node.ID)))
+		if node.AllTasksCompleted {
+			parts = append(parts, style.Paint(style.ColDone, "(All done)"))
+		}
+	}
+	if node.IsArchived {
+		parts = append(parts, style.Paint(style.ColDim, "(archived)"))
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatTreeHumanTaskState(node *treeWireNode) string {
+	if node.State != "open" {
+		return node.State
+	}
+	openedAge := style.FormatOpenedAge(node.WireCreatedAt)
+	if openedAge == "" {
+		return node.State
+	}
+	return "opened " + openedAge + " ago"
 }

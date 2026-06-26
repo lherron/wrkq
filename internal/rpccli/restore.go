@@ -21,10 +21,9 @@ import (
 // intermediate states + drift). The mirror owns ONLY the caller-side scoping of
 // the task ref + the --to destination path and the legacy output rendering.
 //
-// Container targets are HARD-GATED with a clean non-zero error: there is no
-// wrkq.container.restore method, so container restore cannot be byte-proven on
-// this seam (mirrors the rm container hard-gate; container restore fans out with
-// the container archive/restore slice).
+// Container targets use the narrow wrkq.container.restore method after the task
+// restore method returns a genuine NOT_FOUND. The task call stays first so
+// validation-before-resolution precedence for restore flags remains server-owned.
 func newRestoreCmd() *cobra.Command {
 	var (
 		to          string
@@ -133,15 +132,36 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 
 	restored, rerr := tr.Call(ctx, "wrkq.task.restore", params)
 	if rerr != nil {
-		// Only a genuine NOT_FOUND (ref didn't resolve to a task) is rewritten to
-		// the container hard-gate / legacy not-found. Validation/conflict errors
+		// Only a genuine NOT_FOUND (ref didn't resolve to a task) falls through to
+		// container restore / legacy not-found. Validation/conflict errors
 		// (bad flag, etag/slug conflict) pass through unchanged — the server already
 		// owns their precedence ahead of the task lookup.
 		if isNotFound(rerr) {
-			// Is it a container? (legacy restores containers; this seam has no
-			// wrkq.container.restore — hard-gate, no silent degradation.)
-			if _, cerr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": arg}); cerr == nil {
-				return fmt.Errorf("restore: container targets are not yet supported in wrkq-rpccli (gated: container restore mode pending; got %s)", arg)
+			params := map[string]any{"container": arg}
+			if actor != "" {
+				params["actor"] = actor
+			}
+			raw, cerr := tr.Call(ctx, "wrkq.container.restore", params)
+			if cerr == nil {
+				var c struct {
+					UUID string `json:"uuid"`
+				}
+				if uerr := json.Unmarshal(raw, &c); uerr != nil {
+					return uerr
+				}
+				if !isStdoutTTY(cmd.OutOrStdout()) {
+					return encodeJSONIndent(cmd, map[string]interface{}{
+						"type":     "container",
+						"selector": arg,
+						"uuid":     c.UUID,
+						"restored": true,
+					})
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Restored container: %s\n", arg)
+				return nil
+			}
+			if !isNotFound(cerr) {
+				return errors.New(rpcMessage(cerr))
 			}
 			// Neither task nor container: legacy emits "not found: <arg>".
 			return fmt.Errorf("not found: %s", arg)

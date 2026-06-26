@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/spf13/cobra"
@@ -19,10 +20,10 @@ import (
 // project-root scoping, the legacy purge prompt + abort + --yes, dry-run
 // rendering, output-mode selection, and the partial-failure exit-code taxonomy.
 //
-// B0 scope: TASK targets are byte-proven. Container targets are HARD-GATED with
-// a clean non-zero error (no silent degradation) — wrkq.container.delete has no
-// archive mode yet, so container rm cannot be byte-proven on this seam. That
-// fans out on the blessed seam (rmdir --force / container archive mode) later.
+// Task targets use wrkq.task.delete with an explicit mode. Container targets use
+// wrkq.container.archive for the legacy default soft-delete and wrkq.container.delete
+// for --purge (empty-only hard delete, as legacy rm documents; recursive deletion
+// remains the rmdir --force surface).
 func newRmCmd() *cobra.Command {
 	var (
 		recursive       bool
@@ -95,8 +96,7 @@ type rmResult struct {
 	BytesFreed         int64  `json:"bytes_freed,omitempty"`
 }
 
-// rmTarget is a resolved removal target. Container targets are recorded so they
-// can be hard-gated; only task targets are byte-proven on this seam (B0).
+// rmTarget is a resolved removal target.
 type rmTarget struct {
 	Type  string // "task" | "container"
 	UUID  string
@@ -166,16 +166,6 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 		return nil
 	}
 
-	// HARD-GATE container targets: container rm cannot be byte-proven on this seam
-	// (wrkq.container.delete has no archive mode). Clean non-zero, no silent
-	// degradation — abort BEFORE any mutation so a mixed batch never partially
-	// applies through the unproven path.
-	for _, tgt := range targets {
-		if tgt.Type == "container" {
-			return fmt.Errorf("rm: container targets are not yet supported in wrkq-rpccli (gated: container archive/purge mode pending; got %s)", tgt.ID)
-		}
-	}
-
 	// Dry run.
 	if f.dryRun {
 		if !isStdoutTTY(cmd.OutOrStdout()) {
@@ -204,7 +194,7 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 	results := []rmResult{}
 	result := op.Execute(targetKeys, func(key string) error {
 		tgt := targetsByKey[key]
-		res, rerr := removeTaskTarget(ctx, tr, actor, tgt, f.purge)
+		res, rerr := removeTarget(ctx, tr, actor, tgt, f.purge)
 		if rerr == nil && res != nil {
 			results = append(results, *res)
 		}
@@ -293,18 +283,35 @@ func resolveRmTarget(ctx context.Context, tr Transport, ref string) (rmTarget, b
 	return rmTarget{}, false, nil
 }
 
-// removeTaskTarget performs the durable task removal via wrkq.task.delete with an
-// explicit mode. For purge it derives the attachment count/bytes from a pre-purge
-// attachment.list (the server purge cleans the files); the legacy CLI computes the
-// same numbers the same way.
-func removeTaskTarget(ctx context.Context, tr Transport, actor string, tgt rmTarget, purge bool) (*rmResult, error) {
+// removeTarget performs the durable removal. Tasks go through wrkq.task.delete
+// with an explicit mode. Containers go through wrkq.container.archive for the
+// default soft delete and wrkq.container.delete for --purge.
+func removeTarget(ctx context.Context, tr Transport, actor string, tgt rmTarget, purge bool) (*rmResult, error) {
 	res := &rmResult{
-		Type:   "task",
+		Type:   tgt.Type,
 		ID:     tgt.ID,
 		UUID:   tgt.UUID,
 		Slug:   tgt.Slug,
 		Path:   tgt.Slug,
 		Purged: purge,
+	}
+
+	if tgt.Type == "container" {
+		method := "wrkq.container.archive"
+		params := map[string]any{"container": tgt.UUID}
+		if purge {
+			method = "wrkq.container.delete"
+		}
+		if actor != "" {
+			params["actor"] = actor
+		}
+		if _, err := tr.Call(ctx, method, params); err != nil {
+			if purge && strings.Contains(rpcMessage(err), "container is not empty") {
+				return nil, nil
+			}
+			return nil, errors.New(rpcMessage(err))
+		}
+		return res, nil
 	}
 
 	mode := "archive"
@@ -393,7 +400,7 @@ func purgeWarning(ctx context.Context, tr Transport, targets []rmTarget) (string
 	return string(b), nil
 }
 
-// showRemovalPlan renders the legacy TTY dry-run plan (task-only on this seam).
+// showRemovalPlan renders the legacy TTY dry-run plan.
 func showRemovalPlan(ctx context.Context, cmd *cobra.Command, tr Transport, targets []rmTarget, purge bool) error {
 	out := cmd.OutOrStdout()
 	var totalAttachments int
@@ -406,6 +413,15 @@ func showRemovalPlan(ctx context.Context, cmd *cobra.Command, tr Transport, targ
 	}
 
 	for _, tgt := range targets {
+		if tgt.Type == "container" {
+			fmt.Fprintf(out, "  %s (%s/)\n", tgt.ID, tgt.Slug)
+			if tgt.Title != "" {
+				fmt.Fprintf(out, "    Title: %s\n", tgt.Title)
+			}
+			fmt.Fprintf(out, "    Kind: %s\n\n", tgt.Kind)
+			continue
+		}
+
 		fmt.Fprintf(out, "  %s (%s)\n", tgt.ID, tgt.Slug)
 		if tgt.Title != "" {
 			fmt.Fprintf(out, "    Title: %s\n", tgt.Title)
@@ -433,21 +449,25 @@ func showRemovalPlan(ctx context.Context, cmd *cobra.Command, tr Transport, targ
 	return nil
 }
 
-// showRemovalPlanJSON renders the legacy non-TTY dry-run JSON (task-only).
+// showRemovalPlanJSON renders the legacy non-TTY dry-run JSON.
 func showRemovalPlanJSON(ctx context.Context, cmd *cobra.Command, tr Transport, targets []rmTarget, purge bool) error {
 	_ = ctx
 	_ = tr
 	entries := make([]map[string]interface{}, 0, len(targets))
 	for _, tgt := range targets {
 		entry := map[string]interface{}{
-			"type":     tgt.Type,
-			"uuid":     tgt.UUID,
-			"purge":    purge,
-			"id":       tgt.ID,
-			"slug":     tgt.Slug,
-			"title":    tgt.Title,
-			"state":    tgt.State,
-			"priority": tgt.Prio,
+			"type":  tgt.Type,
+			"uuid":  tgt.UUID,
+			"purge": purge,
+			"id":    tgt.ID,
+			"slug":  tgt.Slug,
+			"title": tgt.Title,
+		}
+		if tgt.Type == "container" {
+			entry["kind"] = tgt.Kind
+		} else {
+			entry["state"] = tgt.State
+			entry["priority"] = tgt.Prio
 		}
 		entries = append(entries, entry)
 	}

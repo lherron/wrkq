@@ -74,6 +74,16 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 			return nil, NewValidationError(kerr.Error(), map[string]any{"field": "kind"})
 		}
 	}
+	if strings.TrimSpace(p.Resolution) != "" {
+		if rerr := domain.ValidateResolution(p.Resolution); rerr != nil {
+			return nil, NewValidationError(rerr.Error(), map[string]any{"field": "resolution"})
+		}
+	}
+	if strings.TrimSpace(p.ForceUUID) != "" {
+		if uerr := domain.ValidateUUID(p.ForceUUID); uerr != nil {
+			return nil, NewValidationError(uerr.Error(), map[string]any{"field": "forceUuid"})
+		}
+	}
 	var riskClass *string
 	if strings.TrimSpace(p.RiskClass) != "" {
 		trimmed := strings.TrimSpace(p.RiskClass)
@@ -103,12 +113,32 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		trimmed := strings.TrimSpace(p.AssigneePrincipalRef)
 		assigneePrincipalRef = &trimmed
 	}
+	var requestedByProjectID *string
+	if strings.TrimSpace(p.RequestedByProjectID) != "" {
+		trimmed := strings.TrimSpace(p.RequestedByProjectID)
+		requestedByProjectID = &trimmed
+	}
+	var assignedProjectID *string
+	if strings.TrimSpace(p.AssignedProjectID) != "" {
+		trimmed := strings.TrimSpace(p.AssignedProjectID)
+		assignedProjectID = &trimmed
+	}
+	var resolution *string
+	if strings.TrimSpace(p.Resolution) != "" {
+		trimmed := strings.TrimSpace(p.Resolution)
+		resolution = &trimmed
+	}
+	meta, merr := taskMetaString(p.Meta, p.MetaRaw)
+	if merr != nil {
+		return nil, merr
+	}
 
 	attr, aerr := a.attributionFor(p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
 	result, err := a.store.Tasks.CreateWithAttribution(attr, store.CreateParams{
+		UUID:                 p.ForceUUID,
 		Slug:                 slug,
 		Title:                p.Title,
 		Description:          p.Description,
@@ -119,8 +149,13 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		Kind:                 p.Kind,
 		ParentTaskUUID:       parentTaskUUID,
 		AssigneePrincipalRef: assigneePrincipalRef,
+		RequestedByProjectID: requestedByProjectID,
+		AssignedProjectID:    assignedProjectID,
+		Resolution:           resolution,
 		Labels:               labelsString(p.Labels),
-		Meta:                 metaString(p.Meta),
+		Meta:                 meta,
+		DueAt:                p.DueAt,
+		StartAt:              p.StartAt,
 		RiskClass:            riskClass,
 		Via:                  "rpc",
 	})
@@ -425,6 +460,24 @@ func taskCursorAnchor(t WrkqTask, sortField string) any {
 	}
 }
 
+func taskMetaString(meta map[string]any, metaRaw string) (*string, error) {
+	metaRaw = strings.TrimSpace(metaRaw)
+	if metaRaw == "" {
+		return metaString(meta), nil
+	}
+	if metaRaw == "null" {
+		return nil, nil
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(metaRaw), &parsed); err != nil {
+		return nil, NewValidationError("invalid meta JSON: "+err.Error(), map[string]any{"field": "metaRaw"})
+	}
+	if parsed == nil {
+		return nil, nil
+	}
+	return &metaRaw, nil
+}
+
 // TaskUpdate applies a patch with an atomic expectEtag CAS (§8.1).
 func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, error) {
 	if err := ctx.Err(); err != nil {
@@ -451,7 +504,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		})
 	}
 
-	fields, ferr := patchFields(p.Patch)
+	fields, ferr := a.patchFields(p.Patch)
 	if ferr != nil {
 		return nil, ferr
 	}
@@ -489,11 +542,6 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 	if strings.TrimSpace(p.TargetPath) == "" {
 		return nil, NewValidationError("targetPath is required", map[string]any{"field": "targetPath"})
 	}
-	targetUUID, _, rerr := selectors.ResolveContainer(a.db, p.TargetPath)
-	if rerr != nil {
-		return nil, NewNotFoundError(p.TargetPath, "container")
-	}
-
 	var currentEtag int64
 	if scanErr := a.db.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", uuid).Scan(&currentEtag); scanErr != nil {
 		if scanErr == sql.ErrNoRows {
@@ -516,10 +564,78 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 	if aerr != nil {
 		return nil, aerr
 	}
-	if _, merr := a.store.Tasks.MoveWithViaAttribution(attr, uuid, targetUUID, ifMatch, "rpc"); merr != nil {
-		return nil, mapStoreError(merr, p.Task)
+	if targetUUID, _, rerr := selectors.ResolveContainer(a.db, p.TargetPath); rerr == nil {
+		if _, merr := a.store.Tasks.MoveWithViaAttribution(attr, uuid, targetUUID, ifMatch, "rpc"); merr != nil {
+			return nil, mapStoreError(merr, p.Task)
+		}
+		return a.loadTask(uuid)
+	}
+
+	targetProjectUUID, targetSlug, rerr := a.resolveTaskMoveTarget(uuid, p.TargetPath)
+	if rerr != nil {
+		return nil, rerr
+	}
+	var existingTaskUUID string
+	existingErr := a.db.QueryRow(
+		`SELECT uuid FROM tasks WHERE slug = ? AND project_uuid = ?`,
+		targetSlug, targetProjectUUID,
+	).Scan(&existingTaskUUID)
+	if existingErr != nil && existingErr != sql.ErrNoRows {
+		return nil, NewInternalError(existingErr)
+	}
+	if existingErr == nil && existingTaskUUID != uuid {
+		if !p.OverwriteTask {
+			return nil, NewConflictError(
+				"destination task already exists: "+p.TargetPath+" (use --overwrite-task to replace)",
+				map[string]any{"targetPath": p.TargetPath},
+			)
+		}
+		if _, perr := a.store.Tasks.PurgeWithAttribution(attr, existingTaskUUID, 0); perr != nil {
+			return nil, mapStoreError(perr, p.TargetPath)
+		}
+	}
+
+	fields := map[string]any{
+		"slug":         targetSlug,
+		"project_uuid": targetProjectUUID,
+	}
+	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, fields, ifMatch, "rpc"); uerr != nil {
+		return nil, mapStoreError(uerr, p.Task)
 	}
 	return a.loadTask(uuid)
+}
+
+func (a *API) resolveTaskMoveTarget(taskUUID, targetPath string) (string, string, error) {
+	parentUUID, normalizedSlug, _, err := selectors.ResolveParentContainer(a.db, targetPath)
+	if err != nil {
+		dstSegments := paths.SplitPath(targetPath)
+		if len(dstSegments) != 1 {
+			return "", "", NewNotFoundError(targetPath, "container")
+		}
+		var currentProjectUUID string
+		if qerr := a.db.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentProjectUUID); qerr != nil {
+			if qerr == sql.ErrNoRows {
+				return "", "", NewNotFoundError(taskUUID, "task")
+			}
+			return "", "", NewInternalError(qerr)
+		}
+		normalized, nerr := paths.NormalizeSlug(dstSegments[0])
+		if nerr != nil {
+			return "", "", NewValidationError("invalid destination slug "+strconv.Quote(dstSegments[0])+": "+nerr.Error(), map[string]any{"field": "targetPath"})
+		}
+		return currentProjectUUID, normalized, nil
+	}
+	if parentUUID != nil {
+		return *parentUUID, normalizedSlug, nil
+	}
+	var currentProjectUUID string
+	if qerr := a.db.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentProjectUUID); qerr != nil {
+		if qerr == sql.ErrNoRows {
+			return "", "", NewNotFoundError(taskUUID, "task")
+		}
+		return "", "", NewInternalError(qerr)
+	}
+	return currentProjectUUID, normalizedSlug, nil
 }
 
 // TaskAcknowledge records a terminal-state receipt (acknowledged_at). It mirrors
@@ -1008,8 +1124,19 @@ func webhookMapChanges(fields map[string]any, oldValues map[string]any) map[stri
 }
 
 // patchFields converts a TaskPatch into the store field map (DB column names).
-func patchFields(patch TaskPatch) (map[string]any, error) {
+func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 	fields := map[string]any{}
+	if patch.Slug != nil {
+		normalized, err := paths.NormalizeSlug(*patch.Slug)
+		if err != nil {
+			return nil, NewValidationError("invalid slug: "+err.Error(), map[string]any{"field": "slug"})
+		}
+		slug, err := paths.NewSlug(normalized)
+		if err != nil {
+			return nil, NewValidationError("invalid slug: "+err.Error(), map[string]any{"field": "slug"})
+		}
+		fields["slug"] = string(slug)
+	}
 	if patch.Title != nil {
 		fields["title"] = *patch.Title
 	}
@@ -1048,18 +1175,86 @@ func patchFields(patch TaskPatch) (map[string]any, error) {
 			fields["risk_class"] = riskClass
 		}
 	}
+	if patch.ParentTask != nil {
+		parentRef := strings.TrimSpace(*patch.ParentTask)
+		if parentRef == "" {
+			fields["parent_task_uuid"] = nil
+			if patch.Kind == nil {
+				fields["kind"] = "task"
+			}
+		} else {
+			parentUUID, _, err := selectors.ResolveTask(a.db, parentRef)
+			if err != nil {
+				return nil, NewNotFoundError(parentRef, "task")
+			}
+			fields["parent_task_uuid"] = parentUUID
+			if patch.Kind == nil {
+				fields["kind"] = "subtask"
+			}
+		}
+	}
 	if patch.Labels != nil {
 		fields["labels"] = labelsString(*patch.Labels)
 	}
-	if patch.Meta != nil {
+	if patch.MetaRaw != nil {
+		metaRaw := strings.TrimSpace(*patch.MetaRaw)
+		if metaRaw == "" || metaRaw == "null" {
+			fields["meta"] = nil
+		} else {
+			var meta map[string]any
+			if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
+				return nil, NewValidationError("invalid meta JSON: "+err.Error(), map[string]any{"field": "metaRaw"})
+			}
+			if meta == nil {
+				fields["meta"] = nil
+			} else {
+				fields["meta"] = metaRaw
+			}
+		}
+	} else if patch.Meta != nil {
 		fields["meta"] = metaString(*patch.Meta)
 	}
 	if patch.AssigneePrincipalRef != nil {
-		if *patch.AssigneePrincipalRef == "" {
+		assignee := strings.TrimSpace(*patch.AssigneePrincipalRef)
+		if assignee == "" {
 			fields["assignee_principal_ref"] = nil
 		} else {
-			fields["assignee_principal_ref"] = *patch.AssigneePrincipalRef
+			principalRef, err := attribution.NormalizeCompat(assignee)
+			if err != nil {
+				return nil, NewValidationError(err.Error(), map[string]any{"field": "assigneePrincipalRef"})
+			}
+			fields["assignee_principal_ref"] = principalRef
 		}
+	}
+	if patch.RequestedByProjectID != nil {
+		fields["requested_by_project_id"] = *patch.RequestedByProjectID
+	}
+	if patch.AssignedProjectID != nil {
+		fields["assigned_project_id"] = *patch.AssignedProjectID
+	}
+	if patch.Resolution != nil {
+		if err := domain.ValidateResolution(*patch.Resolution); err != nil {
+			return nil, NewValidationError(err.Error(), map[string]any{"field": "resolution"})
+		}
+		fields["resolution"] = *patch.Resolution
+	}
+	if patch.CPProjectID != nil {
+		fields["cp_project_id"] = *patch.CPProjectID
+	}
+	if patch.CPWorkItemID != nil {
+		fields["cp_work_item_id"] = *patch.CPWorkItemID
+	}
+	if patch.CPRunID != nil {
+		fields["cp_run_id"] = *patch.CPRunID
+	}
+	if patch.SessionID != nil {
+		fields["cp_session_id"] = *patch.SessionID
+	}
+	if patch.RunStatus != nil {
+		if err := domain.ValidateRunStatus(*patch.RunStatus); err != nil {
+			return nil, NewValidationError(err.Error(), map[string]any{"field": "runStatus"})
+		}
+		fields["run_status"] = *patch.RunStatus
 	}
 	if patch.DueAt != nil {
 		fields["due_at"] = *patch.DueAt

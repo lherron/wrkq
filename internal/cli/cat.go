@@ -11,6 +11,7 @@ import (
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +33,7 @@ var (
 	catJSON            bool
 	catNDJSON          bool
 	catPorcelain       bool
+	catPretty          bool
 )
 
 func init() {
@@ -41,6 +43,7 @@ func init() {
 	catCmd.Flags().BoolVar(&catJSON, "json", false, "Output as JSON")
 	catCmd.Flags().BoolVar(&catNDJSON, "ndjson", false, "Output as newline-delimited JSON")
 	catCmd.Flags().BoolVar(&catPorcelain, "porcelain", false, "Machine-readable output")
+	catCmd.Flags().BoolVar(&catPretty, "pretty", false, "Force the styled task card even when not a TTY")
 }
 
 func valueOrEmpty(value sql.NullString) string {
@@ -421,20 +424,24 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			task.BlockedBy = blockerInfos
 		}
 
-		// For JSON output, collect tasks
-		if sel.Mode == outputModeJSON || sel.Mode == outputModeNDJSON {
+		// The styled card renders on an interactive TTY by default, or whenever
+		// --pretty forces it (which also overrides an explicit machine mode and
+		// the non-TTY JSON default). Color still follows style.ColorEnabled, so a
+		// non-TTY --pretty card is plain text — deterministic and byte-comparable.
+		styled := catPretty || (sel.Mode == outputModeRaw && !sel.Stable && style.ColorEnabled)
+		if !styled && (sel.Mode == outputModeJSON || sel.Mode == outputModeNDJSON) {
 			tasks = append(tasks, task)
-		} else if sel.Mode == outputModeRaw && !sel.Stable && colorEnabled {
-			// Styled interactive view (TTY only). Pipes and --porcelain fall
-			// through to the byte-stable raw markdown branch below.
+		} else if styled {
+			// Pipes without --pretty (and --porcelain) fall through to the
+			// byte-stable raw markdown branch below.
 			if taskCount > 0 {
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
 			taskCount++
-			var styledComments []styledComment
+			var styledComments []style.StyledComment
 			if !catExcludeComments {
 				for _, c := range task.Comments {
-					styledComments = append(styledComments, styledComment{
+					styledComments = append(styledComments, style.StyledComment{
 						ID:        c.ID,
 						CreatedAt: c.CreatedAt,
 						Actor:     c.ActorSlug,
@@ -443,7 +450,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 					})
 				}
 			}
-			renderStyledTask(cmd.OutOrStdout(), styledTask{
+			style.RenderStyledTask(cmd.OutOrStdout(), style.StyledTask{
 				ID:            task.ID,
 				Path:          task.Path,
 				Title:         task.Title,
@@ -595,12 +602,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Output JSON if requested
-	if sel.Mode == outputModeJSON {
+	// Output JSON if requested. --pretty forces the styled card above and leaves
+	// tasks empty, so it must not fall through to a trailing `null`.
+	if !catPretty && sel.Mode == outputModeJSON {
 		return writeJSONOutput(cmd.OutOrStdout(), sel, tasks)
 	}
 
-	if sel.Mode == outputModeNDJSON {
+	if !catPretty && sel.Mode == outputModeNDJSON {
 		return writeNDJSONOutput(cmd.OutOrStdout(), tasks)
 	}
 

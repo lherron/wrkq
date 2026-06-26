@@ -21,6 +21,8 @@ import (
 // wrkq.task.copy call (source resolution, dest-container resolution, source CAS,
 // create-or-overwrite, attachment cascade + optional same-store file copy, the
 // task.copied event, and the post-commit created webhook all live server-side).
+// Legacy parses -r/--recursive but currently still resolves only task sources;
+// the mirror therefore accepts and ignores it too.
 func newCpCmd() *cobra.Command {
 	var (
 		dryRun          bool
@@ -99,12 +101,6 @@ func runCp(cmd *cobra.Command, args []string, f cpFlags) error {
 	// Legacy validates the mutually-exclusive flags FIRST (before any DB open).
 	if f.withAttachments && f.shallow {
 		return fmt.Errorf("--with-attachments and --shallow are mutually exclusive")
-	}
-
-	// Container/recursive copy is NOT in this tranche. Hard-gate -r with a
-	// mirror-specific error (no silent degradation) rather than risk a wrong copy.
-	if f.recursive {
-		return fmt.Errorf("cp: --recursive (container copy) not yet implemented in wrkq-rpccli (hard-gated pending parity)")
 	}
 
 	tr, sc, closeFn, err := openMirror(cmd)

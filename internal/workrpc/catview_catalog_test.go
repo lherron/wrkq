@@ -123,6 +123,18 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqContainer") {
 		t.Error("WrkqContainer missing from dtoCatalog (wrkq.container.update result DTO)")
 	}
+	// Per-container webhook mutation is deliberately separate from
+	// wrkq.container.update's narrow slug/title patch surface. Its result is the
+	// legacy map-shaped `container set` output, so only the method name is cataloged.
+	if !contains(methodCatalog, "wrkq.container.webhookSet") {
+		t.Error("wrkq.container.webhookSet missing from methodCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.container.archive") {
+		t.Error("wrkq.container.archive missing from methodCatalog")
+	}
+	if !contains(methodCatalog, "wrkq.container.restore") {
+		t.Error("wrkq.container.restore missing from methodCatalog")
+	}
 	// Global webhook family (T-05119): the DEDICATED mutation + list methods must be
 	// in methodCatalog so their NAMES enter the protocol schema-hash input. The
 	// listView row DTO (WebhookRow) is cataloged; the add/remove mutation result is
@@ -165,7 +177,7 @@ func TestCatViewInCatalogs(t *testing.T) {
 	// must be in BOTH catalogs so their NAMES enter the protocol schema-hash input.
 	// Index lifecycle outputs are map-shaped (no struct DTO).
 	for _, m := range []string{
-		"wrkq.handoff.create", "wrkq.handoff.get", "wrkq.handoff.listView", "wrkq.handoff.acknowledge",
+		"wrkq.handoff.create", "wrkq.handoff.get", "wrkq.handoff.listView", "wrkq.handoff.searchView", "wrkq.handoff.acknowledge",
 		"wrkq.search.listView",
 		"wrkq.index.status",
 		"wrkq.index.update",
@@ -178,7 +190,7 @@ func TestCatViewInCatalogs(t *testing.T) {
 			t.Errorf("%s missing from methodCatalog", m)
 		}
 	}
-	for _, d := range []string{"WrkqHandoff", "WrkqHandoffCreateResult", "WrkqHandoffListResult", "WrkqSearchListView", "WrkqSearchResult", "WrkqIndexStatus"} {
+	for _, d := range []string{"WrkqHandoff", "WrkqHandoffCreateResult", "WrkqHandoffListResult", "WrkqHandoffSearchResult", "WrkqSearchListView", "WrkqSearchResult", "WrkqIndexStatus"} {
 		if !contains(dtoCatalog, d) {
 			t.Errorf("%s missing from dtoCatalog", d)
 		}

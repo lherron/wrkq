@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -151,6 +153,73 @@ func (a *API) ContainerUpdate(ctx context.Context, p ContainerUpdateParams) (*Wr
 	return dto, nil
 }
 
+// ContainerMove mirrors the container-source branch of legacy `wrkq mv`.
+// DestinationIsContainer=true moves the source into an already resolved
+// destination container. Otherwise Destination is interpreted as a new path:
+// resolve parent + final slug, then update slug/parent_uuid in one store update.
+// DryRun performs the same validation legacy performs without mutating.
+func (a *API) ContainerMove(ctx context.Context, p ContainerMoveParams) (*WrkqContainer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	selector := strings.TrimSpace(p.Container)
+	if selector == "" {
+		return nil, NewValidationError("container is required", map[string]any{"field": "container"})
+	}
+	destination := strings.TrimSpace(p.Destination)
+	if destination == "" {
+		return nil, NewValidationError("destination is required", map[string]any{"field": "destination"})
+	}
+	containerUUID, _, rerr := selectors.ResolveContainer(a.db, selector)
+	if rerr != nil {
+		return nil, NewNotFoundError(selector, "container")
+	}
+
+	if p.DestinationIsContainer {
+		destUUID, _, derr := selectors.ResolveContainer(a.db, destination)
+		if derr != nil {
+			return nil, newError(CodeNotFound, derr.Error(), false, struct {
+				Ref  string `json:"ref,omitempty"`
+				Kind string `json:"kind,omitempty"`
+			}{Ref: destination, Kind: "container"}, derr)
+		}
+		if p.DryRun {
+			return a.loadContainer(containerUUID)
+		}
+		attr, aerr := a.attributionFor(p.Actor)
+		if aerr != nil {
+			return nil, aerr
+		}
+		if _, merr := a.store.Containers.MoveWithAttribution(attr, containerUUID, &destUUID, p.ExpectETag); merr != nil {
+			return nil, mapContainerStoreError(merr, selector)
+		}
+		return a.loadContainer(containerUUID)
+	}
+
+	parentUUID, slug, err := a.resolveContainerMoveTarget(containerUUID, destination)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.checkContainerMoveConflict(containerUUID, parentUUID, slug, destination); err != nil {
+		return nil, err
+	}
+	if p.DryRun {
+		return a.loadContainer(containerUUID)
+	}
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	fields := map[string]interface{}{
+		"slug":        slug,
+		"parent_uuid": parentUUID,
+	}
+	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(attr, containerUUID, fields, p.ExpectETag); uerr != nil {
+		return nil, mapContainerStoreError(uerr, selector)
+	}
+	return a.loadContainer(containerUUID)
+}
+
 // parseContainerPatch validates the raw container patch. Only slug and title are
 // mutable; any other key (including unknown fields and immutable identity/kind/
 // parent fields) returns WRKQ_VALIDATION. An empty/absent patch is rejected. The
@@ -281,6 +350,83 @@ func (a *API) ContainerList(ctx context.Context, p ContainerListParams) (*WrkqCo
 		}
 	}
 	return result, nil
+}
+
+// ContainerArchive soft-archives a container.
+func (a *API) ContainerArchive(ctx context.Context, p ContainerArchiveParams) (*WrkqContainerArchiveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	selector := containerMutationSelector(p.Container, p.Path, p.Project)
+	if selector == "" {
+		return nil, NewValidationError("container selector is required", map[string]any{"field": "container"})
+	}
+	containerUUID, _, err := selectors.ResolveContainer(a.db, selector)
+	if err != nil {
+		return nil, NewNotFoundError(selector, "container")
+	}
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+	if _, err := a.store.Containers.ArchiveWithAttribution(attr, containerUUID, p.ExpectETag); err != nil {
+		return nil, mapContainerStoreError(err, selector)
+	}
+	return &WrkqContainerArchiveResult{Archived: true}, nil
+}
+
+// ContainerRestore clears a container's archived marker and logs container.restored.
+func (a *API) ContainerRestore(ctx context.Context, p ContainerRestoreParams) (*WrkqContainerRestoreResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	selector := containerMutationSelector(p.Container, p.Path, p.Project)
+	if selector == "" {
+		return nil, NewValidationError("container selector is required", map[string]any{"field": "container"})
+	}
+	containerUUID, _, err := selectors.ResolveContainer(a.db, selector)
+	if err != nil {
+		return nil, NewNotFoundError(selector, "container")
+	}
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+
+	tx, err := a.db.Begin()
+	if err != nil {
+		return nil, NewInternalError(errors.New("failed to begin transaction: " + err.Error()))
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`
+		UPDATE containers
+		SET archived_at = NULL,
+		    updated_by_actor_uuid = ?,
+		    updated_by_principal_ref = ?,
+		    updated_by_scope_ref = ?
+		WHERE uuid = ?
+	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), containerUUID); err != nil {
+		return nil, NewInternalError(errors.New("failed to restore container: " + err.Error()))
+	}
+
+	eventWriter := events.NewWriter(a.db.DB)
+	payload := `{"action":"restored"}`
+	if err := eventWriter.LogEvent(tx, &domain.Event{
+		ActorUUID:    attr.LegacyActorUUID,
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "container",
+		ResourceUUID: &containerUUID,
+		EventType:    "container.restored",
+		Payload:      &payload,
+	}); err != nil {
+		return nil, NewInternalError(errors.New("failed to log event: " + err.Error()))
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, NewInternalError(err)
+	}
+	return &WrkqContainerRestoreResult{UUID: containerUUID, Restored: true}, nil
 }
 
 // ContainerDelete hard-deletes an empty container.
@@ -424,6 +570,49 @@ func (a *API) resolveContainerCreateTarget(p ContainerCreateParams) (*string, st
 		return &parentUUID, slug, nil
 	}
 	return nil, "", NewValidationError("container slug or path is required", map[string]any{"field": "slug"})
+}
+
+func (a *API) resolveContainerMoveTarget(containerUUID, dstPath string) (*string, string, error) {
+	parentUUID, normalizedSlug, _, err := selectors.ResolveParentContainer(a.db, dstPath)
+	if err != nil {
+		dstSegments := paths.SplitPath(dstPath)
+		if len(dstSegments) == 1 {
+			var currentParentUUID *string
+			if qerr := a.db.QueryRow("SELECT parent_uuid FROM containers WHERE uuid = ?", containerUUID).Scan(&currentParentUUID); qerr != nil && !strings.Contains(qerr.Error(), "null") {
+				return nil, "", NewInternalError(fmt.Errorf("failed to get current parent: %w", qerr))
+			}
+			slug, serr := paths.NormalizeSlug(dstSegments[0])
+			if serr != nil {
+				return nil, "", NewValidationError(fmt.Sprintf("invalid destination slug %q: %s", dstSegments[0], serr.Error()), map[string]any{"field": "destination"})
+			}
+			return currentParentUUID, slug, nil
+		}
+		return nil, "", newError(CodeNotFound, err.Error(), false, struct {
+			Ref  string `json:"ref,omitempty"`
+			Kind string `json:"kind,omitempty"`
+		}{Ref: dstPath, Kind: "container"}, err)
+	}
+	return parentUUID, normalizedSlug, nil
+}
+
+func (a *API) checkContainerMoveConflict(containerUUID string, parentUUID *string, slug, dstPath string) error {
+	query := `SELECT uuid FROM containers WHERE slug = ? AND `
+	args := []interface{}{slug}
+	if parentUUID == nil {
+		query += store.RootChildClause
+	} else {
+		query += `parent_uuid = ?`
+		args = append(args, *parentUUID)
+	}
+	var existingUUID string
+	err := a.db.QueryRow(query, args...).Scan(&existingUUID)
+	if err == nil && existingUUID != containerUUID {
+		return NewConflictError(fmt.Sprintf("destination container already exists: %s", dstPath), map[string]any{"destination": dstPath})
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return NewInternalError(err)
+	}
+	return nil
 }
 
 func containerMutationSelector(container, path, project string) string {

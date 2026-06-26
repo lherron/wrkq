@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestBuildTreeShowsOnlyContainersWithDraftOpenTaskDescendants(t *testing.T) {
@@ -243,50 +242,7 @@ func TestFormatTreeTaskStateFallsBackToStateWithoutCreatedAt(t *testing.T) {
 	}
 }
 
-func TestFormatTreeOpenedAge(t *testing.T) {
-	now := time.Date(2026, 6, 12, 15, 4, 5, 0, time.UTC)
-
-	tests := []struct {
-		name      string
-		timestamp string
-		want      string
-	}{
-		{
-			name:      "less than minute",
-			timestamp: "2026-06-12T15:03:30Z",
-			want:      "less than a minute",
-		},
-		{
-			name:      "minutes",
-			timestamp: "2026-06-12T14:59:05Z",
-			want:      "5 minutes",
-		},
-		{
-			name:      "singular hour",
-			timestamp: "2026-06-12T13:34:05Z",
-			want:      "1 hour",
-		},
-		{
-			name:      "sqlite datetime",
-			timestamp: "2026-06-12 12:04:05",
-			want:      "3 hours",
-		},
-		{
-			name:      "days",
-			timestamp: "2026-06-09T15:04:05Z",
-			want:      "3 days",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := formatTreeOpenedAge(tt.timestamp, now)
-			if got != tt.want {
-				t.Fatalf("formatTreeOpenedAge(%q) = %q, want %q", tt.timestamp, got, tt.want)
-			}
-		})
-	}
-}
+// Relative-age formatting moved to internal/style; see TestFormatOpenedAge there.
 
 func TestDisplayTreeHeaderShowsTopLevelProjectID(t *testing.T) {
 	database, _ := setupTestEnv(t)

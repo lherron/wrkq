@@ -51,7 +51,7 @@ type lsEntry struct {
 // Pinned divergences kept: --output raw is unsupported (legacy rejects it too);
 // an unknown --type yields an empty set → `null`.
 func newLsCmd() *cobra.Command {
-	var asJSON, ndjson, porcelain, recursive, one, nul, all, reverse bool
+	var asJSON, ndjson, porcelain, pretty, recursive, one, nul, all, reverse bool
 	var limit int
 	var cursorTok, typeFilter, sort string
 	cmd := &cobra.Command{
@@ -62,7 +62,7 @@ func newLsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = recursive // legacy --recursive/-R is a no-op (rollups already recurse)
 
-			mode, stable, err := resolveLsMode(cmd, asJSON, ndjson, porcelain)
+			mode, stable, err := resolveLsMode(cmd, asJSON, ndjson, porcelain, pretty)
 			if err != nil {
 				return err
 			}
@@ -199,6 +199,7 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force human-readable table output even when not a TTY")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "List recursively")
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by type (p=project, t=task)")
 	cmd.Flags().BoolVarP(&one, "one", "1", false, "One entry per line")
@@ -270,7 +271,7 @@ func formatContainerRollup(entry lsEntry) string {
 // returns the rendering mode and whether it is the Stable (porcelain) variant.
 // raw is the one mode legacy rejects for ls → byte-matched error (a pinned
 // divergence, not a gate).
-func resolveLsMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode string, stable bool, err error) {
+func resolveLsMode(cmd *cobra.Command, asJSON, ndjson, porcelain, pretty bool) (mode string, stable bool, err error) {
 	count := 0
 	var explicit string
 	if asJSON {
@@ -283,6 +284,9 @@ func resolveLsMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode str
 	}
 	if count > 1 {
 		return "", false, fmt.Errorf("choose only one output mode")
+	}
+	if pretty {
+		return "table", false, nil
 	}
 	stable = porcelain
 	if explicit != "" {

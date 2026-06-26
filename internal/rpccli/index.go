@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/spf13/cobra"
@@ -16,9 +17,9 @@ import (
 // The CLI owns ONLY presentation. It NEVER opens the sidecar or calls
 // EnsureLlamaReady (importguard-proven).
 //
-// Implemented surface (byte-proven against legacy, non-TTY): index status
-// (--json + non-TTY default JSON), index update / rebuild / vacuum / pause /
-// resume (non-TTY JSON ack). The interactive TTY human renderers are hard-gated.
+// Implemented surface (byte-proven against legacy): index status (--json +
+// non-TTY default JSON + TTY key:value human), index update / rebuild / vacuum /
+// pause / resume (non-TTY JSON ack + TTY one-liners).
 func newIndexCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "index",
@@ -53,12 +54,15 @@ func newIndexStatusCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			// Legacy: --json OR non-TTY → json.Encoder with indent. The TTY plain
-			// key:value human form is hard-gated (never byte-tested; TTY-only).
+			// Legacy: --json OR non-TTY → json.Encoder with indent.
 			if asJSON || !isStdoutTTY(out) {
 				return writeIndexJSON(out, raw)
 			}
-			return errors.New("index status: human output not yet implemented in wrkq-rpccli (use --json)")
+			var status rpcIndexStatus
+			if err := json.Unmarshal(raw, &status); err != nil {
+				return err
+			}
+			return writeIndexStatusHuman(out, status)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
@@ -130,8 +134,7 @@ func newIndexResumeCmd() *cobra.Command {
 // runIndexLifecycle drives a lifecycle mutation and renders its map-shaped ack.
 // Legacy non-TTY: writeJSONOutput(outputSelection{}, map) → json.Encoder, indented.
 // The map keys are server-emitted in map-alphabetical order (Go marshals map keys
-// sorted), and the mirror re-emits the raw bytes, so byte-parity holds. The TTY
-// human one-liner ("rebuilt search index: ...") is hard-gated.
+// sorted), and the mirror re-emits the raw bytes, so byte-parity holds.
 func runIndexLifecycle(cmd *cobra.Command, method string, params map[string]any) error {
 	tr, _, closeFn, err := openMirror(cmd)
 	if err != nil {
@@ -147,7 +150,7 @@ func runIndexLifecycle(cmd *cobra.Command, method string, params map[string]any)
 	if !isStdoutTTY(out) {
 		return writeIndexJSON(out, raw)
 	}
-	return errors.New(cmd.Name() + ": human output not yet implemented in wrkq-rpccli (pipe stdout for JSON)")
+	return writeIndexLifecycleHuman(cmd, raw)
 }
 
 // indexCall sends one index-family RPC, stripping the domain-code prefix off
@@ -181,4 +184,100 @@ func writeIndexJSON(w io.Writer, raw json.RawMessage) error {
 	buf.WriteByte('\n')
 	_, err := w.Write(buf.Bytes())
 	return err
+}
+
+type rpcIndexStatus struct {
+	Path                 string  `json:"path"`
+	Enabled              bool    `json:"enabled"`
+	Status               string  `json:"status"`
+	LastIndexedEventID   int64   `json:"last_indexed_event_id"`
+	CanonicalMaxEventID  int64   `json:"canonical_max_event_id"`
+	StaleEventCount      int64   `json:"stale_event_count"`
+	DenseModelID         string  `json:"dense_model_id,omitempty"`
+	DenseDimension       int     `json:"dense_dimension,omitempty"`
+	DenseVectorCount     int64   `json:"dense_vector_count,omitempty"`
+	LastError            *string `json:"last_error,omitempty"`
+	SearchableChunkCount int64   `json:"searchable_chunk_count"`
+}
+
+func writeIndexStatusHuman(w io.Writer, status rpcIndexStatus) error {
+	if _, err := fmt.Fprintf(w, "path: %s\n", status.Path); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "status: %s\n", status.Status); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "last_indexed_event_id: %d\n", status.LastIndexedEventID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "canonical_max_event_id: %d\n", status.CanonicalMaxEventID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "stale_event_count: %d\n", status.StaleEventCount); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "chunks: %d\n", status.SearchableChunkCount); err != nil {
+		return err
+	}
+	if status.DenseModelID != "" {
+		if _, err := fmt.Fprintf(w, "dense_model: %s\n", status.DenseModelID); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "dense_dimension: %d\n", status.DenseDimension); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "dense_vectors: %d\n", status.DenseVectorCount); err != nil {
+			return err
+		}
+	}
+	if status.LastError != nil {
+		if _, err := fmt.Fprintf(w, "last_error: %s\n", *status.LastError); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeIndexLifecycleHuman(cmd *cobra.Command, raw json.RawMessage) error {
+	switch cmd.Name() {
+	case "rebuild":
+		var result struct {
+			Status *rpcIndexStatus `json:"status"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return err
+		}
+		status := result.Status
+		if status == nil {
+			return errors.New("index rebuild response missing status")
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "rebuilt search index: %d chunks, last event %d\n", status.SearchableChunkCount, status.LastIndexedEventID)
+		if status.LastError != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "dense indexing warning: %s\n", *status.LastError)
+		}
+	case "update":
+		var result struct {
+			Status *rpcIndexStatus `json:"status"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return err
+		}
+		status := result.Status
+		if status == nil {
+			return errors.New("index update response missing status")
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "updated search index: %d chunks, last event %d\n", status.SearchableChunkCount, status.LastIndexedEventID)
+		if status.LastError != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "dense indexing warning: %s\n", *status.LastError)
+		}
+	case "vacuum":
+		fmt.Fprintln(cmd.OutOrStdout(), "vacuumed search index")
+	case "pause":
+		fmt.Fprintln(cmd.OutOrStdout(), "paused search indexing")
+	case "resume":
+		fmt.Fprintln(cmd.OutOrStdout(), "resumed search indexing")
+	default:
+		return fmt.Errorf("unsupported index lifecycle command: %s", cmd.Name())
+	}
+	return nil
 }

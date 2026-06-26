@@ -24,9 +24,8 @@ type touchResult struct {
 }
 
 // newTouchCmd mirrors `wrkq touch`. RPC-backed via wrkq.task.create, re-projected
-// into the legacy touchResult array. Core fields are supported; flags whose data
-// has no wrkq.task.create param (due-at/start-at/requested-by/assigned-project/
-// resolution/meta-file/force-uuid) hard-error rather than silently diverge.
+// into the legacy touchResult array. The mirror owns caller-local file/stdin
+// reads and artifact-dir creation; the server owns durable task creation.
 func newTouchCmd() *cobra.Command {
 	var title, description, specification, state, kind, parentTask, assignee, labels, meta string
 	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID string
@@ -38,19 +37,15 @@ func newTouchCmd() *cobra.Command {
 		Short: "Create one or more tasks",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			for name, val := range map[string]string{
-				"due-at": dueAt, "start-at": startAt, "requested-by": requestedBy,
-				"assigned-project": assignedProject, "resolution": resolution,
-				"meta-file": metaFile, "force-uuid": forceUUID,
-			} {
-				if val != "" {
-					return fmt.Errorf("touch: --%s is not yet supported in wrkq-rpccli (RPC gap)", name)
-				}
+			if forceUUID != "" && len(args) > 1 {
+				return fmt.Errorf("--force-uuid can only be used when creating a single task")
 			}
 			return runTouch(cmd, args, touchOpts{
 				title: title, description: description, specification: specification,
 				state: state, priority: priority, kind: kind, parentTask: parentTask,
-				assignee: assignee, labels: labels, meta: meta, json: asJSON,
+				assignee: assignee, requestedBy: requestedBy, assignedProject: assignedProject,
+				resolution: resolution, labels: labels, meta: meta, metaFile: metaFile,
+				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, json: asJSON,
 			})
 		},
 	}
@@ -76,9 +71,11 @@ func newTouchCmd() *cobra.Command {
 }
 
 type touchOpts struct {
-	title, description, specification, state, kind, parentTask, assignee, labels, meta string
-	priority                                                                           int
-	json                                                                               bool
+	title, description, specification, state, kind, parentTask, assignee string
+	requestedBy, assignedProject, resolution, labels, meta, metaFile     string
+	dueAt, startAt, forceUUID                                            string
+	priority                                                             int
+	json                                                                 bool
 }
 
 func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
@@ -97,6 +94,24 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 	if o.parentTask != "" {
 		parentTask = sc.selector(o.parentTask, false)
 	}
+	description := ""
+	if o.description != "" {
+		description, err = readTextValue(o.description, "description", cmd.InOrStdin())
+		if err != nil {
+			return fmt.Errorf("failed to read description: %w", err)
+		}
+	}
+	specification := ""
+	if o.specification != "" {
+		specification, err = readTextValue(o.specification, "specification", cmd.InOrStdin())
+		if err != nil {
+			return fmt.Errorf("failed to read specification: %w", err)
+		}
+	}
+	metaSet, metaRaw, metaValue, err := readMetaValue(o.meta, o.metaFile)
+	if err != nil {
+		return err
+	}
 
 	results := make([]touchResult, 0, len(paths))
 	for _, path := range paths {
@@ -108,10 +123,10 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		}
 		params := map[string]any{"path": path, "title": title}
 		if o.description != "" {
-			params["description"] = o.description
+			params["description"] = description
 		}
 		if o.specification != "" {
-			params["specification"] = o.specification
+			params["specification"] = specification
 		}
 		if o.state != "" {
 			params["state"] = o.state
@@ -128,6 +143,15 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		if o.assignee != "" {
 			params["assigneePrincipalRef"] = o.assignee
 		}
+		if o.requestedBy != "" {
+			params["requestedBy"] = o.requestedBy
+		}
+		if o.assignedProject != "" {
+			params["assignedProject"] = o.assignedProject
+		}
+		if o.resolution != "" {
+			params["resolution"] = o.resolution
+		}
 		if o.labels != "" {
 			var lbls []string
 			if err := json.Unmarshal([]byte(o.labels), &lbls); err != nil {
@@ -135,15 +159,24 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 			}
 			params["labels"] = lbls
 		}
-		if o.meta != "" {
-			var m map[string]any
-			if err := json.Unmarshal([]byte(o.meta), &m); err != nil {
-				return fmt.Errorf("invalid --meta JSON object: %w", err)
+		if metaSet {
+			if metaRaw != nil {
+				params["metaRaw"] = *metaRaw
+			} else if metaValue != nil {
+				params["meta"] = metaValue
 			}
-			params["meta"] = m
 		}
 		if actor != "" {
 			params["actor"] = actor
+		}
+		if o.dueAt != "" {
+			params["dueAt"] = o.dueAt
+		}
+		if o.startAt != "" {
+			params["startAt"] = o.startAt
+		}
+		if o.forceUUID != "" {
+			params["forceUuid"] = o.forceUUID
 		}
 
 		raw, err := tr.Call(cmd.Context(), "wrkq.task.create", params)
@@ -166,10 +199,14 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		if err := json.Unmarshal(raw, &dto); err != nil {
 			return err
 		}
+		artifactDir, derr := ensureMirrorArtifactDir(dto.ID)
+		if derr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to create artifact directory %s: %v\n", artifactDir, derr)
+		}
 		results = append(results, touchResult{
 			ID: dto.ID, UUID: dto.UUID, Slug: dto.Slug, Path: path,
 			Title: dto.Title, State: dto.State, Priority: dto.Priority, Kind: dto.Kind,
-			ArtifactDir: mirrorArtifactDir(dto.ID),
+			ArtifactDir: artifactDir,
 		})
 	}
 
@@ -193,4 +230,9 @@ func mirrorArtifactDir(taskID string) string {
 		}
 	}
 	return filepath.Join(root, "var", "wrkq-artifacts", taskID)
+}
+
+func ensureMirrorArtifactDir(taskID string) (string, error) {
+	dir := mirrorArtifactDir(taskID)
+	return dir, os.MkdirAll(dir, 0o755)
 }

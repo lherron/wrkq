@@ -65,6 +65,10 @@ func openPTY(t *testing.T) (master *os.File, slaveName string) {
 // for both binaries, so byte parity still holds. Returns the captured terminal
 // output and the process exit code.
 func runCLIOnTTY(t *testing.T, bin, dir string, args []string) (out string, exit int) {
+	return runCLIOnTTYEnv(t, bin, dir, args, nil)
+}
+
+func runCLIOnTTYEnv(t *testing.T, bin, dir string, args []string, extraEnv []string) (out string, exit int) {
 	t.Helper()
 	master, slaveName := openPTY(t)
 	defer func() { _ = master.Close() }()
@@ -77,7 +81,7 @@ func runCLIOnTTY(t *testing.T, bin, dir string, args []string) (out string, exit
 	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, args...)
 	cmd := exec.Command(bin, full...)
 	cmd.Dir = dir
-	cmd.Env = hermeticEnv()
+	cmd.Env = append(hermeticEnv(), extraEnv...)
 	// stdout+stderr on the pty slave is all that's needed: isStdoutTTY only checks
 	// that the *os.File reports a char device, which any pty slave does. No
 	// controlling-terminal session is required, so we avoid Setctty/Setsid (those

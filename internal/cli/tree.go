@@ -3,65 +3,18 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
-// Subtle ANSI palette for the tree view. Scaffolding recedes (faint),
-// containers anchor (bold blue, matching ls dir convention), and color is
-// reserved for structure and task state rather than painting whole lines.
-const (
-	colDim       = "2"    // tree branches, IDs, secondary metadata
-	colDir       = "1;34" // container slug — bold blue
-	colStateOpen = "33"   // amber — active/needs attention
-	colStateWIP  = "36"   // cyan — in progress
-	colStateStop = "31"   // red — blocked
-	colDone      = "32"   // green — completed / all done
-)
-
-// colorEnabled reports whether to emit ANSI styling. Honors NO_COLOR and only
-// colors when stdout is an interactive terminal (clean output when piped).
-var colorEnabled = func() bool {
-	if _, ok := os.LookupEnv("NO_COLOR"); ok {
-		return false
-	}
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}()
-
-// paint wraps s in an ANSI SGR sequence when color is enabled.
-func paint(code, s string) string {
-	if !colorEnabled || code == "" {
-		return s
-	}
-	return "\033[" + code + "m" + s + "\033[0m"
-}
-
-// stateColor maps a task state to its subtle accent color.
-func stateColor(state string) string {
-	switch state {
-	case "open":
-		return colStateOpen
-	case "in_progress":
-		return colStateWIP
-	case "blocked":
-		return colStateStop
-	case "completed":
-		return colDone
-	default: // draft and anything else recede
-		return colDim
-	}
-}
+// ANSI palette, coloring, and relative-time helpers now live in internal/style,
+// shared verbatim with the RPC mirror so both binaries render identically.
 
 var treeCmd = &cobra.Command{
 	Use:   "tree [PATH...]",
@@ -94,6 +47,7 @@ var (
 	treePorcelain       bool
 	treeJSON            bool
 	treeNDJSON          bool
+	treePretty          bool
 )
 
 func init() {
@@ -106,6 +60,7 @@ func init() {
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
 	treeCmd.Flags().BoolVar(&treeJSON, "json", false, "Output as JSON")
 	treeCmd.Flags().BoolVar(&treeNDJSON, "ndjson", false, "Output as newline-delimited JSON")
+	treeCmd.Flags().BoolVar(&treePretty, "pretty", false, "Force human-readable tree output even when not a TTY")
 }
 
 func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -125,7 +80,7 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 	if outputFlag := cmd.Flag("output"); outputFlag != nil {
 		outputFlagChanged = outputFlag.Changed
 	}
-	legacyPorcelain := treePorcelain && !treeJSON && !treeNDJSON && !outputFlagChanged
+	legacyPorcelain := treePorcelain && !treePretty && !treeJSON && !treeNDJSON && !outputFlagChanged
 	sel := outputSelection{Mode: outputModeRaw}
 	if !legacyPorcelain {
 		var err error
@@ -135,6 +90,9 @@ func runTree(app *appctx.App, cmd *cobra.Command, args []string) error {
 		})
 		if err != nil {
 			return err
+		}
+		if treePretty {
+			sel = outputSelection{Mode: outputModeHuman}
 		}
 	}
 
@@ -251,13 +209,13 @@ func printTreeOutput(w io.Writer, root *treeNode, rootPath, projectID string, po
 		header = "."
 	}
 	if projectID != "" && !porcelain {
-		header += " " + paint(colDim, fmt.Sprintf("[%s]", projectID))
+		header += " " + style.Paint(style.ColDim, fmt.Sprintf("[%s]", projectID))
 	}
 	fmt.Fprintln(w, header)
 
 	printTree(w, root, "", true, porcelain)
 	if root.HiddenContainerCount > 0 && !porcelain {
-		fmt.Fprintln(w, paint(colDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", root.HiddenContainerCount)))
+		fmt.Fprintln(w, style.Paint(style.ColDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", root.HiddenContainerCount)))
 	}
 	return nil
 }
@@ -501,7 +459,7 @@ func printTree(w io.Writer, node *treeNode, prefix string, isLast bool, porcelai
 			} else {
 				connector = "├── "
 			}
-			connector = paint(colDim, connector)
+			connector = style.Paint(style.ColDim, connector)
 		}
 
 		// Format node display
@@ -524,7 +482,7 @@ func printTree(w io.Writer, node *treeNode, prefix string, isLast bool, porcelai
 				if isLastChild {
 					newPrefix = prefix + "    "
 				} else {
-					newPrefix = prefix + paint(colDim, "│") + "   "
+					newPrefix = prefix + style.Paint(style.ColDim, "│") + "   "
 				}
 			}
 			printTree(w, child, newPrefix, isLastChild, porcelain)
@@ -594,30 +552,30 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 	var parts []string
 
 	if node.Type == "task" {
-		parts = append(parts, paint(colDim, node.ID)) // ID recedes; title leads
+		parts = append(parts, style.Paint(style.ColDim, node.ID)) // ID recedes; title leads
 		if node.Title != "" && node.Title != node.Slug {
 			parts = append(parts, node.Title) // content stays plain
 		}
 		if node.State != "" {
-			parts = append(parts, paint(stateColor(node.State), fmt.Sprintf("<%s>", formatTreeTaskState(node))))
+			parts = append(parts, style.Paint(style.StateColor(node.State), fmt.Sprintf("<%s>", formatTreeTaskState(node))))
 		}
 	} else {
 		displayTitle := node.Title
 		if node.Slug == "inbox" && strings.EqualFold(node.Title, "inbox") {
 			displayTitle = "Inbox"
 		}
-		parts = append(parts, paint(colDir, node.Slug+"/")) // bold blue directory
+		parts = append(parts, style.Paint(style.ColDir, node.Slug+"/")) // bold blue directory
 		if displayTitle != node.Slug {
-			parts = append(parts, paint(colDim, fmt.Sprintf("(%s)", displayTitle)))
+			parts = append(parts, style.Paint(style.ColDim, fmt.Sprintf("(%s)", displayTitle)))
 		}
-		parts = append(parts, paint(colDim, fmt.Sprintf("[%s]", node.ID)))
+		parts = append(parts, style.Paint(style.ColDim, fmt.Sprintf("[%s]", node.ID)))
 		if node.AllTasksCompleted {
-			parts = append(parts, paint(colDone, "(All done)"))
+			parts = append(parts, style.Paint(style.ColDone, "(All done)"))
 		}
 	}
 
 	if node.IsArchived {
-		parts = append(parts, paint(colDim, "(archived)"))
+		parts = append(parts, style.Paint(style.ColDim, "(archived)"))
 	}
 
 	return strings.Join(parts, " ")
@@ -628,66 +586,9 @@ func formatTreeTaskState(node *treeNode) string {
 		return node.State
 	}
 
-	openedAge := formatTreeOpenedAge(node.CreatedAt, time.Now().UTC())
+	openedAge := style.FormatOpenedAge(node.CreatedAt)
 	if openedAge == "" {
 		return node.State
 	}
 	return "opened " + openedAge + " ago"
-}
-
-func formatTreeOpenedAge(timestamp string, now time.Time) string {
-	createdAt, ok := parseTreeTimestamp(timestamp)
-	if !ok {
-		return ""
-	}
-
-	elapsed := now.Sub(createdAt)
-	if elapsed < 0 {
-		elapsed = 0
-	}
-
-	return formatTreeDuration(elapsed)
-}
-
-func parseTreeTimestamp(timestamp string) (time.Time, bool) {
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
-	} {
-		parsed, err := time.Parse(layout, timestamp)
-		if err == nil {
-			return parsed.UTC(), true
-		}
-	}
-	return time.Time{}, false
-}
-
-func formatTreeDuration(elapsed time.Duration) string {
-	type durationUnit struct {
-		name    string
-		seconds int64
-	}
-
-	units := []durationUnit{
-		{"year", 365 * 24 * 60 * 60},
-		{"month", 30 * 24 * 60 * 60},
-		{"week", 7 * 24 * 60 * 60},
-		{"day", 24 * 60 * 60},
-		{"hour", 60 * 60},
-		{"minute", 60},
-	}
-
-	elapsedSeconds := int64(elapsed.Seconds())
-	for _, unit := range units {
-		if elapsedSeconds >= unit.seconds {
-			value := elapsedSeconds / unit.seconds
-			name := unit.name
-			if value != 1 {
-				name += "s"
-			}
-			return fmt.Sprintf("%d %s", value, name)
-		}
-	}
-	return "less than a minute"
 }

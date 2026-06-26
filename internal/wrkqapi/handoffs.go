@@ -60,6 +60,18 @@ type WrkqHandoffListResult struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 
+// WrkqHandoffSearchResult is the server-owned compatibility envelope for
+// `wrkq handoff search`. The mirror combines these handoffs with caller-side
+// scope diagnostics and renders the legacy handoffSearchOutput shape.
+type WrkqHandoffSearchResult struct {
+	Handoffs        []WrkqHandoff `json:"handoffs"`
+	NextCursor      *string       `json:"next_cursor"`
+	Truncated       bool          `json:"truncated"`
+	Stale           bool          `json:"stale,omitempty"`
+	StaleEventCount int64         `json:"stale_event_count,omitempty"`
+	IndexWarning    string        `json:"index_warning,omitempty"`
+}
+
 // ─── Params ──────────────────────────────────────────────────────────────────
 
 // HandoffCreateParams carries the CALLER-resolved effective scope/actor for a
@@ -91,6 +103,16 @@ type HandoffGetParams struct {
 // the CALLER-resolved canonical project scope; the server never derives it from
 // env. status is pending|acknowledged|all (default pending).
 type HandoffListViewParams struct {
+	ScopeRef string `json:"scopeRef"`
+	Status   string `json:"status,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+	Cursor   string `json:"cursor,omitempty"`
+}
+
+// HandoffSearchViewParams is caller-scoped handoff search. Scope is resolved by
+// the CLI mirror and passed explicitly; cursor is the legacy base64 offset token.
+type HandoffSearchViewParams struct {
+	Query    string `json:"query"`
 	ScopeRef string `json:"scopeRef"`
 	Status   string `json:"status,omitempty"`
 	Limit    int    `json:"limit,omitempty"`

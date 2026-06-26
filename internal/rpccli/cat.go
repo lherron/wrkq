@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -18,18 +19,19 @@ import (
 //	ndjson (--ndjson, one compact object per line),
 //	raw (--output raw / --porcelain / TTY default markdown front-matter).
 //
-// All four are byte-parity proven against legacy. The TTY-only styled view
-// (colorEnabled markdown) is intentionally NOT reproduced — it is never
-// byte-tested and never reached when stdout is piped.
+// The json/ndjson/raw modes are byte-parity proven against legacy. The styled
+// task card (style.RenderStyledTask) renders on an interactive TTY — matching
+// legacy — or whenever --pretty forces it; color follows style.ColorEnabled, so
+// a non-TTY --pretty card is plain text and byte-comparable to legacy's.
 func newCatCmd() *cobra.Command {
-	var noFrontmatter, excludeComments, asJSON, ndjson, porcelain bool
+	var noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty bool
 	cmd := &cobra.Command{
 		Use:     "cat <path|id>...",
 		Aliases: []string{"show"},
 		Short:   "Print one or more tasks",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCat(cmd, args, noFrontmatter, excludeComments, asJSON, ndjson, porcelain)
+			return runCat(cmd, args, noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty)
 		},
 	}
 	cmd.Flags().BoolVar(&noFrontmatter, "no-frontmatter", false, "Print body only without front matter")
@@ -37,10 +39,11 @@ func newCatCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled task card even when not a TTY")
 	return cmd
 }
 
-func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, asJSON, ndjson, porcelain bool) error {
+func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty bool) error {
 	mode, stable, err := resolveCatMode(cmd, asJSON, ndjson, porcelain)
 	if err != nil {
 		return err
@@ -69,6 +72,11 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 	}
 
 	out := cmd.OutOrStdout()
+	// --pretty forces the styled card (overriding an explicit machine mode and the
+	// non-TTY JSON default); on a TTY it is the default, matching legacy.
+	if pretty || (mode == "raw" && !stable && style.ColorEnabled) {
+		return writeCatStyled(out, objs, noFrontmatter, excludeComments)
+	}
 	switch mode {
 	case "json":
 		return writeCatJSON(out, objs, stable)
@@ -77,6 +85,49 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 	default: // "raw"
 		return writeCatRaw(out, objs, noFrontmatter, excludeComments)
 	}
+}
+
+// writeCatStyled renders each task projection as the shared styled card. It maps
+// the mirror's catTask into style.StyledTask — the exact same renderer legacy
+// calls — so output is byte-identical by construction.
+func writeCatStyled(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComments bool) error {
+	for i, obj := range objs {
+		var t catTask
+		if err := json.Unmarshal(obj, &t); err != nil {
+			return err
+		}
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		var comments []style.StyledComment
+		if !excludeComments {
+			for _, c := range t.Comments {
+				comments = append(comments, style.StyledComment{
+					ID:        c.ID,
+					CreatedAt: c.CreatedAt,
+					Actor:     c.ActorSlug,
+					Role:      c.ActorRole,
+					Body:      c.Body,
+				})
+			}
+		}
+		style.RenderStyledTask(w, style.StyledTask{
+			ID:            t.ID,
+			Path:          t.Path,
+			Title:         t.Title,
+			State:         t.State,
+			Priority:      t.Priority,
+			Assignee:      t.AssigneeSlug,
+			Labels:        t.Labels,
+			DueAt:         t.DueAt,
+			UpdatedAt:     t.UpdatedAt,
+			BlockedCount:  len(t.BlockedBy),
+			Description:   t.Description,
+			Specification: t.Specification,
+			NoFrontmatter: noFrontmatter,
+		}, comments)
+	}
+	return nil
 }
 
 // resolveCatMode reproduces legacy cat's resolveOutputMode decision. Cat's allowed

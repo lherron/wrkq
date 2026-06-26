@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
@@ -16,12 +17,14 @@ import (
 //
 // Implemented surface (byte-proven against legacy): all metadata filters, path
 // prefix/glob matching, --type p|t, --limit, --cursor, all accepted --sort
-// values, --reverse, --json/--ndjson/--porcelain/non-TTY rendering. Everything
-// the legacy command can additionally do is HARD-GATED with a clear error so
-// there is never a silent degradation: --print0 and table/human/yaml/tsv
-// rendering.
+// values, --reverse, --json/--ndjson/--porcelain/non-TTY rendering, --print0,
+// and table/human/yaml/tsv rendering (the typed render paths decode the byte-
+// proven findListView projection back into the legacy findResult struct so
+// internal/render output is byte-identical, mirroring the ls ungate). The only
+// remaining divergence is the deliberate one legacy itself enforces: --output raw
+// is unsupported (byte-identical error).
 func newFindCmd() *cobra.Command {
-	var asJSON, ndjson, porcelain, reverse, ackPending, print0 bool
+	var asJSON, ndjson, porcelain, pretty, reverse, ackPending, print0 bool
 	var limit int
 	var cursorTok, typeFilter, sort string
 	var slugGlob, state, dueBefore, dueAfter, kind, assignee, parentTask, requestedBy, assignedProject string
@@ -30,10 +33,7 @@ func newFindCmd() *cobra.Command {
 		Short: "Search for tasks and containers",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if print0 {
-				return fmt.Errorf("find: --print0 not yet implemented in wrkq-rpccli (hard-gated pending parity)")
-			}
-			mode, stable, err := resolveFindMode(cmd, asJSON, ndjson, porcelain)
+			mode, stable, err := resolveFindMode(cmd, asJSON, ndjson, porcelain, pretty)
 			if err != nil {
 				return err
 			}
@@ -123,7 +123,31 @@ func newFindCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			if mode == "json" {
+
+			// --print0 takes precedence over the output mode (legacy ordering):
+			// NUL-joined Path values with a trailing NUL, nothing when empty.
+			if print0 {
+				results, derr := decodeFindResults(res.Items)
+				if derr != nil {
+					return derr
+				}
+				var paths []string
+				for _, r := range results {
+					paths = append(paths, r.Path)
+				}
+				if len(paths) > 0 {
+					if _, werr := fmt.Fprint(out, strings.Join(paths, "\x00")); werr != nil {
+						return werr
+					}
+					if _, werr := fmt.Fprint(out, "\x00"); werr != nil {
+						return werr
+					}
+				}
+				return nil
+			}
+
+			switch mode {
+			case "json":
 				// Legacy: json.Encoder with SetIndent unless Stable (then compact).
 				// find initializes results as []findResult{} → empty renders as `[]`
 				// (NOT null). The server mirrors this with an initialized slice.
@@ -138,14 +162,33 @@ func newFindCmd() *cobra.Command {
 				}
 				_, err = out.Write(append(data, '\n'))
 				return err
-			}
-			// NDJSON: one compact object per line; empty → no output.
-			for _, it := range res.Items {
-				if _, err := out.Write(append([]byte(it), '\n')); err != nil {
-					return err
+			case "ndjson":
+				// One compact object per line; empty → no output.
+				for _, it := range res.Items {
+					if _, werr := out.Write(append([]byte(it), '\n')); werr != nil {
+						return werr
+					}
 				}
+				return nil
 			}
-			return nil
+
+			// Typed rendering paths (yaml / tsv / table / human) decode the compat
+			// projection back into the legacy findResult struct so internal/render
+			// output is byte-identical (yaml.v3 keys off the Go field names).
+			results, derr := decodeFindResults(res.Items)
+			if derr != nil {
+				return derr
+			}
+			switch mode {
+			case "yaml":
+				return render.NewRenderer(out, render.Options{Format: render.FormatYAML}).RenderYAML(results)
+			case "tsv":
+				headers, rowsData := findTableData(results)
+				return render.NewRenderer(out, render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
+			default: // table / human
+				headers, rowsData := findTableData(results)
+				return render.NewRenderer(out, render.Options{Format: render.FormatTable, Porcelain: stable}).RenderTable(headers, rowsData)
+			}
 		},
 	}
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by type: t (task), p (project/container)")
@@ -166,16 +209,16 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Stable machine-readable output")
-	cmd.Flags().BoolVarP(&print0, "print0", "0", false, "NUL-separated output (hard-gated: not yet implemented)")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force human-readable table output even when not a TTY")
+	cmd.Flags().BoolVarP(&print0, "print0", "0", false, "NUL-separated output")
 	return cmd
 }
 
 // resolveFindMode reproduces legacy resolveOutputMode's decision for find's
 // allowed surface (Allow: table,human,json,ndjson,yaml,tsv; DefaultTTY: table;
-// raw NOT allowed → parity error). Modes the mirror does not yet implement
-// (table/human/yaml/tsv and the TTY default table) are hard-gated as errors so
-// parity is never silently degraded.
-func resolveFindMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode string, stable bool, err error) {
+// raw NOT allowed → byte-identical parity error). human maps to table (legacy
+// has no human render branch for find → table fall-through).
+func resolveFindMode(cmd *cobra.Command, asJSON, ndjson, porcelain, pretty bool) (mode string, stable bool, err error) {
 	count := 0
 	var explicit string
 	if asJSON {
@@ -188,6 +231,9 @@ func resolveFindMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode s
 	}
 	if count > 1 {
 		return "", false, fmt.Errorf("choose only one output mode")
+	}
+	if pretty {
+		return "table", false, nil
 	}
 	stable = porcelain
 	if explicit != "" {
@@ -209,16 +255,76 @@ func resolveFindMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode s
 			// Legacy excludes raw from find's allowed output set, so it errors with
 			// this exact message. Emit it verbatim → byte-parity (not a gate).
 			return "", false, fmt.Errorf("output mode %q is not supported for this command", m)
-		case "table", "human", "yaml", "tsv":
-			// Legacy RENDERS these; the mirror cannot yet, so hard-gate with a
-			// mirror-specific error (no silent degradation). Not a parity case.
-			return "", false, fmt.Errorf("find: %s output not yet implemented in wrkq-rpccli (hard-gated pending parity)", m)
+		case "table", "yaml", "tsv":
+			return m, false, nil
+		case "human":
+			// Legacy has no outputModeHuman render branch for find → it falls
+			// through to the table renderer. Map human → table to match.
+			return "table", false, nil
 		default:
 			return "", false, fmt.Errorf("invalid output mode %q: choose table, human, json, ndjson, porcelain, yaml, tsv, or raw", outF.Value.String())
 		}
 	}
+	// Bare default: TTY → table, non-TTY list shape → ndjson (legacy convention).
 	if isStdoutTTY(cmd.OutOrStdout()) {
-		return "", false, fmt.Errorf("find: table output not yet implemented in wrkq-rpccli (use --json / --ndjson / --porcelain)")
+		return "table", false, nil
 	}
 	return "ndjson", false, nil
+}
+
+// findResult mirrors the legacy internal/cli findResult shape EXACTLY (field
+// order + json tags) so yaml.v3 (which keys off the untagged Go field names) and
+// the table/tsv row construction render byte-identically to legacy. The mirror
+// decodes the byte-proven findListView projection into this type.
+type findResult struct {
+	Type                 string  `json:"type"` // "task" or "container"
+	UUID                 string  `json:"uuid"`
+	ID                   string  `json:"id"`
+	Slug                 string  `json:"slug"`
+	Title                string  `json:"title"`
+	Path                 string  `json:"path"`
+	Specification        string  `json:"specification,omitempty"`
+	State                *string `json:"state,omitempty"`
+	Priority             *int    `json:"priority,omitempty"`
+	Kind                 *string `json:"kind,omitempty"`
+	Assignee             *string `json:"assignee,omitempty"`
+	AssigneePrincipalRef *string `json:"assignee_principal_ref,omitempty"`
+	ParentTaskID         *string `json:"parent_task_id,omitempty"`
+	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
+	Resolution           *string `json:"resolution,omitempty"`
+	DueAt                *string `json:"due_at,omitempty"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+	ETag                 int64   `json:"etag"`
+}
+
+// decodeFindResults unmarshals the server projection items into the legacy
+// struct. A nil/empty item slice yields a nil slice (so yaml of nothing matches).
+func decodeFindResults(items []json.RawMessage) ([]findResult, error) {
+	var results []findResult
+	for _, it := range items {
+		var r findResult
+		if err := json.Unmarshal(it, &r); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// findTableData reproduces legacy runFind's table/tsv row construction: the
+// fixed header set and one row per result with a blank state for containers.
+func findTableData(results []findResult) ([]string, [][]string) {
+	headers := []string{"Type", "ID", "Path", "Title", "State", "UpdatedAt"}
+	rowsData := make([][]string, 0, len(results))
+	for _, result := range results {
+		state := ""
+		if result.State != nil {
+			state = *result.State
+		}
+		rowsData = append(rowsData, []string{result.Type, result.ID, result.Path, result.Title, state, result.UpdatedAt})
+	}
+	return headers, rowsData
 }

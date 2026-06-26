@@ -58,6 +58,7 @@ var (
 	findPorcelain       bool
 	findJSON            bool
 	findNDJSON          bool
+	findPretty          bool
 	findPrint0          bool
 )
 
@@ -82,6 +83,7 @@ func init() {
 	findCmd.Flags().BoolVar(&findPorcelain, "porcelain", false, "Stable machine-readable output")
 	findCmd.Flags().BoolVar(&findJSON, "json", false, "Output as JSON")
 	findCmd.Flags().BoolVar(&findNDJSON, "ndjson", false, "Output as newline-delimited JSON")
+	findCmd.Flags().BoolVar(&findPretty, "pretty", false, "Force human-readable table output even when not a TTY")
 	findCmd.Flags().BoolVarP(&findPrint0, "print0", "0", false, "NUL-separated output")
 }
 
@@ -155,6 +157,9 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if findPretty {
+		sel = outputSelection{Mode: outputModeTable}
 	}
 	if cmd.Flag("json") == nil {
 		switch {

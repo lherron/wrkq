@@ -156,11 +156,16 @@ var methodCatalog = []string{
 	"wrkq.admin.legacyActor.update",
 	"wrkq.container.create",
 	"wrkq.container.update",
+	"wrkq.container.move",
+	"wrkq.container.webhookSet",
+	"wrkq.container.archive",
+	"wrkq.container.restore",
 	"wrkq.container.delete",
 	"wrkq.container.deleteRecursive",
 	"wrkq.container.show",
 	"wrkq.container.catView",
 	"wrkq.container.list",
+	"wrkq.project.listView",
 	"wrkq.webhook.add",
 	"wrkq.webhook.remove",
 	"wrkq.webhook.listView",
@@ -172,6 +177,7 @@ var methodCatalog = []string{
 	"wrkq.handoff.create",
 	"wrkq.handoff.get",
 	"wrkq.handoff.listView",
+	"wrkq.handoff.searchView",
 	"wrkq.handoff.acknowledge",
 	"wrkq.search.listView",
 	"wrkq.index.status",
@@ -261,6 +267,8 @@ var dtoCatalog = []string{
 	"WrkqRelation",
 	"WrkqContainer",
 	"WrkqContainerListResult",
+	"WrkqProjectsListView", // CLI compatibility projection (projects)
+	"WrkqProjectEntry",     // element of projects listView (legacy projects Project row)
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
 	"WrkqBundleExportView", // wrkq.bundle.exportView LOGICAL snapshot read model (CLI materializes files)
 	"WrkqBundleTaskDoc",    // element of WrkqBundleExportView (task/ref doc: path + base_etag + content)
@@ -271,6 +279,7 @@ var dtoCatalog = []string{
 	"WrkqHandoff",             // handoff resource DTO (legacy handoffJSON field order)
 	"WrkqHandoffCreateResult", // wrkq.handoff.create envelope (handoff + idempotentReplay)
 	"WrkqHandoffListResult",   // wrkq.handoff.listView page envelope
+	"WrkqHandoffSearchResult", // wrkq.handoff.searchView legacy search output envelope
 	"WrkqSearchListView",      // CLI compatibility search read model (search); nested WrkqSearchResult + WrkqIndexStatus are part of this DTO
 	"WrkqSearchResult",        // element of search.listView (legacy search.Result struct order)
 	"WrkqIndexStatus",         // CLI compatibility index status projection (index status; legacy indexdb.Status struct order)
@@ -417,6 +426,18 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.container.update", apiHandler(func(ctx context.Context, p wrkqapi.ContainerUpdateParams) (any, error) {
 		return wq.ContainerUpdate(ctx, p)
 	}))
+	s.Register("wrkq.container.move", apiHandler(func(ctx context.Context, p wrkqapi.ContainerMoveParams) (any, error) {
+		return wq.ContainerMove(ctx, p)
+	}))
+	s.Register("wrkq.container.webhookSet", apiHandler(func(ctx context.Context, p wrkqapi.ContainerWebhookSetParams) (any, error) {
+		return wq.ContainerWebhookSet(ctx, p)
+	}))
+	s.Register("wrkq.container.archive", apiHandler(func(ctx context.Context, p wrkqapi.ContainerArchiveParams) (any, error) {
+		return wq.ContainerArchive(ctx, p)
+	}))
+	s.Register("wrkq.container.restore", apiHandler(func(ctx context.Context, p wrkqapi.ContainerRestoreParams) (any, error) {
+		return wq.ContainerRestore(ctx, p)
+	}))
 	s.Register("wrkq.container.delete", apiHandler(func(ctx context.Context, p wrkqapi.ContainerDeleteParams) (any, error) {
 		return wq.ContainerDelete(ctx, p)
 	}))
@@ -431,6 +452,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.container.list", apiHandler(func(ctx context.Context, p wrkqapi.ContainerListParams) (any, error) {
 		return wq.ContainerList(ctx, p)
+	}))
+	s.Register("wrkq.project.listView", apiHandler(func(ctx context.Context, p wrkqapi.ProjectsListViewParams) (any, error) {
+		return wq.ProjectsListView(ctx, p)
 	}))
 	s.Register("wrkq.webhook.add", apiHandler(func(ctx context.Context, p wrkqapi.WebhookMutateParams) (any, error) {
 		return wq.WebhookAdd(ctx, p)
@@ -468,6 +492,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.handoff.listView", apiHandler(func(ctx context.Context, p wrkqapi.HandoffListViewParams) (any, error) {
 		return wq.HandoffListView(ctx, p)
+	}))
+	s.Register("wrkq.handoff.searchView", apiHandler(func(ctx context.Context, p wrkqapi.HandoffSearchViewParams) (any, error) {
+		return wq.HandoffSearchView(ctx, p)
 	}))
 	s.Register("wrkq.handoff.acknowledge", apiHandler(func(ctx context.Context, p wrkqapi.HandoffAcknowledgeParams) (any, error) {
 		return wq.HandoffAcknowledge(ctx, p)

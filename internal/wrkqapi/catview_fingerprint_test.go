@@ -159,10 +159,12 @@ func TestTaskCopyDTOFingerprint(t *testing.T) {
 func TestHandoffDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqHandoff{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqHandoffCreateResult{})) + "\n" +
-		dtoFingerprint(reflect.TypeOf(WrkqHandoffListResult{}))
+		dtoFingerprint(reflect.TypeOf(WrkqHandoffListResult{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqHandoffSearchResult{}))
 	const want = "WrkqHandoff{uuid,id,scope_ref,scope_kind,agent_id,project_id,agent_actor_uuid,agent_principal_ref,omitempty,project_container_uuid,created_by_agent_id,created_by_actor_uuid,created_by_principal_ref,omitempty,title,body,status,idempotency_key,acknowledged_at,acknowledged_by_agent_id,acknowledged_by_actor_uuid,acknowledged_by_principal_ref,omitempty,acknowledgement_note,meta,etag,created_at,updated_at}\n" +
 		"WrkqHandoffCreateResult{handoff,idempotentReplay}\n" +
-		"WrkqHandoffListResult{items,nextCursor,omitempty}"
+		"WrkqHandoffListResult{items,nextCursor,omitempty}\n" +
+		"WrkqHandoffSearchResult{handoffs,next_cursor,truncated,stale,omitempty,stale_event_count,omitempty,index_warning,omitempty}"
 	if got != want {
 		t.Errorf("handoff DTO shape drifted (protocol contract change):\n got:\n%s\nwant:\n%s\n"+
 			"Update this fingerprint, docs/wrkq-wrkf-rpc.md, dtoCatalog, and re-verify handoff parity deliberately.", got, want)
@@ -246,6 +248,17 @@ func TestMonitorViewDTOFingerprint(t *testing.T) {
 		"WrkqMonitorStateView{met,unmet}"
 	if got != want {
 		t.Errorf("monitor view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestProjectsListViewDTOFingerprint guards the projects compatibility projection.
+func TestProjectsListViewDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqProjectsListView{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqProjectEntry{}))
+	const want = "WrkqProjectsListView{items,next_cursor,omitempty}\n" +
+		"WrkqProjectEntry{type,id,slug,title,omitempty,path}"
+	if got != want {
+		t.Errorf("projects list view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
 }
 

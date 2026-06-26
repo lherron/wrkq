@@ -110,19 +110,24 @@ install no-sync="": build
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries
-  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkqadm ~/.local/bin/wrkqd
+  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkqadm ~/.local/bin/wrkqd ~/.local/bin/wrkq-rpccli
   cp bin/wrkq ~/.local/bin/wrkq
   cp bin/wrkf ~/.local/bin/wrkf
   cp bin/wrkqadm ~/.local/bin/wrkqadm
   cp bin/wrkqd ~/.local/bin/wrkqd
+  # RPC-backed mirror — installed alongside during the rpccli migration/cutover so
+  # it can be exercised on PATH (parity harness; superseded once cutover lands).
+  cp bin/wrkq-rpccli ~/.local/bin/wrkq-rpccli
   chmod +x ~/.local/bin/wrkq
   chmod +x ~/.local/bin/wrkf
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
+  chmod +x ~/.local/bin/wrkq-rpccli
   echo "✓ Installed to ~/.local/bin/wrkq"
   echo "✓ Installed to ~/.local/bin/wrkf"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo "✓ Installed to ~/.local/bin/wrkqd"
+  echo "✓ Installed to ~/.local/bin/wrkq-rpccli"
   echo ""
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "⚠️  Add ~/.local/bin to your PATH:"

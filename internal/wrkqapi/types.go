@@ -110,8 +110,15 @@ type TaskCreateParams struct {
 	RiskClass            string         `json:"riskClass,omitempty"`
 	ParentTask           string         `json:"parentTask,omitempty"`
 	AssigneePrincipalRef string         `json:"assigneePrincipalRef,omitempty"`
+	RequestedByProjectID string         `json:"requestedBy,omitempty"`
+	AssignedProjectID    string         `json:"assignedProject,omitempty"`
+	Resolution           string         `json:"resolution,omitempty"`
 	Labels               []string       `json:"labels,omitempty"`
 	Meta                 map[string]any `json:"meta,omitempty"`
+	MetaRaw              string         `json:"metaRaw,omitempty"`
+	DueAt                string         `json:"dueAt,omitempty"`
+	StartAt              string         `json:"startAt,omitempty"`
+	ForceUUID            string         `json:"forceUuid,omitempty"`
 	Actor                string         `json:"actor,omitempty"`
 	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
 }
@@ -160,14 +167,16 @@ type TaskUpdateParams struct {
 
 // TaskMoveParams mirrors WrkqTaskMoveParams.
 type TaskMoveParams struct {
-	Task       string `json:"task"`
-	TargetPath string `json:"targetPath"`
-	ExpectEtag *int64 `json:"expectEtag,omitempty"`
-	Actor      string `json:"actor,omitempty"`
+	Task          string `json:"task"`
+	TargetPath    string `json:"targetPath"`
+	OverwriteTask bool   `json:"overwriteTask,omitempty"`
+	ExpectEtag    *int64 `json:"expectEtag,omitempty"`
+	Actor         string `json:"actor,omitempty"`
 }
 
 // TaskPatch is the mutable subset of a task.
 type TaskPatch struct {
+	Slug                 *string         `json:"slug,omitempty"`
 	Title                *string         `json:"title,omitempty"`
 	Description          *string         `json:"description,omitempty"`
 	Specification        *string         `json:"specification,omitempty"`
@@ -175,9 +184,19 @@ type TaskPatch struct {
 	Priority             *int            `json:"priority,omitempty"`
 	Kind                 *string         `json:"kind,omitempty"`
 	RiskClass            *string         `json:"riskClass,omitempty"`
+	ParentTask           *string         `json:"parentTask,omitempty"`
 	Labels               *[]string       `json:"labels,omitempty"`
 	Meta                 *map[string]any `json:"meta,omitempty"`
+	MetaRaw              *string         `json:"metaRaw,omitempty"`
 	AssigneePrincipalRef *string         `json:"assigneePrincipalRef,omitempty"`
+	RequestedByProjectID *string         `json:"requestedBy,omitempty"`
+	AssignedProjectID    *string         `json:"assignedProject,omitempty"`
+	Resolution           *string         `json:"resolution,omitempty"`
+	CPProjectID          *string         `json:"cpProjectId,omitempty"`
+	CPWorkItemID         *string         `json:"cpWorkItemId,omitempty"`
+	CPRunID              *string         `json:"cpRunId,omitempty"`
+	SessionID            *string         `json:"sessionId,omitempty"`
+	RunStatus            *string         `json:"runStatus,omitempty"`
 	DueAt                *string         `json:"dueAt,omitempty"`
 	StartAt              *string         `json:"startAt,omitempty"`
 }
@@ -189,9 +208,11 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	allowed := map[string]bool{
-		"title": true, "description": true, "specification": true, "state": true,
-		"priority": true, "kind": true, "riskClass": true, "labels": true, "meta": true,
-		"assigneePrincipalRef": true, "dueAt": true, "startAt": true,
+		"slug": true, "title": true, "description": true, "specification": true, "state": true,
+		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
+		"assigneePrincipalRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
+		"cpProjectId": true, "cpWorkItemId": true, "cpRunId": true, "sessionId": true, "runStatus": true,
+		"dueAt": true, "startAt": true,
 	}
 	for key := range raw {
 		if !allowed[key] {
@@ -581,6 +602,60 @@ type ContainerUpdateParams struct {
 	ExpectETag     int64           `json:"expectEtag,omitempty"`
 	Actor          string          `json:"actor,omitempty"`
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+}
+
+// ContainerMoveParams mirrors the container-source branch of legacy `wrkq mv`.
+// DestinationIsContainer preserves the caller's resolved command shape:
+// move into an existing container vs rename/move to a new path.
+type ContainerMoveParams struct {
+	Container              string `json:"container"`
+	Destination            string `json:"destination"`
+	DestinationIsContainer bool   `json:"destinationIsContainer,omitempty"`
+	DryRun                 bool   `json:"dryRun,omitempty"`
+	ExpectETag             int64  `json:"expectEtag,omitempty"`
+	Actor                  string `json:"actor,omitempty"`
+}
+
+// ContainerWebhookSetParams mirrors the legacy `container set` webhook-url
+// compatibility surface. It is separate from ContainerUpdateParams so
+// wrkq.container.update stays the deliberately narrow slug/title patch method.
+type ContainerWebhookSetParams struct {
+	Container         string   `json:"container,omitempty"`
+	All               bool     `json:"all,omitempty"`
+	Replace           bool     `json:"replace,omitempty"`
+	WebhookURLs       []string `json:"webhookUrls,omitempty"`
+	AddWebhookURLs    []string `json:"addWebhookUrls,omitempty"`
+	RemoveWebhookURLs []string `json:"removeWebhookUrls,omitempty"`
+	ExpectETag        int64    `json:"expectEtag,omitempty"`
+	Actor             string   `json:"actor,omitempty"`
+}
+
+// ContainerArchiveParams mirrors WrkqContainerArchiveParams.
+type ContainerArchiveParams struct {
+	Container  string `json:"container,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Project    string `json:"project,omitempty"`
+	ExpectETag int64  `json:"expectEtag,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
+// WrkqContainerArchiveResult is returned by container archive.
+type WrkqContainerArchiveResult struct {
+	Archived bool `json:"archived"`
+}
+
+// ContainerRestoreParams mirrors WrkqContainerRestoreParams.
+type ContainerRestoreParams struct {
+	Container string `json:"container,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Project   string `json:"project,omitempty"`
+	Actor     string `json:"actor,omitempty"`
+}
+
+// WrkqContainerRestoreResult is returned by container restore.
+type WrkqContainerRestoreResult struct {
+	UUID     string `json:"uuid"`
+	Restored bool   `json:"restored"`
 }
 
 // ContainerDeleteParams mirrors WrkqContainerDeleteParams.

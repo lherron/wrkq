@@ -1,17 +1,16 @@
-package cli
+package style
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
-	"time"
 )
 
-// styledTask is the flattened view model the interactive `cat` renderer needs.
-// It is decoupled from cat.go's JSON struct so the renderer stays presentation
-// only.
-type styledTask struct {
+// StyledTask is the flattened view model the interactive `cat` card needs. It is
+// decoupled from any storage/JSON struct so the renderer stays presentation only;
+// both the CLI and the RPC mirror populate it from their own task projections.
+type StyledTask struct {
 	ID            string
 	Path          string
 	Title         string
@@ -27,7 +26,7 @@ type styledTask struct {
 	NoFrontmatter bool
 }
 
-type styledComment struct {
+type StyledComment struct {
 	ID        string
 	CreatedAt string
 	Actor     string
@@ -35,14 +34,14 @@ type styledComment struct {
 	Body      string
 }
 
-// renderStyledTask writes a task as a colorized card: a state-anchored header,
-// the description rendered as markdown, an optional specification section, and
-// quoted comments. Only reached on an interactive TTY.
 // bodyIndent nests section content under its § header so the parent/child
 // relationship is obvious at a glance.
 const bodyIndent = "    "
 
-func renderStyledTask(w io.Writer, t styledTask, comments []styledComment) {
+// RenderStyledTask writes a task as a colorized card: a state-anchored header,
+// the description rendered as markdown, an optional specification section, and
+// quoted comments. Reached on an interactive TTY or when --pretty forces it.
+func RenderStyledTask(w io.Writer, t StyledTask, comments []StyledComment) {
 	if !t.NoFrontmatter {
 		renderHeader(w, t)
 	}
@@ -55,9 +54,9 @@ func renderStyledTask(w io.Writer, t styledTask, comments []styledComment) {
 		if wrote {
 			_, _ = io.WriteString(w, "\n")
 		}
-		_, _ = io.WriteString(w, paint(colSection, label)+"\n")
-		_, _ = io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n\n")
-		renderMarkdown(w, body, bodyIndent)
+		_, _ = io.WriteString(w, Paint(ColSection, label)+"\n")
+		_, _ = io.WriteString(w, Paint(ColRule, strings.Repeat("─", RuleWidth))+"\n\n")
+		RenderMarkdown(w, body, bodyIndent)
 		wrote = true
 	}
 
@@ -71,21 +70,21 @@ func renderStyledTask(w io.Writer, t styledTask, comments []styledComment) {
 
 // renderHeader prints the title line plus an aligned metadata trailer and a
 // full-width divider. The state-colored dot is the card's single accent.
-func renderHeader(w io.Writer, t styledTask) {
-	dot := paint(stateColor(t.State), "●")
-	fmt.Fprintf(w, "%s  %s %s\n", paint(colDim, t.ID), dot, paint(colHeading, t.Title))
+func renderHeader(w io.Writer, t StyledTask) {
+	dot := Paint(StateColor(t.State), "●")
+	fmt.Fprintf(w, "%s  %s %s\n", Paint(ColDim, t.ID), dot, Paint(ColHeading, t.Title))
 
 	indent := strings.Repeat(" ", len(t.ID)+3)
-	sep := paint(colRule, " · ")
+	sep := Paint(ColRule, " · ")
 
 	var meta []string
-	meta = append(meta, paint(stateColor(t.State), t.State))
-	meta = append(meta, paint(colDim, fmt.Sprintf("P%d", t.Priority)))
+	meta = append(meta, Paint(StateColor(t.State), t.State))
+	meta = append(meta, Paint(ColDim, fmt.Sprintf("P%d", t.Priority)))
 	if t.Assignee != nil && *t.Assignee != "" {
-		meta = append(meta, paint(colDir, "@"+*t.Assignee))
+		meta = append(meta, Paint(ColDir, "@"+*t.Assignee))
 	}
 	if t.Path != "" {
-		meta = append(meta, paint(colDim, t.Path))
+		meta = append(meta, Paint(ColDim, t.Path))
 	}
 	_, _ = io.WriteString(w, indent+strings.Join(meta, sep)+"\n")
 
@@ -96,39 +95,39 @@ func renderHeader(w io.Writer, t styledTask) {
 		age, on := formatUpdatedAge(t.UpdatedAt)
 		seg := "updated " + age
 		if on != "" {
-			seg += paint(colDim, " "+on)
+			seg += Paint(ColDim, " "+on)
 		}
 		trailer = append(trailer, seg)
 	}
 	if labels := formatLabels(t.Labels); labels != "" {
-		trailer = append(trailer, paint(colMarker, labels))
+		trailer = append(trailer, Paint(ColMarker, labels))
 	}
 	if t.DueAt != nil && *t.DueAt != "" {
-		trailer = append(trailer, paint(colDim, "due "+shortStamp(*t.DueAt)))
+		trailer = append(trailer, Paint(ColDim, "due "+ShortStamp(*t.DueAt)))
 	}
 	if t.BlockedCount > 0 {
-		trailer = append(trailer, paint(colStateStop, fmt.Sprintf("%d blocked", t.BlockedCount)))
+		trailer = append(trailer, Paint(ColStateStop, fmt.Sprintf("%d blocked", t.BlockedCount)))
 	}
 	if len(trailer) > 0 {
 		_, _ = io.WriteString(w, indent+strings.Join(trailer, sep)+"\n")
 	}
 
-	_, _ = io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
+	_, _ = io.WriteString(w, Paint(ColRule, strings.Repeat("─", RuleWidth))+"\n")
 }
 
 // renderComments prints the comment thread under a counted heading.
-func renderComments(w io.Writer, comments []styledComment) {
-	_, _ = io.WriteString(w, "\n"+paint(colSection, fmt.Sprintf("Comments (%d)", len(comments)))+"\n")
-	_, _ = io.WriteString(w, paint(colRule, strings.Repeat("─", ruleWidth))+"\n")
+func renderComments(w io.Writer, comments []StyledComment) {
+	_, _ = io.WriteString(w, "\n"+Paint(ColSection, fmt.Sprintf("Comments (%d)", len(comments)))+"\n")
+	_, _ = io.WriteString(w, Paint(ColRule, strings.Repeat("─", RuleWidth))+"\n")
 
-	bar := paint(colRule, "▏ ")
+	bar := Paint(ColRule, "▏ ")
 	for _, c := range comments {
-		head := paint(colDim, c.ID) + paint(colRule, " · ") + paint(colDim, shortStamp(c.CreatedAt))
+		head := Paint(ColDim, c.ID) + Paint(ColRule, " · ") + Paint(ColDim, ShortStamp(c.CreatedAt))
 		if c.Actor != "" {
-			head += " " + paint(colDir, "@"+c.Actor)
+			head += " " + Paint(ColDir, "@"+c.Actor)
 		}
 		if c.Role != "" {
-			head += paint(colDim, " ("+c.Role+")")
+			head += Paint(ColDim, " ("+c.Role+")")
 		}
 		_, _ = io.WriteString(w, bar+head+"\n")
 		for _, line := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
@@ -161,25 +160,17 @@ func formatLabels(labels *string) string {
 	return strings.Join(out, " ")
 }
 
-// shortStamp trims an RFC3339-ish timestamp to its date for compact display.
-func shortStamp(ts string) string {
-	if len(ts) >= 10 && ts[4] == '-' && ts[7] == '-' {
-		return ts[:10]
-	}
-	return ts
-}
-
 // formatUpdatedAge splits a timestamp into a humanized "<duration> ago" phrase
 // and an "on <date>" absolute reference, so each can be styled independently.
 // When the timestamp can't be parsed, the date carries the age and on is empty.
 func formatUpdatedAge(ts string) (age, on string) {
-	parsed, ok := parseTreeTimestamp(ts)
+	parsed, ok := ParseTimestamp(ts)
 	if !ok {
-		return shortStamp(ts), ""
+		return ShortStamp(ts), ""
 	}
-	elapsed := time.Now().UTC().Sub(parsed)
+	elapsed := NowUTC().Sub(parsed)
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	return formatTreeDuration(elapsed) + " ago", "on " + shortStamp(ts)
+	return FormatDuration(elapsed) + " ago", "on " + ShortStamp(ts)
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 )
 
@@ -82,6 +83,124 @@ func (a *API) WebhookRemove(ctx context.Context, p WebhookMutateParams) (json.Ra
 	}
 	url := strings.TrimSpace(p.URL)
 	return a.mutateRootWebhooks(nil, []string{url}, p.ExpectETag, p.Actor)
+}
+
+// ContainerWebhookSet mirrors legacy `wrkq container set` webhook-url updates.
+// This is intentionally separate from wrkq.container.update: global webhook
+// mutation and per-container webhook mutation are reviewed compatibility
+// surfaces, while container.update remains the narrow slug/title method.
+func (a *API) ContainerWebhookSet(ctx context.Context, p ContainerWebhookSetParams) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	attr, aerr := a.attributionFor(p.Actor)
+	if aerr != nil {
+		return nil, aerr
+	}
+
+	if p.All {
+		if len(p.AddWebhookURLs) == 0 && len(p.RemoveWebhookURLs) == 0 {
+			return nil, NewValidationError("--all requires --add-webhook-url or --remove-webhook-url", map[string]any{"field": "all"})
+		}
+		if strings.TrimSpace(p.Container) != "" {
+			return nil, NewValidationError("--all cannot be used with a container argument", map[string]any{"field": "container"})
+		}
+		for _, u := range p.AddWebhookURLs {
+			if !isValidWebhookURL(strings.TrimSpace(u)) {
+				return nil, NewValidationError("invalid webhook url: "+u, map[string]any{"field": "addWebhookUrls"})
+			}
+		}
+		containers, err := a.store.Containers.ListAll(false)
+		if err != nil {
+			return nil, NewInternalError(errors.New("failed to list containers: " + err.Error()))
+		}
+		updated := 0
+		for _, c := range containers {
+			newURLs, changed := applyWebhookDelta(c.WebhookURLs, p.AddWebhookURLs, p.RemoveWebhookURLs)
+			if !changed {
+				continue
+			}
+			payload, err := json.Marshal(newURLs)
+			if err != nil {
+				return nil, NewInternalError(errors.New("failed to encode webhook urls: " + err.Error()))
+			}
+			fields := map[string]interface{}{"webhook_urls": string(payload)}
+			if _, err := a.store.Containers.UpdateFieldsWithAttribution(attr, c.UUID, fields, 0); err != nil {
+				return nil, NewInternalError(errors.New("failed to update container " + c.ID + ": " + err.Error()))
+			}
+			updated++
+		}
+		return marshalAlpha(map[string]any{"updated": updated, "all": true})
+	}
+
+	selector := strings.TrimSpace(p.Container)
+	if selector == "" {
+		return nil, NewValidationError("container argument required (or use --all)", map[string]any{"field": "container"})
+	}
+	containerUUID, containerPath, err := selectors.ResolveContainer(a.db, selector)
+	if err != nil {
+		return nil, newError(CodeNotFound, err.Error(), false, struct {
+			Ref  string `json:"ref,omitempty"`
+			Kind string `json:"kind,omitempty"`
+		}{Ref: selector, Kind: "container"}, err)
+	}
+
+	var webhookURLs []string
+	if p.Replace {
+		webhookURLs, err = normalizeWebhookURLs(p.WebhookURLs)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if len(p.AddWebhookURLs) == 0 && len(p.RemoveWebhookURLs) == 0 {
+			return nil, NewValidationError("no updates specified", map[string]any{"field": "webhookUrls"})
+		}
+		for _, u := range p.AddWebhookURLs {
+			if !isValidWebhookURL(strings.TrimSpace(u)) {
+				return nil, NewValidationError("invalid webhook url: "+u, map[string]any{"field": "addWebhookUrls"})
+			}
+		}
+		container, err := a.store.Containers.GetByUUID(containerUUID)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		webhookURLs, _ = applyWebhookDelta(container.WebhookURLs, p.AddWebhookURLs, p.RemoveWebhookURLs)
+	}
+
+	payload, err := json.Marshal(webhookURLs)
+	if err != nil {
+		return nil, NewInternalError(errors.New("failed to encode webhook urls: " + err.Error()))
+	}
+	fields := map[string]interface{}{"webhook_urls": string(payload)}
+	if _, err := a.store.Containers.UpdateFieldsWithAttribution(attr, containerUUID, fields, p.ExpectETag); err != nil {
+		return nil, mapWebhookStoreError(err)
+	}
+
+	return marshalAlpha(map[string]any{
+		"container_uuid": containerUUID,
+		"container_path": containerPath,
+		"webhook_urls":   webhookURLs,
+		"count":          len(webhookURLs),
+		"updated":        true,
+	})
+}
+
+func normalizeWebhookURLs(raw []string) ([]string, error) {
+	urls := append([]string{}, raw...)
+	for i, u := range urls {
+		trimmed := strings.TrimSpace(u)
+		if trimmed == "" {
+			return nil, NewValidationError("webhook url cannot be empty", map[string]any{"field": "webhookUrls"})
+		}
+		if !isValidWebhookURL(trimmed) {
+			return nil, NewValidationError("invalid webhook url: "+trimmed, map[string]any{"field": "webhookUrls"})
+		}
+		urls[i] = trimmed
+	}
+	if urls == nil {
+		urls = []string{}
+	}
+	return urls, nil
 }
 
 // mutateRootWebhooks resolves the root container, applies the idempotent add/remove

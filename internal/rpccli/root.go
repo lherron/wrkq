@@ -6,24 +6,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// mirroredCommand describes one top-level command of the production `wrkq`
-// surface that the mirror reproduces. For the seam smoke slice every command
-// except `cat` is a not-implemented stub; the stubs exist so the command-tree
-// parity test can fail on path/alias drift early (see tree parity test in
-// internal/cli). Coverage status per command lives in docs/rpc-cli-migration.md.
+// mirroredCommand describes a command surface represented by an explicit
+// not-implemented mirror stub. Top-level stubs are expected to remain empty for
+// primary cutover; nested development stubs may still use newStubCmd directly.
+// Coverage status per command lives in docs/rpc-cli-migration.md.
 type mirroredCommand struct {
 	use     string
 	aliases []string
 }
 
-// topLevelCommands mirrors `wrkq`'s top-level command paths and aliases exactly.
-// Keep this in lockstep with internal/cli rootCmd.AddCommand registrations; the
-// parity test is the guardrail.
+// topLevelCommands is the remaining top-level stub inventory. It should stay
+// empty unless a newly added legacy command is intentionally classified as a
+// mirror gap with docs/tests.
 var topLevelCommands = []mirroredCommand{
 	// ack is RPC-backed (real parity command); registered separately.
-	{use: "agent [prompt] [-- extra hrcchat-turn args]"},
-	{use: "agent-context"},
-	{use: "agent-info"},
+	// agent is local pass-through to hrcchat; registered separately.
+	// agent-context is local/RPC-lookup parity; registered separately.
+	// agent-info is local-only and byte-proven; registered separately.
 	// apply is RPC-backed (wrkq.task.update via the caller-side parse/gate); registered separately.
 	// bundle is RPC-backed (wrkq.bundle.exportView LOGICAL snapshot; the CLI
 	// materializes files on the caller host); registered separately.
@@ -42,30 +41,30 @@ var topLevelCommands = []mirroredCommand{
 	// ls is RPC-backed (real parity command); registered separately.
 	// monitor is RPC-backed (bounded polling via wrkq.monitor.eventsView +
 	// wrkq.monitor.stateView; caller owns the loop/terminal/exit codes); registered separately.
-	{use: "projects"},
+	// projects is RPC-backed via wrkq.project.listView; registered separately.
 	// rename-container is RPC-backed (new wrkq.container.update, narrow slug/title
 	// patch + etag CAS, T-05112); registered separately.
-	// restore is RPC-backed (extended wrkq.task.restore, caller-owned-confirmation
-	// seam: task flags server-side, container targets hard-gated); registered separately.
+	// restore is RPC-backed (extended wrkq.task.restore for tasks,
+	// wrkq.container.restore for containers); registered separately.
 	// rm is RPC-backed (caller-owned-confirmation seam); registered separately.
-	{use: "rpc --stdio"},
+	// rpc --stdio is local protocol serving via workrpc.ServeStdio; registered separately.
 	// search is RPC-backed (server-owned wrkq.search.listView, T-05114);
 	// registered separately.
-	{use: "server"},
+	// server is local daemon control; registered separately.
 	// stat is RPC-backed (real parity command); registered separately.
 	// tree is RPC-backed (real parity command); registered separately.
-	{use: "usage", aliases: []string{"info"}},
-	{use: "version"},
+	// usage/info is local-only and byte-proven; registered separately.
+	// version is local-only and byte-proven; registered separately.
 	// watch is RPC-backed (bounded raw tail via wrkq.history.tailView; caller owns
 	// the follow loop + deprecation warning + rendering); registered separately.
 	// webhook is RPC-backed (DEDICATED family wrkq.webhook.add/remove/listView,
 	// T-05119); registered separately.
-	{use: "whoami"},
+	// whoami is local/config attribution parity; registered separately.
 }
 
 // NewRootCmd builds the mirror's cobra tree. It reproduces the production
-// persistent flags and top-level command surface, wiring the real `cat`
-// seam-smoke command and not-implemented stubs for everything else.
+// persistent flags and top-level command surface, wiring implemented mirror
+// commands plus any explicit temporary stubs listed in topLevelCommands.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "wrkq-rpccli",
@@ -111,6 +110,15 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newWatchCmd())
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newIndexCmd())
+	root.AddCommand(newVersionCmd())
+	root.AddCommand(newUsageCmd())
+	root.AddCommand(newAgentInfoCmd())
+	root.AddCommand(newWhoamiCmd())
+	root.AddCommand(newProjectsCmd())
+	root.AddCommand(newAgentContextCmd())
+	root.AddCommand(newRPCCmd())
+	root.AddCommand(newAgentCmd())
+	root.AddCommand(newServerCmd())
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}

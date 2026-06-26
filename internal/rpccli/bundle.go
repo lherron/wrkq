@@ -27,11 +27,11 @@ const (
 // directory (manifest.json, tasks/*.md, refs/*.md, containers.txt, events.ndjson)
 // byte-identically to legacy (the shared internal/bundle.Materialize writer).
 //
-// --with-attachments is HARD-GATED with a clean validation error: bundle
-// attachments can exceed RPC frame limits and the snapshot intentionally carries
-// DESCRIPTORS only, never bytes (wrkq.wrkf-rpc.attachment-byte-transfer). Shipping
-// a fat one-frame attachment bundle is not allowed; the legacy binary still
-// supports --with-attachments for direct-DB use.
+// --with-attachments matches current legacy bundle behavior: the logical snapshot
+// carries attachment DESCRIPTORS only, never bytes, and the shared materializer
+// sets manifest.with_attachments without writing attachment files. If bundle byte
+// materialization is added later, bytes must cross via chunked attachment transfer,
+// not inline in the snapshot.
 func newBundleCmd() *cobra.Command {
 	bundleCmd := &cobra.Command{
 		Use:   "bundle",
@@ -96,15 +96,6 @@ type bundleFlags struct {
 }
 
 func runBundleCreate(cmd *cobra.Command, f bundleFlags) error {
-	// --with-attachments is hard-gated over RPC (see command doc). Validate FIRST,
-	// before any DB open / scoping, so the error is deterministic regardless of
-	// filter validity.
-	if f.withAttachments {
-		return errors.New("bundle: --with-attachments is not supported over wrkq-rpccli " +
-			"(attachment bytes are not transferred in the bundle snapshot; fetch them via the " +
-			"chunked attachment byte-transfer path or use the legacy wrkq binary)")
-	}
-
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
@@ -140,7 +131,7 @@ func runBundleCreate(cmd *cobra.Command, f bundleFlags) error {
 		Actor:           f.actor,
 		Since:           f.since,
 		Until:           f.until,
-		WithAttachments: false,
+		WithAttachments: f.withAttachments,
 		WithEvents:      !f.noEvents,
 		IncludeRefs:     f.includeRefs,
 		ProjectUUID:     projectUUID,
@@ -224,6 +215,9 @@ func runBundleCreate(cmd *cobra.Command, f bundleFlags) error {
 	}
 	if opts.IncludeRefs {
 		params["includeRefs"] = true
+	}
+	if opts.WithAttachments {
+		params["withAttachments"] = true
 	}
 
 	raw, cerr := tr.Call(cmd.Context(), "wrkq.bundle.exportView", params)

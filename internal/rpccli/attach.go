@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
 
@@ -47,9 +48,6 @@ func newAttachLsCmd() *cobra.Command {
 		Short: "List attachments for a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !asJSON && !ndjson && !porcelain && isStdoutTTY(cmd.OutOrStdout()) {
-				return fmt.Errorf("attach ls: only --json / --ndjson / --porcelain / non-TTY output is implemented so far")
-			}
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
@@ -90,14 +88,48 @@ func newAttachLsCmd() *cobra.Command {
 				if _, err := out.Write(append(data, '\n')); err != nil {
 					return err
 				}
-			} else {
+				return nil
+			}
+			if ndjson || porcelain || !isStdoutTTY(out) {
 				for _, it := range res.Items {
 					if _, err := out.Write(append([]byte(it), '\n')); err != nil {
 						return err
 					}
 				}
+				return nil
 			}
-			return nil
+			var rows []struct {
+				ID        string `json:"id"`
+				Filename  string `json:"filename"`
+				SizeBytes int64  `json:"size_bytes"`
+				MimeType  string `json:"mime_type,omitempty"`
+				CreatedAt string `json:"created_at"`
+			}
+			for _, it := range res.Items {
+				var row struct {
+					ID        string `json:"id"`
+					Filename  string `json:"filename"`
+					SizeBytes int64  `json:"size_bytes"`
+					MimeType  string `json:"mime_type,omitempty"`
+					CreatedAt string `json:"created_at"`
+				}
+				if err := json.Unmarshal(it, &row); err != nil {
+					return err
+				}
+				rows = append(rows, row)
+			}
+			headers := []string{"ID", "Filename", "Size", "MIME Type", "Created"}
+			rowsData := make([][]string, 0, len(rows))
+			for _, row := range rows {
+				rowsData = append(rowsData, []string{
+					row.ID,
+					row.Filename,
+					fmt.Sprintf("%d", row.SizeBytes),
+					row.MimeType,
+					row.CreatedAt,
+				})
+			}
+			return render.NewRenderer(out, render.Options{Format: render.FormatTable}).RenderTable(headers, rowsData)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
@@ -110,8 +142,8 @@ func newAttachLsCmd() *cobra.Command {
 
 // newAttachPutCmd mirrors `wrkq attach put <task> <file>`. The host file path is
 // sent to wrkq.attachment.add; the server reads the bytes and writes them into
-// the (server-local) attach dir. Reading FROM STDIN ('-') is a byte-upload over
-// the RPC boundary and is hard-gated as an open design decision.
+// the (server-local) attach dir. Reading FROM STDIN ('-') uses
+// runAttachPutStdin and uploads bytes over the chunked RPC byte-transfer path.
 func newAttachPutCmd() *cobra.Command {
 	var mime, name string
 	cmd := &cobra.Command{
