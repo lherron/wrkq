@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
@@ -163,14 +165,18 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	results := []rmResult{}
+	var resultsMu sync.Mutex
 	result := op.Execute(targetKeys, func(key string) error {
 		target := targetsByKey[key]
 		res, err := removeTarget(s, cfg.AttachDir, attr, target)
 		if err == nil && res != nil {
+			resultsMu.Lock()
 			results = append(results, *res)
+			resultsMu.Unlock()
 		}
 		return err
 	})
+	sortRmResults(results, targetKeys)
 
 	// Output results
 	if rmJSON || (!isStdoutTTY(cmd.OutOrStdout()) && !rmNDJSON && !rmPorcelain) {
@@ -212,6 +218,18 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 func (t rmTarget) Key() string {
 	return t.Type + ":" + t.UUID
+}
+
+func sortRmResults(results []rmResult, targetKeys []string) {
+	targetOrder := make(map[string]int, len(targetKeys))
+	for i, key := range targetKeys {
+		if _, ok := targetOrder[key]; !ok {
+			targetOrder[key] = i
+		}
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		return targetOrder[results[i].Type+":"+results[i].UUID] < targetOrder[results[j].Type+":"+results[j].UUID]
+	})
 }
 
 func showRemovalPlan(cmd *cobra.Command, database *db.DB, targets []rmTarget) error {

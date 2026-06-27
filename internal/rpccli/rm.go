@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/spf13/cobra"
@@ -110,6 +112,18 @@ type rmTarget struct {
 
 func (t rmTarget) key() string { return t.Type + ":" + t.UUID }
 
+func sortRmResults(results []rmResult, targetKeys []string) {
+	targetOrder := make(map[string]int, len(targetKeys))
+	for i, key := range targetKeys {
+		if _, ok := targetOrder[key]; !ok {
+			targetOrder[key] = i
+		}
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		return targetOrder[results[i].Type+":"+results[i].UUID] < targetOrder[results[j].Type+":"+results[j].UUID]
+	})
+}
+
 func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
@@ -192,14 +206,18 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 	}
 
 	results := []rmResult{}
+	var resultsMu sync.Mutex
 	result := op.Execute(targetKeys, func(key string) error {
 		tgt := targetsByKey[key]
 		res, rerr := removeTarget(ctx, tr, actor, tgt, f.purge)
 		if rerr == nil && res != nil {
+			resultsMu.Lock()
 			results = append(results, *res)
+			resultsMu.Unlock()
 		}
 		return rerr
 	})
+	sortRmResults(results, targetKeys)
 
 	// Output (legacy precedence).
 	out := cmd.OutOrStdout()
