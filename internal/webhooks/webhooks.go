@@ -19,6 +19,9 @@ import (
 const (
 	defaultTimeout     = 500 * time.Millisecond
 	defaultConcurrency = 4
+
+	EventWorkflowAttached     = "workflow_attached"
+	EventWorkflowTransitioned = "workflow_transitioned"
 )
 
 // BlockerInfo represents an incomplete blocking task.
@@ -47,16 +50,54 @@ type Change struct {
 	To   interface{} `json:"to,omitempty"`
 }
 
+// Subject identifies the resource pair a webhook event is about.
+type Subject struct {
+	TicketID           string `json:"ticket_id"`
+	TicketUUID         string `json:"ticket_uuid"`
+	WorkflowInstanceID string `json:"workflow_instance_id,omitempty"`
+}
+
+// WorkflowPayload carries wrkf-specific event details inside the existing
+// schema_version=2 webhook body.
+type WorkflowPayload struct {
+	SchemaVersion    string      `json:"schema_version,omitempty"`
+	Type             string      `json:"type,omitempty"`
+	EventID          string      `json:"event_id,omitempty"`
+	EventSeq         int64       `json:"event_seq,omitempty"`
+	InstanceID       string      `json:"instance_id"`
+	Template         string      `json:"template,omitempty"`
+	State            interface{} `json:"state,omitempty"`
+	Transition       string      `json:"transition,omitempty"`
+	Outcome          string      `json:"outcome,omitempty"`
+	From             interface{} `json:"from,omitempty"`
+	To               interface{} `json:"to,omitempty"`
+	Actor            string      `json:"actor,omitempty"`
+	Role             string      `json:"role,omitempty"`
+	RunID            *string     `json:"run_id,omitempty"`
+	ObservedRevision *int64      `json:"observed_revision,omitempty"`
+	NextRevision     *int64      `json:"next_revision,omitempty"`
+	TaskDocETag      string      `json:"task_doc_etag,omitempty"`
+	TaskDocHash      string      `json:"task_doc_hash,omitempty"`
+	ContextHash      string      `json:"context_hash,omitempty"`
+	IdempotencyKey   *string     `json:"idempotency_key,omitempty"`
+	Payload          interface{} `json:"payload,omitempty"`
+}
+
 // EventContext carries event-specific data that cannot be reconstructed from
 // the post-mutation task row.
 type EventContext struct {
 	Metadata   events.EventMetadata
 	Event      string
+	EventID    string
+	EventSeq   int64
+	OccurredAt string
 	ActorUUID  *string
 	Via        string
 	Transition *Transition
 	Changed    []string
 	Changes    map[string]Change
+	Subject    *Subject
+	Workflow   *WorkflowPayload
 }
 
 // Payload is the webhook payload for task updates.
@@ -91,6 +132,8 @@ type Payload struct {
 	CPRunID        *string           `json:"cp_run_id"`
 	SessionID      *string           `json:"session_id"`
 	BlockedBy      []BlockerInfo     `json:"blocked_by,omitempty"`
+	Subject        *Subject          `json:"subject,omitempty"`
+	Workflow       *WorkflowPayload  `json:"workflow,omitempty"`
 }
 
 // TaskInfo carries task metadata needed for webhook dispatch.
@@ -161,6 +204,20 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 	if ctx.Metadata.ID > 0 {
 		eventID = fmt.Sprintf("evt_%d", ctx.Metadata.ID)
 	}
+	if ctx.EventID != "" {
+		eventID = ctx.EventID
+	}
+	eventSeq := ctx.Metadata.ID
+	if ctx.EventSeq != 0 {
+		eventSeq = ctx.EventSeq
+	}
+	occurredAt := ctx.Metadata.Timestamp
+	if ctx.OccurredAt != "" {
+		occurredAt = ctx.OccurredAt
+	}
+	if ctx.Workflow != nil && ctx.Workflow.RunID != nil {
+		origin.RunID = ctx.Workflow.RunID
+	}
 	changed := ctx.Changed
 	if changed == nil {
 		changed = []string{}
@@ -172,9 +229,9 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 	payload := Payload{
 		SchemaVersion:  2,
 		EventID:        eventID,
-		EventSeq:       ctx.Metadata.ID,
+		EventSeq:       eventSeq,
 		Event:          ctx.Event,
-		OccurredAt:     ctx.Metadata.Timestamp,
+		OccurredAt:     occurredAt,
 		Origin:         origin,
 		TicketID:       info.TaskID,
 		TicketUUID:     info.TaskUUID,
@@ -200,6 +257,17 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 		CPRunID:        info.CPRunID,
 		SessionID:      info.CPSessionID,
 		BlockedBy:      info.BlockedBy,
+		Workflow:       ctx.Workflow,
+	}
+	if ctx.Subject != nil {
+		subject := *ctx.Subject
+		if subject.TicketID == "" {
+			subject.TicketID = info.TaskID
+		}
+		if subject.TicketUUID == "" {
+			subject.TicketUUID = info.TaskUUID
+		}
+		payload.Subject = &subject
 	}
 	urls, err := ResolveWebhookTargets(database, info.ProjectUUID, payload)
 	if err != nil {
@@ -324,16 +392,21 @@ func LookupTaskInfoWith(database taskInfoQueryer, taskUUID string) (TaskInfo, er
 	return info, nil
 }
 
-// ResolveWebhookTargets collects, templates, normalizes, and de-dupes webhook URLs.
+type webhookSubscription struct {
+	URL    string
+	Events []string
+}
+
+// ResolveWebhookTargets collects, templates, filters, normalizes, and de-dupes webhook URLs.
 func ResolveWebhookTargets(database *db.DB, containerUUID string, payload Payload) ([]string, error) {
-	raw, err := collectWebhookURLs(database, containerUUID)
+	raw, err := collectWebhookSubscriptions(database, containerUUID)
 	if err != nil {
 		return nil, err
 	}
 	return normalizeWebhookURLs(raw, payload), nil
 }
 
-func collectWebhookURLs(database *db.DB, containerUUID string) ([]string, error) {
+func collectWebhookSubscriptions(database *db.DB, containerUUID string) ([]webhookSubscription, error) {
 	rows, err := database.Query(`
 		WITH RECURSIVE container_chain(uuid, parent_uuid, webhook_urls) AS (
 			SELECT uuid, parent_uuid, webhook_urls FROM containers WHERE uuid = ?
@@ -350,14 +423,14 @@ func collectWebhookURLs(database *db.DB, containerUUID string) ([]string, error)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var collected []string
+	var collected []webhookSubscription
 	for rows.Next() {
 		var jsonStr string
 		if err := rows.Scan(&jsonStr); err != nil {
 			return nil, fmt.Errorf("scan webhook urls: %w", err)
 		}
-		var urls []string
-		if err := json.Unmarshal([]byte(jsonStr), &urls); err != nil {
+		urls, err := decodeWebhookSubscriptions(jsonStr)
+		if err != nil {
 			return nil, fmt.Errorf("parse webhook urls: %w", err)
 		}
 		collected = append(collected, urls...)
@@ -368,7 +441,34 @@ func collectWebhookURLs(database *db.DB, containerUUID string) ([]string, error)
 	return collected, nil
 }
 
-func normalizeWebhookURLs(urls []string, payload Payload) []string {
+func decodeWebhookSubscriptions(jsonStr string) ([]webhookSubscription, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal([]byte(jsonStr), &entries); err != nil {
+		return nil, err
+	}
+	out := make([]webhookSubscription, 0, len(entries))
+	for _, entry := range entries {
+		var urlOnly string
+		if err := json.Unmarshal(entry, &urlOnly); err == nil {
+			out = append(out, webhookSubscription{URL: urlOnly, Events: []string{"task.*"}})
+			continue
+		}
+		var structured struct {
+			URL    string   `json:"url"`
+			Events []string `json:"events"`
+		}
+		if err := json.Unmarshal(entry, &structured); err != nil {
+			return nil, err
+		}
+		if len(structured.Events) == 0 {
+			structured.Events = []string{"task.*"}
+		}
+		out = append(out, webhookSubscription{URL: structured.URL, Events: structured.Events})
+	}
+	return out, nil
+}
+
+func normalizeWebhookURLs(urls []webhookSubscription, payload Payload) []string {
 	if len(urls) == 0 {
 		return nil
 	}
@@ -376,8 +476,11 @@ func normalizeWebhookURLs(urls []string, payload Payload) []string {
 	seen := make(map[string]struct{}, len(urls))
 	var normalized []string
 
-	for _, raw := range urls {
-		trimmed := strings.TrimSpace(raw)
+	for _, sub := range urls {
+		if !subscriptionMatchesEvent(sub, payload.Event) {
+			continue
+		}
+		trimmed := strings.TrimSpace(sub.URL)
 		if trimmed == "" {
 			continue
 		}
@@ -402,6 +505,40 @@ func normalizeWebhookURLs(urls []string, payload Payload) []string {
 	}
 
 	return normalized
+}
+
+func subscriptionMatchesEvent(sub webhookSubscription, event string) bool {
+	if len(sub.Events) == 0 {
+		return isTaskWebhookEvent(event)
+	}
+	for _, allowed := range sub.Events {
+		allowed = strings.ToLower(strings.TrimSpace(allowed))
+		switch allowed {
+		case "", "task", "task.*":
+			if isTaskWebhookEvent(event) {
+				return true
+			}
+		case "*", "all":
+			return true
+		case "workflow", "workflow.*":
+			if isWorkflowWebhookEvent(event) {
+				return true
+			}
+		default:
+			if strings.EqualFold(allowed, event) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isWorkflowWebhookEvent(event string) bool {
+	return event == EventWorkflowAttached || event == EventWorkflowTransitioned || strings.HasPrefix(event, "workflow.")
+}
+
+func isTaskWebhookEvent(event string) bool {
+	return !isWorkflowWebhookEvent(event)
 }
 
 func applyTemplate(raw string, payload Payload) string {

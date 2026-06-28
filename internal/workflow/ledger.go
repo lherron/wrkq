@@ -15,6 +15,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 func (s *Service) ListObligations(taskSelector string, includeClosed bool) ([]Obligation, error) {
@@ -1597,6 +1598,8 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID string, opts TransitionOptions) (map[string]interface{}, error) {
 	requestHash := transitionRequestHash(taskSelector, instanceID, transitionID, opts)
 	var result map[string]interface{}
+	var webhookCtx *webhooks.EventContext
+	var webhookTaskUUID string
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
 		if err != nil {
@@ -1838,13 +1841,21 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		result["transition"] = transitionID
 		result["outcome"] = chosen.ID
 		resultJSON, _ := json.Marshal(result)
-		if err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.Actor, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}); err != nil {
+		eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
+		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.Actor, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, eventPayload)
+		if err != nil {
 			return err
 		}
+		ctx := workflowTransitionWebhookContext(eventMeta, updated, opts.Actor, opts.Role, opts.RunID, transitionID, chosen.ID, inst.Revision, updated.Revision, opts.IdempotencyKey, inst.State(), updated.State())
+		webhookCtx = &ctx
+		webhookTaskUUID = updated.TaskUUID
 		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.Actor)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if webhookCtx != nil && webhookTaskUUID != "" {
+		webhooks.DispatchTaskEvent(s.db, webhookTaskUUID, *webhookCtx)
 	}
 	if result != nil {
 		result, err = s.deliverBuiltinTransitionEffects(result, transitionID)
@@ -1928,7 +1939,7 @@ func transitionResultMap(taskSelector string, updated Instance, eventID string, 
 	}
 }
 
-func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
+func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) (workflowEventMetadata, error) {
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
@@ -1941,7 +1952,21 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID 
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
 		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
 	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
-	return err
+	if err != nil {
+		return workflowEventMetadata{}, err
+	}
+	var createdAt string
+	if err := tx.QueryRow(`SELECT created_at FROM workflow_events WHERE id = ?`, id).Scan(&createdAt); err != nil {
+		return workflowEventMetadata{}, err
+	}
+	return workflowEventMetadata{
+		ID:            id,
+		Seq:           seq,
+		SchemaVersion: "wrkf.workflow-event.v0",
+		Type:          "workflow.transitioned",
+		CreatedAt:     createdAt,
+		Payload:       payload,
+	}, nil
 }
 
 func (s *Service) ShowCheckRun(id string) (*CheckRun, error) {

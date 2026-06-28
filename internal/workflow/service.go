@@ -23,6 +23,7 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/rpcidem"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 type Service struct {
@@ -465,6 +466,8 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string) (*Instance
 	}
 
 	var inst *Instance
+	var attachedEvent workflowEventMetadata
+	var dispatchAttachedWebhook bool
 	err = withTx(s.db.DB, func(tx *sql.Tx) error {
 		task, err := loadTaskDoc(tx, taskUUID)
 		if err != nil {
@@ -487,13 +490,19 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string) (*Instance
 			return err
 		}
 		inst = &Instance{ID: instanceID, TaskUUID: taskUUID, TaskRef: "wrkq:" + taskID, ProjectID: task.ProjectID, TemplateID: id, TemplateVersion: version, TemplateHash: templateHash, Status: tpl.Initial.Status, Phase: tpl.Initial.Phase, Outcome: tpl.Initial.Outcome, Revision: 0, ContextHash: ctxHash, TaskDocEtag: fmt.Sprint(task.ETag), TaskDocHash: taskHash, CreatedAt: now, UpdatedAt: now}
-		if err := insertEvent(tx, instanceID, "workflow.attached", actor, "", "", 0, 0, "", task.ETag, taskHash, ctxHash, map[string]interface{}{"template": templateRef, "state": tpl.Initial}); err != nil {
+		attachedPayload := map[string]interface{}{"template": templateRef, "state": tpl.Initial}
+		attachedEvent, err = insertEventReturning(tx, instanceID, "workflow.attached", actor, "", "", 0, 0, "", task.ETag, taskHash, ctxHash, attachedPayload)
+		if err != nil {
 			return err
 		}
+		dispatchAttachedWebhook = true
 		return updateTaskWorkflowMeta(tx, taskUUID, *inst, actor)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if dispatchAttachedWebhook && inst != nil {
+		webhooks.DispatchTaskEvent(s.db, inst.TaskUUID, workflowAttachedWebhookContext(attachedEvent, *inst, templateRef, actor, tpl.Initial))
 	}
 	return inst, nil
 }
@@ -677,15 +686,23 @@ func withImmediateTx(database *db.DB, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func insertEvent(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash, ctxHash string, payload interface{}) error {
-	_, err := insertEventWithResult(tx, instanceID, typ, actor, role, runID, observed, next, key, "", "", taskETag, taskHash, ctxHash, payload)
-	return err
+type workflowEventMetadata struct {
+	ID            string
+	Seq           int64
+	SchemaVersion string
+	Type          string
+	CreatedAt     string
+	Payload       interface{}
 }
 
-func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) (string, error) {
+func insertEventReturning(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash, ctxHash string, payload interface{}) (workflowEventMetadata, error) {
+	return insertEventWithResult(tx, instanceID, typ, actor, role, runID, observed, next, key, "", "", taskETag, taskHash, ctxHash, payload)
+}
+
+func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) (workflowEventMetadata, error) {
 	id, err := nextSeqID(tx, "workflow_event_seq", "wfe")
 	if err != nil {
-		return "", err
+		return workflowEventMetadata{}, err
 	}
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
@@ -699,7 +716,21 @@ func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID strin
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
 		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
 	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
-	return id, err
+	if err != nil {
+		return workflowEventMetadata{}, err
+	}
+	var createdAt string
+	if err := tx.QueryRow(`SELECT created_at FROM workflow_events WHERE id = ?`, id).Scan(&createdAt); err != nil {
+		return workflowEventMetadata{}, err
+	}
+	return workflowEventMetadata{
+		ID:            id,
+		Seq:           seq,
+		SchemaVersion: "wrkf.workflow-event.v0",
+		Type:          typ,
+		CreatedAt:     createdAt,
+		Payload:       payload,
+	}, nil
 }
 
 func nextSeqID(tx *sql.Tx, table, prefix string) (string, error) {

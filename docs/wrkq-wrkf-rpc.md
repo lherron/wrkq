@@ -1271,6 +1271,30 @@ interface WebhookRow { url: string }      // legacy {url:<value>} row
   caller MAY opt in to reduce the concurrent last-writer-wins risk (a stale etag →
   `WRKQ_CONFLICT`).
 
+Webhook deliveries use schema_version `2`. Task mutations continue to use the
+legacy snake_case event names (`created`, `updated`, `moved`, `archived`,
+`purged`, `unblocked`, etc.). wrkf workflow mutations publish through the same
+webhook path with distinct event names:
+
+- `workflow_attached` for persisted `workflow.attached`
+- `workflow_transitioned` for persisted `workflow.transitioned`
+
+The workflow payload keeps the task fields populated and adds:
+`subject.{ticket_id,ticket_uuid,workflow_instance_id}` plus a `workflow` object
+with `instance_id`, wrkf `event_id`/`event_seq`, `schema_version:
+"wrkf.workflow-event.v0"`, `type`, `transition`, `outcome`, `from`, `to`,
+`actor`, `role`, `run_id`, revision fields, task-doc hash fields, and
+`context_hash`. Legacy webhook URL strings are task-event subscriptions. A stored
+object entry can opt into workflow events without forcing task-only subscribers to
+receive them:
+
+```json
+[
+  "https://task-only.example/hook",
+  {"url":"https://workflow.example/hook","events":["workflow.*"]}
+]
+```
+
 `wrkq webhook` (list / add / rm) mirrors this family: the CLI owns ONLY the TTY vs
 non-TTY output rendering (non-TTY list = one `{"url":<value>}` NDJSON line per URL;
 non-TTY add/rm = the indented map-alphabetical mutation JSON; TTY = the legacy human
