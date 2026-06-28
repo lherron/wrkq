@@ -450,7 +450,10 @@ func decodeWebhookSubscriptions(jsonStr string) ([]webhookSubscription, error) {
 	for _, entry := range entries {
 		var urlOnly string
 		if err := json.Unmarshal(entry, &urlOnly); err == nil {
-			out = append(out, webhookSubscription{URL: urlOnly, Events: []string{"task.*"}})
+			// A bare URL string with no explicit events defaults to ALL event
+			// families (task + workflow). Subscribers narrow via the object
+			// form {"url":...,"events":[...]}.
+			out = append(out, webhookSubscription{URL: urlOnly, Events: []string{"*"}})
 			continue
 		}
 		var structured struct {
@@ -461,7 +464,7 @@ func decodeWebhookSubscriptions(jsonStr string) ([]webhookSubscription, error) {
 			return nil, err
 		}
 		if len(structured.Events) == 0 {
-			structured.Events = []string{"task.*"}
+			structured.Events = []string{"*"}
 		}
 		out = append(out, webhookSubscription{URL: structured.URL, Events: structured.Events})
 	}
@@ -509,7 +512,8 @@ func normalizeWebhookURLs(urls []webhookSubscription, payload Payload) []string 
 
 func subscriptionMatchesEvent(sub webhookSubscription, event string) bool {
 	if len(sub.Events) == 0 {
-		return isTaskWebhookEvent(event)
+		// No explicit events => receive everything (task + workflow).
+		return true
 	}
 	for _, allowed := range sub.Events {
 		allowed = strings.ToLower(strings.TrimSpace(allowed))

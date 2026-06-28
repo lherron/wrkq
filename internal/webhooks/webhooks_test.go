@@ -127,3 +127,50 @@ func TestResolveWebhookTargets(t *testing.T) {
 		t.Fatalf("unexpected urls\nexpected: %v\nactual:   %v", expected, urls)
 	}
 }
+
+// TestResolveWebhookTargets_BareStringDefaultsToAllEvents asserts that a
+// legacy/bare URL string with no explicit events receives BOTH task and
+// workflow events, while an object-form subscriber can still narrow to
+// task-only.
+func TestResolveWebhookTargets_BareStringDefaultsToAllEvents(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	s := store.New(database)
+
+	root, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "proj", Kind: "project"})
+	if err != nil {
+		t.Fatalf("failed to create project container: %v", err)
+	}
+
+	// Mixed subscriptions: a bare string (default => all events) and an
+	// object-form subscriber narrowed to task-only.
+	rootJSON := `[` +
+		`"http://example.com/all",` +
+		`{"url":"http://example.com/task-only","events":["task.*"]}` +
+		`]`
+	if _, err := s.Containers.UpdateFields(actorUUID, root.UUID, map[string]interface{}{"webhook_urls": rootJSON}, 0); err != nil {
+		t.Fatalf("failed to set root webhook urls: %v", err)
+	}
+
+	taskEvent := webhooks.Payload{TicketID: "T-00001", ProjectID: "P-00001", Event: "updated"}
+	workflowEvent := webhooks.Payload{TicketID: "T-00001", ProjectID: "P-00001", Event: webhooks.EventWorkflowAttached}
+
+	taskURLs, err := webhooks.ResolveWebhookTargets(database, root.UUID, taskEvent)
+	if err != nil {
+		t.Fatalf("ResolveWebhookTargets(task) failed: %v", err)
+	}
+	// Task event reaches both subscribers.
+	if want := []string{"http://example.com/all", "http://example.com/task-only"}; !reflect.DeepEqual(taskURLs, want) {
+		t.Fatalf("task event targets\nexpected: %v\nactual:   %v", want, taskURLs)
+	}
+
+	workflowURLs, err := webhooks.ResolveWebhookTargets(database, root.UUID, workflowEvent)
+	if err != nil {
+		t.Fatalf("ResolveWebhookTargets(workflow) failed: %v", err)
+	}
+	// Workflow event reaches ONLY the bare-string (default-all) subscriber;
+	// the task-only object subscriber is excluded.
+	if want := []string{"http://example.com/all"}; !reflect.DeepEqual(workflowURLs, want) {
+		t.Fatalf("workflow event targets\nexpected: %v\nactual:   %v", want, workflowURLs)
+	}
+}

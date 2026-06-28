@@ -191,29 +191,41 @@ func TestWorkflowTransitionDispatchesWebhookAndSkipsIdempotentReplay(t *testing.
 	}
 }
 
-func TestWorkflowWebhookFilteringLeavesLegacyTaskSubscribersUntouched(t *testing.T) {
-	legacyTaskCalls := make(chan webhooks.Payload, 1)
-	taskOnlyServer := webhookCaptureServer(t, legacyTaskCalls)
+// TestWorkflowWebhookLegacyStringDefaultsToAllTaskOnlyNarrows asserts the
+// post-T-05272 contract: a legacy/bare URL string with no explicit events
+// receives workflow events by default, while an object-form subscriber
+// narrowed to task-only is still excluded from workflow events.
+func TestWorkflowWebhookLegacyStringDefaultsToAllTaskOnlyNarrows(t *testing.T) {
+	legacyAllCalls := make(chan webhooks.Payload, 2)
+	legacyAllServer := webhookCaptureServer(t, legacyAllCalls)
+	defer legacyAllServer.Close()
+
+	taskOnlyCalls := make(chan webhooks.Payload, 2)
+	taskOnlyServer := webhookCaptureServer(t, taskOnlyCalls)
 	defer taskOnlyServer.Close()
 
-	workflowCalls := make(chan webhooks.Payload, 2)
-	workflowServer := webhookCaptureServer(t, workflowCalls)
-	defer workflowServer.Close()
-
 	webhookURLs, _ := json.Marshal([]interface{}{
-		taskOnlyServer.URL + "/legacy",
-		map[string]interface{}{"url": workflowServer.URL + "/workflow", "events": []string{"workflow_transitioned"}},
+		legacyAllServer.URL + "/legacy",
+		map[string]interface{}{"url": taskOnlyServer.URL + "/task-only", "events": []string{"task.*"}},
 	})
 	svc, taskUUID, _ := setupWorkflowWebhookFixture(t, string(webhookURLs))
 	if _, err := svc.AttachTask(taskUUID, "cas_test@1", "attach-actor"); err != nil {
 		t.Fatalf("AttachTask: %v", err)
 	}
 
+	// Legacy bare-string subscriber receives the workflow_attached event.
 	select {
-	case payload := <-legacyTaskCalls:
-		t.Fatalf("legacy string webhook should not receive workflow attach: %+v", payload)
-	case payload := <-workflowCalls:
-		t.Fatalf("transition-only webhook should not receive workflow attach: %+v", payload)
+	case payload := <-legacyAllCalls:
+		if payload.Event != webhooks.EventWorkflowAttached {
+			t.Fatalf("legacy subscriber received wrong event on attach: %+v", payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for legacy-string workflow attach webhook")
+	}
+	// Task-only object subscriber is excluded from workflow attach.
+	select {
+	case payload := <-taskOnlyCalls:
+		t.Fatalf("task-only object webhook should not receive workflow attach: %+v", payload)
 	case <-time.After(300 * time.Millisecond):
 	}
 
@@ -222,17 +234,19 @@ func TestWorkflowWebhookFilteringLeavesLegacyTaskSubscribersUntouched(t *testing
 		t.Fatalf("Transition: %v", err)
 	}
 
+	// Legacy bare-string subscriber also receives the workflow_transitioned event.
 	select {
-	case payload := <-workflowCalls:
+	case payload := <-legacyAllCalls:
 		if payload.Event != webhooks.EventWorkflowTransitioned {
-			t.Fatalf("workflow subscriber received wrong event: %+v", payload)
+			t.Fatalf("legacy subscriber received wrong event on transition: %+v", payload)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for filtered workflow webhook")
+		t.Fatalf("timed out waiting for legacy-string workflow transition webhook")
 	}
+	// Task-only object subscriber is still excluded from workflow transition.
 	select {
-	case payload := <-legacyTaskCalls:
-		t.Fatalf("legacy string webhook should not receive workflow transition: %+v", payload)
+	case payload := <-taskOnlyCalls:
+		t.Fatalf("task-only object webhook should not receive workflow transition: %+v", payload)
 	case <-time.After(300 * time.Millisecond):
 	}
 }
