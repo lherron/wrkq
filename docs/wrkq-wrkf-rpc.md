@@ -371,7 +371,11 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > hidden-container count. Params:
 > `{ path?, maxDepth?, includeArchived?, openOnly? }` →
 > `WrkqTreeView{ path, project_id?, children: WrkqTreeNode[], hidden_containers_not_displayed, wire_raw_path? }`.
-> The nested `children` reproduce legacy's `tree --json` node shape byte-for-byte.
+> The nested `children` are residency-scoped machine content and reproduce legacy's
+> `tree --json` node shape byte-for-byte. A node may also carry explicit
+> `external_children` presentation rows (`external_backlink`, `external_project_id`,
+> `external_path`) for human tree rendering of cross-project parent backlinks; the
+> CLI strips those rows from JSON/NDJSON/porcelain machine outputs.
 > Three `wire_*` carriers (`wire_created_at`, `wire_parent_task_uuid` on each node;
 > `wire_raw_path` on the view) are **real, fingerprinted protocol fields** present in
 > the RPC JSON; they carry state the CLI needs to rebuild the NDJSON stream + nesting.

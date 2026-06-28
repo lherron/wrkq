@@ -307,6 +307,53 @@ func TestTaskStore_UpdateFields_ETagMismatch(t *testing.T) {
 	}
 }
 
+func TestTaskStore_UpdateFields_ReopenClearsCompletedAt(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	containerUUID := setupTestContainer(t, database, actorUUID)
+	s := New(database)
+
+	createResult, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "reopen-clears-completed-at",
+		Title:       "Reopen clears completed_at",
+		ProjectUUID: containerUUID,
+		State:       "open",
+		Priority:    3,
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if _, err := s.Tasks.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{"state": "completed"}, 0); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	var completedAt *string
+	if err := database.QueryRow("SELECT completed_at FROM tasks WHERE uuid = ?", createResult.UUID).Scan(&completedAt); err != nil {
+		t.Fatalf("query completed_at after completion: %v", err)
+	}
+	if completedAt == nil || *completedAt == "" {
+		t.Fatal("completed_at was not set after transition to completed")
+	}
+
+	if _, err := s.Tasks.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{"state": "open"}, 0); err != nil {
+		t.Fatalf("reopen task: %v", err)
+	}
+	if err := database.QueryRow("SELECT completed_at FROM tasks WHERE uuid = ?", createResult.UUID).Scan(&completedAt); err != nil {
+		t.Fatalf("query completed_at after reopen: %v", err)
+	}
+	if completedAt != nil {
+		t.Fatalf("completed_at = %q after reopen, want NULL", *completedAt)
+	}
+
+	task, err := s.Tasks.GetByUUID(createResult.UUID)
+	if err != nil {
+		t.Fatalf("GetByUUID failed: %v", err)
+	}
+	if task.CompletedAt != nil {
+		t.Fatalf("task.CompletedAt = %v after reopen, want nil", task.CompletedAt)
+	}
+}
+
 func TestTaskStore_Move(t *testing.T) {
 	database := setupTestDB(t)
 	actorUUID := setupTestActor(t, database)

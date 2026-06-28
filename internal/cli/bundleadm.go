@@ -1025,6 +1025,9 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, c
 	}
 
 	if update.State != nil && *update.State == "deleted" {
+		if err := detachExternalSubtasksTx(tx, attr, current.UUID); err != nil {
+			return err
+		}
 		if err := cascadeDeleteSubtasksTx(tx, ew, attr, current.UUID); err != nil {
 			return err
 		}
@@ -1035,8 +1038,12 @@ func updateTaskTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, c
 
 func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
 	rows, err := tx.Query(`
-		SELECT uuid FROM tasks
-		WHERE parent_task_uuid = ? AND state != 'deleted'
+		SELECT c.uuid
+		FROM tasks c
+		JOIN tasks p ON p.uuid = c.parent_task_uuid
+		WHERE c.parent_task_uuid = ?
+		  AND c.state != 'deleted'
+		  AND c.project_uuid = p.project_uuid
 	`, parentTaskUUID)
 	if err != nil {
 		return fmt.Errorf("failed to query subtasks: %w", err)
@@ -1077,11 +1084,32 @@ func cascadeDeleteSubtasksTx(tx *sql.Tx, ew *events.Writer, attr attribution.Att
 			return fmt.Errorf("failed to log subtask delete: %w", err)
 		}
 
+		if err := detachExternalSubtasksTx(tx, attr, subtaskUUID); err != nil {
+			return err
+		}
 		if err := cascadeDeleteSubtasksTx(tx, ew, attr, subtaskUUID); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+func detachExternalSubtasksTx(tx *sql.Tx, attr attribution.Attribution, parentTaskUUID string) error {
+	if _, err := tx.Exec(`
+		UPDATE tasks
+		SET parent_task_uuid = NULL,
+		    kind = 'task',
+		    etag = etag + 1,
+		    updated_by_actor_uuid = ?,
+		    updated_by_principal_ref = ?,
+		    updated_by_scope_ref = ?
+		WHERE parent_task_uuid = ?
+		  AND state != 'deleted'
+		  AND project_uuid != (SELECT project_uuid FROM tasks WHERE uuid = ?)
+	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), parentTaskUUID, parentTaskUUID); err != nil {
+		return fmt.Errorf("failed to detach external subtasks: %w", err)
+	}
 	return nil
 }
 

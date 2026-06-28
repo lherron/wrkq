@@ -28,9 +28,9 @@ Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, 
 Reparenting:
   --parent-task (or --parent-id) accepts a task ID or path. The task is set
   to kind=subtask unless --kind is also given. Pass an empty value to clear
-  the parent (reverts kind to task unless --kind is given). Parent and child
-  must be in the same container, a task cannot be its own parent, and subtasks
-  cannot themselves have subtasks (max depth 1).
+  the parent (reverts kind to task unless --kind is given). Parent links may
+  cross projects/containers; a task cannot be its own parent, and subtasks cannot
+  themselves have subtasks (max depth 1).
 
 Description can be set from:
   - String: --description "text"

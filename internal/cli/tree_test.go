@@ -197,6 +197,69 @@ func TestDisplayTreeNDJSONFlattensVisibleNodes(t *testing.T) {
 	}
 }
 
+func TestDisplayTreeHumanShowsExternalChildBacklinkOnlyInHumanMode(t *testing.T) {
+	database, _ := setupTestEnv(t)
+
+	_, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES
+			('00000000-0000-0000-0000-000000000901', 'P-00901', 'tree-a', 'Tree A', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1),
+			('00000000-0000-0000-0000-000000000902', 'P-00902', 'tree-b', 'Tree B', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', datetime('now'), datetime('now'), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("seed containers: %v", err)
+	}
+	_, err = database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, kind, parent_task_uuid, description, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES
+			('00000000-0000-0000-0000-000000000903', 'T-00903', 'parent-task', 'Parent Task', '00000000-0000-0000-0000-000000000901', 'open', 2, 'task', NULL, '', '2026-06-12T12:04:05Z', '2026-06-12T12:04:05Z', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1),
+			('00000000-0000-0000-0000-000000000904', 'T-00904', 'external-child', 'External Child', '00000000-0000-0000-0000-000000000902', 'completed', 2, 'subtask', '00000000-0000-0000-0000-000000000903', '', '2026-06-12T12:04:06Z', '2026-06-12T12:04:06Z', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`)
+	if err != nil {
+		t.Fatalf("seed tasks: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := displayTree(&out, database, "tree-a", 0, true, false, outputSelection{Mode: outputModeHuman}, false); err != nil {
+		t.Fatalf("human displayTree failed: %v", err)
+	}
+	human := out.String()
+	if !strings.Contains(human, "Parent Task") || !strings.Contains(human, "External Child") {
+		t.Fatalf("human tree should show parent and external child, got:\n%s", human)
+	}
+	if !strings.Contains(human, "(external: tree-b P-00902)") {
+		t.Fatalf("human tree should mark external child with project context, got:\n%s", human)
+	}
+
+	out.Reset()
+	if err := displayTree(&out, database, "tree-a", 0, true, false, outputSelection{Mode: outputModeJSON}, false); err != nil {
+		t.Fatalf("json displayTree failed: %v", err)
+	}
+	if strings.Contains(out.String(), "External Child") || strings.Contains(out.String(), "external_child") {
+		t.Fatalf("JSON tree must remain residency-scoped, got:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := displayTree(&out, database, "tree-a", 0, true, false, outputSelection{Mode: outputModeNDJSON}, false); err != nil {
+		t.Fatalf("ndjson displayTree failed: %v", err)
+	}
+	if strings.Contains(out.String(), "External Child") || strings.Contains(out.String(), "external-child") {
+		t.Fatalf("NDJSON tree must remain residency-scoped, got:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := displayTree(&out, database, "tree-b", 0, true, false, outputSelection{Mode: outputModeHuman}, false); err != nil {
+		t.Fatalf("resident human displayTree failed: %v", err)
+	}
+	resident := out.String()
+	if !strings.Contains(resident, "External Child") {
+		t.Fatalf("resident --all tree should show completed cross-project child, got:\n%s", resident)
+	}
+	if strings.Contains(resident, "(external:") {
+		t.Fatalf("resident tree should not mark its own task as external, got:\n%s", resident)
+	}
+}
+
 func TestFormatNodeDisplayTaskShowsBareIDAndTitleWithoutSlug(t *testing.T) {
 	display := formatNodeDisplay(&treeNode{
 		Type:      "task",

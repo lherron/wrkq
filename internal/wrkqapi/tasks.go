@@ -1065,11 +1065,18 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	}, nil
 }
 
-// cascadeRestoreSubtasks restores all archived/deleted subtasks of a parent,
-// dispatching the restore webhook for EACH restored subtask (legacy parity).
+// cascadeRestoreSubtasks restores archived/deleted resident subtasks of a
+// parent, dispatching the restore webhook for EACH restored subtask. Cross-
+// project parent edges are backlinks, not containment, so external children are
+// not restored through the parent.
 func (a *API) cascadeRestoreSubtasks(parentTaskUUID, targetState string, attr attribution.Attribution) error {
 	rows, err := a.db.Query(
-		"SELECT uuid FROM tasks WHERE parent_task_uuid = ? AND state IN ('archived', 'deleted')",
+		`SELECT c.uuid
+		   FROM tasks c
+		   JOIN tasks p ON p.uuid = c.parent_task_uuid
+		  WHERE c.parent_task_uuid = ?
+		    AND c.project_uuid = p.project_uuid
+		    AND c.state IN ('archived', 'deleted')`,
 		parentTaskUUID,
 	)
 	if err != nil {

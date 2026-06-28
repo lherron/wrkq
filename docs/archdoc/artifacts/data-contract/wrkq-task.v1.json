@@ -3,7 +3,7 @@
   "id": "artifact:wrkq/task-data-contract",
   "profile": "data-contract.v1",
   "title": "Task",
-  "summary": "Semantic DTO contract for the persisted wrkq task as exposed by domain.Task JSON tags.",
+  "summary": "Semantic DTO contract for the persisted wrkq task as exposed by domain.Task JSON tags, including external-principal and runtime-scope attribution and the refined domain.State and paths.Slug wire types.",
   "scope": {
     "system": "wrkq",
     "boundedContext": "task management",
@@ -21,13 +21,14 @@
     "assumptions": [
       "JSON field names are taken from internal/domain.Task struct tags.",
       "Optionality follows Go pointer fields and omitempty JSON tags.",
-      "Enum literals follow internal/domain validation helpers and current task-table CHECK constraints."
+      "Enum literals follow internal/domain validation helpers and current task-table CHECK constraints.",
+      "Attribution is carried by canonical principal and scope refs; legacy actor-UUID caches remain only for backward compatibility and serialize when populated."
     ],
     "exclusions": [
       "The deprecated sdk_session_id database column is intentionally absent because domain.Task marks it json:\"-\".",
       "Related comments, task relations, attachments, evidence items, role assignments, and transitions are outside this standalone Task DTO contract."
     ],
-    "temporal": "source snapshot at wrkq commit 86958ad on 2026-06-06",
+    "temporal": "source snapshot at wrkq commit e57dc67 on 2026-06-28",
     "operationalMode": "normal wrkq task persistence and JSON rendering"
   },
   "coverage": {
@@ -41,7 +42,8 @@
       "control-plane linkage",
       "workflow metadata",
       "content",
-      "audit timestamps"
+      "audit timestamps",
+      "principal and scope attribution"
     ],
     "excludes": [
       "database-only sdk_session_id",
@@ -73,8 +75,40 @@
       "sourceType": "source_file",
       "authority": "authoritative",
       "locator": "internal/domain/validation.go",
-      "observedAt": "2026-06-06T19:27:28Z",
-      "note": "Task state, kind, resolution, run_status, risk_class, priority, UUID, and timestamp validation helpers."
+      "observedAt": "2026-06-28T00:00:00Z",
+      "note": "Task kind, resolution, run_status, risk_class, priority, UUID, and timestamp validation helpers; ValidateState delegates to domain.ParseState."
+    },
+    {
+      "id": "domain-state",
+      "sourceType": "source_file",
+      "authority": "authoritative",
+      "locator": "internal/domain/state.go:6",
+      "observedAt": "2026-06-28T00:00:00Z",
+      "note": "domain.State wire type and ParseState lifecycle validation for the state field."
+    },
+    {
+      "id": "paths-slug",
+      "sourceType": "source_file",
+      "authority": "authoritative",
+      "locator": "internal/paths/slug.go",
+      "observedAt": "2026-06-28T00:00:00Z",
+      "note": "paths.Slug wire type, NewSlug constructor, and slug normalization/validation rules."
+    },
+    {
+      "id": "created-by-scope-ref",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000023_task_created_by_scope_ref.sql",
+      "observedAt": "2026-06-28T00:00:00Z",
+      "note": "Runtime scope attribution column for task creation."
+    },
+    {
+      "id": "external-principal-attribution",
+      "sourceType": "migration",
+      "authority": "authoritative",
+      "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+      "observedAt": "2026-06-28T00:00:00Z",
+      "note": "Canonical principal and scope attribution columns (created/updated/deleted) and legacy actor-UUID cache semantics."
     },
     {
       "id": "tasks-baseline",
@@ -191,9 +225,9 @@
   "visibility": "internal",
   "revision": {
     "profileVersion": "data-contract.v1",
-    "artifactVersion": "0.1.0",
+    "artifactVersion": "0.2.0",
     "createdAt": "2026-06-06T19:27:28Z",
-    "updatedAt": "2026-06-06T19:27:28Z"
+    "updatedAt": "2026-06-28T00:00:00Z"
   },
   "payload": {
     "name": "Task",
@@ -202,6 +236,150 @@
     "version": "v1",
     "description": "Persisted work item inside one wrkq container, carrying identity, path placement, lifecycle state, routing, workflow metadata, content, and audit stamps.",
     "fields": [
+      {
+        "name": "path",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "description": "Resolved container/task path from v_task_paths.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "rendered from v_task_paths; not stored on domain.Task"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "artifact_dir",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "description": "Local artifact directory derived from the task id for generated task outputs.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "derived from task id and wrkq artifact root; not stored on domain.Task"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "project_id",
+        "type": "`P-${number}` | string",
+        "required": false,
+        "nullable": false,
+        "description": "Friendly id of the owning project/container.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "resolved from owning project/container; not stored on domain.Task"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "parent_task_id",
+        "type": "`T-${number}` | string",
+        "required": false,
+        "nullable": false,
+        "description": "Friendly id of the parent task when parent_task_uuid is present.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "resolved from parent_task_uuid; not stored on domain.Task"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "assignee",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "description": "Display handle resolved from assignee_principal_ref or legacy actor slug.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "display projection; canonical owner is assignee_principal_ref"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "assignee_uuid",
+        "type": "UUIDv4String",
+        "required": false,
+        "nullable": false,
+        "deprecated": true,
+        "description": "Legacy actor UUID alias exposed by read DTOs for local actor-backed assignments.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "legacy alias for assignee_actor_uuid"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "created_by",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "description": "Display handle resolved from created_by_principal_ref or legacy creator actor slug.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "display projection; canonical creator is created_by_principal_ref"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "updated_by",
+        "type": "string",
+        "required": false,
+        "nullable": false,
+        "description": "Display handle resolved from updated_by_principal_ref or legacy updater actor slug.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "display projection; canonical updater is updated_by_principal_ref"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "blocked_by",
+        "type": "BlockedByTaskReadDTO[]",
+        "required": false,
+        "nullable": false,
+        "description": "Incomplete blocking tasks included by richer CLI reads.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "embedded read projection; not stored on domain.Task"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "comments",
+        "type": "CommentReadDTO[]",
+        "required": false,
+        "nullable": false,
+        "description": "Non-deleted task comments included unless comments are explicitly excluded.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "embedded read projection; comments are stored separately"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
+      {
+        "name": "relations",
+        "type": "TaskRelationReadDTO[]",
+        "required": false,
+        "nullable": false,
+        "description": "Task relations included by rich reads when relation data is loaded.",
+        "producedBy": "wrkq cat --json / wrkqd read decorators",
+        "constraints": [
+          "embedded read projection; relations are stored separately"
+        ],
+        "group": "read_projection",
+        "origin": "read-projection"
+      },
       {
         "name": "uuid",
         "type": "UUIDv4String",
@@ -222,7 +400,9 @@
             "locator": "internal/domain/validation.go:11",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "identity"
       },
       {
         "name": "id",
@@ -244,24 +424,32 @@
             "locator": "internal/db/migrations/000001_baseline.sql:147",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "identity"
       },
       {
         "name": "slug",
         "type": "Slug",
         "required": true,
         "nullable": false,
-        "description": "Lowercase path segment unique within the owning container.",
+        "description": "Lowercase path segment unique within the owning container, validated and wrapped by the paths.Slug wire type.",
         "constraints": [
           "lowercase",
           "matches [a-z0-9][a-z0-9-]*",
-          "length <= 255",
-          "unique with project_uuid"
+          "length <= 255 bytes",
+          "unique with project_uuid",
+          "validated by paths.ValidateSlug / paths.NewSlug"
         ],
         "provenance": [
           {
             "sourceType": "source_file",
-            "locator": "internal/domain/types.go:96",
+            "locator": "internal/domain/types.go:127",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "source_file",
+            "locator": "internal/paths/slug.go:14",
             "authority": "authoritative"
           },
           {
@@ -269,7 +457,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:121",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "identity"
       },
       {
         "name": "title",
@@ -283,7 +473,9 @@
             "locator": "internal/domain/types.go:97",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "identity"
       },
       {
         "name": "project_uuid",
@@ -306,7 +498,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:124",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "identity"
       },
       {
         "name": "requested_by_project_id",
@@ -325,7 +519,9 @@
             "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:5",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "routing"
       },
       {
         "name": "assigned_project_id",
@@ -344,27 +540,30 @@
             "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:6",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "routing"
       },
       {
         "name": "state",
-        "type": "'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted'",
+        "type": "TaskState",
         "required": true,
         "nullable": false,
-        "description": "Lifecycle or visibility state accepted by domain validation.",
+        "description": "Lifecycle or visibility state backed by the domain.State wire type and accepted by domain validation.",
         "constraints": [
-          "validated by domain.ValidateState",
+          "backed by the domain.State wire type",
+          "validated by domain.ParseState (ValidateState delegates to it)",
           "database CHECK enforces the same current literals"
         ],
         "provenance": [
           {
             "sourceType": "source_file",
-            "locator": "internal/domain/types.go:101",
+            "locator": "internal/domain/types.go:132",
             "authority": "authoritative"
           },
           {
             "sourceType": "source_file",
-            "locator": "internal/domain/validation.go:20",
+            "locator": "internal/domain/state.go:21",
             "authority": "authoritative"
           },
           {
@@ -372,7 +571,9 @@
             "locator": "internal/db/migrations/000009_idea_state.sql:36",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "lifecycle"
       },
       {
         "name": "priority",
@@ -400,11 +601,13 @@
             "locator": "internal/db/migrations/000001_baseline.sql:126",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "lifecycle"
       },
       {
         "name": "kind",
-        "type": "'task' | 'subtask' | 'spike' | 'bug' | 'chore'",
+        "type": "TaskKind",
         "required": true,
         "nullable": false,
         "description": "Work-item category accepted by domain validation.",
@@ -427,7 +630,9 @@
             "locator": "internal/db/migrations/000002_planning_layer.sql:147",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "lifecycle"
       },
       {
         "name": "parent_task_uuid",
@@ -456,22 +661,26 @@
             "locator": "internal/db/migrations/000002_planning_layer.sql:149",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "routing"
       },
       {
         "name": "assignee_actor_uuid",
         "type": "UUIDv4String",
         "required": false,
         "nullable": true,
-        "description": "Actor UUID for the currently assigned human or agent.",
+        "deprecated": true,
+        "description": "Legacy local actor-UUID assignment cache; prefer assignee_principal_ref for canonical ownership.",
         "constraints": [
           "references actors(uuid)",
-          "set null on actor deletion"
+          "set null on actor deletion",
+          "legacy: superseded by assignee_principal_ref"
         ],
         "provenance": [
           {
             "sourceType": "source_file",
-            "locator": "internal/domain/types.go:105",
+            "locator": "internal/domain/types.go:137",
             "authority": "authoritative"
           },
           {
@@ -479,7 +688,33 @@
             "locator": "internal/db/migrations/000002_planning_layer.sql:151",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "routing"
+      },
+      {
+        "name": "assignee_principal_ref",
+        "type": "PrincipalRef",
+        "required": false,
+        "nullable": true,
+        "description": "Canonical assignee principal for current agent or external-principal ownership.",
+        "constraints": [
+          "preferred over the legacy assignee_actor_uuid cache"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:138",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "routing"
       },
       {
         "name": "acknowledged_at",
@@ -501,11 +736,13 @@
             "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:7",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "routing"
       },
       {
         "name": "resolution",
-        "type": "'done' | 'wont_do' | 'duplicate' | 'needs_info'",
+        "type": "TaskResolution",
         "required": false,
         "nullable": true,
         "description": "Final or triage resolution accepted by domain validation.",
@@ -528,7 +765,9 @@
             "locator": "internal/db/migrations/000005_roundtrip_minimal.sql:8",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "lifecycle"
       },
       {
         "name": "cp_project_id",
@@ -547,7 +786,9 @@
             "locator": "internal/db/migrations/000006_async_run_linkage.sql:5",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "control_plane"
       },
       {
         "name": "cp_work_item_id",
@@ -566,7 +807,9 @@
             "locator": "internal/db/migrations/000011_cp_work_item_id.sql:5",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "control_plane"
       },
       {
         "name": "cp_run_id",
@@ -585,7 +828,9 @@
             "locator": "internal/db/migrations/000006_async_run_linkage.sql:6",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "control_plane"
       },
       {
         "name": "session_id",
@@ -607,11 +852,13 @@
             "locator": "internal/db/migrations/000006_async_run_linkage.sql:7",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "control_plane"
       },
       {
         "name": "run_status",
-        "type": "'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'",
+        "type": "TaskRunStatus",
         "required": false,
         "nullable": true,
         "description": "Async run status accepted by domain validation.",
@@ -635,7 +882,9 @@
             "locator": "internal/db/migrations/000006_async_run_linkage.sql:9",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "control_plane"
       },
       {
         "name": "workflow_preset",
@@ -657,7 +906,9 @@
             "locator": "internal/db/migrations/000013_task_workflow_schema.sql:3",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "workflow"
       },
       {
         "name": "preset_version",
@@ -679,7 +930,9 @@
             "locator": "internal/db/migrations/000013_task_workflow_schema.sql:4",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "workflow"
       },
       {
         "name": "phase",
@@ -701,11 +954,13 @@
             "locator": "internal/db/migrations/000013_task_workflow_schema.sql:5",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "workflow"
       },
       {
         "name": "risk_class",
-        "type": "'low' | 'medium' | 'high'",
+        "type": "TaskRiskClass",
         "required": false,
         "nullable": true,
         "description": "Workflow risk classification accepted by domain validation.",
@@ -729,7 +984,9 @@
             "locator": "internal/db/migrations/000013_task_workflow_schema.sql:6",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "workflow"
       },
       {
         "name": "start_at",
@@ -751,7 +1008,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:127",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "lifecycle"
       },
       {
         "name": "due_at",
@@ -773,11 +1032,13 @@
             "locator": "internal/db/migrations/000001_baseline.sql:128",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "lifecycle"
       },
       {
         "name": "labels",
-        "type": "JSONText<unknown[]>",
+        "type": "JSONText<string[]>",
         "required": false,
         "nullable": true,
         "description": "JSON array stored as SQLite TEXT in the database/domain field.",
@@ -796,7 +1057,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:129",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "content"
       },
       {
         "name": "meta",
@@ -819,7 +1082,9 @@
             "locator": "internal/db/migrations/000008_task_meta.sql:4",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "content"
       },
       {
         "name": "description",
@@ -841,7 +1106,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:130",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "content"
       },
       {
         "name": "specification",
@@ -863,7 +1130,9 @@
             "locator": "internal/db/migrations/000012_task_specification.sql:2",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "content"
       },
       {
         "name": "etag",
@@ -890,7 +1159,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:131",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "content"
       },
       {
         "name": "created_at",
@@ -912,7 +1183,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:132",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "created"
       },
       {
         "name": "updated_at",
@@ -940,16 +1213,19 @@
             "locator": "internal/db/migrations/000010_task_touch_triggers.sql:1",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "updated"
       },
       {
         "name": "completed_at",
         "type": "RFC3339Timestamp",
         "required": false,
         "nullable": true,
-        "description": "Timestamp set when state transitions to completed.",
+        "description": "Current completion timestamp set when state transitions to completed and cleared when state transitions out of completed.",
         "constraints": [
-          "managed by task state consistency trigger"
+          "managed by task state consistency trigger",
+          "null when the current state is not completed"
         ],
         "provenance": [
           {
@@ -962,7 +1238,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:134",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "deleted"
       },
       {
         "name": "archived_at",
@@ -984,7 +1262,9 @@
             "locator": "internal/db/migrations/000001_baseline.sql:135",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "deleted"
       },
       {
         "name": "deleted_at",
@@ -1006,58 +1286,207 @@
             "locator": "internal/db/migrations/000004_deleted_state.sql:49",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "deleted"
       },
       {
         "name": "created_by_actor_uuid",
         "type": "UUIDv4String",
-        "required": true,
+        "required": false,
         "nullable": false,
-        "description": "Actor UUID that created the task.",
+        "deprecated": true,
+        "description": "Legacy local creator actor-UUID cache; serialized only when populated. Prefer created_by_principal_ref.",
         "constraints": [
-          "references actors(uuid)",
-          "delete restricted by database foreign key"
+          "omitempty: omitted from JSON when empty",
+          "legacy: superseded by created_by_principal_ref"
         ],
         "provenance": [
           {
             "sourceType": "source_file",
-            "locator": "internal/domain/types.go:130",
+            "locator": "internal/domain/types.go:161",
             "authority": "authoritative"
           },
           {
             "sourceType": "migration",
-            "locator": "internal/db/migrations/000001_baseline.sql:136",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "created"
       },
       {
         "name": "updated_by_actor_uuid",
         "type": "UUIDv4String",
-        "required": true,
+        "required": false,
         "nullable": false,
-        "description": "Actor UUID responsible for the most recent mutation.",
+        "deprecated": true,
+        "description": "Legacy local updater actor-UUID cache; serialized only when populated. Prefer updated_by_principal_ref.",
         "constraints": [
-          "references actors(uuid)",
-          "delete restricted by database foreign key"
+          "omitempty: omitted from JSON when empty",
+          "legacy: superseded by updated_by_principal_ref"
         ],
         "provenance": [
           {
             "sourceType": "source_file",
-            "locator": "internal/domain/types.go:131",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "source_file",
-            "locator": "internal/store/tasks.go:284",
+            "locator": "internal/domain/types.go:162",
             "authority": "authoritative"
           },
           {
             "sourceType": "migration",
-            "locator": "internal/db/migrations/000001_baseline.sql:137",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
             "authority": "authoritative"
           }
-        ]
+        ],
+        "origin": "persisted",
+        "group": "updated"
+      },
+      {
+        "name": "created_by_principal_ref",
+        "type": "PrincipalRef",
+        "required": false,
+        "nullable": false,
+        "description": "Canonical principal that created the task after external-principal attribution.",
+        "constraints": [
+          "omitempty: omitted from JSON when empty",
+          "preferred over the legacy created_by_actor_uuid cache"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:165",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "created"
+      },
+      {
+        "name": "updated_by_principal_ref",
+        "type": "PrincipalRef",
+        "required": false,
+        "nullable": false,
+        "description": "Canonical principal responsible for the most recent task mutation.",
+        "constraints": [
+          "omitempty: omitted from JSON when empty",
+          "preferred over the legacy updated_by_actor_uuid cache"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:166",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "updated"
+      },
+      {
+        "name": "deleted_by_principal_ref",
+        "type": "PrincipalRef",
+        "required": false,
+        "nullable": true,
+        "description": "Canonical principal that soft-deleted the task; cleared when the task is restored.",
+        "constraints": [
+          "nullable pointer field; null or absent when the task is not deleted"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:167",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "deleted"
+      },
+      {
+        "name": "created_by_scope_ref",
+        "type": "ScopeRef",
+        "required": false,
+        "nullable": false,
+        "description": "Runtime scope that created the task when available.",
+        "constraints": [
+          "omitempty: omitted from JSON when empty"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:168",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000023_task_created_by_scope_ref.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "created"
+      },
+      {
+        "name": "updated_by_scope_ref",
+        "type": "ScopeRef",
+        "required": false,
+        "nullable": false,
+        "description": "Runtime scope responsible for the most recent mutation when available.",
+        "constraints": [
+          "omitempty: omitted from JSON when empty"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:169",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "updated"
+      },
+      {
+        "name": "deleted_by_scope_ref",
+        "type": "ScopeRef",
+        "required": false,
+        "nullable": true,
+        "description": "Runtime scope that soft-deleted the task; cleared when the task is restored.",
+        "constraints": [
+          "nullable pointer field; null or absent when the task is not deleted"
+        ],
+        "provenance": [
+          {
+            "sourceType": "source_file",
+            "locator": "internal/domain/types.go:170",
+            "authority": "authoritative"
+          },
+          {
+            "sourceType": "migration",
+            "locator": "internal/db/migrations/000026_external_principal_attribution.sql",
+            "authority": "authoritative"
+          }
+        ],
+        "origin": "persisted",
+        "group": "deleted"
       }
     ],
     "examples": [],
@@ -1067,7 +1496,443 @@
     "notes": [
       "required and nullable are independent dimensions.",
       "Database-only sdk_session_id is omitted because the Task JSON tag is json:\"-\".",
-      "session_id is the JSON name for the cp_session_id database column."
+      "session_id is the JSON name for the cp_session_id database column.",
+      "Principal refs (created/updated/deleted_by_principal_ref) and scope refs (created/updated/deleted_by_scope_ref) are the canonical attribution fields after migration 000026; the *_actor_uuid fields are legacy caches that serialize only when populated.",
+      "created/updated attribution fields use omitempty non-pointer strings (absent when empty, never JSON null); the deleted_by_* fields are nullable pointers cleared on restore.",
+      "Read-projection fields are rendered by CLI/daemon read decorators and are not persisted on domain.Task.",
+      "fieldGroups order the generated notation and field ledger to match the public DTO contract sections.",
+      "definitions expands nested read DTO shapes referenced by comments, relations, and blocked_by fields.",
+      "surfaces records which read/domain/storage surface emits each projection.",
+      "scalarAliases defines branded scalar and enum names used by the Task DTO."
+    ],
+    "fieldGroups": [
+      {
+        "id": "read_projection",
+        "title": "Read Projection",
+        "order": 1,
+        "description": "Porcelain and rich-read fields rendered on read, not stored on domain.Task."
+      },
+      {
+        "id": "identity",
+        "title": "Identity And Placement",
+        "order": 2,
+        "description": "Stable selectors and path placement stored on the task record."
+      },
+      {
+        "id": "routing",
+        "title": "Routing And Assignment",
+        "order": 3,
+        "description": "Cross-project routing, parentage, assignment, and acknowledgement fields."
+      },
+      {
+        "id": "lifecycle",
+        "title": "Lifecycle And Schedule",
+        "order": 4,
+        "description": "Task lifecycle, priority, kind, outcome, and scheduling fields."
+      },
+      {
+        "id": "control_plane",
+        "title": "Control Plane Run Linkage",
+        "order": 5,
+        "description": "ACP run/session linkage and async run state."
+      },
+      {
+        "id": "workflow",
+        "title": "Workflow Metadata",
+        "order": 6,
+        "description": "Workflow preset, phase, version, and risk metadata."
+      },
+      {
+        "id": "content",
+        "title": "Content And Metadata",
+        "order": 7,
+        "description": "Human-authored content, structured metadata, and optimistic concurrency."
+      },
+      {
+        "id": "created",
+        "title": "Created Attribution",
+        "order": 8,
+        "description": "Creation time and creator principal/scope attribution."
+      },
+      {
+        "id": "updated",
+        "title": "Updated Attribution",
+        "order": 9,
+        "description": "Mutation time and updater principal/scope attribution."
+      },
+      {
+        "id": "deleted",
+        "title": "Completion, Archive, And Deletion",
+        "order": 10,
+        "description": "Terminal timestamps and soft-delete attribution."
+      }
+    ],
+    "definitions": [
+      {
+        "name": "BlockedByTaskReadDTO",
+        "kind": "inline",
+        "description": "Inline blocking-task shape embedded in richer task read responses.",
+        "fields": [
+          {
+            "name": "id",
+            "type": "`T-${number}` | string",
+            "required": true,
+            "nullable": false,
+            "description": "Friendly id of an incomplete blocking task.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "state",
+            "type": "TaskState",
+            "required": true,
+            "nullable": false,
+            "description": "Lifecycle state of that blocking task.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          }
+        ]
+      },
+      {
+        "name": "CommentReadDTO",
+        "kind": "dto",
+        "description": "Minimal comment shape embedded in task read responses.",
+        "fields": [
+          {
+            "name": "id",
+            "type": "string",
+            "required": true,
+            "nullable": false,
+            "description": "Friendly comment id.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "created_at",
+            "type": "RFC3339Timestamp",
+            "required": true,
+            "nullable": false,
+            "description": "Comment creation timestamp.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "body",
+            "type": "string",
+            "required": true,
+            "nullable": false,
+            "description": "Markdown comment body.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "principal_ref",
+            "type": "PrincipalRef",
+            "required": false,
+            "nullable": false,
+            "description": "Canonical comment author principal when available.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "scope_ref",
+            "type": "ScopeRef",
+            "required": false,
+            "nullable": false,
+            "description": "Runtime scope that created the comment when available.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "actor_slug",
+            "type": "string",
+            "required": false,
+            "nullable": false,
+            "deprecated": true,
+            "description": "Legacy author actor slug when principal attribution is unavailable.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "actor_role",
+            "type": "'human' | 'agent' | 'system'",
+            "required": false,
+            "nullable": false,
+            "deprecated": true,
+            "description": "Legacy actor-table role for display and filtering.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          }
+        ]
+      },
+      {
+        "name": "TaskRelationReadDTO",
+        "kind": "dto",
+        "description": "Task relation shape embedded in richer task read responses.",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "'blocks' | 'relates_to' | 'duplicates' | string",
+            "required": true,
+            "nullable": false,
+            "description": "Relation kind recorded for the directed edge.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "direction",
+            "type": "'outgoing' | 'incoming' | string",
+            "required": false,
+            "nullable": false,
+            "description": "Direction relative to the task being read when the caller asks for relations.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "task_id",
+            "type": "`T-${number}` | string",
+            "required": false,
+            "nullable": false,
+            "description": "Friendly id of the related task when loaded for display.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "task_uuid",
+            "type": "UUIDv4String",
+            "required": false,
+            "nullable": false,
+            "description": "Stable UUID of the related task when loaded for joins.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "task_slug",
+            "type": "string",
+            "required": false,
+            "nullable": false,
+            "description": "Slug of the related task when loaded for display.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "task_title",
+            "type": "string",
+            "required": false,
+            "nullable": false,
+            "description": "Title of the related task when loaded for display.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          },
+          {
+            "name": "created_by_id",
+            "type": "string",
+            "required": false,
+            "nullable": false,
+            "description": "Principal handle or legacy actor id that created the relation.",
+            "origin": "read-projection",
+            "producedBy": "wrkq cat --json / wrkqd read decorators"
+          }
+        ]
+      }
+    ],
+    "surfaces": [
+      {
+        "name": "wrkq cat --json / wrkqd",
+        "kind": "read",
+        "projection": "Task public read DTO",
+        "fields": [
+          "path",
+          "artifact_dir",
+          "project_id",
+          "parent_task_id",
+          "assignee",
+          "assignee_uuid",
+          "created_by",
+          "updated_by",
+          "blocked_by",
+          "comments",
+          "relations",
+          "uuid",
+          "id",
+          "slug",
+          "title",
+          "project_uuid",
+          "requested_by_project_id",
+          "assigned_project_id",
+          "state",
+          "priority",
+          "kind",
+          "parent_task_uuid",
+          "assignee_actor_uuid",
+          "assignee_principal_ref",
+          "acknowledged_at",
+          "resolution",
+          "cp_project_id",
+          "cp_work_item_id",
+          "cp_run_id",
+          "session_id",
+          "run_status",
+          "workflow_preset",
+          "preset_version",
+          "phase",
+          "risk_class",
+          "start_at",
+          "due_at",
+          "labels",
+          "meta",
+          "description",
+          "specification",
+          "etag",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "archived_at",
+          "deleted_at",
+          "created_by_actor_uuid",
+          "updated_by_actor_uuid",
+          "created_by_principal_ref",
+          "updated_by_principal_ref",
+          "deleted_by_principal_ref",
+          "created_by_scope_ref",
+          "updated_by_scope_ref",
+          "deleted_by_scope_ref"
+        ],
+        "description": "Porcelain-facing task DTO with read-rendered fields listed before persisted fields."
+      },
+      {
+        "name": "domain.Task",
+        "kind": "domain-json",
+        "projection": "canonical persisted Task JSON",
+        "fields": [
+          "uuid",
+          "id",
+          "slug",
+          "title",
+          "project_uuid",
+          "requested_by_project_id",
+          "assigned_project_id",
+          "state",
+          "priority",
+          "kind",
+          "parent_task_uuid",
+          "assignee_actor_uuid",
+          "assignee_principal_ref",
+          "acknowledged_at",
+          "resolution",
+          "cp_project_id",
+          "cp_work_item_id",
+          "cp_run_id",
+          "session_id",
+          "run_status",
+          "workflow_preset",
+          "preset_version",
+          "phase",
+          "risk_class",
+          "start_at",
+          "due_at",
+          "labels",
+          "meta",
+          "description",
+          "specification",
+          "etag",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "archived_at",
+          "deleted_at",
+          "created_by_actor_uuid",
+          "updated_by_actor_uuid",
+          "created_by_principal_ref",
+          "updated_by_principal_ref",
+          "deleted_by_principal_ref",
+          "created_by_scope_ref",
+          "updated_by_scope_ref",
+          "deleted_by_scope_ref"
+        ],
+        "description": "Canonical persisted task JSON shape, including principal and scope attribution fields."
+      },
+      {
+        "name": "tasks table / v_task_paths",
+        "kind": "storage",
+        "projection": "storage and path-view backing data",
+        "fields": [
+          "uuid",
+          "id",
+          "slug",
+          "project_uuid",
+          "session_id",
+          "sdk_session_id",
+          "path"
+        ],
+        "description": "Storage and compatibility backing, including deprecated sdk_session_id and path projection via v_task_paths."
+      }
+    ],
+    "scalarAliases": [
+      {
+        "name": "UUIDv4String",
+        "type": "string",
+        "validator": "domain.ValidateUUID",
+        "description": "Lowercase UUIDv4 accepted by domain validation."
+      },
+      {
+        "name": "RFC3339Timestamp",
+        "type": "string",
+        "validator": "domain.ValidateTimestamp / Go time.Time JSON",
+        "description": "Timestamp serialized by Go time.Time or stored as UTC ISO/RFC3339 text."
+      },
+      {
+        "name": "Slug",
+        "type": "string",
+        "validator": "paths.NewSlug / paths.ValidateSlug",
+        "description": "Lowercase path segment matching [a-z0-9][a-z0-9-]* with max length 255 bytes."
+      },
+      {
+        "name": "PrincipalRef",
+        "type": "`agent:${string}` | string",
+        "validator": "external principal attribution checks",
+        "description": "Canonical external principal reference for agents and future principal namespaces."
+      },
+      {
+        "name": "ScopeRef",
+        "type": "string",
+        "description": "Praesidium runtime scope reference carried for provenance and runtime attribution."
+      },
+      {
+        "name": "JSONText<T>",
+        "type": "string",
+        "description": "SQLite TEXT containing JSON with the semantic shape T."
+      },
+      {
+        "name": "TaskState",
+        "type": "'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted'",
+        "validator": "domain.ParseState",
+        "description": "Lifecycle states backed by the domain.State wire type and task-table CHECK constraints."
+      },
+      {
+        "name": "TaskKind",
+        "type": "'task' | 'subtask' | 'spike' | 'bug' | 'chore'",
+        "validator": "domain.ValidateTaskKind",
+        "description": "Work-item categories accepted by domain validation."
+      },
+      {
+        "name": "TaskResolution",
+        "type": "'done' | 'wont_do' | 'duplicate' | 'needs_info'",
+        "validator": "domain.ValidateResolution",
+        "description": "Resolution values accepted when a task is closed or triaged."
+      },
+      {
+        "name": "TaskRunStatus",
+        "type": "'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'",
+        "validator": "domain.ValidateRunStatus",
+        "description": "Async control-plane run statuses accepted by domain validation."
+      },
+      {
+        "name": "TaskRiskClass",
+        "type": "'low' | 'medium' | 'high'",
+        "validator": "domain.ValidateTaskRiskClass",
+        "description": "Workflow risk classes accepted when workflow metadata is present."
+      }
     ]
   }
 }

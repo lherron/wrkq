@@ -23,14 +23,14 @@ var treeCmd = &cobra.Command{
 
 By default, archived and deleted containers are hidden, only draft/open tasks are shown,
 and containers without visible task descendants are collapsed.
-Use -a/--all to include archived and empty containers.
+Use -a/--all to include completed/archived/deleted tasks and empty containers.
 When all tasks in a container are completed/archived, they are collapsed
 and an "(All done)" indicator is shown on the container.
 
 Examples:
   wrkq tree                    # Show active containers and draft/open tasks
   wrkq tree --open             # Show only open tasks
-  wrkq tree -a                 # Include archived and empty containers
+  wrkq tree -a                 # Include completed/archived/deleted tasks and empty containers
   wrkq tree portal             # Show tree under portal
   wrkq tree -L 2               # Limit depth to 2 levels
   wrkq tree --json             # Output as JSON
@@ -54,7 +54,7 @@ func init() {
 	rootCmd.AddCommand(treeCmd)
 
 	treeCmd.Flags().IntVarP(&treeDepth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include archived and empty containers")
+	treeCmd.Flags().BoolVarP(&treeIncludeArchived, "all", "a", false, "Include completed/archived/deleted tasks and empty containers")
 	treeCmd.Flags().BoolVar(&treeOpenOnly, "open", false, "Show only open tasks")
 	treeCmd.Flags().StringVar(&treeFields, "fields", "", "Fields to display (comma-separated)")
 	treeCmd.Flags().BoolVar(&treePorcelain, "porcelain", false, "Machine-readable output")
@@ -115,6 +115,10 @@ type treeNode struct {
 	IsArchived           bool        `json:"is_archived"`
 	IsDeleted            bool        `json:"is_deleted"`
 	AllTasksCompleted    bool        `json:"all_tasks_completed,omitempty"` // for containers
+	ExternalChildren     []*treeNode `json:"-"`
+	ExternalBacklink     bool        `json:"-"`
+	ExternalProjectID    string      `json:"-"`
+	ExternalPath         string      `json:"-"`
 	HasVisibleTasks      bool        `json:"-"`
 	HasVisibleContent    bool        `json:"-"`
 	HiddenContainerCount int         `json:"-"`
@@ -181,6 +185,9 @@ func displayTree(w io.Writer, database *db.DB, rootPath string, maxDepth int, in
 	case sel.Mode == outputModeNDJSON:
 		return writeNDJSONOutput(w, flattenTree(root, rootPath))
 	default:
+		if err := attachExternalTreeBacklinks(database, root, includeArchived, openOnly); err != nil {
+			return err
+		}
 		return printTreeOutput(w, root, rootPath, projectID, false)
 	}
 }
@@ -375,7 +382,9 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 			// Determine if task should be shown based on filters.
 			showTask := node.State == "draft" || node.State == "open"
-			if !includeArchived && (node.IsArchived || node.IsDeleted) {
+			if includeArchived {
+				showTask = true
+			} else if node.IsArchived || node.IsDeleted {
 				showTask = false
 			}
 			if openOnly && node.State != "open" {
@@ -432,7 +441,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 		// If all tasks are completed (and all child containers are done), don't add tasks to the tree
 		// Otherwise, add the tasks we collected
-		if !root.AllTasksCompleted || totalTasks == 0 {
+		if includeArchived || !root.AllTasksCompleted || totalTasks == 0 {
 			root.Children = append(root.Children, topTasks...)
 		}
 	}
@@ -473,7 +482,7 @@ func printTree(w io.Writer, node *treeNode, prefix string, isLast bool, porcelai
 			fmt.Fprintf(w, "%s%s%s\n", prefix, connector, display)
 		}
 
-		// Print children recursively
+		// Print resident children recursively.
 		if len(child.Children) > 0 {
 			var newPrefix string
 			if porcelain {
@@ -486,6 +495,13 @@ func printTree(w io.Writer, node *treeNode, prefix string, isLast bool, porcelai
 				}
 			}
 			printTree(w, child, newPrefix, isLastChild, porcelain)
+		}
+		if !porcelain && len(child.ExternalChildren) > 0 {
+			newPrefix := prefix + style.Paint(style.ColDim, "│") + "   "
+			if isLastChild {
+				newPrefix = prefix + "    "
+			}
+			printTree(w, &treeNode{Children: child.ExternalChildren}, newPrefix, true, false)
 		}
 	}
 }
@@ -577,6 +593,19 @@ func formatNodeDisplay(node *treeNode, porcelain bool) string {
 	if node.IsArchived {
 		parts = append(parts, style.Paint(style.ColDim, "(archived)"))
 	}
+	if node.ExternalBacklink {
+		context := strings.TrimSpace(node.ExternalPath)
+		if context == "" {
+			context = node.ExternalProjectID
+		} else if node.ExternalProjectID != "" {
+			context += " " + node.ExternalProjectID
+		}
+		if context != "" {
+			parts = append(parts, style.Paint(style.ColDim, fmt.Sprintf("(external: %s)", context)))
+		} else {
+			parts = append(parts, style.Paint(style.ColDim, "(external)"))
+		}
+	}
 
 	return strings.Join(parts, " ")
 }
@@ -591,4 +620,79 @@ func formatTreeTaskState(node *treeNode) string {
 		return node.State
 	}
 	return "opened " + openedAge + " ago"
+}
+
+func attachExternalTreeBacklinks(database *db.DB, root *treeNode, includeArchived bool, openOnly bool) error {
+	var walk func(nodes []*treeNode) error
+	walk = func(nodes []*treeNode) error {
+		for _, node := range nodes {
+			if node.Type == "task" {
+				children, err := loadExternalTreeBacklinks(database, node.UUID, includeArchived, openOnly)
+				if err != nil {
+					return err
+				}
+				node.ExternalChildren = children
+			}
+			if err := walk(node.Children); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(root.Children)
+}
+
+func loadExternalTreeBacklinks(database *db.DB, parentUUID string, includeArchived bool, openOnly bool) ([]*treeNode, error) {
+	rows, err := database.Query(`
+		SELECT c.uuid, c.id, c.slug, c.title, c.state, c.created_at, c.archived_at, c.deleted_at,
+		       c.requested_by_project_id, c.assigned_project_id, c.acknowledged_at, c.resolution,
+		       COALESCE(cp.id, ''), COALESCE(vcp.path, '')
+		  FROM tasks c
+		  JOIN tasks p ON p.uuid = c.parent_task_uuid
+		  LEFT JOIN containers cp ON cp.uuid = c.project_uuid
+		  LEFT JOIN v_container_paths vcp ON vcp.uuid = c.project_uuid
+		 WHERE c.parent_task_uuid = ?
+		   AND c.project_uuid != p.project_uuid
+		 ORDER BY c.created_at ASC, c.id ASC
+	`, parentUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query external child tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []*treeNode{}
+	for rows.Next() {
+		var node treeNode
+		var archivedAt, deletedAt *string
+		var requestedBy, assignedProject, acknowledgedAt, resolution *string
+		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.CreatedAt, &archivedAt, &deletedAt,
+			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &node.ExternalProjectID, &node.ExternalPath); err != nil {
+			return nil, fmt.Errorf("failed to scan external child task: %w", err)
+		}
+		node.Type = "task"
+		node.RequestedByProjectID = requestedBy
+		node.AssignedProjectID = assignedProject
+		node.AcknowledgedAt = acknowledgedAt
+		node.Resolution = resolution
+		node.IsArchived = archivedAt != nil
+		node.IsDeleted = deletedAt != nil
+		node.ExternalBacklink = true
+
+		showTask := node.State == "draft" || node.State == "open"
+		if includeArchived {
+			showTask = true
+		} else if node.IsArchived || node.IsDeleted {
+			showTask = false
+		}
+		if openOnly && node.State != "open" {
+			showTask = false
+		}
+		if showTask {
+			out = append(out, &node)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate external child tasks: %w", err)
+	}
+	return out, nil
 }

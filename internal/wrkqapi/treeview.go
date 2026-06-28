@@ -42,6 +42,10 @@ type WrkqTreeNode struct {
 	IsDeleted            bool            `json:"is_deleted"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
 	Children             []*WrkqTreeNode `json:"children,omitempty"`
+	ExternalChildren     []*WrkqTreeNode `json:"external_children,omitempty"`
+	ExternalBacklink     bool            `json:"external_backlink,omitempty"`
+	ExternalProjectID    string          `json:"external_project_id,omitempty"`
+	ExternalPath         string          `json:"external_path,omitempty"`
 
 	// Wire-only carriers (legacy hides these from `tree --json`). The CLI uses them
 	// to build NDJSON stream entries + subtask nesting, then drops them for JSON.
@@ -82,6 +86,9 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 	pruneEmpty := !p.IncludeArchived
 	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, p.IncludeArchived, p.OpenOnly, pruneEmpty, 0)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.attachExternalTreeBacklinks(ctx, root, p.IncludeArchived, p.OpenOnly); err != nil {
 		return nil, err
 	}
 
@@ -246,7 +253,9 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 			}
 
 			showTask := node.State == "draft" || node.State == "open"
-			if !includeArchived && (node.IsArchived || node.IsDeleted) {
+			if includeArchived {
+				showTask = true
+			} else if node.IsArchived || node.IsDeleted {
 				showTask = false
 			}
 			if openOnly && node.State != "open" {
@@ -289,7 +298,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 			topTasks = append(topTasks, t)
 		}
 
-		if !root.AllTasksCompleted || totalTasks == 0 {
+		if includeArchived || !root.AllTasksCompleted || totalTasks == 0 {
 			root.Children = append(root.Children, topTasks...)
 		}
 	}
@@ -300,6 +309,81 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 
 func treeAlwaysShow(node *WrkqTreeNode) bool {
 	return node.Type == "container" && node.Slug == "inbox"
+}
+
+func (a *API) attachExternalTreeBacklinks(ctx context.Context, root *WrkqTreeNode, includeArchived bool, openOnly bool) error {
+	var walk func(nodes []*WrkqTreeNode) error
+	walk = func(nodes []*WrkqTreeNode) error {
+		for _, node := range nodes {
+			if node.Type == "task" {
+				children, err := a.loadExternalTreeBacklinks(ctx, node.UUID, includeArchived, openOnly)
+				if err != nil {
+					return err
+				}
+				node.ExternalChildren = children
+			}
+			if err := walk(node.Children); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(root.Children)
+}
+
+func (a *API) loadExternalTreeBacklinks(ctx context.Context, parentUUID string, includeArchived bool, openOnly bool) ([]*WrkqTreeNode, error) {
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT c.uuid, c.id, c.slug, c.title, c.state, c.created_at, c.archived_at, c.deleted_at,
+		       c.requested_by_project_id, c.assigned_project_id, c.acknowledged_at, c.resolution,
+		       COALESCE(cp.id, ''), COALESCE(vcp.path, '')
+		  FROM tasks c
+		  JOIN tasks p ON p.uuid = c.parent_task_uuid
+		  LEFT JOIN containers cp ON cp.uuid = c.project_uuid
+		  LEFT JOIN v_container_paths vcp ON vcp.uuid = c.project_uuid
+		 WHERE c.parent_task_uuid = ?
+		   AND c.project_uuid != p.project_uuid
+		 ORDER BY c.created_at ASC, c.id ASC
+	`, parentUUID)
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []*WrkqTreeNode{}
+	for rows.Next() {
+		var node WrkqTreeNode
+		var archivedAt, deletedAt *string
+		var requestedBy, assignedProject, acknowledgedAt, resolution *string
+		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.WireCreatedAt, &archivedAt, &deletedAt,
+			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &node.ExternalProjectID, &node.ExternalPath); err != nil {
+			return nil, NewInternalError(err)
+		}
+		node.Type = "task"
+		node.RequestedByProjectID = requestedBy
+		node.AssignedProjectID = assignedProject
+		node.AcknowledgedAt = acknowledgedAt
+		node.Resolution = resolution
+		node.IsArchived = archivedAt != nil
+		node.IsDeleted = deletedAt != nil
+		node.ExternalBacklink = true
+
+		showTask := node.State == "draft" || node.State == "open"
+		if includeArchived {
+			showTask = true
+		} else if node.IsArchived || node.IsDeleted {
+			showTask = false
+		}
+		if openOnly && node.State != "open" {
+			showTask = false
+		}
+		if showTask {
+			out = append(out, &node)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, NewInternalError(err)
+	}
+	return out, nil
 }
 
 var _ = sql.ErrNoRows

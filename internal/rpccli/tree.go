@@ -89,7 +89,7 @@ func newTreeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVarP(&depth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include archived and empty containers")
+	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include completed/archived/deleted tasks and empty containers")
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only open tasks")
 	cmd.Flags().StringVar(&fields, "fields", "", "Fields to display (comma-separated)")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
@@ -176,6 +176,10 @@ type treeWireNode struct {
 	IsDeleted            bool            `json:"is_deleted"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
 	Children             []*treeWireNode `json:"children,omitempty"`
+	ExternalChildren     []*treeWireNode `json:"external_children,omitempty"`
+	ExternalBacklink     bool            `json:"external_backlink,omitempty"`
+	ExternalProjectID    string          `json:"external_project_id,omitempty"`
+	ExternalPath         string          `json:"external_path,omitempty"`
 	WireCreatedAt        string          `json:"wire_created_at,omitempty"`
 	WireParentTaskUUID   string          `json:"wire_parent_task_uuid,omitempty"`
 }
@@ -403,6 +407,13 @@ func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
 			}
 			printTreeHuman(w, child.Children, newPrefix)
 		}
+		if len(child.ExternalChildren) > 0 {
+			newPrefix := prefix + style.Paint(style.ColDim, "│") + "   "
+			if isLastChild {
+				newPrefix = prefix + "    "
+			}
+			printTreeHuman(w, child.ExternalChildren, newPrefix)
+		}
 	}
 }
 
@@ -432,6 +443,19 @@ func formatTreeHumanNode(node *treeWireNode) string {
 	}
 	if node.IsArchived {
 		parts = append(parts, style.Paint(style.ColDim, "(archived)"))
+	}
+	if node.ExternalBacklink {
+		context := strings.TrimSpace(node.ExternalPath)
+		if context == "" {
+			context = node.ExternalProjectID
+		} else if node.ExternalProjectID != "" {
+			context += " " + node.ExternalProjectID
+		}
+		if context != "" {
+			parts = append(parts, style.Paint(style.ColDim, fmt.Sprintf("(external: %s)", context)))
+		} else {
+			parts = append(parts, style.Paint(style.ColDim, "(external)"))
+		}
 	}
 	return strings.Join(parts, " ")
 }

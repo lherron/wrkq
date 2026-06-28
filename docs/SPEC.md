@@ -205,7 +205,8 @@ Valid task role assignment roles:
 ### Subtasks
 
 A task with `--parent-task` is stored as kind `subtask` unless `--kind` is
-explicitly provided. Parent and child tasks must be in the same container.
+explicitly provided. Parent links are task-graph edges and may cross
+project/container boundaries; the child keeps its own resident container.
 Subtasks cannot have subtasks.
 
 ### Comments

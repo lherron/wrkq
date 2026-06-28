@@ -188,8 +188,8 @@ func g5EventPayload(t *testing.T, dbPath, eventType, taskUUID string) string {
 }
 
 // g5HierarchyMismatchCount counts tasks whose project_uuid differs from their
-// parent task's project_uuid.  The hierarchy invariant requires this to be zero
-// after any correct cascade move.
+// parent task's project_uuid. Cross-project parent edges are now allowed, so this
+// helper is only valid in tests that seed same-residency parent graphs.
 func g5HierarchyMismatchCount(t *testing.T, dbPath string) int {
 	t.Helper()
 	database, err := db.Open(dbPath)
@@ -577,9 +577,9 @@ func TestWrkqTaskMove_SameTarget_NoOp_Stable(t *testing.T) {
 	// Move to the SAME container (g5-noop-proj) — must be treated as a no-op.
 	frames := p2Run(t, dbPath,
 		mkRPC("mv1", "wrkq.task.move", map[string]any{
-			"task":        taskID,
-			"targetPath":  "g5-noop-proj", // same as current container
-			"expectEtag":  etagBefore,     // supply current etag to exercise CAS path
+			"task":       taskID,
+			"targetPath": "g5-noop-proj", // same as current container
+			"expectEtag": etagBefore,     // supply current etag to exercise CAS path
 		}),
 	)
 	result := p2ResultOrFail(t, frames[1], "wrkq.task.move same-target no-op")
@@ -623,9 +623,9 @@ func TestWrkqTaskMove_SameTarget_StaleEtag_ReturnsConflict(t *testing.T) {
 
 	frames := p2Run(t, dbPath,
 		mkRPC("mv1", "wrkq.task.move", map[string]any{
-			"task":        taskID,
-			"targetPath":  "g5-noop-stale-proj", // same container
-			"expectEtag":  staleEtag,
+			"task":       taskID,
+			"targetPath": "g5-noop-stale-proj", // same container
+			"expectEtag": staleEtag,
 		}),
 	)
 	code := p2ErrCode(frames[1])
@@ -637,15 +637,14 @@ func TestWrkqTaskMove_SameTarget_StaleEtag_ReturnsConflict(t *testing.T) {
 
 // ─── wrkq.task.move: hierarchy invariant (SQL) ────────────────────────────
 
-// TestWrkqTaskMove_HierarchyInvariant_NoProjectMismatch verifies that after a
-// cascade move, no child task lives in a different container than its parent.
-// This is the core safety invariant of the cascade requirement.
+// TestWrkqTaskMove_ResidentSubtreeMove_NoProjectMismatch verifies that after a
+// same-residency cascade move, no resident child is accidentally left behind.
 //
 // The test seeds a root task with subtasks, performs a move, then executes the
 // invariant SQL query directly on the DB.
 //
 // RED: method not registered → p2ResultOrFail fails with "method not found".
-func TestWrkqTaskMove_HierarchyInvariant_NoProjectMismatch(t *testing.T) {
+func TestWrkqTaskMove_ResidentSubtreeMove_NoProjectMismatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
@@ -680,24 +679,17 @@ func TestWrkqTaskMove_HierarchyInvariant_NoProjectMismatch(t *testing.T) {
 
 	// Post-condition: invariant must still hold after a correct cascade move.
 	if n := g5HierarchyMismatchCount(t, dbPath); n != 0 {
-		t.Errorf("hierarchy invariant: expected 0 child/parent project_uuid mismatches "+
+		t.Errorf("resident subtree move: expected 0 child/parent project_uuid mismatches "+
 			"after cascade move, got %d; "+
-			"every descendant must be in the same container as its parent", n)
+			"all seeded resident descendants should move with their parent", n)
 	}
 }
 
-// TestWrkqTaskMove_HierarchyInvariant_ArbitraryMovesSQL verifies the hierarchy
-// invariant after multiple successive cascade moves across three projects.
-//
-// The SQL query
-//   SELECT COUNT(*) FROM tasks t
-//   JOIN tasks p ON t.parent_task_uuid = p.uuid
-//   WHERE t.project_uuid != p.project_uuid
-//     AND t.state != 'deleted' AND p.state != 'deleted'
-// must return ZERO after all moves complete successfully.
+// TestWrkqTaskMove_ResidentSubtreeMove_ArbitraryMovesSQL verifies the same-
+// residency cascade invariant after multiple successive moves across projects.
 //
 // RED: method not registered → p2ResultOrFail on the first move fails.
-func TestWrkqTaskMove_HierarchyInvariant_ArbitraryMovesSQL(t *testing.T) {
+func TestWrkqTaskMove_ResidentSubtreeMove_ArbitraryMovesSQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
@@ -743,10 +735,56 @@ func TestWrkqTaskMove_HierarchyInvariant_ArbitraryMovesSQL(t *testing.T) {
 	)
 	p2ResultOrFail(t, frames2[1], "wrkq.task.move R2 to projC")
 
-	// Hierarchy invariant SQL check: zero child/parent project_uuid mismatches.
+	// Same-residency cascade check: zero mismatches for this seeded resident graph.
 	if n := g5HierarchyMismatchCount(t, dbPath); n != 0 {
-		t.Errorf("after multiple cascade moves: SQL invariant returned %d child/parent "+
+		t.Errorf("after multiple resident cascade moves: SQL check returned %d child/parent "+
 			"project_uuid mismatches (expected 0); "+
-			"every descendant must share project_uuid with its parent task", n)
+			"all seeded resident descendants should move with their parent", n)
+	}
+}
+
+func TestWrkqTaskMove_CrossProjectChildIsNotMoved(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+
+	projAUUID := "g5000000-a100-4000-8000-000000000001"
+	projBUUID := "g5000000-a100-4000-8000-000000000002"
+	projCUUID := "g5000000-a100-4000-8000-000000000003"
+	parentUUID := "g5000000-a100-4000-8000-000000000010"
+	externalUUID := "g5000000-a100-4000-8000-000000000011"
+
+	g5SeedProject(t, dbPath, "g5-xmove-a", projAUUID)
+	g5SeedProject(t, dbPath, "g5-xmove-b", projBUUID)
+	g5SeedProject(t, dbPath, "g5-xmove-c", projCUUID)
+	parentID := g5SeedRootTask(t, dbPath, "g5-xmove-parent", parentUUID, projAUUID)
+	g5SeedSubtask(t, dbPath, "g5-xmove-external", externalUUID, projBUUID, parentUUID)
+
+	frames := p2Run(t, dbPath,
+		mkRPC("mv1", "wrkq.task.move", map[string]any{
+			"task":       parentID,
+			"targetPath": "g5-xmove-c",
+		}),
+	)
+	p2ResultOrFail(t, frames[1], "wrkq.task.move cross-project child")
+
+	if got := g5TaskProjectUUID(t, dbPath, parentUUID); got != projCUUID {
+		t.Fatalf("parent project_uuid = %s, want %s", got, projCUUID)
+	}
+	if got := g5TaskProjectUUID(t, dbPath, externalUUID); got != projBUUID {
+		t.Fatalf("external child project_uuid = %s, want unchanged %s", got, projBUUID)
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var parentRef string
+	if err := database.QueryRow("SELECT parent_task_uuid FROM tasks WHERE uuid = ?", externalUUID).Scan(&parentRef); err != nil {
+		t.Fatalf("load external child parent ref: %v", err)
+	}
+	if parentRef != parentUUID {
+		t.Fatalf("external child parent_task_uuid = %s, want backlink to moved parent %s", parentRef, parentUUID)
 	}
 }

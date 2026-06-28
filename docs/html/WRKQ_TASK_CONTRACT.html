@@ -887,7 +887,7 @@ th {
   etag: number // Optimistic concurrency token incremented on task mutation. database default is 1 trust:high evidence:3
   created_at: RFC3339Timestamp // Timestamp when the task row was created. database default uses UTC strftime trust:high evidence:2
   updated_at: RFC3339Timestamp // Timestamp touched by updates for recency and audit views. database default uses UTC strftime update paths touch this field trust:high evidence:3
-  completed_at?: RFC3339Timestamp // Timestamp set when state transitions to completed. managed by task state consistency trigger trust:high evidence:2
+  completed_at?: RFC3339Timestamp // Current completion timestamp set while state is completed; cleared when reopened. managed by task state consistency trigger trust:high evidence:2
   archived_at?: RFC3339Timestamp // Timestamp set when the task is archived. managed by task state consistency trigger trust:high evidence:2
   deleted_at?: RFC3339Timestamp // Timestamp set on transition to deleted and cleared on restore. managed by deleted_at and undelete triggers trust:high evidence:2
   created_by_actor_uuid: UUIDv4String // Actor UUID that created the task. references actors(uuid) delete restricted by database foreign key trust:high evidence:2

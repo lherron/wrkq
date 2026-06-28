@@ -702,9 +702,9 @@ interface WrkqTaskMoveParams {
 Contract (daedalus HIGH-risk ruling, T-04847 C-04823 §2):
 
 - `targetPath` must resolve to an **existing** container; an unknown destination is `WRKQ_NOT_FOUND` (`kind = "container"`). The move does not create containers.
-- **Descendant cascade in one transaction.** Moving a root task moves *every* descendant subtask in the same DB transaction. Each moved task gets the new `project_uuid`, a bumped `etag`, an updated attribution, and its own `task.moved` event. The invariant `child.project_uuid == parent.project_uuid` is preserved.
+- **Resident descendant cascade in one transaction.** Moving a root task moves same-residency descendant subtasks in the same DB transaction. Each moved resident task gets the new `project_uuid`, a bumped `etag`, an updated attribution, and its own `task.moved` event. Cross-project children are external backlinks: they are not moved through the parent edge and keep their own `project_uuid`.
 - `expectEtag` is a CAS on the **root task only**; a stale value is `WRKQ_CONFLICT` (carrying `expectEtag` + the current etag). Descendants are not individually CAS-checked.
-- Moving an **independent subtask** across containers (one whose parent would end up in a different container) is rejected with `WRKQ_VALIDATION` — only whole subtrees move coherently.
+- Moving an **independent same-residency subtask** across containers (one whose parent would remain in the old container) is rejected with `WRKQ_VALIDATION` — same-residency subtrees move coherently. A cross-project child may be moved when it is explicitly selected by the caller.
 - A **same-container move is a stable no-op** (idempotent; no spurious etag churn beyond the contract).
 - Move origin metadata is honest: events/attribution record origin `rpc` (never `cli`).
 - The `task.moved` event payload carries the old/new container uuid + path and, for cascaded descendants, the `cascadeRootTaskUuid` (the tests also accept `cascade_root_task_uuid`).

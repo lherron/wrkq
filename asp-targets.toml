@@ -1,11 +1,5 @@
 schema = 1
 
-[targets.clod]
-description = "clod code rules the world"
-yolo = true
-compose = ["space:defaults@dev", "space:praesidium-defaults@dev"]
-
-
 [targets.dev]
 description = "Default target"
 compose = ["space:defaults@dev"]

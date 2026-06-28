@@ -932,7 +932,7 @@ p {
   updated_by_scope_ref?: ScopeRef // Runtime scope responsible for the latest mutation when available.
 
   // Deleted and archived fields
-  completed_at?: RFC3339Timestamp // Timestamp set when state transitions to completed.
+  completed_at?: RFC3339Timestamp // Current completion timestamp set while state is completed; cleared when reopened.
   archived_at?: RFC3339Timestamp // Timestamp set when state transitions to archived.
   deleted_at?: RFC3339Timestamp // Timestamp set when state transitions to deleted and cleared on restore.
   deleted_by_principal_ref?: PrincipalRef // Canonical principal that soft-deleted the task, cleared when restored.
@@ -982,16 +982,16 @@ type TaskRelationReadDTO = { // Task relation shape embedded in richer task read
               </div>
               <div class="code-panel"><pre><code>type UUIDv4String = string // Lowercase UUIDv4 accepted by domain.ValidateUUID.
 type RFC3339Timestamp = string // Timestamp serialized by Go time.Time or stored as UTC ISO/RFC3339 text.
-type Slug = string // Lowercase path segment matching [a-z0-9][a-z0-9-]* with max length 255.
+type Slug = string // Lowercase path segment matching [a-z0-9][a-z0-9-]* (max 255 bytes); validated and wrapped by the paths.Slug wire type via paths.NewSlug and paths.ValidateSlug.
 type PrincipalRef = `agent:${string}` // Canonical external principal ref validated by attribution migration checks.
 type ScopeRef = string // Praesidium scope reference carried for provenance and runtime attribution.
 type JSONText&lt;T&gt; = string // SQLite TEXT containing JSON with the semantic shape T.
-type TaskState = 'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted' // Lifecycle states accepted by domain validation and task-table CHECK constraints.
+type TaskState = 'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted' // Lifecycle states backed by the domain.State wire type; accepted by domain.ParseState and task-table CHECK constraints.
 type TaskKind = 'task' | 'subtask' | 'spike' | 'bug' | 'chore' // Work-item categories accepted by domain validation.
 type TaskResolution = 'done' | 'wont_do' | 'duplicate' | 'needs_info' // Resolution values accepted when a task is closed or triaged.
 type TaskRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' // Async control-plane run statuses accepted by domain validation.
 type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted when workflow metadata is present.</code></pre></div>
-              <div class="source-note">Source: <span class="inline-code">internal/domain/validation.go</span>, <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/validation.go</span>, <span class="inline-code">internal/domain/state.go</span>, <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/paths/slug.go</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
             </article>
           </section>
 
@@ -1042,7 +1042,9 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
                 <h3>Source map</h3>
                 <ul class="source-list minor">
                   <li><span class="inline-code">internal/domain/types.go</span> for <span class="inline-code">Task</span> JSON tags and deprecated <span class="inline-code">SDKSessionID</span>.</li>
-                  <li><span class="inline-code">internal/domain/validation.go</span> for state, priority, kind, resolution, run status, risk class, UUID, and timestamp validation.</li>
+                  <li><span class="inline-code">internal/domain/validation.go</span> for priority, kind, resolution, run status, risk class, UUID, and timestamp validation.</li>
+                  <li><span class="inline-code">internal/domain/state.go</span> for the <span class="inline-code">domain.State</span> wire type and <span class="inline-code">ParseState</span> lifecycle validation.</li>
+                  <li><span class="inline-code">internal/paths/slug.go</span> for the <span class="inline-code">paths.Slug</span> wire type, <span class="inline-code">NewSlug</span>, and slug normalization/validation rules.</li>
                   <li><span class="inline-code">internal/db/migrations/000006_async_run_linkage.sql</span> for CP run/session fields and deprecated <span class="inline-code">sdk_session_id</span>.</li>
                   <li><span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span> for canonical principal/scope attribution and legacy actor UUID cache semantics.</li>
                   <li><span class="inline-code">internal/cli/cat.go</span> and <span class="inline-code">internal/cli/daemon.go</span> for public read decorators.</li>
@@ -1050,7 +1052,7 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
               </article>
               <article class="panel">
                 <h3>Scope notes</h3>
-                <p class="minor">This artifact is source-linked to the current worktree, which contains uncommitted principal attribution changes. It documents the public task object as implemented locally, not the older generated <span class="inline-code">WRKQ_TASK_CONTRACT.html</span> snapshot.</p>
+                <p class="minor">This artifact is source-linked to the current tree, including committed external-principal/scope attribution (migration <span class="inline-code">000026</span>) and the refined <span class="inline-code">domain.State</span> / <span class="inline-code">paths.Slug</span> wire types. It is the canonical public task-object contract; an older generated snapshot once lived alongside it and has been removed in favor of this page.</p>
               </article>
             </div>
           </section>

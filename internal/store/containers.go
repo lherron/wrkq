@@ -629,6 +629,9 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 				return fmt.Errorf("failed to log task purge event: %w", err)
 			}
 		}
+		if err := detachExternalSubtasksForParents(tx, attr, taskUUIDs); err != nil {
+			return err
+		}
 		for _, task := range tasks {
 			if _, err := tx.Exec("DELETE FROM tasks WHERE uuid = ?", task.UUID); err != nil {
 				return fmt.Errorf("failed to delete task: %w", err)

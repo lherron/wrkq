@@ -1,0 +1,74 @@
+id: wrkq.task-hierarchy.cross-project-parents
+kind: invariant
+status: active
+owner_project: wrkq
+scope: task parent graph, task residency, and hierarchy-affecting mutations
+predicate: >
+  `tasks.project_uuid` is the authoritative task residency/container path.
+  `tasks.parent_task_uuid` is a bounded task-graph edge, not a container-membership
+  edge, and MAY reference a task whose `project_uuid` differs from the child's.
+
+  Path/container-scoped machine projections (`tree --json`, `tree --ndjson`,
+  `tree --porcelain`, list/find path filters, and their RPC compatibility shapes)
+  remain scoped by residency unless a future record explicitly changes that
+  machine contract: only tasks resident in the selected container set count as
+  selected/resident tree content. In-set subtask nesting happens when both parent
+  and child are resident and visible in that selected set.
+
+  Human `wrkq tree` MAY augment a resident parent task with visible external-child
+  backlink rows for cross-residency children. Those rows must be marked as external
+  or otherwise visually unmistakable, and they are presentation/backlink rows only:
+  they are not resident containment, do not change the child's `path` or
+  `project_uuid`, and must not affect recursive delete impact, move membership,
+  path-filter membership, hidden-container counts, or `all_tasks_completed`
+  rollups. If external rows cross the RPC boundary, they must be modeled as
+  explicit non-resident presentation data (or a separate human-tree read model),
+  not as ordinary resident task children silently mixed into machine projections.
+  Cross-residency children also appear in their own residency and task detail/read
+  models may expose the parent id/uuid as a backlink.
+
+  Parent graph integrity is global: parent existence, no self-parenting, max depth
+  1, and cycle prevention are enforced across project/container boundaries.
+
+  Hierarchy-affecting mutations must not let a parent edge delete, move, archive,
+  restore, purge, or otherwise mutate a task with a different `project_uuid` unless
+  that task is explicitly selected by the caller's residency-scoped operation.
+  Same-residency descendants preserve existing containment behavior for the operation
+  being performed. Cross-residency children are external backlinks: when their parent
+  task/container/project is tombstoned or hard-deleted, they are detached
+  (`parent_task_uuid = NULL`; `kind` normalized to `task` unless explicitly set by
+  the caller), not deleted.
+
+  Unconditional schema-level cascade on `tasks.parent_task_uuid` is forbidden under
+  this invariant. The database default failure mode must be detach or reject; any
+  same-residency cascade is an explicit store/API behavior with tests.
+authority:
+  repo: wrkq
+  surface: tasks table parent graph + wrkq task/container mutation/read-model surfaces
+enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/tasks.go; internal/store/containers.go; internal/cli/tree.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/store/cross_project_parent_test.go; internal/cli/tree_test.go; internal/workrpc/taskmove_test.go"
+required_tests:
+  - go test ./internal/store ./internal/wrkqapi ./internal/cli
+  - go test ./internal/workrpc -run 'TestWrkqTaskMove_(ResidentSubtreeMove|CrossProjectChild)'
+  - just architecture-records
+last_verified:
+  date: 2026-06-28
+  evidence: "T-05266 implementation: go test ./internal/store ./internal/wrkqapi ./internal/cli green; go test ./internal/workrpc -run 'TestWrkqTaskMove_(ResidentSubtreeMove|CrossProjectChild)' green; full verify/install/manual smoke captured on task before close."
+exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the hierarchy mutation/read-model call site"
+source:
+  - internal/db/migrations/000026_external_principal_attribution.sql
+  - internal/store/tasks.go
+  - internal/store/containers.go
+  - internal/wrkqapi/tasks.go
+  - internal/wrkqapi/treeview.go
+  - internal/rpccli/tree.go
+  - internal/workrpc/taskmove_test.go
+  - docs/SPEC.md
+  - docs/wrkq-wrkf-rpc.md
+  - docs/wrkq-wrkf-rpc-client-forward-spec.md
+reopen_when:
+  - task parent depth changes beyond max depth 1
+  - parent_task_uuid becomes containment rather than backlink across project_uuid boundaries
+  - task/container deletion, purge, restore, or move semantics change for parented tasks
+  - schema referential action on tasks.parent_task_uuid changes
+supersedes: []
+superseded_by: null

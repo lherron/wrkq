@@ -368,10 +368,16 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 }
 
 func cascadeRestoreSubtasks(database *db.DB, attr attribution.Attribution, parentTaskUUID, targetState string) error {
-	// Find all subtasks that are archived or deleted
+	// Find resident subtasks that are archived or deleted. Cross-project parent
+	// edges are backlinks, not containment, so restore must not mutate them via
+	// the parent.
 	rows, err := database.Query(`
-		SELECT uuid FROM tasks
-		WHERE parent_task_uuid = ? AND state IN ('archived', 'deleted')
+		SELECT c.uuid
+		FROM tasks c
+		JOIN tasks p ON p.uuid = c.parent_task_uuid
+		WHERE c.parent_task_uuid = ?
+		  AND c.project_uuid = p.project_uuid
+		  AND c.state IN ('archived', 'deleted')
 	`, parentTaskUUID)
 	if err != nil {
 		return fmt.Errorf("failed to query subtasks: %w", err)

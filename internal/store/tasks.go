@@ -454,7 +454,7 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			return err
 		}
 
-		// Validate re-parenting (same container, no self-parent, no cycles, depth <= 1).
+		// Validate re-parenting (no self-parent, no cycles, depth <= 1).
 		if pv, ok := fields["parent_task_uuid"]; ok && pv != nil {
 			parentUUID, _ := pv.(string)
 			if err := validateParentAssignment(tx, taskUUID, parentUUID); err != nil {
@@ -534,10 +534,14 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			return fmt.Errorf("failed to update task: %w", err)
 		}
 
-		// Cascade delete subtasks if state is being set to 'deleted'
+		// Cascade delete resident subtasks and detach external child backlinks if
+		// state is being set to 'deleted'.
 		if newState, ok := fields["state"]; ok && newState == "deleted" {
-			if err := cascadeDeleteSubtasks(tx, ew, attr, taskUUID); err != nil {
-				return fmt.Errorf("failed to cascade delete subtasks: %w", err)
+			if err := detachExternalSubtasks(tx, attr, taskUUID); err != nil {
+				return fmt.Errorf("failed to detach external subtasks: %w", err)
+			}
+			if err := cascadeDeleteResidentSubtasks(tx, ew, attr, taskUUID); err != nil {
+				return fmt.Errorf("failed to cascade delete resident subtasks: %w", err)
 			}
 		}
 
@@ -656,34 +660,29 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 }
 
 // validateParentAssignment enforces the invariants for re-parenting a task:
-// the parent must exist, parent and child must share a container, a task may not
-// be its own parent, and the single-level subtask depth (max depth 1) must hold —
+// the parent must exist, a task may not be its own parent, and the single-level
+// subtask depth (max depth 1) must hold globally across containers/projects —
 // neither the parent being a subtask nor the child already having subtasks.
 func validateParentAssignment(tx *sql.Tx, childUUID, parentUUID string) error {
 	if parentUUID == childUUID {
 		return fmt.Errorf("a task cannot be its own parent")
 	}
 
-	var childProject string
-	if err := tx.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", childUUID).Scan(&childProject); err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("task not found: %s", childUUID)
-		}
+	var childExists int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM tasks WHERE uuid = ?", childUUID).Scan(&childExists); err != nil {
 		return fmt.Errorf("failed to load task: %w", err)
 	}
+	if childExists == 0 {
+		return fmt.Errorf("task not found: %s", childUUID)
+	}
 
-	var parentProject string
 	var parentParent sql.NullString
-	err := tx.QueryRow("SELECT project_uuid, parent_task_uuid FROM tasks WHERE uuid = ?", parentUUID).Scan(&parentProject, &parentParent)
+	err := tx.QueryRow("SELECT parent_task_uuid FROM tasks WHERE uuid = ?", parentUUID).Scan(&parentParent)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("parent task not found: %s", parentUUID)
 		}
 		return fmt.Errorf("failed to load parent task: %w", err)
-	}
-
-	if parentProject != childProject {
-		return fmt.Errorf("parent task must be in the same container as the task")
 	}
 
 	if parentParent.Valid && parentParent.String != "" {
@@ -754,16 +753,24 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 		}
 
 		if root.parentTaskUUID.Valid && root.oldProjectUUID != newProjectUUID {
-			return fmt.Errorf("cannot move subtask across containers independently; move the root task instead")
+			var parentProjectUUID string
+			err := tx.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", root.parentTaskUUID.String).Scan(&parentProjectUUID)
+			if err != nil {
+				return fmt.Errorf("failed to load parent task: %w", err)
+			}
+			if parentProjectUUID == root.oldProjectUUID {
+				return fmt.Errorf("cannot move subtask across containers independently; move the root task instead")
+			}
 		}
 
 		rows, err := tx.Query(`
-			WITH RECURSIVE subtree(uuid) AS (
-				SELECT uuid FROM tasks WHERE uuid = ?
+			WITH RECURSIVE subtree(uuid, project_uuid) AS (
+				SELECT uuid, project_uuid FROM tasks WHERE uuid = ?
 				UNION ALL
-				SELECT t.uuid
+				SELECT t.uuid, t.project_uuid
 				  FROM tasks t
 				  JOIN subtree s ON t.parent_task_uuid = s.uuid
+				 WHERE t.project_uuid = s.project_uuid
 			)
 			SELECT t.uuid, t.etag, t.project_uuid, t.parent_task_uuid, COALESCE(cp.path, '')
 			  FROM tasks t
@@ -1085,6 +1092,13 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 			Changes:    map[string]webhooks.Change{},
 		}
 
+		if err := detachExternalSubtasks(tx, attr, taskUUID); err != nil {
+			return fmt.Errorf("failed to detach external subtasks: %w", err)
+		}
+		if err := purgeResidentSubtasks(tx, ew, attr, taskUUID); err != nil {
+			return fmt.Errorf("failed to purge resident subtasks: %w", err)
+		}
+
 		// Hard delete (CASCADE will delete attachments and comments)
 		_, err = tx.Exec("DELETE FROM tasks WHERE uuid = ?", taskUUID)
 		if err != nil {
@@ -1136,7 +1150,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task := &domain.Task{}
 	// Use string intermediates for nullable time fields since SQLite stores times as strings
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
-	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution *string
+	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution, parentTaskUUID *string
 	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
 	var workflowPreset, phase, riskClass *string
 	var presetVersion sql.NullInt64
@@ -1145,7 +1159,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 
 	err := ts.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
-			   state, priority,
+			   state, priority, kind, parent_task_uuid,
 			   workflow_preset, preset_version, phase, risk_class,
 			   start_at, due_at, labels, meta, description, specification, etag,
 			   created_at, updated_at, completed_at, archived_at,
@@ -1157,7 +1171,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		FROM tasks WHERE uuid = ?
 	`, uuid).Scan(
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
-		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority,
+		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority, &task.Kind, &parentTaskUUID,
 		&workflowPreset, &presetVersion, &phase, &riskClass,
 		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
@@ -1176,6 +1190,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 
 	task.RequestedByProjectID = requestedByProjectID
 	task.AssignedProjectID = assignedProjectID
+	task.ParentTaskUUID = parentTaskUUID
 	task.Resolution = resolution
 	task.AcknowledgedAt = parseTimeNullable(acknowledgedAt)
 	task.CPProjectID = cpProjectID
@@ -1329,13 +1344,51 @@ func isCompletionState(state string) bool {
 	}
 }
 
-// cascadeDeleteSubtasks deletes all subtasks when a parent task is deleted.
+// detachExternalSubtasks detaches child tasks that are linked by parent_task_uuid
+// but live in a different resident container/project than the parent. Parent
+// graph edges are not containment, so parent mutations must not delete or move
+// external children.
+func detachExternalSubtasks(tx *sql.Tx, attr attribution.Attribution, parentTaskUUID string) error {
+	if _, err := tx.Exec(`
+		UPDATE tasks
+		SET parent_task_uuid = NULL,
+		    kind = 'task',
+		    etag = etag + 1,
+		    updated_by_actor_uuid = ?,
+		    updated_by_principal_ref = ?,
+		    updated_by_scope_ref = ?
+		WHERE parent_task_uuid = ?
+		  AND state != 'deleted'
+		  AND project_uuid != (SELECT project_uuid FROM tasks WHERE uuid = ?)
+	`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), parentTaskUUID, parentTaskUUID); err != nil {
+		return fmt.Errorf("failed to detach external subtasks: %w", err)
+	}
+	return nil
+}
+
+// detachExternalSubtasksForParents detaches external child backlinks for a set of
+// parent tasks that are about to be hard-deleted.
+func detachExternalSubtasksForParents(tx *sql.Tx, attr attribution.Attribution, parentTaskUUIDs []string) error {
+	for _, parentTaskUUID := range parentTaskUUIDs {
+		if err := detachExternalSubtasks(tx, attr, parentTaskUUID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// cascadeDeleteResidentSubtasks deletes same-residency subtasks when a parent
+// task is deleted. External children are detached by detachExternalSubtasks.
 // This is called within a transaction when a task's state is set to 'deleted'.
-func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
+func cascadeDeleteResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
 	// Find all subtasks (not already deleted)
 	rows, err := tx.Query(`
-		SELECT uuid FROM tasks
-		WHERE parent_task_uuid = ? AND state != 'deleted'
+		SELECT c.uuid
+		FROM tasks c
+		JOIN tasks p ON p.uuid = c.parent_task_uuid
+		WHERE c.parent_task_uuid = ?
+		  AND c.state != 'deleted'
+		  AND c.project_uuid = p.project_uuid
 	`, parentTaskUUID)
 	if err != nil {
 		return fmt.Errorf("failed to query subtasks: %w", err)
@@ -1382,11 +1435,79 @@ func cascadeDeleteSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attri
 			return fmt.Errorf("failed to log event: %w", err)
 		}
 
-		// Recursively delete nested subtasks
-		if err := cascadeDeleteSubtasks(tx, ew, attr, subtaskUUID); err != nil {
+		if err := detachExternalSubtasks(tx, attr, subtaskUUID); err != nil {
+			return err
+		}
+
+		// Recursively delete nested resident subtasks
+		if err := cascadeDeleteResidentSubtasks(tx, ew, attr, subtaskUUID); err != nil {
 			return err
 		}
 	}
 
+	return nil
+}
+
+// purgeResidentSubtasks hard-deletes same-residency subtasks before their parent
+// task is purged. The schema no longer cascades via parent_task_uuid because
+// cross-project parent edges are graph backlinks, not containment.
+func purgeResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
+	rows, err := tx.Query(`
+		SELECT c.uuid, c.slug
+		FROM tasks c
+		JOIN tasks p ON p.uuid = c.parent_task_uuid
+		WHERE c.parent_task_uuid = ?
+		  AND c.project_uuid = p.project_uuid
+		ORDER BY c.id
+	`, parentTaskUUID)
+	if err != nil {
+		return fmt.Errorf("failed to query resident subtasks for purge: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type subtask struct {
+		uuid string
+		slug string
+	}
+	var subtasks []subtask
+	for rows.Next() {
+		var st subtask
+		if err := rows.Scan(&st.uuid, &st.slug); err != nil {
+			return fmt.Errorf("failed to scan resident subtask for purge: %w", err)
+		}
+		subtasks = append(subtasks, st)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to iterate resident subtasks for purge: %w", err)
+	}
+
+	for _, st := range subtasks {
+		if err := detachExternalSubtasks(tx, attr, st.uuid); err != nil {
+			return err
+		}
+		if err := purgeResidentSubtasks(tx, ew, attr, st.uuid); err != nil {
+			return err
+		}
+		payloadJSON, _ := json.Marshal(map[string]interface{}{
+			"slug":                st.slug,
+			"purged_by":           attr.PrincipalRef,
+			"cascadeRootTaskUuid": parentTaskUUID,
+		})
+		payloadStr := string(payloadJSON)
+		if err := ew.LogEvent(tx, &domain.Event{
+			ActorUUID:    eventActorUUID(attr),
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
+			ResourceType: "task",
+			ResourceUUID: &st.uuid,
+			EventType:    "task.purged",
+			Payload:      &payloadStr,
+		}); err != nil {
+			return fmt.Errorf("failed to log resident subtask purge event: %w", err)
+		}
+		if _, err := tx.Exec("DELETE FROM tasks WHERE uuid = ?", st.uuid); err != nil {
+			return fmt.Errorf("failed to purge resident subtask %s: %w", st.uuid, err)
+		}
+	}
 	return nil
 }

@@ -268,7 +268,7 @@ func TestProjectsListViewDTOFingerprint(t *testing.T) {
 func TestTreeViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqTreeView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqTreeNode{}))
 	const want = "WrkqTreeView{path,project_id,omitempty,children,hidden_containers_not_displayed,wire_raw_path,omitempty}\n" +
-		"WrkqTreeNode{type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,children,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
+		"WrkqTreeNode{type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,children,omitempty,external_children,omitempty,external_backlink,omitempty,external_project_id,omitempty,external_path,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
 	if got != want {
 		t.Errorf("tree view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
