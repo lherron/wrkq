@@ -1,0 +1,262 @@
+provider:
+  id: wrkq
+  title: wrkq
+  summary: Work item and workflow provider.
+
+capabilities:
+  - id: provider:wrkq/work_item.patch@1
+    provider: wrkq
+    root: work_item
+    verb: patch
+    title: Patch work item
+    summary: Partially update mutable fields on a durable wrkq work item.
+    maturity: active
+    contracts:
+      input: provider:wrkq/work_item.patch.input.v1
+      output: provider:wrkq/work_item.output.v1
+    execution:
+      mode: sync
+      persistence: operation_and_execution
+    idempotency:
+      required: true
+      strategy: idempotency-key-plus-input-hash
+    produces:
+      - role: work_item
+        kind: provider:wrkq/work_item@1
+    binding: binding:wrkq/work_item.patch.rpc_stdio@1
+    examples:
+      - name: patch_title
+        input: examples/invoke.wrkq-task-patch.json
+
+artifactKinds:
+  - id: provider:wrkq/work_item@1
+    summary: wrkq task/work-item DTO returned by wrkq.task.update.
+
+bindings:
+  - id: binding:wrkq/work_item.patch.rpc_stdio@1
+    capability: provider:wrkq/work_item.patch@1
+    adapter: jsonrpc-stdio
+    process:
+      command: wrkq
+      args: ["rpc", "--stdio"]
+    lifecycle:
+      initialize:
+        method: rpc.initialize
+        params:
+          protocolVersion: "2026-06-14"
+          client:
+            name: cap
+            version: "0.1.0"
+    request:
+      method: wrkq.task.update
+      params:
+        fromInput: "$"
+        inject:
+          actor: "$.envelope.actor"
+          idempotencyKey: "$.envelope.idempotencyKey"
+    response:
+      output:
+        workItem: "$.result"
+
+aliases:
+  - alias: wrkq.set
+    resolvesTo: provider:wrkq/work_item.patch@1
+
+schemas:
+  - id: provider:wrkq/work_item.patch.input.v1
+    schema:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      $id: provider:wrkq/work_item.patch.input.v1
+      title: wrkq work item patch input
+      type: object
+      additionalProperties: false
+      required: [task, patch]
+      properties:
+        task:
+          type: string
+          minLength: 1
+          description: wrkq task selector such as T-05178, UUID, or path.
+        patch:
+          $ref: "#/$defs/taskPatch"
+        expectEtag:
+          type: integer
+          minimum: 0
+          description: Optional CAS precondition forwarded as TaskUpdateParams.expectEtag.
+        actor:
+          type: string
+          minLength: 1
+          description: Optional write actor; normally injected from the cap invocation envelope.
+        idempotencyKey:
+          type: string
+          minLength: 1
+          description: Optional idempotency key; normally injected from the cap invocation envelope.
+      $defs:
+        taskPatch:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            slug:
+              type: string
+            title:
+              type: string
+            description:
+              type: string
+            specification:
+              type: string
+            state:
+              type: string
+              enum: [idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted]
+            priority:
+              type: integer
+              minimum: 1
+              maximum: 4
+            kind:
+              type: string
+            riskClass:
+              type: string
+            parentTask:
+              type: string
+            labels:
+              type: array
+              items:
+                type: string
+            meta:
+              type: object
+              additionalProperties: true
+            metaRaw:
+              type: string
+            assigneePrincipalRef:
+              type: string
+            requestedBy:
+              type: string
+            assignedProject:
+              type: string
+            resolution:
+              type: string
+            cpProjectId:
+              type: string
+            cpWorkItemId:
+              type: string
+            cpRunId:
+              type: string
+            sessionId:
+              type: string
+            runStatus:
+              type: string
+            dueAt:
+              type: string
+            startAt:
+              type: string
+
+  - id: provider:wrkq/work_item.output.v1
+    schema:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      $id: provider:wrkq/work_item.output.v1
+      title: wrkq work item patch output
+      type: object
+      additionalProperties: false
+      required: [workItem]
+      properties:
+        workItem:
+          $ref: "#/$defs/wrkqTask"
+      $defs:
+        wrkqTask:
+          type: object
+          additionalProperties: true
+          required:
+            - uuid
+            - id
+            - slug
+            - title
+            - projectUuid
+            - path
+            - state
+            - priority
+            - kind
+            - description
+            - specification
+            - hasDescription
+            - hasSpecification
+            - labels
+            - meta
+            - etag
+            - createdAt
+            - updatedAt
+          properties:
+            uuid:
+              type: string
+            id:
+              type: string
+            slug:
+              type: string
+            title:
+              type: string
+            projectUuid:
+              type: string
+            path:
+              type: string
+            state:
+              type: string
+            priority:
+              type: integer
+            kind:
+              type: string
+            riskClass:
+              type: string
+            description:
+              type: string
+            specification:
+              type: string
+            hasDescription:
+              type: boolean
+            hasSpecification:
+              type: boolean
+            labels:
+              type: array
+              items:
+                type: string
+            meta:
+              type: object
+              additionalProperties: true
+            etag:
+              type: integer
+            startAt:
+              type: string
+            dueAt:
+              type: string
+            createdAt:
+              type: string
+            updatedAt:
+              type: string
+            completedAt:
+              type: string
+            archivedAt:
+              type: string
+            deletedAt:
+              type: string
+            acknowledgedAt:
+              type: string
+            assigneePrincipalRef:
+              type: string
+            createdByPrincipalRef:
+              type: string
+            updatedByPrincipalRef:
+              type: string
+
+x-source:
+  protocolVersion:
+    value: "2026-06-14"
+    file: internal/workrpc/registry_contract_test.go
+  server:
+    command: wrkq rpc --stdio
+    file: internal/cli/rpc.go
+  method:
+    name: wrkq.task.update
+    file: internal/workrpc/registry.go
+  params:
+    type: TaskUpdateParams
+    file: internal/wrkqapi/types.go
+  result:
+    type: WrkqTask
+    file: internal/wrkqapi/types.go
