@@ -43,6 +43,12 @@ func TestTransportEquivalence_SearchIndex(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a wrkq binary; skipped under -short")
 	}
+	if !fts5BuildTag {
+		// The in-process transport uses THIS test binary's sqlite build; without
+		// the sqlite_fts5 tag its search index has no FTS5 module. Skip cleanly
+		// (run with `-tags sqlite_fts5`, as `just test` and the release build do).
+		t.Skip("requires -tags sqlite_fts5 for the in-process FTS5 search index")
+	}
 	dbPath, taskID := migratedDBWithTask(t)
 	_ = taskID
 	binPath := buildWrkqFTS(t)
