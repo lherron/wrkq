@@ -146,27 +146,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "labels":
-			// Normalize the prior label set to a decoded []string so the
-			// webhook `changes.labels.from` endpoint is an automation-ready
-			// JSON array, symmetric with the summarized `to` value. ACP
-			// event-hooks must not have to parse a storage-encoded JSON
-			// string to detect a label-addition edge (T-04891). Missing,
-			// null, empty, or invalid prior labels collapse to an empty set.
-			var value sql.NullString
-			if err := tx.QueryRow("SELECT labels FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
-				return nil, err
-			}
-			if !value.Valid {
-				values[field] = nil
-				break
-			}
-			var labels []string
-			if err := json.Unmarshal([]byte(value.String), &labels); err != nil || labels == nil {
-				labels = []string{}
-			}
-			values[field] = labels
-		case "state", "slug", "title", "project_uuid", "kind", "run_status", "resolution", "meta", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "cp_project_id", "cp_work_item_id", "cp_run_id", "cp_session_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
+		case "state", "slug", "title", "project_uuid", "kind", "run_status", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "cp_project_id", "cp_work_item_id", "cp_run_id", "cp_session_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err
