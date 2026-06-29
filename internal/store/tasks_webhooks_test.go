@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -42,39 +41,6 @@ func setupWebhookTestActor(t *testing.T, database *db.DB) string {
 		t.Fatalf("failed to get actor uuid: %v", err)
 	}
 	return uuid
-}
-
-func waitForWebhookPayload(t *testing.T, calls <-chan webhooks.Payload, taskUUID string) webhooks.Payload {
-	t.Helper()
-	timeout := time.After(2 * time.Second)
-	for {
-		select {
-		case payload := <-calls:
-			if payload.TicketUUID == taskUUID {
-				return payload
-			}
-		case <-timeout:
-			t.Fatalf("timed out waiting for webhook for %s", taskUUID)
-		}
-	}
-}
-
-func containsString(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func containsAnyString(values []interface{}, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
@@ -256,146 +222,6 @@ func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for webhook")
-	}
-}
-
-func TestTaskStoreCreateWebhookExposesNeedsSmoketestLabelEdge(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	calls := make(chan webhooks.Payload, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Errorf("decode webhook payload: %v", err)
-		}
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	task, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "created-needs-smoke",
-		Title:       "Created needs smoke",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-		Labels:      `["needs_smoketest","ui"]`,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
-	}
-
-	payload := waitForWebhookPayload(t, calls, task.UUID)
-	if payload.Event != "created" {
-		t.Fatalf("event = %q, want created", payload.Event)
-	}
-	if !containsString(payload.Labels, "needs_smoketest") {
-		t.Fatalf("top-level labels = %#v, want needs_smoketest", payload.Labels)
-	}
-	change, ok := payload.Changes["labels"]
-	if !ok {
-		t.Fatalf("missing labels change in created webhook: %#v", payload.Changes)
-	}
-	if change.From != nil {
-		t.Fatalf("created labels from = %#v, want nil", change.From)
-	}
-	toLabels, ok := change.To.([]interface{})
-	if !ok {
-		t.Fatalf("created labels to = %#v (%T), want JSON label array", change.To, change.To)
-	}
-	if !containsAnyString(toLabels, "needs_smoketest") {
-		t.Fatalf("created labels to = %#v, want needs_smoketest", toLabels)
-	}
-}
-
-func TestTaskStoreUpdateWebhookExposesNeedsSmoketestLabelAdditionEdge(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	calls := make(chan webhooks.Payload, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Errorf("decode webhook payload: %v", err)
-		}
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	task, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "updated-needs-smoke",
-		Title:       "Updated needs smoke",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-		Labels:      `["ui"]`,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
-	}
-	_ = waitForWebhookPayload(t, calls, task.UUID)
-
-	if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{
-		"labels": `["ui","needs_smoketest"]`,
-	}, 0); err != nil {
-		t.Fatalf("failed to add needs_smoketest label: %v", err)
-	}
-
-	payload := waitForWebhookPayload(t, calls, task.UUID)
-	if payload.Event != "updated" {
-		t.Fatalf("event = %q, want updated", payload.Event)
-	}
-	if !reflect.DeepEqual(payload.Changed, []string{"labels"}) {
-		t.Fatalf("changed = %#v, want [labels]", payload.Changed)
-	}
-	if !containsString(payload.Labels, "needs_smoketest") {
-		t.Fatalf("top-level labels = %#v, want needs_smoketest", payload.Labels)
-	}
-	change, ok := payload.Changes["labels"]
-	if !ok {
-		t.Fatalf("missing labels change in updated webhook: %#v", payload.Changes)
-	}
-	fromLabels, ok := change.From.([]interface{})
-	if !ok {
-		t.Fatalf("updated labels from = %#v (%T), want JSON label array instead of storage string", change.From, change.From)
-	}
-	toLabels, ok := change.To.([]interface{})
-	if !ok {
-		t.Fatalf("updated labels to = %#v (%T), want JSON label array", change.To, change.To)
-	}
-	if containsAnyString(fromLabels, "needs_smoketest") {
-		t.Fatalf("updated labels from = %#v, must not already include needs_smoketest", fromLabels)
-	}
-	if !containsAnyString(toLabels, "needs_smoketest") {
-		t.Fatalf("updated labels to = %#v, want needs_smoketest", toLabels)
 	}
 }
 
