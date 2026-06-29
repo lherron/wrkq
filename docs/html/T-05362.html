@@ -1,0 +1,1002 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T-05362 - wrkf Scheduler and agent-loop Runner Proposal</title>
+  <style>
+    :root {
+      --ink: #172026;
+      --muted: #5f6b73;
+      --paper: #f7f5ef;
+      --panel: #fffdfa;
+      --line: #d9d5c8;
+      --line-strong: #9a9383;
+      --teal: #0f766e;
+      --teal-soft: #dff3ef;
+      --amber: #b7791f;
+      --amber-soft: #fff1d6;
+      --red: #b24035;
+      --red-soft: #fde7e2;
+      --green: #387a44;
+      --green-soft: #e4f2df;
+      --blue: #2d5e8c;
+      --blue-soft: #e1edf8;
+      --violet: #5d4b86;
+      --violet-soft: #eee9f8;
+      --shadow: 0 20px 50px rgba(39, 34, 24, 0.10);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(23, 32, 38, 0.045) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(23, 32, 38, 0.04) 1px, transparent 1px),
+        var(--paper);
+      background-size: 36px 36px;
+      color: var(--ink);
+      line-height: 1.55;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(15, 118, 110, 0.42);
+      text-underline-offset: 0.18em;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      min-height: 86vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1.02fr) minmax(330px, 0.78fr);
+      gap: 28px;
+      align-items: center;
+      padding: 44px 0 30px;
+    }
+
+    .eyebrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 22px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 250, 0.76);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: 0;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .badge.teal { color: var(--teal); background: var(--teal-soft); border-color: rgba(15, 118, 110, 0.28); }
+    .badge.amber { color: var(--amber); background: var(--amber-soft); border-color: rgba(183, 121, 31, 0.30); }
+    .badge.red { color: var(--red); background: var(--red-soft); border-color: rgba(178, 64, 53, 0.28); }
+    .badge.blue { color: var(--blue); background: var(--blue-soft); border-color: rgba(45, 94, 140, 0.26); }
+    .badge.green { color: var(--green); background: var(--green-soft); border-color: rgba(56, 122, 68, 0.28); }
+
+    h1 {
+      margin: 0;
+      max-width: 860px;
+      font-size: clamp(42px, 7vw, 82px);
+      line-height: 0.96;
+      letter-spacing: 0;
+      font-weight: 860;
+    }
+
+    .lead {
+      max-width: 780px;
+      margin: 24px 0 0;
+      color: #364149;
+      font-size: clamp(18px, 2.1vw, 24px);
+      line-height: 1.36;
+    }
+
+    .thesis {
+      margin-top: 28px;
+      padding: 18px 20px;
+      border-left: 5px solid var(--teal);
+      background: rgba(255, 253, 250, 0.78);
+      box-shadow: var(--shadow);
+      max-width: 810px;
+      font-size: 17px;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 253, 250, 0.78);
+      color: #2f3b42;
+      font-size: 13px;
+      font-weight: 720;
+      text-decoration: none;
+    }
+
+    .first-model {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 253, 250, 0.92);
+      box-shadow: var(--shadow);
+    }
+
+    .model-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .model-title h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .model-row {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .node-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 92px;
+      padding: 12px;
+      border: 1px solid var(--line-strong);
+      background: #f0eee7;
+      color: #394249;
+      font-weight: 840;
+      text-align: center;
+      border-radius: 6px;
+    }
+
+    .node-copy {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fffdfa;
+    }
+
+    .node-copy strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .node-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    main {
+      padding-bottom: 56px;
+    }
+
+    section {
+      padding: 54px 0;
+      border-top: 1px solid rgba(154, 147, 131, 0.42);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.82fr) minmax(280px, 0.55fr);
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    .kicker {
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 840;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    h2 {
+      margin: 6px 0 0;
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .section-summary {
+      margin: 0;
+      color: #4c5961;
+      font-size: 16px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid.four {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 253, 250, 0.92);
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(39, 34, 24, 0.06);
+    }
+
+    .panel h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .panel .tagline {
+      color: #303a41;
+      font-weight: 760;
+      margin-bottom: 8px;
+    }
+
+    .consensus {
+      border-left: 5px solid var(--green);
+      background: linear-gradient(90deg, rgba(228, 242, 223, 0.82), rgba(255, 253, 250, 0.94));
+    }
+
+    .warning {
+      border-left: 5px solid var(--red);
+      background: linear-gradient(90deg, rgba(253, 231, 226, 0.88), rgba(255, 253, 250, 0.94));
+    }
+
+    .decision {
+      border-left: 5px solid var(--amber);
+      background: linear-gradient(90deg, rgba(255, 241, 214, 0.9), rgba(255, 253, 250, 0.94));
+    }
+
+    .lanes {
+      display: grid;
+      gap: 12px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 150px repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .lane-title {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--line-strong);
+      background: #ebe8df;
+      font-weight: 830;
+      color: #313b42;
+    }
+
+    .step {
+      min-height: 88px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+      color: var(--ink);
+    }
+
+    .step span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .step.teal { border-top: 5px solid var(--teal); }
+    .step.blue { border-top: 5px solid var(--blue); }
+    .step.amber { border-top: 5px solid var(--amber); }
+    .step.red { border-top: 5px solid var(--red); }
+    .step.green { border-top: 5px solid var(--green); }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(11, minmax(82px, 1fr));
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+
+    .invariant {
+      min-width: 82px;
+      min-height: 156px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+    }
+
+    .invariant .num {
+      display: inline-flex;
+      width: 26px;
+      height: 26px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--ink);
+      color: white;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .invariant strong {
+      display: block;
+      margin-top: 12px;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .invariant small {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .contract {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #161b1f;
+      color: #eef4f4;
+      box-shadow: var(--shadow);
+    }
+
+    .contract-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+      background: #20282d;
+    }
+
+    .contract-head h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .code-grid {
+      display: grid;
+      grid-template-columns: minmax(300px, 0.96fr) minmax(260px, 0.74fr);
+      gap: 0;
+      overflow-x: auto;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow-x: auto;
+      max-width: 100%;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 12.5px;
+      line-height: 1.52;
+      white-space: pre;
+    }
+
+    .defs {
+      min-width: 260px;
+      padding: 18px;
+      border-left: 1px solid rgba(255, 255, 255, 0.16);
+      background: #222b30;
+    }
+
+    .def {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+      font-size: 12px;
+    }
+
+    .def:last-child {
+      border-bottom: 0;
+    }
+
+    .def b {
+      color: #a9ded7;
+      font-weight: 790;
+    }
+
+    .def span {
+      color: #c8d3d4;
+    }
+
+    .phase-track {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .phase {
+      position: relative;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      min-height: 250px;
+    }
+
+    .phase::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      border-radius: 8px 8px 0 0;
+      background: var(--line-strong);
+    }
+
+    .phase:nth-child(1)::before { background: var(--amber); }
+    .phase:nth-child(2)::before { background: var(--teal); }
+    .phase:nth-child(3)::before { background: var(--blue); }
+    .phase:nth-child(4)::before { background: var(--green); }
+
+    .phase h3 {
+      margin: 8px 0 10px;
+      font-size: 18px;
+    }
+
+    .phase ul,
+    .checks ul,
+    .questions ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .phase li,
+    .checks li,
+    .questions li {
+      margin: 8px 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .quote {
+      padding: 20px;
+      border-left: 5px solid var(--violet);
+      background: var(--violet-soft);
+      border-radius: 0 8px 8px 0;
+      color: #332d43;
+      font-size: 18px;
+      line-height: 1.38;
+    }
+
+    .footer {
+      padding: 28px 0 44px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer code,
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.94em;
+      background: rgba(23, 32, 38, 0.08);
+      border: 1px solid rgba(23, 32, 38, 0.12);
+      border-radius: 4px;
+      padding: 0.08em 0.28em;
+    }
+
+    @media (max-width: 980px) {
+      header,
+      .section-head,
+      .split,
+      .grid.two,
+      .grid.three,
+      .grid.four,
+      .phase-track {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        min-height: auto;
+      }
+
+      .lane {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-title {
+        min-height: 54px;
+      }
+
+      .code-grid {
+        grid-template-columns: minmax(280px, 1fr);
+      }
+
+      .defs {
+        border-left: 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.16);
+      }
+    }
+
+    @media (max-width: 560px) {
+      .page {
+        width: min(100% - 20px, 1180px);
+      }
+
+      header {
+        padding-top: 28px;
+      }
+
+      h1 {
+        font-size: 40px;
+      }
+
+      .model-row {
+        grid-template-columns: 1fr;
+      }
+
+      .node-label {
+        min-height: 56px;
+      }
+
+      section {
+        padding: 40px 0;
+      }
+
+      .matrix {
+        grid-template-columns: repeat(11, 150px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <div class="eyebrow" aria-label="Artifact metadata">
+          <span class="badge teal">T-05362</span>
+          <span class="badge blue">wrkf scheduler</span>
+          <span class="badge amber">agent-loop runner</span>
+          <span class="badge green">three-way signed</span>
+        </div>
+        <h1>Durable scheduler authority, not another scanner loop.</h1>
+        <p class="lead">The proposal turns `wrkf` from a passive workflow ledger into the authority that discovers, claims, fences, and recovers runnable workflow work while `agent-loop` remains the executor.</p>
+        <div class="thesis">
+          Production scheduling is blocked until the scheduler has durable claims, lease plus fence semantics, ledger-derived implement-to-verify continuation, release/reaper reconciliation from terminal action truth, and a verify-launch precedence rule with ACP.
+        </div>
+        <nav class="nav" aria-label="Page sections">
+          <a href="#consensus">Consensus</a>
+          <a href="#model">Operating Model</a>
+          <a href="#invariants">Invariants</a>
+          <a href="#rpc">RPC Surface</a>
+          <a href="#continuation">Continuation</a>
+          <a href="#phases">Phases</a>
+          <a href="#checks">Checks</a>
+        </nav>
+      </div>
+
+      <aside class="first-model" aria-labelledby="authority-model">
+        <div class="model-title">
+          <h2 id="authority-model">Authority split</h2>
+          <span class="badge red">production gate</span>
+        </div>
+        <div class="model-row">
+          <div class="node-label">wrkf</div>
+          <div class="node-copy">
+            <strong>Durable source of truth</strong>
+            <p>Instances, runs, actions, evidence, transitions, effects, CAS, idempotency, scheduler claims, fences, and recovery.</p>
+          </div>
+        </div>
+        <div class="model-row">
+          <div class="node-label">agent-loop</div>
+          <div class="node-copy">
+            <strong>Bound action executor</strong>
+            <p>Consumes claims, resolves handlers, heartbeats while working, and settles only under current fence authority.</p>
+          </div>
+        </div>
+        <div class="model-row">
+          <div class="node-label">runner</div>
+          <div class="node-copy">
+            <strong>One action, then re-query</strong>
+            <p>Runs a single claimed action, re-enters the ledger, and follows mandatory continuations before unrelated work.</p>
+          </div>
+        </div>
+      </aside>
+    </header>
+
+    <main>
+      <section id="consensus">
+        <div class="section-head">
+          <div>
+            <div class="kicker">01 / signed direction</div>
+            <h2>Three agents aligned on the hard boundary.</h2>
+          </div>
+          <p class="section-summary">Clod and Daedalus reviewed independently, then Cody mediated the blocking edits into a final sentence both agents signed.</p>
+        </div>
+
+        <div class="grid three">
+          <article class="panel consensus">
+            <span class="badge green">signed</span>
+            <h3>Production requires durable wrkf authority</h3>
+            <p>Runner-only work is useful as a vertical spike, but it cannot be the production scheduler or the unattended multi-runner story.</p>
+          </article>
+          <article class="panel warning">
+            <span class="badge red">fence rule</span>
+            <h3>Lease is liveness; fence is write authority</h3>
+            <p>Final settlement, transition commit, release, and non-idempotent external side effects must reject stale or stolen authority.</p>
+          </article>
+          <article class="panel decision">
+            <span class="badge amber">continuation</span>
+            <h3>Implement pins verify by ledger truth</h3>
+            <p>`implement.done` pins exact source lineage until `verify` terminalizes or becomes `operator_required`, even after a crash.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="model">
+        <div class="section-head">
+          <div>
+            <div class="kicker">02 / operating model</div>
+            <h2>The runner asks the ledger what is legal next.</h2>
+          </div>
+          <p class="section-summary">The proposal rejects task scraping and long-lived local workflow memory. Every action starts from `wrkf`, completes through `wrkf`, and returns to `wrkf` before the next move.</p>
+        </div>
+
+        <div class="lanes" aria-label="Scheduler and runner swimlane">
+          <div class="lane">
+            <div class="lane-title">wrkf scheduler</div>
+            <div class="step teal"><b>Discover</b><span>Find runnable attached workflow instances across requested project/path/template filters.</span></div>
+            <div class="step blue"><b>Claim</b><span>Recompute next action, CAS revision and context hash, persist lease and fence.</span></div>
+            <div class="step amber"><b>Reconcile</b><span>Release only from matching terminal action truth; reaper reconciles terminal-but-unreleased work.</span></div>
+            <div class="step green"><b>Continue</b><span>Surface mandatory verify before fresh unrelated work from ledger state.</span></div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">agent-loop runner</div>
+            <div class="step teal"><b>Poll</b><span>Claim one action matching declared capabilities and caller-owned scope.</span></div>
+            <div class="step blue"><b>Execute</b><span>Start or resume the canonical action run and pass a structured binding to the handler.</span></div>
+            <div class="step amber"><b>Fence-check</b><span>Confirm current fence before external launches, worktree mutation, and final settlement.</span></div>
+            <div class="step green"><b>Re-query</b><span>Never run a cached list of actions; re-enter the ledger after every action.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="invariants">
+        <div class="section-head">
+          <div>
+            <div class="kicker">03 / production invariants</div>
+            <h2>The scheduler is safe only if these checks are boring.</h2>
+          </div>
+          <p class="section-summary">These are the gates that keep crash recovery from duplicating work, losing verification, or leaving git in a half-mutated state.</p>
+        </div>
+
+        <div class="matrix" role="list" aria-label="Production invariants">
+          <div class="invariant" role="listitem"><span class="num">1</span><strong>Fence writes</strong><small>Complete, fail, transition, and release require current fence authority.</small></div>
+          <div class="invariant" role="listitem"><span class="num">2</span><strong>Fence side effects</strong><small>Check before worktree mutation, external launch, and final settlement.</small></div>
+          <div class="invariant" role="listitem"><span class="num">3</span><strong>Reconcile truth</strong><small>Terminal action plus expired claim is reconciled, not re-run.</small></div>
+          <div class="invariant" role="listitem"><span class="num">4</span><strong>CAS claims</strong><small>Claim only after validating current revision and context hash.</small></div>
+          <div class="invariant" role="listitem"><span class="num">5</span><strong>Canonical id</strong><small>Action identity is the idempotency key for start/resume.</small></div>
+          <div class="invariant" role="listitem"><span class="num">6</span><strong>Ledger pin</strong><small>Continuation discovery derives from instance and run ledger truth.</small></div>
+          <div class="invariant" role="listitem"><span class="num">7</span><strong>Exact lineage</strong><small>Verify carries source implement action run and commit, never latest.</small></div>
+          <div class="invariant" role="listitem"><span class="num">8</span><strong>One verify path</strong><small>ACP and scheduler verify launch need dedupe or precedence.</small></div>
+          <div class="invariant" role="listitem"><span class="num">9</span><strong>Capabilities</strong><small>Runners claim only actions they declare they can execute.</small></div>
+          <div class="invariant" role="listitem"><span class="num">10</span><strong>Caller scope</strong><small>Project/path filters are explicit selectors, not env inference.</small></div>
+          <div class="invariant" role="listitem"><span class="num">11</span><strong>Worktree guard</strong><small>Coordinate workspace identity or keep guard responsibility in runner/runtime.</small></div>
+        </div>
+      </section>
+
+      <section id="rpc">
+        <div class="section-head">
+          <div>
+            <div class="kicker">04 / scheduler contract</div>
+            <h2>The RPC surface separates read previews from ownership.</h2>
+          </div>
+          <p class="section-summary">Discovery explains runnable work. Claiming is the only mutating entrypoint that creates scheduler ownership and write authority.</p>
+        </div>
+
+        <div class="grid two">
+          <article class="contract">
+            <div class="contract-head">
+              <h3>SchedulerClaim</h3>
+              <span class="badge teal">owned work unit</span>
+            </div>
+            <div class="code-grid">
+<pre><code>type SchedulerClaim = {
+  claimId: string
+  instanceId: string
+  task: string
+  workflow: {
+    id: string
+    version: string
+    hash?: string
+  }
+  revision: number
+  contextHash: string
+  action: {
+    id: string
+    kind: string
+    role: string
+    lane?: string
+  }
+  leaseToken: string
+  leaseExpiresAt: string
+  fenceToken: string
+  workspaceRef?: string
+  continuation?: ContinuationPolicy
+}</code></pre>
+              <div class="defs" aria-label="SchedulerClaim field definitions">
+                <div class="def"><b>claimId</b><span>Durable scheduler ownership row.</span></div>
+                <div class="def"><b>revision</b><span>CAS guard over workflow instance state.</span></div>
+                <div class="def"><b>contextHash</b><span>Hash-covered expected workflow context.</span></div>
+                <div class="def"><b>leaseToken</b><span>Time-bounded liveness proof.</span></div>
+                <div class="def"><b>fenceToken</b><span>Write authority for side effects and settlement.</span></div>
+                <div class="def"><b>workspaceRef</b><span>Required if wrkf coordinates worktrees globally.</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="contract">
+            <div class="contract-head">
+              <h3>Scheduler methods</h3>
+              <span class="badge blue">JSON-RPC shape</span>
+            </div>
+            <div class="code-grid">
+<pre><code>type WrkfScheduler = {
+  discover(params): CandidatePage
+  claimNext(params): ClaimResult
+  claimContinuation(params): ClaimResult
+  heartbeat(params): ClaimLease
+  release(params): ClaimStatus
+  reap(params): ReapReport
+}</code></pre>
+              <div class="defs" aria-label="Scheduler method definitions">
+                <div class="def"><b>discover</b><span>Read-only preview for dashboards and dry runs.</span></div>
+                <div class="def"><b>claimNext</b><span>Atomic claim with capability matching and CAS.</span></div>
+                <div class="def"><b>claimContinuation</b><span>Same-runner fast path after completed action.</span></div>
+                <div class="def"><b>heartbeat</b><span>Lease extension by current owner only.</span></div>
+                <div class="def"><b>release</b><span>Claim reconciliation, not semantic completion.</span></div>
+                <div class="def"><b>reap</b><span>Expired claim and orphaned active-action recovery.</span></div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="continuation">
+        <div class="section-head">
+          <div>
+            <div class="kicker">05 / continuation policy</div>
+            <h2>TDD, implementation, and e2e stay one attention unit.</h2>
+          </div>
+          <p class="section-summary">The ledger still records separate actions. The scheduler treats them as an exclusive-attention group when verification is mandatory.</p>
+        </div>
+
+        <div class="split">
+          <div class="quote">
+            After `implement.done`, the same instance and exact source implement action/commit are pinned until `verify` terminalizes or becomes `operator_required`.
+          </div>
+          <div class="grid two">
+            <article class="panel consensus">
+              <span class="badge green">happy path</span>
+              <h3>Claim continuation directly</h3>
+              <p>The same runner can move from implement to verify through `claimContinuation` after re-querying the instance.</p>
+            </article>
+            <article class="panel warning">
+              <span class="badge red">crash path</span>
+              <h3>Recover from ledger discovery</h3>
+              <p>A restarted runner finds implemented-but-unverified work from instance/action-run truth, independent of live claim rows.</p>
+            </article>
+            <article class="panel decision">
+              <span class="badge amber">no fallback</span>
+              <h3>Never use "latest implement"</h3>
+              <p>Verify bindings carry the exact source implement action run and source commit.</p>
+            </article>
+            <article class="panel">
+              <span class="badge blue">operator state</span>
+              <h3>Infrastructure failure does not free the worktree</h3>
+              <p>If verify cannot launch operationally, the scheduler keeps the pin, expires into recovery, or reports `operator_required`.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="phases">
+        <div class="section-head">
+          <div>
+            <div class="kicker">06 / staged plan</div>
+            <h2>The first slice proves shape; the second builds authority.</h2>
+          </div>
+          <p class="section-summary">The phase names matter because the durable scheduler core is still not production-ready until continuation policy and verify-launch authority are settled.</p>
+        </div>
+
+        <div class="phase-track">
+          <article class="phase">
+            <span class="badge amber">phase 1</span>
+            <h3>Non-production vertical spike</h3>
+            <ul>
+              <li>Use existing `wrkf.instance.next` and `wrkf.action.*`.</li>
+              <li>Run packaged triage, implement, and verify handlers.</li>
+              <li>Prove one-runner continuation only.</li>
+              <li>No crash-safety or multi-runner guarantee.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <span class="badge teal">phase 2</span>
+            <h3>Durable scheduler core</h3>
+            <ul>
+              <li>Settle effect-lease reuse versus scheduler-claim table.</li>
+              <li>Add discover, claim, heartbeat, release, and reap.</li>
+              <li>Add fence semantics and idempotent action-run start/resume.</li>
+              <li>Still blocked from production until phase 3 gates land.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <span class="badge blue">phase 3</span>
+            <h3>Continuation hardening</h3>
+            <ul>
+              <li>Encode continuation policy in templates or wrkf policy catalog.</li>
+              <li>Recover `implement -> verify` across restarts.</li>
+              <li>Resolve scheduler verify versus ACP verify-launch authority.</li>
+              <li>Add operator readback for pinned continuations.</li>
+            </ul>
+          </article>
+          <article class="phase">
+            <span class="badge green">phase 4</span>
+            <h3>Intake cleanup</h3>
+            <ul>
+              <li>Decide automatic `wrkq-simple-task@1` attachment.</li>
+              <li>Retire standalone scanner loops except compatibility cases.</li>
+              <li>Route normal executable work through scheduler discovery.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="checks">
+        <div class="section-head">
+          <div>
+            <div class="kicker">07 / visible checks</div>
+            <h2>Acceptance is about recovery and refusal, not throughput.</h2>
+          </div>
+          <p class="section-summary">The most important tests prove stale actors cannot write, verified work cannot be skipped, and terminal work is not repeated.</p>
+        </div>
+
+        <div class="grid two">
+          <article class="panel checks">
+            <span class="badge red">must fail closed</span>
+            <h3>Safety checks</h3>
+            <ul>
+              <li>Two schedulers cannot claim the same workflow instance.</li>
+              <li>Stale fences cannot complete, fail, transition, release, launch, or mutate worktrees.</li>
+              <li>Fence loss after partial local side effects reports `operator_required` and does not release completed.</li>
+              <li>ACP verify-launch and scheduler continuation cannot double-launch verify.</li>
+            </ul>
+          </article>
+          <article class="panel checks">
+            <span class="badge green">must recover</span>
+            <h3>Recovery checks</h3>
+            <ul>
+              <li>Terminal action plus expired claim reconciles without re-running the action.</li>
+              <li>Runner crash after implement still discovers verify before fresh work.</li>
+              <li>Verify carries exact `sourceImplementActionRunId` and commit lineage.</li>
+              <li>Active orphaned actions can be reclaimed or failed without hiding the task forever.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="questions">
+        <div class="section-head">
+          <div>
+            <div class="kicker">08 / open decisions</div>
+            <h2>The proposal leaves the right things unsettled.</h2>
+          </div>
+          <p class="section-summary">These are implementation-planning decisions, not reasons to weaken the safety model.</p>
+        </div>
+
+        <div class="grid three questions">
+          <article class="panel">
+            <h3>Storage authority</h3>
+            <ul>
+              <li>Extend `workflow_effects` lease mechanics?</li>
+              <li>Or add `workflow_scheduler_claims` with the same lease/fence invariants?</li>
+            </ul>
+          </article>
+          <article class="panel">
+            <h3>Policy placement</h3>
+            <ul>
+              <li>Workflow-template metadata?</li>
+              <li>Separate `wrkf`-owned policy catalog?</li>
+            </ul>
+          </article>
+          <article class="panel">
+            <h3>Intake behavior</h3>
+            <ul>
+              <li>Auto-attach `wrkq-simple-task@1`?</li>
+              <li>Or keep explicit attachment plus compatibility scanner?</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      Source task: <code>T-05362</code>, "Draft wrkf scheduler and agent-loop runner proposal." Source proposal: <code>docs/wrkf-scheduler-runner-proposal.md</code>. Standalone HTML artifact generated for review and taskboard publication.
+    </footer>
+  </div>
+</body>
+</html>
