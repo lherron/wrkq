@@ -1,0 +1,53 @@
+id: wrkq.rpc.remote-transport-locator
+kind: invariant
+status: proposed
+owner_project: wrkq
+scope: wrkq CLI database locator and remote workrpc transport
+predicate: >
+  Day-to-day `wrkq` commands select their durability endpoint through a database
+  locator, not always a filesystem path. `WRKQ_DB` and the production `wrkq --db`
+  flag MAY accept either a local SQLite path or a remote wrkq semantic RPC endpoint
+  (`rpc://host[:port]`, default port owned by wrkqd). `WRKQ_DB_PATH`,
+  `WRKQ_DB_PATH_FILE`, `wrkqadm --db`, `wrkqd --db`, and `wrkq server --db-path`
+  remain local-path-only inputs and must reject endpoint URLs before any call to
+  `db.Open`.
+
+  A remote endpoint is a transport to the SAME workrpc method catalog and DTO/error
+  contract exposed by `wrkq rpc --stdio`; it is not the legacy wrkqd REST surface,
+  not a sync peer, and not a second semantic API. Remote clients must complete
+  transport authentication plus `rpc.initialize` before business calls and verify
+  protocol version, protocol schema hash, method/capability surface, and migration
+  compatibility. Network/auth/handshake failures are transport errors and must not
+  be reported as SQLite contention such as `WRKQ_DB_BUSY`.
+
+  In remote mode the canonical host owns the SQLite database, migrations, etags/CAS,
+  attribution writes, event log, search/index sidecar and embedder, attachment store,
+  and monitor/watch bounded read models. The caller host owns project-root argument
+  scoping, prompts, stdin/stdout, local file reads/writes, presentation, and polling
+  loops. Caller-local file content crossing to the canonical host must use explicit
+  byte-transfer methods, not server-local path strings. Server-local paths returned
+  in read models are diagnostic hints, not remote filesystem guarantees.
+authority:
+  repo: wrkq
+  surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
+enforced_by: "PROPOSED for the post-local-cutover remote wrkqd transport; activate after locator parsing, auth, workrpc-over-wrkqd transport, and max3/mini e2e validation land"
+exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser or transport selection call site"
+source:
+  - docs/rpc-cli-cutover-plan.md
+  - internal/config/config.go
+  - internal/rpccli/transport.go
+  - internal/rpccli/server.go
+  - internal/workrpc/lifecycle.go
+  - internal/workrpc/registry.go
+  - internal/workrpc/bootstrap/bootstrap.go
+  - internal/cli/daemon.go
+  - cmd/wrkqd/main.go
+reopen_when:
+  - a new locator scheme is added
+  - WRKQ_DB_PATH or admin/daemon DB flags are allowed to carry remote endpoints
+  - wrkqd exposes a semantic API that diverges from the workrpc registry
+  - remote clients open local SQLite/search/attachment stores for durable wrkq behavior
+  - monitor/watch moves from bounded polling to server push or long-lived streams
+  - authentication requirements for non-loopback wrkqd change
+supersedes: []
+superseded_by: null
