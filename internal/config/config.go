@@ -78,12 +78,13 @@ func Load() (*Config, error) {
 	_ = loadYAMLConfig(cfg)
 
 	// Override with environment variables
-	if dbLocator := strings.TrimSpace(os.Getenv("WRKQ_DB")); dbLocator != "" {
-		if err := ApplyDBLocator(cfg, dbLocator, false); err != nil {
+	explicitDBLocator := strings.TrimSpace(os.Getenv("WRKQ_DB"))
+	if explicitDBLocator != "" {
+		if err := ApplyDBLocator(cfg, explicitDBLocator, false); err != nil {
 			return nil, err
 		}
 	}
-	if dbPath := strings.TrimSpace(getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); dbPath != "" {
+	if dbPath := strings.TrimSpace(getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); dbPath != "" && explicitDBLocator == "" {
 		if IsRemoteLocator(dbPath) {
 			return nil, fmt.Errorf("WRKQ_DB_PATH is path-only; use WRKQ_DB for rpc:// locators")
 		}

@@ -1107,57 +1107,86 @@ func rpcCmd() *cobra.Command {
 		Use:   "rpc --stdio",
 		Short: "Serve wrkf JSON-RPC over stdio",
 		Args:  cobra.NoArgs,
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stdio {
 				return fmt.Errorf("--stdio is required")
 			}
-			api := wrkfapi.New(
-				a.service,
-				wrkfapi.WithHookCatalog(a.hookCatalog),
-				wrkfapi.WithTemplateDir(workflow.HookCatalogDir(a.hookPath)),
-			)
-			// Load the real wrkq config so the wrkf rpc entrypoint serves
-			// attachments with the SAME attach dir / size limit as the wrkq
-			// entrypoint (T-04448 entrypoint equivalence).
-			attachDir := ""
-			attachMaxMB := 0
-			// search host config so the wrkf rpc entrypoint serves the same
-			// server-owned search/index methods as the wrkq entrypoint (T-05114
-			// entrypoint equivalence — the method is registered on BOTH entrypoints).
-			var searchCfg wrkqapi.SearchConfig
-			if cfg, cerr := config.Load(); cerr == nil {
-				attachDir = rpcAttachDir(cfg.AttachDir)
-				attachMaxMB = cfg.AttachmentsMaxMB
-				searchCfg = wrkqapi.SearchConfig{
-					Enabled:          cfg.Search.Enabled,
-					CanonicalDBPath:  a.db.Path(),
-					DBPath:           cfg.Search.DBPath,
-					DenseProvider:    cfg.Search.DenseProvider,
-					DenseBaseURL:     cfg.Search.DenseBaseURL,
-					DenseModel:       cfg.Search.DenseModel,
-					DenseDimension:   cfg.Search.DenseDimension,
-					QueryInstruction: cfg.Search.QueryInstruction,
-					IndexBatchSize:   cfg.Search.IndexBatchSize,
-					CandidateLimit:   cfg.Search.CandidateLimit,
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			if flagDB != "" {
+				if err := config.ApplyDBLocator(cfg, flagDB, false); err != nil {
+					return err
 				}
 			}
-			srv := workrpc.NewServer(os.Stdout)
-			workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
-				Database:         a.db,
-				DatabasePath:     a.db.Path(),
-				ServerVersion:    "dev",
-				Entrypoint:       "wrkf",
-				DefaultActor:     a.actor,
-				DefaultRole:      a.role,
-				AttachDir:        attachDir,
-				AttachmentsMaxMB: attachMaxMB,
-				Search:           searchCfg,
-			})
-			return srv.Serve(context.Background(), os.Stdin)
-		}),
+			if cfg.RemoteEndpoint != "" {
+				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, wrkqdTokenFromEnv())
+			}
+			return withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+				if !stdio {
+					return fmt.Errorf("--stdio is required")
+				}
+				api := wrkfapi.New(
+					a.service,
+					wrkfapi.WithHookCatalog(a.hookCatalog),
+					wrkfapi.WithTemplateDir(workflow.HookCatalogDir(a.hookPath)),
+				)
+				// Load the real wrkq config so the wrkf rpc entrypoint serves
+				// attachments with the SAME attach dir / size limit as the wrkq
+				// entrypoint (T-04448 entrypoint equivalence).
+				attachDir := ""
+				attachMaxMB := 0
+				// search host config so the wrkf rpc entrypoint serves the same
+				// server-owned search/index methods as the wrkq entrypoint (T-05114
+				// entrypoint equivalence — the method is registered on BOTH entrypoints).
+				var searchCfg wrkqapi.SearchConfig
+				if cfg, cerr := config.Load(); cerr == nil {
+					attachDir = rpcAttachDir(cfg.AttachDir)
+					attachMaxMB = cfg.AttachmentsMaxMB
+					searchCfg = wrkqapi.SearchConfig{
+						Enabled:          cfg.Search.Enabled,
+						CanonicalDBPath:  a.db.Path(),
+						DBPath:           cfg.Search.DBPath,
+						DenseProvider:    cfg.Search.DenseProvider,
+						DenseBaseURL:     cfg.Search.DenseBaseURL,
+						DenseModel:       cfg.Search.DenseModel,
+						DenseDimension:   cfg.Search.DenseDimension,
+						QueryInstruction: cfg.Search.QueryInstruction,
+						IndexBatchSize:   cfg.Search.IndexBatchSize,
+						CandidateLimit:   cfg.Search.CandidateLimit,
+					}
+				}
+				srv := workrpc.NewServer(os.Stdout)
+				workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
+					Database:         a.db,
+					DatabasePath:     a.db.Path(),
+					ServerVersion:    "dev",
+					Entrypoint:       "wrkf",
+					DefaultActor:     a.actor,
+					DefaultRole:      a.role,
+					AttachDir:        attachDir,
+					AttachmentsMaxMB: attachMaxMB,
+					Search:           searchCfg,
+				})
+				return srv.Serve(context.Background(), os.Stdin)
+			})(cmd, args)
+		},
 	}
 	cmd.Flags().BoolVar(&stdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")
 	return cmd
+}
+
+func wrkqdTokenFromEnv() string {
+	if token := strings.TrimSpace(os.Getenv("WRKQD_TOKEN")); token != "" {
+		return token
+	}
+	if path := strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")); path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
 }
 
 // rpcAttachDir resolves the attachment storage directory for the RPC server,

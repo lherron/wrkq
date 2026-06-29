@@ -47,6 +47,9 @@ export interface CreateClientOptions {
   command?: "wrkq" | "wrkf" | string;
   /** argv after the global flags. Defaults to ["rpc", "--stdio"]. */
   args?: string[];
+  /** Local SQLite path or rpc:// remote wrkqd locator. Prefer this over dbPath. */
+  dbLocator?: string;
+  /** Legacy name for dbLocator. */
   dbPath?: string;
   actor?: string;
   role?: string;
@@ -270,6 +273,7 @@ export async function createClient(opts: CreateClientOptions = {}): Promise<Work
     new StdioTransport({
       command: opts.command ?? "wrkq",
       args: opts.args,
+      dbLocator: opts.dbLocator,
       dbPath: opts.dbPath,
       actor: opts.actor,
       role: opts.role,

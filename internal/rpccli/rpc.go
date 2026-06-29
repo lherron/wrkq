@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
@@ -20,7 +21,19 @@ func newRPCCmd() *cobra.Command {
 			if !stdio {
 				return fmt.Errorf("--stdio is required")
 			}
-			h, err := bootstrap.Open(dbOverride(cmd))
+			cfg, err := config.Load()
+			if err != nil {
+				return err
+			}
+			if override := dbOverride(cmd); override != "" {
+				if err := config.ApplyDBLocator(cfg, override, false); err != nil {
+					return err
+				}
+			}
+			if cfg.RemoteEndpoint != "" {
+				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv())
+			}
+			h, err := bootstrap.Open(cfg.DBLocator)
 			if err != nil {
 				return err
 			}

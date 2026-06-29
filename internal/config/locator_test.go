@@ -34,3 +34,30 @@ func TestApplyDBLocatorLocalPath(t *testing.T) {
 		t.Fatalf("local locator mismatch: %#v", cfg)
 	}
 }
+
+func TestLoadExplicitWRKQDBRemoteWinsOverStaleRemoteDBPath(t *testing.T) {
+	t.Setenv("WRKQ_DB", "rpc://max3:7171")
+	t.Setenv("WRKQ_DB_PATH", "rpc://stale:7171")
+	t.Setenv("WRKQ_DB_PATH_FILE", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RemoteEndpoint != "max3:7171" {
+		t.Fatalf("RemoteEndpoint=%q want max3:7171", cfg.RemoteEndpoint)
+	}
+	if cfg.DBPath != "" {
+		t.Fatalf("DBPath=%q want empty for remote locator", cfg.DBPath)
+	}
+}
+
+func TestLoadRemoteDBPathWithoutWRKQDBIsRejected(t *testing.T) {
+	t.Setenv("WRKQ_DB", "")
+	t.Setenv("WRKQ_DB_PATH", "rpc://stale:7171")
+	t.Setenv("WRKQ_DB_PATH_FILE", "")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected path-only WRKQ_DB_PATH rejection")
+	}
+}

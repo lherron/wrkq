@@ -8,7 +8,8 @@
  *
  * Contract: docs/wrkq-wrkf-rpc.md §1, §4, §7.
  * - Global flags (--db/--actor/--role/--hook-catalog) precede the `rpc --stdio`
- *   subcommand, matching the CLI surface.
+ *   subcommand, matching the CLI surface. Remote rpc:// DB locators are passed
+ *   through WRKQ_DB instead of path-only --db.
  * - close() == graceful (stdin EOF == rpc.exit) then await exit, escalate on
  *   timeout.
  * - kill()  == immediate SIGKILL.
@@ -23,7 +24,9 @@ export interface StdioSpawnOptions {
   command: string;
   /** argv after the global flags. Defaults to ["rpc", "--stdio"]. */
   args?: string[];
-  /** --db */
+  /** Local SQLite path or rpc:// remote wrkqd locator. */
+  dbLocator?: string;
+  /** Legacy name for dbLocator. */
   dbPath?: string;
   /** --actor */
   actor?: string;
@@ -61,6 +64,41 @@ type BunSubprocess = {
   kill(signal?: number | NodeJS.Signals): void;
 };
 
+export interface StdioSpawnSpec {
+  argv: string[];
+  env: Record<string, string | undefined>;
+}
+
+function isRemoteLocator(locator: string): boolean {
+  return locator.trim().startsWith("rpc://");
+}
+
+export function buildStdioSpawnSpec(opts: StdioSpawnOptions): StdioSpawnSpec {
+  const dbLocator = opts.dbLocator ?? opts.dbPath;
+  if (opts.dbLocator && opts.dbPath && opts.dbLocator !== opts.dbPath) {
+    throw new Error("dbLocator and dbPath refer to different database locators");
+  }
+
+  const base = baseName(opts.command);
+  const isWrkf = base === "wrkf";
+  const argv: string[] = [];
+  const env: Record<string, string | undefined> = { ...process.env, ...opts.env };
+  if (dbLocator) {
+    if (isRemoteLocator(dbLocator)) {
+      env.WRKQ_DB = dbLocator;
+      delete env.WRKQ_DB_PATH;
+      delete env.WRKQ_DB_PATH_FILE;
+    } else {
+      argv.push("--db", dbLocator);
+    }
+  }
+  if (opts.actor) argv.push(isWrkf ? "--actor" : "--as", opts.actor);
+  if (isWrkf && opts.role) argv.push("--role", opts.role);
+  if (isWrkf && opts.hookCatalogPath) argv.push("--hook-catalog", opts.hookCatalogPath);
+  argv.push(...(opts.args ?? ["rpc", "--stdio"]));
+  return { argv, env };
+}
+
 export class StdioTransport implements Transport {
   private readonly proc: BunSubprocess;
   private readonly channel: JsonRpcChannel;
@@ -81,16 +119,7 @@ export class StdioTransport implements Transport {
     // flags, while `wrkf` uses `--actor`/`--role`/`--hook-catalog`. Map session
     // options to whichever the launched binary accepts; per-call `actor`/`role`
     // still travel in method params either way.
-    const base = baseName(opts.command);
-    const isWrkf = base === "wrkf";
-    const argv: string[] = [];
-    if (opts.dbPath) argv.push("--db", opts.dbPath);
-    if (opts.actor) argv.push(isWrkf ? "--actor" : "--as", opts.actor);
-    if (isWrkf && opts.role) argv.push("--role", opts.role);
-    if (isWrkf && opts.hookCatalogPath) argv.push("--hook-catalog", opts.hookCatalogPath);
-    argv.push(...(opts.args ?? ["rpc", "--stdio"]));
-
-    const env = opts.env ? { ...process.env, ...opts.env } : process.env;
+    const { argv, env } = buildStdioSpawnSpec(opts);
 
     // Bun.spawn: no shell, no injection, no human CLI parsing.
     this.proc = Bun.spawn([opts.command, ...argv], {
