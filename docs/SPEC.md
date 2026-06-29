@@ -211,6 +211,43 @@ Valid task role assignment roles:
 
 `triager`, `owner`, `implementer`, `tester`, `reviewer`, `release_manager`
 
+#### Reserved automation labels
+
+Task labels are a free-form `string[]` (stored as a JSON array). Some labels are
+reserved as conventional automation signals; they are **labels, not lifecycle
+states**, and must never be added to the task `state` enum.
+
+| Label | Meaning |
+| --- | --- |
+| `needs_smoketest` | Smoke-test readiness signal. When a `created`/`updated` webhook represents an edge where the task's label set **newly** includes `needs_smoketest`, downstream automation (the ACP `smokey` event-hook) requests a smoke test. |
+
+`needs_smoketest` is intentionally **not** a wrkq state, workflow state, run
+status, or schema-backed field. `wrkq set <task> --state needs_smoketest` is
+rejected by the same invalid-state validation as any other unknown state.
+
+The signal is **edge-oriented**, keyed on the webhook label change rather than
+the current label set:
+
+- `changes.labels.from` and `changes.labels.to` are emitted as decoded JSON
+  label arrays (`string[]`), never as storage-encoded JSON strings, so an
+  event-hook rule can detect a label-addition edge without parsing storage
+  encodings. Missing/null/empty/invalid prior labels are treated as an empty
+  prior label set.
+- A `created` webhook whose `changes.labels.to` contains `needs_smoketest`
+  (and whose `from` is absent) is a request edge.
+- An `updated` webhook whose `changed` contains `labels`, whose
+  `changes.labels.to` contains `needs_smoketest`, and whose
+  `changes.labels.from` does **not**, is a request edge.
+- Later unrelated updates while the label remains present are **not** new
+  requests; consumers must suppress duplicates on durable event identity plus
+  the edge predicate, not on current label presence alone.
+- Re-requesting is done by removing and re-adding the label, which produces a
+  new label-addition edge.
+
+The label replacement surfaces are replacement-oriented: adding
+`needs_smoketest` to a task with existing labels must preserve those labels in
+the replacement array.
+
 ### Subtasks
 
 A task with `--parent-task` is stored as kind `subtask` unless `--kind` is

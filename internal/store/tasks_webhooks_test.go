@@ -932,3 +932,196 @@ func TestWebhookPayloadBlockedByOmittedWhenEmpty(t *testing.T) {
 		t.Fatalf("blocked_by should be omitted when empty, but found in payload: %s", string(rawPayload))
 	}
 }
+
+// helperContainsString reports whether values contains needle.
+func helperContainsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// helperContainsIface reports whether a decoded JSON array contains needle.
+func helperContainsIface(values []interface{}, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func helperWaitWebhook(t *testing.T, calls <-chan webhooks.Payload, taskUUID string) webhooks.Payload {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case payload := <-calls:
+			if payload.TicketUUID == taskUUID {
+				return payload
+			}
+		case <-timeout:
+			t.Fatalf("timed out waiting for webhook for %s", taskUUID)
+		}
+	}
+}
+
+// TestTaskStoreNeedsSmoketestLabelEdge covers the T-04891 needs_smoketest
+// reserved-label signal: created/updated webhooks must expose label-addition
+// edges as decoded JSON label arrays so ACP event-hooks can detect the edge
+// without parsing storage-encoded JSON strings, and later unrelated updates
+// must not carry a label edge.
+func TestTaskStoreNeedsSmoketestLabelEdge(t *testing.T) {
+	database := setupWebhookTestDB(t)
+	actorUUID := setupWebhookTestActor(t, database)
+	s := New(database)
+
+	project, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	calls := make(chan webhooks.Payload, 8)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		body, _ := io.ReadAll(r.Body)
+		var payload webhooks.Payload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Errorf("decode webhook payload: %v", err)
+		}
+		calls <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
+	if _, err := s.Containers.UpdateFields(actorUUID, project.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
+		t.Fatalf("set webhook urls: %v", err)
+	}
+
+	t.Run("created edge exposes decoded label array", func(t *testing.T) {
+		created, err := s.Tasks.Create(actorUUID, CreateParams{
+			Slug:        "created-needs-smoke",
+			Title:       "Created needs smoke",
+			ProjectUUID: project.UUID,
+			State:       "open",
+			Priority:    2,
+			Labels:      `["needs_smoketest","ui"]`,
+		})
+		if err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		payload := helperWaitWebhook(t, calls, created.UUID)
+		if payload.Event != "created" {
+			t.Fatalf("event = %q, want created", payload.Event)
+		}
+		if !helperContainsString(payload.Labels, "needs_smoketest") {
+			t.Fatalf("top-level labels = %#v, want needs_smoketest", payload.Labels)
+		}
+		change, ok := payload.Changes["labels"]
+		if !ok {
+			t.Fatalf("missing labels change in created webhook: %#v", payload.Changes)
+		}
+		if change.From != nil {
+			t.Fatalf("created labels from = %#v, want nil", change.From)
+		}
+		to, ok := change.To.([]interface{})
+		if !ok {
+			t.Fatalf("created labels to = %#v (%T), want JSON label array", change.To, change.To)
+		}
+		if !helperContainsIface(to, "needs_smoketest") {
+			t.Fatalf("created labels to = %#v, want needs_smoketest", to)
+		}
+	})
+
+	t.Run("updated edge exposes decoded from and to arrays", func(t *testing.T) {
+		task, err := s.Tasks.Create(actorUUID, CreateParams{
+			Slug:        "updated-needs-smoke",
+			Title:       "Updated needs smoke",
+			ProjectUUID: project.UUID,
+			State:       "open",
+			Priority:    2,
+			Labels:      `["ui"]`,
+		})
+		if err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		_ = helperWaitWebhook(t, calls, task.UUID)
+
+		// Add needs_smoketest while preserving existing labels.
+		if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{
+			"labels": `["ui","needs_smoketest"]`,
+		}, 0); err != nil {
+			t.Fatalf("add needs_smoketest label: %v", err)
+		}
+		payload := helperWaitWebhook(t, calls, task.UUID)
+		if payload.Event != "updated" {
+			t.Fatalf("event = %q, want updated", payload.Event)
+		}
+		if !helperContainsString(payload.Changed, "labels") {
+			t.Fatalf("changed = %#v, want to contain labels", payload.Changed)
+		}
+		if !helperContainsString(payload.Labels, "needs_smoketest") {
+			t.Fatalf("top-level labels = %#v, want needs_smoketest", payload.Labels)
+		}
+		change := payload.Changes["labels"]
+		from, ok := change.From.([]interface{})
+		if !ok {
+			t.Fatalf("updated labels from = %#v (%T), want JSON label array not storage string", change.From, change.From)
+		}
+		if helperContainsIface(from, "needs_smoketest") {
+			t.Fatalf("updated labels from = %#v, must not already include needs_smoketest", from)
+		}
+		to, ok := change.To.([]interface{})
+		if !ok {
+			t.Fatalf("updated labels to = %#v (%T), want JSON label array", change.To, change.To)
+		}
+		if !helperContainsIface(to, "needs_smoketest") {
+			t.Fatalf("updated labels to = %#v, want needs_smoketest", to)
+		}
+
+		// A later unrelated update while the label remains present must NOT
+		// carry a label edge, so ACP does not re-dispatch Smokey.
+		if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{
+			"title": "smoketest duplicate guard",
+		}, 0); err != nil {
+			t.Fatalf("unrelated update: %v", err)
+		}
+		later := helperWaitWebhook(t, calls, task.UUID)
+		if later.Event != "updated" {
+			t.Fatalf("later event = %q, want updated", later.Event)
+		}
+		if _, ok := later.Changes["labels"]; ok {
+			t.Fatalf("later unrelated update must not carry a labels edge: %#v", later.Changes)
+		}
+		if helperContainsString(later.Changed, "labels") {
+			t.Fatalf("later changed = %#v, must not contain labels", later.Changed)
+		}
+		// Top-level labels still reflect presence, which is why ACP must key on
+		// the edge, not on current label presence.
+		if !helperContainsString(later.Labels, "needs_smoketest") {
+			t.Fatalf("later top-level labels = %#v, want needs_smoketest still present", later.Labels)
+		}
+	})
+
+	t.Run("invalid state needs_smoketest is rejected", func(t *testing.T) {
+		task, err := s.Tasks.Create(actorUUID, CreateParams{
+			Slug:        "state-guard",
+			Title:       "State guard",
+			ProjectUUID: project.UUID,
+			State:       "open",
+			Priority:    2,
+		})
+		if err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		_ = helperWaitWebhook(t, calls, task.UUID)
+		if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{
+			"state": "needs_smoketest",
+		}, 0); err == nil {
+			t.Fatalf("expected invalid-state error for needs_smoketest state, got nil")
+		}
+	})
+}
