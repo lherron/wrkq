@@ -1,0 +1,56 @@
+id: wrkq.task-causality.caused-by
+kind: invariant
+status: proposed
+owner_project: wrkq
+scope: first-class causal lineage between tasks
+predicate: >
+  `caused_by` is causal lineage for defect/rework attribution, not task
+  containment, blocker state, or a generic user relation. Its authoritative write
+  state must live in a dedicated normalized task-cause edge table, not in
+  `tasks` JSON metadata and not in `task_relations`. The table models ordered,
+  deduplicated edges from the current task to existing causing tasks; self-causation
+  is invalid. Public projections expose the field as task friendly IDs in stable
+  order: legacy CLI compatibility surfaces use `caused_by`, while stable wrkqapi
+  task DTOs and RPC params use camelCase `causedBy`.
+
+  Mutating `caused_by` participates in the ordinary task mutation envelope:
+  optimistic etag preconditions, task etag bump, updated attribution, webhook
+  change payloads, and `task.created` / `task.updated` event payload key
+  `caused_by`. Absence means no change; clearing is explicit. Querying by
+  `--caused-by` is membership filtering over this edge set and must compose with
+  existing state/path/type filters without changing their defaults. Causal edges
+  must not induce unblock logic, parent/child nesting, move/archive/restore
+  cascades, recursive hierarchy semantics, or task residency changes. Hard-purging
+  a causing task must not silently erase another task's projected `caused_by`;
+  reject the purge while dependent cause edges exist, or explicitly clear those
+  edges through the task mutation envelope with dependent etag/history/webhook
+  updates.
+authority:
+  repo: wrkq
+  surface: task causal lineage schema, task mutation/read-model APIs, and CLI/RPC compatibility projections
+enforced_by: "planned T-04229 implementation; promote to active only after live schema/API/parity tests exist"
+source:
+  - architecture/records/invariants/wrkq.mutation.caller-owned-confirmation.yaml
+  - architecture/records/invariants/wrkq.task-hierarchy.cross-project-parents.yaml
+  - docs/SPEC.md
+  - docs/wrkq-wrkf-rpc.md
+  - internal/db/migrations/000031_cross_project_parent_edges.sql
+  - internal/store/tasks.go
+  - internal/wrkqapi/types.go
+  - internal/wrkqapi/catview.go
+  - internal/wrkqapi/findlistview.go
+  - internal/rpccli/set.go
+  - internal/rpccli/find.go
+  - internal/cli/touch.go
+  - internal/cli/set.go
+  - internal/cli/find.go
+required_tests: []
+last_verified: null
+reopen_when:
+  - caused_by is implemented through task_relations or opaque task metadata
+  - causal edges affect blocker, hierarchy, residency, or recursive mutation semantics
+  - caused_by changes bypass task etag/history/webhook attribution
+  - hard-purging a causing task silently removes another task's projected caused_by
+  - legacy CLI and RPC-backed compatibility projections diverge on field shape, order, clear semantics, or find filtering
+supersedes: []
+superseded_by: null
