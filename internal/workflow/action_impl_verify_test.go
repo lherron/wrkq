@@ -394,7 +394,7 @@ func TestBuiltinTemplate_FactBranchedContract(t *testing.T) {
 			t.Errorf("%s last outcome %q is not `otherwise`", trID, last.ID)
 		}
 	}
-	assertOutcomeOrder("implement_complete", []string{"done", "blocked", "implemented"})
+	assertOutcomeOrder("implement_complete", []string{"done_verify_launch", "done", "blocked", "implemented"})
 	assertOutcomeOrder("verify_complete", []string{"verified", "blocked", "reviewing"})
 
 	// Effects: implement blocked + verify verified/blocked carry set_task_state.

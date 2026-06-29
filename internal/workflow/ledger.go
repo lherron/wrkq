@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1510,7 +1511,112 @@ func nextEffectSequenceTx(tx *sql.Tx, instanceID string) (int64, error) {
 	return seq, err
 }
 
-func effectSemanticKey(inst Instance, outcomeID string, ef EffectSpec, sequence int64) string {
+type effectRenderContext struct {
+	instance  Instance
+	outcomeID string
+	runID     string
+	sequence  int64
+}
+
+var unresolvedEffectTokenRE = regexp.MustCompile(`\{[A-Za-z][A-Za-z0-9_]*\}`)
+
+func effectRenderReplacements(ctx effectRenderContext, kind string) map[string]string {
+	return map[string]string{
+		"{instanceId}":                 ctx.instance.ID,
+		"{taskUuid}":                   ctx.instance.TaskUUID,
+		"{taskRef}":                    ctx.instance.TaskRef,
+		"{revision}":                   fmt.Sprint(ctx.instance.Revision),
+		"{outcome}":                    ctx.outcomeID,
+		"{kind}":                       kind,
+		"{sequence}":                   fmt.Sprint(ctx.sequence),
+		"{runId}":                      ctx.runID,
+		"{sourceImplementActionRunId}": ctx.runID,
+	}
+}
+
+func renderEffectTemplateString(value string, replacements map[string]string) (string, error) {
+	rendered := value
+	for token, replacement := range replacements {
+		if strings.Contains(rendered, token) && replacement == "" {
+			return "", fmt.Errorf("effect template token %s resolved empty", token)
+		}
+		rendered = strings.ReplaceAll(rendered, token, replacement)
+	}
+	if unresolved := unresolvedEffectTokenRE.FindString(rendered); unresolved != "" {
+		return "", fmt.Errorf("unresolved effect template token %s", unresolved)
+	}
+	return rendered, nil
+}
+
+func renderEffectTemplateValue(value interface{}, replacements map[string]string) (interface{}, error) {
+	switch v := value.(type) {
+	case string:
+		return renderEffectTemplateString(v, replacements)
+	case []interface{}:
+		out := make([]interface{}, len(v))
+		for i := range v {
+			rendered, err := renderEffectTemplateValue(v[i], replacements)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = rendered
+		}
+		return out, nil
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for key, child := range v {
+			renderedKey, err := renderEffectTemplateString(key, replacements)
+			if err != nil {
+				return nil, err
+			}
+			rendered, err := renderEffectTemplateValue(child, replacements)
+			if err != nil {
+				return nil, err
+			}
+			out[renderedKey] = rendered
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+
+func renderEffectSpec(ef EffectSpec, ctx effectRenderContext) (EffectSpec, string, error) {
+	rendered := ef
+	replacements := effectRenderReplacements(ctx, ef.Kind)
+	var err error
+	rendered.Kind, err = renderEffectTemplateString(rendered.Kind, replacements)
+	if err != nil {
+		return EffectSpec{}, "", err
+	}
+	replacements = effectRenderReplacements(ctx, rendered.Kind)
+	rendered.Role, err = renderEffectTemplateString(rendered.Role, replacements)
+	if err != nil {
+		return EffectSpec{}, "", err
+	}
+	rendered.Reason, err = renderEffectTemplateString(rendered.Reason, replacements)
+	if err != nil {
+		return EffectSpec{}, "", err
+	}
+	rendered.SemanticKey, err = renderEffectTemplateString(rendered.SemanticKey, replacements)
+	if err != nil {
+		return EffectSpec{}, "", err
+	}
+	if rendered.Data != nil {
+		data, err := renderEffectTemplateValue(rendered.Data, replacements)
+		if err != nil {
+			return EffectSpec{}, "", err
+		}
+		rendered.Data = data.(map[string]interface{})
+	}
+	semanticKey, err := effectSemanticKey(ctx, rendered)
+	if err != nil {
+		return EffectSpec{}, "", err
+	}
+	return rendered, semanticKey, nil
+}
+
+func effectSemanticKey(ctx effectRenderContext, ef EffectSpec) (string, error) {
 	key := strings.TrimSpace(ef.SemanticKey)
 	if key == "" && ef.Data != nil {
 		if raw, ok := ef.Data["semanticKey"]; ok {
@@ -1520,20 +1626,9 @@ func effectSemanticKey(inst Instance, outcomeID string, ef EffectSpec, sequence 
 		}
 	}
 	if key == "" {
-		key = fmt.Sprintf("rev:%d:outcome:%s:seq:%d:kind:%s", inst.Revision, outcomeID, sequence, ef.Kind)
+		key = fmt.Sprintf("rev:%d:outcome:%s:seq:%d:kind:%s", ctx.instance.Revision, ctx.outcomeID, ctx.sequence, ef.Kind)
 	}
-	replacements := map[string]string{
-		"{instanceId}": inst.ID,
-		"{taskUuid}":   inst.TaskUUID,
-		"{revision}":   fmt.Sprint(inst.Revision),
-		"{outcome}":    outcomeID,
-		"{kind}":       ef.Kind,
-		"{sequence}":   fmt.Sprint(sequence),
-	}
-	for k, v := range replacements {
-		key = strings.ReplaceAll(key, k, v)
-	}
-	return key
+	return renderEffectTemplateString(key, effectRenderReplacements(ctx, ef.Kind))
 }
 
 func (s *Service) FailEffect(id, leaseToken, reason string, retryable bool) (*Effect, error) {
@@ -1816,18 +1911,23 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			if err != nil {
 				return err
 			}
-			payload, _ := json.Marshal(ef)
-			semanticKey := effectSemanticKey(updated, chosen.ID, ef, seq)
+			renderedEffect, semanticKey, err := renderEffectSpec(ef, effectRenderContext{
+				instance: updated, outcomeID: chosen.ID, runID: opts.RunID, sequence: seq,
+			})
+			if err != nil {
+				return err
+			}
+			payload, _ := json.Marshal(renderedEffect)
 			key := fmt.Sprintf("%s:%s", updated.ID, semanticKey)
 			_, err = tx.Exec(`
 				INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-			`, id, updated.ID, updated.Revision, seq, ef.Kind, string(payload), key, semanticKey, now, now)
+			`, id, updated.ID, updated.Revision, seq, renderedEffect.Kind, string(payload), key, semanticKey, now, now)
 			if err != nil {
 				return err
 			}
 			createdEffects = append(createdEffects, Effect{
-				ID: id, InstanceID: updated.ID, Revision: updated.Revision, Sequence: seq, Kind: ef.Kind, Payload: json.RawMessage(payload),
+				ID: id, InstanceID: updated.ID, Revision: updated.Revision, Sequence: seq, Kind: renderedEffect.Kind, Payload: json.RawMessage(payload),
 				Status: "pending", IdempotencyKey: key, SemanticKey: semanticKey, CreatedAt: now, UpdatedAt: now,
 			})
 		}

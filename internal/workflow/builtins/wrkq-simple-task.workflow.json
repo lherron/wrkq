@@ -71,6 +71,9 @@
             "type": "string",
             "enum": ["done", "blocked"]
           },
+          "automation.verifyLaunch": {
+            "type": "string"
+          },
           "red.proven": { "type": "boolean" },
           "red.needed": { "type": "boolean" },
           "bar.hash": { "type": "string" },
@@ -182,6 +185,40 @@
         "implementer"
       ],
       "outcomes": [
+        {
+          "id": "done_verify_launch",
+          "description": "Implementation reported done with the exact versioned ACP verify-launch opt-in; advance to implemented and emit one pending tester verify launch intent bound to this implement action run.",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "automation.verifyLaunch": "acp-command-run/v1",
+                "impl.disposition": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implemented"
+          },
+          "effects": [
+            {
+              "kind": "verify_launch",
+              "role": "tester",
+              "semanticKey": "verify-launch:{taskUuid}:{revision}:{runId}",
+              "data": {
+                "sourceImplementActionRunId": "{runId}",
+                "taskUuid": "{taskUuid}",
+                "taskRef": "{taskRef}",
+                "instanceId": "{instanceId}",
+                "revision": "{revision}",
+                "action": "verify",
+                "role": "tester",
+                "correlation": "verify-launch:{taskUuid}:{revision}:{runId}"
+              }
+            }
+          ]
+        },
         {
           "id": "done",
           "description": "Implementation reported done; verification may proceed. Selected from the just-written implement_result evidence facts (impl.disposition=done).",

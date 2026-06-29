@@ -1,0 +1,48 @@
+id: wrkq.contract.wrkf-verify-launch-producer
+kind: contract
+status: active
+owner_project: wrkq
+scope: wrkf simple-task implement_complete producer for ACP verify-launch intents
+predicate: >
+  `wrkq-simple-task@1` emits exactly one non-engine-owned pending verify-launch
+  effect from `implement_complete` only when the completing implement action's
+  run-linked `implement_result` evidence carries both `impl.disposition="done"`
+  and the exact versioned opt-in fact `automation.verifyLaunch="acp-command-run/v1"`.
+  The generic done path remains behavior-compatible without that fact. Each
+  emitted effect is causally bound by transition context, with semantic key
+  `verify-launch:{taskUuid}:{revision}:{runId}` and payload fields for
+  sourceImplementActionRunId, task/instance identity, action `verify`, role
+  `tester`, and correlation. Unresolved effect template tokens fail the
+  transition atomically before revision/effect/event commit. Built-in template
+  replacement remains subject to active accepted risk
+  `wrkq.simple-task.v1.naive-supersede`.
+authority:
+  repo: wrkq
+  surface: wrkf workflow template + workflow_effects outbox
+consumers:
+  - agent-control-plane ACP verify action launcher
+source:
+  - internal/workflow/builtins/wrkq-simple-task.workflow.json
+  - internal/workflow/ledger.go
+  - internal/workflow/action_verify_launch_intent_test.go
+  - architecture/records/risks/wrkq.simple-task.v1.naive-supersede.yaml
+  - hrcchat#10969
+  - hrcchat#10974
+required_tests:
+  - TestImplementCompleteDoneWithoutAutomationFactDoesNotLaunchVerify
+  - TestImplementCompleteDoneWithAutomationFactCreatesPendingVerifyLaunch
+  - TestImplementCompleteDoesNotLaunchVerifyForNonOptInEvidence
+  - TestTransitionEffectMaterializesRevisionAndRunID
+  - TestTransitionEffectUnresolvedTokenFailsAtomically
+  - TestImplementCompleteVerifyLaunchReplayIsIdempotent
+  - go test ./internal/workflow
+last_verified:
+  date: 2026-06-29
+  evidence: "go test ./internal/workflow green during T-05310 producer implementation"
+reopen_when:
+  - automation.verifyLaunch fact name or version changes
+  - verify-launch effect kind, semantic key, or payload contract changes
+  - transition effect template token set or atomicity semantics change
+  - wrkq-simple-task@1 built-in migration/supersede semantics change
+supersedes: []
+superseded_by: null
