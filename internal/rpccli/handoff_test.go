@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/scope"
+	"github.com/spf13/cobra"
 )
 
 // TestHandoffCreateParams_ExplicitScopeAndOmitempty proves the mirror builds the
@@ -58,6 +59,73 @@ func TestHandoffAckParams_ExplicitActorAndOmitempty(t *testing.T) {
 		if _, ok := bare[k]; ok {
 			t.Errorf("ack params should omit unset optional field %q (params=%#v)", k, bare)
 		}
+	}
+}
+
+func TestHandoffAckIdentityFallsBackToExactRow(t *testing.T) {
+	t.Setenv("ASP_SCOPE_REF", "")
+	t.Setenv("ASP_HANDLE", "")
+	t.Setenv("ASP_AGENT_ID", "")
+	t.Setenv("ASP_PROJECT", "")
+
+	got, err := resolveHandoffAckIdentity(&cobra.Command{}, handoffJSON{
+		ID:        "H-00001",
+		ScopeRef:  "agent:curly:project:wrkq",
+		AgentID:   "curly",
+		ProjectID: "wrkq",
+	})
+	if err != nil {
+		t.Fatalf("resolve identity from exact row: %v", err)
+	}
+	if got.actorAgentID != "curly" || got.principalRef != "agent:curly" || got.scopeRef != "agent:curly:project:wrkq" {
+		t.Fatalf("identity mismatch: %#v", got)
+	}
+}
+
+func TestHandoffAckIdentityExplicitAsUsesRowProject(t *testing.T) {
+	t.Setenv("ASP_SCOPE_REF", "")
+	t.Setenv("ASP_HANDLE", "")
+	t.Setenv("ASP_AGENT_ID", "")
+	t.Setenv("ASP_PROJECT", "")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("as", "", "")
+	if err := cmd.ParseFlags([]string{"--as", "curly"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	got, err := resolveHandoffAckIdentity(cmd, handoffJSON{
+		ID:        "H-00001",
+		ScopeRef:  "agent:curly:project:wrkq",
+		AgentID:   "curly",
+		ProjectID: "wrkq",
+	})
+	if err != nil {
+		t.Fatalf("resolve identity from --as + row project: %v", err)
+	}
+	if got.actorAgentID != "curly" || got.principalRef != "agent:curly" || got.scopeRef != "agent:curly:project:wrkq" {
+		t.Fatalf("identity mismatch: %#v", got)
+	}
+}
+
+func TestHandoffAckIdentityRejectsMismatchedActor(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("as", "", "")
+	if err := cmd.ParseFlags([]string{"--as", "cody"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	_, err := resolveHandoffAckIdentity(cmd, handoffJSON{
+		ID:        "H-00001",
+		ScopeRef:  "agent:curly:project:wrkq",
+		AgentID:   "curly",
+		ProjectID: "wrkq",
+	})
+	if err == nil {
+		t.Fatal("expected mismatched actor validation error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous actor") || !strings.Contains(err.Error(), "cody") || !strings.Contains(err.Error(), "curly") {
+		t.Fatalf("expected actor conflict details, got %v", err)
 	}
 }
 

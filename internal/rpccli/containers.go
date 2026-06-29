@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
 )
 
@@ -245,27 +244,21 @@ func rmdirForceWarning(containerID, path string, tasks, descendants int64) strin
 
 // ── shared mirror helpers ────────────────────────────────────────────────────
 
-// openMirror opens the bootstrap handle + in-process transport and returns the
-// project-root scoper (built from the handle config + --project override) and a
-// close function that tears down both. Callers MUST scope every raw path/selector
+// openMirror opens the configured transport and returns the project-root scoper
+// (built from local config plus a local DB or remote RPC --project lookup) and a
+// close function that tears it down. Callers MUST scope every raw path/selector
 // argument through the returned scoper before sending it as an RPC param.
 func openMirror(cmd *cobra.Command) (Transport, *scoper, func(), error) {
-	h, err := bootstrap.Open(dbOverride(cmd))
+	tr, cfg, closeFn, err := openConfiguredTransport(cmd)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// Resolve --project against the DB before the serve loop owns the handle.
-	sc, err := newScoper(cmd, h)
+	sc, err := newScoperFromConfig(cmd, cfg, tr)
 	if err != nil {
-		_ = h.Close()
+		closeFn()
 		return nil, nil, nil, err
 	}
-	tr, err := NewInProcess(h)
-	if err != nil {
-		_ = h.Close()
-		return nil, nil, nil, err
-	}
-	return tr, sc, func() { _ = tr.Close() }, nil
+	return tr, sc, closeFn, nil
 }
 
 // mkdirKindFor mirrors legacy mkdir's kind inference for the final path segment.

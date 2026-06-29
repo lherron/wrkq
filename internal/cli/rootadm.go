@@ -8,8 +8,8 @@ var rootAdmCmd = &cobra.Command{
 	Use:   "wrkqadm",
 	Short: "Administrative CLI for wrkq database lifecycle and infrastructure",
 	Long: `wrkqadm is the administrative companion to wrkq. It handles database
-lifecycle (init, snapshot), actor management, bundle application, and
-health checks. These operations should not be exposed to agents.`,
+lifecycle (init, snapshot), actor management, merge, patches, and health checks.
+These operations should not be exposed to agents.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

@@ -39,6 +39,11 @@ func ProtocolSchemaHash() string {
 	}
 	for _, dto := range dtoCatalog {
 		_, _ = fmt.Fprintln(h, "dto:"+dto)
+		if typ, ok := dtoSchemaTypes[dto]; ok {
+			_, _ = fmt.Fprintln(h, "dto-shape:"+dtoSchemaFingerprint(dto, typ))
+		} else {
+			_, _ = fmt.Fprintln(h, "dto-shape-missing:"+dto)
+		}
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }

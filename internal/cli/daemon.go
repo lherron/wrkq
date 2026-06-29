@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -19,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/attribution"
-	"github.com/lherron/wrkq/internal/bundle"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
@@ -32,15 +31,18 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
+	"github.com/lherron/wrkq/internal/workrpc"
+	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 )
 
 // DaemonOptions configures the wrkqd daemon.
 type DaemonOptions struct {
-	Addr    string
-	Unix    string
-	Token   string
-	DBPath  string
-	PIDPath string
+	Addr          string
+	Unix          string
+	Token         string
+	DBPath        string
+	PIDPath       string
+	UnsafeNoToken bool
 }
 
 // ServeDaemon starts the wrkqd daemon.
@@ -51,7 +53,12 @@ func ServeDaemon(opts DaemonOptions) error {
 	}
 
 	if opts.DBPath != "" {
-		cfg.DBPath = opts.DBPath
+		if err := config.ApplyDBLocator(cfg, opts.DBPath, true); err != nil {
+			return err
+		}
+	}
+	if cfg.RemoteEndpoint != "" {
+		return fmt.Errorf("wrkqd requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
 	}
 
 	database, err := db.Open(cfg.DBPath)
@@ -71,11 +78,19 @@ func ServeDaemon(opts DaemonOptions) error {
 		}
 		defer func() { _ = os.Remove(opts.PIDPath) }()
 	}
+	api, rpcOpts, err := bootstrap.Server(database, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize workrpc registry: %w", err)
+	}
+	rpcServer := workrpc.NewServer(io.Discard)
+	workrpc.RegisterAPI(rpcServer, api, rpcOpts)
 
 	server := &daemonServer{
-		db:    database,
-		cfg:   cfg,
-		token: opts.Token,
+		db:       database,
+		cfg:      cfg,
+		token:    opts.Token,
+		workrpc:  rpcServer,
+		rpcToken: opts.Token,
 	}
 	server.startSearchIndexer()
 
@@ -102,6 +117,9 @@ func ServeDaemon(opts DaemonOptions) error {
 	if addr == "" {
 		addr = "127.0.0.1:7171"
 	}
+	if opts.Unix == "" && opts.Token == "" && !opts.UnsafeNoToken && !isLoopbackListenAddr(addr) {
+		return fmt.Errorf("refusing to bind wrkqd on non-loopback address %s without --token; pass --unsafe-no-token for explicit dev-only override", addr)
+	}
 	httpServer.Addr = addr
 
 	listener, err := net.Listen("tcp", addr)
@@ -110,6 +128,19 @@ func ServeDaemon(opts DaemonOptions) error {
 	}
 	defer func() { _ = listener.Close() }()
 	return serveHTTPWithSignals(httpServer, listener)
+}
+
+func isLoopbackListenAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func writePIDFile(path string) error {
@@ -157,9 +188,11 @@ var (
 )
 
 type daemonServer struct {
-	db    *db.DB
-	cfg   *config.Config
-	token string
+	db       *db.DB
+	cfg      *config.Config
+	token    string
+	workrpc  *workrpc.Server
+	rpcToken string
 }
 
 // Task mirrors wrkq cat --json output with additional deleted_at metadata.
@@ -212,6 +245,7 @@ type Comment struct {
 
 func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/health", s.withAuth(s.handleHealth))
+	mux.HandleFunc("/v1/rpc", s.withAuth(s.handleWorkRPC))
 	mux.HandleFunc("/v1/containers/tree", s.withAuth(s.handleContainersTree))
 
 	mux.HandleFunc("/v1/tasks/list", s.withAuth(s.handleTasksList))
@@ -232,8 +266,6 @@ func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/actors/create", s.withAuth(s.handleActorsCreate))
 	mux.HandleFunc("/v1/actors/update", s.withAuth(s.handleActorsUpdate))
 
-	mux.HandleFunc("/v1/bundle/create", s.withAuth(s.handleBundleCreate))
-	mux.HandleFunc("/v1/bundle/apply", s.withAuth(s.handleBundleApply))
 }
 
 func (s *daemonServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -268,6 +300,40 @@ func (s *daemonServer) writeError(w http.ResponseWriter, status int, err error) 
 	s.writeJSON(w, status, map[string]interface{}{
 		"message": err.Error(),
 	})
+}
+
+func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var req workrpc.Request
+	if err := s.decodeJSON(r, &req); err != nil {
+		resp := workrpc.Response{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(`null`),
+			Error:   workrpc.MapError(&workrpc.ParseError{Err: err}),
+		}
+		s.writeJSON(w, http.StatusBadRequest, resp)
+		return
+	}
+	if len(req.ID) == 0 {
+		resp := workrpc.Response{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(`null`),
+			Error: workrpc.MapError(&workrpc.ValidationError{
+				Message: "remote workrpc requires request id",
+				Code:    workrpc.CodeWRKQValidation,
+			}),
+		}
+		s.writeJSON(w, http.StatusBadRequest, resp)
+		return
+	}
+	resp, ok := s.workrpc.HandleRequest(r.Context(), req)
+	if !ok {
+		resp = workrpc.Response{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)}
+	}
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *daemonServer) resolveAttribution(r *http.Request) (attribution.Attribution, error) {
@@ -1617,217 +1683,6 @@ func (s *daemonServer) handleActorsUpdate(w http.ResponseWriter, r *http.Request
 	})
 }
 
-type bundleCreateRequest struct {
-	Out             string   `json:"out,omitempty"`
-	Actor           string   `json:"actor,omitempty"`
-	Since           string   `json:"since,omitempty"`
-	Until           string   `json:"until,omitempty"`
-	Project         string   `json:"project,omitempty"`
-	PathPrefixes    []string `json:"path_prefix,omitempty"`
-	IncludeRefs     bool     `json:"include_refs,omitempty"`
-	WithAttachments bool     `json:"with_attachments,omitempty"`
-	WithEvents      *bool    `json:"with_events,omitempty"`
-}
-
-func (s *daemonServer) handleBundleCreate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
-		return
-	}
-
-	var req bundleCreateRequest
-	if err := s.decodeJSON(r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	outDir := req.Out
-	if outDir == "" {
-		outDir = ".wrkq"
-	}
-
-	opts := bundle.CreateOptions{
-		OutputDir:       outDir,
-		Actor:           req.Actor,
-		Since:           req.Since,
-		Until:           req.Until,
-		WithAttachments: req.WithAttachments,
-		WithEvents:      true,
-		IncludeRefs:     req.IncludeRefs,
-		Version:         "0.1.0",
-		Commit:          "",
-		BuildDate:       "",
-	}
-	if req.WithEvents != nil {
-		opts.WithEvents = *req.WithEvents
-	}
-
-	if req.Project != "" {
-		projectUUID, _, err := selectors.ResolveContainer(s.db, req.Project)
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		var projectPath string
-		if err := s.db.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", projectUUID).Scan(&projectPath); err != nil {
-			s.writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		opts.ProjectUUID = projectUUID
-		opts.ProjectPath = projectPath
-	}
-
-	for _, prefix := range req.PathPrefixes {
-		trimmed := strings.Trim(prefix, "/")
-		if trimmed != "" {
-			opts.PathPrefixes = append(opts.PathPrefixes, trimmed)
-		}
-	}
-
-	b, err := bundle.Create(s.db.DB, opts)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"bundle_dir":       b.Dir,
-		"tasks_count":      len(b.Tasks),
-		"containers_count": len(b.Containers),
-		"refs_count":       len(b.Refs),
-		"manifest":         b.Manifest,
-	})
-}
-
-type bundleApplyRequest struct {
-	From            string `json:"from,omitempty"`
-	DryRun          bool   `json:"dry_run,omitempty"`
-	ContinueOnError bool   `json:"continue_on_error,omitempty"`
-}
-
-func (s *daemonServer) handleBundleApply(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
-		return
-	}
-
-	var req bundleApplyRequest
-	if err := s.decodeJSON(r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	from := req.From
-	if from == "" {
-		from = ".wrkq"
-	}
-
-	b, err := bundle.Load(from)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if b.Manifest.MachineInterfaceVersion != 1 {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("bundle machine_interface_version (%d) doesn't match current version (1)", b.Manifest.MachineInterfaceVersion))
-		return
-	}
-
-	attr, err := s.resolveAttribution(r)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	result := &applyResult{Success: true}
-
-	if req.ContinueOnError {
-		for _, containerPath := range b.Containers {
-			created, err := ensureContainer(s.db, attr, containerPath, req.DryRun)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", containerPath, err))
-				result.Success = false
-				continue
-			}
-			if created {
-				result.ContainersAdded++
-			}
-		}
-
-		for _, task := range b.Tasks {
-			if err := applyTaskDocumentWithDB(s.db, attr, task, req.DryRun); err != nil {
-				result.TasksFailed++
-				result.Success = false
-				if conflict := conflictFromError(err); conflict != nil {
-					result.Conflicts = append(result.Conflicts, *conflict)
-				} else {
-					result.Errors = append(result.Errors, fmt.Sprintf("task %s: %v", task.Path, err))
-				}
-				continue
-			}
-			result.TasksApplied++
-		}
-	} else {
-		tx, err := s.db.Begin()
-		if err != nil {
-			s.writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		defer func() { _ = tx.Rollback() }()
-
-		ew := events.NewWriter(s.db.DB)
-
-		for _, containerPath := range b.Containers {
-			created, err := ensureContainerTx(tx, ew, attr, containerPath, req.DryRun)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("container %s: %v", containerPath, err))
-				result.Success = false
-				break
-			}
-			if created {
-				result.ContainersAdded++
-			}
-		}
-
-		if result.Success {
-			for _, task := range b.Tasks {
-				if err := applyTaskDocumentTx(tx, ew, attr, task, req.DryRun); err != nil {
-					result.TasksFailed++
-					result.Success = false
-					if conflict := conflictFromError(err); conflict != nil {
-						result.Conflicts = append(result.Conflicts, *conflict)
-					} else {
-						result.Errors = append(result.Errors, fmt.Sprintf("task %s: %v", task.Path, err))
-					}
-					break
-				}
-				result.TasksApplied++
-			}
-		}
-
-		if result.Success && !req.DryRun {
-			if err := tx.Commit(); err != nil {
-				s.writeError(w, http.StatusBadRequest, err)
-				return
-			}
-		}
-	}
-
-	if result.Success && !req.DryRun && b.Manifest.WithAttachments {
-		attachmentsDir := filepath.Join(b.Dir, "attachments")
-		if _, err := os.Stat(attachmentsDir); err == nil {
-			attached, err := reattachFilesDaemon(s.cfg, attachmentsDir, attr)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("attachments: %v", err))
-				result.Success = false
-			} else {
-				result.AttachmentsAdded = attached
-			}
-		}
-	}
-
-	s.writeJSON(w, http.StatusOK, result)
-}
-
 func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, includeRelations bool) (*Task, error) {
 	var id, slug, title, state, description, specification, kind string
 	var priority int
@@ -2052,6 +1907,29 @@ func getIntField(fields map[string]interface{}, key string, fallback int) int {
 	return fallback
 }
 
+func coerceInt(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	default:
+		return 0, false
+	}
+}
+
+func generateUUID() string {
+	return uuid.New().String()
+}
+
 func sortedMapKeys(fields map[string]interface{}) []string {
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
@@ -2101,54 +1979,4 @@ func getLabelsField(fields map[string]interface{}, key string) string {
 		}
 	}
 	return ""
-}
-
-func reattachFilesDaemon(cfg *config.Config, attachmentsDir string, attr attribution.Attribution) (int, error) {
-	count := 0
-
-	entries, err := os.ReadDir(attachmentsDir)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		taskUUID := entry.Name()
-		taskAttachDir := filepath.Join(attachmentsDir, taskUUID)
-
-		files, err := os.ReadDir(taskAttachDir)
-		if err != nil {
-			return count, fmt.Errorf("failed to read %s: %w", taskAttachDir, err)
-		}
-
-		for _, file := range files {
-			if file.IsDir() {
-				continue
-			}
-
-			filePath := filepath.Join(taskAttachDir, file.Name())
-
-			attachCmd := exec.Command("wrkq", "attach", "put", "t:"+taskUUID, filePath)
-			attachCmd.Env = os.Environ()
-			attachCmd.Env = append(attachCmd.Env, "WRKQ_DB_PATH="+cfg.DBPath)
-			if attr.PrincipalRef != "" {
-				attachCmd.Env = append(attachCmd.Env, "WRKQ_PRINCIPAL_REF="+attr.PrincipalRef)
-			}
-			if attr.ScopeRef != "" {
-				attachCmd.Env = append(attachCmd.Env, "ASP_SCOPE_REF="+attr.ScopeRef)
-			}
-
-			output, err := attachCmd.CombinedOutput()
-			if err != nil {
-				return count, fmt.Errorf("wrkq attach put failed for %s: %w\nOutput: %s", file.Name(), err, output)
-			}
-
-			count++
-		}
-	}
-
-	return count, nil
 }

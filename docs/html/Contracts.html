@@ -842,14 +842,14 @@ h3,
           <section class="hero" id="summary" aria-labelledby="page-title">
             <div class="hero-copy">
               <div class="eyebrow">wrkq task plane -> wrkf workflow plane</div>
-              <h1 id="page-title">Public contract shapes for tasks, handoffs, bundles, and workflow routing.</h1>
+              <h1 id="page-title">Public contract shapes for tasks, handoffs, and workflow routing.</h1>
               <p class="lead"><span class="inline-code">wrkq</span> owns project/task collaboration records. <span class="inline-code">wrkf</span> owns workflow templates, instances, routing evidence, checks, effects, obligations, and next-action suggestions.</p>
             </div>
             <div class="hero-board" aria-label="Interface boundary summary">
               <div class="route-card">
                 <div class="route-label">Task collaboration</div>
                 <div class="route-title"><span class="inline-code">wrkq --json</span></div>
-                <div class="route-copy">Tasks, containers, comments, attachments, handoffs, event log, bundles, and agent scope diagnostics.</div>
+                <div class="route-copy">Tasks, containers, comments, attachments, handoffs, event log, and agent scope diagnostics.</div>
               </div>
               <div class="route-card">
                 <div class="route-label">Workflow execution</div>
@@ -871,7 +871,7 @@ h3,
               <article class="panel">
                 <span class="badge wrkq">wrkq</span>
                 <h3>Collaboration records</h3>
-                <p class="minor">Resource CRUD, comments, attachments, handoffs, search, history, bundles, and agent scope diagnostics.</p>
+                <p class="minor">Resource CRUD, comments, attachments, handoffs, search, history, and agent scope diagnostics.</p>
               </article>
               <article class="panel">
                 <span class="badge wrkf">wrkf</span>
@@ -934,10 +934,6 @@ h3,
                   <span class="method-name">watch, log, diff, search</span>
                   <span class="method-copy">EventDTO, SearchResultDTO</span>
                   <span class="method-copy">Stream changes, inspect history, compare resources, and query indexed task/comment content.</span>
-                </div><div class="method-row three-col">
-                  <span class="method-name">bundle create/apply</span>
-                  <span class="method-copy">BundleManifestDTO, TaskDocumentDTO</span>
-                  <span class="method-copy">Export and apply Git-ops bundles with manifest metadata, task documents, refs, events, and attachments.</span>
                 </div>
               </div>
             </article>
@@ -1011,7 +1007,7 @@ h3,
 <pre><code>type TaskState = &#x27;idea&#x27; | &#x27;draft&#x27; | &#x27;open&#x27; | &#x27;in_progress&#x27; | &#x27;blocked&#x27; | &#x27;completed&#x27; | &#x27;cancelled&#x27; | &#x27;archived&#x27; | &#x27;deleted&#x27; // Lifecycle values accepted by task state filters and mutations.
 type TaskKind = &#x27;task&#x27; | &#x27;subtask&#x27; | &#x27;spike&#x27; | &#x27;bug&#x27; | &#x27;chore&#x27; // Work item classification stored on TaskDTO.kind.
 
-type TaskDTO = { // Primary work item returned by task discovery, reads, creates, updates, and bundle materialization.
+type TaskDTO = { // Primary work item returned by task discovery, reads, creates, and updates.
   id: string // Friendly task id such as T-00001.
   uuid: string // Stable storage identity for joins, attachments, and history.
   path?: string // Resolved container/task path emitted by list and read commands.
@@ -1130,7 +1126,7 @@ type ContainerDTO = { // Hierarchical project/subproject container returned by c
   id: string // Friendly attachment id such as ATT-00001.
   uuid: string // Stable attachment storage identity.
   task_uuid: string // Owning task UUID.
-  filename: string // Logical filename presented to users and bundle exports.
+  filename: string // Logical filename presented to users.
   relative_path: string // Path under the configured attachment storage root.
   mime_type?: string // Optional detected or supplied MIME type.
   size_bytes: number // Payload size in bytes.
@@ -1147,7 +1143,7 @@ type ContainerDTO = { // Hierarchical project/subproject container returned by c
                 <div>
                   <span class="badge audit">Continuity + audit DTOs</span>
                   <h3><span class="inline-code">HandoffDTO</span> and <span class="inline-code">EventDTO</span></h3>
-                  <p>Handoffs preserve agent session continuity; events provide the append-only audit stream used by watch, history, and bundles.</p>
+                  <p>Handoffs preserve agent session continuity; events provide the append-only audit stream used by watch and history.</p>
                 </div>
                 <div class="object-chip-row">
                   <span class="badge audit">H-</span><span class="badge ops">cursor</span><span class="badge audit">event log</span>
@@ -1177,7 +1173,7 @@ type HandoffDTO = { // Agent/project-scoped continuity record returned by handof
   updated_at: string // Last mutation timestamp.
 }
 
-type EventDTO = { // Append-only audit event returned by watch, history, and bundle event exports.
+type EventDTO = { // Append-only audit event returned by watch and history.
   id: number // Monotonic event id within the database.
   timestamp: string // Event creation timestamp.
   actor_uuid?: string // Actor UUID responsible for the mutation when known.
@@ -1195,7 +1191,7 @@ type EventDTO = { // Append-only audit event returned by watch, history, and bun
 
           <section id="wrkq-operational-dtos" aria-labelledby="wrkq-operational-title">
             <h2 id="wrkq-operational-title"><span class="section-num">05</span> wrkq Operational DTOs</h2>
-            <p class="section-intro">Operational outputs wrap resources for pagination, scope diagnosis, branch bundle exchange, and compatibility reporting. HandoffPageDTO and AgentContextDTO are each standalone full-width objects.</p>
+            <p class="section-intro">Operational outputs wrap resources for pagination, scope diagnosis, and compatibility reporting. HandoffPageDTO and AgentContextDTO are each standalone full-width objects.</p>
             
             <article class="contract-object ops" id="pagination-dto">
               <div class="contract-object-head">
@@ -1260,47 +1256,6 @@ type ActorDTO = { // Actor row used for attribution and diagnostics.
 }</code></pre>
 </div>
               <div class="source-note">Source: <span class="inline-code">internal/cli/agent_context.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
-            </article>
-            
-            <article class="contract-object ops" id="bundle-dto">
-              <div class="contract-object-head">
-                <div>
-                  <span class="badge ops">Git-ops DTO</span>
-                  <h3><span class="inline-code">BundleManifestDTO</span> and <span class="inline-code">TaskDocumentDTO</span></h3>
-                  <p>Bundles exchange branch-scoped task documents and optional attachments/events through versioned manifests.</p>
-                </div>
-                <div class="object-chip-row">
-                  <span class="badge ops">manifest.json</span><span class="badge audit">events.ndjson</span>
-                </div>
-              </div>
-              <div class="code-panel">
-<pre><code>type BundleManifestDTO = { // manifest.json at the root of a wrkq bundle export.
-  machine_interface_version: number // Compatibility guard checked during bundle apply.
-  version?: string // wrkq version that produced the bundle when known.
-  commit?: string // Source commit or build commit associated with the exporter.
-  build_date?: string // Build date metadata for the exporting binary.
-  timestamp: string // Export timestamp.
-  actor?: string // Actor filter or actor identity used during export.
-  since?: string // Lower timestamp bound for selected events or resources.
-  until?: string // Upper timestamp bound for selected events or resources.
-  since_cursor?: string // Event cursor used as the export lower bound.
-  project?: string // Project selector used during export.
-  project_uuid?: string // Resolved project UUID for the export.
-  path_prefixes?: string[] // Included path prefixes when export was narrowed.
-  with_attachments: boolean // True when attachment payloads were included.
-  with_events: boolean // True when events.ndjson was included.
-  include_refs?: boolean // True when reference documents were included.
-  ref_count?: number // Number of exported reference documents.
-}
-
-type TaskDocumentDTO = { // Frontmatter plus markdown body in tasks/*.md or refs/*.md.
-  path: string // Resource path represented by the document.
-  base_etag?: number // Conflict guard recorded when the document was exported.
-  uuid?: string // Existing resource UUID when the document represents an existing row.
-  description: string // Markdown task body following frontmatter.
-}</code></pre>
-</div>
-              <div class="source-note">Source: <span class="inline-code">internal/bundle/bundle.go</span>, <span class="inline-code">docs/SPEC.md#branchpr-sync-commands</span></div>
             </article>
           </section>
 
@@ -1731,7 +1686,7 @@ type HookSpecDTO = { // Executable hook constraints and IO contract.
               <article class="panel">
                 <span class="badge wrkq">wrkq</span>
                 <h3>Resource and CLI sources</h3>
-                <p class="minor"><span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/bundle/bundle.go</span>, <span class="inline-code">internal/cli/watch.go</span>, and <span class="inline-code">docs/SPEC.md</span>.</p>
+                <p class="minor"><span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/cli/watch.go</span>, and <span class="inline-code">docs/SPEC.md</span>.</p>
               </article>
               <article class="panel">
                 <span class="badge wrkf">wrkf</span>

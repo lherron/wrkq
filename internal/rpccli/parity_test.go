@@ -19,7 +19,7 @@ import (
 )
 
 // TestParity is the data-driven old-vs-new equivalence harness. It is the single
-// proof that `wrkq-rpccli <cmd>` is functionally equivalent to legacy `wrkq <cmd>`:
+// proof that the RPC-backed CLI is functionally equivalent to the legacy oracle:
 // for each case it seeds two identical fixtures, runs the OLD binary on one and
 // the NEW binary on the other, and asserts byte-equal exit code + stdout + stderr,
 // plus an identical durable-task-table snapshot for mutating commands.
@@ -3070,7 +3070,7 @@ var parityCases = []parityCase{
 	{
 		name:          "handoff/acknowledge-json",
 		setup:         [][]string{{"handoff", "create", "-t", "Ack me", "--body-file", "body.md", "--json"}},
-		args:          []string{"handoff", "acknowledge", "H-00001", "--note", "loaded next session", "--json"},
+		args:          []string{"--as", "cody", "handoff", "acknowledge", "H-00001", "--note", "loaded next session", "--json"},
 		files:         map[string]string{"body.md": "ack body\n"},
 		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
@@ -3080,9 +3080,9 @@ var parityCases = []parityCase{
 		name: "handoff/acknowledge-already-errors",
 		setup: [][]string{
 			{"handoff", "create", "-t", "Twice", "--body-file", "body.md", "--json"},
-			{"handoff", "acknowledge", "H-00001", "--json"},
+			{"--as", "cody", "handoff", "acknowledge", "H-00001", "--json"},
 		},
-		args:          []string{"handoff", "acknowledge", "H-00001", "--json"},
+		args:          []string{"--as", "cody", "handoff", "acknowledge", "H-00001", "--json"},
 		files:         map[string]string{"body.md": "twice body\n"},
 		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
@@ -3091,7 +3091,7 @@ var parityCases = []parityCase{
 	{
 		name:          "handoff/acknowledge-dry-run",
 		setup:         [][]string{{"handoff", "create", "-t", "Dry ack", "--body-file", "body.md", "--json"}},
-		args:          []string{"handoff", "acknowledge", "H-00001", "--dry-run", "--json"},
+		args:          []string{"--as", "cody", "handoff", "acknowledge", "H-00001", "--dry-run", "--json"},
 		files:         map[string]string{"body.md": "dry ack body\n"},
 		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
@@ -3157,7 +3157,7 @@ var parityCases = []parityCase{
 		setup: [][]string{
 			{"handoff", "create", "-t", "Quartz pending", "--body-file", "body.md", "--json"},
 			{"handoff", "create", "-t", "Quartz done", "--body-file", "done.md", "--json"},
-			{"handoff", "acknowledge", "H-00002", "--json"},
+			{"--as", "cody", "handoff", "acknowledge", "H-00002", "--json"},
 			{"index", "rebuild"},
 		},
 		args:              []string{"handoff", "search", "quartz", "--status", "acknowledged", "--json"},
@@ -3607,7 +3607,7 @@ var treeSubtasks = [][]string{
 
 func TestParity(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds wrkq + wrkq-rpccli and runs both CLIs")
+		t.Skip("builds wrkq-legacy + wrkq-rpccli and runs both CLIs")
 	}
 	bins := buildParityBinaries(t)
 	for _, tc := range parityCases {
@@ -3691,7 +3691,7 @@ func TestParity(t *testing.T) {
 
 func TestAgentContextNoDBParity(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds wrkq + wrkq-rpccli and runs both CLIs")
+		t.Skip("builds wrkq-legacy + wrkq-rpccli and runs both CLIs")
 	}
 	bins := buildParityBinaries(t)
 	dbPath := filepath.Join(t.TempDir(), "missing.db")
@@ -4321,225 +4321,6 @@ func TestLogDetailedTTYSemanticParity(t *testing.T) {
 // tasks, so the former mirror-only hard gate was removed and the behavior now
 // lives in TestParity/cp/recursive-* rows.
 func TestCpRecursiveHardGate(t *testing.T) {
-}
-
-// bundleSetup seeds a multi-project fixture with a relation (for --include-refs),
-// comments (so event_log has rows beyond create), and a second project's task so
-// project/path-prefix scoping has something to EXCLUDE. Slugs are ≥2 chars.
-var bundleSetup = [][]string{
-	{"mkdir", "alpha"},
-	{"mkdir", "beta"},
-	{"touch", "alpha/task-one", "-t", "Task One ✓", "--priority", "1"},
-	{"touch", "alpha/task-two", "-t", "Task Two"},
-	{"touch", "beta/task-three", "-t", "Task Three"},
-	{"comment", "add", "alpha/task-one", "first comment"},
-	{"comment", "add", "alpha/task-two", "second comment"},
-	{"relation", "add", "alpha/task-one", "blocks", "beta/task-three"},
-}
-
-// normalizeBundleStdout neutralizes the run-dir-specific bundle_dir absolute path
-// AND the wall-clock manifest timestamp so the two binaries' JSON/human output is
-// comparable. The bundle dir is materialized under each binary's own run dir
-// (legitimately different absolute paths), and the manifest timestamp is time.Now.
-func normalizeBundleStdout(s, oldDir, newDir string) string {
-	s = strings.ReplaceAll(s, oldDir, "<DIR>")
-	s = strings.ReplaceAll(s, newDir, "<DIR>")
-	s = rfc3339Re.ReplaceAllString(s, "<TS>")
-	return s
-}
-
-// compareBundleDir asserts the materialized bundle directory tree under relOut is
-// byte-identical between the two run dirs, EXCEPT the manifest.json timestamp
-// (time.Now, legitimately per-run). It walks oldDir/relOut, asserts newDir/relOut
-// has the same file set with identical bytes (timestamp-normalized), and fails on
-// any file present on one side only.
-func compareBundleDir(t *testing.T, oldRunDir, newRunDir, relOut string) {
-	t.Helper()
-	oldRoot := filepath.Join(oldRunDir, relOut)
-	newRoot := filepath.Join(newRunDir, relOut)
-
-	collect := func(root string) map[string]string {
-		files := map[string]string{}
-		err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-			rel, rerr := filepath.Rel(root, p)
-			if rerr != nil {
-				return rerr
-			}
-			b, rerr := os.ReadFile(p)
-			if rerr != nil {
-				return rerr
-			}
-			content := string(b)
-			if rel == "manifest.json" {
-				content = rfc3339Re.ReplaceAllString(content, "<TS>")
-			}
-			files[rel] = content
-			return nil
-		})
-		if err != nil {
-			t.Fatalf("walk %s: %v", root, err)
-		}
-		return files
-	}
-
-	oldFiles := collect(oldRoot)
-	newFiles := collect(newRoot)
-
-	if len(oldFiles) != len(newFiles) {
-		t.Errorf("bundle file COUNT differs: old=%d new=%d\n old files: %v\n new files: %v",
-			len(oldFiles), len(newFiles), sortedKeys(oldFiles), sortedKeys(newFiles))
-	}
-	for rel, oldContent := range oldFiles {
-		newContent, ok := newFiles[rel]
-		if !ok {
-			t.Errorf("bundle file %q present in legacy but MISSING in mirror", rel)
-			continue
-		}
-		if oldContent != newContent {
-			t.Errorf("bundle file %q bytes differ:\n old: %q\n new: %q", rel, oldContent, newContent)
-		}
-	}
-	for rel := range newFiles {
-		if _, ok := oldFiles[rel]; !ok {
-			t.Errorf("bundle file %q present in mirror but MISSING in legacy", rel)
-		}
-	}
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// TestBundleParity proves `wrkq-rpccli bundle create` is byte-equivalent to legacy
-// `wrkq bundle create` across the filter/scoping/output surface. Durable behavior
-// (the LOGICAL snapshot read under one transaction) is server-owned via
-// wrkq.bundle.exportView; the CLI materializes the directory on the caller host.
-// The test compares BOTH the command stdout/stderr/exit (bundle_dir + manifest
-// timestamp normalized) AND the materialized directory tree byte-for-byte
-// (manifest timestamp normalized), the latter being the real materialization proof.
-func TestBundleParity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds binaries + runs both CLIs")
-	}
-	bins := buildParityBinaries(t)
-
-	cases := []struct {
-		name  string
-		args  []string
-		setup [][]string
-		files map[string]string
-		// materializes is true when the command writes a bundle dir under relOut.
-		materializes bool
-		relOut       string
-	}{
-		{
-			name:         "actor-filter/json",
-			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--json"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name:         "actor-filter/include-refs",
-			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--include-refs", "--json"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name:         "actor-filter/no-events",
-			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--no-events", "--json"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name:         "actor-filter/with-attachments",
-			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--with-attachments", "--json"},
-			setup:        [][]string{{"attach", "put", "alpha/task-one", "bundle-att.txt"}},
-			files:        map[string]string{"bundle-att.txt": "bundle attachment payload\n"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name:         "project-scope/alpha",
-			args:         []string{"bundle", "create", "--project", "alpha", "--out", "bundle-out", "--json"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name:         "path-prefix/alpha",
-			args:         []string{"bundle", "create", "--path-prefix", "alpha", "--out", "bundle-out", "--json"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name:         "actor-filter/porcelain",
-			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--porcelain"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			// no --json/--porcelain on a non-TTY → legacy emits JSON (the same as --json).
-			name:         "actor-filter/default-nontty",
-			args:         []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out"},
-			materializes: true, relOut: "bundle-out",
-		},
-		{
-			name: "dry-run/nontty-json",
-			args: []string{"bundle", "create", "--actor", "local-human", "--out", "bundle-out", "--dry-run"},
-		},
-		{
-			name: "dry-run/project",
-			args: []string{"bundle", "create", "--project", "alpha", "--out", "bundle-out", "--dry-run"},
-		},
-		{
-			name: "no-filter/error",
-			args: []string{"bundle", "create", "--out", "bundle-out"},
-		},
-		{
-			name: "unknown-project/error",
-			args: []string{"bundle", "create", "--project", "nope", "--out", "bundle-out"},
-		},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			setup := append([][]string{}, bundleSetup...)
-			setup = append(setup, tc.setup...)
-			base := seedFixtureFiles(t, bins, setup, tc.files)
-			oldDir := copyFixture(t, base)
-			newDir := copyFixture(t, base)
-
-			oldRes := runCLI(t, bins.wrkq, oldDir, tc.args)
-			newRes := runCLI(t, bins.mirror, newDir, tc.args)
-
-			if oldRes.exit != newRes.exit {
-				t.Errorf("exit code: old=%d new=%d\n old stderr: %s\n new stderr: %s",
-					oldRes.exit, newRes.exit, oldRes.stderr, newRes.stderr)
-			}
-			if got, want := normalizeBundleStdout(newRes.stdout, oldDir, newDir), normalizeBundleStdout(oldRes.stdout, oldDir, newDir); got != want {
-				t.Errorf("stdout mismatch:\n old: %q\n new: %q", want, got)
-			}
-			if got, want := normalizeBundleStdout(newRes.stderr, oldDir, newDir), normalizeBundleStdout(oldRes.stderr, oldDir, newDir); got != want {
-				t.Errorf("stderr mismatch:\n old: %q\n new: %q", want, got)
-			}
-			if tc.materializes && oldRes.exit == 0 {
-				compareBundleDir(t, oldDir, newDir, tc.relOut)
-			}
-		})
-	}
-}
-
-// TestBundleWithAttachmentsHardGate is retained as a named guard for the broad
-// rpccli suite. The mirror no longer hard-gates --with-attachments: current
-// legacy bundle behavior sets manifest.with_attachments and carries descriptors
-// only, with no attachment file materialization. That behavior is now byte-proven
-// in TestBundleParity/actor-filter/with-attachments.
-func TestBundleWithAttachmentsHardGate(t *testing.T) {
 }
 
 // TestRmContainerHardGate is retained as a named guard for the broad rpccli suite.
@@ -5206,7 +4987,7 @@ func buildParityBinaries(t *testing.T) binaries {
 			return out
 		}
 		parityBins = binaries{
-			wrkq:    build("wrkq", "./cmd/wrkq"),
+			wrkq:    build("wrkq-legacy", "./cmd/wrkq-legacy"),
 			mirror:  build("wrkq-rpccli", "./cmd/wrkq-rpccli"),
 			wrkqadm: build("wrkqadm", "./cmd/wrkqadm"),
 		}

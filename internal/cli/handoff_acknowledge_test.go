@@ -310,26 +310,68 @@ func TestHandoffAckOutputModes(t *testing.T) {
 	}
 }
 
-func TestHandoffAckRequiresActorAgent(t *testing.T) {
+func TestHandoffAckExactIDFallsBackToRowWithoutRuntimeEnv(t *testing.T) {
 	database, _ := setupTestEnv(t)
 	t.Setenv("WRKQ_DB_PATH", database.Path())
-	// Force ASP_AGENT_ID empty so the actor resolution fails.
 	t.Setenv("ASP_SCOPE_REF", "")
 	t.Setenv("ASP_AGENT_ID", "")
 	t.Setenv("ASP_HANDLE", "")
 	t.Setenv("ASP_PROJECT", "")
 
-	created := seedHandoff(t, database, "curly", "wrkq", "no actor", "body")
+	created := seedHandoff(t, database, "curly", "wrkq", "row fallback", "body")
 
 	res := runHandoffAckCLI(t, []string{"handoff", "acknowledge", created.ID})
+	if res.code != 0 || res.err != nil {
+		t.Fatalf("row fallback ack failed code=%d err=%v stdout=%s stderr=%s", res.code, res.err, res.stdout, res.stderr)
+	}
+	out := decodeHandoffAckOutput(t, res.stdout)
+	if out.Handoff.AcknowledgedByAgentID == nil || *out.Handoff.AcknowledgedByAgentID != "curly" {
+		t.Fatalf("acknowledged_by_agent_id=%v want curly", out.Handoff.AcknowledgedByAgentID)
+	}
+	if out.Handoff.Status != store.HandoffStatusAcknowledged {
+		t.Fatalf("status=%q want acknowledged", out.Handoff.Status)
+	}
+}
+
+func TestHandoffAckExplicitAsUsesRowProjectWithoutRuntimeEnv(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	t.Setenv("WRKQ_DB_PATH", database.Path())
+	t.Setenv("ASP_SCOPE_REF", "")
+	t.Setenv("ASP_AGENT_ID", "")
+	t.Setenv("ASP_HANDLE", "")
+	t.Setenv("ASP_PROJECT", "")
+
+	created := seedHandoff(t, database, "curly", "wrkq", "--as fallback", "body")
+
+	res := runHandoffAckCLI(t, []string{"--as", "curly", "handoff", "acknowledge", created.ID})
+	if res.code != 0 || res.err != nil {
+		t.Fatalf("--as row-project ack failed code=%d err=%v stdout=%s stderr=%s", res.code, res.err, res.stdout, res.stderr)
+	}
+	out := decodeHandoffAckOutput(t, res.stdout)
+	if out.Handoff.AcknowledgedByPrincipalRef == nil || *out.Handoff.AcknowledgedByPrincipalRef != "agent:curly" {
+		t.Fatalf("acknowledged_by_principal_ref=%v want agent:curly", out.Handoff.AcknowledgedByPrincipalRef)
+	}
+}
+
+func TestHandoffAckMismatchedActorIsValidationError(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	t.Setenv("WRKQ_DB_PATH", database.Path())
+	t.Setenv("ASP_SCOPE_REF", "")
+	t.Setenv("ASP_AGENT_ID", "")
+	t.Setenv("ASP_HANDLE", "")
+	t.Setenv("ASP_PROJECT", "")
+
+	created := seedHandoff(t, database, "curly", "wrkq", "wrong actor", "body")
+
+	res := runHandoffAckCLI(t, []string{"--as", "cody", "handoff", "acknowledge", created.ID})
 	if res.code != 1 {
-		t.Fatalf("expected exit 1 when actor missing, got %d stdout=%s stderr=%s", res.code, res.stdout, res.stderr)
+		t.Fatalf("expected exit 1 for mismatched actor, got %d stdout=%s stderr=%s", res.code, res.stdout, res.stderr)
 	}
 	errOut := decodeHandoffAckError(t, res.stderr)
 	if errOut.Error.Code != "validation_error" {
 		t.Errorf("expected validation_error, got %s", errOut.Error.Code)
 	}
-	if !strings.Contains(errOut.Error.Message, "ASP_AGENT_ID") {
-		t.Errorf("expected ASP_AGENT_ID hint in message, got %q", errOut.Error.Message)
+	if !strings.Contains(errOut.Error.Message, "ambiguous actor") || !strings.Contains(errOut.Error.Message, "cody") || !strings.Contains(errOut.Error.Message, "curly") {
+		t.Errorf("expected actor conflict details in message, got %q", errOut.Error.Message)
 	}
 }

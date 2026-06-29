@@ -15,8 +15,6 @@ import type {
   WrkqAttachmentListResult,
   WrkqAttachmentRemoveParams,
   WrkqAttachmentShowParams,
-  WrkqBundleExportView,
-  WrkqBundleExportViewParams,
   WrkqComment,
   WrkqCommentAddParams,
   WrkqCommentDeleteParams,
@@ -165,16 +163,6 @@ export interface WrkqAdminFacade {
 }
 
 /**
- * Bundle namespace (wrkq.bundle.*). exportView returns the server-owned LOGICAL
- * bundle snapshot (read under one transaction); the CALLER materializes the
- * bundle directory from it. The snapshot carries NO server-host paths and NO
- * attachment bytes (descriptors only). Mirrors docs/wrkq-wrkf-rpc.md §6.2.
- */
-export interface WrkqBundleFacade {
-  exportView(params: WrkqBundleExportViewParams): Promise<WrkqBundleExportView>;
-}
-
-/**
  * Handoff family (wrkq.handoff.*). Scope is CALLER-owned but NOT project-root:
  * callers resolve the effective agent/project scope (and enforce self-scope for
  * create) and pass EXPLICIT scope/actor fields. The server reads no agent-runtime
@@ -222,5 +210,4 @@ export interface WrkqFacade {
   readonly search: WrkqSearchFacade;
   readonly index: WrkqIndexFacade;
   readonly admin: WrkqAdminFacade;
-  readonly bundle: WrkqBundleFacade;
 }

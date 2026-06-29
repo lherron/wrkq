@@ -7,9 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version information mirrors internal/cli/version.go. The mirror is built by the
-// same justfile path as wrkq-rpccli, so these default values match the current
-// installed parity harness unless release ldflags are added for both binaries.
+// Version information mirrors the legacy CLI version payload so the RPC-backed
+// production entrypoint and the temporary parity mirror stay byte-compatible.
 var (
 	Version   = "dev"
 	GitCommit = "unknown"

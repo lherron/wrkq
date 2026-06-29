@@ -10,8 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/scope"
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
 )
 
@@ -117,16 +117,11 @@ func handoffMode(cmd *cobra.Command, asJSON, ndjson, human bool, defaultStable h
 // the project-root scoper: handoff scope is resolved caller-side from --scope /
 // env, not from project-root.
 func openHandoffMirror(cmd *cobra.Command) (Transport, func(), error) {
-	h, err := bootstrap.Open(dbOverride(cmd))
+	tr, _, closeFn, err := openConfiguredTransport(cmd)
 	if err != nil {
 		return nil, nil, err
 	}
-	tr, err := NewInProcess(h)
-	if err != nil {
-		_ = h.Close()
-		return nil, nil, err
-	}
-	return tr, func() { _ = tr.Close() }, nil
+	return tr, closeFn, nil
 }
 
 // handoffCreateParams builds the wrkq.handoff.create request from the
@@ -879,7 +874,18 @@ func newHandoffAckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "acknowledge <handoff-id>",
 		Short: "Acknowledge a handoff so it is no longer pending",
-		Args:  cobra.ExactArgs(1),
+		Long: `Acknowledge a handoff so it no longer appears in default pending listings.
+
+Acknowledgement is the only retirement mechanism - handoffs do not expire
+automatically. Acknowledged handoffs are retained for history and search.
+
+The actor is resolved from --as, agent runtime env, or, for an exact handoff ID,
+the handoff row's agent/project as a last-resort sparse-shell fallback.
+
+Use --note to attach a short acknowledgement note describing why the handoff
+was consumed or is obsolete. Use --dry-run to inspect the mutation before
+applying it.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHandoffAck(cmd, args[0], handoffAckFlags{
 				note: note, dryRun: dryRun, ifMatch: ifMatch, asJSON: asJSON, human: human,
@@ -931,26 +937,26 @@ func runHandoffAck(cmd *cobra.Command, arg string, f handoffAckFlags) error {
 		return writeHandoffError(stderr, mode, 1, "validation_error", idOrUUID, "--if-match must be a non-negative etag value", nil, handoffAckExample)
 	}
 
-	// CALLER-side actor resolution from runtime env (the server never reads env).
-	// Mirrors internal/cli/handoff_acknowledge.go:66-78.
-	resolved, _, resolveErr := scope.Resolve("")
-	if resolveErr != nil || strings.TrimSpace(resolved.AgentID) == "" {
-		message := "actor agent id not resolved; set ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID/ASP_PROJECT in runtime env"
-		if resolveErr != nil {
-			message = resolveErr.Error()
-		}
-		return writeHandoffError(stderr, mode, 1, "validation_error", idOrUUID, message, nil, handoffAckExample)
-	}
-	actorAgentID := resolved.AgentID
-	principalRef := "agent:" + resolved.AgentID
-
 	tr, closeFn, err := openHandoffMirror(cmd)
 	if err != nil {
 		return writeHandoffError(stderr, mode, 1, "runtime_error", idOrUUID, err.Error(), nil, "")
 	}
 	defer closeFn()
 
-	params := handoffAckParams(idOrUUID, actorAgentID, principalRef, resolved.FullRef(), note, f.dryRun, f.ifMatch)
+	rowRaw, gerr := tr.Call(cmd.Context(), "wrkq.handoff.get", map[string]string{"handoff": idOrUUID})
+	if gerr != nil {
+		return classifyHandoffAckError(cmd, tr, stderr, mode, idOrUUID, gerr)
+	}
+	row, herr := handoffFromRPC(rowRaw)
+	if herr != nil {
+		return herr
+	}
+	identity, ierr := resolveHandoffAckIdentity(cmd, row)
+	if ierr != nil {
+		return writeHandoffError(stderr, mode, 1, "validation_error", idOrUUID, ierr.Error(), nil, handoffAckExample)
+	}
+
+	params := handoffAckParams(idOrUUID, identity.actorAgentID, identity.principalRef, identity.scopeRef, note, f.dryRun, f.ifMatch)
 
 	raw, rerr := tr.Call(cmd.Context(), "wrkq.handoff.acknowledge", params)
 	if rerr != nil {
@@ -961,6 +967,89 @@ func runHandoffAck(cmd *cobra.Command, arg string, f handoffAckFlags) error {
 		return herr
 	}
 	return writeHandoffAckOutput(cmd, mode, handoffAckOutput{Handoff: handoff, DryRun: f.dryRun})
+}
+
+type handoffAckIdentity struct {
+	actorAgentID string
+	principalRef string
+	scopeRef     string
+}
+
+func resolveHandoffAckIdentity(cmd *cobra.Command, handoff handoffJSON) (handoffAckIdentity, error) {
+	asFlag := changedStringFlag(cmd, "as")
+	if asFlag != "" {
+		principalRef, err := attribution.NormalizeCompat(asFlag)
+		if err != nil {
+			return handoffAckIdentity{}, fmt.Errorf("invalid --as: %w", err)
+		}
+		actorAgentID := strings.TrimPrefix(principalRef, "agent:")
+		return handoffAckIdentityFromCandidate("explicit --as", actorAgentID, principalRef, "", handoff)
+	}
+
+	if resolved, _, err := scope.Resolve(""); err == nil && strings.TrimSpace(resolved.AgentID) != "" {
+		return handoffAckIdentityFromCandidate("runtime scope", resolved.AgentID, "agent:"+resolved.AgentID, resolved.FullRef(), handoff)
+	}
+
+	env := scope.ReadEnv()
+	if strings.TrimSpace(env.ASPAgentID) != "" {
+		scopeRef := ""
+		if strings.TrimSpace(env.ASPProject) != "" {
+			scopeRef = "agent:" + strings.TrimSpace(env.ASPAgentID) + ":project:" + strings.TrimSpace(env.ASPProject)
+		}
+		return handoffAckIdentityFromCandidate("runtime ASP_AGENT_ID", strings.TrimSpace(env.ASPAgentID), "agent:"+strings.TrimSpace(env.ASPAgentID), scopeRef, handoff)
+	}
+
+	if strings.TrimSpace(handoff.AgentID) == "" || strings.TrimSpace(handoff.ProjectID) == "" {
+		return handoffAckIdentity{}, fmt.Errorf("actor agent id not resolved; set --as, ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID/ASP_PROJECT; exact handoff row %s lacks unambiguous agent_id/project_id", handoff.ID)
+	}
+	return handoffAckIdentityFromCandidate("handoff row", handoff.AgentID, "agent:"+handoff.AgentID, handoff.ScopeRef, handoff)
+}
+
+func handoffAckIdentityFromCandidate(source, actorAgentID, principalRef, scopeRef string, handoff handoffJSON) (handoffAckIdentity, error) {
+	actorAgentID = strings.TrimSpace(actorAgentID)
+	principalRef = strings.TrimSpace(principalRef)
+	scopeRef = strings.TrimSpace(scopeRef)
+	if actorAgentID == "" {
+		return handoffAckIdentity{}, fmt.Errorf("actor agent id not resolved from %s", source)
+	}
+	if strings.TrimSpace(handoff.AgentID) != "" && actorAgentID != strings.TrimSpace(handoff.AgentID) {
+		return handoffAckIdentity{}, fmt.Errorf("ambiguous actor: %s resolved %q but handoff row agent_id is %q", source, actorAgentID, handoff.AgentID)
+	}
+	if principalRef == "" {
+		principalRef = "agent:" + actorAgentID
+	}
+	projectID := strings.TrimSpace(handoff.ProjectID)
+	if scopeRef != "" {
+		if parsed, err := scope.ParseScopeRef(scopeRef); err == nil {
+			if strings.TrimSpace(parsed.ProjectID) != "" {
+				if projectID != "" && parsed.ProjectID != projectID {
+					return handoffAckIdentity{}, fmt.Errorf("ambiguous project: %s resolved %q but handoff row project_id is %q", source, parsed.ProjectID, projectID)
+				}
+				projectID = parsed.ProjectID
+			}
+		}
+	}
+	if projectID == "" {
+		return handoffAckIdentity{}, fmt.Errorf("project id not resolved from %s and handoff row lacks project_id", source)
+	}
+	if scopeRef == "" {
+		scopeRef = "agent:" + actorAgentID + ":project:" + projectID
+	}
+	return handoffAckIdentity{
+		actorAgentID: actorAgentID,
+		principalRef: principalRef,
+		scopeRef:     scopeRef,
+	}, nil
+}
+
+func changedStringFlag(cmd *cobra.Command, name string) string {
+	if cmd == nil {
+		return ""
+	}
+	if f := cmd.Flag(name); f != nil && f.Changed {
+		return strings.TrimSpace(f.Value.String())
+	}
+	return ""
 }
 
 // classifyHandoffAckError maps RPC errors to the legacy exit codes: 4 not found,

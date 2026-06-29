@@ -9,20 +9,22 @@ import (
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/scope"
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
 )
 
 type agentContextOutput struct {
-	Env          scope.EnvSnapshot    `json:"env"`
-	Scope        *scope.ResolvedScope `json:"scope,omitempty"`
-	Diagnostics  []scope.Diagnostic   `json:"diagnostics,omitempty"`
-	Error        string               `json:"error,omitempty"`
-	Lookups      *agentContextLookups `json:"lookups,omitempty"`
-	DBPath       string               `json:"db_path,omitempty"`
-	DBReachable  bool                 `json:"db_reachable"`
-	DBError      string               `json:"db_error,omitempty"`
-	OverrideFlag string               `json:"override_flag,omitempty"`
+	Env            scope.EnvSnapshot    `json:"env"`
+	Scope          *scope.ResolvedScope `json:"scope,omitempty"`
+	Diagnostics    []scope.Diagnostic   `json:"diagnostics,omitempty"`
+	Error          string               `json:"error,omitempty"`
+	Lookups        *agentContextLookups `json:"lookups,omitempty"`
+	DBPath         string               `json:"db_path,omitempty"`
+	DBMode         string               `json:"db_mode,omitempty"`
+	DBLocator      string               `json:"db_locator,omitempty"`
+	RemoteEndpoint string               `json:"remote_endpoint,omitempty"`
+	DBReachable    bool                 `json:"db_reachable"`
+	DBError        string               `json:"db_error,omitempty"`
+	OverrideFlag   string               `json:"override_flag,omitempty"`
 }
 
 type agentContextLookups struct {
@@ -56,13 +58,16 @@ Use --json or --human to force a mode.`,
 
 			env := scope.ReadEnv()
 			resolved, diags, resolveErr := scope.Resolve(overrideScope)
-			lookups, dbPath, dbReachable, dbErr := tryAgentContextLookups(cmd, resolved, resolveErr)
+			lookups, dbPath, dbReachable, dbErr, dbMode, dbLocator, remoteEndpoint := tryAgentContextLookups(cmd, resolved, resolveErr)
 
 			out := agentContextOutput{
-				Env:         env,
-				Diagnostics: diags,
-				DBPath:      dbPath,
-				DBReachable: dbReachable,
+				Env:            env,
+				Diagnostics:    diags,
+				DBPath:         dbPath,
+				DBMode:         dbMode,
+				DBLocator:      dbLocator,
+				RemoteEndpoint: remoteEndpoint,
+				DBReachable:    dbReachable,
 			}
 			if dbErr != "" {
 				out.DBError = dbErr
@@ -137,39 +142,54 @@ func resolveAgentContextMode(cmd *cobra.Command, asJSON, human bool) (string, er
 	return "json", nil
 }
 
-func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, resolveErr error) (*agentContextLookups, string, bool, string) {
+func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, resolveErr error) (*agentContextLookups, string, bool, string, string, string, string) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, "", false, fmt.Sprintf("config load failed: %v", err)
+		return nil, "", false, fmt.Sprintf("config load failed: %v", err), "", "", ""
 	}
 	if dbFlag := cmd.Flag("db"); dbFlag != nil {
 		if v := dbFlag.Value.String(); v != "" {
-			cfg.DBPath = v
+			if err := config.ApplyDBLocator(cfg, v, false); err != nil {
+				return nil, "", false, err.Error(), "", "", ""
+			}
 		}
+	}
+	if cfg.RemoteEndpoint != "" {
+		tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())
+		if err != nil {
+			return nil, "", false, fmt.Sprintf("remote rpc failed: %v", err), "remote", cfg.DBLocator, cfg.RemoteEndpoint
+		}
+		defer func() { _ = tr.Close() }()
+		if resolveErr != nil {
+			return nil, "", true, "", "remote", cfg.DBLocator, cfg.RemoteEndpoint
+		}
+		lookups := &agentContextLookups{}
+		if resolved.AgentID != "" {
+			fillAgentContextActorLookup(cmd, tr, resolved.AgentID, lookups)
+		}
+		if resolved.ProjectID != "" {
+			fillAgentContextContainerLookup(cmd, tr, resolved.ProjectID, lookups)
+		}
+		return lookups, "", true, "", "remote", cfg.DBLocator, cfg.RemoteEndpoint
 	}
 	if cfg.DBPath == "" {
-		return nil, "", false, ""
+		return nil, "", false, "", "", "", ""
 	}
 	if _, statErr := os.Stat(cfg.DBPath); statErr != nil {
-		return nil, cfg.DBPath, false, fmt.Sprintf("db not present: %v", statErr)
+		return nil, cfg.DBPath, false, fmt.Sprintf("db not present: %v", statErr), "", "", ""
 	}
 
-	h, openErr := bootstrap.Open(dbOverride(cmd))
+	tr, _, closeFn, openErr := openConfiguredTransport(cmd)
 	if openErr != nil {
 		if strings.Contains(openErr.Error(), "requires migration") {
-			return nil, cfg.DBPath, true, fmt.Sprintf("db requires migration: %v", openErr)
+			return nil, cfg.DBPath, true, fmt.Sprintf("db requires migration: %v", openErr), "", "", ""
 		}
-		return nil, cfg.DBPath, false, fmt.Sprintf("db open failed: %v", openErr)
+		return nil, cfg.DBPath, false, fmt.Sprintf("db open failed: %v", openErr), "", "", ""
 	}
-	tr, trErr := NewInProcess(h)
-	if trErr != nil {
-		_ = h.Close()
-		return nil, cfg.DBPath, false, fmt.Sprintf("db open failed: %v", trErr)
-	}
-	defer func() { _ = tr.Close() }()
+	defer closeFn()
 
 	if resolveErr != nil {
-		return nil, cfg.DBPath, true, ""
+		return nil, cfg.DBPath, true, "", "", "", ""
 	}
 
 	lookups := &agentContextLookups{}
@@ -179,7 +199,7 @@ func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, re
 	if resolved.ProjectID != "" {
 		fillAgentContextContainerLookup(cmd, tr, resolved.ProjectID, lookups)
 	}
-	return lookups, cfg.DBPath, true, ""
+	return lookups, cfg.DBPath, true, "", "", "", ""
 }
 
 func fillAgentContextActorLookup(cmd *cobra.Command, tr Transport, slug string, lookups *agentContextLookups) {
@@ -265,7 +285,15 @@ func printAgentContextHuman(stdout, stderr io.Writer, out agentContextOutput) {
 
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Database:")
-	if out.DBPath == "" {
+	if out.DBMode == "remote" {
+		fmt.Fprintf(stdout, "  mode        = remote\n")
+		fmt.Fprintf(stdout, "  locator     = %s\n", out.DBLocator)
+		fmt.Fprintf(stdout, "  endpoint    = %s\n", out.RemoteEndpoint)
+		fmt.Fprintf(stdout, "  reachable   = %t\n", out.DBReachable)
+		if out.DBError != "" {
+			fmt.Fprintf(stdout, "  status      = %s\n", out.DBError)
+		}
+	} else if out.DBPath == "" {
 		fmt.Fprintln(stdout, "  path        = <not configured>")
 	} else {
 		fmt.Fprintf(stdout, "  path        = %s\n", out.DBPath)

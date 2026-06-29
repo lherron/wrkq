@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lherron/wrkq/internal/cli"
+	"github.com/lherron/wrkq/internal/rpccli"
 )
 
 func main() {
-	if err := cli.Execute(); err != nil {
-		if !cli.ErrorAlreadyReported(err) {
+	if err := rpccli.ExecuteAs("wrkq"); err != nil {
+		if !rpccli.ErrorAlreadyReported(err) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
-		os.Exit(cli.ExitCodeForError(err))
+		os.Exit(rpccli.ExitCodeForError(err))
 	}
 }

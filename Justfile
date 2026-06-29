@@ -46,14 +46,19 @@ db-reset:
 
 # --- CLI tasks (Golang) ---
 
-# Build CLI binaries (wrkq, wrkf, wrkqadm, wrkqd)
+# Build shipped CLI binaries (wrkq, wrkf, wrkqadm, wrkqd)
 build:
   echo "Building wrkq, wrkf, wrkqadm, and wrkqd binaries..."
+  rm -f bin/wrkq-rpccli bin/wrkq-legacy
   go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
   go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
   go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
-  # RPC-backed mirror (parity harness, not system-installed). See docs/rpc-cli-migration.md.
+
+# Build the temporary old-vs-new RPC cutover oracle binaries.
+build-rpc-oracle:
+  echo "Building wrkq legacy/RPC oracle binaries..."
+  go build -tags sqlite_fts5 -o bin/wrkq-legacy ./cmd/wrkq-legacy
   go build -tags sqlite_fts5 -o bin/wrkq-rpccli ./cmd/wrkq-rpccli
 
 # Conservative no-network check for agents/CI sandboxes
@@ -115,19 +120,14 @@ install no-sync="": build
   cp bin/wrkf ~/.local/bin/wrkf
   cp bin/wrkqadm ~/.local/bin/wrkqadm
   cp bin/wrkqd ~/.local/bin/wrkqd
-  # RPC-backed mirror — installed alongside during the rpccli migration/cutover so
-  # it can be exercised on PATH (parity harness; superseded once cutover lands).
-  cp bin/wrkq-rpccli ~/.local/bin/wrkq-rpccli
   chmod +x ~/.local/bin/wrkq
   chmod +x ~/.local/bin/wrkf
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
-  chmod +x ~/.local/bin/wrkq-rpccli
   echo "✓ Installed to ~/.local/bin/wrkq"
   echo "✓ Installed to ~/.local/bin/wrkf"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo "✓ Installed to ~/.local/bin/wrkqd"
-  echo "✓ Installed to ~/.local/bin/wrkq-rpccli"
   echo ""
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "⚠️  Add ~/.local/bin to your PATH:"

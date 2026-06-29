@@ -35,15 +35,16 @@ type serverRuntimeStatus struct {
 }
 
 type serverOptions struct {
-	addr       string
-	unixPath   string
-	token      string
-	dbPath     string
-	json       bool
-	foreground bool
-	daemon     bool
-	timeoutMS  int
-	force      bool
+	addr          string
+	unixPath      string
+	token         string
+	dbPath        string
+	json          bool
+	foreground    bool
+	daemon        bool
+	unsafeNoToken bool
+	timeoutMS     int
+	force         bool
 }
 
 type launchdOwner struct {
@@ -111,6 +112,7 @@ func newServerCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&opts.unixPath, "unix", opts.unixPath, "Listen/status Unix socket path")
 	cmd.PersistentFlags().StringVar(&opts.token, "token", opts.token, "Shared token for local auth")
 	cmd.PersistentFlags().StringVar(&opts.dbPath, "db-path", "", "Database path override")
+	cmd.PersistentFlags().BoolVar(&opts.unsafeNoToken, "unsafe-no-token", false, "Allow non-loopback listen without a token (dev only)")
 
 	startCmd.Flags().BoolVar(&opts.foreground, "foreground", false, "Run in the foreground when launchd is not loaded")
 	startCmd.Flags().BoolVar(&opts.daemon, "daemon", false, "Run as a background process when launchd is not loaded")
@@ -288,6 +290,9 @@ func serveWrkqServer(opts *serverOptions) error {
 	}
 	if opts.token != "" {
 		args = append(args, "--token", opts.token)
+	}
+	if opts.unsafeNoToken {
+		args = append(args, "--unsafe-no-token")
 	}
 	if opts.dbPath != "" {
 		args = append(args, "--db", opts.dbPath)
@@ -481,6 +486,9 @@ func daemonizeWrkqServer(opts *serverOptions, timeout time.Duration) error {
 	}
 	if opts.token != "" {
 		args = append(args, "--token", opts.token)
+	}
+	if opts.unsafeNoToken {
+		args = append(args, "--unsafe-no-token")
 	}
 	if opts.dbPath != "" {
 		args = append(args, "--db-path", opts.dbPath)

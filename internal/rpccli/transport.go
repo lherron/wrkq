@@ -7,17 +7,23 @@ package rpccli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
+	"github.com/spf13/cobra"
 )
 
 // Transport is the CLI's only boundary to durable wrkq behavior. Command
@@ -267,4 +273,151 @@ func NewSubprocess(ctx context.Context, binPath, dbPath string, extraEnv []strin
 		return nil, initErr
 	}
 	return c, nil
+}
+
+type remoteTransport struct {
+	mu     sync.Mutex
+	client *http.Client
+	url    string
+	token  string
+	nextID int
+	closed bool
+}
+
+func NewRemote(endpoint, token string) (Transport, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return nil, fmt.Errorf("remote endpoint is required")
+	}
+	rt := &remoteTransport{
+		client: http.DefaultClient,
+		url:    "http://" + endpoint + "/v1/rpc",
+		token:  token,
+	}
+	if err := rt.initialize(); err != nil {
+		return nil, err
+	}
+	return rt, nil
+}
+
+func (t *remoteTransport) initialize() error {
+	res, err := t.request(context.Background(), "rpc.initialize", map[string]string{"protocolVersion": workrpc.ProtocolVersion})
+	if err != nil {
+		return fmt.Errorf("rpc.initialize: %w", err)
+	}
+	var init struct {
+		ProtocolVersion string   `json:"protocolVersion"`
+		Methods         []string `json:"methods"`
+	}
+	if err := json.Unmarshal(res, &init); err != nil {
+		return fmt.Errorf("decode initialize result: %w", err)
+	}
+	if init.ProtocolVersion != workrpc.ProtocolVersion {
+		return fmt.Errorf("rpc protocol mismatch: server %q, client %q", init.ProtocolVersion, workrpc.ProtocolVersion)
+	}
+	if !containsMethod(init.Methods, "wrkq.task.show") {
+		return errors.New("rpc server does not expose the wrkq method surface (wrong wiring)")
+	}
+	return nil
+}
+
+func (t *remoteTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return nil, fmt.Errorf("remote transport is closed")
+	}
+	return t.request(ctx, method, params)
+}
+
+func (t *remoteTransport) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	t.nextID++
+	id := json.RawMessage(strconv.Itoa(t.nextID))
+	var raw json.RawMessage
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+			return nil, err
+		}
+		raw = b
+	}
+	frame, err := json.Marshal(workrpc.Request{JSONRPC: "2.0", ID: id, Method: method, Params: raw})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(frame))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if t.token != "" {
+		req.Header.Set("Authorization", "Bearer "+t.token)
+	}
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("remote workrpc request %s: %w", method, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var rpcResp workrpc.Response
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		return nil, fmt.Errorf("decode remote workrpc response %s: %w", method, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if rpcResp.Error != nil {
+			return nil, errorFromRPC(rpcResp.Error)
+		}
+		return nil, fmt.Errorf("remote workrpc HTTP %d", resp.StatusCode)
+	}
+	if rpcResp.Error != nil {
+		return nil, errorFromRPC(rpcResp.Error)
+	}
+	return rpcResp.Result, nil
+}
+
+func (t *remoteTransport) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closed = true
+	return nil
+}
+
+func remoteTokenFromEnv() string {
+	if token := strings.TrimSpace(os.Getenv("WRKQD_TOKEN")); token != "" {
+		return token
+	}
+	if path := strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")); path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
+}
+
+func openConfiguredTransport(cmd *cobra.Command) (Transport, *config.Config, func(), error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if override := dbOverride(cmd); override != "" {
+		if err := config.ApplyDBLocator(cfg, override, false); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if cfg.RemoteEndpoint != "" {
+		tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return tr, cfg, func() { _ = tr.Close() }, nil
+	}
+	h, err := bootstrap.Open(cfg.DBLocator)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tr, err := NewInProcess(h)
+	if err != nil {
+		_ = h.Close()
+		return nil, nil, nil, err
+	}
+	return tr, h.Config, func() { _ = tr.Close() }, nil
 }

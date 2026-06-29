@@ -4,11 +4,8 @@ import "testing"
 
 // TestCatViewInCatalogs guards daedalus's catView contract corrections (T-05090):
 // the compatibility projection must be represented in BOTH the method catalog and
-// the DTO catalog. NOTE: ProtocolSchemaHash() hashes catalog *names*, not field
-// shapes — so these memberships make the hash detect added/removed method/DTO
-// NAMES, not field-level drift. Field-shape drift is guarded separately by
-// TestCatViewDTOFingerprint (internal/wrkqapi). True shape-hashing is a tracked
-// follow-up (see docs/rpc-cli-migration.md).
+// the DTO catalog so ProtocolSchemaHash() detects added/removed method/DTO names
+// and the reflected DTO field/tag shape registered for each DTO.
 func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(methodCatalog, "wrkq.task.catView") {
 		t.Error("wrkq.task.catView missing from methodCatalog (its name would not be in the schema-hash input)")
@@ -161,17 +158,6 @@ func TestCatViewInCatalogs(t *testing.T) {
 	}
 	if !contains(dtoCatalog, "WrkqTaskCopyResult") {
 		t.Error("WrkqTaskCopyResult missing from dtoCatalog")
-	}
-	// Bundle logical snapshot (T-05118): the new read-view method + its DTOs must be
-	// in BOTH catalogs so their NAMES enter the protocol schema-hash input.
-	if !contains(methodCatalog, "wrkq.bundle.exportView") {
-		t.Error("wrkq.bundle.exportView missing from methodCatalog")
-	}
-	if !contains(dtoCatalog, "WrkqBundleExportView") {
-		t.Error("WrkqBundleExportView missing from dtoCatalog")
-	}
-	if !contains(dtoCatalog, "WrkqBundleTaskDoc") {
-		t.Error("WrkqBundleTaskDoc missing from dtoCatalog")
 	}
 	// Handoff family (T-05117) + search + index family (T-05114): the new methods
 	// must be in BOTH catalogs so their NAMES enter the protocol schema-hash input.

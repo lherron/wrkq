@@ -24,8 +24,7 @@ var topLevelCommands = []mirroredCommand{
 	// agent-context is local/RPC-lookup parity; registered separately.
 	// agent-info is local-only and byte-proven; registered separately.
 	// apply is RPC-backed (wrkq.task.update via the caller-side parse/gate); registered separately.
-	// bundle is RPC-backed (wrkq.bundle.exportView LOGICAL snapshot; the CLI
-	// materializes files on the caller host); registered separately.
+	// bundle is sunset before production cutover; see T-04371.
 	// cat is the one real command this slice; registered separately.
 	// check / check-inbox are RPC-backed (real parity commands); registered separately.
 	// cp is RPC-backed (server-owned deep copy via wrkq.task.copy; caller owns
@@ -62,13 +61,28 @@ var topLevelCommands = []mirroredCommand{
 	// whoami is local/config attribution parity; registered separately.
 }
 
-// NewRootCmd builds the mirror's cobra tree. It reproduces the production
-// persistent flags and top-level command surface, wiring implemented mirror
-// commands plus any explicit temporary stubs listed in topLevelCommands.
+// NewRootCmd builds the compatibility mirror's cobra tree. Tests keep using the
+// wrkq-rpccli command name while the production entrypoint calls
+// NewRootCmdFor("wrkq").
 func NewRootCmd() *cobra.Command {
+	return NewRootCmdFor("wrkq-rpccli")
+}
+
+// NewRootCmdFor builds the RPC-backed cobra tree using the supplied command
+// name. The tree reproduces the production persistent flags and top-level
+// command surface, wiring implemented RPC-backed commands plus any explicit
+// temporary stubs listed in topLevelCommands.
+func NewRootCmdFor(commandName string) *cobra.Command {
+	if commandName == "" {
+		commandName = "wrkq"
+	}
+	short := "Task management CLI"
+	if commandName == "wrkq-rpccli" {
+		short = "RPC-backed mirror of wrkq (parity harness, not for production use)"
+	}
 	root := &cobra.Command{
-		Use:           "wrkq-rpccli",
-		Short:         "RPC-backed mirror of wrkq (parity harness, not for production use)",
+		Use:           commandName,
+		Short:         short,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -104,7 +118,6 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newRenameContainerCmd())
 	root.AddCommand(newCpCmd())
 	root.AddCommand(newWebhookCmd())
-	root.AddCommand(newBundleCmd())
 	root.AddCommand(newHandoffCmd())
 	root.AddCommand(newMonitorCmd())
 	root.AddCommand(newWatchCmd())
@@ -128,6 +141,11 @@ func NewRootCmd() *cobra.Command {
 // Execute runs the mirror root command.
 func Execute() error {
 	return NewRootCmd().Execute()
+}
+
+// ExecuteAs runs the RPC-backed CLI under a specific executable name.
+func ExecuteAs(commandName string) error {
+	return NewRootCmdFor(commandName).Execute()
 }
 
 func newStubCmd(mc mirroredCommand) *cobra.Command {

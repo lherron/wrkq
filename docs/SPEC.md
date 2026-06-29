@@ -37,18 +37,20 @@ Non-goals:
 
 ## 2. Shipped Binaries
 
-`just build` and `just install` build four binaries:
+`just build` and `just install` build four shipped binaries:
 
 | Binary | Role | Canonical use |
 | --- | --- | --- |
-| `wrkq` | Human and agent task surface | Task/container/comment/attachment CRUD, search, handoffs, server lifecycle helpers. |
-| `wrkqadm` | Administrative surface | Init, migrations, snapshots, actors, merge, patches, bundle apply. |
+| `wrkq` | Human and agent task surface | RPC-backed task/container/comment/attachment CRUD, search, handoffs, and local server lifecycle helpers. |
+| `wrkqadm` | Administrative surface | Init, migrations, snapshots, actors, merge, patches, and state import/export. |
 | `wrkqd` | Local daemon | Token-auth HTTP API over the same database. |
 | `wrkf` | Workflow CLI/RPC surface | Workflow templates, evidence, obligations, effects, transitions, and JSON-RPC stdio. |
 
-`wrkq` is intentionally safe for day-to-day agent use. `wrkqadm` is for database
-and administrative operations. `wrkqd` is a local service wrapper, not a separate
-source of truth. `wrkf` builds workflow semantics on top of wrkq tasks.
+`wrkq` is intentionally safe for day-to-day agent use and routes retained
+durable behavior through the workrpc JSON-RPC boundary. `wrkqadm` is for
+database and administrative operations. `wrkqd` is a local service wrapper, not
+a separate source of truth. `wrkf` builds workflow semantics on top of wrkq
+tasks.
 
 ## 3. Repository Boundaries
 
@@ -56,8 +58,10 @@ Important implementation packages:
 
 | Path | Responsibility |
 | --- | --- |
-| `cmd/wrkq`, `cmd/wrkqadm`, `cmd/wrkqd`, `cmd/wrkf` | Binary entry points. |
-| `internal/cli` | Cobra commands for `wrkq`, `wrkqadm`, and daemon helpers. |
+| `cmd/wrkq`, `cmd/wrkqadm`, `cmd/wrkqd`, `cmd/wrkf` | Shipped binary entry points. |
+| `cmd/wrkq-legacy`, `cmd/wrkq-rpccli` | Temporary RPC cutover oracle binaries used by tests; not installed by default. |
+| `internal/rpccli` | RPC-backed production `wrkq` command adapters and temporary mirror root. |
+| `internal/cli` | Legacy oracle commands plus `wrkqadm` and daemon helpers. |
 | `internal/config` | Config/env loading and defaults. |
 | `internal/db` | SQLite open, migrations, schema status. |
 | `internal/domain` | Domain structs and validation enums. |
@@ -83,7 +87,9 @@ Key variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Canonical database path. |
+| `WRKQ_DB` | Primary database locator for production `wrkq`: local SQLite path or `rpc://host[:port]` workrpc endpoint. |
+| `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Local SQLite database path compatibility inputs; reject `rpc://` values. |
+| `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` | Bearer token used by remote `WRKQ_DB=rpc://...` calls and wrkqd HTTP auth. |
 | `WRKQ_ATTACH_DIR` | Attachment byte storage root. |
 | `WRKQ_PRINCIPAL_REF` | Canonical mutation principal, exactly `agent:<id>`. |
 | `WRKQ_ACTOR_ID` | Compatibility alias; best-effort translated to an `agent:<id>` principal. |
@@ -96,6 +102,9 @@ Key variables:
 Database defaults:
 - If `.wrkq/wrkq.db` exists in the current directory, it is used.
 - Otherwise the default is `~/.local/share/wrkq/wrkq.db`.
+- `rpc://host` locators default to port `7171`.
+- Admin and daemon path-owning surfaces (`wrkqadm --db`, `wrkqd --db`,
+  `wrkq server --db-path`) remain local-path-only.
 
 Attachment defaults:
 - If the DB is `.wrkq/wrkq.db`, attachments default to `.wrkq/attachments`.
@@ -328,8 +337,8 @@ Primary task/container surface:
 `projects`, `ls`, `tree`, `find`, `search`, `index`, `stat`, `cat`, `touch`,
 `set`, `apply`, `diff`, `log`, `watch`, `mkdir`, `rmdir`, `mv`, `cp`, `rm`,
 `restore`, `container`, `rename-container`, `comment`, `attach`, `relation`,
-`check`, `ack`, `handoff`, `agent-context`, `whoami`, `bundle create`,
-`webhook`, `server`, `usage`, `agent-info`, `version`, `completion`.
+`check`, `ack`, `handoff`, `agent-context`, `whoami`, `webhook`, `server`,
+`usage`, `agent-info`, `version`, `completion`.
 
 Important behavior:
 
@@ -354,10 +363,10 @@ Important behavior:
 
 Administrative surface:
 
-`init`, `migrate`, `db snapshot`, `actors ls`, `actors add`, `bundle apply`,
-`state export`, `state import`, `state verify`, `patch create`, `patch validate`,
-`patch apply`, `patch rebase`, `patch summarize`, `merge`, `attach path`,
-`doctor`, `config doctor`, `version`.
+`init`, `migrate`, `db snapshot`, `actors ls`, `actors add`, `state export`,
+`state import`, `state verify`, `patch create`, `patch validate`, `patch apply`,
+`patch rebase`, `patch summarize`, `merge`, `attach path`, `doctor`,
+`config doctor`, `version`.
 
 ### Exit Codes
 
@@ -433,8 +442,6 @@ Current route surface:
 | `/v1/actors/list` | List legacy actor display-cache rows. |
 | `/v1/actors/create` | Explicit legacy/admin actor-cache creation; not required for writes. |
 | `/v1/actors/update` | Update legacy actor display-cache rows. |
-| `/v1/bundle/create` | Create bundle. |
-| `/v1/bundle/apply` | Apply bundle. |
 
 There are no handoff HTTP routes in the current daemon.
 
@@ -453,8 +460,8 @@ timestamp, and JSON payload. The event log is an audit trail, not a hash-chain
 ledger.
 
 `state export`, `state import`, and `state verify` provide canonical snapshot
-operations. `bundle create` and `bundle apply` support git-ops style state
-transfer.
+operations. The former Git-ops bundle workflow is not part of the production
+CLI, admin, daemon, or workrpc contract.
 
 ## 11. wrkf Integration
 

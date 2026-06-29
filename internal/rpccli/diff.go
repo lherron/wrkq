@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
 )
 
@@ -63,21 +62,11 @@ type diffFieldChange struct {
 }
 
 func runDiff(cmd *cobra.Command, args []string, diffJSON bool) error {
-	h, err := bootstrap.Open(dbOverride(cmd))
+	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
 	}
-	sc, err := newScoper(cmd, h)
-	if err != nil {
-		_ = h.Close()
-		return err
-	}
-	tr, err := NewInProcess(h)
-	if err != nil {
-		_ = h.Close()
-		return err
-	}
-	defer func() { _ = tr.Close() }()
+	defer closeFn()
 
 	// Resolve + fetch task A. Legacy: applyProjectRootToSelector(arg, false) then
 	// ResolveTask + fetchTaskData; the wrapping prefixes are reproduced here.

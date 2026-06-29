@@ -35,7 +35,6 @@ func runVersionAdm(cmd *cobra.Command, args []string) error {
 				"actors", "actor",
 				"doctor", "config",
 				"db",
-				"bundle",
 				"attach",
 				"version", "completion",
 			},

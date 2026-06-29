@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
@@ -11,7 +12,9 @@ import (
 
 // Config represents the application configuration
 type Config struct {
+	DBLocator        string       `yaml:"db_locator"`
 	DBPath           string       `yaml:"db_path"`
+	RemoteEndpoint   string       `yaml:"remote_endpoint"`
 	AttachDir        string       `yaml:"attach_dir"`
 	AttachmentsMaxMB int          `yaml:"attachments_max_mb"`
 	DefaultActor     string       `yaml:"default_actor"`
@@ -75,8 +78,20 @@ func Load() (*Config, error) {
 	_ = loadYAMLConfig(cfg)
 
 	// Override with environment variables
-	if dbPath := getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE"); dbPath != "" {
-		cfg.DBPath = dbPath
+	if dbLocator := strings.TrimSpace(os.Getenv("WRKQ_DB")); dbLocator != "" {
+		if err := ApplyDBLocator(cfg, dbLocator, false); err != nil {
+			return nil, err
+		}
+	}
+	if dbPath := strings.TrimSpace(getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); dbPath != "" {
+		if IsRemoteLocator(dbPath) {
+			return nil, fmt.Errorf("WRKQ_DB_PATH is path-only; use WRKQ_DB for rpc:// locators")
+		}
+		if cfg.DBLocator == "" {
+			cfg.DBLocator = dbPath
+			cfg.DBPath = dbPath
+			cfg.RemoteEndpoint = ""
+		}
 	}
 	if attachDir := os.Getenv("WRKQ_ATTACH_DIR"); attachDir != "" {
 		cfg.AttachDir = attachDir
@@ -156,7 +171,7 @@ func Load() (*Config, error) {
 	}
 
 	// Set defaults if not configured
-	if cfg.DBPath == "" {
+	if cfg.DBPath == "" && cfg.RemoteEndpoint == "" {
 		// Check for project-local database first
 		if _, err := os.Stat(".wrkq/wrkq.db"); err == nil {
 			cfg.DBPath = ".wrkq/wrkq.db"
@@ -167,6 +182,13 @@ func Load() (*Config, error) {
 				return nil, fmt.Errorf("failed to get home directory: %w", err)
 			}
 			cfg.DBPath = filepath.Join(homeDir, ".local", "share", "wrkq", "wrkq.db")
+		}
+	}
+	if cfg.DBLocator == "" {
+		if cfg.RemoteEndpoint != "" {
+			cfg.DBLocator = "rpc://" + cfg.RemoteEndpoint
+		} else {
+			cfg.DBLocator = cfg.DBPath
 		}
 	}
 
@@ -184,6 +206,44 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// IsRemoteLocator reports whether a database locator selects a remote workrpc
+// endpoint rather than a local SQLite path.
+func IsRemoteLocator(locator string) bool {
+	return strings.HasPrefix(strings.TrimSpace(locator), "rpc://")
+}
+
+// ApplyDBLocator applies either a local SQLite path or rpc:// endpoint to cfg.
+// When pathOnly is true, rpc:// values are rejected before they can reach db.Open.
+func ApplyDBLocator(cfg *Config, locator string, pathOnly bool) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	locator = strings.TrimSpace(locator)
+	if locator == "" {
+		return nil
+	}
+	if IsRemoteLocator(locator) {
+		if pathOnly {
+			return fmt.Errorf("database path field is path-only; use WRKQ_DB for rpc:// locators")
+		}
+		endpoint := strings.TrimPrefix(locator, "rpc://")
+		if endpoint == "" {
+			return fmt.Errorf("rpc:// database locator requires a host")
+		}
+		if !strings.Contains(endpoint, ":") {
+			endpoint += ":7171"
+		}
+		cfg.DBLocator = locator
+		cfg.DBPath = ""
+		cfg.RemoteEndpoint = endpoint
+		return nil
+	}
+	cfg.DBLocator = locator
+	cfg.DBPath = locator
+	cfg.RemoteEndpoint = ""
+	return nil
 }
 
 // loadYAMLConfig loads configuration from ~/.config/wrkq/config.yaml

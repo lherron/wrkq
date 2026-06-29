@@ -76,17 +76,25 @@ func (h *Handle) Close() error {
 	return err
 }
 
-// Open loads config, opens the database (honoring an optional db-path override),
+// Open loads config, opens the database (honoring an optional db locator override),
 // verifies migrations, and builds the server API + options. The mirror CLI uses
 // this because it has no pre-opened database; the stdio entrypoint uses Server
 // directly with the database it already opened through appctx.
-func Open(dbPathOverride string) (*Handle, error) {
+func Open(dbLocatorOverride string) (*Handle, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	if dbPathOverride != "" {
-		cfg.DBPath = dbPathOverride
+	if dbLocatorOverride != "" {
+		if err := config.ApplyDBLocator(cfg, dbLocatorOverride, false); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.RemoteEndpoint != "" {
+		return nil, fmt.Errorf("remote database locator %q cannot be opened as a local SQLite database", cfg.DBLocator)
+	}
+	if cfg.DBPath == "" {
+		return nil, fmt.Errorf("database path not specified")
 	}
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {

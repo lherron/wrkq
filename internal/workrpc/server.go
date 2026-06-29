@@ -26,6 +26,7 @@ type Server struct {
 	maxBytes    int
 	initialized bool
 	shutdown    bool
+	mu          sync.Mutex
 }
 
 func NewServer(out io.Writer) *Server {
@@ -65,71 +66,87 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 			}
 			continue
 		}
-		if req.Method == "rpc.exit" {
-			return nil
-		}
-		if req.Method == "$/cancelRequest" {
-			continue
-		}
-		if req.Method == "rpc.shutdown" {
-			s.shutdown = true
-			if !req.isNotification() {
-				_ = s.writeResult(req.ID, json.RawMessage(`{}`))
-			}
-			continue
-		}
-		if s.shutdown {
-			if req.isNotification() {
-				continue
-			}
-			_ = s.writeError(req.ID, MapError(NewValidationError("server is shutting down", nil)))
-			continue
-		}
-		if !s.initialized && req.Method != "rpc.initialize" {
-			if req.isNotification() {
-				continue
-			}
-			_ = s.writeError(req.ID, MapError(NewValidationError("rpc.initialize must be called first", map[string]any{
-				"method": req.Method,
-			})))
-			continue
-		}
-		handler, ok := s.handlers[req.Method]
+		resp, ok := s.HandleRequest(ctx, req)
 		if !ok {
-			if !req.isNotification() {
-				_ = s.writeError(req.ID, protocolError(codeMethodNotFound, "method not found", nil))
-			}
-			continue
-		}
-		result, err := callStdoutPure(ctx, handler, req.Params)
-		if err != nil {
-			if !req.isNotification() {
-				_ = s.writeError(req.ID, MapError(err))
-			}
-			continue
-		}
-		if req.Method == "rpc.initialize" {
-			s.initialized = true
+			return nil
 		}
 		if req.isNotification() {
 			continue
 		}
-		_ = s.writeResult(req.ID, result)
+		_ = s.writer.WriteResponse(resp)
 	}
+}
+
+// HandleRequest dispatches a single JSON-RPC request against this server's
+// registry. It returns ok=false only for rpc.exit, which terminates streaming
+// transports. HTTP transports can reject notifications before calling this.
+func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if req.Method == "rpc.exit" {
+		return Response{}, false
+	}
+	if req.Method == "$/cancelRequest" {
+		return Response{}, true
+	}
+	if req.Method == "rpc.shutdown" {
+		s.shutdown = true
+		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Result: json.RawMessage(`{}`)}, true
+	}
+	if s.shutdown {
+		if req.isNotification() {
+			return Response{}, true
+		}
+		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: MapError(NewValidationError("server is shutting down", nil))}, true
+	}
+	if !s.initialized && req.Method != "rpc.initialize" {
+		if req.isNotification() {
+			return Response{}, true
+		}
+		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: MapError(NewValidationError("rpc.initialize must be called first", map[string]any{
+			"method": req.Method,
+		}))}, true
+	}
+	handler, ok := s.handlers[req.Method]
+	if !ok {
+		if req.isNotification() {
+			return Response{}, true
+		}
+		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: protocolError(codeMethodNotFound, "method not found", nil)}, true
+	}
+	result, err := callStdoutPure(ctx, handler, req.Params)
+	if err != nil {
+		if req.isNotification() {
+			return Response{}, true
+		}
+		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: MapError(err)}, true
+	}
+	if req.Method == "rpc.initialize" {
+		s.initialized = true
+	}
+	if req.isNotification() {
+		return Response{}, true
+	}
+	return Response{JSONRPC: "2.0", ID: responseID(req.ID), Result: resultOrNull(result)}, true
 }
 
 func (r Request) isNotification() bool {
 	return len(r.ID) == 0
 }
 
-func (s *Server) writeResult(id json.RawMessage, result json.RawMessage) error {
+func responseID(id json.RawMessage) json.RawMessage {
 	if len(id) == 0 {
-		id = json.RawMessage(`null`)
+		return json.RawMessage(`null`)
 	}
+	return id
+}
+
+func resultOrNull(result json.RawMessage) json.RawMessage {
 	if len(result) == 0 {
-		result = json.RawMessage(`null`)
+		return json.RawMessage(`null`)
 	}
-	return s.writer.WriteResponse(Response{JSONRPC: "2.0", ID: id, Result: result})
+	return result
 }
 
 func (s *Server) writeError(id json.RawMessage, rpcErr *RPCError) error {

@@ -574,10 +574,9 @@ func Collect(db *sql.DB, opts CreateOptions) (*Snapshot, error) {
 }
 
 // Materialize writes a Snapshot to outputDir as the on-disk bundle (manifest.json,
-// tasks/*.md, refs/*.md, containers.txt, events.ndjson). It is host-side: the RPC
-// mirror and legacy `wrkq bundle create` both call this so the files are
-// byte-identical. Attachment BYTE materialization is NOT done here (descriptors
-// only); callers that need bytes fetch them via wrkq.attachment.getBytes.
+// tasks/*.md, refs/*.md, containers.txt, events.ndjson). Attachment BYTE
+// materialization is NOT done here (descriptors only); callers that need bytes
+// fetch them via wrkq.attachment.getBytes.
 func Materialize(snap *Snapshot, outputDir string) (*Bundle, error) {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create bundle directory: %w", err)

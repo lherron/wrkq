@@ -42,15 +42,16 @@ type launchdOwner struct {
 }
 
 var (
-	serverAddr       string
-	serverUnixPath   string
-	serverToken      string
-	serverDBPath     string
-	serverJSON       bool
-	serverForeground bool
-	serverDaemon     bool
-	serverTimeoutMS  int
-	serverForce      bool
+	serverAddr          string
+	serverUnixPath      string
+	serverToken         string
+	serverDBPath        string
+	serverJSON          bool
+	serverForeground    bool
+	serverDaemon        bool
+	serverUnsafeNoToken bool
+	serverTimeoutMS     int
+	serverForce         bool
 )
 
 var serverCmd = &cobra.Command{
@@ -102,6 +103,7 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverUnixPath, "unix", os.Getenv("WRKQD_UNIX"), "Listen/status Unix socket path")
 	serverCmd.PersistentFlags().StringVar(&serverToken, "token", os.Getenv("WRKQD_TOKEN"), "Shared token for local auth")
 	serverCmd.PersistentFlags().StringVar(&serverDBPath, "db-path", "", "Database path override")
+	serverCmd.PersistentFlags().BoolVar(&serverUnsafeNoToken, "unsafe-no-token", false, "Allow non-loopback listen without a token (dev only)")
 
 	serverStartCmd.Flags().BoolVar(&serverForeground, "foreground", false, "Run in the foreground when launchd is not loaded")
 	serverStartCmd.Flags().BoolVar(&serverDaemon, "daemon", false, "Run as a background process when launchd is not loaded")
@@ -260,11 +262,12 @@ func writeServerLifecycleJSON(cmd *cobra.Command, action, mode string, status se
 
 func serveWrkqServer() error {
 	return ServeDaemon(DaemonOptions{
-		Addr:    resolvedServerAddr(),
-		Unix:    serverUnixPath,
-		Token:   serverToken,
-		DBPath:  serverDBPath,
-		PIDPath: wrkqServerPIDPath(),
+		Addr:          resolvedServerAddr(),
+		Unix:          serverUnixPath,
+		Token:         serverToken,
+		DBPath:        serverDBPath,
+		PIDPath:       wrkqServerPIDPath(),
+		UnsafeNoToken: serverUnsafeNoToken,
 	})
 }
 
@@ -438,6 +441,9 @@ func daemonizeWrkqServer(timeout time.Duration) error {
 	}
 	if serverToken != "" {
 		args = append(args, "--token", serverToken)
+	}
+	if serverUnsafeNoToken {
+		args = append(args, "--unsafe-no-token")
 	}
 	if serverDBPath != "" {
 		args = append(args, "--db-path", serverDBPath)

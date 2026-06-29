@@ -36,7 +36,8 @@ in default pending listings.
 Scope is agent/project for v1 (e.g. cody@wrkq). Task and lane scope are
 intentionally out of scope for the first implementation. Default scope
 resolution reads agent runtime env first (ASP_SCOPE_REF, ASP_HANDLE,
-ASP_AGENT_ID + ASP_PROJECT); use --scope only to override.`,
+ASP_AGENT_ID + ASP_PROJECT). Subcommands that accept --scope use it as an
+explicit override.`,
 }
 
 // ---- handoff create -------------------------------------------------------
@@ -149,6 +150,9 @@ var handoffAckCmd = &cobra.Command{
 
 Acknowledgement is the only retirement mechanism — handoffs do not expire
 automatically. Acknowledged handoffs are retained for history and search.
+
+The actor is resolved from --as, agent runtime env, or, for an exact handoff ID,
+the handoff row's agent/project as a last-resort sparse-shell fallback.
 
 Use --note to attach a short acknowledgement note describing why the
 handoff was consumed or is obsolete. Use --dry-run to inspect the mutation

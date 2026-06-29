@@ -170,6 +170,10 @@ func seedDatabaseAdm(database *db.DB, humanSlug, humanName, agentSlug, agentName
 
 // updateGitignore adds the database path to .gitignore if not already present
 func updateGitignore(dbPath string) error {
+	if filepath.IsAbs(dbPath) {
+		return nil
+	}
+
 	gitignorePath := ".gitignore"
 
 	// Read existing .gitignore content if it exists

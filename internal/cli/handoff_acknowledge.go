@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/scope"
@@ -62,25 +63,21 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 			"--if-match must be a non-negative etag value", handoffAckExample)
 	}
 
-	// Resolve the acting agent from runtime env. Acknowledging requires a
-	// principal derived from a validated runtime scope.
-	resolved, _, resolveErr := scope.Resolve("")
-	if resolveErr != nil || strings.TrimSpace(resolved.AgentID) == "" {
-		message := "actor agent id not resolved; set ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID/ASP_PROJECT in runtime env"
-		if resolveErr != nil {
-			message = resolveErr.Error()
-		}
-		return writeHandoffAckError(stderr, mode, 1, "validation_error", idOrUUID,
-			message, handoffAckExample)
-	}
-	actorAgentID := resolved.AgentID
-	principalRef := "agent:" + resolved.AgentID
-
 	database, err := openHandoffCreateDB(cmd)
 	if err != nil {
 		return writeHandoffAckError(stderr, mode, 1, "runtime_error", idOrUUID, err.Error(), "")
 	}
 	defer func() { _ = database.Close() }()
+
+	handoff, err := store.GetHandoff(cmd.Context(), database, idOrUUID)
+	if err != nil {
+		return classifyHandoffAckError(cmd.Context(), database, stderr, mode, idOrUUID, err)
+	}
+
+	identity, err := resolveHandoffAckIdentity(cmd, handoff)
+	if err != nil {
+		return writeHandoffAckError(stderr, mode, 1, "validation_error", idOrUUID, err.Error(), handoffAckExample)
+	}
 
 	// Best-effort actor UUID lookup; the store accepts a nil pointer when the
 	// running agent has no corresponding actor row (matches handoff_create).
@@ -88,22 +85,22 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 	{
 		var u string
 		if err := database.QueryRowContext(cmd.Context(),
-			"SELECT uuid FROM actors WHERE slug = ? LIMIT 1", actorAgentID).Scan(&u); err == nil {
+			"SELECT uuid FROM actors WHERE slug = ? LIMIT 1", identity.actorAgentID).Scan(&u); err == nil {
 			actorUUID = &u
 		}
 	}
 
 	ackArgs := store.AcknowledgeHandoffArgs{
 		Note:         note,
-		ActorAgentID: actorAgentID,
+		ActorAgentID: identity.actorAgentID,
 		ActorUUID:    actorUUID,
-		PrincipalRef: principalRef,
-		ScopeRef:     resolved.FullRef(),
+		PrincipalRef: identity.principalRef,
+		ScopeRef:     identity.scopeRef,
 		DryRun:       handoffAckDryRun,
 		IfMatch:      handoffAckIfMatch,
 	}
 
-	handoff, err := store.AcknowledgeHandoff(cmd.Context(), database, idOrUUID, ackArgs)
+	handoff, err = store.AcknowledgeHandoff(cmd.Context(), database, idOrUUID, ackArgs)
 	if err != nil {
 		return classifyHandoffAckError(cmd.Context(), database, stderr, mode, idOrUUID, err)
 	}
@@ -116,6 +113,91 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 		return exitError(1, err)
 	}
 	return nil
+}
+
+type handoffAckIdentity struct {
+	actorAgentID string
+	principalRef string
+	scopeRef     string
+	source       string
+}
+
+func resolveHandoffAckIdentity(cmd *cobra.Command, handoff store.Handoff) (handoffAckIdentity, error) {
+	asFlag := changedStringFlag(cmd, "as")
+	if asFlag != "" {
+		principalRef, err := attribution.NormalizeCompat(asFlag)
+		if err != nil {
+			return handoffAckIdentity{}, fmt.Errorf("invalid --as: %w", err)
+		}
+		actorAgentID := strings.TrimPrefix(principalRef, "agent:")
+		return handoffAckIdentityFromCandidate("explicit --as", actorAgentID, principalRef, "", handoff)
+	}
+
+	if resolved, _, err := scope.Resolve(""); err == nil && strings.TrimSpace(resolved.AgentID) != "" {
+		return handoffAckIdentityFromCandidate("runtime scope", resolved.AgentID, "agent:"+resolved.AgentID, resolved.FullRef(), handoff)
+	}
+
+	env := scope.ReadEnv()
+	if strings.TrimSpace(env.ASPAgentID) != "" {
+		scopeRef := ""
+		if strings.TrimSpace(env.ASPProject) != "" {
+			scopeRef = "agent:" + strings.TrimSpace(env.ASPAgentID) + ":project:" + strings.TrimSpace(env.ASPProject)
+		}
+		return handoffAckIdentityFromCandidate("runtime ASP_AGENT_ID", strings.TrimSpace(env.ASPAgentID), "agent:"+strings.TrimSpace(env.ASPAgentID), scopeRef, handoff)
+	}
+
+	if strings.TrimSpace(handoff.AgentID) == "" || strings.TrimSpace(handoff.ProjectID) == "" {
+		return handoffAckIdentity{}, fmt.Errorf("actor agent id not resolved; set --as, ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID/ASP_PROJECT; exact handoff row %s lacks unambiguous agent_id/project_id", handoff.ID)
+	}
+	return handoffAckIdentityFromCandidate("handoff row", handoff.AgentID, "agent:"+handoff.AgentID, handoff.ScopeRef, handoff)
+}
+
+func handoffAckIdentityFromCandidate(source, actorAgentID, principalRef, scopeRef string, handoff store.Handoff) (handoffAckIdentity, error) {
+	actorAgentID = strings.TrimSpace(actorAgentID)
+	principalRef = strings.TrimSpace(principalRef)
+	scopeRef = strings.TrimSpace(scopeRef)
+	if actorAgentID == "" {
+		return handoffAckIdentity{}, fmt.Errorf("actor agent id not resolved from %s", source)
+	}
+	if strings.TrimSpace(handoff.AgentID) != "" && actorAgentID != strings.TrimSpace(handoff.AgentID) {
+		return handoffAckIdentity{}, fmt.Errorf("ambiguous actor: %s resolved %q but handoff row agent_id is %q", source, actorAgentID, handoff.AgentID)
+	}
+	if principalRef == "" {
+		principalRef = "agent:" + actorAgentID
+	}
+	projectID := strings.TrimSpace(handoff.ProjectID)
+	if scopeRef != "" {
+		if parsed, err := scope.ParseScopeRef(scopeRef); err == nil {
+			if strings.TrimSpace(parsed.ProjectID) != "" {
+				if projectID != "" && parsed.ProjectID != projectID {
+					return handoffAckIdentity{}, fmt.Errorf("ambiguous project: %s resolved %q but handoff row project_id is %q", source, parsed.ProjectID, projectID)
+				}
+				projectID = parsed.ProjectID
+			}
+		}
+	}
+	if projectID == "" {
+		return handoffAckIdentity{}, fmt.Errorf("project id not resolved from %s and handoff row lacks project_id", source)
+	}
+	if scopeRef == "" {
+		scopeRef = "agent:" + actorAgentID + ":project:" + projectID
+	}
+	return handoffAckIdentity{
+		actorAgentID: actorAgentID,
+		principalRef: principalRef,
+		scopeRef:     scopeRef,
+		source:       source,
+	}, nil
+}
+
+func changedStringFlag(cmd *cobra.Command, name string) string {
+	if cmd == nil {
+		return ""
+	}
+	if f := cmd.Flag(name); f != nil && f.Changed {
+		return strings.TrimSpace(f.Value.String())
+	}
+	return ""
 }
 
 // classifyHandoffAckError maps store errors to the documented CLI exit codes

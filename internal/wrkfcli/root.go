@@ -93,7 +93,12 @@ func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*
 				return err
 			}
 			if flagDB != "" {
-				cfg.DBPath = flagDB
+				if err := config.ApplyDBLocator(cfg, flagDB, true); err != nil {
+					return err
+				}
+			}
+			if cfg.RemoteEndpoint != "" {
+				return fmt.Errorf("wrkf requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
 			}
 			database, err := db.Open(cfg.DBPath)
 			if err != nil {

@@ -55,6 +55,17 @@ func TestCoreRuleImportGuard(t *testing.T) {
 	}
 }
 
+func TestProductionWrkqEntrypointUsesRPCCLI(t *testing.T) {
+	root := repoRootFromTest(t)
+	src := readTextFile(t, filepath.Join(root, "cmd", "wrkq", "main.go"))
+	if strings.Contains(src, `"github.com/lherron/wrkq/internal/cli"`) {
+		t.Fatal("cmd/wrkq imports internal/cli; production wrkq must use the RPC-backed entrypoint")
+	}
+	if !strings.Contains(src, `"github.com/lherron/wrkq/internal/rpccli"`) {
+		t.Fatal("cmd/wrkq does not import internal/rpccli")
+	}
+}
+
 func TestPrimaryCutoverInventoryGate(t *testing.T) {
 	if len(topLevelCommands) != 0 {
 		t.Fatalf("top-level mirror stubs remain: %#v", topLevelCommands)
@@ -105,7 +116,6 @@ func TestPrimaryCutoverInventoryGate(t *testing.T) {
 		"TestMonitorWatchFollowNDJSONParity",
 		"TestWatchFollowNDJSONParity",
 		"TestWatchTTYHumanSemanticParity",
-		"TestBundleParity",
 	}
 	for _, evidence := range requiredEvidence {
 		if !strings.Contains(migrationDoc, evidence) {
@@ -152,12 +162,6 @@ func TestPrimaryCutoverInventoryGate(t *testing.T) {
 			forbidden: []string{
 				"CLI mirror HARD-GATES this flag",
 				"rpc-backed (partial)",
-			},
-		},
-		{
-			path: filepath.Join(root, "internal", "wrkqapi", "bundleview.go"),
-			forbidden: []string{
-				"hard-gates the flag",
 			},
 		},
 		{

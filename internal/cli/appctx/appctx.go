@@ -127,12 +127,17 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 	// Override DB path from --db flag if provided
 	if dbFlag := cmd.Flag("db"); dbFlag != nil {
 		if dbPath := dbFlag.Value.String(); dbPath != "" {
-			app.Config.DBPath = dbPath
+			if err := config.ApplyDBLocator(app.Config, dbPath, true); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	// Open database if needed
 	if opts.NeedsDB {
+		if app.Config.RemoteEndpoint != "" {
+			return nil, fmt.Errorf("remote database locator %q is not valid for this local command", app.Config.DBLocator)
+		}
 		database, err := db.Open(app.Config.DBPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open database: %w", err)

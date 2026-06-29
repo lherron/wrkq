@@ -13,13 +13,15 @@ func main() {
 	unixPath := flag.String("unix", os.Getenv("WRKQD_UNIX"), "Listen on unix socket path")
 	token := flag.String("token", os.Getenv("WRKQD_TOKEN"), "Shared token for local auth")
 	dbPath := flag.String("db", "", "Database path override (defaults to config)")
+	unsafeNoToken := flag.Bool("unsafe-no-token", false, "Allow non-loopback listen without a token (dev only)")
 	flag.Parse()
 
 	opts := cli.DaemonOptions{
-		Addr:   *addr,
-		Unix:   *unixPath,
-		Token:  *token,
-		DBPath: *dbPath,
+		Addr:          *addr,
+		Unix:          *unixPath,
+		Token:         *token,
+		DBPath:        *dbPath,
+		UnsafeNoToken: *unsafeNoToken,
 	}
 
 	if err := cli.ServeDaemon(opts); err != nil {

@@ -110,7 +110,7 @@ func runMergeAdm(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	actorUUID, err := resolveBundleActor(destDB, cmd, cfg)
+	actorUUID, err := resolveMergeActor(destDB, cmd, cfg)
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to resolve actor: %w", err))
 	}

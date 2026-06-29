@@ -99,86 +99,8 @@ echo "✓ Snapshot creation and verification works"
 rm -f "$TEST_SNAPSHOT"
 echo
 
-# Test 8: Create test bundle for bundle apply
-echo "Test 8: Preparing bundle apply test"
-BUNDLE_DIR="/tmp/claude/test-bundle"
-rm -rf "$BUNDLE_DIR"
-mkdir -p "$BUNDLE_DIR/tasks/portal"
-mkdir -p "$BUNDLE_DIR/attachments"
-
-# Create manifest.json
-cat > "$BUNDLE_DIR/manifest.json" <<EOF
-{
-  "machine_interface_version": 1,
-  "timestamp": "2025-11-20T12:00:00Z",
-  "with_attachments": false,
-  "with_events": false
-}
-EOF
-
-# Create containers.txt
-cat > "$BUNDLE_DIR/containers.txt" <<EOF
-# Test containers
-portal
-portal/api
-backend
-EOF
-
-# Get UUID of existing task for testing
-TASK_UUID=$($WRKQ cat portal/task-1 | grep "^uuid:" | awk '{print $2}')
-
-# Create a task document for bundle (simulating modification)
-cat > "$BUNDLE_DIR/tasks/portal/task-1.md" <<EOF
----
-uuid: $TASK_UUID
-path: portal/task-1
-base_etag: 1
----
-
-# Updated Test Task 1
-
-This is an updated version of the task from the bundle.
-
-## Implementation Notes
-
-- Testing bundle apply
-- Verifying etag handling
-EOF
-
-# Create a new task in bundle
-cat > "$BUNDLE_DIR/tasks/portal/new-task.md" <<EOF
----
-path: portal/new-task
----
-
-# New Task from Bundle
-
-This task is created via bundle apply.
-EOF
-
-echo "✓ Test bundle prepared"
-echo
-
-# Test 9: wrkqadm bundle apply --dry-run
-echo "Test 9: wrkqadm bundle apply --dry-run"
-$WRKQADM bundle apply --from "$BUNDLE_DIR" --dry-run
-echo "✓ Dry-run works"
-echo
-
-# Test 10: wrkqadm bundle apply (actual apply)
-echo "Test 10: wrkqadm bundle apply"
-$WRKQADM bundle apply --from "$BUNDLE_DIR"
-
-# Verify containers were created
-$WRKQ ls | grep -q "portal"
-$WRKQ ls | grep -q "backend"
-$WRKQ ls portal | grep -q "api"
-
-echo "✓ Bundle applied successfully"
-echo
-
-# Test 11: wrkqadm attach path (if task has attachments)
-echo "Test 11: wrkqadm attach path"
+# Test 8: wrkqadm attach path (if task has attachments)
+echo "Test 8: wrkqadm attach path"
 # Create a test file and attach it
 echo "test content" > /tmp/claude/test-file.txt
 ATTACH_OUTPUT=$($WRKQ attach put portal/task-1 /tmp/claude/test-file.txt)
