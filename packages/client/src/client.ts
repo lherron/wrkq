@@ -51,6 +51,7 @@ export interface CreateClientOptions {
   dbLocator?: string;
   /** Legacy name for dbLocator. */
   dbPath?: string;
+  principalRef?: string;
   actor?: string;
   role?: string;
   hookCatalogPath?: string;
@@ -289,6 +290,7 @@ export async function createClient(opts: CreateClientOptions = {}): Promise<Work
       args: opts.args,
       dbLocator: opts.dbLocator,
       dbPath: opts.dbPath,
+      principalRef: opts.principalRef,
       actor: opts.actor,
       role: opts.role,
       hookCatalogPath: opts.hookCatalogPath,

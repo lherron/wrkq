@@ -7,7 +7,7 @@
  * exits.
  *
  * Contract: docs/wrkq-wrkf-rpc.md §1, §4, §7.
- * - Global flags (--db/--actor/--role/--hook-catalog) precede the `rpc --stdio`
+ * - Global flags (--db/--principal-ref/--actor/--role/--hook-catalog) precede the `rpc --stdio`
  *   subcommand, matching the CLI surface. Remote rpc:// DB locators are passed
  *   through WRKQ_DB instead of path-only --db.
  * - close() == graceful (stdin EOF == rpc.exit) then await exit, escalate on
@@ -28,7 +28,9 @@ export interface StdioSpawnOptions {
   dbLocator?: string;
   /** Legacy name for dbLocator. */
   dbPath?: string;
-  /** --actor */
+  /** wrkq --principal-ref */
+  principalRef?: string;
+  /** wrkf --actor; legacy wrkq compatibility when a DB locator is explicit. */
   actor?: string;
   /** --role */
   role?: string;
@@ -92,7 +94,18 @@ export function buildStdioSpawnSpec(opts: StdioSpawnOptions): StdioSpawnSpec {
       argv.push("--db", dbLocator);
     }
   }
-  if (opts.actor) argv.push(isWrkf ? "--actor" : "--as", opts.actor);
+  if (!isWrkf && opts.principalRef) {
+    argv.push("--principal-ref", opts.principalRef);
+  }
+  if (opts.actor) {
+    if (isWrkf) {
+      argv.push("--actor", opts.actor);
+    } else if (dbLocator) {
+      argv.push("--as", opts.actor);
+    } else {
+      throw new Error("actor is no longer accepted for wrkq caller attribution; use principalRef");
+    }
+  }
   if (isWrkf && opts.role) argv.push("--role", opts.role);
   if (isWrkf && opts.hookCatalogPath) argv.push("--hook-catalog", opts.hookCatalogPath);
   argv.push(...(opts.args ?? ["rpc", "--stdio"]));
