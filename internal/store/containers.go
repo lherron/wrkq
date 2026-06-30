@@ -813,12 +813,11 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 	var createdAt, updatedAt string
 	var archivedAt *string
 	var kind string
-	var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
+	var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 
 	err := cs.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 			   created_at, updated_at, archived_at,
-			   created_by_actor_uuid, updated_by_actor_uuid,
 			   created_by_principal_ref, updated_by_principal_ref,
 			   created_by_scope_ref, updated_by_scope_ref
 		FROM containers WHERE uuid = ?
@@ -826,7 +825,6 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
 		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
-		&createdByActor, &updatedByActor,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,
 	)
@@ -837,12 +835,6 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 		return nil, fmt.Errorf("failed to get container: %w", err)
 	}
 	container.Kind = domain.ContainerKind(kind)
-	if createdByActor.Valid {
-		container.CreatedByActorUUID = createdByActor.String
-	}
-	if updatedByActor.Valid {
-		container.UpdatedByActorUUID = updatedByActor.String
-	}
 	if createdByPrincipal.Valid {
 		container.CreatedByPrincipalRef = createdByPrincipal.String
 	}
@@ -865,7 +857,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 	var createdAt, updatedAt string
 	var archivedAt *string
 	var kind string
-	var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
+	var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 	var query string
 	var args []interface{}
 
@@ -873,7 +865,6 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		query = `
 			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
-				   created_by_actor_uuid, updated_by_actor_uuid,
 				   created_by_principal_ref, updated_by_principal_ref,
 				   created_by_scope_ref, updated_by_scope_ref
 			FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
@@ -883,7 +874,6 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		query = `
 			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 				   created_at, updated_at, archived_at,
-				   created_by_actor_uuid, updated_by_actor_uuid,
 				   created_by_principal_ref, updated_by_principal_ref,
 				   created_by_scope_ref, updated_by_scope_ref
 			FROM containers WHERE slug = ? AND parent_uuid = ?
@@ -895,7 +885,6 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
 		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
-		&createdByActor, &updatedByActor,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,
 	)
@@ -906,12 +895,6 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		return nil, fmt.Errorf("failed to lookup container: %w", err)
 	}
 	container.Kind = domain.ContainerKind(kind)
-	if createdByActor.Valid {
-		container.CreatedByActorUUID = createdByActor.String
-	}
-	if updatedByActor.Valid {
-		container.UpdatedByActorUUID = updatedByActor.String
-	}
 	if createdByPrincipal.Valid {
 		container.CreatedByPrincipalRef = createdByPrincipal.String
 	}
@@ -932,7 +915,6 @@ func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, err
 	query := `
 		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
 		       created_at, updated_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid,
 		       created_by_principal_ref, updated_by_principal_ref,
 		       created_by_scope_ref, updated_by_scope_ref
 		FROM containers
@@ -953,24 +935,17 @@ func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, err
 		var createdAt, updatedAt string
 		var archivedAt *string
 		var kind string
-		var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
+		var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 		if err := rows.Scan(
 			&c.UUID, &c.ID, &c.Slug, &c.Title,
 			&c.ParentUUID, &kind, &c.SectionUUID, &c.SortIndex, &c.WebhookURLs, &c.ETag,
 			&createdAt, &updatedAt, &archivedAt,
-			&createdByActor, &updatedByActor,
 			&createdByPrincipal, &updatedByPrincipal,
 			&createdByScope, &updatedByScope,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan container: %w", err)
 		}
 		c.Kind = domain.ContainerKind(kind)
-		if createdByActor.Valid {
-			c.CreatedByActorUUID = createdByActor.String
-		}
-		if updatedByActor.Valid {
-			c.UpdatedByActorUUID = updatedByActor.String
-		}
 		if createdByPrincipal.Valid {
 			c.CreatedByPrincipalRef = createdByPrincipal.String
 		}

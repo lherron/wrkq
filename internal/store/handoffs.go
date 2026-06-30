@@ -538,10 +538,10 @@ func getHandoffByUUIDTx(ctx context.Context, tx *sql.Tx, handoffUUID string) (Ha
 func handoffSelectSQL() string {
 	return `
 		SELECT uuid, id, scope_ref, scope_kind, agent_id, project_id,
-		       agent_actor_uuid, agent_principal_ref, project_container_uuid,
-		       created_by_agent_id, created_by_actor_uuid, created_by_principal_ref,
+		       agent_principal_ref, project_container_uuid,
+		       created_by_agent_id, created_by_principal_ref,
 		       title, body, status, idempotency_key,
-		       acknowledged_at, acknowledged_by_agent_id, acknowledged_by_actor_uuid,
+		       acknowledged_at, acknowledged_by_agent_id,
 		       acknowledged_by_principal_ref, acknowledgement_note,
 		       meta, etag, created_at, updated_at
 		FROM handoffs`
@@ -553,31 +553,28 @@ type handoffScanner interface {
 
 func scanHandoff(scanner handoffScanner) (Handoff, error) {
 	var handoff Handoff
-	var agentActorUUID, agentPrincipalRef, projectContainerUUID, createdByActorUUID, createdByPrincipalRef sql.NullString
-	var idempotencyKey, acknowledgedAt, acknowledgedByAgentID, acknowledgedByActorUUID, acknowledgedByPrincipalRef, acknowledgementNote sql.NullString
+	var agentPrincipalRef, projectContainerUUID, createdByPrincipalRef sql.NullString
+	var idempotencyKey, acknowledgedAt, acknowledgedByAgentID, acknowledgedByPrincipalRef, acknowledgementNote sql.NullString
 	var meta sql.NullString
 	var createdAt, updatedAt string
 
 	err := scanner.Scan(
 		&handoff.UUID, &handoff.ID, &handoff.ScopeRef, &handoff.ScopeKind, &handoff.AgentID, &handoff.ProjectID,
-		&agentActorUUID, &agentPrincipalRef, &projectContainerUUID,
-		&handoff.CreatedByAgentID, &createdByActorUUID, &createdByPrincipalRef,
+		&agentPrincipalRef, &projectContainerUUID,
+		&handoff.CreatedByAgentID, &createdByPrincipalRef,
 		&handoff.Title, &handoff.Body, &handoff.Status, &idempotencyKey,
-		&acknowledgedAt, &acknowledgedByAgentID, &acknowledgedByActorUUID, &acknowledgedByPrincipalRef, &acknowledgementNote,
+		&acknowledgedAt, &acknowledgedByAgentID, &acknowledgedByPrincipalRef, &acknowledgementNote,
 		&meta, &handoff.ETag, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return Handoff{}, err
 	}
 
-	handoff.AgentActorUUID = nullStringPtr(agentActorUUID)
 	handoff.AgentPrincipalRef = nullStringPtr(agentPrincipalRef)
 	handoff.ProjectContainerUUID = nullStringPtr(projectContainerUUID)
-	handoff.CreatedByActorUUID = nullStringPtr(createdByActorUUID)
 	handoff.CreatedByPrincipalRef = nullStringValue(createdByPrincipalRef)
 	handoff.IdempotencyKey = nullStringPtr(idempotencyKey)
 	handoff.AcknowledgedByAgentID = nullStringPtr(acknowledgedByAgentID)
-	handoff.AcknowledgedByActorUUID = nullStringPtr(acknowledgedByActorUUID)
 	handoff.AcknowledgedByPrincipalRef = nullStringPtr(acknowledgedByPrincipalRef)
 	handoff.AcknowledgementNote = nullStringPtr(acknowledgementNote)
 	handoff.Meta = nullStringPtr(meta)

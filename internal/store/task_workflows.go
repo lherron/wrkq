@@ -102,7 +102,7 @@ func (ts *TaskStore) CreateRoleAssignment(params CreateRoleAssignmentParams) (*d
 // ListRoleAssignments returns the workflow role assignments for a task.
 func (ts *TaskStore) ListRoleAssignments(taskUUID string) ([]domain.TaskRoleAssignment, error) {
 	rows, err := ts.store.db.Query(`
-		SELECT uuid, task_uuid, role, actor_uuid, principal_ref, assigned_at
+		SELECT uuid, task_uuid, role, principal_ref, assigned_at
 		FROM task_role_assignments
 		WHERE task_uuid = ?
 		ORDER BY role
@@ -185,7 +185,7 @@ func (ts *TaskStore) CreateEvidenceItem(params CreateEvidenceItemParams) (*domai
 // ListEvidenceItems returns evidence items for a task.
 func (ts *TaskStore) ListEvidenceItems(taskUUID string) ([]domain.EvidenceItem, error) {
 	rows, err := ts.store.db.Query(`
-		SELECT uuid, id, task_uuid, kind, ref, content_hash, produced_by_actor_uuid, produced_by_principal_ref, produced_by_role,
+		SELECT uuid, id, task_uuid, kind, ref, content_hash, produced_by_principal_ref, produced_by_role,
 		       build_id, build_version, build_env, produced_at, meta
 		FROM evidence_items
 		WHERE task_uuid = ?
@@ -272,7 +272,7 @@ func (ts *TaskStore) CreateTaskTransition(params CreateTaskTransitionParams) (*d
 func (ts *TaskStore) ListTaskTransitions(taskUUID string) ([]domain.TaskTransition, error) {
 	rows, err := ts.store.db.Query(`
 		SELECT uuid, id, task_uuid, from_phase, to_phase, from_lifecycle_state, to_lifecycle_state,
-		       actor_uuid, principal_ref, actor_role, evidence_item_uuids, transitioned_at, meta
+		       principal_ref, actor_role, evidence_item_uuids, transitioned_at, meta
 		FROM task_transitions
 		WHERE task_uuid = ?
 		ORDER BY transitioned_at, id
@@ -304,7 +304,7 @@ type rowScanner interface {
 
 func getRoleAssignmentByRowID(tx *sql.Tx, rowID int64) (*domain.TaskRoleAssignment, error) {
 	row := tx.QueryRow(`
-		SELECT uuid, task_uuid, role, actor_uuid, principal_ref, assigned_at
+		SELECT uuid, task_uuid, role, principal_ref, assigned_at
 		FROM task_role_assignments
 		WHERE rowid = ?
 	`, rowID)
@@ -314,11 +314,10 @@ func getRoleAssignmentByRowID(tx *sql.Tx, rowID int64) (*domain.TaskRoleAssignme
 func scanRoleAssignment(scanner rowScanner) (*domain.TaskRoleAssignment, error) {
 	var assignment domain.TaskRoleAssignment
 	var assignedAt string
-	var actorUUID, principalRef sql.NullString
-	if err := scanner.Scan(&assignment.UUID, &assignment.TaskUUID, &assignment.Role, &actorUUID, &principalRef, &assignedAt); err != nil {
+	var principalRef sql.NullString
+	if err := scanner.Scan(&assignment.UUID, &assignment.TaskUUID, &assignment.Role, &principalRef, &assignedAt); err != nil {
 		return nil, fmt.Errorf("failed to scan task role assignment: %w", err)
 	}
-	assignment.ActorUUID = nullStringValue(actorUUID)
 	assignment.PrincipalRef = nullStringValue(principalRef)
 	parsed, err := parseStoredTime(assignedAt)
 	if err != nil {
@@ -330,7 +329,7 @@ func scanRoleAssignment(scanner rowScanner) (*domain.TaskRoleAssignment, error) 
 
 func getEvidenceItemByRowID(tx *sql.Tx, rowID int64) (*domain.EvidenceItem, error) {
 	row := tx.QueryRow(`
-		SELECT uuid, id, task_uuid, kind, ref, content_hash, produced_by_actor_uuid, produced_by_principal_ref, produced_by_role,
+		SELECT uuid, id, task_uuid, kind, ref, content_hash, produced_by_principal_ref, produced_by_role,
 		       build_id, build_version, build_env, produced_at, meta
 		FROM evidence_items
 		WHERE rowid = ?
@@ -341,15 +340,14 @@ func getEvidenceItemByRowID(tx *sql.Tx, rowID int64) (*domain.EvidenceItem, erro
 func scanEvidenceItem(scanner rowScanner) (*domain.EvidenceItem, error) {
 	var item domain.EvidenceItem
 	var producedAt string
-	var producedByActorUUID, producedByPrincipalRef sql.NullString
+	var producedByPrincipalRef sql.NullString
 	if err := scanner.Scan(
 		&item.UUID, &item.ID, &item.TaskUUID, &item.Kind, &item.Ref, &item.ContentHash,
-		&producedByActorUUID, &producedByPrincipalRef, &item.ProducedByRole, &item.BuildID, &item.BuildVersion,
+		&producedByPrincipalRef, &item.ProducedByRole, &item.BuildID, &item.BuildVersion,
 		&item.BuildEnv, &producedAt, &item.Meta,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan evidence item: %w", err)
 	}
-	item.ProducedByActorUUID = nullStringValue(producedByActorUUID)
 	item.ProducedByPrincipalRef = nullStringValue(producedByPrincipalRef)
 	parsed, err := parseStoredTime(producedAt)
 	if err != nil {
@@ -362,7 +360,7 @@ func scanEvidenceItem(scanner rowScanner) (*domain.EvidenceItem, error) {
 func getTaskTransitionByRowID(tx *sql.Tx, rowID int64) (*domain.TaskTransition, error) {
 	row := tx.QueryRow(`
 		SELECT uuid, id, task_uuid, from_phase, to_phase, from_lifecycle_state, to_lifecycle_state,
-		       actor_uuid, principal_ref, actor_role, evidence_item_uuids, transitioned_at, meta
+		       principal_ref, actor_role, evidence_item_uuids, transitioned_at, meta
 		FROM task_transitions
 		WHERE rowid = ?
 	`, rowID)
@@ -372,15 +370,14 @@ func getTaskTransitionByRowID(tx *sql.Tx, rowID int64) (*domain.TaskTransition, 
 func scanTaskTransition(scanner rowScanner) (*domain.TaskTransition, error) {
 	var transition domain.TaskTransition
 	var transitionedAt string
-	var actorUUID, principalRef sql.NullString
+	var principalRef sql.NullString
 	if err := scanner.Scan(
 		&transition.UUID, &transition.ID, &transition.TaskUUID, &transition.FromPhase, &transition.ToPhase,
-		&transition.FromLifecycleState, &transition.ToLifecycleState, &actorUUID,
+		&transition.FromLifecycleState, &transition.ToLifecycleState,
 		&principalRef, &transition.ActorRole, &transition.EvidenceItemUUIDs, &transitionedAt, &transition.Meta,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan task transition: %w", err)
 	}
-	transition.ActorUUID = nullStringValue(actorUUID)
 	transition.PrincipalRef = nullStringValue(principalRef)
 	parsed, err := parseStoredTime(transitionedAt)
 	if err != nil {

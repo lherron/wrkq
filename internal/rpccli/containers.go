@@ -280,7 +280,16 @@ func mkdirKindFor(path, userKind string) (string, error) {
 	return "directory", nil
 }
 
+// actorFlag returns the caller principal from the global attribution flags.
+// --principal-ref is canonical; --as is its transitional alias. The value is
+// forwarded verbatim as the mutation's principalRef and validated server-side
+// (exact agent:<id>); legacy slugs / actor UUIDs / system:* are rejected there.
 func actorFlag(cmd *cobra.Command) string {
+	if f := cmd.Flag("principal-ref"); f != nil {
+		if v := f.Value.String(); v != "" {
+			return v
+		}
+	}
 	if f := cmd.Flag("as"); f != nil {
 		return f.Value.String()
 	}

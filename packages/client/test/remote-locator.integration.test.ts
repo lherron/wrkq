@@ -70,9 +70,13 @@ beforeAll(async () => {
     stdio: "ignore",
   });
 
+  // Principal-only attribution: the remote wrkqd's /v1/rpc surface attributes
+  // writes to its launch-time service principal (per-request principal forwarding
+  // over the remote transport is a separate, larger feature). Give it the same
+  // agent identity the client declares below so the forwarded write is attributed.
   daemon = Bun.spawn([WRKQD, "--db", dbPath, "--addr", `127.0.0.1:${port}`, "--token", token], {
     cwd: dir,
-    env: { ...process.env, WRKQ_ATTACH_DIR: attachDir },
+    env: { ...process.env, WRKQ_ATTACH_DIR: attachDir, WRKQ_PRINCIPAL_REF: "agent:local-human" },
     stdout: "pipe",
     stderr: "pipe",
   });

@@ -120,7 +120,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		priority                                                 int
 		startAt, dueAt, labels, meta, completedAt, archivedAt    *string
 		requestedBy, assignedProject, acknowledgedAt, resolution *string
-		parentTaskUUID, assigneeActorUUID, assigneePrincipalRef  *string
+		parentTaskUUID, assigneePrincipalRef                     *string
 		createdAt, updatedAt                                     string
 		etag                                                     int64
 		projectUUID                                              string
@@ -130,14 +130,14 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 		       state, priority,
-		       kind, parent_task_uuid, assignee_actor_uuid, assignee_principal_ref,
+		       kind, parent_task_uuid, assignee_principal_ref,
 		       start_at, due_at, labels, meta, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       acknowledged_at, resolution,
 		       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
-		&kind, &parentTaskUUID, &assigneeActorUUID, &assigneePrincipalRef,
+		&kind, &parentTaskUUID, &assigneePrincipalRef,
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
@@ -200,7 +200,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		ParentTaskID:          parentTaskID,
 		ParentTaskUUID:        parentTaskUUID,
 		AssigneeSlug:          assigneeSlug,
-		AssigneeUUID:          assigneeActorUUID,
 		AssigneePrincipalRef:  assigneePrincipalRef,
 		StartAt:               startAt,
 		DueAt:                 dueAt,

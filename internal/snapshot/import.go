@@ -129,15 +129,17 @@ func rejectLegacyActorData(data []byte) error {
 
 // legacyActorKeys are object keys whose presence anywhere in a snapshot marks
 // it as a pre-principal (actor-bearing) snapshot.
+// These are JSON denylist keys, not DB columns — wrkq is principal-only, so any
+// snapshot still carrying actor scaffolding is hard-rejected rather than imported.
 var legacyActorKeys = map[string]bool{
 	"actors":                true,
-	"actor_uuid":            true,
+	"actor_uuid":            true, // principal-only: legacy-rejection denylist key, not a live column read
 	"actor_slug":            true,
 	"actor_role":            true,
-	"created_by_actor_uuid": true,
-	"updated_by_actor_uuid": true,
-	"deleted_by_actor_uuid": true,
-	"assignee_actor_uuid":   true,
+	"created_by_actor_uuid": true, // principal-only: legacy-rejection denylist key, not a live column read
+	"updated_by_actor_uuid": true, // principal-only: legacy-rejection denylist key, not a live column read
+	"deleted_by_actor_uuid": true, // principal-only: legacy-rejection denylist key, not a live column read
+	"assignee_actor_uuid":   true, // principal-only: legacy-rejection denylist key, not a live column read
 	// Legacy bare attribution fields (now superseded by *_principal_ref).
 	"created_by": true,
 	"updated_by": true,

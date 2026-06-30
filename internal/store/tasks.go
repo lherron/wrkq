@@ -175,7 +175,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "state", "slug", "title", "project_uuid", "kind", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
+		case "state", "slug", "title", "project_uuid", "kind", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err
@@ -1248,7 +1248,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	var workflowPreset, phase, riskClass *string
 	var presetVersion sql.NullInt64
 	var createdAt, updatedAt string
-	var createdByActor, updatedByActor, createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
+	var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 
 	err := ts.store.db.QueryRow(`
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
@@ -1258,7 +1258,6 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
 			   sdk_session_id,
-			   created_by_actor_uuid, updated_by_actor_uuid,
 			   created_by_principal_ref, updated_by_principal_ref,
 			   created_by_scope_ref, updated_by_scope_ref
 		FROM tasks WHERE uuid = ?
@@ -1270,7 +1269,6 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&sdkSessionID,
-		&createdByActor, &updatedByActor,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,
 	)
@@ -1290,12 +1288,6 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.WorkflowPreset = workflowPreset
 	task.Phase = phase
 	task.RiskClass = riskClass
-	if createdByActor.Valid {
-		task.CreatedByActorUUID = createdByActor.String
-	}
-	if updatedByActor.Valid {
-		task.UpdatedByActorUUID = updatedByActor.String
-	}
 	if createdByPrincipal.Valid {
 		task.CreatedByPrincipalRef = createdByPrincipal.String
 	}
