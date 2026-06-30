@@ -49,6 +49,17 @@ describe("public surface (runtime)", () => {
       expect(anyClient[forbidden]).toBeUndefined();
     }
   });
+
+  test("T-05381 removes the legacy actor admin facade from the public client", async () => {
+    const client = await createClient({ transport: new FakeTransport(), autoInitialize: false });
+
+    const wrkq = client.wrkq as unknown as Record<string, unknown>;
+    const admin = wrkq.admin as Record<string, unknown> | undefined;
+    expect(admin).toBeDefined();
+
+    // T-05381 removes wrkq.admin.legacyActor.* as live actor scaffolding.
+    expect(admin?.legacyActor).toBeUndefined();
+  });
 });
 
 // ── Type-level negatives (validated by tsc --noEmit, not at runtime) ──────────
