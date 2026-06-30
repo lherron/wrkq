@@ -102,7 +102,7 @@ class WorkClientImpl implements WorkClient {
 
   readonly wrkq: WrkqFacade = {
     task: {
-      create: (p) => this.call("wrkq.task.create", p),
+      create: async (p) => this.call("wrkq.task.create", rejectLegacyActorAttribution(p)),
       show: (p) => this.call("wrkq.task.show", p),
       list: (p) => this.call("wrkq.task.list", p ?? {}),
       update: (p) => this.call("wrkq.task.update", p),
@@ -264,6 +264,17 @@ class WorkClientImpl implements WorkClient {
   kill(): void {
     this.transport.kill();
   }
+}
+
+function rejectLegacyActorAttribution<T>(params: T): T {
+  if (
+    params !== null &&
+    typeof params === "object" &&
+    Object.prototype.hasOwnProperty.call(params, "actor")
+  ) {
+    throw new Error("actor is no longer accepted for wrkq caller attribution; use principalRef");
+  }
+  return params;
 }
 
 /**

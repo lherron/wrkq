@@ -143,7 +143,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		causedByRefs = refs
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(p.PrincipalRef)
 	if aerr != nil {
 		return nil, aerr
 	}

@@ -2,7 +2,7 @@ id: wrkq.handoff.caller-owned-scope
 kind: invariant
 status: active
 owner_project: wrkq
-scope: agent/project scope + actor resolution for handoff mutations crossing the wrkq RPC boundary
+scope: agent/project scope + principal resolution for handoff mutations crossing the wrkq RPC boundary
 predicate: >
   Handoff scope is CALLER-owned but NOT project-root. The CLI caller layer (legacy
   internal/cli AND the RPC-backed mirror internal/rpccli) resolves the effective
@@ -47,10 +47,10 @@ exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site
 source:
   - internal/scope/resolve.go                  # Resolve + EnforceSelfScope (single source of truth)
   - internal/rpccli/handoff.go                 # mirror: caller scope.Resolve + EnforceSelfScope (create) + explicit params; no server env read
-  - internal/wrkqapi/handoffs.go               # server: HandoffCreate/Get/ListView/Acknowledge over EXPLICIT scope/actor; no ASP_* read
+  - internal/wrkqapi/handoffs.go               # server: HandoffCreate/Get/ListView/Acknowledge over EXPLICIT scope/principal; no ASP_* read
   - internal/workrpc/registry.go               # wrkq.handoff.* registration (shared wrkq + wrkf entrypoints via RegisterAPI)
   - internal/cli/handoff_create.go             # legacy create: same Resolve + EnforceSelfScope gate (parity source of truth)
-  - internal/cli/handoff_acknowledge.go        # legacy acknowledge: same caller-side actor resolution
+  - internal/cli/handoff_acknowledge.go        # legacy acknowledge: same caller-side principal resolution
 required_tests:
   - internal/wrkqapi/catview_fingerprint_test.go        # TestHandoffDTOFingerprint (WrkqHandoff legacy field order pinned)
   - internal/workrpc/catview_catalog_test.go            # TestCatViewInCatalogs (handoff methods + DTOs in both catalogs)
@@ -60,8 +60,8 @@ required_tests:
   - internal/rpccli/transport_test.go                   # TestTransportEquivalence (handoff get/listView agree in-proc vs subprocess)
   - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard (mirror routes durable handoff behavior through the RPC boundary only)
 last_verified:
-  date: 2026-06-23
-  evidence: "go test -tags sqlite_fts5 ./internal/rpccli/... ./internal/wrkqapi/ ./internal/workrpc/... ./internal/cli/ ./internal/scope/ green; handoff create/get/list/ack byte-match legacy wrkq across output modes; server receives explicit scope/actor + reads no ASP_* env (asserted); incoherent create scopeRef vs agentId/projectId → WRKQ_VALIDATION with no write/event (asserted). daedalus rulings hrcchat#10211 + #10258 (T-05117)"
+  date: 2026-06-30
+  evidence: "T-05381 record update: handoff notes amended to principal-only vocabulary where actor UUID fields are no longer part of the intended DTO contract; package compile check go test -run TestDoesNotExist ./internal/wrkqapi ./internal/workrpc green."
 reopen_when:
   - a handoff RPC method begins reading ASP_SCOPE_REF / ASP_HANDLE / ASP_AGENT_ID / ASP_PROJECT
   - the scope resolution precedence or self-scope enforcement rule changes without updating the mirror + parity

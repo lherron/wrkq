@@ -5,7 +5,7 @@ owner_project: wrkq
 scope: human confirmation + interactivity for destructive mutations crossing the wrkq RPC boundary
 predicate: >
   RPC mutation methods are NON-INTERACTIVE and deterministic: they accept
-  caller-scoped selectors + EXPLICIT intent (mode, target fields, actor) +
+  caller-scoped selectors + EXPLICIT intent (mode, target fields, principalRef) +
   machine-checkable preconditions (ifMatch, expected impact), and they decide
   purely from those params. They MUST NOT prompt, inspect a TTY, read stdin, or
   infer confirmation from the transport. The CLI mirror (internal/rpccli) owns
@@ -44,8 +44,8 @@ required_tests:
   - internal/rpccli/parity_test.go                    # TestParity/rm/*, TestParity/comment-rm/*, TestParity/rmdir/* (incl. --force two-phase) + comment row in the durable snapshot
   - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror routes durable mutation through the RPC boundary only)
 last_verified:
-  date: 2026-06-22
-  evidence: "go test internal/rpccli (TestParity/rm + TestParity/comment-rm + TestParity/rmdir + TestRmPurgePromptOwnership + TestCommentRmPromptOwnership + TestRmdirForcePromptOwnership + TestCoreRuleImportGuard) + internal/workrpc (TestTaskDelete_* + TestCommentDelete_*) green; rm/comment-rm byte-match legacy for archive/soft/purge (incl. the comment.deleted/purged event payload shape + new-etag, TestCommentDelete_SoftEventParity/PurgeEventParity); rmdir --force byte-matches legacy for SINGLE-LEVEL ACTIVE contents — for nested or archived contents the prompt counts intentionally reflect the TRUE recursive/archived-inclusive impact, NOT legacy's immediate active-only count (daedalus-accepted divergence, hrcchat#10198); the committed recursive delete is byte-equivalent. daedalus B-ruling hrcchat#10185 + seam-blessing #10190 + conditional-accept #10198 (T-05100)"
+  date: 2026-06-30
+  evidence: "T-05381 record update: mutation attribution vocabulary amended from actor to principalRef; package compile check go test -run TestDoesNotExist ./internal/wrkqapi ./internal/workrpc green."
 reopen_when:
   - a mutation method begins prompting, reading stdin, or inspecting a TTY
   - a destructive disposition becomes a hidden default (no explicit mode/intent)

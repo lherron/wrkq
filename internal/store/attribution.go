@@ -12,16 +12,7 @@ func (s *Store) attributionFromActorUUID(actorUUID string) attribution.Attributi
 	if actorUUID == "" {
 		return attribution.Attribution{}
 	}
-
-	attr := attribution.Attribution{LegacyActorUUID: &actorUUID}
-	var slug, id string
-	if err := s.db.QueryRow("SELECT slug, id FROM actors WHERE uuid = ? LIMIT 1", actorUUID).Scan(&slug, &id); err == nil {
-		attr.PrincipalRef = "agent:" + slug
-		attr.LegacyActorID = id
-		return attr
-	}
-	attr.PrincipalRef = "agent:" + actorUUID
-	return attr
+	return attribution.Attribution{PrincipalRef: "agent:" + actorUUID}
 }
 
 func requireAttribution(attr attribution.Attribution) error {
@@ -32,10 +23,7 @@ func requireAttribution(attr attribution.Attribution) error {
 }
 
 func legacyActorSQL(attr attribution.Attribution) interface{} {
-	if attr.LegacyActorUUID == nil || strings.TrimSpace(*attr.LegacyActorUUID) == "" {
-		return nil
-	}
-	return *attr.LegacyActorUUID
+	return nil
 }
 
 func principalSQL(attr attribution.Attribution) interface{} {
@@ -53,10 +41,7 @@ func scopeSQL(attr attribution.Attribution) interface{} {
 }
 
 func actorUUIDPtr(attr attribution.Attribution) *string {
-	if attr.LegacyActorUUID == nil || strings.TrimSpace(*attr.LegacyActorUUID) == "" {
-		return nil
-	}
-	return attr.LegacyActorUUID
+	return nil
 }
 
 func eventActorUUID(attr attribution.Attribution) *string {

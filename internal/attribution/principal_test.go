@@ -1,11 +1,9 @@
 package attribution
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
 )
@@ -77,12 +75,13 @@ func TestDeriveFromScope(t *testing.T) {
 
 func TestResolvePrecedence(t *testing.T) {
 	t.Setenv(PrincipalEnv, "agent:env-principal")
-	t.Setenv(ActorEnv, "compat-actor")
-	t.Setenv(ActorIDEnv, "A-99999")
+	t.Setenv("WRKQ_ACTOR", "compat-actor")
+	t.Setenv("WRKQ_ACTOR_ID", "A-99999")
 
 	cmd := &cobra.Command{}
+	cmd.Flags().String("principal-ref", "", "principal")
 	cmd.Flags().String("as", "", "principal")
-	if err := cmd.ParseFlags([]string{"--as", "flag-principal"}); err != nil {
+	if err := cmd.ParseFlags([]string{"--as", "agent:flag-principal"}); err != nil {
 		t.Fatalf("ParseFlags failed: %v", err)
 	}
 
@@ -92,7 +91,7 @@ func TestResolvePrecedence(t *testing.T) {
 			AgentID:   "scope-agent",
 			ProjectID: "wrkq",
 		},
-		Config: &config.Config{DefaultActor: "config-actor"},
+		Config: &config.Config{DefaultPrincipalRef: "agent:config-principal"},
 	})
 	if err != nil {
 		t.Fatalf("Resolve failed: %v", err)
@@ -107,7 +106,7 @@ func TestResolvePrecedence(t *testing.T) {
 
 func TestResolvePrincipalEnvOutranksActorEnv(t *testing.T) {
 	t.Setenv(PrincipalEnv, "agent:principal-env")
-	t.Setenv(ActorEnv, "actor-env")
+	t.Setenv("WRKQ_ACTOR", "actor-env")
 
 	attr, err := Resolve(ResolveOptions{})
 	if err != nil {
@@ -118,13 +117,13 @@ func TestResolvePrincipalEnvOutranksActorEnv(t *testing.T) {
 	}
 }
 
-func TestResolveScopeOutranksConfigDefaultActor(t *testing.T) {
+func TestResolveScopeOutranksConfigDefaultPrincipal(t *testing.T) {
 	attr, err := Resolve(ResolveOptions{
 		ResolvedScope: &scope.ResolvedScope{
 			AgentID:   "scope-agent",
 			ProjectID: "wrkq",
 		},
-		Config: &config.Config{DefaultActor: "config-actor"},
+		Config: &config.Config{DefaultPrincipalRef: "agent:config-principal"},
 	})
 	if err != nil {
 		t.Fatalf("Resolve failed: %v", err)
@@ -137,67 +136,35 @@ func TestResolveScopeOutranksConfigDefaultActor(t *testing.T) {
 	}
 }
 
-func TestResolveActorIDBestEffortTranslation(t *testing.T) {
-	database := openAttributionTestDB(t)
-	_, err := database.Exec(`INSERT INTO actors (id, slug, role) VALUES ('A-00001', 'legacy-cody', 'agent')`)
-	if err != nil {
-		t.Fatalf("insert actor: %v", err)
-	}
-
-	t.Setenv(ActorIDEnv, "A-00001")
-
-	attr, err := Resolve(ResolveOptions{DB: database.DB})
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:legacy-cody" {
-		t.Fatalf("PrincipalRef = %q, want agent:legacy-cody", attr.PrincipalRef)
-	}
-	if attr.LegacyActorUUID == nil {
-		t.Fatal("LegacyActorUUID should be populated from display/cache row")
-	}
-	if attr.LegacyActorID != "A-00001" {
-		t.Fatalf("LegacyActorID = %q, want A-00001", attr.LegacyActorID)
-	}
-}
-
-func TestResolveActorIDMissingRowFallsBackToVerbatim(t *testing.T) {
-	database := openAttributionTestDB(t)
-	t.Setenv(ActorIDEnv, "A-12345")
-
-	attr, err := Resolve(ResolveOptions{DB: database.DB})
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:A-12345" {
-		t.Fatalf("PrincipalRef = %q, want agent:A-12345", attr.PrincipalRef)
-	}
-	if attr.LegacyActorUUID != nil {
-		t.Fatalf("LegacyActorUUID = %q, want nil", *attr.LegacyActorUUID)
-	}
-}
-
 func TestResolveNoInputFailsWithPrincipalHint(t *testing.T) {
 	_, err := Resolve(ResolveOptions{})
 	if err == nil {
 		t.Fatal("expected no-input error")
 	}
-	if got := err.Error(); !containsAll(got, "no principal configured", PrincipalEnv, ActorEnv, ActorIDEnv) {
+	if got := err.Error(); !containsAll(got, "no principal configured", PrincipalEnv, "default_principal_ref") {
 		t.Fatalf("error %q does not name accepted inputs", got)
 	}
 }
 
-func openAttributionTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("db.Open failed: %v", err)
+func TestResolveIgnoresLegacyActorSources(t *testing.T) {
+	t.Setenv("WRKQ_ACTOR", "legacy-actor")
+	t.Setenv("WRKQ_ACTOR_ID", "A-00001")
+
+	_, err := Resolve(ResolveOptions{Config: &config.Config{DefaultActor: "legacy-config"}})
+	if err == nil {
+		t.Fatal("expected legacy-only actor sources to be ignored")
 	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := database.Migrate(); err != nil {
-		t.Fatalf("Migrate failed: %v", err)
+}
+
+func TestResolveRejectsBareAs(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("as", "", "principal")
+	if err := cmd.ParseFlags([]string{"--as", "calchas"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
 	}
-	return database
+	if _, err := Resolve(ResolveOptions{Command: cmd}); err == nil {
+		t.Fatal("expected bare --as to be rejected")
+	}
 }
 
 func containsAll(s string, needles ...string) bool {

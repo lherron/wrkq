@@ -12,17 +12,18 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	DBLocator        string       `yaml:"db_locator"`
-	DBPath           string       `yaml:"db_path"`
-	RemoteEndpoint   string       `yaml:"remote_endpoint"`
-	AttachDir        string       `yaml:"attach_dir"`
-	AttachmentsMaxMB int          `yaml:"attachments_max_mb"`
-	DefaultActor     string       `yaml:"default_actor"`
-	ProjectRoot      string       `yaml:"project_root"`
-	LogLevel         string       `yaml:"log_level"`
-	Output           string       `yaml:"output"`
-	Pager            string       `yaml:"pager"`
-	Search           SearchConfig `yaml:"search"`
+	DBLocator           string       `yaml:"db_locator"`
+	DBPath              string       `yaml:"db_path"`
+	RemoteEndpoint      string       `yaml:"remote_endpoint"`
+	AttachDir           string       `yaml:"attach_dir"`
+	AttachmentsMaxMB    int          `yaml:"attachments_max_mb"`
+	DefaultActor        string       `yaml:"default_actor"`
+	DefaultPrincipalRef string       `yaml:"default_principal_ref"`
+	ProjectRoot         string       `yaml:"project_root"`
+	LogLevel            string       `yaml:"log_level"`
+	Output              string       `yaml:"output"`
+	Pager               string       `yaml:"pager"`
+	Search              SearchConfig `yaml:"search"`
 }
 
 // SearchConfig controls the derived local search sidecar.
@@ -66,8 +67,6 @@ func Load() (*Config, error) {
 	// shared global-default .env.local. See project-root precedence below.
 	explicitProjectRoot := os.Getenv("WRKQ_PROJECT_ROOT")
 	aspProject := os.Getenv("ASP_PROJECT")
-	explicitActor := os.Getenv("WRKQ_ACTOR")
-	explicitActorID := os.Getenv("WRKQ_ACTOR_ID")
 
 	// Load .env.local if it exists (walking up parent directories)
 	if envPath := findEnvLocal(); envPath != "" {
@@ -112,17 +111,8 @@ func Load() (*Config, error) {
 	if pager := os.Getenv("WRKQ_PAGER"); pager != "" {
 		cfg.Pager = pager
 	}
-	if defaultActor := os.Getenv("WRKQ_ACTOR"); defaultActor != "" {
-		cfg.DefaultActor = defaultActor
-	}
-	if actorID := os.Getenv("WRKQ_ACTOR_ID"); actorID != "" && cfg.DefaultActor == "" {
-		cfg.DefaultActor = actorID
-	}
-	if explicitActor == "" {
-		_ = os.Unsetenv("WRKQ_ACTOR")
-	}
-	if explicitActorID == "" {
-		_ = os.Unsetenv("WRKQ_ACTOR_ID")
+	if defaultPrincipalRef := os.Getenv("WRKQ_PRINCIPAL_REF"); defaultPrincipalRef != "" {
+		cfg.DefaultPrincipalRef = defaultPrincipalRef
 	}
 	// Project-root precedence (high -> low):
 	//   1. --project flag             (applied later, in appctx)
@@ -327,14 +317,10 @@ func findEnvLocal() string {
 	return ""
 }
 
-// GetActorID returns the current actor ID from environment or config
-// Priority: WRKQ_ACTOR_ID > WRKQ_ACTOR > config.default_actor
-func (c *Config) GetActorID() string {
-	if actorID := os.Getenv("WRKQ_ACTOR_ID"); actorID != "" {
-		return actorID
+// GetPrincipalRef returns the configured canonical caller principal.
+func (c *Config) GetPrincipalRef() string {
+	if principalRef := os.Getenv("WRKQ_PRINCIPAL_REF"); principalRef != "" {
+		return principalRef
 	}
-	if actor := os.Getenv("WRKQ_ACTOR"); actor != "" {
-		return actor
-	}
-	return c.DefaultActor
+	return c.DefaultPrincipalRef
 }

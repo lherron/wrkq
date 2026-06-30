@@ -41,7 +41,7 @@ func (a *API) WorkflowAttach(ctx context.Context, p WorkflowAttachParams) (*Wrkq
 		}
 	}
 
-	inst, err := a.wf.TaskAttach(ctx, p.Task, p.Workflow, defaultString(p.Actor, a.defaultActor))
+	inst, err := a.wf.TaskAttach(ctx, p.Task, p.Workflow, defaultString(p.Actor, a.defaultPrincipalRef))
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (a *API) WorkflowRefresh(ctx context.Context, taskSelector, actor string) (
 	if _, err := a.resolveTaskUUID(taskSelector); err != nil {
 		return nil, err
 	}
-	inst, err := a.wf.TaskRefresh(ctx, taskSelector, defaultString(actor, a.defaultActor))
+	inst, err := a.wf.TaskRefresh(ctx, taskSelector, defaultString(actor, a.defaultPrincipalRef))
 	if err != nil {
 		return nil, err
 	}

@@ -44,7 +44,7 @@ func Server(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.Registry
 		DatabasePath:     database.Path(),
 		ServerVersion:    "dev",
 		Entrypoint:       "wrkq",
-		DefaultActor:     DefaultActor(cfg.DefaultActor),
+		DefaultActor:     DefaultPrincipalRef(cfg.DefaultPrincipalRef),
 		DefaultRole:      os.Getenv("WRKF_ROLE"),
 		AttachDir:        AttachDir(cfg.AttachDir),
 		AttachmentsMaxMB: cfg.AttachmentsMaxMB,
@@ -132,13 +132,10 @@ func SearchConfig(cfg *config.Config, canonicalDBPath string) wrkqapi.SearchConf
 	}
 }
 
-// DefaultActor mirrors the stdio server's default-actor policy: an explicit
-// configured actor wins, otherwise the system actor is used.
-func DefaultActor(actor string) string {
-	if actor != "" {
-		return actor
-	}
-	return "system:wrkq"
+// DefaultPrincipalRef returns the configured principal-only default. Empty means
+// wrkq mutations must receive an explicit principal or fail.
+func DefaultPrincipalRef(principalRef string) string {
+	return principalRef
 }
 
 // AttachDir resolves the attachment storage directory for the RPC server. It

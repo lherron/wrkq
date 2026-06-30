@@ -121,8 +121,26 @@ type TaskCreateParams struct {
 	StartAt              string         `json:"startAt,omitempty"`
 	CausedBy             []string       `json:"causedBy,omitempty"`
 	ForceUUID            string         `json:"forceUuid,omitempty"`
+	PrincipalRef         string         `json:"principalRef,omitempty"`
 	Actor                string         `json:"actor,omitempty"`
 	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
+}
+
+func (p *TaskCreateParams) UnmarshalJSON(b []byte) error {
+	type taskCreateParams TaskCreateParams
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["actor"]; ok {
+		return fmt.Errorf("unsupported task create field %q; use principalRef", "actor")
+	}
+	var out taskCreateParams
+	if err := json.Unmarshal(b, &out); err != nil {
+		return err
+	}
+	*p = TaskCreateParams(out)
+	return nil
 }
 
 // TaskShowParams mirrors WrkqTaskShowParams.

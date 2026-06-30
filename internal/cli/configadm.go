@@ -148,9 +148,17 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 		Valid:  true,
 	}
 
-	// Check acting principal. WRKQ_ACTOR/WRKQ_ACTOR_ID remain compatibility aliases.
-	actorSource := "default_actor compatibility setting"
-	actorValue := cfg.GetActorID()
+	// Check acting principal.
+	actorSource := "default_principal_ref setting"
+	actorValue := cfg.GetPrincipalRef()
+	if asFlag := cmd.Flag("as"); asFlag != nil && asFlag.Changed {
+		actorSource = "command-line flag --as"
+		actorValue = asFlag.Value.String()
+	}
+	if principalFlag := cmd.Flag("principal-ref"); principalFlag != nil && principalFlag.Changed {
+		actorSource = "command-line flag --principal-ref"
+		actorValue = principalFlag.Value.String()
+	}
 	if principal := os.Getenv("WRKQ_PRINCIPAL_REF"); principal != "" {
 		actorValue = principal
 		actorSource = "environment variable WRKQ_PRINCIPAL_REF"
@@ -159,28 +167,11 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 		actorValue = "(not set)"
 	}
 
-	if os.Getenv("WRKQ_PRINCIPAL_REF") != "" {
-		// Canonical principal env already set source/value above.
-	} else if os.Getenv("WRKQ_ACTOR") != "" {
-		actorSource = "environment variable WRKQ_ACTOR"
-	} else if os.Getenv("WRKQ_ACTOR_ID") != "" {
-		actorSource = "environment variable WRKQ_ACTOR_ID"
-	}
-	if asFlag := cmd.Flag("as"); asFlag != nil && asFlag.Changed {
-		actorSource = "command-line flag --as"
-	}
-
 	actorValid := false
 	actorNote := ""
 
 	if actorValue != "(not set)" {
-		var principalRef string
-		var err error
-		if actorSource == "environment variable WRKQ_PRINCIPAL_REF" {
-			principalRef, err = attribution.NormalizeCanonical(actorValue)
-		} else {
-			principalRef, err = attribution.NormalizeCompat(actorValue)
-		}
+		principalRef, err := attribution.NormalizeCanonical(actorValue)
 		if err == nil {
 			actorValid = true
 			actorNote = fmt.Sprintf("Normalizes to principal %s", principalRef)
@@ -189,7 +180,7 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 			report.Warnings = append(report.Warnings, fmt.Sprintf("Principal value %q is invalid", actorValue))
 		}
 	} else if actorValue == "(not set)" {
-		report.Warnings = append(report.Warnings, "No principal configured - set WRKQ_PRINCIPAL_REF, WRKQ_ACTOR, --as, or a valid ASP scope")
+		report.Warnings = append(report.Warnings, "No principal configured - set WRKQ_PRINCIPAL_REF, --principal-ref, --as, or a valid ASP scope")
 	}
 
 	report.Config["actor"] = configValue{

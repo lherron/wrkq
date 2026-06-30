@@ -19,14 +19,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -261,10 +259,6 @@ func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/relations/list", s.withAuth(s.handleRelationsList))
 	mux.HandleFunc("/v1/relations/create", s.withAuth(s.handleRelationsCreate))
 	mux.HandleFunc("/v1/relations/delete", s.withAuth(s.handleRelationsDelete))
-
-	mux.HandleFunc("/v1/actors/list", s.withAuth(s.handleActorsList))
-	mux.HandleFunc("/v1/actors/create", s.withAuth(s.handleActorsCreate))
-	mux.HandleFunc("/v1/actors/update", s.withAuth(s.handleActorsUpdate))
 
 }
 
@@ -1557,129 +1551,6 @@ func (s *daemonServer) handleRelationsDelete(w http.ResponseWriter, r *http.Requ
 
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok": true,
-	})
-}
-
-func (s *daemonServer) handleActorsList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
-		return
-	}
-
-	resolver := actors.NewResolver(s.db.DB)
-	actorsList, err := resolver.List()
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"actors": actorsList,
-	})
-}
-
-type actorsCreateRequest struct {
-	Slug        string `json:"slug"`
-	DisplayName string `json:"display_name,omitempty"`
-	Role        string `json:"role,omitempty"`
-}
-
-func (s *daemonServer) handleActorsCreate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
-		return
-	}
-
-	var req actorsCreateRequest
-	if err := s.decodeJSON(r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	normalizedSlug, err := paths.NormalizeSlug(req.Slug)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	role := req.Role
-	if role == "" {
-		role = "agent"
-	}
-
-	resolver := actors.NewResolver(s.db.DB)
-	actor, err := resolver.Create(normalizedSlug, req.DisplayName, role)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"actor": actor,
-	})
-}
-
-type actorsUpdateRequest struct {
-	Actor       string `json:"actor"`
-	DisplayName string `json:"display_name,omitempty"`
-	Role        string `json:"role,omitempty"`
-}
-
-func (s *daemonServer) handleActorsUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
-		return
-	}
-
-	var req actorsUpdateRequest
-	if err := s.decodeJSON(r, &req); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	if req.Actor == "" {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("actor required"))
-		return
-	}
-
-	resolver := actors.NewResolver(s.db.DB)
-	actorUUID, err := resolver.Resolve(req.Actor)
-	if err != nil {
-		s.writeError(w, http.StatusNotFound, err)
-		return
-	}
-
-	setClauses := []string{}
-	args := []interface{}{}
-	if req.DisplayName != "" {
-		setClauses = append(setClauses, "display_name = ?")
-		args = append(args, req.DisplayName)
-	}
-	if req.Role != "" {
-		setClauses = append(setClauses, "role = ?")
-		args = append(args, req.Role)
-	}
-
-	if len(setClauses) == 0 {
-		s.writeError(w, http.StatusBadRequest, fmt.Errorf("no fields to update"))
-		return
-	}
-
-	args = append(args, actorUUID)
-	query := fmt.Sprintf("UPDATE actors SET %s WHERE uuid = ?", strings.Join(setClauses, ", "))
-	if _, err := s.db.Exec(query, args...); err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	actor, err := resolver.GetByUUID(actorUUID)
-	if err != nil {
-		s.writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"actor": actor,
 	})
 }
 

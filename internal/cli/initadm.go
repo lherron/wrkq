@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/actors"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
@@ -109,8 +108,7 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("✓ Initialized new database at %s\n", cfg.DBPath)
 		fmt.Printf("✓ Created attachments directory at %s\n", cfg.AttachDir)
-		fmt.Printf("✓ Seeded human actor: %s (%s)\n", initAdmHumanSlug, initAdmHumanName)
-		fmt.Printf("✓ Seeded agent actor: %s (%s)\n", initAdmAgentSlug, initAdmAgentName)
+		fmt.Printf("✓ Seeded principal-owned inbox project\n")
 		fmt.Printf("✓ Seeded inbox project\n")
 	} else {
 		fmt.Printf("✓ Database already initialized at %s\n", cfg.DBPath)
@@ -126,28 +124,6 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 }
 
 func seedDatabaseAdm(database *db.DB, humanSlug, humanName, agentSlug, agentName string) error {
-	resolver := actors.NewResolver(database.DB)
-
-	// Normalize and create human actor
-	normalizedHumanSlug, err := paths.NormalizeSlug(humanSlug)
-	if err != nil {
-		return fmt.Errorf("invalid human actor slug: %w", err)
-	}
-	humanActor, err := resolver.Create(normalizedHumanSlug, humanName, "human")
-	if err != nil {
-		return fmt.Errorf("failed to create human actor: %w", err)
-	}
-
-	// Normalize and create agent actor
-	normalizedAgentSlug, err := paths.NormalizeSlug(agentSlug)
-	if err != nil {
-		return fmt.Errorf("invalid agent actor slug: %w", err)
-	}
-	_, err = resolver.Create(normalizedAgentSlug, agentName, "agent")
-	if err != nil {
-		return fmt.Errorf("failed to create agent actor: %w", err)
-	}
-
 	// Normalize inbox slug
 	inboxSlug, err := paths.NormalizeSlug("inbox")
 	if err != nil {
@@ -158,9 +134,12 @@ func seedDatabaseAdm(database *db.DB, humanSlug, humanName, agentSlug, agentName
 	// 000024). Projects must be top-level (children of root), never null-parent.
 	title := "Inbox"
 	_, err = database.Exec(`
-		INSERT INTO containers (id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		INSERT INTO containers (
+			id, slug, title, parent_uuid, kind,
+			created_by_principal_ref, updated_by_principal_ref
+		)
 		VALUES ('', ?, ?, (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?)
-	`, inboxSlug, title, humanActor.UUID, humanActor.UUID)
+	`, inboxSlug, title, "agent:"+agentSlug, "agent:"+agentSlug)
 	if err != nil {
 		return fmt.Errorf("failed to create inbox project: %w", err)
 	}

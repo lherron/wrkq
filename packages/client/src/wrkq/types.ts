@@ -39,6 +39,7 @@ export interface WrkqTaskCreateParams {
   labels?: string[];
   meta?: Record<string, unknown>;
   riskClass?: WrkqRiskClass;
+  principalRef?: string;
   idempotencyKey?: string;
 }
 

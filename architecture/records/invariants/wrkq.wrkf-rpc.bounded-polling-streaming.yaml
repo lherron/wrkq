@@ -8,12 +8,13 @@ predicate: >
   surfaces cross the client↔server RPC boundary as BOUNDED POLLING read models — there
   is NO server push / subscribe / long-lived stream in RPC v1 (daedalus ruling #10211).
   The SERVER owns ONLY stateless, bounded read models: wrkq.monitor.eventsView returns a
-  single bounded ASCENDING event_log page (selector resolution, resource_id hydration,
-  comment→task backfill, isEventIncluded / isStateChangeEvent, event-type filtering, and
-  the high-water cursor of the LAST RAW row scanned); wrkq.monitor.stateView returns a
+  single bounded ASCENDING event_log page (selector resolution, resource_id hydration
+  from principal/resource refs, comment→task backfill, isEventIncluded /
+  isStateChangeEvent, event-type filtering, and the high-water cursor of the LAST
+  RAW row scanned); wrkq.monitor.stateView returns a
   SINGLE authoritative --until condition snapshot (met + still-unmet task ids) and NEVER
   sleeps/times out/stalls/emits terminal lines; wrkq.history.tailView returns a bounded
-  ASCENDING raw event_log page (actor slug/id + resource_id hydration + high-water). Each
+  ASCENDING raw event_log page (principal/resource hydration + high-water). Each
   page is hard-capped server-side (monitorMaxPageLimit) so a hammering client can never
   pull an unbounded slice in one frame. The CLIENT (wrkq-rpccli) owns ALL streaming
   control flow: the blocking poll loop + interval, the monotonic high-water cursor carried
@@ -24,8 +25,9 @@ predicate: >
   RACE-TOLERANT (a met condition may be observed before the matching event is paged in);
   tests assert race-tolerantly. The JSON-RPC server stdout stays JSON-RPC-pure — the
   per-event / terminal NDJSON is emitted ONLY by wrkq-rpccli after RPC-frame decode. The
-  raw tail (watch / monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape: INCLUDES
-  resource_id, STRING timestamp, nullable resource_uuid), DISTINCT from WrkqLogEvent.
+  raw tail (watch / monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape:
+  INCLUDES resource_id, STRING timestamp, nullable resource_uuid, and no actor
+  fields), DISTINCT from WrkqLogEvent.
 
   The `--last N` replay start cursor is resolved SERVER-SIDE from actual row IDENTITY:
   eventsView with lastN>0 returns the legacy predicate COALESCE(MIN(id),0)-1 over the last
@@ -51,8 +53,8 @@ required_tests:
   - internal/wrkqapi/catview_fingerprint_test.go # TestMonitorViewDTOFingerprint, TestHistoryTailViewDTOFingerprint
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (eventsView/stateView/tailView + DTOs)
 last_verified:
-  date: 2026-06-23
-  evidence: "go test internal/rpccli + internal/wrkqapi + internal/workrpc green (T-05115 / T-05116); --last N start cursor server-resolved from row identity (MIN(id)-1 over last N existing rows), gap-independence asserted by TestMonitorEventsView_LastNGapIndependent. daedalus rulings hrcchat#10211 + #10262"
+  date: 2026-06-30
+  evidence: "T-05381 record update: monitor/history read-model DTOs are principal-only intent; package compile check go test -run TestDoesNotExist ./internal/wrkqapi ./internal/workrpc green."
 reopen_when:
   - a server push / subscribe / long-lived stream is introduced for monitor or watch
   - the server is given ownership of the timeout/stall clocks or the terminal NDJSON line

@@ -18,12 +18,12 @@ import (
 // the task↔workflow binding (wrkq.workflow.attach is a wrkq verb), delegating
 // workflow state reads to the shared wrkfapi.API.
 type API struct {
-	db           *db.DB
-	store        *store.Store
-	wf           *wrkfapi.API
-	defaultActor string
-	attachDir    string
-	attachMaxMB  int
+	db                  *db.DB
+	store               *store.Store
+	wf                  *wrkfapi.API
+	defaultPrincipalRef string
+	attachDir           string
+	attachMaxMB         int
 
 	// searchCfg is the SERVER's search/index host configuration. The server owns
 	// the derived sidecar + dense embedder behind the wrkq.search.* / wrkq.index.*
@@ -45,15 +45,15 @@ type API struct {
 // attachDir/attachMaxMB carry the explicitly-configured attachment storage
 // settings; an empty attachDir disables attachment writes (attachment.add
 // returns WRKQ_VALIDATION rather than silently writing relative to cwd).
-func New(database *db.DB, wf *wrkfapi.API, defaultActor, attachDir string, attachMaxMB int, opts ...Option) *API {
+func New(database *db.DB, wf *wrkfapi.API, defaultPrincipalRef, attachDir string, attachMaxMB int, opts ...Option) *API {
 	a := &API{
-		db:           database,
-		store:        store.New(database),
-		wf:           wf,
-		defaultActor: defaultActor,
-		attachDir:    attachDir,
-		attachMaxMB:  attachMaxMB,
-		uploads:      map[string]*attachmentUpload{},
+		db:                  database,
+		store:               store.New(database),
+		wf:                  wf,
+		defaultPrincipalRef: defaultPrincipalRef,
+		attachDir:           attachDir,
+		attachMaxMB:         attachMaxMB,
+		uploads:             map[string]*attachmentUpload{},
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -73,64 +73,27 @@ func WithSearch(cfg SearchConfig) Option {
 
 // ─── attribution ─────────────────────────────────────────────────────────────
 
-// systemActorUUID is the built-in wrkq system actor seeded by migration 000024.
-const systemActorUUID = "00000000-0000-4000-8000-0000000000a0"
-
-// attributionFor resolves a write attribution for the given actor selector.
-// It accepts an actor UUID, a canonical principal ref (agent:<id>), or a bare
-// compat slug, and records the SAME caller-resolved principal legacy would
-// record (--as agent:x -> agent:x; bare slug -> agent:<slug>) WITHOUT requiring
-// a legacy actor row. A legacy actor row, when present, backfills the display
-// UUID. Only a truly empty selector (no actor, no default) falls back to the
-// built-in wrkq-system actor; a NON-EMPTY but invalid selector is rejected with
-// WRKQ_VALIDATION rather than silently rewriting attribution to system, which
-// would destroy audit truth (daedalus #10261 / #10285, T-05119).
+// attributionFor resolves principal-only write attribution. The parameter name
+// remains actor while older RPC DTOs are retired, but the accepted value is only
+// an exact agent:<id> principal ref. Empty uses the configured
+// default_principal_ref; if none is configured the mutation fails.
 func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		actor = strings.TrimSpace(a.defaultActor)
+	principalInput := strings.TrimSpace(actor)
+	if principalInput == "" {
+		principalInput = strings.TrimSpace(a.defaultPrincipalRef)
 	}
-	if actor == "" {
-		u := systemActorUUID
-		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}, nil
+	if principalInput == "" {
+		return attribution.Attribution{}, NewValidationError(
+			"principalRef is required",
+			map[string]any{"field": "principalRef"})
 	}
-	// The built-in entrypoint no-actor default sentinels live in the "system:"
-	// namespace (bootstrap.DefaultActor → "system:wrkq"; wrkfcli → "system:wrkf").
-	// These denote the built-in SYSTEM actor, not a caller principal, so they map to
-	// agent:wrkq-system rather than being rejected as an invalid selector. This is
-	// the explicit "intended no-actor default" path (daedalus #10285).
-	if strings.HasPrefix(actor, "system:") {
-		u := systemActorUUID
-		return attribution.Attribution{PrincipalRef: "agent:wrkq-system", LegacyActorUUID: &u}, nil
-	}
-	// A UUID selector resolves directly off the actor row (canonical principal +
-	// legacy uuid).
-	var uuid, slug string
-	if err := a.db.QueryRow(
-		"SELECT uuid, slug FROM actors WHERE uuid = ? LIMIT 1", actor,
-	).Scan(&uuid, &slug); err == nil {
-		u := uuid
-		return attribution.Attribution{PrincipalRef: "agent:" + slug, LegacyActorUUID: &u}, nil
-	}
-	// Otherwise resolve the caller selector to a principal ref the way legacy does
-	// (attribution.NormalizeCompat), preserving canonical attribution even when no
-	// legacy actor row exists. A NON-EMPTY invalid selector (e.g. a full scope ref
-	// or "system:wrkq") is a protocol-integrity error — fail fast, do NOT coerce to
-	// wrkq-system. Best-effort backfill the display UUID by slug.
-	principal, err := attribution.NormalizeCompat(actor)
+	principal, err := attribution.NormalizeCanonical(principalInput)
 	if err != nil {
 		return attribution.Attribution{}, NewValidationError(
-			"invalid actor: "+err.Error(),
-			map[string]any{"field": "actor", "actor": actor})
+			"invalid principalRef: "+err.Error(),
+			map[string]any{"field": "principalRef", "principalRef": principalInput})
 	}
-	attr := attribution.Attribution{PrincipalRef: principal}
-	var u string
-	if err := a.db.QueryRow(
-		"SELECT uuid FROM actors WHERE slug = ? LIMIT 1", attribution.PrincipalHandle(principal),
-	).Scan(&u); err == nil {
-		attr.LegacyActorUUID = &u
-	}
-	return attr, nil
+	return attribution.Attribution{PrincipalRef: principal}, nil
 }
 
 // ─── shared canonical request hashing ────────────────────────────────────────
@@ -274,10 +237,7 @@ func metaString(meta map[string]any) *string {
 
 // legacyActorBind returns the legacy actor UUID for a SQL bind, or nil.
 func legacyActorBind(attr attribution.Attribution) any {
-	if attr.LegacyActorUUID == nil || strings.TrimSpace(*attr.LegacyActorUUID) == "" {
-		return nil
-	}
-	return *attr.LegacyActorUUID
+	return nil
 }
 
 // scopeBind returns the scope ref for a SQL bind, mapping empty to nil.
