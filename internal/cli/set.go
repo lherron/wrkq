@@ -88,6 +88,7 @@ var (
 	setCPRunID         string
 	setSessionID       string
 	setRunStatus       string
+	setCausedBy        string
 )
 
 func init() {
@@ -121,11 +122,18 @@ func init() {
 	setCmd.Flags().StringVar(&setCPRunID, "cp-run-id", "", "Update CP run ID (async run linkage)")
 	setCmd.Flags().StringVar(&setSessionID, "session-id", "", "Update session ID (async run linkage)")
 	setCmd.Flags().StringVar(&setRunStatus, "run-status", "", "Update async run status (queued, running, completed, failed, cancelled, timed_out)")
+	setCausedBy = causedByUnset
+	setCmd.Flags().StringVar(&setCausedBy, "caused-by", causedByUnset, "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
+	setCmd.Flags().Lookup("caused-by").DefValue = ""
 }
 
 func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+
+	// Reset the caused-by sentinel after running so the shared rootCmd (used across
+	// tests) never leaks a stale value into a later set invocation.
+	defer func() { setCausedBy = causedByUnset }()
 
 	// All args are task refs now (no more key=value parsing)
 	taskRefs := args
@@ -218,8 +226,12 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 		result.PrintSummary(cmd.OutOrStdout())
 	}
 
-	// Exit with appropriate code
-	os.Exit(result.ExitCode())
+	// Exit only on a non-zero code so a fully successful run returns normally
+	// (mirrors the rpccli set mirror); a direct exit avoids an extra "Error:" line
+	// on partial failure.
+	if code := result.ExitCode(); code != 0 {
+		os.Exit(code)
+	}
 	return nil
 }
 
@@ -424,6 +436,17 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 			return nil, err
 		}
 		fields["run_status"] = setRunStatus
+	}
+
+	// Handle caused-by lineage. The sentinel default distinguishes "omitted" (no
+	// change) from "--caused-by ''" (explicit clear). A non-empty value replaces
+	// the full ordered, de-duplicated set.
+	if setCausedBy != causedByUnset {
+		refs, err := resolveCausedBy(database, setCausedBy, "")
+		if err != nil {
+			return nil, err
+		}
+		fields["caused_by"] = store.CausedByUpdate{Refs: refs}
 	}
 
 	return fields, nil

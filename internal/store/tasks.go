@@ -51,8 +51,9 @@ type CreateParams struct {
 	Meta                 *string // JSON object
 	DueAt                string
 	StartAt              string
-	Via                  string // origin.via for webhooks; defaults to "cli"
-	CreatorScopeRef      string // full praesidium scopeRef of the creating agent; stored as created_by_scope_ref
+	CausedBy             []CausedByRef // ordered, de-duplicated causal lineage edges
+	Via                  string        // origin.via for webhooks; defaults to "cli"
+	CreatorScopeRef      string        // full praesidium scopeRef of the creating agent; stored as created_by_scope_ref
 }
 
 // CreateResult contains the result of task creation.
@@ -334,6 +335,18 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			return fmt.Errorf("failed to get task UUID: %w", err)
 		}
 
+		// Insert causal lineage edges (caused_by) in the same transaction now that
+		// the new task UUID is known.
+		if len(params.CausedBy) > 0 {
+			if err := insertCausedByRows(tx, causedByAttribution{
+				legacyActor:  legacyActor,
+				principalRef: attr.PrincipalRef,
+				scope:        scopeSQL(attr),
+			}, uuid, params.CausedBy); err != nil {
+				return err
+			}
+		}
+
 		// Log event with structured payload
 		payload := map[string]interface{}{
 			"slug":     params.Slug,
@@ -383,6 +396,13 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		}
 		if params.Specification != "" {
 			payload["specification"] = params.Specification
+		}
+		if len(params.CausedBy) > 0 {
+			causedByIDs := make([]string, 0, len(params.CausedBy))
+			for _, ref := range params.CausedBy {
+				causedByIDs = append(causedByIDs, ref.FriendlyID)
+			}
+			payload["caused_by"] = causedByIDs
 		}
 
 		payloadJSON, err := json.Marshal(payload)
@@ -457,6 +477,18 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 	}
 	if via == "" {
 		via = "cli"
+	}
+	// caused_by is a non-column task field: extract it before the scalar UPDATE is
+	// built so it never becomes a `caused_by = ?` set clause. Its rows are replaced
+	// in the same transaction below.
+	var causedByUpdate *CausedByUpdate
+	if raw, ok := fields[causedByFieldKey]; ok {
+		cu, ok := raw.(CausedByUpdate)
+		if !ok {
+			return 0, fmt.Errorf("invalid caused_by value type %T", raw)
+		}
+		causedByUpdate = &cu
+		delete(fields, causedByFieldKey)
 	}
 	if _, _, err := normalizeStateField(fields); err != nil {
 		return 0, err
@@ -562,6 +594,27 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			return fmt.Errorf("failed to update task: %w", err)
 		}
 
+		// Replace the task's caused_by edge set (if a caused_by update was supplied).
+		// Old values are captured first so the event/webhook change summary reports
+		// old/new as friendly-ID arrays.
+		var causedByOldIDs []string
+		if causedByUpdate != nil {
+			causedByOldIDs, err = CausedByIDs(tx, taskUUID)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec("DELETE FROM task_causes WHERE task_uuid = ?", taskUUID); err != nil {
+				return fmt.Errorf("failed to clear caused_by: %w", err)
+			}
+			if err := insertCausedByRows(tx, causedByAttribution{
+				legacyActor:  legacyActorSQL(attr),
+				principalRef: attr.PrincipalRef,
+				scope:        scopeSQL(attr),
+			}, taskUUID, causedByUpdate.Refs); err != nil {
+				return err
+			}
+		}
+
 		// Cascade delete resident subtasks and detach external child backlinks if
 		// state is being set to 'deleted'.
 		if newState, ok := fields["state"]; ok && newState == "deleted" {
@@ -598,8 +651,24 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			}
 		}
 
-		// Log event with structured payload
-		changesJSON, err := json.Marshal(fields)
+		// Log event with structured payload. caused_by (a non-column field) is
+		// merged back into the payload as a friendly-ID array so `wrkq log --patch`
+		// shows it like any other field edit.
+		payloadFields := fields
+		eventChanged := fieldNames
+		eventChanges := buildWebhookChanges(oldValues, fields)
+		if causedByUpdate != nil {
+			payloadFields = make(map[string]interface{}, len(fields)+1)
+			for k, v := range fields {
+				payloadFields[k] = v
+			}
+			newIDs := causedByUpdate.FriendlyIDs()
+			payloadFields[causedByFieldKey] = newIDs
+			eventChanged = append(append([]string{}, fieldNames...), causedByFieldKey)
+			sort.Strings(eventChanged)
+			eventChanges[causedByFieldKey] = webhooks.Change{From: causedByOldIDs, To: newIDs}
+		}
+		changesJSON, err := json.Marshal(payloadFields)
 		if err != nil {
 			return fmt.Errorf("failed to marshal changes: %w", err)
 		}
@@ -631,8 +700,8 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 				ActorUUID:  actorUUIDPtr(attr),
 				Via:        via,
 				Transition: transition,
-				Changed:    fieldNames,
-				Changes:    buildWebhookChanges(oldValues, fields),
+				Changed:    eventChanged,
+				Changes:    eventChanges,
 			},
 		})
 
@@ -1059,6 +1128,20 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 		// Check etag if ifMatch was provided
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
+		}
+
+		// Guard causal lineage: refuse to hard-purge a task that surviving tasks
+		// still attribute their defect/rework to. The caller must clear those
+		// dependents' caused_by first (or purge them too). This mirrors the DB-level
+		// ON DELETE RESTRICT but yields a stable, explanatory error.
+		var causedByReferrers int
+		if err := tx.QueryRow(
+			"SELECT COUNT(*) FROM task_causes WHERE caused_by_task_uuid = ?", taskUUID,
+		).Scan(&causedByReferrers); err != nil {
+			return fmt.Errorf("failed to check caused_by referrers: %w", err)
+		}
+		if causedByReferrers > 0 {
+			return fmt.Errorf("cannot purge task %s: it is referenced by the caused_by lineage of %d surviving task(s); clear those references first", slug, causedByReferrers)
 		}
 
 		// Capture webhook payload info before deletion

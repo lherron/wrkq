@@ -14,6 +14,7 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +51,7 @@ var (
 	findParentTask      string
 	findRequestedBy     string
 	findAssignedProject string
+	findCausedBy        string
 	findAckPending      bool
 	findLimit           int
 	findCursor          string
@@ -75,6 +77,7 @@ func init() {
 	findCmd.Flags().StringVar(&findParentTask, "parent-task", "", "Filter subtasks of a specific parent task (ID or path)")
 	findCmd.Flags().StringVar(&findRequestedBy, "requested-by", "", "Filter by requester project ID")
 	findCmd.Flags().StringVar(&findAssignedProject, "assigned-project", "", "Filter by assignee project ID")
+	findCmd.Flags().StringVar(&findCausedBy, "caused-by", "", "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)")
 	findCmd.Flags().BoolVar(&findAckPending, "ack-pending", false, "Filter for ack-pending tasks (acknowledged_at is null; completed/cancelled)")
 	findCmd.Flags().IntVar(&findLimit, "limit", 0, "Limit number of results")
 	findCmd.Flags().StringVar(&findCursor, "cursor", "", "Pagination cursor")
@@ -89,7 +92,22 @@ func init() {
 
 func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
+
+	// Reset the caused-by global after running so the shared rootCmd (used across
+	// tests) never leaks a stale value into a later find invocation.
+	defer func() { findCausedBy = "" }()
+
 	args = applyProjectRootToPaths(app.Config, args, true)
+
+	// Resolve the caused-by filter (a task ID) to its UUID.
+	var causedByTaskUUID string
+	if findCausedBy != "" {
+		uuid, _, err := selectors.ResolveTask(database, findCausedBy)
+		if err != nil {
+			return fmt.Errorf("failed to resolve --caused-by task: %w", err)
+		}
+		causedByTaskUUID = uuid
+	}
 
 	// Normalize assignee to a principal ref if provided.
 	var assigneePrincipalRef string
@@ -130,6 +148,7 @@ func runFind(app *appctx.App, cmd *cobra.Command, args []string) error {
 		parentTaskUUID:       parentTaskUUID,
 		requestedByProjectID: findRequestedBy,
 		assignedProjectID:    findAssignedProject,
+		causedByTaskUUID:     causedByTaskUUID,
 		ackPending:           findAckPending,
 		limit:                findLimit,
 		cursor:               findCursor,
@@ -230,6 +249,7 @@ type findOptions struct {
 	parentTaskUUID       string
 	requestedByProjectID string
 	assignedProjectID    string
+	causedByTaskUUID     string
 	ackPending           bool
 	limit                int
 	cursor               string
@@ -238,27 +258,28 @@ type findOptions struct {
 }
 
 type findResult struct {
-	Type                 string  `json:"type"` // "task" or "container"
-	UUID                 string  `json:"uuid"`
-	ID                   string  `json:"id"`
-	Slug                 string  `json:"slug"`
-	Title                string  `json:"title"`
-	Path                 string  `json:"path"`
-	Specification        string  `json:"specification,omitempty"`
-	State                *string `json:"state,omitempty"`                   // tasks only
-	Priority             *int    `json:"priority,omitempty"`                // tasks only
-	Kind                 *string `json:"kind,omitempty"`                    // tasks only
-	Assignee             *string `json:"assignee,omitempty"`                // tasks only (principal display)
-	AssigneePrincipalRef *string `json:"assignee_principal_ref,omitempty"`  // tasks only
-	ParentTaskID         *string `json:"parent_task_id,omitempty"`          // subtasks only
-	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"` // tasks only
-	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`     // tasks only
-	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`         // tasks only
-	Resolution           *string `json:"resolution,omitempty"`              // tasks only
-	DueAt                *string `json:"due_at,omitempty"`                  // tasks only
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
-	ETag                 int64   `json:"etag"`
+	Type                 string   `json:"type"` // "task" or "container"
+	UUID                 string   `json:"uuid"`
+	ID                   string   `json:"id"`
+	Slug                 string   `json:"slug"`
+	Title                string   `json:"title"`
+	Path                 string   `json:"path"`
+	Specification        string   `json:"specification,omitempty"`
+	State                *string  `json:"state,omitempty"`                   // tasks only
+	Priority             *int     `json:"priority,omitempty"`                // tasks only
+	Kind                 *string  `json:"kind,omitempty"`                    // tasks only
+	Assignee             *string  `json:"assignee,omitempty"`                // tasks only (principal display)
+	AssigneePrincipalRef *string  `json:"assignee_principal_ref,omitempty"`  // tasks only
+	ParentTaskID         *string  `json:"parent_task_id,omitempty"`          // subtasks only
+	RequestedByProjectID *string  `json:"requested_by_project_id,omitempty"` // tasks only
+	AssignedProjectID    *string  `json:"assigned_project_id,omitempty"`     // tasks only
+	AcknowledgedAt       *string  `json:"acknowledged_at,omitempty"`         // tasks only
+	Resolution           *string  `json:"resolution,omitempty"`              // tasks only
+	DueAt                *string  `json:"due_at,omitempty"`                  // tasks only
+	CausedBy             []string `json:"caused_by,omitempty"`               // tasks only
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
+	ETag                 int64    `json:"etag"`
 }
 
 func executeFindQuery(database *db.DB, opts findOptions) ([]findResult, bool, error) {
@@ -377,6 +398,12 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 	if opts.assignedProjectID != "" {
 		query += " AND t.assigned_project_id = ?"
 		args = append(args, opts.assignedProjectID)
+	}
+
+	// Filter by caused-by lineage (tasks whose caused_by set contains the producer).
+	if opts.causedByTaskUUID != "" {
+		query += " AND EXISTS (SELECT 1 FROM task_causes tc WHERE tc.task_uuid = t.uuid AND tc.caused_by_task_uuid = ?)"
+		args = append(args, opts.causedByTaskUUID)
 	}
 
 	// Filter by ack pending
@@ -528,6 +555,17 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 
 	if err := rows.Err(); err != nil {
 		return nil, false, err
+	}
+
+	// Project caused_by lineage onto each task result (omitted when empty).
+	for i := range results {
+		causedByIDs, err := store.CausedByIDs(database, results[i].UUID)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(causedByIDs) > 0 {
+			results[i].CausedBy = causedByIDs
+		}
 	}
 
 	// Check if there are more results (we requested limit+1)

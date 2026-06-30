@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lherron/wrkq/internal/store"
 )
 
 // TaskCatViewParams selects the task to project and whether to include comments.
@@ -67,6 +69,7 @@ type WrkqTaskCatView struct {
 	CreatedByScopeRef     *string           `json:"created_by_scope_ref,omitempty"`
 	UpdatedBy             string            `json:"updated_by"`
 	UpdatedByPrincipalRef string            `json:"updated_by_principal_ref,omitempty"`
+	CausedBy              []string          `json:"caused_by"`
 	BlockedBy             []CatViewBlocker  `json:"blocked_by,omitempty"`
 	Comments              []CatViewComment  `json:"comments,omitempty"`
 	Relations             []CatViewRelation `json:"relations,omitempty"`
@@ -251,6 +254,12 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		UpdatedBy:             updatedBy,
 		UpdatedByPrincipalRef: nullStr(updatedByPrincipalRef),
 	}
+
+	causedBy, cerr := store.CausedByIDs(tx, taskUUID)
+	if cerr != nil {
+		return nil, NewInternalError(cerr)
+	}
+	view.CausedBy = causedBy
 
 	if includeComments {
 		comments, cerr := catViewComments(ctx, tx, taskUUID)

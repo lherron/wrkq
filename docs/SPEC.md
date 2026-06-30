@@ -253,6 +253,31 @@ blocking task is not in:
 
 Therefore `draft`, `open`, `in_progress`, and `blocked` tasks still block.
 
+### Causal lineage (`caused_by`)
+
+`caused_by` is a first-class, multi-valued task field recording the existing
+task(s) whose delivered work caused this task to exist as defect/rework. It is
+DISTINCT from task relations: it is causal/outcome-quality lineage, stored in a
+dedicated normalized edge table (`task_causes`), and does NOT participate in
+blocker checks, `relation` output, parent/subtask nesting, moves, archives,
+restores, recursive tree behavior, or residency.
+
+- Accepted input is comma-separated friendly task IDs matching `^T-[0-9]{5}$`
+  (e.g. `--caused-by T-00012,T-00034`). Each must reference an existing task.
+  Bad format, missing reference, and self-causation are validation errors. The
+  resolved set is ordered (first-seen) and de-duplicated.
+- `wrkq touch <path> --caused-by ...` sets initial lineage on creation.
+- `wrkq set <task> --caused-by ...` replaces the full set; `--caused-by ""`
+  clears it; omitting the flag leaves it unchanged.
+- `wrkq cat` exposes `caused_by` (legacy CLI/compat surfaces) / `causedBy`
+  (stable `WrkqTask` DTO) as an array of friendly IDs.
+- `wrkq find --caused-by T-XXXXX` returns tasks whose `caused_by` set contains
+  that ID, composing with existing path/state/type/kind/sort/pagination.
+- `task.created` / `task.updated` event payloads include `caused_by`, so it
+  appears in `wrkq log --patch` like other field edits.
+- Hard-purging a task referenced by surviving `caused_by` edges is rejected
+  unless the dependents are purged together or their lineage is cleared first.
+
 ### Handoffs
 
 Handoffs are intentional context records that an agent leaves for a later

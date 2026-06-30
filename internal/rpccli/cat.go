@@ -266,6 +266,7 @@ type catTask struct {
 	CreatedByScopeRef     *string         `json:"created_by_scope_ref,omitempty"`
 	UpdatedBy             string          `json:"updated_by"`
 	UpdatedByPrincipalRef string          `json:"updated_by_principal_ref,omitempty"`
+	CausedBy              []string        `json:"caused_by"`
 	BlockedBy             []catBlocker    `json:"blocked_by,omitempty"`
 	Comments              []catComment    `json:"comments,omitempty"`
 }
@@ -343,6 +344,9 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			}
 			if t.Labels != nil && *t.Labels != "" {
 				fmt.Fprintf(w, "labels: %s\n", *t.Labels)
+			}
+			if len(t.CausedBy) > 0 {
+				fmt.Fprintf(w, "caused_by: [%s]\n", strings.Join(t.CausedBy, ", "))
 			}
 			fmt.Fprintf(w, "meta: %s\n", metaValue)
 			if t.Specification != "" {

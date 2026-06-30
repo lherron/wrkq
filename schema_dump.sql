@@ -186,6 +186,19 @@ END;
 CREATE INDEX task_relations_to_idx ON task_relations(to_task_uuid);
 CREATE INDEX task_relations_from_idx ON task_relations(from_task_uuid);
 CREATE INDEX task_relations_kind_idx ON task_relations(kind);
+CREATE TABLE task_causes (
+  task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+  caused_by_task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE RESTRICT,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  created_by_actor_uuid TEXT REFERENCES actors(uuid) ON DELETE SET NULL,
+  created_by_principal_ref TEXT NOT NULL,
+  created_by_scope_ref TEXT,
+  PRIMARY KEY (task_uuid, caused_by_task_uuid),
+  UNIQUE (task_uuid, position),
+  CHECK (task_uuid <> caused_by_task_uuid)
+);
+CREATE INDEX task_causes_caused_by_idx ON task_causes(caused_by_task_uuid, task_uuid);
 CREATE TABLE IF NOT EXISTS "tasks" (
   uuid TEXT PRIMARY KEY
        DEFAULT (

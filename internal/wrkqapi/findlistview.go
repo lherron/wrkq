@@ -12,6 +12,7 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 // FindListViewParams mirrors the legacy `wrkq find [PATH...]` surface. The CLI
@@ -31,6 +32,7 @@ type FindListViewParams struct {
 	ParentTask           string   `json:"parentTask,omitempty"`
 	RequestedByProjectID string   `json:"requestedBy,omitempty"`
 	AssignedProjectID    string   `json:"assignedProject,omitempty"`
+	CausedBy             string   `json:"causedBy,omitempty"`
 	AckPending           bool     `json:"ackPending,omitempty"`
 	Limit                int      `json:"limit,omitempty"`
 	Cursor               string   `json:"cursor,omitempty"`
@@ -42,27 +44,28 @@ type FindListViewParams struct {
 // tags). Marshaled by encoding/json — NOT alphabetical (legacy uses a struct, not
 // a map), so field order here is the wire order.
 type WrkqFindEntry struct {
-	Type                 string  `json:"type"`
-	UUID                 string  `json:"uuid"`
-	ID                   string  `json:"id"`
-	Slug                 string  `json:"slug"`
-	Title                string  `json:"title"`
-	Path                 string  `json:"path"`
-	Specification        string  `json:"specification,omitempty"`
-	State                *string `json:"state,omitempty"`
-	Priority             *int    `json:"priority,omitempty"`
-	Kind                 *string `json:"kind,omitempty"`
-	Assignee             *string `json:"assignee,omitempty"`
-	AssigneePrincipalRef *string `json:"assignee_principal_ref,omitempty"`
-	ParentTaskID         *string `json:"parent_task_id,omitempty"`
-	RequestedByProjectID *string `json:"requested_by_project_id,omitempty"`
-	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
-	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
-	Resolution           *string `json:"resolution,omitempty"`
-	DueAt                *string `json:"due_at,omitempty"`
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
-	ETag                 int64   `json:"etag"`
+	Type                 string   `json:"type"`
+	UUID                 string   `json:"uuid"`
+	ID                   string   `json:"id"`
+	Slug                 string   `json:"slug"`
+	Title                string   `json:"title"`
+	Path                 string   `json:"path"`
+	Specification        string   `json:"specification,omitempty"`
+	State                *string  `json:"state,omitempty"`
+	Priority             *int     `json:"priority,omitempty"`
+	Kind                 *string  `json:"kind,omitempty"`
+	Assignee             *string  `json:"assignee,omitempty"`
+	AssigneePrincipalRef *string  `json:"assignee_principal_ref,omitempty"`
+	ParentTaskID         *string  `json:"parent_task_id,omitempty"`
+	RequestedByProjectID *string  `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string  `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt       *string  `json:"acknowledged_at,omitempty"`
+	Resolution           *string  `json:"resolution,omitempty"`
+	DueAt                *string  `json:"due_at,omitempty"`
+	CausedBy             []string `json:"caused_by,omitempty"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
+	ETag                 int64    `json:"etag"`
 }
 
 // WrkqFindListView is the server-owned COMPATIBILITY list projection for
@@ -105,6 +108,16 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		parentTaskUUID = uuid
 	}
 
+	// Resolve the caused-by filter (a task ID) to its UUID.
+	var causedByTaskUUID string
+	if p.CausedBy != "" {
+		uuid, _, err := selectors.ResolveTask(a.db, p.CausedBy)
+		if err != nil {
+			return nil, NewValidationError(fmt.Sprintf("failed to resolve --caused-by task: %s", err.Error()), map[string]any{"field": "causedBy"})
+		}
+		causedByTaskUUID = uuid
+	}
+
 	sortField, descending, err := normalizeFindSort(p.Sort, p.Reverse, p.Type)
 	if err != nil {
 		return nil, NewValidationError(err.Error(), map[string]any{"field": "sort"})
@@ -122,6 +135,7 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		parentTaskUUID:       parentTaskUUID,
 		requestedByProjectID: p.RequestedByProjectID,
 		assignedProjectID:    p.AssignedProjectID,
+		causedByTaskUUID:     causedByTaskUUID,
 		ackPending:           p.AckPending,
 		limit:                p.Limit,
 		cursor:               p.Cursor,
@@ -158,6 +172,7 @@ type findQueryOptions struct {
 	parentTaskUUID       string
 	requestedByProjectID string
 	assignedProjectID    string
+	causedByTaskUUID     string
 	ackPending           bool
 	limit                int
 	cursor               string
@@ -266,6 +281,10 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	if opts.assignedProjectID != "" {
 		query += " AND t.assigned_project_id = ?"
 		args = append(args, opts.assignedProjectID)
+	}
+	if opts.causedByTaskUUID != "" {
+		query += " AND EXISTS (SELECT 1 FROM task_causes tc WHERE tc.task_uuid = t.uuid AND tc.caused_by_task_uuid = ?)"
+		args = append(args, opts.causedByTaskUUID)
 	}
 	if opts.ackPending {
 		query += " AND t.acknowledged_at IS NULL AND t.state IN ('completed', 'cancelled')"
@@ -402,6 +421,17 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, NewInternalError(err)
+	}
+
+	// Project caused_by lineage onto each task entry (omitted when empty).
+	for i := range results {
+		causedBy, cerr := store.CausedByIDs(a.db, results[i].UUID)
+		if cerr != nil {
+			return nil, false, NewInternalError(cerr)
+		}
+		if len(causedBy) > 0 {
+			results[i].CausedBy = causedBy
+		}
 	}
 
 	hasMore := false

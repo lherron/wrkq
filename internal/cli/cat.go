@@ -154,6 +154,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CreatedByScopeRef     *string         `json:"created_by_scope_ref,omitempty"`
 		UpdatedBy             string          `json:"updated_by"`
 		UpdatedByPrincipalRef string          `json:"updated_by_principal_ref,omitempty"`
+		CausedBy              []string        `json:"caused_by"`
 		BlockedBy             []BlockerInfo   `json:"blocked_by,omitempty"`
 		Comments              []Comment       `json:"comments,omitempty"`
 		Relations             []Relation      `json:"relations,omitempty"`
@@ -301,6 +302,15 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			UpdatedBy:             updatedBy,
 			UpdatedByPrincipalRef: valueOrEmpty(updatedByPrincipalRef),
 		}
+
+		// Load caused_by causal lineage (ordered friendly IDs). Always a non-nil
+		// slice so the JSON projection carries `caused_by: []` when empty rather
+		// than omitting the key.
+		causedByIDs, err := store.CausedByIDs(database, taskUUID)
+		if err != nil {
+			return err
+		}
+		task.CausedBy = causedByIDs
 
 		// Include comments by default (unless excluded)
 		if !catExcludeComments {
@@ -515,6 +525,9 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				if task.Labels != nil && *task.Labels != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "labels: %s\n", *task.Labels)
+				}
+				if len(task.CausedBy) > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "caused_by: [%s]\n", strings.Join(task.CausedBy, ", "))
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "meta: %s\n", metaValue)
 				if task.Specification != "" {

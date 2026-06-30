@@ -30,6 +30,7 @@ type WrkqTask struct {
 	ETag                  int64          `json:"etag"`
 	StartAt               string         `json:"startAt,omitempty"`
 	DueAt                 string         `json:"dueAt,omitempty"`
+	CausedBy              []string       `json:"causedBy,omitempty"`
 	CreatedAt             string         `json:"createdAt"`
 	UpdatedAt             string         `json:"updatedAt"`
 	CompletedAt           string         `json:"completedAt,omitempty"`
@@ -118,6 +119,7 @@ type TaskCreateParams struct {
 	MetaRaw              string         `json:"metaRaw,omitempty"`
 	DueAt                string         `json:"dueAt,omitempty"`
 	StartAt              string         `json:"startAt,omitempty"`
+	CausedBy             []string       `json:"causedBy,omitempty"`
 	ForceUUID            string         `json:"forceUuid,omitempty"`
 	Actor                string         `json:"actor,omitempty"`
 	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
@@ -199,6 +201,9 @@ type TaskPatch struct {
 	RunStatus            *string         `json:"runStatus,omitempty"`
 	DueAt                *string         `json:"dueAt,omitempty"`
 	StartAt              *string         `json:"startAt,omitempty"`
+	// CausedBy replaces the full causal-lineage set. A non-nil pointer to an empty
+	// slice clears it; nil means no change (absent-vs-empty preserved).
+	CausedBy *[]string `json:"causedBy,omitempty"`
 }
 
 func (p *TaskPatch) UnmarshalJSON(b []byte) error {
@@ -212,7 +217,7 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
 		"assigneePrincipalRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
 		"cpProjectId": true, "cpWorkItemId": true, "cpRunId": true, "sessionId": true, "runStatus": true,
-		"dueAt": true, "startAt": true,
+		"dueAt": true, "startAt": true, "causedBy": true,
 	}
 	for key := range raw {
 		if !allowed[key] {

@@ -28,7 +28,7 @@ type touchResult struct {
 // reads and artifact-dir creation; the server owns durable task creation.
 func newTouchCmd() *cobra.Command {
 	var title, description, specification, state, kind, parentTask, assignee, labels, meta string
-	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID string
+	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID, causedBy string
 	var priority int
 	var asJSON bool
 
@@ -45,7 +45,7 @@ func newTouchCmd() *cobra.Command {
 				state: state, priority: priority, kind: kind, parentTask: parentTask,
 				assignee: assignee, requestedBy: requestedBy, assignedProject: assignedProject,
 				resolution: resolution, labels: labels, meta: meta, metaFile: metaFile,
-				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, json: asJSON,
+				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, causedBy: causedBy, json: asJSON,
 			})
 		},
 	}
@@ -66,6 +66,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Initial task due date")
 	cmd.Flags().StringVar(&startAt, "start-at", "", "Initial task start date")
 	cmd.Flags().StringVar(&forceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
+	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Causal lineage: comma-separated task IDs whose work caused this defect/rework (e.g. T-00012,T-00034)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -73,7 +74,7 @@ func newTouchCmd() *cobra.Command {
 type touchOpts struct {
 	title, description, specification, state, kind, parentTask, assignee string
 	requestedBy, assignedProject, resolution, labels, meta, metaFile     string
-	dueAt, startAt, forceUUID                                            string
+	dueAt, startAt, forceUUID, causedBy                                  string
 	priority                                                             int
 	json                                                                 bool
 }
@@ -177,6 +178,9 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		}
 		if o.forceUUID != "" {
 			params["forceUuid"] = o.forceUUID
+		}
+		if toks := splitCausedBy(o.causedBy); len(toks) > 0 {
+			params["causedBy"] = toks
 		}
 
 		raw, err := tr.Call(cmd.Context(), "wrkq.task.create", params)

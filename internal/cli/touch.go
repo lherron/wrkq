@@ -58,6 +58,7 @@ var (
 	touchDueAt           string
 	touchStartAt         string
 	touchForceUUID       string
+	touchCausedBy        string
 	touchJSON            bool
 )
 
@@ -80,12 +81,17 @@ func init() {
 	touchCmd.Flags().StringVar(&touchDueAt, "due-at", "", "Initial task due date")
 	touchCmd.Flags().StringVar(&touchStartAt, "start-at", "", "Initial task start date")
 	touchCmd.Flags().StringVar(&touchForceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
+	touchCmd.Flags().StringVar(&touchCausedBy, "caused-by", "", "Causal lineage: comma-separated task IDs whose work caused this defect/rework (e.g. T-00012,T-00034)")
 	touchCmd.Flags().BoolVar(&touchJSON, "json", false, "Output as JSON")
 }
 
 func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+
+	// Reset the caused-by global after running so the shared rootCmd (used across
+	// tests) never leaks a stale value into a later touch invocation.
+	defer func() { touchCausedBy = "" }()
 
 	// Apply project root (from config or --project flag override)
 	args = applyProjectRootToPaths(app.Config, args, false)
@@ -200,6 +206,15 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Resolve caused-by lineage (ordered, de-duplicated; refs must exist).
+	var causedByRefs []store.CausedByRef
+	if touchCausedBy != "" {
+		causedByRefs, err = resolveCausedBy(database, touchCausedBy, "")
+		if err != nil {
+			return err
+		}
+	}
+
 	// Create store
 	s := store.New(database)
 	machineOutput := touchJSON || !isStdoutTTY(cmd.OutOrStdout())
@@ -284,8 +299,9 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				return nil
 			}(),
-			DueAt:   touchDueAt,
-			StartAt: touchStartAt,
+			DueAt:    touchDueAt,
+			StartAt:  touchStartAt,
+			CausedBy: causedByRefs,
 		})
 		if err != nil {
 			return err

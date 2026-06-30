@@ -355,9 +355,11 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > sort-validation + BuildNextCursor over the filtered set, and the legacy
 > mixed-type in-memory merge-sort:
 > `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, assignee?,
-> parentTask?, requestedBy?, assignedProject?, ackPending?, sort?, reverse?,
-> limit?, cursor? }` → `{ items: WrkqFindEntry[], next_cursor }`. Rows are
-> legacy-shaped (snake_case `findResult`). PINNED PARITY QUIRKS the server
+> parentTask?, requestedBy?, assignedProject?, causedBy?, ackPending?, sort?,
+> reverse?, limit?, cursor? }` → `{ items: WrkqFindEntry[], next_cursor }`. Rows
+> are legacy-shaped (snake_case `findResult`); each task row carries `caused_by`
+> (array of friendly IDs) when non-empty. `causedBy` filters to tasks whose
+> lineage contains that task ID. PINNED PARITY QUIRKS the server
 > reproduces exactly: (1) when NO `--type` is given (searchBoth) the cursor is
 > IGNORED — pagination/limit run over the merged in-memory set with no
 > cursor.Apply; only a single `type` (`t`|`p`) applies the cursor SQL-side; (2)
@@ -541,6 +543,7 @@ interface WrkqTaskCreateParams {
   metaRaw?: string; // compatibility carrier: validated JSON object/null stored verbatim
   dueAt?: string;
   startAt?: string;
+  causedBy?: string[];   // causal lineage: friendly task IDs (^T-[0-9]{5}$), ordered + de-duplicated server-side
   forceUuid?: string; // lowercase UUIDv4, mirrors `wrkq touch --force-uuid`
   idempotencyKey?: string;
 }
@@ -590,6 +593,7 @@ interface WrkqTaskUpdateParams {
     runStatus?: "queued" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
     dueAt?: string | null;
     startAt?: string | null;
+    causedBy?: string[];   // replaces the full causal-lineage set; [] clears, absent = no change (absent-vs-empty preserved)
   };
   expectEtag?: number;   // CAS precondition; see §9.1
   idempotencyKey?: string;
@@ -621,6 +625,7 @@ interface WrkqTask {
   etag: number;
   startAt?: string;      // RFC3339
   dueAt?: string;        // RFC3339
+  causedBy?: string[];   // causal lineage friendly IDs (ordered); omitted when empty
   createdAt: string;     // RFC3339
   updatedAt: string;     // RFC3339
   completedAt?: string;

@@ -18,7 +18,7 @@ import (
 // wrkq.task.update.
 func newSetCmd() *cobra.Command {
 	var description, specification, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
-	var parentTask, parentID, requestedBy, assignedProject, resolution string
+	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy string
 	var cpProjectID, cpWorkItemID, cpRunID, sessionID, runStatus, metaFile string
 	var priority, jobs, batchSize int
 	var ifMatch int64
@@ -128,6 +128,13 @@ func newSetCmd() *cobra.Command {
 				patch["runStatus"] = runStatus
 				dryFields["run_status"] = runStatus
 			}
+			// caused_by: --caused-by '' clears, omitted leaves unchanged. The empty
+			// slice (vs absent) signals an explicit clear to the server.
+			if cmd.Flags().Changed("caused-by") {
+				toks := splitCausedBy(causedBy)
+				patch["causedBy"] = toks
+				dryFields["caused_by"] = toks
+			}
 			if dueAt != "" {
 				patch["dueAt"] = dueAt
 				dryFields["due_at"] = dueAt
@@ -198,6 +205,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cpRunID, "cp-run-id", "", "Update CP run ID")
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Update session ID")
 	cmd.Flags().StringVar(&runStatus, "run-status", "", "Update async run status")
+	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
 	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
 	return cmd
 }

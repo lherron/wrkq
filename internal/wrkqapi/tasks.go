@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/causedby"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -133,6 +134,15 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		return nil, merr
 	}
 
+	var causedByRefs []store.CausedByRef
+	if len(p.CausedBy) > 0 {
+		refs, cerr := causedby.ResolveTokens(a.db, p.CausedBy, "")
+		if cerr != nil {
+			return nil, NewValidationError(cerr.Error(), map[string]any{"field": "causedBy"})
+		}
+		causedByRefs = refs
+	}
+
 	attr, aerr := a.attributionFor(p.Actor)
 	if aerr != nil {
 		return nil, aerr
@@ -157,6 +167,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		DueAt:                p.DueAt,
 		StartAt:              p.StartAt,
 		RiskClass:            riskClass,
+		CausedBy:             causedByRefs,
 		Via:                  "rpc",
 	})
 	if err != nil {
@@ -378,6 +389,16 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	if err := rows.Err(); err != nil {
 		return nil, NewInternalError(err)
 	}
+	// Hydrate caused_by lineage for each task (after the rows cursor is closed).
+	for i := range items {
+		causedBy, cerr := store.CausedByIDs(a.db, items[i].UUID)
+		if cerr != nil {
+			return nil, NewInternalError(cerr)
+		}
+		if len(causedBy) > 0 {
+			items[i].CausedBy = causedBy
+		}
+	}
 
 	result := &WrkqTaskListResult{Items: items}
 	if len(items) > limit {
@@ -507,6 +528,16 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	fields, ferr := a.patchFields(p.Patch)
 	if ferr != nil {
 		return nil, ferr
+	}
+	// Reject self-causation: a task cannot be in its own caused_by set.
+	if cbv, ok := fields["caused_by"]; ok {
+		if cu, ok := cbv.(store.CausedByUpdate); ok {
+			for _, r := range cu.Refs {
+				if r.TaskUUID == uuid {
+					return nil, NewValidationError("a task cannot be caused by itself", map[string]any{"field": "causedBy"})
+				}
+			}
+		}
 	}
 	if len(fields) == 0 {
 		// Nothing to change; return the current DTO.
@@ -1269,6 +1300,13 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 	if patch.StartAt != nil {
 		fields["start_at"] = *patch.StartAt
 	}
+	if patch.CausedBy != nil {
+		refs, cerr := causedby.ResolveTokens(a.db, *patch.CausedBy, "")
+		if cerr != nil {
+			return nil, NewValidationError(cerr.Error(), map[string]any{"field": "causedBy"})
+		}
+		fields["caused_by"] = store.CausedByUpdate{Refs: refs}
+	}
 	return fields, nil
 }
 
@@ -1303,6 +1341,13 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 			return nil, NewNotFoundError(uuid, "task")
 		}
 		return nil, NewInternalError(err)
+	}
+	causedBy, cerr := store.CausedByIDs(a.db, task.UUID)
+	if cerr != nil {
+		return nil, NewInternalError(cerr)
+	}
+	if len(causedBy) > 0 {
+		task.CausedBy = causedBy
 	}
 	return task, nil
 }
