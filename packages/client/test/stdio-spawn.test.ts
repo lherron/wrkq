@@ -1,7 +1,50 @@
 import { describe, expect, test } from "bun:test";
 import { buildStdioSpawnSpec } from "../src/stdio-transport";
+import type { StdioSpawnOptions } from "../src/stdio-transport";
 
 describe("StdioTransport spawn construction", () => {
+  test("T-05381 wrkq sessions use principalRef as --principal-ref caller attribution", () => {
+    const spec = buildStdioSpawnSpec({
+      command: "wrkq",
+      dbPath: "/tmp/wrkq.db",
+      principalRef: "agent:cody",
+      env: { WRKQ_DB: undefined, WRKQ_DB_PATH: undefined },
+    } as StdioSpawnOptions & { principalRef: string });
+
+    expect(spec.argv).toEqual([
+      "--db",
+      "/tmp/wrkq.db",
+      "--principal-ref",
+      "agent:cody",
+      "rpc",
+      "--stdio",
+    ]);
+    expect(spec.argv).not.toContain("--as");
+    expect(spec.env.WRKQ_DB).toBeUndefined();
+  });
+
+  test("T-05381 wrkq sessions reject legacy actor while wrkf keeps workflow actor", () => {
+    let wrkqRejectedActor = false;
+    try {
+      buildStdioSpawnSpec({
+        command: "wrkq",
+        actor: "agent:cody",
+      });
+    } catch (err) {
+      wrkqRejectedActor = true;
+      expect((err as Error).message).toMatch(/actor|principalRef/i);
+    }
+    expect(wrkqRejectedActor).toBe(true);
+
+    // T-05381 only removes wrkq-core caller-attribution actor scaffolding.
+    // wrkf workflow role-binding vocabulary still launches with --actor.
+    const wrkfSpec = buildStdioSpawnSpec({
+      command: "wrkf",
+      actor: "agent:cody",
+    });
+    expect(wrkfSpec.argv).toEqual(["--actor", "agent:cody", "rpc", "--stdio"]);
+  });
+
   test("local dbPath stays on path-only --db", () => {
     const spec = buildStdioSpawnSpec({
       command: "wrkq",
