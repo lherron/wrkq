@@ -518,6 +518,15 @@ Known limits:
   truth of referenced artifacts.
 - Hook/effect handler catalogs are runtime filesystem dependencies, not
   content-pinned workflow dependencies.
+- Production action-handler and agent-work manifests for scheduler-driven agent
+  work are a separate proposed contract: ASP owns the agent/space handler source
+  and prompt bundles; ASPC compiles per-agent work manifests; HRC exposes stable
+  agent-manifest list/match endpoints; wrkf imports handler contract and
+  assignability snapshots tied to workflow template action contract refs before
+  unattended scheduler claims are enabled. Lance explicitly rejected adding a
+  scheduler-owned hash/provenance layer for handler manifests, prompts, schemas,
+  capabilities, or delivery refs. This does not make low-level hook/effect
+  catalogs durable by implication.
 
 ## 12. Supporting Markdown Disposition
 

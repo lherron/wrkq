@@ -3,28 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>T-05362 - wrkf Scheduler and agent-loop Runner Proposal</title>
+  <title>T-05362 - wrkf Scheduler Runner Proposal</title>
   <style>
     :root {
-      --ink: #172026;
-      --muted: #5f6b73;
-      --paper: #f7f5ef;
-      --panel: #fffdfa;
-      --line: #d9d5c8;
-      --line-strong: #9a9383;
+      --ink: #162024;
+      --muted: #5d6870;
+      --paper: #f6f4ee;
+      --panel: #fffdf8;
+      --panel-2: #f0eee6;
+      --line: #d8d3c6;
+      --line-strong: #9e9686;
       --teal: #0f766e;
-      --teal-soft: #dff3ef;
-      --amber: #b7791f;
-      --amber-soft: #fff1d6;
-      --red: #b24035;
-      --red-soft: #fde7e2;
-      --green: #387a44;
-      --green-soft: #e4f2df;
-      --blue: #2d5e8c;
-      --blue-soft: #e1edf8;
-      --violet: #5d4b86;
-      --violet-soft: #eee9f8;
-      --shadow: 0 20px 50px rgba(39, 34, 24, 0.10);
+      --teal-soft: #dff3ee;
+      --blue: #2f6792;
+      --blue-soft: #dfedf7;
+      --amber: #ad6b12;
+      --amber-soft: #fff0cf;
+      --red: #b04438;
+      --red-soft: #fde7df;
+      --green: #3c7846;
+      --green-soft: #e3f0de;
+      --violet: #64518b;
+      --violet-soft: #eee8f7;
+      --shadow: 0 18px 46px rgba(28, 25, 18, 0.10);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
@@ -39,10 +40,10 @@
     body {
       margin: 0;
       background:
-        linear-gradient(90deg, rgba(23, 32, 38, 0.045) 1px, transparent 1px),
-        linear-gradient(180deg, rgba(23, 32, 38, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22, 32, 36, 0.045) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(22, 32, 36, 0.04) 1px, transparent 1px),
         var(--paper);
-      background-size: 36px 36px;
+      background-size: 34px 34px;
       color: var(--ink);
       line-height: 1.55;
     }
@@ -61,16 +62,21 @@
     header {
       min-height: 86vh;
       display: grid;
-      grid-template-columns: minmax(0, 1.02fr) minmax(330px, 0.78fr);
-      gap: 28px;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, 0.72fr);
+      gap: 30px;
       align-items: center;
       padding: 44px 0 30px;
     }
 
-    .eyebrow {
+    .eyebrow,
+    .nav,
+    .tags {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
+    }
+
+    .eyebrow {
       margin-bottom: 22px;
     }
 
@@ -80,26 +86,27 @@
       min-height: 28px;
       padding: 4px 10px;
       border: 1px solid var(--line);
-      background: rgba(255, 253, 250, 0.76);
       border-radius: 999px;
-      font-size: 12px;
-      font-weight: 750;
-      letter-spacing: 0;
+      background: rgba(255, 253, 248, 0.78);
       color: var(--muted);
+      font-size: 12px;
+      font-weight: 780;
+      letter-spacing: 0;
       white-space: nowrap;
     }
 
     .badge.teal { color: var(--teal); background: var(--teal-soft); border-color: rgba(15, 118, 110, 0.28); }
-    .badge.amber { color: var(--amber); background: var(--amber-soft); border-color: rgba(183, 121, 31, 0.30); }
-    .badge.red { color: var(--red); background: var(--red-soft); border-color: rgba(178, 64, 53, 0.28); }
-    .badge.blue { color: var(--blue); background: var(--blue-soft); border-color: rgba(45, 94, 140, 0.26); }
-    .badge.green { color: var(--green); background: var(--green-soft); border-color: rgba(56, 122, 68, 0.28); }
+    .badge.blue { color: var(--blue); background: var(--blue-soft); border-color: rgba(47, 103, 146, 0.26); }
+    .badge.amber { color: var(--amber); background: var(--amber-soft); border-color: rgba(173, 107, 18, 0.28); }
+    .badge.red { color: var(--red); background: var(--red-soft); border-color: rgba(176, 68, 56, 0.28); }
+    .badge.green { color: var(--green); background: var(--green-soft); border-color: rgba(60, 120, 70, 0.28); }
+    .badge.violet { color: var(--violet); background: var(--violet-soft); border-color: rgba(100, 81, 139, 0.26); }
 
     h1 {
       margin: 0;
       max-width: 860px;
-      font-size: clamp(42px, 7vw, 82px);
-      line-height: 0.96;
+      font-size: clamp(42px, 6.8vw, 80px);
+      line-height: 0.97;
       letter-spacing: 0;
       font-weight: 860;
     }
@@ -107,25 +114,22 @@
     .lead {
       max-width: 780px;
       margin: 24px 0 0;
-      color: #364149;
-      font-size: clamp(18px, 2.1vw, 24px);
+      color: #344149;
+      font-size: clamp(18px, 2.05vw, 24px);
       line-height: 1.36;
     }
 
     .thesis {
+      max-width: 830px;
       margin-top: 28px;
       padding: 18px 20px;
       border-left: 5px solid var(--teal);
-      background: rgba(255, 253, 250, 0.78);
+      background: rgba(255, 253, 248, 0.88);
       box-shadow: var(--shadow);
-      max-width: 810px;
       font-size: 17px;
     }
 
     .nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
       margin-top: 24px;
     }
 
@@ -136,20 +140,20 @@
       padding: 6px 12px;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: rgba(255, 253, 250, 0.78);
-      color: #2f3b42;
+      background: rgba(255, 253, 248, 0.78);
+      color: #2f3a41;
       font-size: 13px;
-      font-weight: 720;
+      font-weight: 730;
       text-decoration: none;
     }
 
-    .first-model {
+    .model {
       display: grid;
       gap: 14px;
       padding: 18px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgba(255, 253, 250, 0.92);
+      background: rgba(255, 253, 248, 0.94);
       box-shadow: var(--shadow);
     }
 
@@ -170,7 +174,7 @@
 
     .model-row {
       display: grid;
-      grid-template-columns: 118px minmax(0, 1fr);
+      grid-template-columns: 124px minmax(0, 1fr);
       gap: 12px;
       align-items: stretch;
     }
@@ -179,21 +183,21 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      min-height: 92px;
+      min-height: 90px;
       padding: 12px;
       border: 1px solid var(--line-strong);
-      background: #f0eee7;
-      color: #394249;
-      font-weight: 840;
-      text-align: center;
       border-radius: 6px;
+      background: var(--panel-2);
+      color: #333d43;
+      font-weight: 850;
+      text-align: center;
     }
 
     .node-copy {
       padding: 14px;
       border: 1px solid var(--line);
       border-radius: 6px;
-      background: #fffdfa;
+      background: var(--panel);
     }
 
     .node-copy strong {
@@ -209,12 +213,12 @@
     }
 
     main {
-      padding-bottom: 56px;
+      padding-bottom: 58px;
     }
 
     section {
       padding: 54px 0;
-      border-top: 1px solid rgba(154, 147, 131, 0.42);
+      border-top: 1px solid rgba(158, 150, 134, 0.42);
     }
 
     .section-head {
@@ -228,7 +232,7 @@
     .kicker {
       color: var(--teal);
       font-size: 12px;
-      font-weight: 840;
+      font-weight: 850;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
@@ -242,7 +246,7 @@
 
     .section-summary {
       margin: 0;
-      color: #4c5961;
+      color: #4b5860;
       font-size: 16px;
     }
 
@@ -259,20 +263,16 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
-    .grid.four {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-
     .panel {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgba(255, 253, 250, 0.92);
+      background: rgba(255, 253, 248, 0.94);
       padding: 18px;
-      box-shadow: 0 12px 30px rgba(39, 34, 24, 0.06);
+      box-shadow: 0 12px 30px rgba(28, 25, 18, 0.06);
     }
 
     .panel h3 {
-      margin: 0 0 8px;
+      margin: 10px 0 8px;
       font-size: 18px;
       line-height: 1.2;
     }
@@ -283,25 +283,30 @@
       font-size: 14px;
     }
 
-    .panel .tagline {
-      color: #303a41;
-      font-weight: 760;
-      margin-bottom: 8px;
+    .panel ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    .panel li {
+      margin: 8px 0;
+      color: var(--muted);
+      font-size: 14px;
     }
 
     .consensus {
       border-left: 5px solid var(--green);
-      background: linear-gradient(90deg, rgba(228, 242, 223, 0.82), rgba(255, 253, 250, 0.94));
+      background: linear-gradient(90deg, rgba(227, 240, 222, 0.88), rgba(255, 253, 248, 0.94));
     }
 
     .warning {
       border-left: 5px solid var(--red);
-      background: linear-gradient(90deg, rgba(253, 231, 226, 0.88), rgba(255, 253, 250, 0.94));
+      background: linear-gradient(90deg, rgba(253, 231, 223, 0.9), rgba(255, 253, 248, 0.94));
     }
 
     .decision {
       border-left: 5px solid var(--amber);
-      background: linear-gradient(90deg, rgba(255, 241, 214, 0.9), rgba(255, 253, 250, 0.94));
+      background: linear-gradient(90deg, rgba(255, 240, 207, 0.9), rgba(255, 253, 248, 0.94));
     }
 
     .lanes {
@@ -311,7 +316,7 @@
 
     .lane {
       display: grid;
-      grid-template-columns: 150px repeat(4, minmax(0, 1fr));
+      grid-template-columns: 154px repeat(4, minmax(0, 1fr));
       gap: 10px;
       align-items: stretch;
     }
@@ -320,15 +325,15 @@
       display: flex;
       align-items: center;
       padding: 12px;
-      border-radius: 6px;
       border: 1px solid var(--line-strong);
-      background: #ebe8df;
-      font-weight: 830;
+      border-radius: 6px;
+      background: var(--panel-2);
       color: #313b42;
+      font-weight: 850;
     }
 
     .step {
-      min-height: 88px;
+      min-height: 92px;
       padding: 12px;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -338,8 +343,8 @@
     .step b {
       display: block;
       margin-bottom: 4px;
-      font-size: 13px;
       color: var(--ink);
+      font-size: 13px;
     }
 
     .step span {
@@ -357,15 +362,15 @@
 
     .matrix {
       display: grid;
-      grid-template-columns: repeat(11, minmax(82px, 1fr));
+      grid-template-columns: repeat(11, minmax(88px, 1fr));
       gap: 8px;
       overflow-x: auto;
       padding-bottom: 6px;
     }
 
     .invariant {
-      min-width: 82px;
-      min-height: 156px;
+      min-width: 88px;
+      min-height: 158px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -407,7 +412,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       overflow: hidden;
-      background: #161b1f;
+      background: #161d21;
       color: #eef4f4;
       box-shadow: var(--shadow);
     }
@@ -419,7 +424,7 @@
       align-items: center;
       padding: 12px 16px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.16);
-      background: #20282d;
+      background: #222a2f;
     }
 
     .contract-head h3 {
@@ -449,7 +454,7 @@
       min-width: 260px;
       padding: 18px;
       border-left: 1px solid rgba(255, 255, 255, 0.16);
-      background: #222b30;
+      background: #222c31;
     }
 
     .def {
@@ -466,12 +471,12 @@
     }
 
     .def b {
-      color: #a9ded7;
+      color: #a7ded6;
       font-weight: 790;
     }
 
     .def span {
-      color: #c8d3d4;
+      color: #c9d4d5;
     }
 
     .phase-track {
@@ -483,11 +488,11 @@
 
     .phase {
       position: relative;
+      min-height: 260px;
       padding: 18px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel);
-      min-height: 250px;
     }
 
     .phase::before {
@@ -511,16 +516,12 @@
       font-size: 18px;
     }
 
-    .phase ul,
-    .checks ul,
-    .questions ul {
+    .phase ul {
       margin: 0;
       padding-left: 18px;
     }
 
-    .phase li,
-    .checks li,
-    .questions li {
+    .phase li {
       margin: 8px 0;
       color: var(--muted);
       font-size: 14px;
@@ -536,8 +537,8 @@
     .quote {
       padding: 20px;
       border-left: 5px solid var(--violet);
-      background: var(--violet-soft);
       border-radius: 0 8px 8px 0;
+      background: var(--violet-soft);
       color: #332d43;
       font-size: 18px;
       line-height: 1.38;
@@ -550,12 +551,12 @@
       font-size: 13px;
     }
 
-    .footer code,
-    code {
+    code,
+    .footer code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       font-size: 0.94em;
-      background: rgba(23, 32, 38, 0.08);
-      border: 1px solid rgba(23, 32, 38, 0.12);
+      background: rgba(22, 32, 36, 0.08);
+      border: 1px solid rgba(22, 32, 36, 0.12);
       border-radius: 4px;
       padding: 0.08em 0.28em;
     }
@@ -566,7 +567,6 @@
       .split,
       .grid.two,
       .grid.three,
-      .grid.four,
       .phase-track {
         grid-template-columns: 1fr;
       }
@@ -631,26 +631,28 @@
         <div class="eyebrow" aria-label="Artifact metadata">
           <span class="badge teal">T-05362</span>
           <span class="badge blue">wrkf scheduler</span>
-          <span class="badge amber">agent-loop runner</span>
-          <span class="badge green">three-way signed</span>
+          <span class="badge amber">ASPC/HRC manifests</span>
+          <span class="badge green">Daedalus approved</span>
         </div>
-        <h1>Durable scheduler authority, not another scanner loop.</h1>
-        <p class="lead">The proposal turns `wrkf` from a passive workflow ledger into the authority that discovers, claims, fences, and recovers runnable workflow work while `agent-loop` remains the executor.</p>
+        <h1>Named contracts and agent manifests, not scanner loops.</h1>
+        <p class="lead">The proposal makes <code>wrkf</code> the durable authority for discovering, claiming, fencing, and recovering workflow work while ASPC/HRC answer which agents may be assigned and <code>agent-loop</code> executes the selected handler.</p>
         <div class="thesis">
-          Production scheduling is blocked until the scheduler has durable claims, lease plus fence semantics, ledger-derived implement-to-verify continuation, release/reaper reconciliation from terminal action truth, and a verify-launch precedence rule with ACP.
+          Lance explicitly rejected scheduler-owned hash/provenance machinery. The final design uses named handler contracts, handler versions, ASPC-compiled agent work manifests, HRC agent matching, lease/fence safety, and mandatory implement-to-verify continuation.
         </div>
         <nav class="nav" aria-label="Page sections">
-          <a href="#consensus">Consensus</a>
+          <a href="#review">Final Review</a>
           <a href="#model">Operating Model</a>
+          <a href="#contracts">Contracts</a>
           <a href="#invariants">Invariants</a>
           <a href="#rpc">RPC Surface</a>
           <a href="#continuation">Continuation</a>
+          <a href="#worksets">Worksets</a>
           <a href="#phases">Phases</a>
           <a href="#checks">Checks</a>
         </nav>
       </div>
 
-      <aside class="first-model" aria-labelledby="authority-model">
+      <aside class="model" aria-labelledby="authority-model">
         <div class="model-title">
           <h2 id="authority-model">Authority split</h2>
           <span class="badge red">production gate</span>
@@ -659,51 +661,51 @@
           <div class="node-label">wrkf</div>
           <div class="node-copy">
             <strong>Durable source of truth</strong>
-            <p>Instances, runs, actions, evidence, transitions, effects, CAS, idempotency, scheduler claims, fences, and recovery.</p>
+            <p>Instances, runs, actions, evidence, transitions, effects, CAS, scheduler claims, fences, and recovery.</p>
+          </div>
+        </div>
+        <div class="model-row">
+          <div class="node-label">ASPC + HRC</div>
+          <div class="node-copy">
+            <strong>Assignable-agent source</strong>
+            <p>ASPC compiles explicit agent work manifests; HRC lists and matches agents that can perform a proposed task/action.</p>
           </div>
         </div>
         <div class="model-row">
           <div class="node-label">agent-loop</div>
           <div class="node-copy">
             <strong>Bound action executor</strong>
-            <p>Consumes claims, resolves handlers, heartbeats while working, and settles only under current fence authority.</p>
-          </div>
-        </div>
-        <div class="model-row">
-          <div class="node-label">runner</div>
-          <div class="node-copy">
-            <strong>One action, then re-query</strong>
-            <p>Runs a single claimed action, re-enters the ledger, and follows mandatory continuations before unrelated work.</p>
+            <p>Queries HRC, supplies the selected capability tuple to <code>wrkf</code>, runs one claimed action, and re-queries before moving on.</p>
           </div>
         </div>
       </aside>
     </header>
 
     <main>
-      <section id="consensus">
+      <section id="review">
         <div class="section-head">
           <div>
-            <div class="kicker">01 / signed direction</div>
-            <h2>Three agents aligned on the hard boundary.</h2>
+            <div class="kicker">01 / final review</div>
+            <h2>Daedalus approved the simplified boundary.</h2>
           </div>
-          <p class="section-summary">Clod and Daedalus reviewed independently, then Cody mediated the blocking edits into a final sentence both agents signed.</p>
+          <p class="section-summary">The current proposal keeps the scheduler mechanics and removes scheduler-owned hash/provenance tracking. Daedalus found no blocking edits and approved the ASPC/HRC/wrkf/agent-loop split.</p>
         </div>
 
         <div class="grid three">
           <article class="panel consensus">
-            <span class="badge green">signed</span>
+            <span class="badge green">approved</span>
             <h3>Production requires durable wrkf authority</h3>
-            <p>Runner-only work is useful as a vertical spike, but it cannot be the production scheduler or the unattended multi-runner story.</p>
+            <p>Runner-only work remains a non-production vertical spike. Unattended scheduling needs wrkf claims, leases, fences, release, and reaper behavior.</p>
           </article>
           <article class="panel warning">
-            <span class="badge red">fence rule</span>
-            <h3>Lease is liveness; fence is write authority</h3>
-            <p>Final settlement, transition commit, release, and non-idempotent external side effects must reject stale or stolen authority.</p>
+            <span class="badge red">rejected</span>
+            <h3>No scheduler-owned provenance layer</h3>
+            <p>No manifest hashes, prompt-bundle hashes, schema hashes, capability hashes, source provenance, or delivery-ref provenance for scheduler admission.</p>
           </article>
           <article class="panel decision">
-            <span class="badge amber">continuation</span>
-            <h3>Implement pins verify by ledger truth</h3>
-            <p>`implement.done` pins exact source lineage until `verify` terminalizes or becomes `operator_required`, even after a crash.</p>
+            <span class="badge amber">precision</span>
+            <h3>wrkf must not call HRC inside claim transactions</h3>
+            <p>The runner calls HRC first. <code>claimNext</code> validates the supplied HRC/ASPC tuple against current wrkf state under CAS before leasing.</p>
           </article>
         </div>
       </section>
@@ -712,22 +714,29 @@
         <div class="section-head">
           <div>
             <div class="kicker">02 / operating model</div>
-            <h2>The runner asks the ledger what is legal next.</h2>
+            <h2>The runner asks HRC who can work, then wrkf what is legal.</h2>
           </div>
-          <p class="section-summary">The proposal rejects task scraping and long-lived local workflow memory. Every action starts from `wrkf`, completes through `wrkf`, and returns to `wrkf` before the next move.</p>
+          <p class="section-summary">The design rejects task scraping, generic "do the next thing" prompts, and local workflow memory. Assignment comes from ASPC/HRC; execution legality comes from wrkf.</p>
         </div>
 
         <div class="lanes" aria-label="Scheduler and runner swimlane">
           <div class="lane">
+            <div class="lane-title">ASPC / HRC</div>
+            <div class="step teal"><b>Compile</b><span>ASPC turns explicit agent work declarations into per-agent manifests.</span></div>
+            <div class="step blue"><b>Match</b><span>HRC returns agents permitted for handler contract, role, work class, side effects, and workspace mode.</span></div>
+            <div class="step amber"><b>Report</b><span>Static no-match and runtime capacity unavailability are reported separately.</span></div>
+            <div class="step green"><b>Stay out</b><span>HRC is not called from inside the wrkf claim transaction.</span></div>
+          </div>
+          <div class="lane">
             <div class="lane-title">wrkf scheduler</div>
             <div class="step teal"><b>Discover</b><span>Find runnable attached workflow instances across requested project/path/template filters.</span></div>
-            <div class="step blue"><b>Claim</b><span>Recompute next action, CAS revision and context hash, persist lease and fence.</span></div>
+            <div class="step blue"><b>Claim</b><span>Recompute next action, CAS revision and context, persist lease and fence.</span></div>
             <div class="step amber"><b>Reconcile</b><span>Release only from matching terminal action truth; reaper reconciles terminal-but-unreleased work.</span></div>
             <div class="step green"><b>Continue</b><span>Surface mandatory verify before fresh unrelated work from ledger state.</span></div>
           </div>
           <div class="lane">
             <div class="lane-title">agent-loop runner</div>
-            <div class="step teal"><b>Poll</b><span>Claim one action matching declared capabilities and caller-owned scope.</span></div>
+            <div class="step teal"><b>Ask HRC</b><span>Fetch assignable agents for the proposed handler contract and work requirement.</span></div>
             <div class="step blue"><b>Execute</b><span>Start or resume the canonical action run and pass a structured binding to the handler.</span></div>
             <div class="step amber"><b>Fence-check</b><span>Confirm current fence before external launches, worktree mutation, and final settlement.</span></div>
             <div class="step green"><b>Re-query</b><span>Never run a cached list of actions; re-enter the ledger after every action.</span></div>
@@ -735,10 +744,112 @@
         </div>
       </section>
 
+      <section id="contracts">
+        <div class="section-head">
+          <div>
+            <div class="kicker">03 / contract plane</div>
+            <h2>Execution is selected by named contracts and explicit assignability.</h2>
+          </div>
+          <p class="section-summary">Workflow templates declare what kind of work is needed. ASP owns handler and prompt source. ASPC compiles what each agent may do. HRC answers who can do this action now. wrkf records the selected contract and assignee.</p>
+        </div>
+
+        <div class="grid three">
+          <article class="panel">
+            <span class="badge teal">template</span>
+            <h3>Action slot</h3>
+            <p>Names the semantic action, role, handler contract, output evidence, side effects, and continuation policy.</p>
+          </article>
+          <article class="panel">
+            <span class="badge blue">ASP</span>
+            <h3>Handler manifest</h3>
+            <p>Publishes handler contract, handler id/version, schema refs, side-effect classes, and implementation reference.</p>
+          </article>
+          <article class="panel">
+            <span class="badge amber">ASPC</span>
+            <h3>Agent work manifest</h3>
+            <p>Compiles explicit declarations for roles, handler contracts, work classes, project scopes, workspace modes, and exclusions.</p>
+          </article>
+          <article class="panel">
+            <span class="badge green">HRC</span>
+            <h3>agentManifest.match</h3>
+            <p>Lists assignable agents for the proposed task/action without requiring agent-loop to parse ASP source files.</p>
+          </article>
+          <article class="panel">
+            <span class="badge red">wrkf</span>
+            <h3>Claim admission</h3>
+            <p>Validates the caller-supplied HRC/ASPC tuple against current workflow state and imported handler facts before leasing.</p>
+          </article>
+          <article class="panel warning">
+            <span class="badge red">explicit no</span>
+            <h3>No provenance burden</h3>
+            <p>Scheduler admission does not require prompt, schema, manifest, capability, source, or delivery provenance fields.</p>
+          </article>
+        </div>
+
+        <div class="grid two" style="margin-top:16px">
+          <article class="contract">
+            <div class="contract-head">
+              <h3>AspcAgentManifest</h3>
+              <span class="badge amber">assignability</span>
+            </div>
+            <div class="code-grid">
+<pre><code>type AspcAgentManifest = {
+  agentRef: "agent:cody"
+  version: string
+  workCapabilities: {
+    roles: string[]
+    handlerContracts: string[]
+    workClasses: string[]
+    projectScopes: string[]
+    sideEffectClasses: string[]
+    workspaceModes: string[]
+    riskClasses?: string[]
+    maxConcurrent?: number
+    exclusions?: string[]
+  }[]
+}</code></pre>
+              <div class="defs" aria-label="AspcAgentManifest field definitions">
+                <div class="def"><b>agentRef</b><span>Agent identity that may receive work.</span></div>
+                <div class="def"><b>roles</b><span>Assignable workflow roles.</span></div>
+                <div class="def"><b>contract</b><span>Handler contracts this agent can perform.</span></div>
+                <div class="def"><b>classes</b><span>Work and side-effect classes explicitly allowed.</span></div>
+                <div class="def"><b>scopes</b><span>Project and workspace boundaries for assignment.</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="contract">
+            <div class="contract-head">
+              <h3>HRC match result</h3>
+              <span class="badge green">runner input</span>
+            </div>
+            <div class="code-grid">
+<pre><code>type HrcAgentManifestMatchResult = {
+  agents: {
+    agentRef: string
+    roles: string[]
+    handlerContracts: string[]
+    workClasses: string[]
+    sideEffectClasses: string[]
+    workspaceModes: string[]
+  }[]
+}</code></pre>
+              <div class="defs" aria-label="HRC match field definitions">
+                <div class="def"><b>agents</b><span>Only agents explicitly permitted by ASPC manifests.</span></div>
+                <div class="def"><b>roles</b><span>Matched role support for this action.</span></div>
+                <div class="def"><b>effects</b><span>Allowed side-effect envelope.</span></div>
+                <div class="def"><b>workspace</b><span>Mode such as read-only or pinned worktree.</span></div>
+                <div class="def"><b>capacity</b><span>Runtime unavailability is reported separately from static no-match.</span></div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section id="invariants">
         <div class="section-head">
           <div>
-            <div class="kicker">03 / production invariants</div>
+            <div class="kicker">04 / production invariants</div>
             <h2>The scheduler is safe only if these checks are boring.</h2>
           </div>
           <p class="section-summary">These are the gates that keep crash recovery from duplicating work, losing verification, or leaving git in a half-mutated state.</p>
@@ -748,13 +859,13 @@
           <div class="invariant" role="listitem"><span class="num">1</span><strong>Fence writes</strong><small>Complete, fail, transition, and release require current fence authority.</small></div>
           <div class="invariant" role="listitem"><span class="num">2</span><strong>Fence side effects</strong><small>Check before worktree mutation, external launch, and final settlement.</small></div>
           <div class="invariant" role="listitem"><span class="num">3</span><strong>Reconcile truth</strong><small>Terminal action plus expired claim is reconciled, not re-run.</small></div>
-          <div class="invariant" role="listitem"><span class="num">4</span><strong>CAS claims</strong><small>Claim only after validating current revision and context hash.</small></div>
-          <div class="invariant" role="listitem"><span class="num">5</span><strong>Canonical id</strong><small>Action identity is the idempotency key for start/resume.</small></div>
+          <div class="invariant" role="listitem"><span class="num">4</span><strong>CAS claims</strong><small>Claim only after validating current revision and context.</small></div>
+          <div class="invariant" role="listitem"><span class="num">5</span><strong>Canonical action</strong><small>Action identity is the replay key for start/resume.</small></div>
           <div class="invariant" role="listitem"><span class="num">6</span><strong>Ledger pin</strong><small>Continuation discovery derives from instance and run ledger truth.</small></div>
-          <div class="invariant" role="listitem"><span class="num">7</span><strong>Exact lineage</strong><small>Verify carries source implement action run and commit, never latest.</small></div>
+          <div class="invariant" role="listitem"><span class="num">7</span><strong>Source binding</strong><small>Verify carries source implement action run and commit, never latest.</small></div>
           <div class="invariant" role="listitem"><span class="num">8</span><strong>One verify path</strong><small>ACP and scheduler verify launch need dedupe or precedence.</small></div>
-          <div class="invariant" role="listitem"><span class="num">9</span><strong>Capabilities</strong><small>Runners claim only actions they declare they can execute.</small></div>
-          <div class="invariant" role="listitem"><span class="num">10</span><strong>Caller scope</strong><small>Project/path filters are explicit selectors, not env inference.</small></div>
+          <div class="invariant" role="listitem"><span class="num">9</span><strong>Assignable agent</strong><small>Claims match handler contract and HRC/ASPC agent capability before leasing.</small></div>
+          <div class="invariant" role="listitem"><span class="num">10</span><strong>No HRC in DB txn</strong><small>Runner supplies the tuple; wrkf validates it under CAS.</small></div>
           <div class="invariant" role="listitem"><span class="num">11</span><strong>Worktree guard</strong><small>Coordinate workspace identity or keep guard responsibility in runner/runtime.</small></div>
         </div>
       </section>
@@ -762,7 +873,7 @@
       <section id="rpc">
         <div class="section-head">
           <div>
-            <div class="kicker">04 / scheduler contract</div>
+            <div class="kicker">05 / scheduler contract</div>
             <h2>The RPC surface separates read previews from ownership.</h2>
           </div>
           <p class="section-summary">Discovery explains runnable work. Claiming is the only mutating entrypoint that creates scheduler ownership and write authority.</p>
@@ -782,7 +893,6 @@
   workflow: {
     id: string
     version: string
-    hash?: string
   }
   revision: number
   contextHash: string
@@ -791,6 +901,13 @@
     kind: string
     role: string
     lane?: string
+    handlerContract: string
+    handlerId: string
+    handlerVersion?: string
+  }
+  assignee: {
+    agentRef: string
+    role: string
   }
   leaseToken: string
   leaseExpiresAt: string
@@ -801,10 +918,12 @@
               <div class="defs" aria-label="SchedulerClaim field definitions">
                 <div class="def"><b>claimId</b><span>Durable scheduler ownership row.</span></div>
                 <div class="def"><b>revision</b><span>CAS guard over workflow instance state.</span></div>
-                <div class="def"><b>contextHash</b><span>Hash-covered expected workflow context.</span></div>
-                <div class="def"><b>leaseToken</b><span>Time-bounded liveness proof.</span></div>
-                <div class="def"><b>fenceToken</b><span>Write authority for side effects and settlement.</span></div>
-                <div class="def"><b>workspaceRef</b><span>Required if wrkf coordinates worktrees globally.</span></div>
+                <div class="def"><b>context</b><span>Existing wrkf CAS guard over expected workflow context.</span></div>
+                <div class="def"><b>handler</b><span>Named contract and handler id/version selected for this action.</span></div>
+                <div class="def"><b>assignee</b><span>Agent selected from HRC/ASPC assignability.</span></div>
+                <div class="def"><b>lease</b><span>Time-bounded liveness proof.</span></div>
+                <div class="def"><b>fence</b><span>Write authority for side effects and settlement.</span></div>
+                <div class="def"><b>workspace</b><span>Required if wrkf coordinates worktrees globally.</span></div>
               </div>
             </div>
           </article>
@@ -825,8 +944,8 @@
 }</code></pre>
               <div class="defs" aria-label="Scheduler method definitions">
                 <div class="def"><b>discover</b><span>Read-only preview for dashboards and dry runs.</span></div>
-                <div class="def"><b>claimNext</b><span>Atomic claim with capability matching and CAS.</span></div>
-                <div class="def"><b>claimContinuation</b><span>Same-runner fast path after completed action.</span></div>
+                <div class="def"><b>claimNext</b><span>Atomic claim with handler and assignee matching under CAS.</span></div>
+                <div class="def"><b>continue</b><span>Same-runner fast path after completed action.</span></div>
                 <div class="def"><b>heartbeat</b><span>Lease extension by current owner only.</span></div>
                 <div class="def"><b>release</b><span>Claim reconciliation, not semantic completion.</span></div>
                 <div class="def"><b>reap</b><span>Expired claim and orphaned active-action recovery.</span></div>
@@ -839,7 +958,7 @@
       <section id="continuation">
         <div class="section-head">
           <div>
-            <div class="kicker">05 / continuation policy</div>
+            <div class="kicker">06 / continuation policy</div>
             <h2>TDD, implementation, and e2e stay one attention unit.</h2>
           </div>
           <p class="section-summary">The ledger still records separate actions. The scheduler treats them as an exclusive-attention group when verification is mandatory.</p>
@@ -847,13 +966,13 @@
 
         <div class="split">
           <div class="quote">
-            After `implement.done`, the same instance and exact source implement action/commit are pinned until `verify` terminalizes or becomes `operator_required`.
+            After <code>implement.done</code>, the same instance and exact source implement action/commit are pinned until <code>verify</code> terminalizes or becomes <code>operator_required</code>.
           </div>
           <div class="grid two">
             <article class="panel consensus">
               <span class="badge green">happy path</span>
               <h3>Claim continuation directly</h3>
-              <p>The same runner can move from implement to verify through `claimContinuation` after re-querying the instance.</p>
+              <p>The same runner can move from implement to verify through <code>claimContinuation</code> after re-querying the instance.</p>
             </article>
             <article class="panel warning">
               <span class="badge red">crash path</span>
@@ -862,25 +981,107 @@
             </article>
             <article class="panel decision">
               <span class="badge amber">no fallback</span>
-              <h3>Never use "latest implement"</h3>
+              <h3>Never use latest implement</h3>
               <p>Verify bindings carry the exact source implement action run and source commit.</p>
             </article>
             <article class="panel">
               <span class="badge blue">operator state</span>
               <h3>Infrastructure failure does not free the worktree</h3>
-              <p>If verify cannot launch operationally, the scheduler keeps the pin, expires into recovery, or reports `operator_required`.</p>
+              <p>If verify cannot launch operationally, the scheduler keeps the pin, expires into recovery, or reports <code>operator_required</code>.</p>
             </article>
           </div>
+        </div>
+      </section>
+
+      <section id="worksets">
+        <div class="section-head">
+          <div>
+            <div class="kicker">07 / dynamic worksets</div>
+            <h2>Cross-repo lanes are discovered facts, not up-front decomposition.</h2>
+          </div>
+          <p class="section-summary">A simple task can start as ordinary implementation work. If impact discovery proves multiple repos are needed, the workflow stores a typed workset as evidence and the scheduler materializes lane-scoped candidates from that ledger fact.</p>
+        </div>
+
+        <div class="lanes" aria-label="Dynamic workset lifecycle">
+          <div class="lane">
+            <div class="lane-title">ledger storage</div>
+            <div class="step teal"><b>Discover</b><span><code>impact_discover</code> writes <code>cross_repo_workset</code> evidence with stable lane ids.</span></div>
+            <div class="step blue"><b>Materialize</b><span><code>claimNext</code> derives repo-scoped runnable candidates from instance state plus workset evidence.</span></div>
+            <div class="step amber"><b>Bind lane</b><span>Claims, action runs, and evidence carry the same <code>worksetId</code> and <code>laneId</code>.</span></div>
+            <div class="step green"><b>Integrate</b><span><code>integration_verify</code> unlocks only after required lane verifies pass.</span></div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">runner behavior</div>
+            <div class="step teal"><b>No ad hoc edits</b><span>If implement discovers cross-repo scope, it records <code>needs_replan</code> instead of editing every repo from memory.</span></div>
+            <div class="step blue"><b>Repo implement</b><span>Each lane claims a fenced workspace such as <code>repo:wrkq</code> with its own worktree guard.</span></div>
+            <div class="step amber"><b>Repo verify</b><span>Verify carries exact source implement action run and commit for that lane.</span></div>
+            <div class="step green"><b>Repair target</b><span>Integration failures open targeted repair lanes, not a broad unscoped implement action.</span></div>
+          </div>
+        </div>
+
+        <div class="grid two" style="margin-top:16px">
+          <article class="contract">
+            <div class="contract-head">
+              <h3>CrossRepoWorkset</h3>
+              <span class="badge amber">evidence contract</span>
+            </div>
+            <div class="code-grid">
+<pre><code>type CrossRepoWorkset = {
+  worksetId: string
+  sourceActionRunId: string
+  discoveredAtRevision: number
+  lanes: CrossRepoLane[]
+  integration: {
+    requiredAfter: string[]
+    verifyAction: "integration_verify"
+  }
+}</code></pre>
+              <div class="defs" aria-label="CrossRepoWorkset field definitions">
+                <div class="def"><b>workset</b><span>Stable decomposition id used by claims, runs, and evidence.</span></div>
+                <div class="def"><b>source</b><span>Action run that discovered this decomposition.</span></div>
+                <div class="def"><b>revision</b><span>Workflow revision where the workset was observed.</span></div>
+                <div class="def"><b>lanes</b><span>Repo/workspace-scoped implementation units.</span></div>
+                <div class="def"><b>integrate</b><span>Aggregate verify gate after all required lanes pass.</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="contract">
+            <div class="contract-head">
+              <h3>CrossRepoLane</h3>
+              <span class="badge teal">dynamic lane</span>
+            </div>
+            <div class="code-grid">
+<pre><code>type CrossRepoLane = {
+  laneId: string
+  project: string
+  repoPath: string
+  workspaceRef: string
+  requiredChange: string
+  verifyPlan: string[]
+  status: "pending" | "implemented"
+        | "verified" | "blocked"
+        | "operator_required"
+}</code></pre>
+              <div class="defs" aria-label="CrossRepoLane field definitions">
+                <div class="def"><b>lane</b><span>Canonical action lane such as <code>repo:wrkq</code>.</span></div>
+                <div class="def"><b>project</b><span>Caller-resolved project, not inferred from env.</span></div>
+                <div class="def"><b>workspace</b><span>Fenced worktree identity when globally coordinated.</span></div>
+                <div class="def"><b>verify</b><span>Lane-local install, smoke, and e2e checks.</span></div>
+                <div class="def"><b>status</b><span>Projected from lane evidence and workflow state.</span></div>
+              </div>
+            </div>
+          </article>
         </div>
       </section>
 
       <section id="phases">
         <div class="section-head">
           <div>
-            <div class="kicker">06 / staged plan</div>
+            <div class="kicker">08 / staged plan</div>
             <h2>The first slice proves shape; the second builds authority.</h2>
           </div>
-          <p class="section-summary">The phase names matter because the durable scheduler core is still not production-ready until continuation policy and verify-launch authority are settled.</p>
+          <p class="section-summary">The phase names matter because the durable scheduler core is still not production-ready until handler contracts, agent manifests, continuation policy, and verify-launch authority are settled.</p>
         </div>
 
         <div class="phase-track">
@@ -888,7 +1089,7 @@
             <span class="badge amber">phase 1</span>
             <h3>Non-production vertical spike</h3>
             <ul>
-              <li>Use existing `wrkf.instance.next` and `wrkf.action.*`.</li>
+              <li>Use existing <code>wrkf.instance.next</code> and <code>wrkf.action.*</code>.</li>
               <li>Run packaged triage, implement, and verify handlers.</li>
               <li>Prove one-runner continuation only.</li>
               <li>No crash-safety or multi-runner guarantee.</li>
@@ -900,8 +1101,8 @@
             <ul>
               <li>Settle effect-lease reuse versus scheduler-claim table.</li>
               <li>Add discover, claim, heartbeat, release, and reap.</li>
-              <li>Add fence semantics and idempotent action-run start/resume.</li>
-              <li>Still blocked from production until phase 3 gates land.</li>
+              <li>Add ASP handler publish, ASPC manifest compile, and HRC list/match.</li>
+              <li>Add fence semantics and action-run start/resume replay.</li>
             </ul>
           </article>
           <article class="phase">
@@ -909,16 +1110,16 @@
             <h3>Continuation hardening</h3>
             <ul>
               <li>Encode continuation policy in templates or wrkf policy catalog.</li>
-              <li>Recover `implement -> verify` across restarts.</li>
+              <li>Recover <code>implement -&gt; verify</code> across restarts.</li>
               <li>Resolve scheduler verify versus ACP verify-launch authority.</li>
-              <li>Add operator readback for pinned continuations.</li>
+              <li>Define dynamic workset evidence and lane materialization.</li>
             </ul>
           </article>
           <article class="phase">
             <span class="badge green">phase 4</span>
             <h3>Intake cleanup</h3>
             <ul>
-              <li>Decide automatic `wrkq-simple-task@1` attachment.</li>
+              <li>Decide automatic <code>wrkq-simple-task@1</code> attachment.</li>
               <li>Retire standalone scanner loops except compatibility cases.</li>
               <li>Route normal executable work through scheduler discovery.</li>
             </ul>
@@ -929,30 +1130,31 @@
       <section id="checks">
         <div class="section-head">
           <div>
-            <div class="kicker">07 / visible checks</div>
+            <div class="kicker">09 / visible checks</div>
             <h2>Acceptance is about recovery and refusal, not throughput.</h2>
           </div>
           <p class="section-summary">The most important tests prove stale actors cannot write, verified work cannot be skipped, and terminal work is not repeated.</p>
         </div>
 
         <div class="grid two">
-          <article class="panel checks">
+          <article class="panel">
             <span class="badge red">must fail closed</span>
             <h3>Safety checks</h3>
             <ul>
               <li>Two schedulers cannot claim the same workflow instance.</li>
               <li>Stale fences cannot complete, fail, transition, release, launch, or mutate worktrees.</li>
-              <li>Fence loss after partial local side effects reports `operator_required` and does not release completed.</li>
+              <li><code>claimNext</code> refuses unsupported or unassignable capabilities inside the transaction.</li>
               <li>ACP verify-launch and scheduler continuation cannot double-launch verify.</li>
             </ul>
           </article>
-          <article class="panel checks">
+          <article class="panel">
             <span class="badge green">must recover</span>
             <h3>Recovery checks</h3>
             <ul>
               <li>Terminal action plus expired claim reconciles without re-running the action.</li>
               <li>Runner crash after implement still discovers verify before fresh work.</li>
-              <li>Verify carries exact `sourceImplementActionRunId` and commit lineage.</li>
+              <li>Verify carries exact <code>sourceImplementActionRunId</code> and source commit.</li>
+              <li>Cross-repo worksets materialize from typed evidence, not agent memory.</li>
               <li>Active orphaned actions can be reclaimed or failed without hiding the task forever.</li>
             </ul>
           </article>
@@ -962,32 +1164,39 @@
       <section id="questions">
         <div class="section-head">
           <div>
-            <div class="kicker">08 / open decisions</div>
-            <h2>The proposal leaves the right things unsettled.</h2>
+            <div class="kicker">10 / open decisions</div>
+            <h2>The proposal leaves implementation choices visible.</h2>
           </div>
           <p class="section-summary">These are implementation-planning decisions, not reasons to weaken the safety model.</p>
         </div>
 
-        <div class="grid three questions">
+        <div class="grid three">
           <article class="panel">
             <h3>Storage authority</h3>
             <ul>
-              <li>Extend `workflow_effects` lease mechanics?</li>
-              <li>Or add `workflow_scheduler_claims` with the same lease/fence invariants?</li>
+              <li>Extend <code>workflow_effects</code> lease mechanics?</li>
+              <li>Or add <code>workflow_scheduler_claims</code> with the same lease/fence invariants?</li>
             </ul>
           </article>
           <article class="panel">
             <h3>Policy placement</h3>
             <ul>
               <li>Workflow-template metadata?</li>
-              <li>Separate `wrkf`-owned policy catalog?</li>
+              <li>Separate <code>wrkf</code>-owned policy catalog?</li>
             </ul>
           </article>
           <article class="panel">
             <h3>Intake behavior</h3>
             <ul>
-              <li>Auto-attach `wrkq-simple-task@1`?</li>
+              <li>Auto-attach <code>wrkq-simple-task@1</code>?</li>
               <li>Or keep explicit attachment plus compatibility scanner?</li>
+            </ul>
+          </article>
+          <article class="panel">
+            <h3>Workset storage</h3>
+            <ul>
+              <li>Project dynamic lanes entirely from evidence?</li>
+              <li>Or add first-class workset/lane tables after the evidence contract stabilizes?</li>
             </ul>
           </article>
         </div>
