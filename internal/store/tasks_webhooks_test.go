@@ -140,7 +140,9 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		if got.payload.EventID == "" || got.payload.EventSeq == 0 || got.payload.OccurredAt == "" {
 			t.Fatalf("missing event identity fields: %+v", got.payload)
 		}
-		if got.payload.Origin.Actor != "human:test-actor" || got.payload.Origin.Via != "cli" {
+		// Principal-only: origin.actor is now the bare principal ref (agent:<id>),
+		// not the legacy role:slug derived from the actors table.
+		if got.payload.Origin.Actor != "agent:"+actorUUID || got.payload.Origin.Via != "cli" {
 			t.Fatalf("unexpected origin: %+v", got.payload.Origin)
 		}
 		if got.payload.ProjectScopeID != "project" || got.payload.ContainerPath != "project" {

@@ -65,10 +65,9 @@ func createTestApp(t *testing.T, database *db.DB, dbPath string) *appctx.App {
 		DBPath: dbPath,
 	}
 	return &appctx.App{
-		Config:    cfg,
-		DB:        database,
-		ActorUUID: "00000000-0000-0000-0000-000000000001", // test-user from setupTestEnv
-		ActorID:   "A-00001",
+		Config:       cfg,
+		DB:           database,
+		PrincipalRef: "agent:test-user", // canonical principal for test writes
 	}
 }
 
@@ -638,9 +637,9 @@ func TestCatCommand_BlockedBy(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test cat on the blocked task - should show blocked_by
 	cmd := rootCmd
@@ -703,9 +702,9 @@ func TestCatCommand_BlockedBy_CompletedBlockerNotShown(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test cat on the waiting task - should NOT show blocked_by (blocker is completed)
 	cmd := rootCmd
@@ -768,9 +767,9 @@ func TestCatCommand_BlockedBy_JSON(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test cat with JSON output
 	cmd := rootCmd

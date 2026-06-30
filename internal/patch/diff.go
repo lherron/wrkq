@@ -66,10 +66,6 @@ func Create(opts CreateOptions) (*CreateResult, error) {
 func computeDiff(base, target *snapshot.Snapshot) Patch {
 	var ops Patch
 
-	// Diff actors
-	ops = append(ops, diffMap("/actors", base.Actors, target.Actors,
-		func(v interface{}) interface{} { return v })...)
-
 	// Diff containers
 	ops = append(ops, diffMap("/containers", base.Containers, target.Containers,
 		func(v interface{}) interface{} { return v })...)
@@ -252,16 +248,6 @@ func getValueAtPath(snap *snapshot.Snapshot, path string) (interface{}, bool) {
 	}
 
 	switch parts[0] {
-	case "actors":
-		if len(parts) < 2 {
-			return snap.Actors, true
-		}
-		if v, ok := snap.Actors[parts[1]]; ok {
-			if len(parts) == 2 {
-				return v, true
-			}
-			return getFieldValue(v, parts[2:])
-		}
 	case "containers":
 		if len(parts) < 2 {
 			return snap.Containers, true

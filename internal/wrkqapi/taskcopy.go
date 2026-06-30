@@ -179,10 +179,10 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 		if _, uerr := tx.Exec(`
 			UPDATE tasks SET title = ?, state = ?, priority = ?, description = ?, specification = ?, labels = ?,
 				start_at = ?, due_at = ?, updated_at = CURRENT_TIMESTAMP,
-				updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?, etag = etag + 1
+				updated_by_principal_ref = ?, updated_by_scope_ref = ?, etag = etag + 1
 			WHERE uuid = ?
 		`, title, state, priority, description, specification, labels, startAt, dueAt,
-			legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), existingUUID); uerr != nil {
+			attr.PrincipalRef, scopeBind(attr), existingUUID); uerr != nil {
 			return nil, NewInternalError(uerr)
 		}
 		newUUID = existingUUID
@@ -192,11 +192,10 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 	} else {
 		res, ierr := tx.Exec(`
 			INSERT INTO tasks (slug, title, project_uuid, state, priority, description, specification, labels,
-				start_at, due_at, created_by_actor_uuid, updated_by_actor_uuid,
+				start_at, due_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, slug, title, destUUID, state, priority, description, specification, labels, startAt, dueAt,
-			legacyActorBind(attr), legacyActorBind(attr),
 			attr.PrincipalRef, attr.PrincipalRef, scopeBind(attr), scopeBind(attr))
 		if ierr != nil {
 			return nil, mapStoreError(ierr, "")
@@ -229,7 +228,6 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 	payloadStr := string(payloadJSON)
 
 	eventMeta, eerr := events.NewWriter(a.db.DB).LogEventReturning(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -258,12 +256,12 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 	// Post-commit `created` webhook carrying the synthetic source_uuid change. Best
 	// effort (legacy dispatches outside the tx, errors are logged not surfaced).
 	webhooks.DispatchTaskEvent(a.db, newUUID, webhooks.EventContext{
-		Metadata:   eventMeta,
-		Event:      "created",
-		ActorUUID:  attr.LegacyActorUUID,
-		Via:        "rpc",
-		Transition: &webhooks.Transition{From: nil, To: &state},
-		Changed:    []string{"source_uuid"},
+		Metadata:     eventMeta,
+		Event:        "created",
+		PrincipalRef: attr.PrincipalRef,
+		Via:          "rpc",
+		Transition:   &webhooks.Transition{From: nil, To: &state},
+		Changed:      []string{"source_uuid"},
 		Changes: map[string]webhooks.Change{
 			"source_uuid": {From: nil, To: sourceUUID},
 		},
@@ -346,11 +344,11 @@ func (a *API) copyAttachmentsTx(tx *sql.Tx, attr attribution.Attribution, source
 		if _, ierr := tx.Exec(`
 			INSERT INTO attachments (
 				id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
-				created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+				created_by_principal_ref, created_by_scope_ref
 			)
-			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
 		`, destTaskUUID, r.filename, newRelativePath, r.mimeType, r.sizeBytes, r.checksum,
-			legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr)); ierr != nil {
+			attr.PrincipalRef, scopeBind(attr)); ierr != nil {
 			return 0, staged, NewInternalError(ierr)
 		}
 		count++

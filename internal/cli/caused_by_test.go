@@ -80,7 +80,7 @@ func TestCausedByCLIRoundTripFindAndClear(t *testing.T) {
 	insertContainer(t, database, "00000000-0000-0000-0000-000000000101", "P-00101", "wrkq", "wrkq", "", "2024-01-01T00:00:00Z")
 	insertContainer(t, database, "00000000-0000-0000-0000-000000000102", "P-00102", "inbox", "Inbox", "00000000-0000-0000-0000-000000000101", "2024-01-01T00:00:00Z")
 	t.Setenv("WRKQ_DB_PATH", dbPath)
-	t.Setenv("WRKQ_ACTOR", "test-user")
+	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	t.Setenv("PRAESIDIUM_HOME", t.TempDir())
 
 	producerOne := mustSingleTaskID(t, mustCausedByCLI(t, "touch", "inbox/producer-one", "--json"))

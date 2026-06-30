@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/lherron/wrkq/internal/attribution"
 )
 
 type Chunk struct {
@@ -79,9 +81,8 @@ func TaskChunks(database *sql.DB, taskUUID string) ([]Chunk, error) {
 
 	rows, err := database.Query(`
 		SELECT c.uuid, c.id, c.body, c.etag, c.created_at, COALESCE(c.updated_at, c.created_at),
-		       COALESCE(a.slug, '')
+		       COALESCE(c.created_by_principal_ref, '')
 		FROM comments c
-		LEFT JOIN actors a ON a.uuid = c.actor_uuid
 		WHERE c.task_uuid = ? AND c.deleted_at IS NULL
 		ORDER BY c.created_at ASC, c.id ASC
 	`, taskUUID)
@@ -92,7 +93,7 @@ func TaskChunks(database *sql.DB, taskUUID string) ([]Chunk, error) {
 
 	for rows.Next() {
 		var comment commentRow
-		if err := rows.Scan(&comment.UUID, &comment.ID, &comment.Body, &comment.ETag, &comment.CreatedAt, &comment.UpdatedAt, &comment.ActorSlug); err != nil {
+		if err := rows.Scan(&comment.UUID, &comment.ID, &comment.Body, &comment.ETag, &comment.CreatedAt, &comment.UpdatedAt, &comment.PrincipalRef); err != nil {
 			return nil, err
 		}
 		chunks = append(chunks, renderCommentChunk(task, comment))
@@ -119,13 +120,13 @@ type taskRow struct {
 }
 
 type commentRow struct {
-	UUID      string
-	ID        string
-	Body      string
-	ETag      int64
-	CreatedAt string
-	UpdatedAt string
-	ActorSlug string
+	UUID         string
+	ID           string
+	Body         string
+	ETag         int64
+	CreatedAt    string
+	UpdatedAt    string
+	PrincipalRef string
 }
 
 func renderTaskChunk(task taskRow) Chunk {
@@ -170,7 +171,7 @@ func renderCommentChunk(task taskRow, comment commentRow) Chunk {
 		"Path: " + task.Path,
 		"Task: " + task.ID,
 		"Comment: " + comment.ID,
-		"Actor: " + comment.ActorSlug,
+		"Author: " + attribution.PrincipalHandle(comment.PrincipalRef),
 		"Body:",
 		comment.Body,
 	}), "\n")

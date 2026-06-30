@@ -18,15 +18,11 @@ type CommentCatViewParams struct {
 // provenance). Fields are declared in alphabetical json-tag order so a struct
 // marshal matches the legacy map's key ordering byte-for-byte. Not a domain DTO.
 type WrkqCommentCatView struct {
-	ActorRole             *string `json:"actor_role,omitempty"`
-	ActorSlug             *string `json:"actor_slug,omitempty"`
-	ActorUUID             *string `json:"actor_uuid,omitempty"`
 	Body                  string  `json:"body"`
 	CreatedAt             string  `json:"created_at"`
 	CreatedByPrincipalRef *string `json:"created_by_principal_ref,omitempty"`
 	CreatedByScopeRef     *string `json:"created_by_scope_ref,omitempty"`
 	DeletedAt             *string `json:"deleted_at,omitempty"`
-	DeletedByActorUUID    *string `json:"deleted_by_actor_uuid,omitempty"`
 	DeletedByPrincipalRef *string `json:"deleted_by_principal_ref,omitempty"`
 	DeletedByScopeRef     *string `json:"deleted_by_scope_ref,omitempty"`
 	Etag                  int64   `json:"etag"`
@@ -70,13 +66,12 @@ func (a *API) CommentCatView(ctx context.Context, p CommentCatViewParams) (*Wrkq
 // used by both comment catView (single) and comment listView (paginated) so
 // their rows are byte-identical.
 const commentCatViewSelect = `
-	SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
-	       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
+	SELECT c.uuid, c.id, c.task_uuid, c.body, c.meta, c.etag,
+	       c.created_at, c.updated_at, c.deleted_at,
 	       c.created_by_principal_ref, c.created_by_scope_ref,
 	       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
-	       a.slug, a.role, t.id
+	       t.id
 	FROM comments c
-	LEFT JOIN actors a ON c.actor_uuid = a.uuid
 	LEFT JOIN tasks t ON c.task_uuid = t.uuid`
 
 type commentRowScanner interface {
@@ -88,28 +83,26 @@ func scanCommentCatView(s commentRowScanner) (*WrkqCommentCatView, error) {
 	var (
 		commentUUID, commentID, taskUUID, body, createdAt, taskID string
 		etag                                                      int64
-		meta, updatedAt, deletedAt, deletedByActorUUID            sql.NullString
-		actorUUID, actorSlug, actorRole                           sql.NullString
+		meta, updatedAt, deletedAt                                sql.NullString
 		createdByPrincipalRef, createdByScopeRef                  sql.NullString
 		deletedByPrincipalRef, deletedByScopeRef                  sql.NullString
 	)
 	if err := s.Scan(
-		&commentUUID, &commentID, &taskUUID, &actorUUID, &body, &meta, &etag,
-		&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+		&commentUUID, &commentID, &taskUUID, &body, &meta, &etag,
+		&createdAt, &updatedAt, &deletedAt,
 		&createdByPrincipalRef, &createdByScopeRef,
 		&deletedByPrincipalRef, &deletedByScopeRef,
-		&actorSlug, &actorRole, &taskID,
+		&taskID,
 	); err != nil {
 		return nil, err
 	}
 	v := &WrkqCommentCatView{
 		UUID: commentUUID, ID: commentID, TaskUUID: taskUUID, TaskID: taskID,
 		Body: body, Etag: etag, CreatedAt: createdAt,
-		ActorUUID: nsPtr(actorUUID), ActorSlug: nsPtr(actorSlug), ActorRole: nsPtr(actorRole),
 		CreatedByPrincipalRef: nsPtr(createdByPrincipalRef), CreatedByScopeRef: nsPtr(createdByScopeRef),
 		UpdatedAt: nsPtr(updatedAt), DeletedAt: nsPtr(deletedAt),
-		DeletedByActorUUID: nsPtr(deletedByActorUUID), DeletedByPrincipalRef: nsPtr(deletedByPrincipalRef),
-		DeletedByScopeRef: nsPtr(deletedByScopeRef),
+		DeletedByPrincipalRef: nsPtr(deletedByPrincipalRef),
+		DeletedByScopeRef:     nsPtr(deletedByScopeRef),
 	}
 	if meta.Valid && meta.String != "" {
 		m := meta.String

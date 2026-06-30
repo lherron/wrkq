@@ -43,8 +43,9 @@ func TestCreateHandoff(t *testing.T) {
 	if handoff.ETag != 1 {
 		t.Fatalf("expected etag 1, got %d", handoff.ETag)
 	}
-	if handoff.AgentActorUUID == nil || *handoff.AgentActorUUID != actorUUID {
-		t.Fatalf("expected agent actor uuid %s, got %v", actorUUID, handoff.AgentActorUUID)
+	// Legacy actor UUIDs are no longer persisted under principal-only attribution.
+	if handoff.AgentActorUUID != nil {
+		t.Fatalf("expected agent actor uuid to be nil, got %v", *handoff.AgentActorUUID)
 	}
 	if handoff.ProjectContainerUUID == nil || *handoff.ProjectContainerUUID != containerUUID {
 		t.Fatalf("expected project container uuid %s, got %v", containerUUID, handoff.ProjectContainerUUID)

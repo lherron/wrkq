@@ -123,11 +123,11 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 	res, ierr := tx.Exec(`
 		INSERT INTO attachments (
 			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
-			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			created_by_principal_ref, created_by_scope_ref
 		)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
 	`, taskUUID, filename, relativePath, mimeType, size, checksum,
-		legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
+		attr.PrincipalRef, scopeBind(attr))
 	if ierr != nil {
 		_ = os.Remove(absPath)
 		return nil, mapStoreError(ierr, p.Task)
@@ -147,7 +147,6 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 	})
 	payloadStr := string(payload)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "attachment",
@@ -312,7 +311,6 @@ func (a *API) AttachmentRemove(ctx context.Context, p AttachmentRemoveParams) (*
 	payload, _ := json.Marshal(map[string]any{"filename": filename})
 	payloadStr := string(payload)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "attachment",

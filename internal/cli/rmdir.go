@@ -64,8 +64,8 @@ func runRmdir(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func removeContainer(cmd *cobra.Command, database *db.DB, actorUUID, path string) error {
-	return removeContainerWithAttribution(cmd, database, attributionFromLegacyActor(actorUUID), path)
+func removeContainer(cmd *cobra.Command, database *db.DB, principalRef, path string) error {
+	return removeContainerWithAttribution(cmd, database, attribution.Attribution{PrincipalRef: principalRef}, path)
 }
 
 func removeContainerWithAttribution(cmd *cobra.Command, database *db.DB, attr attribution.Attribution, path string) error {
@@ -160,7 +160,6 @@ func removeContainerWithAttribution(cmd *cobra.Command, database *db.DB, attr at
 	payload := fmt.Sprintf(`{"slug":"%s","path":"%s","force":%t}`, slug, path, rmdirForce)
 	payloadStr := payload
 	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "container",

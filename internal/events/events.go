@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 )
 
@@ -33,13 +32,9 @@ func (w *Writer) LogEvent(tx *sql.Tx, event *domain.Event) error {
 
 // LogEventReturning writes an event and returns its event_log identity.
 func (w *Writer) LogEventReturning(tx *sql.Tx, event *domain.Event) (EventMetadata, error) {
-	principalRef := event.PrincipalRef
-	if principalRef == "" {
-		principalRef = w.legacyPrincipalRef(tx, event.ActorUUID)
-	}
 	query := `
-		INSERT INTO event_log (actor_uuid, principal_ref, scope_ref, resource_type, resource_uuid, event_type, etag, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO event_log (principal_ref, scope_ref, resource_type, resource_uuid, event_type, etag, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	var (
@@ -47,9 +42,9 @@ func (w *Writer) LogEventReturning(tx *sql.Tx, event *domain.Event) (EventMetada
 		err error
 	)
 	if tx != nil {
-		res, err = tx.Exec(query, event.ActorUUID, nullString(principalRef), nullString(event.ScopeRef), event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
+		res, err = tx.Exec(query, nullString(event.PrincipalRef), nullString(event.ScopeRef), event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
 	} else {
-		res, err = w.db.Exec(query, event.ActorUUID, nullString(principalRef), nullString(event.ScopeRef), event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
+		res, err = w.db.Exec(query, nullString(event.PrincipalRef), nullString(event.ScopeRef), event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload)
 	}
 	if err != nil {
 		return EventMetadata{}, fmt.Errorf("failed to write event: %w", err)
@@ -71,28 +66,6 @@ func (w *Writer) LogEventReturning(tx *sql.Tx, event *domain.Event) (EventMetada
 	}
 
 	return EventMetadata{ID: id, Timestamp: timestamp}, nil
-}
-
-func (w *Writer) legacyPrincipalRef(tx *sql.Tx, actorUUID *string) string {
-	if actorUUID == nil || *actorUUID == "" {
-		return ""
-	}
-	var slug string
-	var err error
-	if tx != nil {
-		err = tx.QueryRow("SELECT slug FROM actors WHERE uuid = ? LIMIT 1", *actorUUID).Scan(&slug)
-	} else {
-		err = w.db.QueryRow("SELECT slug FROM actors WHERE uuid = ? LIMIT 1", *actorUUID).Scan(&slug)
-	}
-	if err == nil && slug != "" {
-		if ref, normErr := attribution.NormalizeCompat(slug); normErr == nil {
-			return ref
-		}
-	}
-	if ref, normErr := attribution.NormalizeCompat(*actorUUID); normErr == nil {
-		return ref
-	}
-	return ""
 }
 
 func nullString(value string) interface{} {

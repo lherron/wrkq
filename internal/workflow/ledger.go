@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -1270,11 +1271,7 @@ func (s *Service) deliverSetTaskStateEffect(current *Effect, adapter string) (*E
 	target = string(targetState)
 	alreadyApplied := before.State == target
 	if !alreadyApplied {
-		actorUUID, err := s.ensureWorkflowSystemActor()
-		if err != nil {
-			return nil, err
-		}
-		newETag, err = store.New(s.db).Tasks.UpdateFieldsWithVia(actorUUID, inst.TaskUUID, map[string]interface{}{"state": target}, before.ETag, "wrkf.effect:set_task_state")
+		newETag, err = store.New(s.db).Tasks.UpdateFieldsWithViaAttribution(workflowSystemAttribution, inst.TaskUUID, map[string]interface{}{"state": target}, before.ETag, "wrkf.effect:set_task_state")
 		if err != nil {
 			failed, failErr := s.FailEffect(eff.ID, claim.LeaseToken, err.Error(), true)
 			if failErr != nil {
@@ -1374,23 +1371,9 @@ func transitionResultEffects(v interface{}) ([]Effect, error) {
 	}
 }
 
-func (s *Service) ensureWorkflowSystemActor() (string, error) {
-	var uuid string
-	err := s.db.QueryRow(`SELECT uuid FROM actors WHERE slug = 'wrkf-system'`).Scan(&uuid)
-	if err == nil {
-		return uuid, nil
-	}
-	if err != sql.ErrNoRows {
-		return "", err
-	}
-	if _, err := s.db.Exec(`INSERT INTO actors (slug, display_name, role) VALUES ('wrkf-system', 'wrkf system', 'system')`); err != nil {
-		return "", err
-	}
-	if err := s.db.QueryRow(`SELECT uuid FROM actors WHERE slug = 'wrkf-system'`).Scan(&uuid); err != nil {
-		return "", err
-	}
-	return uuid, nil
-}
+// workflowSystemAttribution is the principal-only attribution the wrkf engine
+// uses for its own system writes (e.g. set_task_state effects).
+var workflowSystemAttribution = attribution.Attribution{PrincipalRef: "agent:wrkf-system"}
 
 func (s *Service) claimEffectByID(id, adapter string, leaseMs int64) (*EffectClaim, error) {
 	if adapter == "" {

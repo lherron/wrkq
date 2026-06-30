@@ -93,6 +93,10 @@ func runRPC(t *testing.T, entrypoint, dbPath string, requests []string) []map[st
 	args := []string{"run", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = repoRoot(t)
+	// Principal-only attribution: supply a default caller principal for the rpc
+	// server (mirrors a configured agent session). Mutation steps that pass an
+	// explicit `actor: agent:<id>` override this; seed steps fall back to it.
+	cmd.Env = append(os.Environ(), "WRKQ_PRINCIPAL_REF=agent:smokey")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)

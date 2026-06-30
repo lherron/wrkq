@@ -245,8 +245,8 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 	// Build dynamic UPDATE query
 	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL,
 		deleted_by_principal_ref = NULL, deleted_by_scope_ref = NULL,
-		updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?`
-	args := []interface{}{opts.targetState, legacyActorBind(opts.attr), opts.attr.PrincipalRef, scopeBind(opts.attr)}
+		updated_by_principal_ref = ?, updated_by_scope_ref = ?`
+	args := []interface{}{opts.targetState, opts.attr.PrincipalRef, scopeBind(opts.attr)}
 	fields := map[string]interface{}{
 		"state":       opts.targetState,
 		"archived_at": nil,
@@ -310,7 +310,6 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 	payloadStr := string(payloadJSON)
 
 	eventMeta, err := eventWriter.LogEventReturning(tx, &domain.Event{
-		ActorUUID:    opts.attr.LegacyActorUUID,
 		PrincipalRef: opts.attr.PrincipalRef,
 		ScopeRef:     opts.attr.ScopeRef,
 		ResourceType: "task",
@@ -342,11 +341,11 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 
 		_, err = tx.Exec(`
 			INSERT INTO comments (
-				uuid, id, task_uuid, actor_uuid, created_by_principal_ref,
+				uuid, id, task_uuid, created_by_principal_ref,
 				created_by_scope_ref, body, etag
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-		`, commentUUID, commentID, opts.taskUUID, legacyActorBind(opts.attr),
+			VALUES (?, ?, ?, ?, ?, ?, 1)
+		`, commentUUID, commentID, opts.taskUUID,
 			opts.attr.PrincipalRef, scopeBind(opts.attr), opts.comment)
 		if err != nil {
 			return webhooks.EventContext{}, fmt.Errorf("failed to add comment: %w", err)
@@ -357,13 +356,13 @@ func restoreTaskWithOptions(database *db.DB, opts restoreTaskOptions) (webhooks.
 		return webhooks.EventContext{}, err
 	}
 	return webhooks.EventContext{
-		Metadata:   eventMeta,
-		Event:      "updated",
-		ActorUUID:  opts.attr.LegacyActorUUID,
-		Via:        "cli",
-		Transition: &webhooks.Transition{From: &currentState, To: &opts.targetState},
-		Changed:    sortedMapKeys(fields),
-		Changes:    mapChanges(fields, map[string]interface{}{"state": currentState}),
+		Metadata:     eventMeta,
+		Event:        "updated",
+		PrincipalRef: opts.attr.PrincipalRef,
+		Via:          "cli",
+		Transition:   &webhooks.Transition{From: &currentState, To: &opts.targetState},
+		Changed:      sortedMapKeys(fields),
+		Changes:      mapChanges(fields, map[string]interface{}{"state": currentState}),
 	}, nil
 }
 
@@ -426,11 +425,10 @@ func restoreContainer(database *db.DB, attr attribution.Attribution, containerUU
 	_, err = tx.Exec(`
 		UPDATE containers
 		SET archived_at = NULL,
-		    updated_by_actor_uuid = ?,
 		    updated_by_principal_ref = ?,
 		    updated_by_scope_ref = ?
 		WHERE uuid = ?
-	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), containerUUID)
+	`, attr.PrincipalRef, scopeBind(attr), containerUUID)
 	if err != nil {
 		return fmt.Errorf("failed to restore container: %w", err)
 	}
@@ -439,7 +437,6 @@ func restoreContainer(database *db.DB, attr attribution.Attribution, containerUU
 	eventWriter := events.NewWriter(database.DB)
 	payload := `{"action":"restored"}`
 	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "container",

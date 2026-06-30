@@ -315,13 +315,11 @@ func isStateChangeEvent(event watchEvent) bool {
 // on subsequent calls to avoid duplicate emissions.
 func pollMonitorEvents(database *db.DB, cursorID int64, filter monitorEventFilter) ([]monitorEventLine, int64, error) {
 	rows, err := database.Query(`
-		SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
+		SELECT e.id, e.timestamp, e.principal_ref, e.scope_ref,
 		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
-		       a.slug as actor_slug, a.id as actor_id,
 		       CASE e.resource_type
 		           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
 		           WHEN 'container' THEN (SELECT id FROM containers WHERE uuid = e.resource_uuid)
-		           WHEN 'actor' THEN (SELECT id FROM actors WHERE uuid = e.resource_uuid)
 		           WHEN 'comment' THEN (SELECT id FROM comments WHERE uuid = e.resource_uuid)
 		           ELSE NULL
 		       END as resource_id,
@@ -334,7 +332,6 @@ func pollMonitorEvents(database *db.DB, cursorID int64, filter monitorEventFilte
 		           ELSE NULL
 		       END as comment_task_id
 		FROM event_log e
-		LEFT JOIN actors a ON a.uuid = e.actor_uuid
 		WHERE e.id > ?
 		ORDER BY e.id ASC
 	`, cursorID)
@@ -392,12 +389,11 @@ type eventScanner interface {
 
 func scanWatchEventWithCommentTask(scanner eventScanner) (watchEvent, string, string, error) {
 	var event watchEvent
-	var actorSlug, actorID, resourceID sql.NullString
+	var resourceID sql.NullString
 	var commentTaskUUID, commentTaskID sql.NullString
 	err := scanner.Scan(
 		&event.ID,
 		&event.Timestamp,
-		&event.ActorUUID,
 		&event.PrincipalRef,
 		&event.ScopeRef,
 		&event.ResourceType,
@@ -405,20 +401,12 @@ func scanWatchEventWithCommentTask(scanner eventScanner) (watchEvent, string, st
 		&event.EventType,
 		&event.ETag,
 		&event.Payload,
-		&actorSlug,
-		&actorID,
 		&resourceID,
 		&commentTaskUUID,
 		&commentTaskID,
 	)
 	if err != nil {
 		return watchEvent{}, "", "", fmt.Errorf("scan monitor event: %w", err)
-	}
-	if actorSlug.Valid {
-		event.ActorSlug = &actorSlug.String
-	}
-	if actorID.Valid {
-		event.ActorID = &actorID.String
 	}
 	if resourceID.Valid {
 		event.ResourceID = &resourceID.String

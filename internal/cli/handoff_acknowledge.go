@@ -79,21 +79,9 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 		return writeHandoffAckError(stderr, mode, 1, "validation_error", idOrUUID, err.Error(), handoffAckExample)
 	}
 
-	// Best-effort actor UUID lookup; the store accepts a nil pointer when the
-	// running agent has no corresponding actor row (matches handoff_create).
-	var actorUUID *string
-	{
-		var u string
-		if err := database.QueryRowContext(cmd.Context(),
-			"SELECT uuid FROM actors WHERE slug = ? LIMIT 1", identity.actorAgentID).Scan(&u); err == nil {
-			actorUUID = &u
-		}
-	}
-
 	ackArgs := store.AcknowledgeHandoffArgs{
 		Note:         note,
 		ActorAgentID: identity.actorAgentID,
-		ActorUUID:    actorUUID,
 		PrincipalRef: identity.principalRef,
 		ScopeRef:     identity.scopeRef,
 		DryRun:       handoffAckDryRun,
@@ -125,7 +113,7 @@ type handoffAckIdentity struct {
 func resolveHandoffAckIdentity(cmd *cobra.Command, handoff store.Handoff) (handoffAckIdentity, error) {
 	asFlag := changedStringFlag(cmd, "as")
 	if asFlag != "" {
-		principalRef, err := attribution.NormalizeCompat(asFlag)
+		principalRef, err := attribution.NormalizeCanonical(asFlag)
 		if err != nil {
 			return handoffAckIdentity{}, fmt.Errorf("invalid --as: %w", err)
 		}

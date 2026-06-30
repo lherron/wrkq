@@ -90,7 +90,7 @@ func TestHandoffAckIdentityExplicitAsUsesRowProject(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("as", "", "")
-	if err := cmd.ParseFlags([]string{"--as", "curly"}); err != nil {
+	if err := cmd.ParseFlags([]string{"--as", "agent:curly"}); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestHandoffAckIdentityExplicitAsUsesRowProject(t *testing.T) {
 func TestHandoffAckIdentityRejectsMismatchedActor(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("as", "", "")
-	if err := cmd.ParseFlags([]string{"--as", "cody"}); err != nil {
+	if err := cmd.ParseFlags([]string{"--as", "agent:cody"}); err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
 
@@ -126,6 +126,31 @@ func TestHandoffAckIdentityRejectsMismatchedActor(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ambiguous actor") || !strings.Contains(err.Error(), "cody") || !strings.Contains(err.Error(), "curly") {
 		t.Fatalf("expected actor conflict details, got %v", err)
+	}
+}
+
+// TestHandoffAckIdentityRejectsBareSlug encodes the principal-only rule: a bare
+// `--as` slug (no agent: prefix) is no longer accepted as caller attribution; the
+// handoff acknowledge identity resolver must reject it via NormalizeCanonical.
+func TestHandoffAckIdentityRejectsBareSlug(t *testing.T) {
+	for _, bad := range []string{"curly", "system:scheduler", "A-00001"} {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("as", "", "")
+		if err := cmd.ParseFlags([]string{"--as", bad}); err != nil {
+			t.Fatalf("parse flags %q: %v", bad, err)
+		}
+		_, err := resolveHandoffAckIdentity(cmd, handoffJSON{
+			ID:        "H-00001",
+			ScopeRef:  "agent:curly:project:wrkq",
+			AgentID:   "curly",
+			ProjectID: "wrkq",
+		})
+		if err == nil {
+			t.Fatalf("expected rejection for non-canonical --as %q", bad)
+		}
+		if !strings.Contains(err.Error(), "invalid --as") {
+			t.Fatalf("expected invalid --as error for %q, got %v", bad, err)
+		}
 	}
 }
 

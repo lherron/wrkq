@@ -256,7 +256,6 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 	if kind == "" {
 		kind = "task"
 	}
-	legacyActor := legacyActorSQL(attr)
 	creatorScope := attr.ScopeRef
 	if params.CreatorScopeRef != "" {
 		creatorScope = params.CreatorScopeRef
@@ -269,19 +268,19 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 
 		if params.UUID != "" {
 			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
-				parent_task_uuid, assignee_actor_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
+				parent_task_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid,
+				labels, meta, due_at, start_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			args = append(args, params.UUID)
 		} else {
 			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
-				parent_task_uuid, assignee_actor_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
+				parent_task_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at, created_by_actor_uuid, updated_by_actor_uuid,
+				labels, meta, due_at, start_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -296,7 +295,6 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			params.Priority,
 			kind,
 			params.ParentTaskUUID,
-			params.AssigneeActorUUID,
 			params.AssigneePrincipalRef,
 			params.RequestedByProjectID,
 			params.AssignedProjectID,
@@ -309,8 +307,6 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			params.Meta,
 			params.DueAt,
 			params.StartAt,
-			legacyActor,
-			legacyActor,
 			attr.PrincipalRef,
 			attr.PrincipalRef,
 			nullableScopeRef(creatorScope),
@@ -339,7 +335,6 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		// the new task UUID is known.
 		if len(params.CausedBy) > 0 {
 			if err := insertCausedByRows(tx, causedByAttribution{
-				legacyActor:  legacyActor,
 				principalRef: attr.PrincipalRef,
 				scope:        scopeSQL(attr),
 			}, uuid, params.CausedBy); err != nil {
@@ -357,9 +352,6 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		}
 		if params.ParentTaskUUID != nil {
 			payload["parent_task_uuid"] = *params.ParentTaskUUID
-		}
-		if params.AssigneeActorUUID != nil {
-			payload["assignee_actor_uuid"] = *params.AssigneeActorUUID
 		}
 		if params.AssigneePrincipalRef != nil {
 			payload["assignee_principal_ref"] = *params.AssigneePrincipalRef
@@ -412,7 +404,6 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		payloadStr := string(payloadJSON)
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
@@ -430,13 +421,13 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			changes[field] = webhooks.Change{From: nil, To: summarizeWebhookValue(field, payload[field])}
 		}
 		webhookCtx = webhooks.EventContext{
-			Metadata:   meta,
-			Event:      "created",
-			ActorUUID:  actorUUIDPtr(attr),
-			Via:        via,
-			Transition: &webhooks.Transition{From: nil, To: stringPtr(string(params.State))},
-			Changed:    changed,
-			Changes:    changes,
+			Metadata:     meta,
+			Event:        "created",
+			PrincipalRef: attr.PrincipalRef,
+			Via:          via,
+			Transition:   &webhooks.Transition{From: nil, To: stringPtr(string(params.State))},
+			Changed:      changed,
+			Changes:      changes,
 		}
 
 		result = &CreateResult{
@@ -573,12 +564,11 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			args = append(args, value)
 		}
 
-		// Increment etag and update actor
+		// Increment etag and update attribution
 		setClauses = append(setClauses, "etag = etag + 1")
-		setClauses = append(setClauses, "updated_by_actor_uuid = ?")
 		setClauses = append(setClauses, "updated_by_principal_ref = ?")
 		setClauses = append(setClauses, "updated_by_scope_ref = ?")
-		args = append(args, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr))
+		args = append(args, attr.PrincipalRef, scopeSQL(attr))
 		if newState, ok := fields["state"]; ok && newState == "deleted" {
 			setClauses = append(setClauses, "deleted_by_principal_ref = ?")
 			setClauses = append(setClauses, "deleted_by_scope_ref = ?")
@@ -607,7 +597,6 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 				return fmt.Errorf("failed to clear caused_by: %w", err)
 			}
 			if err := insertCausedByRows(tx, causedByAttribution{
-				legacyActor:  legacyActorSQL(attr),
 				principalRef: attr.PrincipalRef,
 				scope:        scopeSQL(attr),
 			}, taskUUID, causedByUpdate.Refs); err != nil {
@@ -676,7 +665,6 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 		newETag = currentETag + 1
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
@@ -695,13 +683,13 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 		webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
 			taskUUID: taskUUID,
 			ctx: webhooks.EventContext{
-				Metadata:   meta,
-				Event:      "updated",
-				ActorUUID:  actorUUIDPtr(attr),
-				Via:        via,
-				Transition: transition,
-				Changed:    eventChanged,
-				Changes:    eventChanges,
+				Metadata:     meta,
+				Event:        "updated",
+				PrincipalRef: attr.PrincipalRef,
+				Via:          via,
+				Transition:   transition,
+				Changed:      eventChanged,
+				Changes:      eventChanges,
 			},
 		})
 
@@ -717,7 +705,6 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			payloadJSON, _ := json.Marshal(payload)
 			payloadStr := string(payloadJSON)
 			unblockedMeta, err := ew.LogEventReturning(tx, &domain.Event{
-				ActorUUID:    eventActorUUID(attr),
 				PrincipalRef: attr.PrincipalRef,
 				ScopeRef:     attr.ScopeRef,
 				ResourceType: "task",
@@ -731,12 +718,12 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 			webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
 				taskUUID: unblockedUUID,
 				ctx: webhooks.EventContext{
-					Metadata:   unblockedMeta,
-					Event:      "unblocked",
-					ActorUUID:  actorUUIDPtr(attr),
-					Via:        via,
-					Transition: nil,
-					Changed:    []string{"blocked_by"},
+					Metadata:     unblockedMeta,
+					Event:        "unblocked",
+					PrincipalRef: attr.PrincipalRef,
+					Via:          via,
+					Transition:   nil,
+					Changed:      []string{"blocked_by"},
 					Changes: map[string]webhooks.Change{
 						"blocked_by": {From: blockersBefore[unblockedUUID], To: blockersAfter},
 					},
@@ -914,11 +901,10 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 				UPDATE tasks
 				SET project_uuid = ?,
 					etag = etag + 1,
-					updated_by_actor_uuid = ?,
 					updated_by_principal_ref = ?,
 					updated_by_scope_ref = ?
 				WHERE uuid = ?
-			`, newProjectUUID, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), mt.uuid); err != nil {
+			`, newProjectUUID, attr.PrincipalRef, scopeSQL(attr), mt.uuid); err != nil {
 				return fmt.Errorf("failed to move task: %w", err)
 			}
 
@@ -942,7 +928,6 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 
 			resourceUUID := mt.uuid
 			meta, err := ew.LogEventReturning(tx, &domain.Event{
-				ActorUUID:    eventActorUUID(attr),
 				PrincipalRef: attr.PrincipalRef,
 				ScopeRef:     attr.ScopeRef,
 				ResourceType: "task",
@@ -957,12 +942,12 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 			webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
 				taskUUID: mt.uuid,
 				ctx: webhooks.EventContext{
-					Metadata:   meta,
-					Event:      "moved",
-					ActorUUID:  actorUUIDPtr(attr),
-					Via:        via,
-					Transition: nil,
-					Changed:    []string{"container_path", "project_uuid"},
+					Metadata:     meta,
+					Event:        "moved",
+					PrincipalRef: attr.PrincipalRef,
+					Via:          via,
+					Transition:   nil,
+					Changed:      []string{"container_path", "project_uuid"},
 					Changes: map[string]webhooks.Change{
 						"container_path": {From: mt.oldContainerPath, To: newContainerPath},
 						"project_uuid":   {From: mt.oldProjectUUID, To: newProjectUUID},
@@ -1036,12 +1021,11 @@ func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, tas
 			UPDATE tasks
 			SET state = 'archived',
 				archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-				updated_by_actor_uuid = ?,
 				updated_by_principal_ref = ?,
 				updated_by_scope_ref = ?,
 				etag = etag + 1
 			WHERE uuid = ?
-		`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), taskUUID)
+		`, attr.PrincipalRef, scopeSQL(attr), taskUUID)
 		if err != nil {
 			return fmt.Errorf("failed to archive task: %w", err)
 		}
@@ -1056,7 +1040,6 @@ func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, tas
 		newETag := currentETag + 1
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
@@ -1069,12 +1052,12 @@ func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, tas
 			return fmt.Errorf("failed to log event: %w", err)
 		}
 		webhookCtx = webhooks.EventContext{
-			Metadata:   meta,
-			Event:      "archived",
-			ActorUUID:  actorUUIDPtr(attr),
-			Via:        via,
-			Transition: &webhooks.Transition{From: stringPtr(currentState), To: stringPtr("archived")},
-			Changed:    []string{"archived_at", "state"},
+			Metadata:     meta,
+			Event:        "archived",
+			PrincipalRef: attr.PrincipalRef,
+			Via:          via,
+			Transition:   &webhooks.Transition{From: stringPtr(currentState), To: stringPtr("archived")},
+			Changed:      []string{"archived_at", "state"},
 			Changes: map[string]webhooks.Change{
 				"state":       {From: currentState, To: "archived"},
 				"archived_at": {From: nil, To: "now"},
@@ -1182,7 +1165,6 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 		payloadStr := string(payloadJSON)
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
@@ -1194,13 +1176,13 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 			return fmt.Errorf("failed to log event: %w", err)
 		}
 		webhookCtx = webhooks.EventContext{
-			Metadata:   meta,
-			Event:      "purged",
-			ActorUUID:  actorUUIDPtr(attr),
-			Via:        "cli",
-			Transition: nil,
-			Changed:    []string{},
-			Changes:    map[string]webhooks.Change{},
+			Metadata:     meta,
+			Event:        "purged",
+			PrincipalRef: attr.PrincipalRef,
+			Via:          "cli",
+			Transition:   nil,
+			Changed:      []string{},
+			Changes:      map[string]webhooks.Change{},
 		}
 
 		if err := detachExternalSubtasks(tx, attr, taskUUID); err != nil {
@@ -1460,13 +1442,12 @@ func detachExternalSubtasks(tx *sql.Tx, attr attribution.Attribution, parentTask
 		SET parent_task_uuid = NULL,
 		    kind = 'task',
 		    etag = etag + 1,
-		    updated_by_actor_uuid = ?,
 		    updated_by_principal_ref = ?,
 		    updated_by_scope_ref = ?
 		WHERE parent_task_uuid = ?
 		  AND state != 'deleted'
 		  AND project_uuid != (SELECT project_uuid FROM tasks WHERE uuid = ?)
-	`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), parentTaskUUID, parentTaskUUID); err != nil {
+	`, attr.PrincipalRef, scopeSQL(attr), parentTaskUUID, parentTaskUUID); err != nil {
 		return fmt.Errorf("failed to detach external subtasks: %w", err)
 	}
 	return nil
@@ -1516,13 +1497,12 @@ func cascadeDeleteResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attributi
 		_, err := tx.Exec(`
 			UPDATE tasks
 			SET state = 'deleted',
-			    updated_by_actor_uuid = ?,
 			    updated_by_principal_ref = ?,
 			    updated_by_scope_ref = ?,
 			    deleted_by_principal_ref = ?,
 			    deleted_by_scope_ref = ?
 			WHERE uuid = ?
-		`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr), subtaskUUID)
+		`, attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr), subtaskUUID)
 		if err != nil {
 			return fmt.Errorf("failed to delete subtask %s: %w", subtaskUUID, err)
 		}
@@ -1530,7 +1510,6 @@ func cascadeDeleteResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attributi
 		// Log event
 		payload := `{"action":"cascade_deleted","parent_deleted":true}`
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",
@@ -1601,7 +1580,6 @@ func purgeResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attri
 		})
 		payloadStr := string(payloadJSON)
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "task",

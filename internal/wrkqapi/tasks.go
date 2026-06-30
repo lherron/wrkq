@@ -980,8 +980,8 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 
 	query := `UPDATE tasks SET state = ?, archived_at = NULL, deleted_at = NULL,
 		deleted_by_principal_ref = NULL, deleted_by_scope_ref = NULL,
-		updated_by_actor_uuid = ?, updated_by_principal_ref = ?, updated_by_scope_ref = ?`
-	args := []any{opts.targetState, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr)}
+		updated_by_principal_ref = ?, updated_by_scope_ref = ?`
+	args := []any{opts.targetState, attr.PrincipalRef, scopeBind(attr)}
 
 	// fields mirrors legacy restoreTaskWithOptions' webhook `fields` map exactly —
 	// it drives Changed (sorted keys) + Changes (from→to). Note description is
@@ -1042,7 +1042,6 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	payloadJSON, _ := json.Marshal(payloadMap)
 	payload := string(payloadJSON)
 	eventMeta, eerr := events.NewWriter(a.db.DB).LogEventReturning(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -1068,11 +1067,11 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		commentID := id.FormatComment(int(nextSeq))
 		if _, serr := tx.Exec(`
 			INSERT INTO comments (
-				uuid, id, task_uuid, actor_uuid, created_by_principal_ref,
+				uuid, id, task_uuid, created_by_principal_ref,
 				created_by_scope_ref, body, etag
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-		`, commentUUID, commentID, taskUUID, legacyActorBind(attr),
+			VALUES (?, ?, ?, ?, ?, ?, 1)
+		`, commentUUID, commentID, taskUUID,
 			attr.PrincipalRef, scopeBind(attr), opts.comment); serr != nil {
 			return webhooks.EventContext{}, NewInternalError(serr)
 		}
@@ -1086,13 +1085,13 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	// the archived/deleted→target transition, the per-field Changed/Changes derived
 	// from the same `fields` map, and Via="rpc" (this path's mutation convention).
 	return webhooks.EventContext{
-		Metadata:   eventMeta,
-		Event:      "updated",
-		ActorUUID:  attr.LegacyActorUUID,
-		Via:        "rpc",
-		Transition: &webhooks.Transition{From: &currentState, To: &opts.targetState},
-		Changed:    webhookSortedKeys(fields),
-		Changes:    webhookMapChanges(fields, map[string]any{"state": currentState}),
+		Metadata:     eventMeta,
+		Event:        "updated",
+		PrincipalRef: attr.PrincipalRef,
+		Via:          "rpc",
+		Transition:   &webhooks.Transition{From: &currentState, To: &opts.targetState},
+		Changed:      webhookSortedKeys(fields),
+		Changes:      webhookMapChanges(fields, map[string]any{"state": currentState}),
 	}, nil
 }
 

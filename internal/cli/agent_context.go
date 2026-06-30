@@ -57,8 +57,6 @@ type agentContextOutput struct {
 // agentContextLookups carries optional DB-backed identity info. All fields are
 // best-effort: any failed lookup leaves the corresponding field empty.
 type agentContextLookups struct {
-	ActorUUID           string `json:"actor_uuid,omitempty"`
-	ActorFriendlyID     string `json:"actor_friendly_id,omitempty"`
 	ContainerUUID       string `json:"container_uuid,omitempty"`
 	ContainerFriendlyID string `json:"container_friendly_id,omitempty"`
 }
@@ -167,20 +165,6 @@ func tryDBLookups(cmd *cobra.Command, resolved scope.ResolvedScope, resolveErr e
 
 	lookups := &agentContextLookups{}
 
-	// Actor lookup: AgentID slug → actors row.
-	if resolved.AgentID != "" {
-		var actorUUID, actorID string
-		err := database.QueryRow(
-			"SELECT uuid, id FROM actors WHERE slug = ? LIMIT 1",
-			resolved.AgentID,
-		).Scan(&actorUUID, &actorID)
-		if err == nil {
-			lookups.ActorUUID = actorUUID
-			lookups.ActorFriendlyID = actorID
-		}
-		// Silently ignore non-ENOENT lookup errors — best effort only.
-	}
-
 	// Container lookup: ProjectID slug → top-level project container.
 	if resolved.ProjectID != "" {
 		var contUUID, contID string
@@ -253,13 +237,9 @@ func printAgentContextHuman(stdout, stderr io.Writer, out agentContextOutput) {
 		}
 	}
 
-	if out.Lookups != nil && (out.Lookups.ActorUUID != "" || out.Lookups.ContainerUUID != "") {
+	if out.Lookups != nil && out.Lookups.ContainerUUID != "" {
 		fmt.Fprintln(stdout)
 		fmt.Fprintln(stdout, "Lookups (best-effort):")
-		if out.Lookups.ActorUUID != "" {
-			fmt.Fprintf(stdout, "  actor       = %s (%s)\n",
-				out.Lookups.ActorFriendlyID, out.Lookups.ActorUUID)
-		}
 		if out.Lookups.ContainerUUID != "" {
 			fmt.Fprintf(stdout, "  container   = %s (%s)\n",
 				out.Lookups.ContainerFriendlyID, out.Lookups.ContainerUUID)

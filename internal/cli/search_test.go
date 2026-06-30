@@ -23,7 +23,7 @@ func TestSearchCommandRebuildAndSearchJSON(t *testing.T) {
 	}
 
 	s := store.New(database)
-	if _, err := s.Tasks.Create(app.ActorUUID, store.CreateParams{
+	if _, err := s.Tasks.CreateWithAttribution(app.Attribution(), store.CreateParams{
 		Slug:        "qwen-search",
 		Title:       "Qwen search",
 		Description: "Use qwen embeddings for local search.",

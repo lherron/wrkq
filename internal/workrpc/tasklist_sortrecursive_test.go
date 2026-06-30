@@ -582,7 +582,7 @@ func TestWrkqTaskList_CursorDirectionMismatchRejected(t *testing.T) {
 	p2Frames := p2Run(t, dbPath,
 		mkRPC("l2", "wrkq.task.list", map[string]any{
 			"sort":      "created_at",
-			"direction": "desc",   // opposite direction from the cursor's origin
+			"direction": "desc", // opposite direction from the cursor's origin
 			"cursor":    nextCursor,
 		}),
 	)

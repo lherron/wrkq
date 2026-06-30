@@ -22,14 +22,6 @@ type App struct {
 	// DB is the opened database connection (nil if NeedsDB is false)
 	DB *db.DB
 
-	// ActorUUID is the resolved actor UUID (empty if NeedsActor is false)
-	// Deprecated: legacy actor-table display/cache metadata only.
-	ActorUUID string
-
-	// ActorID is the resolved actor friendly ID (e.g., "A-00001")
-	// Deprecated: legacy actor-table display/cache metadata only.
-	ActorID string
-
 	// PrincipalRef is the canonical externally issued principal reference used
 	// for new write attribution. It is non-empty when NeedsActor/WithActor is used.
 	PrincipalRef string
@@ -43,19 +35,10 @@ type App struct {
 
 // Attribution returns the canonical write attribution resolved during bootstrap.
 func (a *App) Attribution() attribution.Attribution {
-	principalRef := a.PrincipalRef
-	if principalRef == "" && a.ActorUUID != "" {
-		principalRef = "agent:" + a.ActorUUID
+	return attribution.Attribution{
+		PrincipalRef: a.PrincipalRef,
+		ScopeRef:     a.ScopeRef,
 	}
-	attr := attribution.Attribution{
-		PrincipalRef:  principalRef,
-		ScopeRef:      a.ScopeRef,
-		LegacyActorID: a.ActorID,
-	}
-	if a.ActorUUID != "" {
-		attr.LegacyActorUUID = &a.ActorUUID
-	}
-	return attr
 }
 
 // Close releases resources held by the App.
@@ -184,10 +167,6 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 		}
 		app.PrincipalRef = attr.PrincipalRef
 		app.ScopeRef = attr.ScopeRef
-		if attr.LegacyActorUUID != nil {
-			app.ActorUUID = *attr.LegacyActorUUID
-		}
-		app.ActorID = attr.LegacyActorID
 	}
 
 	return app, nil

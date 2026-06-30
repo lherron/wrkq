@@ -285,11 +285,10 @@ func TestCommentDelete_SoftEventParity(t *testing.T) {
 	dbPath := migratedDB(t)
 	commentUUID, commentID, taskUUID := createCommentRPCFull(t, dbPath, "soft event parity") // fresh etag=1
 
-	// Pass an EXPLICIT actor so the recorded principal is deterministic regardless
-	// of the ambient config default_actor (the server now honors a caller/default
-	// principal exactly like legacy — daedalus #10261 — so an unset actor would
-	// resolve to whatever default_actor the rpc subprocess inherits).
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": commentUUID, "actor": "wrkq-system"}))
+	// Pass an EXPLICIT principal so the recorded principal is deterministic
+	// regardless of the ambient default principal (principal-only attribution
+	// requires an exact agent:<id> ref).
+	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": commentUUID, "actor": "agent:smokey"}))
 	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (soft event parity)")
 
 	// Row preserved + etag bumped 1→2.
@@ -310,7 +309,7 @@ func TestCommentDelete_SoftEventParity(t *testing.T) {
 
 	// Legacy payload is a fixed key order: task_id, comment_id, deleted_by_principal_ref, soft_delete.
 	want := `{"task_id":"` + taskUUID + `","comment_id":"` + commentID +
-		`","deleted_by_principal_ref":"agent:wrkq-system","soft_delete":true}`
+		`","deleted_by_principal_ref":"agent:smokey","soft_delete":true}`
 	if payload != want {
 		t.Errorf("comment.deleted payload mismatch:\n want: %s\n got:  %s", want, payload)
 	}

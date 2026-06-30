@@ -31,7 +31,7 @@ func runCLIPromptTTY(t *testing.T, bin, dir string, args []string, input string)
 		t.Skipf("pty unavailable (open slave %s): %v", slaveName, err)
 	}
 
-	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, args...)
+	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "agent:local-human"}, args...)
 	cmd := exec.Command(bin, full...)
 	cmd.Dir = dir
 	cmd.Env = hermeticEnv()

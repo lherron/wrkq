@@ -63,7 +63,7 @@ func newWebhookAPI(t *testing.T) (*API, *store.Store, *db.DB) {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return New(database, nil, "", "", 0), store.New(database), database
+	return New(database, nil, "agent:wrkq-system", "", 0), store.New(database), database
 }
 
 // TestTaskRestore_DispatchesWebhook proves the RPC restore path dispatches the

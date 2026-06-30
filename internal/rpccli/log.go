@@ -19,9 +19,6 @@ import (
 type logEvent struct {
 	ID           int64     `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
-	ActorUUID    *string   `json:"actor_uuid,omitempty"`
-	ActorSlug    *string   `json:"actor_slug,omitempty"`
-	ActorID      *string   `json:"actor_id,omitempty"`
 	PrincipalRef *string   `json:"principal_ref,omitempty"`
 	ScopeRef     *string   `json:"scope_ref,omitempty"`
 	ResourceType string    `json:"resource_type"`
@@ -171,8 +168,6 @@ func renderLogEventsOneline(w io.Writer, events []logEvent) error {
 		actor := "system"
 		if e.PrincipalRef != nil {
 			actor = *e.PrincipalRef
-		} else if e.ActorSlug != nil {
-			actor = *e.ActorSlug
 		}
 		timestamp := e.Timestamp.Format("2006-01-02 15:04")
 		fmt.Fprintf(w, "%s  %s  %s  by %s\n", timestamp, e.EventType, formatLogEventSummary(e), actor)
@@ -193,10 +188,7 @@ func renderLogEventsDetailed(w io.Writer, events []logEvent, showPatch bool) err
 			if e.ScopeRef != nil {
 				fmt.Fprintf(w, "  Scope:      %s\n", *e.ScopeRef)
 			}
-		}
-		if e.ActorSlug != nil && e.ActorID != nil {
-			fmt.Fprintf(w, "  Actor:      %s (%s)\n", *e.ActorSlug, *e.ActorID)
-		} else if e.PrincipalRef == nil {
+		} else {
 			fmt.Fprintf(w, "  Actor:      system\n")
 		}
 

@@ -11,9 +11,12 @@ import (
 
 // Snapshot represents the complete canonical state of a wrkq database.
 // The JSON shape follows PATCH-MODE.md §2.2.
+//
+// Attribution is principal-only: legacy actor scaffolding (the top-level
+// "actors" map, actor UUIDs, actor slugs/roles) is no longer serialized.
+// Write attribution is carried by canonical "*_principal_ref" fields.
 type Snapshot struct {
 	Meta       Meta                      `json:"meta"`
-	Actors     map[string]ActorEntry     `json:"actors,omitempty"`
 	Containers map[string]ContainerEntry `json:"containers,omitempty"`
 	Tasks      map[string]TaskEntry      `json:"tasks,omitempty"`
 	Comments   map[string]CommentEntry   `json:"comments,omitempty"`
@@ -29,88 +32,76 @@ type Meta struct {
 	MachineInterfaceVersion int    `json:"machine_interface_version"`
 }
 
-// ActorEntry represents an actor in the snapshot.
-// Keys under "actors" are UUIDs.
-type ActorEntry struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug"`
-	DisplayName string `json:"display_name,omitempty"`
-	Role        string `json:"role"`
-	Meta        string `json:"meta,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-}
-
 // ContainerEntry represents a container (project/subproject) in the snapshot.
 // Keys under "containers" are UUIDs.
 type ContainerEntry struct {
-	ID         string `json:"id"`
-	Slug       string `json:"slug"`
-	Title      string `json:"title,omitempty"`
-	ParentUUID string `json:"parent_uuid,omitempty"`
-	ETag       int64  `json:"etag"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
-	ArchivedAt string `json:"archived_at,omitempty"`
-	CreatedBy  string `json:"created_by"`
-	UpdatedBy  string `json:"updated_by"`
+	ID                    string `json:"id"`
+	Slug                  string `json:"slug"`
+	Title                 string `json:"title,omitempty"`
+	ParentUUID            string `json:"parent_uuid,omitempty"`
+	ETag                  int64  `json:"etag"`
+	CreatedAt             string `json:"created_at"`
+	UpdatedAt             string `json:"updated_at"`
+	ArchivedAt            string `json:"archived_at,omitempty"`
+	CreatedByPrincipalRef string `json:"created_by_principal_ref,omitempty"`
+	UpdatedByPrincipalRef string `json:"updated_by_principal_ref,omitempty"`
 }
 
 // TaskEntry represents a task in the snapshot.
 // Keys under "tasks" are UUIDs.
 type TaskEntry struct {
-	ID                   string   `json:"id"`
-	Slug                 string   `json:"slug"`
-	Title                string   `json:"title"`
-	ProjectUUID          string   `json:"project_uuid"`
-	RequestedByProjectID string   `json:"requested_by_project_id,omitempty"`
-	AssignedProjectID    string   `json:"assigned_project_id,omitempty"`
-	AcknowledgedAt       string   `json:"acknowledged_at,omitempty"`
-	Resolution           string   `json:"resolution,omitempty"`
-	WorkflowPreset       string   `json:"workflow_preset,omitempty"`
-	PresetVersion        int      `json:"preset_version,omitempty"`
-	Phase                string   `json:"phase,omitempty"`
-	RiskClass            string   `json:"risk_class,omitempty"`
-	State                string   `json:"state"`
-	Priority             int      `json:"priority"`
-	StartAt              string   `json:"start_at,omitempty"`
-	DueAt                string   `json:"due_at,omitempty"`
-	Labels               []string `json:"labels,omitempty"`
-	Description          string   `json:"description,omitempty"`
-	Specification        string   `json:"specification,omitempty"`
-	ETag                 int64    `json:"etag"`
-	CreatedAt            string   `json:"created_at"`
-	UpdatedAt            string   `json:"updated_at"`
-	CompletedAt          string   `json:"completed_at,omitempty"`
-	ArchivedAt           string   `json:"archived_at,omitempty"`
-	CreatedBy            string   `json:"created_by"`
-	UpdatedBy            string   `json:"updated_by"`
+	ID                    string   `json:"id"`
+	Slug                  string   `json:"slug"`
+	Title                 string   `json:"title"`
+	ProjectUUID           string   `json:"project_uuid"`
+	RequestedByProjectID  string   `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID     string   `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt        string   `json:"acknowledged_at,omitempty"`
+	Resolution            string   `json:"resolution,omitempty"`
+	WorkflowPreset        string   `json:"workflow_preset,omitempty"`
+	PresetVersion         int      `json:"preset_version,omitempty"`
+	Phase                 string   `json:"phase,omitempty"`
+	RiskClass             string   `json:"risk_class,omitempty"`
+	State                 string   `json:"state"`
+	Priority              int      `json:"priority"`
+	StartAt               string   `json:"start_at,omitempty"`
+	DueAt                 string   `json:"due_at,omitempty"`
+	Labels                []string `json:"labels,omitempty"`
+	Description           string   `json:"description,omitempty"`
+	Specification         string   `json:"specification,omitempty"`
+	ETag                  int64    `json:"etag"`
+	CreatedAt             string   `json:"created_at"`
+	UpdatedAt             string   `json:"updated_at"`
+	CompletedAt           string   `json:"completed_at,omitempty"`
+	ArchivedAt            string   `json:"archived_at,omitempty"`
+	CreatedByPrincipalRef string   `json:"created_by_principal_ref,omitempty"`
+	UpdatedByPrincipalRef string   `json:"updated_by_principal_ref,omitempty"`
 }
 
 // CommentEntry represents a comment in the snapshot.
 // Keys under "comments" are UUIDs.
 type CommentEntry struct {
-	ID        string `json:"id"`
-	TaskUUID  string `json:"task_uuid"`
-	ActorUUID string `json:"actor_uuid"`
-	Body      string `json:"body"`
-	Meta      string `json:"meta,omitempty"`
-	ETag      int64  `json:"etag"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-	DeletedAt string `json:"deleted_at,omitempty"`
-	DeletedBy string `json:"deleted_by,omitempty"`
+	ID                    string `json:"id"`
+	TaskUUID              string `json:"task_uuid"`
+	CreatedByPrincipalRef string `json:"created_by_principal_ref,omitempty"`
+	Body                  string `json:"body"`
+	Meta                  string `json:"meta,omitempty"`
+	ETag                  int64  `json:"etag"`
+	CreatedAt             string `json:"created_at"`
+	UpdatedAt             string `json:"updated_at,omitempty"`
+	DeletedAt             string `json:"deleted_at,omitempty"`
+	DeletedByPrincipalRef string `json:"deleted_by_principal_ref,omitempty"`
 }
 
 // LinkEntry represents a link/dependency in the snapshot.
 // Keys under "links" are UUIDs.
 type LinkEntry struct {
-	ID         string `json:"id,omitempty"`
-	SourceUUID string `json:"source_uuid"`
-	TargetUUID string `json:"target_uuid"`
-	LinkType   string `json:"link_type"`
-	CreatedAt  string `json:"created_at"`
-	CreatedBy  string `json:"created_by"`
+	ID                    string `json:"id,omitempty"`
+	SourceUUID            string `json:"source_uuid"`
+	TargetUUID            string `json:"target_uuid"`
+	LinkType              string `json:"link_type"`
+	CreatedAt             string `json:"created_at"`
+	CreatedByPrincipalRef string `json:"created_by_principal_ref,omitempty"`
 }
 
 // EventEntry represents minimal event metadata in the snapshot.
@@ -118,7 +109,7 @@ type LinkEntry struct {
 type EventEntry struct {
 	ID           int64  `json:"id"`
 	Timestamp    string `json:"timestamp"`
-	ActorUUID    string `json:"actor_uuid,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 	ResourceType string `json:"resource_type"`
 	ResourceUUID string `json:"resource_uuid,omitempty"`
 	EventType    string `json:"event_type"`
@@ -152,7 +143,6 @@ type ImportOptions struct {
 type ExportResult struct {
 	OutputPath     string `json:"out"`
 	SnapshotRev    string `json:"snapshot_rev"`
-	ActorCount     int    `json:"actors"`
 	ContainerCount int    `json:"containers"`
 	TaskCount      int    `json:"tasks"`
 	CommentCount   int    `json:"comments"`
@@ -164,7 +154,6 @@ type ExportResult struct {
 type ImportResult struct {
 	InputPath      string `json:"from"`
 	SnapshotRev    string `json:"snapshot_rev"`
-	ActorCount     int    `json:"actors"`
 	ContainerCount int    `json:"containers"`
 	TaskCount      int    `json:"tasks"`
 	CommentCount   int    `json:"comments"`

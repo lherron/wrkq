@@ -82,12 +82,6 @@ func Rebase(opts RebaseOptions) (*RebaseResult, error) {
 	codeRewrites := make(map[string]map[string]IDRewrite)
 
 	// Auto-renumber each resource type
-	if rewrites, err := renumberActors(branchState, &oldBase, &newBase, opts.StrictIDs); err != nil {
-		return nil, err
-	} else if len(rewrites) > 0 {
-		codeRewrites["actors"] = rewrites
-	}
-
 	if rewrites, err := renumberContainers(branchState, &oldBase, &newBase, opts.StrictIDs); err != nil {
 		return nil, err
 	} else if len(rewrites) > 0 {
@@ -129,43 +123,6 @@ func Rebase(opts RebaseOptions) (*RebaseResult, error) {
 	}
 
 	return result, nil
-}
-
-// renumberActors renumbers colliding actor friendly IDs.
-func renumberActors(branch, oldBase, newBase *snapshot.Snapshot, strict bool) (map[string]IDRewrite, error) {
-	// Find new actors (in branch but not in old-base)
-	newUUIDs := findNewEntities(
-		keysOf(branch.Actors),
-		keysOf(oldBase.Actors),
-	)
-
-	if len(newUUIDs) == 0 {
-		return nil, nil
-	}
-
-	// Collect existing IDs on new-base
-	existingIDs := make(map[string]bool)
-	for _, actor := range newBase.Actors {
-		existingIDs[actor.ID] = true
-	}
-
-	// Renumber collisions
-	rewrites := make(map[string]IDRewrite)
-	for _, uuid := range newUUIDs {
-		actor := branch.Actors[uuid]
-		if existingIDs[actor.ID] {
-			newID, err := incrementFriendlyID(actor.ID, existingIDs, strict)
-			if err != nil {
-				return nil, fmt.Errorf("actor %s: %w", uuid, err)
-			}
-			rewrites[uuid] = IDRewrite{From: actor.ID, To: newID}
-			actor.ID = newID
-			branch.Actors[uuid] = actor
-		}
-		existingIDs[actor.ID] = true
-	}
-
-	return rewrites, nil
 }
 
 // renumberContainers renumbers colliding container friendly IDs.

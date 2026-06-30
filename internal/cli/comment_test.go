@@ -45,9 +45,9 @@ func TestCommentAdd(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test adding a comment via message flag
 	cmd := rootCmd
@@ -126,7 +126,7 @@ func TestCommentAdd(t *testing.T) {
 		if payload.EventID == "" || payload.EventSeq == 0 || payload.OccurredAt == "" {
 			t.Fatalf("Expected event identity fields, got %+v", payload)
 		}
-		if payload.Origin.Actor != "human:test-user" || payload.Origin.Via != "cli" {
+		if payload.Origin.Actor != "agent:test-user" || payload.Origin.Via != "cli" {
 			t.Fatalf("Unexpected origin: %+v", payload.Origin)
 		}
 		if len(payload.Changed) != 1 || payload.Changed[0] != "comments" {
@@ -162,9 +162,9 @@ func TestCommentLs(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Query comments directly to verify
 	var count int
@@ -219,10 +219,10 @@ func TestCommentCat(t *testing.T) {
 		t.Fatalf("Failed to create test task: %v", err)
 	}
 
-	// Create a test comment
+	// Create a test comment with principal-only attribution.
 	_, err = database.Exec(`
-		INSERT INTO comments (uuid, id, task_uuid, actor_uuid, body, etag, created_at)
-		VALUES ('comment-uuid-1', 'C-00001', 'task-uuid-1', '00000000-0000-0000-0000-000000000001', 'Test comment body', 1, datetime('now'))
+		INSERT INTO comments (uuid, id, task_uuid, created_by_principal_ref, body, etag, created_at)
+		VALUES ('comment-uuid-1', 'C-00001', 'task-uuid-1', 'agent:test-user', 'Test comment body', 1, datetime('now'))
 	`)
 	if err != nil {
 		t.Fatalf("Failed to create test comment: %v", err)
@@ -230,9 +230,9 @@ func TestCommentCat(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test showing comment
 	cmd := rootCmd
@@ -258,7 +258,7 @@ func TestCommentCat(t *testing.T) {
 	}
 
 	if !strings.Contains(output, "test-user") {
-		t.Errorf("Output should contain actor slug")
+		t.Errorf("Output should contain author handle")
 	}
 }
 
@@ -285,9 +285,9 @@ func TestCommentRm_SoftDelete(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test soft-deleting comment
 	cmd := rootCmd
@@ -302,12 +302,13 @@ func TestCommentRm_SoftDelete(t *testing.T) {
 	}
 
 	// Verify comment was soft-deleted (still exists but has deleted_at)
-	var deletedAt, deletedByActor string
+	var deletedAt string
+	var deletedByPrincipal string
 	err = database.QueryRow(`
-		SELECT deleted_at, deleted_by_actor_uuid
+		SELECT deleted_at, deleted_by_principal_ref
 		FROM comments
 		WHERE uuid = 'comment-uuid-1'
-	`).Scan(&deletedAt, &deletedByActor)
+	`).Scan(&deletedAt, &deletedByPrincipal)
 	if err != nil {
 		t.Fatalf("Failed to query deleted comment: %v", err)
 	}
@@ -316,8 +317,8 @@ func TestCommentRm_SoftDelete(t *testing.T) {
 		t.Errorf("Expected deleted_at to be set")
 	}
 
-	if deletedByActor != "00000000-0000-0000-0000-000000000001" {
-		t.Errorf("Expected deleted_by_actor_uuid to be set to actor UUID")
+	if deletedByPrincipal != "agent:test-user" {
+		t.Errorf("Expected deleted_by_principal_ref to be agent:test-user, got %q", deletedByPrincipal)
 	}
 
 	// Verify event log
@@ -355,9 +356,9 @@ func TestCommentRm_Purge(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test purging comment
 	cmd := rootCmd
@@ -463,9 +464,9 @@ func TestCatWithIncludeComments(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test cat with comments included by default
 	app := createTestApp(t, database, dbPath)
@@ -565,9 +566,9 @@ func TestCommentSequenceIncrement(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Create multiple comments
 	for i := 1; i <= 3; i++ {
@@ -621,9 +622,9 @@ func TestCommentAdd_PositionalArg(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test adding a comment via positional argument (new default behavior)
 	cmd := rootCmd
@@ -689,9 +690,9 @@ func TestCommentAdd_FileFlag(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Test adding a comment via -f flag
 	cmd := rootCmd
@@ -745,9 +746,9 @@ func TestCommentSequenceDesync(t *testing.T) {
 
 	// Set environment variables
 	_ = os.Setenv("WRKQ_DB_PATH", dbPath)
-	_ = os.Setenv("WRKQ_ACTOR", "test-user")
+	_ = os.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 	defer func() { _ = os.Unsetenv("WRKQ_DB_PATH") }()
-	defer func() { _ = os.Unsetenv("WRKQ_ACTOR") }()
+	defer func() { _ = os.Unsetenv("WRKQ_PRINCIPAL_REF") }()
 
 	// Step 1: Add a comment via CLI (uses sequence, sets it to 1)
 	cmd := rootCmd

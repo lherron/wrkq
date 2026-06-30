@@ -23,7 +23,7 @@ func newMonitorAPI(t *testing.T) (*API, *store.Store) {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return New(database, nil, "", "", 0), store.New(database)
+	return New(database, nil, "agent:wrkq-system", "", 0), store.New(database)
 }
 
 const monitorSystemActor = "00000000-0000-4000-8000-0000000000a0"

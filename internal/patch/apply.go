@@ -42,9 +42,6 @@ func copySnapshot(snap *snapshot.Snapshot) (*snapshot.Snapshot, error) {
 	}
 
 	// Ensure maps are initialized
-	if result.Actors == nil {
-		result.Actors = make(map[string]snapshot.ActorEntry)
-	}
 	if result.Containers == nil {
 		result.Containers = make(map[string]snapshot.ContainerEntry)
 	}
@@ -94,12 +91,6 @@ func applyAdd(snap *snapshot.Snapshot, path []string, value interface{}) error {
 	key := path[1]
 
 	switch collection {
-	case "actors":
-		entry, err := convertToActorEntry(value)
-		if err != nil {
-			return err
-		}
-		snap.Actors[key] = entry
 	case "containers":
 		entry, err := convertToContainerEntry(value)
 		if err != nil {
@@ -140,11 +131,6 @@ func applyRemove(snap *snapshot.Snapshot, path []string) error {
 	key := path[1]
 
 	switch collection {
-	case "actors":
-		if _, ok := snap.Actors[key]; !ok {
-			return fmt.Errorf("actor not found: %s", key)
-		}
-		delete(snap.Actors, key)
 	case "containers":
 		if _, ok := snap.Containers[key]; !ok {
 			return fmt.Errorf("container not found: %s", key)
@@ -181,15 +167,6 @@ func applyReplace(snap *snapshot.Snapshot, path []string, value interface{}) err
 	key := path[1]
 
 	switch collection {
-	case "actors":
-		if _, ok := snap.Actors[key]; !ok {
-			return fmt.Errorf("actor not found for replace: %s", key)
-		}
-		entry, err := convertToActorEntry(value)
-		if err != nil {
-			return err
-		}
-		snap.Actors[key] = entry
 	case "containers":
 		if _, ok := snap.Containers[key]; !ok {
 			return fmt.Errorf("container not found for replace: %s", key)
@@ -247,18 +224,6 @@ func applyTest(snap *snapshot.Snapshot, path []string, value interface{}) error 
 }
 
 // Type conversion functions
-func convertToActorEntry(v interface{}) (snapshot.ActorEntry, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return snapshot.ActorEntry{}, err
-	}
-	var entry snapshot.ActorEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return snapshot.ActorEntry{}, err
-	}
-	return entry, nil
-}
-
 func convertToContainerEntry(v interface{}) (snapshot.ContainerEntry, error) {
 	data, err := json.Marshal(v)
 	if err != nil {

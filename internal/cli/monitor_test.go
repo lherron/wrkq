@@ -40,7 +40,7 @@ func runMonitorCLI(t *testing.T, dbPath string, args []string) monitorExecResult
 	t.Helper()
 
 	t.Setenv("WRKQ_DB_PATH", dbPath)
-	t.Setenv("WRKQ_ACTOR", "test-user")
+	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetArgs(args)

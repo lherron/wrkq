@@ -148,7 +148,7 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 
 	// comment.catView must also agree across transports. Seed a comment first via
 	// the in-process transport so a known comment id exists.
-	if _, err := inproc.Call(context.Background(), "wrkq.comment.add", map[string]any{"task": taskID, "body": "xport ✓"}); err != nil {
+	if _, err := inproc.Call(context.Background(), "wrkq.comment.add", map[string]any{"task": taskID, "body": "xport ✓", "actor": "agent:smokey"}); err != nil {
 		t.Fatalf("seed comment: %v", err)
 	}
 	inCm, err := inproc.Call(context.Background(), "wrkq.comment.catView", map[string]string{"comment": "C-00001"})
@@ -166,7 +166,7 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	// relation.listView (Group B compat list projection) must agree across
 	// transports. Seed a second task + a relation via the in-process transport.
 	t2, err := inproc.Call(context.Background(), "wrkq.task.create",
-		map[string]any{"path": "rpccli-test-proj/rel-target", "title": "T2"})
+		map[string]any{"path": "rpccli-test-proj/rel-target", "title": "T2", "principalRef": "agent:smokey"})
 	if err != nil {
 		t.Fatalf("seed second task: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	}
 	_ = json.Unmarshal(t2, &t2dto)
 	if _, err := inproc.Call(context.Background(), "wrkq.relation.add",
-		map[string]any{"fromTask": taskID, "kind": "blocks", "toTask": t2dto.ID}); err != nil {
+		map[string]any{"fromTask": taskID, "kind": "blocks", "toTask": t2dto.ID, "actor": "agent:smokey"}); err != nil {
 		t.Fatalf("seed relation: %v", err)
 	}
 	inRel, err := inproc.Call(context.Background(), "wrkq.relation.listView", map[string]string{"task": taskID})
@@ -397,20 +397,20 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 		return m
 	}
 	if _, err := inproc.Call(context.Background(), "wrkq.container.create",
-		map[string]any{"path": "xport-rename-a", "kind": "project"}); err != nil {
+		map[string]any{"path": "xport-rename-a", "kind": "project", "actor": "agent:smokey"}); err != nil {
 		t.Fatalf("in-process seed container: %v", err)
 	}
 	if _, err := sub.Call(ctx, "wrkq.container.create",
-		map[string]any{"path": "xport-rename-b", "kind": "project"}); err != nil {
+		map[string]any{"path": "xport-rename-b", "kind": "project", "actor": "agent:smokey"}); err != nil {
 		t.Fatalf("subprocess seed container: %v", err)
 	}
 	inUpd, err := inproc.Call(context.Background(), "wrkq.container.update",
-		map[string]any{"container": "xport-rename-a", "patch": map[string]any{"slug": "xport-renamed-a", "title": "Renamed"}})
+		map[string]any{"container": "xport-rename-a", "patch": map[string]any{"slug": "xport-renamed-a", "title": "Renamed"}, "actor": "agent:smokey"})
 	if err != nil {
 		t.Fatalf("in-process container.update: %v", err)
 	}
 	subUpd, err := sub.Call(ctx, "wrkq.container.update",
-		map[string]any{"container": "xport-rename-b", "patch": map[string]any{"slug": "xport-renamed-b", "title": "Renamed"}})
+		map[string]any{"container": "xport-rename-b", "patch": map[string]any{"slug": "xport-renamed-b", "title": "Renamed"}, "actor": "agent:smokey"})
 	if err != nil {
 		t.Fatalf("subprocess container.update: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	// BOTH transports and assert byte-identical rows. This proves the server-owned
 	// root resolution + webhook_urls read agree regardless of transport.
 	if _, err := inproc.Call(context.Background(), "wrkq.webhook.add",
-		map[string]any{"url": "https://xport-hook.test/wrkq"}); err != nil {
+		map[string]any{"url": "https://xport-hook.test/wrkq", "actor": "agent:smokey"}); err != nil {
 		t.Fatalf("in-process webhook.add: %v", err)
 	}
 	inHooks, err := inproc.Call(context.Background(), "wrkq.webhook.listView", map[string]any{})
@@ -444,7 +444,7 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	// The source task already lives in rpccli-test-proj, so both calls use overwrite
 	// to target the SAME destination row → byte-identical result DTO (same dest
 	// uuid/id), proving the create-or-overwrite envelope is server-owned.
-	copyParams := map[string]any{"source": taskID, "destination": "rpccli-test-proj", "overwrite": true}
+	copyParams := map[string]any{"source": taskID, "destination": "rpccli-test-proj", "overwrite": true, "actor": "agent:smokey"}
 	inCopy, err := inproc.Call(context.Background(), "wrkq.task.copy", copyParams)
 	if err != nil {
 		t.Fatalf("in-process task.copy: %v", err)
@@ -567,6 +567,7 @@ func TestTransportEquivalence_AttachmentBytes(t *testing.T) {
 		"seq":           0,
 		"contentBase64": base64.StdEncoding.EncodeToString(content),
 		"final":         true,
+		"actor":         "agent:smokey",
 	})
 	if err != nil {
 		t.Fatalf("addBytes: %v", err)
@@ -691,6 +692,7 @@ func TestStdoutPurity_AttachmentGetBytes(t *testing.T) {
 	call(2, "wrkq.attachment.addBytes", map[string]any{
 		"task": taskID, "filename": "pure.bin", "seq": 0,
 		"contentBase64": base64.StdEncoding.EncodeToString(content), "final": true,
+		"actor": "agent:smokey",
 	})
 	call(3, "wrkq.attachment.getBytes", map[string]any{"id": "ATT-00001", "offset": 0})
 }

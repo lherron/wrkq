@@ -66,15 +66,13 @@ type WrkqMonitorStateView struct {
 // order + json tags + pointer/omitempty). It is DISTINCT from WrkqLogEvent: it
 // INCLUDES resource_id, uses a STRING timestamp (raw event_log.timestamp, not a
 // parsed time.Time), and resource_uuid is a nullable pointer (omitempty), NOT a
-// required string. Field order is the legacy watchEvent struct order:
-// id, timestamp, actor_uuid?, actor_slug?, actor_id?, principal_ref?, scope_ref?,
+// required string. Field order is the legacy watchEvent struct order (legacy
+// actor_uuid/actor_slug/actor_id attribution fields removed — principal-only):
+// id, timestamp, principal_ref?, scope_ref?,
 // resource_type, resource_uuid?, resource_id?, event_type, etag?, payload?.
 type WrkqWatchEvent struct {
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
-	ActorUUID    *string `json:"actor_uuid,omitempty"`
-	ActorSlug    *string `json:"actor_slug,omitempty"`
-	ActorID      *string `json:"actor_id,omitempty"`
 	PrincipalRef *string `json:"principal_ref,omitempty"`
 	ScopeRef     *string `json:"scope_ref,omitempty"`
 	ResourceType string  `json:"resource_type"`
@@ -290,11 +288,10 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 	view := &WrkqHistoryTailView{Items: []WrkqWatchEvent{}, HighWater: p.Cursor}
 	for rows.Next() {
 		var e WrkqWatchEvent
-		var actorSlug, actorID, resourceID sql.NullString
+		var resourceID sql.NullString
 		if err := rows.Scan(
 			&e.ID,
 			&e.Timestamp,
-			&e.ActorUUID,
 			&e.PrincipalRef,
 			&e.ScopeRef,
 			&e.ResourceType,
@@ -302,17 +299,9 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 			&e.EventType,
 			&e.ETag,
 			&e.Payload,
-			&actorSlug,
-			&actorID,
 			&resourceID,
 		); err != nil {
 			return nil, NewInternalError(fmt.Errorf("scan failed: %w", err))
-		}
-		if actorSlug.Valid {
-			e.ActorSlug = &actorSlug.String
-		}
-		if actorID.Valid {
-			e.ActorID = &actorID.String
 		}
 		if resourceID.Valid {
 			e.ResourceID = &resourceID.String
@@ -519,7 +508,6 @@ const monitorEventScanQuery = `
 	       CASE e.resource_type
 	           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
 	           WHEN 'container' THEN (SELECT id FROM containers WHERE uuid = e.resource_uuid)
-	           WHEN 'actor' THEN (SELECT id FROM actors WHERE uuid = e.resource_uuid)
 	           WHEN 'comment' THEN (SELECT id FROM comments WHERE uuid = e.resource_uuid)
 	           ELSE NULL
 	       END as resource_id,
@@ -540,17 +528,14 @@ const monitorEventScanQuery = `
 // watchTailScanQuery is the legacy watchEvents query with a server cursor and a
 // hard LIMIT for bounded pages. It hydrates actor slug/id + resource_id.
 const watchTailScanQuery = `
-	SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
+	SELECT e.id, e.timestamp, e.principal_ref, e.scope_ref,
 	       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
-	       a.slug as actor_slug, a.id as actor_id,
 	       CASE e.resource_type
 	           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
 	           WHEN 'container' THEN (SELECT id FROM containers WHERE uuid = e.resource_uuid)
-	           WHEN 'actor' THEN (SELECT id FROM actors WHERE uuid = e.resource_uuid)
 	           ELSE NULL
 	       END as resource_id
 	FROM event_log e
-	LEFT JOIN actors a ON a.uuid = e.actor_uuid
 	WHERE e.id > ?
 	ORDER BY e.id ASC
 	LIMIT ?

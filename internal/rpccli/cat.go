@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -105,8 +106,7 @@ func writeCatStyled(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeC
 				comments = append(comments, style.StyledComment{
 					ID:        c.ID,
 					CreatedAt: c.CreatedAt,
-					Actor:     c.ActorSlug,
-					Role:      c.ActorRole,
+					Actor:     attribution.PrincipalHandle(c.PrincipalRef),
 					Body:      c.Body,
 				})
 			}
@@ -241,7 +241,6 @@ type catTask struct {
 	ParentTaskID          *string         `json:"parent_task_id,omitempty"`
 	ParentTaskUUID        *string         `json:"parent_task_uuid,omitempty"`
 	AssigneeSlug          *string         `json:"assignee,omitempty"`
-	AssigneeUUID          *string         `json:"assignee_uuid,omitempty"`
 	AssigneePrincipalRef  *string         `json:"assignee_principal_ref,omitempty"`
 	StartAt               *string         `json:"start_at,omitempty"`
 	DueAt                 *string         `json:"due_at,omitempty"`
@@ -267,11 +266,10 @@ type catTask struct {
 }
 
 type catComment struct {
-	ID        string `json:"id"`
-	CreatedAt string `json:"created_at"`
-	Body      string `json:"body"`
-	ActorSlug string `json:"actor_slug,omitempty"`
-	ActorRole string `json:"actor_role,omitempty"`
+	ID           string `json:"id"`
+	CreatedAt    string `json:"created_at"`
+	Body         string `json:"body"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type catBlocker struct {
@@ -324,9 +322,6 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			}
 			if t.AssigneeSlug != nil {
 				fmt.Fprintf(w, "assignee: %s\n", *t.AssigneeSlug)
-			}
-			if t.AssigneeUUID != nil {
-				fmt.Fprintf(w, "assignee_uuid: %s\n", *t.AssigneeUUID)
 			}
 			if t.AssigneePrincipalRef != nil {
 				fmt.Fprintf(w, "assignee_principal_ref: %s\n", *t.AssigneePrincipalRef)
@@ -396,7 +391,7 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			fmt.Fprintln(w, "<!-- wrkq-comments: do not edit below -->")
 			fmt.Fprintln(w)
 			for _, c := range t.Comments {
-				fmt.Fprintf(w, "> [%s] [%s] %s (%s)\n", c.ID, c.CreatedAt, c.ActorSlug, c.ActorRole)
+				fmt.Fprintf(w, "> [%s] [%s] %s\n", c.ID, c.CreatedAt, attribution.PrincipalHandle(c.PrincipalRef))
 				for _, line := range strings.Split(c.Body, "\n") {
 					fmt.Fprintf(w, "> %s\n", line)
 				}

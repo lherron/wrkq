@@ -150,7 +150,6 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			// Log purge event
 			payload := fmt.Sprintf(`{"task_id":"%s","comment_id":"%s","hard_delete":true}`, taskUUID, commentID)
 			if err := eventWriter.LogEvent(tx, &domain.Event{
-				ActorUUID:    attr.LegacyActorUUID,
 				PrincipalRef: attr.PrincipalRef,
 				ScopeRef:     attr.ScopeRef,
 				ResourceType: "comment",
@@ -179,12 +178,11 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 			_, err = tx.Exec(`
 				UPDATE comments
 				SET deleted_at = datetime('now'),
-				    deleted_by_actor_uuid = ?,
 				    deleted_by_principal_ref = ?,
 				    deleted_by_scope_ref = ?,
 				    etag = etag + 1
 				WHERE uuid = ?
-			`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), commentUUID)
+			`, attr.PrincipalRef, scopeBind(attr), commentUUID)
 			if err != nil {
 				return fmt.Errorf("failed to soft-delete comment %s: %w", commentID, err)
 			}
@@ -231,7 +229,6 @@ func runCommentRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 				taskUUID, commentID, attr.PrincipalRef)
 			eventPayload := payload
 			if err := eventWriter.LogEvent(tx, &domain.Event{
-				ActorUUID:    attr.LegacyActorUUID,
 				PrincipalRef: attr.PrincipalRef,
 				ScopeRef:     attr.ScopeRef,
 				ResourceType: "comment",

@@ -128,16 +128,15 @@ func runRelationAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	_, err = tx.Exec(`
 		INSERT INTO task_relations (
 			from_task_uuid, to_task_uuid, kind,
-			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			created_by_principal_ref, created_by_scope_ref
 		)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, fromTaskUUID, toTaskUUID, kind, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
+		VALUES (?, ?, ?, ?, ?)
+	`, fromTaskUUID, toTaskUUID, kind, attr.PrincipalRef, scopeBind(attr))
 	if err != nil {
 		return fmt.Errorf("failed to create relation: %w", err)
 	}
 	payload := fmt.Sprintf(`{"from_task_uuid":"%s","to_task_uuid":"%s","kind":"%s"}`, fromTaskUUID, toTaskUUID, kind)
 	if err := events.NewWriter(database.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -218,7 +217,6 @@ func runRelationRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 	payload := fmt.Sprintf(`{"from_task_uuid":"%s","to_task_uuid":"%s","kind":"%s","deleted_by_principal_ref":"%s"}`,
 		fromTaskUUID, toTaskUUID, kind, attr.PrincipalRef)
 	if err := events.NewWriter(database.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -279,10 +277,9 @@ func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	outgoingRows, err := database.Query(`
 		SELECT r.kind, r.created_at,
 		       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-		       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+		       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 		FROM task_relations r
 		JOIN tasks t ON r.to_task_uuid = t.uuid
-		LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 		WHERE r.from_task_uuid = ?
 		ORDER BY r.kind, t.id
 	`, taskUUID)
@@ -305,10 +302,9 @@ func runRelationLs(app *appctx.App, cmd *cobra.Command, args []string) error {
 	incomingRows, err := database.Query(`
 		SELECT r.kind, r.created_at,
 		       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-		       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+		       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 		FROM task_relations r
 		JOIN tasks t ON r.from_task_uuid = t.uuid
-		LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 		WHERE r.to_task_uuid = ?
 		ORDER BY r.kind, t.id
 	`, taskUUID)

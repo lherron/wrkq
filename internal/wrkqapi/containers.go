@@ -402,18 +402,16 @@ func (a *API) ContainerRestore(ctx context.Context, p ContainerRestoreParams) (*
 	if _, err := tx.Exec(`
 		UPDATE containers
 		SET archived_at = NULL,
-		    updated_by_actor_uuid = ?,
 		    updated_by_principal_ref = ?,
 		    updated_by_scope_ref = ?
 		WHERE uuid = ?
-	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), containerUUID); err != nil {
+	`, attr.PrincipalRef, scopeBind(attr), containerUUID); err != nil {
 		return nil, NewInternalError(errors.New("failed to restore container: " + err.Error()))
 	}
 
 	eventWriter := events.NewWriter(a.db.DB)
 	payload := `{"action":"restored"}`
 	if err := eventWriter.LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "container",

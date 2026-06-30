@@ -65,13 +65,10 @@ func validateSnapshotInvariants(snap *snapshot.Snapshot) []string {
 		}
 	}
 
-	// 2. FK constraints - comments must reference valid tasks and actors
+	// 2. FK constraints - comments must reference valid tasks
 	for uuid, comment := range snap.Comments {
 		if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
 			errors = append(errors, fmt.Sprintf("comment %s references unknown task %s", uuid, comment.TaskUUID))
-		}
-		if _, ok := snap.Actors[comment.ActorUUID]; !ok {
-			errors = append(errors, fmt.Sprintf("comment %s references unknown actor %s", uuid, comment.ActorUUID))
 		}
 	}
 
@@ -113,14 +110,6 @@ func validateSnapshotInvariants(snap *snapshot.Snapshot) []string {
 	}
 
 	// 6. Friendly ID uniqueness per resource type
-	actorIDs := make(map[string]string) // id -> uuid
-	for uuid, actor := range snap.Actors {
-		if existing, ok := actorIDs[actor.ID]; ok {
-			errors = append(errors, fmt.Sprintf("duplicate actor ID '%s': %s and %s", actor.ID, existing, uuid))
-		}
-		actorIDs[actor.ID] = uuid
-	}
-
 	containerIDs := make(map[string]string)
 	for uuid, container := range snap.Containers {
 		if existing, ok := containerIDs[container.ID]; ok {
@@ -147,25 +136,6 @@ func validateSnapshotInvariants(snap *snapshot.Snapshot) []string {
 
 	// 7. Container hierarchy is acyclic (no container can be its own ancestor)
 	errors = append(errors, checkContainerCycles(snap)...)
-
-	// 8. Actors referenced by tasks must exist
-	for uuid, task := range snap.Tasks {
-		if _, ok := snap.Actors[task.CreatedBy]; !ok {
-			errors = append(errors, fmt.Sprintf("task %s references unknown actor %s (created_by)", uuid, task.CreatedBy))
-		}
-		if _, ok := snap.Actors[task.UpdatedBy]; !ok {
-			errors = append(errors, fmt.Sprintf("task %s references unknown actor %s (updated_by)", uuid, task.UpdatedBy))
-		}
-	}
-
-	for uuid, container := range snap.Containers {
-		if _, ok := snap.Actors[container.CreatedBy]; !ok {
-			errors = append(errors, fmt.Sprintf("container %s references unknown actor %s (created_by)", uuid, container.CreatedBy))
-		}
-		if _, ok := snap.Actors[container.UpdatedBy]; !ok {
-			errors = append(errors, fmt.Sprintf("container %s references unknown actor %s (updated_by)", uuid, container.UpdatedBy))
-		}
-	}
 
 	return errors
 }

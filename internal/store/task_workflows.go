@@ -67,14 +67,14 @@ func (ts *TaskStore) CreateRoleAssignment(params CreateRoleAssignmentParams) (*d
 
 		if params.AssignedAt != nil {
 			res, err = tx.Exec(`
-				INSERT INTO task_role_assignments (task_uuid, role, actor_uuid, principal_ref, assigned_at)
-				VALUES (?, ?, ?, ?, ?)
-			`, params.TaskUUID, params.Role, legacyActorSQL(attr), attr.PrincipalRef, *params.AssignedAt)
+				INSERT INTO task_role_assignments (task_uuid, role, principal_ref, assigned_at)
+				VALUES (?, ?, ?, ?)
+			`, params.TaskUUID, params.Role, attr.PrincipalRef, *params.AssignedAt)
 		} else {
 			res, err = tx.Exec(`
-				INSERT INTO task_role_assignments (task_uuid, role, actor_uuid, principal_ref)
-				VALUES (?, ?, ?, ?)
-			`, params.TaskUUID, params.Role, legacyActorSQL(attr), attr.PrincipalRef)
+				INSERT INTO task_role_assignments (task_uuid, role, principal_ref)
+				VALUES (?, ?, ?)
+			`, params.TaskUUID, params.Role, attr.PrincipalRef)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to create task role assignment: %w", err)
@@ -145,18 +145,18 @@ func (ts *TaskStore) CreateEvidenceItem(params CreateEvidenceItemParams) (*domai
 		if params.ProducedAt != nil {
 			res, err = tx.Exec(`
 				INSERT INTO evidence_items (
-					task_uuid, kind, ref, content_hash, produced_by_actor_uuid, produced_by_principal_ref, produced_by_role,
+					task_uuid, kind, ref, content_hash, produced_by_principal_ref, produced_by_role,
 					build_id, build_version, build_env, produced_at, meta
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, params.TaskUUID, params.Kind, params.Ref, params.ContentHash, legacyActorSQL(attr), attr.PrincipalRef,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, params.TaskUUID, params.Kind, params.Ref, params.ContentHash, attr.PrincipalRef,
 				params.ProducedByRole, params.BuildID, params.BuildVersion, params.BuildEnv, *params.ProducedAt, params.Meta)
 		} else {
 			res, err = tx.Exec(`
 				INSERT INTO evidence_items (
-					task_uuid, kind, ref, content_hash, produced_by_actor_uuid, produced_by_principal_ref, produced_by_role,
+					task_uuid, kind, ref, content_hash, produced_by_principal_ref, produced_by_role,
 					build_id, build_version, build_env, meta
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, params.TaskUUID, params.Kind, params.Ref, params.ContentHash, legacyActorSQL(attr), attr.PrincipalRef,
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, params.TaskUUID, params.Kind, params.Ref, params.ContentHash, attr.PrincipalRef,
 				params.ProducedByRole, params.BuildID, params.BuildVersion, params.BuildEnv, params.Meta)
 		}
 		if err != nil {
@@ -230,19 +230,19 @@ func (ts *TaskStore) CreateTaskTransition(params CreateTaskTransitionParams) (*d
 			res, err = tx.Exec(`
 				INSERT INTO task_transitions (
 					task_uuid, from_phase, to_phase, from_lifecycle_state, to_lifecycle_state,
-					actor_uuid, principal_ref, actor_role, evidence_item_uuids, transitioned_at, meta
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					principal_ref, actor_role, evidence_item_uuids, transitioned_at, meta
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`, params.TaskUUID, params.FromPhase, params.ToPhase, params.FromLifecycleState,
-				params.ToLifecycleState, legacyActorSQL(attr), attr.PrincipalRef, params.ActorRole, params.EvidenceItemUUIDs,
+				params.ToLifecycleState, attr.PrincipalRef, params.ActorRole, params.EvidenceItemUUIDs,
 				*params.TransitionedAt, params.Meta)
 		} else {
 			res, err = tx.Exec(`
 				INSERT INTO task_transitions (
 					task_uuid, from_phase, to_phase, from_lifecycle_state, to_lifecycle_state,
-					actor_uuid, principal_ref, actor_role, evidence_item_uuids, meta
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					principal_ref, actor_role, evidence_item_uuids, meta
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`, params.TaskUUID, params.FromPhase, params.ToPhase, params.FromLifecycleState,
-				params.ToLifecycleState, legacyActorSQL(attr), attr.PrincipalRef, params.ActorRole, params.EvidenceItemUUIDs,
+				params.ToLifecycleState, attr.PrincipalRef, params.ActorRole, params.EvidenceItemUUIDs,
 				params.Meta)
 		}
 		if err != nil {

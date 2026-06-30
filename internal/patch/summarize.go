@@ -34,7 +34,6 @@ type SummarizeResult struct {
 type EntityCounts struct {
 	Tasks      OpCounts `json:"tasks,omitempty"`
 	Containers OpCounts `json:"containers,omitempty"`
-	Actors     OpCounts `json:"actors,omitempty"`
 	Comments   OpCounts `json:"comments,omitempty"`
 }
 
@@ -166,8 +165,6 @@ func singularEntity(plural string) string {
 		return "task"
 	case "containers":
 		return "container"
-	case "actors":
-		return "actor"
 	case "comments":
 		return "comment"
 	default:
@@ -193,11 +190,6 @@ func enrichFromBase(detail *OpDetail, entityType, uuid string, base *snapshot.Sn
 			detail.ID = container.ID
 			detail.Title = container.Title
 			detail.Path = buildContainerPath(uuid, base)
-		}
-	case "actors":
-		if actor, ok := base.Actors[uuid]; ok {
-			detail.ID = actor.ID
-			detail.Title = actor.DisplayName
 		}
 	case "comments":
 		if comment, ok := base.Comments[uuid]; ok {
@@ -272,8 +264,6 @@ func updateCounts(counts *EntityCounts, entity, op string) {
 		opCounts = &counts.Tasks
 	case "container":
 		opCounts = &counts.Containers
-	case "actor":
-		opCounts = &counts.Actors
 	case "comment":
 		opCounts = &counts.Comments
 	default:
@@ -299,9 +289,6 @@ func formatText(counts EntityCounts) string {
 	}
 	if total := counts.Containers.Add + counts.Containers.Replace + counts.Containers.Remove; total > 0 {
 		parts = append(parts, formatEntityText("container", counts.Containers))
-	}
-	if total := counts.Actors.Add + counts.Actors.Replace + counts.Actors.Remove; total > 0 {
-		parts = append(parts, formatEntityText("actor", counts.Actors))
 	}
 	if total := counts.Comments.Add + counts.Comments.Replace + counts.Comments.Remove; total > 0 {
 		parts = append(parts, formatEntityText("comment", counts.Comments))

@@ -60,8 +60,13 @@ func TestTaskWorkflowRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoleAssignment failed: %v", err)
 	}
-	if assignment.Role != "triager" || assignment.ActorUUID != actorUUID {
+	// Principal-only: the legacy actor_uuid column is no longer written; attribution
+	// is carried by principal_ref (agent:<id>).
+	if assignment.Role != "triager" || assignment.ActorUUID != "" {
 		t.Fatalf("unexpected role assignment: %+v", assignment)
+	}
+	if assignment.PrincipalRef != "agent:"+actorUUID {
+		t.Fatalf("expected principal_ref agent:%s, got %q", actorUUID, assignment.PrincipalRef)
 	}
 
 	evidence, err := s.Tasks.CreateEvidenceItem(CreateEvidenceItemParams{

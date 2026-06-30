@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
@@ -52,8 +53,7 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var meta sql.NullString
 		var etag int64
 		var createdAt string
-		var updatedAt, deletedAt, deletedByActorUUID sql.NullString
-		var actorUUID, actorSlug, actorRole sql.NullString
+		var updatedAt, deletedAt sql.NullString
 		var createdByPrincipalRef, createdByScopeRef sql.NullString
 		var deletedByPrincipalRef, deletedByScopeRef sql.NullString
 		var taskID string
@@ -63,14 +63,12 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		isFriendlyID := id.IsFriendlyID(ref)
 
 		query := `
-			SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
-			       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
+			SELECT c.uuid, c.id, c.task_uuid, c.body, c.meta, c.etag,
+			       c.created_at, c.updated_at, c.deleted_at,
 			       c.created_by_principal_ref, c.created_by_scope_ref,
 			       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
-			       a.slug as actor_slug, a.role as actor_role,
 			       t.id as task_id
 			FROM comments c
-			LEFT JOIN actors a ON c.actor_uuid = a.uuid
 			LEFT JOIN tasks t ON c.task_uuid = t.uuid
 		`
 
@@ -78,20 +76,20 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if isUUID {
 			query += " WHERE c.uuid = ?"
 			queryErr = database.QueryRow(query, ref).Scan(
-				&commentUUID, &commentID, &taskUUID, &actorUUID, &body, &meta, &etag,
-				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+				&commentUUID, &commentID, &taskUUID, &body, &meta, &etag,
+				&createdAt, &updatedAt, &deletedAt,
 				&createdByPrincipalRef, &createdByScopeRef,
 				&deletedByPrincipalRef, &deletedByScopeRef,
-				&actorSlug, &actorRole, &taskID,
+				&taskID,
 			)
 		} else if isFriendlyID {
 			query += " WHERE c.id = ?"
 			queryErr = database.QueryRow(query, ref).Scan(
-				&commentUUID, &commentID, &taskUUID, &actorUUID, &body, &meta, &etag,
-				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+				&commentUUID, &commentID, &taskUUID, &body, &meta, &etag,
+				&createdAt, &updatedAt, &deletedAt,
 				&createdByPrincipalRef, &createdByScopeRef,
 				&deletedByPrincipalRef, &deletedByScopeRef,
-				&actorSlug, &actorRole, &taskID,
+				&taskID,
 			)
 		} else {
 			return fmt.Errorf("invalid comment reference: %s (expected friendly ID like C-00001 or UUID)", commentRef)
@@ -113,15 +111,6 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			"etag":       etag,
 			"created_at": createdAt,
 		}
-		if actorUUID.Valid {
-			comment["actor_uuid"] = actorUUID.String
-		}
-		if actorSlug.Valid {
-			comment["actor_slug"] = actorSlug.String
-		}
-		if actorRole.Valid {
-			comment["actor_role"] = actorRole.String
-		}
 		if createdByPrincipalRef.Valid {
 			comment["created_by_principal_ref"] = createdByPrincipalRef.String
 		}
@@ -137,9 +126,6 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 		if deletedAt.Valid {
 			comment["deleted_at"] = deletedAt.String
-		}
-		if deletedByActorUUID.Valid {
-			comment["deleted_by_actor_uuid"] = deletedByActorUUID.String
 		}
 		if deletedByPrincipalRef.Valid {
 			comment["deleted_by_principal_ref"] = deletedByPrincipalRef.String
@@ -183,11 +169,14 @@ func runCommentCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(cmd.OutOrStdout(), comment["body"].(string))
 		} else {
 			// Header + body
-			fmt.Fprintf(cmd.OutOrStdout(), "[%s] [%s] %s (%s) - Task: %s\n",
+			author := ""
+			if ref, ok := comment["created_by_principal_ref"].(string); ok {
+				author = attribution.PrincipalHandle(ref)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "[%s] [%s] %s - Task: %s\n",
 				comment["id"].(string),
 				comment["created_at"].(string),
-				comment["actor_slug"].(string),
-				comment["actor_role"].(string),
+				author,
 				comment["task_id"].(string),
 			)
 			fmt.Fprintln(cmd.OutOrStdout())

@@ -50,9 +50,6 @@ func runWatch(app *appctx.App, cmd *cobra.Command, args []string) error {
 type watchEvent struct {
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
-	ActorUUID    *string `json:"actor_uuid,omitempty"`
-	ActorSlug    *string `json:"actor_slug,omitempty"`
-	ActorID      *string `json:"actor_id,omitempty"`
 	PrincipalRef *string `json:"principal_ref,omitempty"`
 	ScopeRef     *string `json:"scope_ref,omitempty"`
 	ResourceType string  `json:"resource_type"`
@@ -70,17 +67,14 @@ func watchEvents(stdout io.Writer, database *db.DB, sinceID int64, ndjson bool, 
 	for {
 		// Query new events
 		query := `
-			SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
+			SELECT e.id, e.timestamp, e.principal_ref, e.scope_ref,
 			       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
-			       a.slug as actor_slug, a.id as actor_id,
 			       CASE e.resource_type
 			           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
 			           WHEN 'container' THEN (SELECT id FROM containers WHERE uuid = e.resource_uuid)
-			           WHEN 'actor' THEN (SELECT id FROM actors WHERE uuid = e.resource_uuid)
 			           ELSE NULL
 			       END as resource_id
 			FROM event_log e
-			LEFT JOIN actors a ON a.uuid = e.actor_uuid
 			WHERE e.id > ?
 			ORDER BY e.id ASC
 		`
@@ -93,12 +87,11 @@ func watchEvents(stdout io.Writer, database *db.DB, sinceID int64, ndjson bool, 
 		hasEvents := false
 		for rows.Next() {
 			var e watchEvent
-			var actorSlug, actorID, resourceID sql.NullString
+			var resourceID sql.NullString
 
 			err := rows.Scan(
 				&e.ID,
 				&e.Timestamp,
-				&e.ActorUUID,
 				&e.PrincipalRef,
 				&e.ScopeRef,
 				&e.ResourceType,
@@ -106,8 +99,6 @@ func watchEvents(stdout io.Writer, database *db.DB, sinceID int64, ndjson bool, 
 				&e.EventType,
 				&e.ETag,
 				&e.Payload,
-				&actorSlug,
-				&actorID,
 				&resourceID,
 			)
 			if err != nil {
@@ -115,12 +106,6 @@ func watchEvents(stdout io.Writer, database *db.DB, sinceID int64, ndjson bool, 
 				return fmt.Errorf("scan failed: %w", err)
 			}
 
-			if actorSlug.Valid {
-				e.ActorSlug = &actorSlug.String
-			}
-			if actorID.Valid {
-				e.ActorID = &actorID.String
-			}
 			if resourceID.Valid {
 				e.ResourceID = &resourceID.String
 			}
@@ -167,12 +152,6 @@ func printWatchEvent(stdout io.Writer, e watchEvent) {
 	actor := "system"
 	if e.PrincipalRef != nil {
 		actor = *e.PrincipalRef
-	} else if e.ActorSlug != nil {
-		actorDisplay := *e.ActorSlug
-		if e.ActorID != nil {
-			actorDisplay += fmt.Sprintf(" (%s)", *e.ActorID)
-		}
-		actor = actorDisplay
 	}
 
 	resource := e.ResourceType

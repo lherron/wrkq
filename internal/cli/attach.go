@@ -325,11 +325,11 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	result, err := tx.Exec(`
 		INSERT INTO attachments (
 			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
-			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			created_by_principal_ref, created_by_scope_ref
 		)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
 	`, taskUUID, filename, relativePath, mimeType, size, checksum,
-		legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
+		attr.PrincipalRef, scopeBind(attr))
 	if err != nil {
 		_ = os.Remove(absPath) // Clean up file
 		return fmt.Errorf("failed to insert attachment: %w", err)
@@ -358,7 +358,6 @@ func runAttachPut(app *appctx.App, cmd *cobra.Command, args []string) error {
 	payloadStr := string(payloadJSON)
 
 	event := &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "attachment",
@@ -505,7 +504,6 @@ func runAttachRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 		payloadStr := string(payloadJSON)
 
 		event := &domain.Event{
-			ActorUUID:    attr.LegacyActorUUID,
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "attachment",

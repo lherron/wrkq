@@ -79,9 +79,9 @@ func insertCausedByRows(tx *sql.Tx, attr causedByAttribution, taskUUID string, r
 		if _, err := tx.Exec(`
 			INSERT INTO task_causes (
 				task_uuid, caused_by_task_uuid, position,
-				created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`, taskUUID, ref.TaskUUID, i, attr.legacyActor, attr.principalRef, attr.scope); err != nil {
+				created_by_principal_ref, created_by_scope_ref
+			) VALUES (?, ?, ?, ?, ?)
+		`, taskUUID, ref.TaskUUID, i, attr.principalRef, attr.scope); err != nil {
 			return fmt.Errorf("failed to insert caused_by edge %s -> %s: %w", taskUUID, ref.FriendlyID, err)
 		}
 	}
@@ -91,7 +91,6 @@ func insertCausedByRows(tx *sql.Tx, attr causedByAttribution, taskUUID string, r
 // causedByAttribution carries the pre-resolved SQL bind values for the
 // created_by_* columns on task_causes rows.
 type causedByAttribution struct {
-	legacyActor  interface{}
 	principalRef string
 	scope        interface{}
 }

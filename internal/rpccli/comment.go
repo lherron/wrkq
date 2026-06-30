@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
@@ -176,7 +177,7 @@ func resolveCommentLsMode(cmd *cobra.Command, asJSON, ndjson, asYAML, tsv, human
 }
 
 // commentLsTableHeaders matches legacy's `comment ls` table/tsv header row.
-var commentLsTableHeaders = []string{"ID", "Task", "Actor", "Created", "Body Preview"}
+var commentLsTableHeaders = []string{"ID", "Task", "Author", "Created", "Body Preview"}
 
 // renderCommentLs renders the comment rows in the resolved mode, byte-matching
 // legacy. JSON/NDJSON emit the raw compat items; yaml/tsv/table reconstruct the
@@ -231,8 +232,12 @@ func renderCommentLs(cmd *cobra.Command, mode string, stable bool, items []json.
 		if len(bodyPreview) > 50 {
 			bodyPreview = bodyPreview[:47] + "..."
 		}
+		author := ""
+		if ref, ok := c["created_by_principal_ref"].(string); ok {
+			author = attribution.PrincipalHandle(ref)
+		}
 		rowsData = append(rowsData, []string{
-			str(c["id"]), str(c["task_id"]), str(c["actor_slug"]), str(c["created_at"]), bodyPreview,
+			str(c["id"]), str(c["task_id"]), author, str(c["created_at"]), bodyPreview,
 		})
 	}
 	if mode == "tsv" {
@@ -255,12 +260,11 @@ func str(v interface{}) string {
 // projection used for --json (wrkq.comment.catView); we keep the raw bytes for
 // the json/ndjson paths so those stay byte-identical to legacy's map marshal.
 type commentCatProjection struct {
-	ID        string `json:"id"`
-	CreatedAt string `json:"created_at"`
-	ActorSlug string `json:"actor_slug"`
-	ActorRole string `json:"actor_role"`
-	TaskID    string `json:"task_id"`
-	Body      string `json:"body"`
+	ID                    string `json:"id"`
+	CreatedAt             string `json:"created_at"`
+	CreatedByPrincipalRef string `json:"created_by_principal_ref"`
+	TaskID                string `json:"task_id"`
+	Body                  string `json:"body"`
 }
 
 func newCommentCatCmd() *cobra.Command {
@@ -345,8 +349,8 @@ func newCommentCatCmd() *cobra.Command {
 					fmt.Fprintln(out, p.Body)
 					continue
 				}
-				fmt.Fprintf(out, "[%s] [%s] %s (%s) - Task: %s\n",
-					p.ID, p.CreatedAt, p.ActorSlug, p.ActorRole, p.TaskID)
+				fmt.Fprintf(out, "[%s] [%s] %s - Task: %s\n",
+					p.ID, p.CreatedAt, attribution.PrincipalHandle(p.CreatedByPrincipalRef), p.TaskID)
 				fmt.Fprintln(out)
 				fmt.Fprintln(out, p.Body)
 			}

@@ -42,7 +42,7 @@ printf 'fake hrcchat ok\n' >&2
 	}
 
 	run := func(bin string, extraEnv []string, stdin []byte, args ...string) cliResult {
-		full := append([]string{"--db", filepath.Join(dir, "missing.db"), "--as", "local-human", "agent"}, args...)
+		full := append([]string{"--db", filepath.Join(dir, "missing.db"), "--as", "agent:local-human", "agent"}, args...)
 		cmd := exec.Command(bin, full...)
 		cmd.Dir = dir
 		cmd.Env = append(hermeticEnv(), append([]string{"PATH=" + fakeDir + string(os.PathListSeparator) + os.Getenv("PATH")}, extraEnv...)...)

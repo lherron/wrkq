@@ -4,14 +4,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/store"
 )
 
 func TestTaskChunksDeterministicHash(t *testing.T) {
-	database, actorUUID, containerUUID := setupRenderDB(t)
+	database, attr, containerUUID := setupRenderDB(t)
 	s := store.New(database)
-	task, err := s.Tasks.Create(actorUUID, store.CreateParams{
+	task, err := s.Tasks.CreateWithAttribution(attr, store.CreateParams{
 		Slug:          "deterministic-task",
 		Title:         "Deterministic task",
 		Description:   "The rendered text should be stable.",
@@ -47,7 +48,7 @@ func TestTaskChunksDeterministicHash(t *testing.T) {
 	}
 }
 
-func setupRenderDB(t *testing.T) (*db.DB, string, string) {
+func setupRenderDB(t *testing.T) (*db.DB, attribution.Attribution, string) {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "wrkq.db"))
 	if err != nil {
@@ -58,20 +59,12 @@ func setupRenderDB(t *testing.T) (*db.DB, string, string) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	res, err := database.Exec(`INSERT INTO actors (id, slug, role) VALUES ('', 'render-tester', 'human')`)
-	if err != nil {
-		t.Fatalf("insert actor: %v", err)
-	}
-	rowID, _ := res.LastInsertId()
-	var actorUUID string
-	if err := database.QueryRow(`SELECT uuid FROM actors WHERE rowid = ?`, rowID).Scan(&actorUUID); err != nil {
-		t.Fatalf("actor uuid: %v", err)
-	}
+	attr := attribution.Attribution{PrincipalRef: "agent:render-tester"}
 
 	s := store.New(database)
-	container, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "inbox", Kind: "project"})
+	container, err := s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{Slug: "inbox", Kind: "project"})
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	return database, actorUUID, container.UUID
+	return database, attr, container.UUID
 }

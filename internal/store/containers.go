@@ -116,13 +116,11 @@ func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, pa
 		res, err := tx.Exec(`
 			INSERT INTO containers (
 				id, slug, title, parent_uuid, kind,
-				created_by_actor_uuid, updated_by_actor_uuid,
 				created_by_principal_ref, updated_by_principal_ref,
 				created_by_scope_ref, updated_by_scope_ref
 			)
-			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
 		`, params.Slug, title, params.ParentUUID, kind,
-			legacyActorSQL(attr), legacyActorSQL(attr),
 			attr.PrincipalRef, attr.PrincipalRef,
 			scopeSQL(attr), scopeSQL(attr))
 		if err != nil {
@@ -159,7 +157,6 @@ func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, pa
 		payloadStr := string(payloadJSON)
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
@@ -236,12 +233,11 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 			args = append(args, value)
 		}
 
-		// Increment etag and update actor
+		// Increment etag and update attribution
 		setClauses = append(setClauses, "etag = etag + 1")
-		setClauses = append(setClauses, "updated_by_actor_uuid = ?")
 		setClauses = append(setClauses, "updated_by_principal_ref = ?")
 		setClauses = append(setClauses, "updated_by_scope_ref = ?")
-		args = append(args, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr))
+		args = append(args, attr.PrincipalRef, scopeSQL(attr))
 
 		// Add WHERE clause
 		args = append(args, containerUUID)
@@ -261,7 +257,6 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 		newETag = currentETag + 1
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
@@ -326,11 +321,10 @@ func (cs *ContainerStore) MoveWithAttribution(attr attribution.Attribution, cont
 			UPDATE containers
 			SET parent_uuid = ?,
 				etag = etag + 1,
-				updated_by_actor_uuid = ?,
 				updated_by_principal_ref = ?,
 				updated_by_scope_ref = ?
 			WHERE uuid = ?
-		`, newParentUUID, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), containerUUID)
+		`, newParentUUID, attr.PrincipalRef, scopeSQL(attr), containerUUID)
 		if err != nil {
 			return fmt.Errorf("failed to move container: %w", err)
 		}
@@ -348,7 +342,6 @@ func (cs *ContainerStore) MoveWithAttribution(attr attribution.Attribution, cont
 		newETag = currentETag + 1
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
@@ -441,12 +434,11 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 		_, err = tx.Exec(`
 			UPDATE containers
 			SET archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-				updated_by_actor_uuid = ?,
 				updated_by_principal_ref = ?,
 				updated_by_scope_ref = ?,
 				etag = etag + 1
 			WHERE uuid = ?
-		`, legacyActorSQL(attr), attr.PrincipalRef, scopeSQL(attr), containerUUID)
+		`, attr.PrincipalRef, scopeSQL(attr), containerUUID)
 		if err != nil {
 			return fmt.Errorf("failed to archive container: %w", err)
 		}
@@ -461,7 +453,6 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 		newETag = currentETag + 1
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
@@ -533,7 +524,6 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 		payloadStr := string(payloadJSON)
 
 		if err := ew.LogEvent(tx, &domain.Event{
-			ActorUUID:    eventActorUUID(attr),
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
@@ -618,7 +608,6 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 			payloadJSON, _ := json.Marshal(payload)
 			payloadStr := string(payloadJSON)
 			if err := ew.LogEvent(tx, &domain.Event{
-				ActorUUID:    eventActorUUID(attr),
 				PrincipalRef: attr.PrincipalRef,
 				ScopeRef:     attr.ScopeRef,
 				ResourceType: "task",
@@ -646,7 +635,6 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 			})
 			payloadStr := string(payloadJSON)
 			if err := ew.LogEvent(tx, &domain.Event{
-				ActorUUID:    eventActorUUID(attr),
 				PrincipalRef: attr.PrincipalRef,
 				ScopeRef:     attr.ScopeRef,
 				ResourceType: "container",

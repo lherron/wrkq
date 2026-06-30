@@ -12,11 +12,8 @@ import (
 func TestDiffSnapshots_AddTask(t *testing.T) {
 	base := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks:    map[string]snapshot.TaskEntry{},
 		Comments: map[string]snapshot.CommentEntry{},
@@ -24,14 +21,11 @@ func TestDiffSnapshots_AddTask(t *testing.T) {
 
 	target := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "new-task", Title: "New Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "new-task", Title: "New Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
@@ -54,25 +48,19 @@ func TestDiffSnapshots_AddTask(t *testing.T) {
 func TestDiffSnapshots_RemoveTask(t *testing.T) {
 	base := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "old-task", Title: "Old Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "old-task", Title: "Old Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
 
 	target := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks:    map[string]snapshot.TaskEntry{},
 		Comments: map[string]snapshot.CommentEntry{},
@@ -96,28 +84,22 @@ func TestDiffSnapshots_RemoveTask(t *testing.T) {
 func TestDiffSnapshots_ReplaceTask(t *testing.T) {
 	base := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Old Title", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "task", Title: "Old Title", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
 
 	target := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "New Title", ProjectUUID: "container-1", State: "completed", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 2, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "task", Title: "New Title", ProjectUUID: "container-1", State: "completed", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 2, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
@@ -139,10 +121,7 @@ func TestDiffSnapshots_ReplaceTask(t *testing.T) {
 
 func TestDiffSnapshots_NoChanges(t *testing.T) {
 	snap := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
+		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
 		Containers: map[string]snapshot.ContainerEntry{},
 		Tasks:      map[string]snapshot.TaskEntry{},
 		Comments:   map[string]snapshot.CommentEntry{},
@@ -158,11 +137,8 @@ func TestDiffSnapshots_NoChanges(t *testing.T) {
 func TestApplyToSnapshot_Add(t *testing.T) {
 	base := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks:    map[string]snapshot.TaskEntry{},
 		Comments: map[string]snapshot.CommentEntry{},
@@ -173,17 +149,17 @@ func TestApplyToSnapshot_Add(t *testing.T) {
 			Op:   "add",
 			Path: "/tasks/task-1",
 			Value: map[string]interface{}{
-				"id":           "T-00001",
-				"slug":         "new-task",
-				"title":        "New Task",
-				"project_uuid": "container-1",
-				"state":        "open",
-				"priority":     float64(2),
-				"created_by":   "actor-1",
-				"updated_by":   "actor-1",
-				"etag":         float64(1),
-				"created_at":   "2025-01-01T00:00:00Z",
-				"updated_at":   "2025-01-01T00:00:00Z",
+				"id":                       "T-00001",
+				"slug":                     "new-task",
+				"title":                    "New Task",
+				"project_uuid":             "container-1",
+				"state":                    "open",
+				"priority":                 float64(2),
+				"created_by_principal_ref": "agent:tester",
+				"updated_by_principal_ref": "agent:tester",
+				"etag":                     float64(1),
+				"created_at":               "2025-01-01T00:00:00Z",
+				"updated_at":               "2025-01-01T00:00:00Z",
 			},
 		},
 	}
@@ -210,14 +186,11 @@ func TestApplyToSnapshot_Add(t *testing.T) {
 func TestApplyToSnapshot_Remove(t *testing.T) {
 	base := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
@@ -239,7 +212,6 @@ func TestApplyToSnapshot_Remove(t *testing.T) {
 func TestApplyToSnapshot_RemoveNotFound(t *testing.T) {
 	base := &snapshot.Snapshot{
 		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors:     map[string]snapshot.ActorEntry{},
 		Containers: map[string]snapshot.ContainerEntry{},
 		Tasks:      map[string]snapshot.TaskEntry{},
 		Comments:   map[string]snapshot.CommentEntry{},
@@ -258,17 +230,14 @@ func TestApplyToSnapshot_RemoveNotFound(t *testing.T) {
 func TestValidateSnapshot_Valid(t *testing.T) {
 	snap := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{
-			"comment-1": {ID: "C-00001", TaskUUID: "task-1", ActorUUID: "actor-1", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
+			"comment-1": {ID: "C-00001", TaskUUID: "task-1", CreatedByPrincipalRef: "agent:tester", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
 		},
 	}
 
@@ -281,10 +250,9 @@ func TestValidateSnapshot_Valid(t *testing.T) {
 func TestValidateSnapshot_InvalidFK(t *testing.T) {
 	snap := &snapshot.Snapshot{
 		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors:     map[string]snapshot.ActorEntry{},
 		Containers: map[string]snapshot.ContainerEntry{},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "nonexistent", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1},
+			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "nonexistent", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
@@ -298,15 +266,12 @@ func TestValidateSnapshot_InvalidFK(t *testing.T) {
 func TestValidateSnapshot_DuplicateSlug(t *testing.T) {
 	snap := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "same-slug", Title: "Task 1", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-			"task-2": {ID: "T-00002", Slug: "same-slug", Title: "Task 2", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-1": {ID: "T-00001", Slug: "same-slug", Title: "Task 1", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"task-2": {ID: "T-00002", Slug: "same-slug", Title: "Task 2", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
@@ -320,12 +285,9 @@ func TestValidateSnapshot_DuplicateSlug(t *testing.T) {
 func TestValidateSnapshot_ContainerCycle(t *testing.T) {
 	snap := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj1", Title: "Project 1", ParentUUID: "container-2", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-			"container-2": {ID: "P-00002", Slug: "proj2", Title: "Project 2", ParentUUID: "container-1", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj1", Title: "Project 1", ParentUUID: "container-2", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-2": {ID: "P-00002", Slug: "proj2", Title: "Project 2", ParentUUID: "container-1", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks:    map[string]snapshot.TaskEntry{},
 		Comments: map[string]snapshot.CommentEntry{},
@@ -431,10 +393,7 @@ func TestCreate(t *testing.T) {
 
 	// Create base snapshot
 	base := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
+		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
 		Containers: map[string]snapshot.ContainerEntry{},
 		Tasks:      map[string]snapshot.TaskEntry{},
 		Comments:   map[string]snapshot.CommentEntry{},
@@ -444,16 +403,14 @@ func TestCreate(t *testing.T) {
 	baseData, _ := json.MarshalIndent(base, "", "  ")
 	_ = os.WriteFile(basePath, baseData, 0644)
 
-	// Create target snapshot
+	// Create target snapshot that adds one container
 	target := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-			"actor-2": {ID: "A-00002", Slug: "new-actor", Role: "agent", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+		Containers: map[string]snapshot.ContainerEntry{
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
-		Containers: map[string]snapshot.ContainerEntry{},
-		Tasks:      map[string]snapshot.TaskEntry{},
-		Comments:   map[string]snapshot.CommentEntry{},
+		Tasks:    map[string]snapshot.TaskEntry{},
+		Comments: map[string]snapshot.CommentEntry{},
 	}
 
 	targetPath := filepath.Join(tmpDir, "target.json")
@@ -622,11 +579,8 @@ func TestRebase_NoCollision(t *testing.T) {
 	// Create old-base snapshot
 	oldBase := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks:    map[string]snapshot.TaskEntry{},
 		Comments: map[string]snapshot.CommentEntry{},
@@ -641,17 +595,17 @@ func TestRebase_NoCollision(t *testing.T) {
 			Op:   "add",
 			Path: "/tasks/task-1",
 			Value: map[string]interface{}{
-				"id":           "T-00001",
-				"slug":         "new-task",
-				"title":        "New Task",
-				"project_uuid": "container-1",
-				"state":        "open",
-				"priority":     float64(2),
-				"created_by":   "actor-1",
-				"updated_by":   "actor-1",
-				"etag":         float64(1),
-				"created_at":   "2025-01-01T00:00:00Z",
-				"updated_at":   "2025-01-01T00:00:00Z",
+				"id":                       "T-00001",
+				"slug":                     "new-task",
+				"title":                    "New Task",
+				"project_uuid":             "container-1",
+				"state":                    "open",
+				"priority":                 float64(2),
+				"created_by_principal_ref": "agent:tester",
+				"updated_by_principal_ref": "agent:tester",
+				"etag":                     float64(1),
+				"created_at":               "2025-01-01T00:00:00Z",
+				"updated_at":               "2025-01-01T00:00:00Z",
 			},
 		},
 	}
@@ -699,11 +653,8 @@ func TestRebase_WithCollision(t *testing.T) {
 	// Create old-base snapshot (no tasks)
 	oldBase := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks:    map[string]snapshot.TaskEntry{},
 		Comments: map[string]snapshot.CommentEntry{},
@@ -712,14 +663,11 @@ func TestRebase_WithCollision(t *testing.T) {
 	// Create new-base with T-00001 already taken
 	newBase := &snapshot.Snapshot{
 		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Actors: map[string]snapshot.ActorEntry{
-			"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
 		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Tasks: map[string]snapshot.TaskEntry{
-			"existing-task": {ID: "T-00001", Slug: "existing", Title: "Existing Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			"existing-task": {ID: "T-00001", Slug: "existing", Title: "Existing Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 		},
 		Comments: map[string]snapshot.CommentEntry{},
 	}
@@ -730,17 +678,17 @@ func TestRebase_WithCollision(t *testing.T) {
 			Op:   "add",
 			Path: "/tasks/new-task",
 			Value: map[string]interface{}{
-				"id":           "T-00001",
-				"slug":         "new-task",
-				"title":        "New Task",
-				"project_uuid": "container-1",
-				"state":        "open",
-				"priority":     float64(2),
-				"created_by":   "actor-1",
-				"updated_by":   "actor-1",
-				"etag":         float64(1),
-				"created_at":   "2025-01-01T00:00:00Z",
-				"updated_at":   "2025-01-01T00:00:00Z",
+				"id":                       "T-00001",
+				"slug":                     "new-task",
+				"title":                    "New Task",
+				"project_uuid":             "container-1",
+				"state":                    "open",
+				"priority":                 float64(2),
+				"created_by_principal_ref": "agent:tester",
+				"updated_by_principal_ref": "agent:tester",
+				"etag":                     float64(1),
+				"created_at":               "2025-01-01T00:00:00Z",
+				"updated_at":               "2025-01-01T00:00:00Z",
 			},
 		},
 	}

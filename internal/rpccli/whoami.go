@@ -100,12 +100,6 @@ func newWhoamiCmd() *cobra.Command {
 					"scope_ref":     attr.ScopeRef,
 					"db_path":       h.Config.DBPath,
 				}
-				if attr.LegacyActorUUID != nil {
-					output["legacy_actor_uuid"] = *attr.LegacyActorUUID
-				}
-				if attr.LegacyActorID != "" {
-					output["legacy_actor_id"] = attr.LegacyActorID
-				}
 				encoder := json.NewEncoder(cmd.OutOrStdout())
 				encoder.SetIndent("", "  ")
 				return encoder.Encode(output)
@@ -116,16 +110,6 @@ func newWhoamiCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "Scope:     %s\n", attr.ScopeRef)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "DB:      %s\n", h.Config.DBPath)
-			if attr.LegacyActorUUID != nil || attr.LegacyActorID != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "Legacy actor cache:")
-				if attr.LegacyActorID != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), " %s", attr.LegacyActorID)
-				}
-				if attr.LegacyActorUUID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), " %s", *attr.LegacyActorUUID)
-				}
-				fmt.Fprintln(cmd.OutOrStdout())
-			}
 			return nil
 		},
 	}

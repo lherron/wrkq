@@ -37,8 +37,8 @@ func TestBootstrap_ConfigOnly(t *testing.T) {
 	if app.DB != nil {
 		t.Error("DB should be nil when NeedsDB is false")
 	}
-	if app.ActorUUID != "" {
-		t.Error("ActorUUID should be empty when NeedsActor is false")
+	if app.PrincipalRef != "" {
+		t.Error("PrincipalRef should be empty when NeedsActor is false")
 	}
 }
 
@@ -144,19 +144,12 @@ func TestBootstrap_WithActor(t *testing.T) {
 	if err := database.Migrate(); err != nil {
 		t.Fatalf("Failed to run migrations: %v", err)
 	}
-
-	// Create a test actor
-	_, err = database.Exec(`
-		INSERT INTO actors (id, slug, role) VALUES ('A-00001', 'test-actor', 'human')
-	`)
-	if err != nil {
-		t.Fatalf("Failed to create test actor: %v", err)
-	}
 	_ = database.Close()
 
-	// Set environment for test
+	// Set environment for test. Attribution is principal-only: a canonical
+	// principal ref is required.
 	t.Setenv("WRKQ_DB_PATH", dbPath)
-	t.Setenv("WRKQ_ACTOR", "test-actor")
+	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-actor")
 
 	// Create a test command
 	cmd := &cobra.Command{}
@@ -170,14 +163,44 @@ func TestBootstrap_WithActor(t *testing.T) {
 	}
 	defer app.Close()
 
-	if app.ActorUUID == "" {
-		t.Error("ActorUUID should not be empty when NeedsActor is true")
-	}
-	if app.ActorID != "A-00001" {
-		t.Errorf("ActorID should be 'A-00001', got %q", app.ActorID)
-	}
 	if app.PrincipalRef != "agent:test-actor" {
 		t.Errorf("PrincipalRef should be 'agent:test-actor', got %q", app.PrincipalRef)
+	}
+}
+
+func TestBootstrap_WithActor_RejectsBareSlug(t *testing.T) {
+	clearAttributionEnv(t)
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
+	}
+	_ = database.Close()
+
+	oldCwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldCwd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	t.Setenv("WRKQ_DB_PATH", dbPath)
+
+	// A bare slug (not agent:<id>) is rejected as caller attribution.
+	for _, bad := range []string{"local-human", "A-00001", "system:scheduler", "agent:scope:project:p:task:t"} {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("db", "", "Database path")
+		cmd.Flags().String("as", "", "Actor")
+		_ = cmd.ParseFlags([]string{"--as", bad})
+
+		if _, err := Bootstrap(cmd, WithActor()); err == nil {
+			t.Errorf("Bootstrap should reject caller attribution %q", bad)
+		}
 	}
 }
 
@@ -221,9 +244,6 @@ func TestBootstrap_WithScopeOnlyAttribution(t *testing.T) {
 	}
 	if app.ScopeRef != "agent:scope-cody:project:wrkq:task:primary" {
 		t.Errorf("ScopeRef should preserve full scope, got %q", app.ScopeRef)
-	}
-	if app.ActorUUID != "" {
-		t.Errorf("ActorUUID should not gate scope-only attribution, got %q", app.ActorUUID)
 	}
 }
 

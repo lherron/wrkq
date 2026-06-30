@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -117,9 +116,6 @@ type logOptions struct {
 type logEvent struct {
 	ID           int64     `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
-	ActorUUID    *string   `json:"actor_uuid,omitempty"`
-	ActorSlug    *string   `json:"actor_slug,omitempty"`
-	ActorID      *string   `json:"actor_id,omitempty"`
 	PrincipalRef *string   `json:"principal_ref,omitempty"`
 	ScopeRef     *string   `json:"scope_ref,omitempty"`
 	ResourceType string    `json:"resource_type"`
@@ -151,13 +147,7 @@ func resolveResource(database *db.DB, target string) (string, string, error) {
 			}
 			return uuid, "container", nil
 		case "A":
-			// Actor
-			var uuid string
-			err := database.QueryRow("SELECT uuid FROM actors WHERE id = ?", target).Scan(&uuid)
-			if err != nil {
-				return "", "", fmt.Errorf("actor not found: %s", target)
-			}
-			return uuid, "actor", nil
+			return "", "", fmt.Errorf("actor resources are no longer supported: %s", target)
 		default:
 			return "", "", fmt.Errorf("unknown friendly ID prefix: %s", prefix)
 		}
@@ -175,11 +165,6 @@ func resolveResource(database *db.DB, target string) (string, string, error) {
 		err = database.QueryRow("SELECT COUNT(*) FROM containers WHERE uuid = ?", target).Scan(&count)
 		if err == nil && count > 0 {
 			return target, "container", nil
-		}
-
-		err = database.QueryRow("SELECT COUNT(*) FROM actors WHERE uuid = ?", target).Scan(&count)
-		if err == nil && count > 0 {
-			return target, "actor", nil
 		}
 
 		return "", "", fmt.Errorf("UUID not found: %s", target)
@@ -205,11 +190,9 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 	}
 
 	query := `
-		SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
-		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
-		       a.slug as actor_slug, a.id as actor_id
+		SELECT e.id, e.timestamp, e.principal_ref, e.scope_ref,
+		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload
 		FROM event_log e
-		LEFT JOIN actors a ON a.uuid = e.actor_uuid
 		WHERE e.resource_uuid = ? AND e.resource_type = ?
 	`
 	args := []interface{}{resourceUUID, resourceType}
@@ -258,12 +241,10 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 	for rows.Next() {
 		var e logEvent
 		var timestampStr string
-		var actorSlug, actorID sql.NullString
 
 		err := rows.Scan(
 			&e.ID,
 			&timestampStr,
-			&e.ActorUUID,
 			&e.PrincipalRef,
 			&e.ScopeRef,
 			&e.ResourceType,
@@ -271,8 +252,6 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 			&e.EventType,
 			&e.ETag,
 			&e.Payload,
-			&actorSlug,
-			&actorID,
 		)
 		if err != nil {
 			return nil, false, fmt.Errorf("scan failed: %w", err)
@@ -282,13 +261,6 @@ func queryEventLog(database *db.DB, resourceUUID string, resourceType string, op
 		e.Timestamp, err = time.Parse(time.RFC3339, timestampStr)
 		if err != nil {
 			e.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", timestampStr)
-		}
-
-		if actorSlug.Valid {
-			e.ActorSlug = &actorSlug.String
-		}
-		if actorID.Valid {
-			e.ActorID = &actorID.String
 		}
 
 		events = append(events, e)
@@ -345,8 +317,6 @@ func renderEventsOneline(w io.Writer, events []logEvent) error {
 		actor := "system"
 		if e.PrincipalRef != nil {
 			actor = *e.PrincipalRef
-		} else if e.ActorSlug != nil {
-			actor = *e.ActorSlug
 		}
 
 		timestamp := e.Timestamp.Format("2006-01-02 15:04")
@@ -370,10 +340,7 @@ func renderEventsDetailed(w io.Writer, events []logEvent, showPatch bool) error 
 			if e.ScopeRef != nil {
 				fmt.Fprintf(w, "  Scope:      %s\n", *e.ScopeRef)
 			}
-		}
-		if e.ActorSlug != nil && e.ActorID != nil {
-			fmt.Fprintf(w, "  Actor:      %s (%s)\n", *e.ActorSlug, *e.ActorID)
-		} else if e.PrincipalRef == nil {
+		} else {
 			fmt.Fprintf(w, "  Actor:      system\n")
 		}
 

@@ -22,10 +22,6 @@ func requireAttribution(attr attribution.Attribution) error {
 	return nil
 }
 
-func legacyActorSQL(attr attribution.Attribution) interface{} {
-	return nil
-}
-
 func principalSQL(attr attribution.Attribution) interface{} {
 	if strings.TrimSpace(attr.PrincipalRef) == "" {
 		return nil
@@ -38,12 +34,4 @@ func scopeSQL(attr attribution.Attribution) interface{} {
 		return nil
 	}
 	return attr.ScopeRef
-}
-
-func actorUUIDPtr(attr attribution.Attribution) *string {
-	return nil
-}
-
-func eventActorUUID(attr attribution.Attribution) *string {
-	return actorUUIDPtr(attr)
 }

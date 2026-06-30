@@ -25,11 +25,9 @@ type WrkqHandoff struct {
 	ScopeKind                  string     `json:"scope_kind"`
 	AgentID                    string     `json:"agent_id"`
 	ProjectID                  string     `json:"project_id"`
-	AgentActorUUID             *string    `json:"agent_actor_uuid"`
 	AgentPrincipalRef          *string    `json:"agent_principal_ref,omitempty"`
 	ProjectContainerUUID       *string    `json:"project_container_uuid"`
 	CreatedByAgentID           string     `json:"created_by_agent_id"`
-	CreatedByActorUUID         *string    `json:"created_by_actor_uuid"`
 	CreatedByPrincipalRef      string     `json:"created_by_principal_ref,omitempty"`
 	Title                      string     `json:"title"`
 	Body                       string     `json:"body"`
@@ -37,7 +35,6 @@ type WrkqHandoff struct {
 	IdempotencyKey             *string    `json:"idempotency_key"`
 	AcknowledgedAt             *time.Time `json:"acknowledged_at"`
 	AcknowledgedByAgentID      *string    `json:"acknowledged_by_agent_id"`
-	AcknowledgedByActorUUID    *string    `json:"acknowledged_by_actor_uuid"`
 	AcknowledgedByPrincipalRef *string    `json:"acknowledged_by_principal_ref,omitempty"`
 	AcknowledgementNote        *string    `json:"acknowledgement_note"`
 	Meta                       *string    `json:"meta"`
@@ -135,7 +132,7 @@ type HandoffAcknowledgeParams struct {
 
 // HandoffCreate writes a pending handoff (handoff.created) or returns an
 // idempotent replay. The caller supplies the effective project scope + actor; the
-// server resolves the actor/container row UUIDs by slug and persists. dryRun
+// server resolves the project container row UUID by slug and persists. dryRun
 // projects the prospective handoff without writing.
 func (a *API) HandoffCreate(ctx context.Context, p HandoffCreateParams) (*WrkqHandoffCreateResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -147,7 +144,7 @@ func (a *API) HandoffCreate(ctx context.Context, p HandoffCreateParams) (*WrkqHa
 		return nil, validationErr
 	}
 
-	agentActorUUID, projectContainerUUID := a.lookupHandoffScopeRows(ctx, resolved.AgentID, resolved.ProjectID)
+	projectContainerUUID := a.lookupProjectContainerUUID(ctx, resolved.ProjectID)
 	agentPrincipalRef := "agent:" + resolved.AgentID
 	createdByAgentID := strings.TrimSpace(p.ActorAgentID)
 	if createdByAgentID == "" {
@@ -156,10 +153,6 @@ func (a *API) HandoffCreate(ctx context.Context, p HandoffCreateParams) (*WrkqHa
 	createdByPrincipalRef := strings.TrimSpace(p.PrincipalRef)
 	if createdByPrincipalRef == "" {
 		createdByPrincipalRef = "agent:" + createdByAgentID
-	}
-	createdByActorUUID := agentActorUUID
-	if createdByAgentID != resolved.AgentID {
-		createdByActorUUID = a.lookupActorUUID(ctx, createdByAgentID)
 	}
 
 	args := store.CreateHandoffArgs{
@@ -172,10 +165,8 @@ func (a *API) HandoffCreate(ctx context.Context, p HandoffCreateParams) (*WrkqHa
 		Body:                  p.Body,
 		IdempotencyKey:        p.IdempotencyKey,
 		Meta:                  p.Meta,
-		AgentActorUUID:        agentActorUUID,
 		AgentPrincipalRef:     &agentPrincipalRef,
 		ProjectContainerUUID:  projectContainerUUID,
-		CreatedByActorUUID:    createdByActorUUID,
 		CreatedByPrincipalRef: createdByPrincipalRef,
 	}
 
@@ -281,12 +272,10 @@ func (a *API) HandoffAcknowledge(ctx context.Context, p HandoffAcknowledgeParams
 	if principalRef == "" {
 		principalRef = "agent:" + strings.TrimSpace(p.ActorAgentID)
 	}
-	actorUUID := a.lookupActorUUID(ctx, p.ActorAgentID)
 
 	handoff, err := store.AcknowledgeHandoff(ctx, a.db, ref, store.AcknowledgeHandoffArgs{
 		Note:         p.Note,
 		ActorAgentID: strings.TrimSpace(p.ActorAgentID),
-		ActorUUID:    actorUUID,
 		PrincipalRef: principalRef,
 		ScopeRef:     strings.TrimSpace(p.ScopeRef),
 		DryRun:       p.DryRun,
@@ -356,31 +345,17 @@ func validateHandoffCreate(p HandoffCreateParams) (scope.ResolvedScope, error) {
 	}, nil
 }
 
-// lookupHandoffScopeRows resolves the agent actor UUID + project container UUID
-// by slug (best-effort; nil when not found), mirroring legacy
-// lookupHandoffScopeRows.
-func (a *API) lookupHandoffScopeRows(ctx context.Context, agentID, projectID string) (*string, *string) {
-	actorUUID := a.lookupActorUUID(ctx, agentID)
-	var containerUUID *string
-	if projectID != "" {
-		var u string
-		if err := a.db.QueryRowContext(ctx,
-			`SELECT uuid FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root') LIMIT 1`,
-			projectID).Scan(&u); err == nil {
-			containerUUID = &u
-		}
-	}
-	return actorUUID, containerUUID
-}
-
-// lookupActorUUID resolves an actor UUID by slug (nil when not found).
-func (a *API) lookupActorUUID(ctx context.Context, agentID string) *string {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+// lookupProjectContainerUUID resolves the project container UUID by slug
+// (best-effort; nil when not found), mirroring legacy lookupHandoffScopeRows'
+// container resolution.
+func (a *API) lookupProjectContainerUUID(ctx context.Context, projectID string) *string {
+	if strings.TrimSpace(projectID) == "" {
 		return nil
 	}
 	var u string
-	if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM actors WHERE slug = ? LIMIT 1", agentID).Scan(&u); err == nil {
+	if err := a.db.QueryRowContext(ctx,
+		`SELECT uuid FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root') LIMIT 1`,
+		projectID).Scan(&u); err == nil {
 		return &u
 	}
 	return nil
@@ -401,11 +376,9 @@ func toWrkqHandoff(h store.Handoff) WrkqHandoff {
 		ScopeKind:                  h.ScopeKind,
 		AgentID:                    h.AgentID,
 		ProjectID:                  h.ProjectID,
-		AgentActorUUID:             h.AgentActorUUID,
 		AgentPrincipalRef:          h.AgentPrincipalRef,
 		ProjectContainerUUID:       h.ProjectContainerUUID,
 		CreatedByAgentID:           h.CreatedByAgentID,
-		CreatedByActorUUID:         h.CreatedByActorUUID,
 		CreatedByPrincipalRef:      h.CreatedByPrincipalRef,
 		Title:                      h.Title,
 		Body:                       h.Body,
@@ -413,7 +386,6 @@ func toWrkqHandoff(h store.Handoff) WrkqHandoff {
 		IdempotencyKey:             h.IdempotencyKey,
 		AcknowledgedAt:             h.AcknowledgedAt,
 		AcknowledgedByAgentID:      h.AcknowledgedByAgentID,
-		AcknowledgedByActorUUID:    h.AcknowledgedByActorUUID,
 		AcknowledgedByPrincipalRef: h.AcknowledgedByPrincipalRef,
 		AcknowledgementNote:        h.AcknowledgementNote,
 		Meta:                       h.Meta,

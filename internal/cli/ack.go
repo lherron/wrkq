@@ -79,8 +79,8 @@ func runAck(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func ackTasks(database *db.DB, actorUUID string, refs []string, force bool) (ackCounts, error) {
-	return ackTasksWithAttribution(database, attributionFromLegacyActor(actorUUID), refs, force)
+func ackTasks(database *db.DB, principalRef string, refs []string, force bool) (ackCounts, error) {
+	return ackTasksWithAttribution(database, attribution.Attribution{PrincipalRef: principalRef}, refs, force)
 }
 
 func ackTasksWithAttribution(database *db.DB, attr attribution.Attribution, refs []string, force bool) (ackCounts, error) {

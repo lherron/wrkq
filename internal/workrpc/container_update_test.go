@@ -421,7 +421,7 @@ func TestWrkqContainerUpdate_EventPayloadEtagAttribution(t *testing.T) {
 		mkRPC("u1", "wrkq.container.update", map[string]any{
 			"container": "g1-upd-event",
 			"patch":     map[string]any{"slug": "g1-upd-event-new", "title": "Event Title"},
-			"actor":     "clod",
+			"actor":     "agent:clod",
 		}),
 	)
 	result := p2ResultOrFail(t, frames[1], "container.update event")

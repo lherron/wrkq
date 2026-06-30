@@ -30,9 +30,6 @@ const watchPollInterval = 1 * time.Second
 type watchEvent struct {
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
-	ActorUUID    *string `json:"actor_uuid,omitempty"`
-	ActorSlug    *string `json:"actor_slug,omitempty"`
-	ActorID      *string `json:"actor_id,omitempty"`
 	PrincipalRef *string `json:"principal_ref,omitempty"`
 	ScopeRef     *string `json:"scope_ref,omitempty"`
 	ResourceType string  `json:"resource_type"`
@@ -134,12 +131,6 @@ func printWatchEvent(stdout io.Writer, e watchEvent) {
 	actor := "system"
 	if e.PrincipalRef != nil {
 		actor = *e.PrincipalRef
-	} else if e.ActorSlug != nil {
-		actorDisplay := *e.ActorSlug
-		if e.ActorID != nil {
-			actorDisplay += fmt.Sprintf(" (%s)", *e.ActorID)
-		}
-		actor = actorDisplay
 	}
 
 	resource := e.ResourceType

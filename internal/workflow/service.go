@@ -779,7 +779,9 @@ func updateTaskWorkflowMeta(tx *sql.Tx, taskUUID string, inst Instance, actor st
 	}
 	meta["workflow"] = wf
 	b, _ := json.Marshal(meta)
-	_, err := tx.Exec(`UPDATE tasks SET meta = ?, updated_by_actor_uuid = COALESCE((SELECT uuid FROM actors WHERE slug = ? OR id = ? LIMIT 1), updated_by_actor_uuid) WHERE uuid = ?`, string(b), actor, actor, taskUUID)
+	// Principal-only: workflow meta sync no longer stamps updated_by_actor_uuid
+	// from the actors table; the meta payload is the only mutation here.
+	_, err := tx.Exec(`UPDATE tasks SET meta = ? WHERE uuid = ?`, string(b), taskUUID)
 	return err
 }
 

@@ -61,11 +61,9 @@ type handoffJSON struct {
 	ScopeKind                  string     `json:"scope_kind"`
 	AgentID                    string     `json:"agent_id"`
 	ProjectID                  string     `json:"project_id"`
-	AgentActorUUID             *string    `json:"agent_actor_uuid"`
 	AgentPrincipalRef          *string    `json:"agent_principal_ref,omitempty"`
 	ProjectContainerUUID       *string    `json:"project_container_uuid"`
 	CreatedByAgentID           string     `json:"created_by_agent_id"`
-	CreatedByActorUUID         *string    `json:"created_by_actor_uuid"`
 	CreatedByPrincipalRef      string     `json:"created_by_principal_ref,omitempty"`
 	Title                      string     `json:"title"`
 	Body                       string     `json:"body"`
@@ -73,7 +71,6 @@ type handoffJSON struct {
 	IdempotencyKey             *string    `json:"idempotency_key"`
 	AcknowledgedAt             *time.Time `json:"acknowledged_at"`
 	AcknowledgedByAgentID      *string    `json:"acknowledged_by_agent_id"`
-	AcknowledgedByActorUUID    *string    `json:"acknowledged_by_actor_uuid"`
 	AcknowledgedByPrincipalRef *string    `json:"acknowledged_by_principal_ref,omitempty"`
 	AcknowledgementNote        *string    `json:"acknowledgement_note"`
 	Meta                       *string    `json:"meta"`
@@ -978,7 +975,7 @@ type handoffAckIdentity struct {
 func resolveHandoffAckIdentity(cmd *cobra.Command, handoff handoffJSON) (handoffAckIdentity, error) {
 	asFlag := changedStringFlag(cmd, "as")
 	if asFlag != "" {
-		principalRef, err := attribution.NormalizeCompat(asFlag)
+		principalRef, err := attribution.NormalizeCanonical(asFlag)
 		if err != nil {
 			return handoffAckIdentity{}, fmt.Errorf("invalid --as: %w", err)
 		}

@@ -153,14 +153,14 @@ func CreateHandoff(ctx context.Context, tx *sql.Tx, args CreateHandoffArgs) (Cre
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO handoffs (
 			uuid, id, scope_ref, scope_kind, agent_id, project_id,
-			agent_actor_uuid, agent_principal_ref, project_container_uuid,
-			created_by_agent_id, created_by_actor_uuid, created_by_principal_ref,
+			agent_principal_ref, project_container_uuid,
+			created_by_agent_id, created_by_principal_ref,
 			title, body, status, idempotency_key, meta, etag
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 1)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 1)
 	`, handoffUUID, handoffID, args.ScopeRef, args.ScopeKind, args.AgentID, args.ProjectID,
-		args.AgentActorUUID, agentPrincipalRef, args.ProjectContainerUUID,
-		args.CreatedByAgentID, args.CreatedByActorUUID, createdByPrincipalRef,
+		agentPrincipalRef, args.ProjectContainerUUID,
+		args.CreatedByAgentID, createdByPrincipalRef,
 		args.Title, args.Body, args.IdempotencyKey, args.Meta); err != nil {
 		return CreateHandoffResult{}, fmt.Errorf("failed to insert handoff: %w", err)
 	}
@@ -169,7 +169,7 @@ func CreateHandoff(ctx context.Context, tx *sql.Tx, args CreateHandoffArgs) (Cre
 	if err != nil {
 		return CreateHandoffResult{}, err
 	}
-	if err := logHandoffEvent(ctx, tx, args.CreatedByActorUUID, createdByPrincipalRef, handoff.ScopeRef, handoff.UUID, "handoff.created", handoff.ETag, map[string]interface{}{
+	if err := logHandoffEvent(ctx, tx, createdByPrincipalRef, handoff.ScopeRef, handoff.UUID, "handoff.created", handoff.ETag, map[string]interface{}{
 		"id":                  handoff.ID,
 		"scope_ref":           handoff.ScopeRef,
 		"scope_kind":          handoff.ScopeKind,
@@ -314,13 +314,12 @@ func AcknowledgeHandoff(ctx context.Context, database *db.DB, idOrUUID string, a
 		SET status = 'acknowledged',
 			acknowledged_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 			acknowledged_by_agent_id = ?,
-			acknowledged_by_actor_uuid = ?,
 			acknowledged_by_principal_ref = ?,
 			acknowledgement_note = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 			etag = etag + 1
 		WHERE uuid = ?
-	`, args.ActorAgentID, args.ActorUUID, ackPrincipalRef, args.Note, handoff.UUID); err != nil {
+	`, args.ActorAgentID, ackPrincipalRef, args.Note, handoff.UUID); err != nil {
 		return Handoff{}, fmt.Errorf("failed to acknowledge handoff: %w", err)
 	}
 
@@ -328,7 +327,7 @@ func AcknowledgeHandoff(ctx context.Context, database *db.DB, idOrUUID string, a
 	if err != nil {
 		return Handoff{}, err
 	}
-	if err := logHandoffEvent(ctx, tx, args.ActorUUID, ackPrincipalRef, args.ScopeRef, acknowledged.UUID, "handoff.acknowledged", acknowledged.ETag, map[string]interface{}{
+	if err := logHandoffEvent(ctx, tx, ackPrincipalRef, args.ScopeRef, acknowledged.UUID, "handoff.acknowledged", acknowledged.ETag, map[string]interface{}{
 		"id":                       acknowledged.ID,
 		"acknowledged_by_agent_id": args.ActorAgentID,
 		"acknowledgement_note":     args.Note,
@@ -632,14 +631,13 @@ func parseStoreTimestamp(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse timestamp: %s", value)
 }
 
-func logHandoffEvent(ctx context.Context, tx *sql.Tx, actorUUID *string, principalRef, scopeRef, resourceUUID, eventType string, etag int64, payload map[string]interface{}) error {
+func logHandoffEvent(ctx context.Context, tx *sql.Tx, principalRef, scopeRef, resourceUUID, eventType string, etag int64, payload map[string]interface{}) error {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal handoff event payload: %w", err)
 	}
 	payloadStr := string(payloadJSON)
 	event := &domain.Event{
-		ActorUUID:    actorUUID,
 		PrincipalRef: principalRef,
 		ScopeRef:     scopeRef,
 		ResourceType: "handoff",
@@ -649,9 +647,9 @@ func logHandoffEvent(ctx context.Context, tx *sql.Tx, actorUUID *string, princip
 		Payload:      &payloadStr,
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO event_log (actor_uuid, principal_ref, scope_ref, resource_type, resource_uuid, event_type, etag, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, event.ActorUUID, principalSQL(attribution.Attribution{PrincipalRef: event.PrincipalRef}), scopeSQL(attribution.Attribution{ScopeRef: event.ScopeRef}),
+		INSERT INTO event_log (principal_ref, scope_ref, resource_type, resource_uuid, event_type, etag, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, principalSQL(attribution.Attribution{PrincipalRef: event.PrincipalRef}), scopeSQL(attribution.Attribution{ScopeRef: event.ScopeRef}),
 		event.ResourceType, event.ResourceUUID, event.EventType, event.ETag, event.Payload); err != nil {
 		return fmt.Errorf("failed to log handoff event: %w", err)
 	}

@@ -497,8 +497,8 @@ func TestWrkqContainerDeleteRecursive_DryRunReturnsCounts(t *testing.T) {
 
 	frames := p2Run(t, dbPath,
 		mkRPC("dr1", "wrkq.container.deleteRecursive", map[string]any{
-			"path":    "g1-del-rec-proj",
-			"dryRun":  true,
+			"path":   "g1-del-rec-proj",
+			"dryRun": true,
 		}),
 	)
 	result := p2ResultOrFail(t, frames[1], "wrkq.container.deleteRecursive dryRun")
@@ -612,7 +612,7 @@ func TestWrkqContainerDeleteRecursive_CountsMismatchConflict(t *testing.T) {
 			"path": "g1-del-rec-proj",
 			"expected": map[string]any{
 				"containers":  drContainers,
-				"tasks":       drTasks,       // stale: +1 task was added
+				"tasks":       drTasks, // stale: +1 task was added
 				"attachments": drAttachments,
 				"bytes":       drBytes,
 			},

@@ -11,7 +11,7 @@ import (
 const (
 	seedTaskUUID = "00000000-2222-4000-8000-000000000001"
 	seedTaskSlug = "rpccli-smoke-task"
-	seedActor    = "00000000-0000-4000-8000-0000000000a0" // wrkq-system actor
+	seedActor    = "agent:wrkq-system" // wrkq-system principal ref
 	seedProject  = "00000000-1111-4000-8000-000000000001"
 )
 
@@ -32,7 +32,7 @@ func migratedDBWithTask(t *testing.T) (dbPath, taskID string) {
 	}
 	if _, err := database.Exec(
 		`INSERT OR IGNORE INTO containers (uuid, slug, title, parent_uuid, kind,
-		     created_by_actor_uuid, updated_by_actor_uuid)
+		     created_by_principal_ref, updated_by_principal_ref)
 		 VALUES (?, 'rpccli-test-proj', 'rpccli Test Project',
 		     (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?)`,
 		seedProject, seedActor, seedActor,
@@ -48,7 +48,7 @@ func migratedDBWithTask(t *testing.T) (dbPath, taskID string) {
 		`INSERT OR IGNORE INTO tasks (uuid, slug, title, description, specification,
 		     project_uuid, state, priority, kind, labels, meta,
 		     start_at, due_at, completed_at, acknowledged_at,
-		     created_by_actor_uuid, updated_by_actor_uuid)
+		     created_by_principal_ref, updated_by_principal_ref)
 		 VALUES (?, ?, 'rpccli smoke ✓ "task"', 'desc ✓ with "quotes"', 'spec line1'||char(10)||'line2',
 		     ?, 'completed', 1, 'bug', '["alpha","beta"]', '{"nested":{"k":1},"arr":[1,2,3]}',
 		     '2026-06-25T00:00:00Z', '2026-12-01T00:00:00Z', '2026-06-22T00:00:00Z', '2026-06-22T00:00:00Z',

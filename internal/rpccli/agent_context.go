@@ -28,8 +28,6 @@ type agentContextOutput struct {
 }
 
 type agentContextLookups struct {
-	ActorUUID           string `json:"actor_uuid,omitempty"`
-	ActorFriendlyID     string `json:"actor_friendly_id,omitempty"`
 	ContainerUUID       string `json:"container_uuid,omitempty"`
 	ContainerFriendlyID string `json:"container_friendly_id,omitempty"`
 }
@@ -164,9 +162,6 @@ func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, re
 			return nil, "", true, "", "remote", cfg.DBLocator, cfg.RemoteEndpoint
 		}
 		lookups := &agentContextLookups{}
-		if resolved.AgentID != "" {
-			fillAgentContextActorLookup(cmd, tr, resolved.AgentID, lookups)
-		}
 		if resolved.ProjectID != "" {
 			fillAgentContextContainerLookup(cmd, tr, resolved.ProjectID, lookups)
 		}
@@ -193,37 +188,10 @@ func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, re
 	}
 
 	lookups := &agentContextLookups{}
-	if resolved.AgentID != "" {
-		fillAgentContextActorLookup(cmd, tr, resolved.AgentID, lookups)
-	}
 	if resolved.ProjectID != "" {
 		fillAgentContextContainerLookup(cmd, tr, resolved.ProjectID, lookups)
 	}
 	return lookups, cfg.DBPath, true, "", "", "", ""
-}
-
-func fillAgentContextActorLookup(cmd *cobra.Command, tr Transport, slug string, lookups *agentContextLookups) {
-	raw, err := tr.Call(cmd.Context(), "wrkq.admin.legacyActor.list", map[string]any{})
-	if err != nil {
-		return
-	}
-	var res struct {
-		Items []struct {
-			UUID string `json:"uuid"`
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-		} `json:"items"`
-	}
-	if json.Unmarshal(raw, &res) != nil {
-		return
-	}
-	for _, actor := range res.Items {
-		if actor.Slug == slug {
-			lookups.ActorUUID = actor.UUID
-			lookups.ActorFriendlyID = actor.ID
-			return
-		}
-	}
 }
 
 func fillAgentContextContainerLookup(cmd *cobra.Command, tr Transport, project string, lookups *agentContextLookups) {
@@ -303,13 +271,9 @@ func printAgentContextHuman(stdout, stderr io.Writer, out agentContextOutput) {
 		}
 	}
 
-	if out.Lookups != nil && (out.Lookups.ActorUUID != "" || out.Lookups.ContainerUUID != "") {
+	if out.Lookups != nil && out.Lookups.ContainerUUID != "" {
 		fmt.Fprintln(stdout)
 		fmt.Fprintln(stdout, "Lookups (best-effort):")
-		if out.Lookups.ActorUUID != "" {
-			fmt.Fprintf(stdout, "  actor       = %s (%s)\n",
-				out.Lookups.ActorFriendlyID, out.Lookups.ActorUUID)
-		}
 		if out.Lookups.ContainerUUID != "" {
 			fmt.Fprintf(stdout, "  container   = %s (%s)\n",
 				out.Lookups.ContainerFriendlyID, out.Lookups.ContainerUUID)

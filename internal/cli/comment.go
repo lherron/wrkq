@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
@@ -112,14 +113,12 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 
 		// Query comments with SQL-based pagination
 		query := `
-			SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
-			       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
+			SELECT c.uuid, c.id, c.task_uuid, c.body, c.meta, c.etag,
+			       c.created_at, c.updated_at, c.deleted_at,
 			       c.created_by_principal_ref, c.created_by_scope_ref,
 			       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
-			       a.slug as actor_slug, a.role as actor_role,
 			       t.id as task_id
 			FROM comments c
-			LEFT JOIN actors a ON c.actor_uuid = a.uuid
 			LEFT JOIN tasks t ON c.task_uuid = t.uuid
 			WHERE c.task_uuid = ?
 		`
@@ -151,18 +150,17 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 
 		for rows.Next() {
 			var uuid, id, taskUUID, body, createdAt string
-			var actorUUID, actorSlug, actorRole sql.NullString
 			var taskIDStr string
-			var meta, updatedAt, deletedAt, deletedByActorUUID sql.NullString
+			var meta, updatedAt, deletedAt sql.NullString
 			var createdByPrincipalRef, createdByScopeRef sql.NullString
 			var deletedByPrincipalRef, deletedByScopeRef sql.NullString
 			var etag int64
 
-			err := rows.Scan(&uuid, &id, &taskUUID, &actorUUID, &body, &meta, &etag,
-				&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+			err := rows.Scan(&uuid, &id, &taskUUID, &body, &meta, &etag,
+				&createdAt, &updatedAt, &deletedAt,
 				&createdByPrincipalRef, &createdByScopeRef,
 				&deletedByPrincipalRef, &deletedByScopeRef,
-				&actorSlug, &actorRole, &taskIDStr)
+				&taskIDStr)
 			if err != nil {
 				_ = rows.Close()
 				return fmt.Errorf("failed to scan comment: %w", err)
@@ -176,15 +174,6 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 				"body":       body,
 				"etag":       etag,
 				"created_at": createdAt,
-			}
-			if actorUUID.Valid {
-				comment["actor_uuid"] = actorUUID.String
-			}
-			if actorSlug.Valid {
-				comment["actor_slug"] = actorSlug.String
-			}
-			if actorRole.Valid {
-				comment["actor_role"] = actorRole.String
 			}
 			if createdByPrincipalRef.Valid {
 				comment["created_by_principal_ref"] = createdByPrincipalRef.String
@@ -201,9 +190,6 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 			}
 			if deletedAt.Valid {
 				comment["deleted_at"] = deletedAt.String
-			}
-			if deletedByActorUUID.Valid {
-				comment["deleted_by_actor_uuid"] = deletedByActorUUID.String
 			}
 			if deletedByPrincipalRef.Valid {
 				comment["deleted_by_principal_ref"] = deletedByPrincipalRef.String
@@ -270,7 +256,7 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursorStr)
 	}
 
-	headers := []string{"ID", "Task", "Actor", "Created", "Body Preview"}
+	headers := []string{"ID", "Task", "Author", "Created", "Body Preview"}
 	var rowsData [][]string
 	for _, comment := range allComments {
 		body := comment["body"].(string)
@@ -280,10 +266,15 @@ func runCommentLs(cmd *cobra.Command, args []string) error {
 			bodyPreview = bodyPreview[:47] + "..."
 		}
 
+		author := ""
+		if ref, ok := comment["created_by_principal_ref"].(string); ok {
+			author = attribution.PrincipalHandle(ref)
+		}
+
 		rowsData = append(rowsData, []string{
 			comment["id"].(string),
 			comment["task_id"].(string),
-			comment["actor_slug"].(string),
+			author,
 			comment["created_at"].(string),
 			bodyPreview,
 		})

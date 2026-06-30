@@ -208,7 +208,6 @@ type Task struct {
 	ParentTaskID          *string    `json:"parent_task_id,omitempty"`
 	ParentTaskUUID        *string    `json:"parent_task_uuid,omitempty"`
 	AssigneeSlug          *string    `json:"assignee,omitempty"`
-	AssigneeUUID          *string    `json:"assignee_uuid,omitempty"`
 	AssigneePrincipalRef  *string    `json:"assignee_principal_ref,omitempty"`
 	StartAt               *string    `json:"start_at,omitempty"`
 	DueAt                 *string    `json:"due_at,omitempty"`
@@ -237,8 +236,7 @@ type Comment struct {
 	Body         string `json:"body"`
 	PrincipalRef string `json:"principal_ref,omitempty"`
 	ScopeRef     string `json:"scope_ref,omitempty"`
-	ActorSlug    string `json:"actor_slug,omitempty"`
-	ActorRole    string `json:"actor_role,omitempty"`
+	Author       string `json:"author,omitempty"`
 }
 
 func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
@@ -344,14 +342,6 @@ func (s *daemonServer) resolveAttribution(r *http.Request) (attribution.Attribut
 		return attribution.Attribution{PrincipalRef: principalRef, ScopeRef: scopeRef}, nil
 	}
 
-	if raw := strings.TrimSpace(r.Header.Get("X-Wrkq-Actor")); raw != "" {
-		principalRef, err := attribution.NormalizeCompat(raw)
-		if err != nil {
-			return attribution.Attribution{}, fmt.Errorf("invalid X-Wrkq-Actor: %w", err)
-		}
-		return attribution.Attribution{PrincipalRef: principalRef, ScopeRef: scopeRef}, nil
-	}
-
 	if parsedScope != nil {
 		principalRef, err := attribution.NormalizeCanonical("agent:" + parsedScope.AgentID)
 		if err != nil {
@@ -360,7 +350,7 @@ func (s *daemonServer) resolveAttribution(r *http.Request) (attribution.Attribut
 		return attribution.Attribution{PrincipalRef: principalRef, ScopeRef: scopeRef}, nil
 	}
 
-	return attribution.Attribution{}, fmt.Errorf("no principal configured (set X-Wrkq-Principal-Ref, X-Wrkq-Actor, or X-Wrkq-Scope-Ref)")
+	return attribution.Attribution{}, fmt.Errorf("no principal configured (set X-Wrkq-Principal-Ref or X-Wrkq-Scope-Ref)")
 }
 
 func parseDaemonScopeRef(r *http.Request) (string, *scope.ParsedScopeRef, error) {
@@ -769,7 +759,6 @@ func (s *daemonServer) handleTasksUpdate(w http.ResponseWriter, r *http.Request)
 		case "assignee":
 			if assignee, ok := value.(string); ok {
 				if assignee == "" {
-					fields["assignee_actor_uuid"] = nil
 					fields["assignee_principal_ref"] = nil
 					continue
 				}
@@ -778,7 +767,6 @@ func (s *daemonServer) handleTasksUpdate(w http.ResponseWriter, r *http.Request)
 					s.writeError(w, http.StatusBadRequest, err)
 					return
 				}
-				fields["assignee_actor_uuid"] = nil
 				fields["assignee_principal_ref"] = principalRef
 			}
 		}
@@ -956,10 +944,9 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 	}
 
 	setClauses = append(setClauses, "etag = etag + 1")
-	setClauses = append(setClauses, "updated_by_actor_uuid = ?")
 	setClauses = append(setClauses, "updated_by_principal_ref = ?")
 	setClauses = append(setClauses, "updated_by_scope_ref = ?")
-	args = append(args, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), taskUUID)
+	args = append(args, attr.PrincipalRef, scopeBind(attr), taskUUID)
 
 	query := fmt.Sprintf("UPDATE tasks SET %s WHERE uuid = ?", strings.Join(setClauses, ", "))
 	if _, err := tx.Exec(query, args...); err != nil {
@@ -971,7 +958,6 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 	payloadJSON, _ := json.Marshal(fields)
 	payloadStr := string(payloadJSON)
 	eventMeta, err := events.NewWriter(s.db.DB).LogEventReturning(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -991,12 +977,12 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 	}
 
 	webhooks.DispatchTaskEvent(s.db, taskUUID, webhooks.EventContext{
-		Metadata:   eventMeta,
-		Event:      "updated",
-		ActorUUID:  attr.LegacyActorUUID,
-		Via:        "api",
-		Transition: &webhooks.Transition{From: &currentState, To: &targetState},
-		Changed:    sortedMapKeys(fields),
+		Metadata:     eventMeta,
+		Event:        "updated",
+		PrincipalRef: attr.PrincipalRef,
+		Via:          "api",
+		Transition:   &webhooks.Transition{From: &currentState, To: &targetState},
+		Changed:      sortedMapKeys(fields),
 		Changes: mapChanges(fields, map[string]interface{}{
 			"state": currentState,
 		}),
@@ -1041,14 +1027,12 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 	}
 
 	query := `
-		SELECT c.uuid, c.id, c.task_uuid, c.actor_uuid, c.body, c.meta, c.etag,
-		       c.created_at, c.updated_at, c.deleted_at, c.deleted_by_actor_uuid,
+		SELECT c.uuid, c.id, c.task_uuid, c.body, c.meta, c.etag,
+		       c.created_at, c.updated_at, c.deleted_at,
 		       c.created_by_principal_ref, c.created_by_scope_ref,
 		       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
-		       a.slug as actor_slug, a.role as actor_role,
 		       t.id as task_id
 		FROM comments c
-		LEFT JOIN actors a ON c.actor_uuid = a.uuid
 		LEFT JOIN tasks t ON c.task_uuid = t.uuid
 		WHERE c.task_uuid = ?
 	`
@@ -1069,17 +1053,16 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 	for rows.Next() {
 		var uuid, id, taskUUID, body, createdAt string
 		var taskIDStr string
-		var actorUUID, actorSlug, actorRole sql.NullString
-		var meta, updatedAt, deletedAt, deletedByActorUUID sql.NullString
+		var meta, updatedAt, deletedAt sql.NullString
 		var createdByPrincipalRef, createdByScopeRef sql.NullString
 		var deletedByPrincipalRef, deletedByScopeRef sql.NullString
 		var etag int64
 
-		if err := rows.Scan(&uuid, &id, &taskUUID, &actorUUID, &body, &meta, &etag,
-			&createdAt, &updatedAt, &deletedAt, &deletedByActorUUID,
+		if err := rows.Scan(&uuid, &id, &taskUUID, &body, &meta, &etag,
+			&createdAt, &updatedAt, &deletedAt,
 			&createdByPrincipalRef, &createdByScopeRef,
 			&deletedByPrincipalRef, &deletedByScopeRef,
-			&actorSlug, &actorRole, &taskIDStr); err != nil {
+			&taskIDStr); err != nil {
 			s.writeError(w, http.StatusBadRequest, err)
 			return
 		}
@@ -1092,15 +1075,6 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 			"body":       body,
 			"etag":       etag,
 			"created_at": createdAt,
-		}
-		if actorUUID.Valid {
-			comment["actor_uuid"] = actorUUID.String
-		}
-		if actorSlug.Valid {
-			comment["actor_slug"] = actorSlug.String
-		}
-		if actorRole.Valid {
-			comment["actor_role"] = actorRole.String
 		}
 		if createdByPrincipalRef.Valid {
 			comment["created_by_principal_ref"] = createdByPrincipalRef.String
@@ -1117,9 +1091,6 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 		}
 		if deletedAt.Valid {
 			comment["deleted_at"] = deletedAt.String
-		}
-		if deletedByActorUUID.Valid {
-			comment["deleted_by_actor_uuid"] = deletedByActorUUID.String
 		}
 		if deletedByPrincipalRef.Valid {
 			comment["deleted_by_principal_ref"] = deletedByPrincipalRef.String
@@ -1219,32 +1190,29 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 
 	if _, err := tx.Exec(`
 		INSERT INTO comments (
-			uuid, id, task_uuid, actor_uuid, created_by_principal_ref, created_by_scope_ref,
+			uuid, id, task_uuid, created_by_principal_ref, created_by_scope_ref,
 			body, meta, etag
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-	`, commentUUID, commentID, taskUUID, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), strings.TrimSpace(req.Body), metaPtr); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+	`, commentUUID, commentID, taskUUID, attr.PrincipalRef, scopeBind(attr), strings.TrimSpace(req.Body), metaPtr); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
 	var comment domain.Comment
 	var createdAtStr string
-	var commentActorUUID, createdByPrincipalRef, createdByScopeRef sql.NullString
+	var createdByPrincipalRef, createdByScopeRef sql.NullString
 	if err := tx.QueryRow(`
-		SELECT uuid, id, task_uuid, actor_uuid, created_by_principal_ref, created_by_scope_ref,
+		SELECT uuid, id, task_uuid, created_by_principal_ref, created_by_scope_ref,
 		       body, meta, etag, created_at
 		FROM comments WHERE uuid = ?
 	`, commentUUID).Scan(
-		&comment.UUID, &comment.ID, &comment.TaskUUID, &commentActorUUID,
+		&comment.UUID, &comment.ID, &comment.TaskUUID,
 		&createdByPrincipalRef, &createdByScopeRef,
 		&comment.Body, &comment.Meta, &comment.ETag, &createdAtStr,
 	); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
-	}
-	if commentActorUUID.Valid {
-		comment.ActorUUID = commentActorUUID.String
 	}
 	if createdByPrincipalRef.Valid {
 		comment.CreatedByPrincipalRef = createdByPrincipalRef.String
@@ -1263,7 +1231,6 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 	})
 	payload := string(payloadJSON)
 	eventMeta, err := events.NewWriter(s.db.DB).LogEventReturning(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "comment",
@@ -1283,12 +1250,12 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 	}
 
 	webhooks.DispatchTaskEvent(s.db, taskUUID, webhooks.EventContext{
-		Metadata:   eventMeta,
-		Event:      "comment_added",
-		ActorUUID:  attr.LegacyActorUUID,
-		Via:        "api",
-		Transition: nil,
-		Changed:    []string{"comments"},
+		Metadata:     eventMeta,
+		Event:        "comment_added",
+		PrincipalRef: attr.PrincipalRef,
+		Via:          "api",
+		Transition:   nil,
+		Changed:      []string{"comments"},
 		Changes: map[string]webhooks.Change{
 			"comments": {From: nil, To: commentID},
 		},
@@ -1326,10 +1293,9 @@ func (s *daemonServer) handleRelationsList(w http.ResponseWriter, r *http.Reques
 	outgoingRows, err := s.db.Query(`
 		SELECT r.kind, r.created_at,
 		       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-		       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+		       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 		FROM task_relations r
 		JOIN tasks t ON r.to_task_uuid = t.uuid
-		LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 		WHERE r.from_task_uuid = ?
 		ORDER BY r.kind, t.id
 	`, taskUUID)
@@ -1353,10 +1319,9 @@ func (s *daemonServer) handleRelationsList(w http.ResponseWriter, r *http.Reques
 	incomingRows, err := s.db.Query(`
 		SELECT r.kind, r.created_at,
 		       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-		       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+		       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 		FROM task_relations r
 		JOIN tasks t ON r.from_task_uuid = t.uuid
-		LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 		WHERE r.to_task_uuid = ?
 		ORDER BY r.kind, t.id
 	`, taskUUID)
@@ -1438,16 +1403,15 @@ func (s *daemonServer) handleRelationsCreate(w http.ResponseWriter, r *http.Requ
 	if _, err := tx.Exec(`
 		INSERT INTO task_relations (
 			from_task_uuid, to_task_uuid, kind,
-			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			created_by_principal_ref, created_by_scope_ref
 		)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, fromUUID, toUUID, req.Kind, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr)); err != nil {
+		VALUES (?, ?, ?, ?, ?)
+	`, fromUUID, toUUID, req.Kind, attr.PrincipalRef, scopeBind(attr)); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	payload := fmt.Sprintf(`{"from_task_uuid":"%s","to_task_uuid":"%s","kind":"%s"}`, fromUUID, toUUID, req.Kind)
 	if err := events.NewWriter(s.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -1533,7 +1497,6 @@ func (s *daemonServer) handleRelationsDelete(w http.ResponseWriter, r *http.Requ
 	payload := fmt.Sprintf(`{"from_task_uuid":"%s","to_task_uuid":"%s","kind":"%s","deleted_by_principal_ref":"%s"}`,
 		fromUUID, toUUID, req.Kind, attr.PrincipalRef)
 	if err := events.NewWriter(s.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -1558,28 +1521,25 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	var id, slug, title, state, description, specification, kind string
 	var priority int
 	var startAt, dueAt, labels, completedAt, archivedAt, deletedAt *string
-	var parentTaskUUID, assigneeActorUUID, assigneePrincipalRef *string
+	var parentTaskUUID, assigneePrincipalRef *string
 	var createdAt, updatedAt string
 	var etag int64
 	var projectUUID string
-	var createdByUUID, updatedByUUID sql.NullString
 	var createdByPrincipalRef, updatedByPrincipalRef, createdByScopeRef, updatedByScopeRef sql.NullString
 
 	err := database.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
-		       kind, parent_task_uuid, assignee_actor_uuid, assignee_principal_ref,
+		       kind, parent_task_uuid, assignee_principal_ref,
 		       start_at, due_at, labels, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at, deleted_at,
-		       created_by_actor_uuid, updated_by_actor_uuid,
 		       created_by_principal_ref, updated_by_principal_ref,
 		       created_by_scope_ref, updated_by_scope_ref
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &state, &priority,
-		&kind, &parentTaskUUID, &assigneeActorUUID, &assigneePrincipalRef,
+		&kind, &parentTaskUUID, &assigneePrincipalRef,
 		&startAt, &dueAt, &labels, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt,
-		&createdByUUID, &updatedByUUID,
 		&createdByPrincipalRef, &updatedByPrincipalRef,
 		&createdByScopeRef, &updatedByScopeRef,
 	)
@@ -1588,12 +1548,6 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	}
 
 	var createdBySlug, updatedBySlug string
-	if createdByUUID.Valid {
-		_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID.String).Scan(&createdBySlug)
-	}
-	if updatedByUUID.Valid {
-		_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID.String).Scan(&updatedBySlug)
-	}
 	if createdByPrincipalRef.Valid && createdByPrincipalRef.String != "" {
 		createdBySlug = attribution.PrincipalHandle(createdByPrincipalRef.String)
 	}
@@ -1616,11 +1570,6 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	if assigneePrincipalRef != nil && *assigneePrincipalRef != "" {
 		display := attribution.PrincipalHandle(*assigneePrincipalRef)
 		assigneeSlug = &display
-	} else if assigneeActorUUID != nil {
-		var aSlug string
-		if err := database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *assigneeActorUUID).Scan(&aSlug); err == nil {
-			assigneeSlug = &aSlug
-		}
 	}
 
 	task := &Task{
@@ -1637,7 +1586,6 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		ParentTaskID:          parentTaskID,
 		ParentTaskUUID:        parentTaskUUID,
 		AssigneeSlug:          assigneeSlug,
-		AssigneeUUID:          assigneeActorUUID,
 		AssigneePrincipalRef:  assigneePrincipalRef,
 		StartAt:               startAt,
 		DueAt:                 dueAt,
@@ -1661,10 +1609,8 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 	if includeComments {
 		rows, err := database.Query(`
 			SELECT c.id, c.created_at, c.body,
-			       c.created_by_principal_ref, c.created_by_scope_ref,
-			       a.slug as actor_slug, a.role as actor_role
+			       c.created_by_principal_ref, c.created_by_scope_ref
 			FROM comments c
-			LEFT JOIN actors a ON c.actor_uuid = a.uuid
 			WHERE c.task_uuid = ? AND c.deleted_at IS NULL
 			ORDER BY c.created_at ASC
 		`, taskUUID)
@@ -1675,15 +1621,14 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		var comments []Comment
 		for rows.Next() {
 			var comment Comment
-			var principalRef, scopeRef, actorSlug, actorRole sql.NullString
-			if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef, &scopeRef, &actorSlug, &actorRole); err != nil {
+			var principalRef, scopeRef sql.NullString
+			if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef, &scopeRef); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("failed to scan comment: %w", err)
 			}
 			comment.PrincipalRef = valueOrEmpty(principalRef)
 			comment.ScopeRef = valueOrEmpty(scopeRef)
-			comment.ActorSlug = valueOrEmpty(actorSlug)
-			comment.ActorRole = valueOrEmpty(actorRole)
+			comment.Author = attribution.PrincipalHandle(comment.PrincipalRef)
 			comments = append(comments, comment)
 		}
 		_ = rows.Close()
@@ -1699,10 +1644,9 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		outgoingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
 			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-			       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+			       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 			FROM task_relations r
 			JOIN tasks t ON r.to_task_uuid = t.uuid
-			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.from_task_uuid = ?
 			ORDER BY r.kind, t.id
 		`, taskUUID)
@@ -1724,10 +1668,9 @@ func loadTaskDetail(database *db.DB, taskUUID string, includeComments bool, incl
 		incomingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
 			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-			       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+			       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 			FROM task_relations r
 			JOIN tasks t ON r.from_task_uuid = t.uuid
-			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.to_task_uuid = ?
 			ORDER BY r.kind, t.id
 		`, taskUUID)

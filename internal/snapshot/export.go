@@ -68,7 +68,6 @@ func Export(db *sql.DB, opts ExportOptions) (*ExportResult, error) {
 	result := &ExportResult{
 		OutputPath:     opts.OutputPath,
 		SnapshotRev:    snapshotRev,
-		ActorCount:     len(snap.Actors),
 		ContainerCount: len(snap.Containers),
 		TaskCount:      len(snap.Tasks),
 		CommentCount:   len(snap.Comments),
@@ -127,16 +126,10 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 			MachineInterfaceVersion: 1,
 			GeneratedAt:             FormatTimestamp(time.Now()),
 		},
-		Actors:     make(map[string]ActorEntry),
 		Containers: make(map[string]ContainerEntry),
 		Tasks:      make(map[string]TaskEntry),
 		Comments:   make(map[string]CommentEntry),
 		Links:      make(map[string]LinkEntry),
-	}
-
-	// Export actors
-	if err := exportActors(db, snap); err != nil {
-		return nil, fmt.Errorf("failed to export actors: %w", err)
 	}
 
 	// Export containers
@@ -164,51 +157,11 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 	return snap, nil
 }
 
-func exportActors(db *sql.DB, snap *Snapshot) error {
-	rows, err := db.Query(`
-		SELECT uuid, id, slug, display_name, role, meta, created_at, updated_at
-		FROM actors
-		ORDER BY uuid
-	`)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var uuid, id, slug, role, createdAt, updatedAt string
-		var displayName, meta sql.NullString
-
-		if err := rows.Scan(&uuid, &id, &slug, &displayName, &role, &meta, &createdAt, &updatedAt); err != nil {
-			return err
-		}
-
-		entry := ActorEntry{
-			ID:        id,
-			Slug:      slug,
-			Role:      role,
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
-		}
-
-		if displayName.Valid {
-			entry.DisplayName = displayName.String
-		}
-		if meta.Valid {
-			entry.Meta = meta.String
-		}
-
-		snap.Actors[uuid] = entry
-	}
-
-	return rows.Err()
-}
-
 func exportContainers(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
 		SELECT uuid, id, slug, title, parent_uuid, etag,
 		       created_at, updated_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid
+		       created_by_principal_ref, updated_by_principal_ref
 		FROM containers
 		WHERE archived_at IS NULL
 		ORDER BY uuid
@@ -221,12 +174,12 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 	for rows.Next() {
 		var uuid, id, slug, title, createdAt, updatedAt string
 		var parentUUID, archivedAt sql.NullString
-		var createdBy, updatedBy string
+		var createdByPrincipal, updatedByPrincipal sql.NullString
 		var etag int64
 
 		if err := rows.Scan(&uuid, &id, &slug, &title, &parentUUID, &etag,
 			&createdAt, &updatedAt, &archivedAt,
-			&createdBy, &updatedBy); err != nil {
+			&createdByPrincipal, &updatedByPrincipal); err != nil {
 			return err
 		}
 
@@ -237,8 +190,6 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 			ETag:      etag,
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
-			CreatedBy: createdBy,
-			UpdatedBy: updatedBy,
 		}
 
 		if parentUUID.Valid {
@@ -246,6 +197,12 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 		}
 		if archivedAt.Valid {
 			entry.ArchivedAt = archivedAt.String
+		}
+		if createdByPrincipal.Valid {
+			entry.CreatedByPrincipalRef = createdByPrincipal.String
+		}
+		if updatedByPrincipal.Valid {
+			entry.UpdatedByPrincipalRef = updatedByPrincipal.String
 		}
 
 		snap.Containers[uuid] = entry
@@ -262,7 +219,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		       state, priority,
 		       start_at, due_at, labels, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid
+		       created_by_principal_ref, updated_by_principal_ref
 		FROM tasks
 		WHERE archived_at IS NULL
 		ORDER BY uuid
@@ -280,7 +237,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var workflowPreset, phase, riskClass sql.NullString
 		var presetVersion sql.NullInt64
-		var createdBy, updatedBy string
+		var createdByPrincipal, updatedByPrincipal sql.NullString
 		var priority int
 		var etag int64
 
@@ -290,7 +247,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 			&state, &priority,
 			&startAt, &dueAt, &labels, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
-			&createdBy, &updatedBy); err != nil {
+			&createdByPrincipal, &updatedByPrincipal); err != nil {
 			return err
 		}
 
@@ -304,8 +261,12 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 			ETag:        etag,
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
-			CreatedBy:   createdBy,
-			UpdatedBy:   updatedBy,
+		}
+		if createdByPrincipal.Valid {
+			entry.CreatedByPrincipalRef = createdByPrincipal.String
+		}
+		if updatedByPrincipal.Valid {
+			entry.UpdatedByPrincipalRef = updatedByPrincipal.String
 		}
 
 		if requestedBy.Valid {
@@ -368,8 +329,8 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 
 func exportComments(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, task_uuid, actor_uuid, body, meta, etag,
-		       created_at, updated_at, deleted_at, deleted_by_actor_uuid
+		SELECT uuid, id, task_uuid, created_by_principal_ref, body, meta, etag,
+		       created_at, updated_at, deleted_at, deleted_by_principal_ref
 		FROM comments
 		WHERE deleted_at IS NULL
 		ORDER BY uuid
@@ -380,24 +341,26 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var uuid, id, taskUUID, actorUUID, body, createdAt string
-		var meta, updatedAt, deletedAt, deletedBy sql.NullString
+		var uuid, id, taskUUID, body, createdAt string
+		var createdByPrincipal, meta, updatedAt, deletedAt, deletedByPrincipal sql.NullString
 		var etag int64
 
-		if err := rows.Scan(&uuid, &id, &taskUUID, &actorUUID, &body, &meta, &etag,
-			&createdAt, &updatedAt, &deletedAt, &deletedBy); err != nil {
+		if err := rows.Scan(&uuid, &id, &taskUUID, &createdByPrincipal, &body, &meta, &etag,
+			&createdAt, &updatedAt, &deletedAt, &deletedByPrincipal); err != nil {
 			return err
 		}
 
 		entry := CommentEntry{
 			ID:        id,
 			TaskUUID:  taskUUID,
-			ActorUUID: actorUUID,
 			Body:      body,
 			ETag:      etag,
 			CreatedAt: createdAt,
 		}
 
+		if createdByPrincipal.Valid {
+			entry.CreatedByPrincipalRef = createdByPrincipal.String
+		}
 		if meta.Valid {
 			entry.Meta = meta.String
 		}
@@ -407,8 +370,8 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 		if deletedAt.Valid {
 			entry.DeletedAt = deletedAt.String
 		}
-		if deletedBy.Valid {
-			entry.DeletedBy = deletedBy.String
+		if deletedByPrincipal.Valid {
+			entry.DeletedByPrincipalRef = deletedByPrincipal.String
 		}
 
 		snap.Comments[uuid] = entry
@@ -421,7 +384,7 @@ func exportEvents(db *sql.DB, snap *Snapshot) error {
 	snap.Events = make(map[string]EventEntry)
 
 	rows, err := db.Query(`
-		SELECT id, timestamp, actor_uuid, resource_type, resource_uuid,
+		SELECT id, timestamp, principal_ref, resource_type, resource_uuid,
 		       event_type, etag, payload
 		FROM event_log
 		ORDER BY id
@@ -434,10 +397,10 @@ func exportEvents(db *sql.DB, snap *Snapshot) error {
 	for rows.Next() {
 		var id int64
 		var timestamp, resourceType, eventType string
-		var actorUUID, resourceUUID, payload sql.NullString
+		var principalRef, resourceUUID, payload sql.NullString
 		var etag sql.NullInt64
 
-		if err := rows.Scan(&id, &timestamp, &actorUUID, &resourceType, &resourceUUID,
+		if err := rows.Scan(&id, &timestamp, &principalRef, &resourceType, &resourceUUID,
 			&eventType, &etag, &payload); err != nil {
 			return err
 		}
@@ -449,8 +412,8 @@ func exportEvents(db *sql.DB, snap *Snapshot) error {
 			EventType:    eventType,
 		}
 
-		if actorUUID.Valid {
-			entry.ActorUUID = actorUUID.String
+		if principalRef.Valid {
+			entry.PrincipalRef = principalRef.String
 		}
 		if resourceUUID.Valid {
 			entry.ResourceUUID = resourceUUID.String

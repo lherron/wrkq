@@ -91,8 +91,9 @@ type EventContext struct {
 	EventID    string
 	EventSeq   int64
 	OccurredAt string
-	ActorUUID  *string
-	Via        string
+	ActorUUID    *string
+	PrincipalRef string
+	Via          string
 	Transition *Transition
 	Changed    []string
 	Changes    map[string]Change
@@ -189,7 +190,7 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 		}
 	}
 	labels := parseLabels(info.Labels)
-	origin := resolveOrigin(database, ctx.ActorUUID, ctx.Via, nil)
+	origin := resolveOrigin(ctx.PrincipalRef, ctx.Via, nil)
 	eventID := ""
 	if ctx.Metadata.ID > 0 {
 		eventID = fmt.Sprintf("evt_%d", ctx.Metadata.ID)
@@ -273,18 +274,18 @@ func parseLabels(raw *string) []string {
 	return labels
 }
 
-func resolveOrigin(database *db.DB, actorUUID *string, via string, runID *string) Origin {
+// resolveOrigin derives the webhook origin actor from the canonical caller
+// principal ref (agent:<id>). It never reads the legacy actors table; a missing
+// principal yields the "system" sentinel.
+func resolveOrigin(principalRef string, via string, runID *string) Origin {
 	if via == "" {
 		via = "unknown"
 	}
-	if actorUUID == nil || *actorUUID == "" {
+	principalRef = strings.TrimSpace(principalRef)
+	if principalRef == "" {
 		return Origin{Actor: "system", RunID: runID, Via: via}
 	}
-	var slug, role string
-	if err := database.QueryRow("SELECT slug, role FROM actors WHERE uuid = ?", *actorUUID).Scan(&slug, &role); err != nil {
-		return Origin{Actor: "system", RunID: runID, Via: via}
-	}
-	return Origin{Actor: role + ":" + slug, RunID: runID, Via: via}
+	return Origin{Actor: principalRef, RunID: runID, Via: via}
 }
 
 // nullStringToPtr converts sql.NullString to *string.

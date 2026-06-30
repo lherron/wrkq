@@ -89,8 +89,8 @@ func runStateExport(app *appctx.App, cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("✓ Exported snapshot to %s\n", result.OutputPath)
 		fmt.Printf("  snapshot_rev: %s\n", result.SnapshotRev)
-		fmt.Printf("  actors: %d, containers: %d, tasks: %d, comments: %d\n",
-			result.ActorCount, result.ContainerCount, result.TaskCount, result.CommentCount)
+		fmt.Printf("  containers: %d, tasks: %d, comments: %d\n",
+			result.ContainerCount, result.TaskCount, result.CommentCount)
 		if result.EventCount > 0 {
 			fmt.Printf("  events: %d\n", result.EventCount)
 		}
@@ -154,8 +154,8 @@ func runStateImport(app *appctx.App, cmd *cobra.Command, args []string) error {
 			fmt.Printf("✓ Imported snapshot from %s\n", result.InputPath)
 		}
 		fmt.Printf("  snapshot_rev: %s\n", result.SnapshotRev)
-		fmt.Printf("  actors: %d, containers: %d, tasks: %d, comments: %d\n",
-			result.ActorCount, result.ContainerCount, result.TaskCount, result.CommentCount)
+		fmt.Printf("  containers: %d, tasks: %d, comments: %d\n",
+			result.ContainerCount, result.TaskCount, result.CommentCount)
 	}
 
 	return nil

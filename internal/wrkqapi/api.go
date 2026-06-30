@@ -235,11 +235,6 @@ func metaString(meta map[string]any) *string {
 	return &s
 }
 
-// legacyActorBind returns the legacy actor UUID for a SQL bind, or nil.
-func legacyActorBind(attr attribution.Attribution) any {
-	return nil
-}
-
 // scopeBind returns the scope ref for a SQL bind, mapping empty to nil.
 func scopeBind(attr attribution.Attribution) any {
 	if strings.TrimSpace(attr.ScopeRef) == "" {

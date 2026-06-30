@@ -23,6 +23,12 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		return nil, fmt.Errorf("failed to read snapshot: %w", err)
 	}
 
+	// Reject legacy actor-bearing snapshots outright. wrkq is principal-only;
+	// importing actor scaffolding would be lossy, so we refuse rather than convert.
+	if err := rejectLegacyActorData(data); err != nil {
+		return nil, err
+	}
+
 	// Parse snapshot
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
@@ -50,7 +56,6 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		return &ImportResult{
 			InputPath:      opts.InputPath,
 			SnapshotRev:    snap.Meta.SnapshotRev,
-			ActorCount:     len(snap.Actors),
 			ContainerCount: len(snap.Containers),
 			TaskCount:      len(snap.Tasks),
 			CommentCount:   len(snap.Comments),
@@ -72,11 +77,7 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		}
 	}
 
-	// Import in dependency order: actors -> containers -> tasks -> comments
-	if err := importActors(tx, &snap); err != nil {
-		return nil, fmt.Errorf("failed to import actors: %w", err)
-	}
-
+	// Import in dependency order: containers -> tasks -> comments
 	if err := importContainers(tx, &snap); err != nil {
 		return nil, fmt.Errorf("failed to import containers: %w", err)
 	}
@@ -102,12 +103,66 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 	return &ImportResult{
 		InputPath:      opts.InputPath,
 		SnapshotRev:    snap.Meta.SnapshotRev,
-		ActorCount:     len(snap.Actors),
 		ContainerCount: len(snap.Containers),
 		TaskCount:      len(snap.Tasks),
 		CommentCount:   len(snap.Comments),
 		DryRun:         false,
 	}, nil
+}
+
+// rejectLegacyActorData refuses any snapshot that still carries actor
+// scaffolding (a top-level "actors" map, actor UUID/slug/role fields, or the
+// legacy bare created_by/updated_by/deleted_by attribution keys). wrkq is
+// principal-only; converting such snapshots would be lossy, so we hard-gate
+// them rather than import partial data.
+func rejectLegacyActorData(data []byte) error {
+	var raw interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		// Let the normal parse path report the malformed-JSON error.
+		return nil
+	}
+	if key := findLegacyActorKey(raw); key != "" {
+		return fmt.Errorf("legacy actor data movement is no longer supported: snapshot contains %q; wrkq is principal-only", key)
+	}
+	return nil
+}
+
+// legacyActorKeys are object keys whose presence anywhere in a snapshot marks
+// it as a pre-principal (actor-bearing) snapshot.
+var legacyActorKeys = map[string]bool{
+	"actors":                true,
+	"actor_uuid":            true,
+	"actor_slug":            true,
+	"actor_role":            true,
+	"created_by_actor_uuid": true,
+	"updated_by_actor_uuid": true,
+	"deleted_by_actor_uuid": true,
+	"assignee_actor_uuid":   true,
+	// Legacy bare attribution fields (now superseded by *_principal_ref).
+	"created_by": true,
+	"updated_by": true,
+	"deleted_by": true,
+}
+
+func findLegacyActorKey(v interface{}) string {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, child := range t {
+			if legacyActorKeys[k] {
+				return k
+			}
+			if found := findLegacyActorKey(child); found != "" {
+				return found
+			}
+		}
+	case []interface{}:
+		for _, child := range t {
+			if found := findLegacyActorKey(child); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
 }
 
 // LoadSnapshot reads and parses a snapshot file.
@@ -142,13 +197,10 @@ func validateSnapshot(snap *Snapshot) error {
 		}
 	}
 
-	// Comments must reference valid tasks and actors
+	// Comments must reference valid tasks.
 	for uuid, comment := range snap.Comments {
 		if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
 			return fmt.Errorf("comment %s references unknown task %s", uuid, comment.TaskUUID)
-		}
-		if _, ok := snap.Actors[comment.ActorUUID]; !ok {
-			return fmt.Errorf("comment %s references unknown actor %s", uuid, comment.ActorUUID)
 		}
 	}
 
@@ -166,14 +218,6 @@ func validateSnapshot(snap *Snapshot) error {
 
 func isDatabaseEmpty(db *sql.DB) (bool, error) {
 	var count int
-
-	// Check actors (beyond the seeded default)
-	if err := db.QueryRow("SELECT COUNT(*) FROM actors").Scan(&count); err != nil {
-		return false, err
-	}
-	if count > 1 { // Allow one seeded actor
-		return false, nil
-	}
 
 	// Check containers
 	if err := db.QueryRow("SELECT COUNT(*) FROM containers").Scan(&count); err != nil {
@@ -196,7 +240,7 @@ func isDatabaseEmpty(db *sql.DB) (bool, error) {
 
 func truncateTables(tx *sql.Tx) error {
 	// Delete in reverse dependency order
-	tables := []string{"comments", "attachments", "tasks", "containers", "actors"}
+	tables := []string{"comments", "attachments", "tasks", "containers"}
 
 	for _, table := range tables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", table)); err != nil {
@@ -205,7 +249,7 @@ func truncateTables(tx *sql.Tx) error {
 	}
 
 	// Reset sequences
-	seqTables := []string{"actor_seq", "container_seq", "task_seq", "attachment_seq"}
+	seqTables := []string{"container_seq", "task_seq", "attachment_seq"}
 	for _, seq := range seqTables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", seq)); err != nil {
 			return fmt.Errorf("failed to reset %s: %w", seq, err)
@@ -220,51 +264,6 @@ func truncateTables(tx *sql.Tx) error {
 	return nil
 }
 
-func importActors(tx *sql.Tx, snap *Snapshot) error {
-	// Sort UUIDs for deterministic order
-	uuids := make([]string, 0, len(snap.Actors))
-	for uuid := range snap.Actors {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO actors (uuid, id, slug, display_name, role, meta, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(uuid) DO UPDATE SET
-			id = excluded.id,
-			slug = excluded.slug,
-			display_name = excluded.display_name,
-			role = excluded.role,
-			meta = excluded.meta,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at
-	`)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, uuid := range uuids {
-		actor := snap.Actors[uuid]
-
-		var displayName, meta interface{}
-		if actor.DisplayName != "" {
-			displayName = actor.DisplayName
-		}
-		if actor.Meta != "" {
-			meta = actor.Meta
-		}
-
-		if _, err := stmt.Exec(uuid, actor.ID, actor.Slug, displayName, actor.Role,
-			meta, actor.CreatedAt, actor.UpdatedAt); err != nil {
-			return fmt.Errorf("failed to import actor %s: %w", uuid, err)
-		}
-	}
-
-	return nil
-}
-
 func importContainers(tx *sql.Tx, snap *Snapshot) error {
 	// Build dependency graph and import in topological order
 	// (parents before children)
@@ -273,7 +272,7 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO containers (uuid, id, slug, title, parent_uuid, etag,
 		                        created_at, updated_at, archived_at,
-		                        created_by_actor_uuid, updated_by_actor_uuid)
+		                        created_by_principal_ref, updated_by_principal_ref)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
@@ -284,8 +283,8 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at,
 			archived_at = excluded.archived_at,
-			created_by_actor_uuid = excluded.created_by_actor_uuid,
-			updated_by_actor_uuid = excluded.updated_by_actor_uuid
+			created_by_principal_ref = excluded.created_by_principal_ref,
+			updated_by_principal_ref = excluded.updated_by_principal_ref
 	`)
 	if err != nil {
 		return err
@@ -295,17 +294,23 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 	for _, uuid := range ordered {
 		container := snap.Containers[uuid]
 
-		var parentUUID, archivedAt interface{}
+		var parentUUID, archivedAt, createdByPrincipal, updatedByPrincipal interface{}
 		if container.ParentUUID != "" {
 			parentUUID = container.ParentUUID
 		}
 		if container.ArchivedAt != "" {
 			archivedAt = container.ArchivedAt
 		}
+		if container.CreatedByPrincipalRef != "" {
+			createdByPrincipal = container.CreatedByPrincipalRef
+		}
+		if container.UpdatedByPrincipalRef != "" {
+			updatedByPrincipal = container.UpdatedByPrincipalRef
+		}
 
 		if _, err := stmt.Exec(uuid, container.ID, container.Slug, container.Title,
 			parentUUID, container.ETag, container.CreatedAt, container.UpdatedAt,
-			archivedAt, container.CreatedBy, container.UpdatedBy); err != nil {
+			archivedAt, createdByPrincipal, updatedByPrincipal); err != nil {
 			return fmt.Errorf("failed to import container %s: %w", uuid, err)
 		}
 	}
@@ -361,7 +366,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		                   state, priority,
 		                   start_at, due_at, labels, description, specification, etag,
 		                   created_at, updated_at, completed_at, archived_at,
-		                   created_by_actor_uuid, updated_by_actor_uuid)
+		                   created_by_principal_ref, updated_by_principal_ref)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
@@ -388,8 +393,8 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 			updated_at = excluded.updated_at,
 			completed_at = excluded.completed_at,
 			archived_at = excluded.archived_at,
-			created_by_actor_uuid = excluded.created_by_actor_uuid,
-			updated_by_actor_uuid = excluded.updated_by_actor_uuid
+			created_by_principal_ref = excluded.created_by_principal_ref,
+			updated_by_principal_ref = excluded.updated_by_principal_ref
 	`)
 	if err != nil {
 		return err
@@ -402,6 +407,13 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		var startAt, dueAt, labels, completedAt, archivedAt interface{}
 		var requestedBy, assignedProject, acknowledgedAt, resolution interface{}
 		var workflowPreset, presetVersion, phase, riskClass interface{}
+		var createdByPrincipal, updatedByPrincipal interface{}
+		if task.CreatedByPrincipalRef != "" {
+			createdByPrincipal = task.CreatedByPrincipalRef
+		}
+		if task.UpdatedByPrincipalRef != "" {
+			updatedByPrincipal = task.UpdatedByPrincipalRef
+		}
 		if task.RequestedByProjectID != "" {
 			requestedBy = task.RequestedByProjectID
 		}
@@ -462,7 +474,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 			task.State, task.Priority,
 			startAt, dueAt, labels, description, specification, task.ETag,
 			task.CreatedAt, task.UpdatedAt, completedAt, archivedAt,
-			task.CreatedBy, task.UpdatedBy); err != nil {
+			createdByPrincipal, updatedByPrincipal); err != nil {
 			return fmt.Errorf("failed to import task %s: %w", uuid, err)
 		}
 	}
@@ -478,20 +490,20 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO comments (uuid, id, task_uuid, actor_uuid, body, meta, etag,
-		                      created_at, updated_at, deleted_at, deleted_by_actor_uuid)
+		INSERT INTO comments (uuid, id, task_uuid, created_by_principal_ref, body, meta, etag,
+		                      created_at, updated_at, deleted_at, deleted_by_principal_ref)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
 			task_uuid = excluded.task_uuid,
-			actor_uuid = excluded.actor_uuid,
+			created_by_principal_ref = excluded.created_by_principal_ref,
 			body = excluded.body,
 			meta = excluded.meta,
 			etag = excluded.etag,
 			created_at = excluded.created_at,
 			updated_at = excluded.updated_at,
 			deleted_at = excluded.deleted_at,
-			deleted_by_actor_uuid = excluded.deleted_by_actor_uuid
+			deleted_by_principal_ref = excluded.deleted_by_principal_ref
 	`)
 	if err != nil {
 		return err
@@ -501,7 +513,10 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	for _, uuid := range uuids {
 		comment := snap.Comments[uuid]
 
-		var meta, updatedAt, deletedAt, deletedBy interface{}
+		var createdByPrincipal, meta, updatedAt, deletedAt, deletedByPrincipal interface{}
+		if comment.CreatedByPrincipalRef != "" {
+			createdByPrincipal = comment.CreatedByPrincipalRef
+		}
 		if comment.Meta != "" {
 			meta = comment.Meta
 		}
@@ -511,13 +526,13 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 		if comment.DeletedAt != "" {
 			deletedAt = comment.DeletedAt
 		}
-		if comment.DeletedBy != "" {
-			deletedBy = comment.DeletedBy
+		if comment.DeletedByPrincipalRef != "" {
+			deletedByPrincipal = comment.DeletedByPrincipalRef
 		}
 
-		if _, err := stmt.Exec(uuid, comment.ID, comment.TaskUUID, comment.ActorUUID,
+		if _, err := stmt.Exec(uuid, comment.ID, comment.TaskUUID, createdByPrincipal,
 			comment.Body, meta, comment.ETag, comment.CreatedAt, updatedAt,
-			deletedAt, deletedBy); err != nil {
+			deletedAt, deletedByPrincipal); err != nil {
 			return fmt.Errorf("failed to import comment %s: %w", uuid, err)
 		}
 	}

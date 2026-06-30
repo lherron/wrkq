@@ -90,8 +90,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		CreatedAt    string `json:"created_at"`
 		Body         string `json:"body"`
 		PrincipalRef string `json:"principal_ref,omitempty"`
-		ActorSlug    string `json:"actor_slug,omitempty"`
-		ActorRole    string `json:"actor_role,omitempty"`
 	}
 
 	type Relation struct {
@@ -128,7 +126,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ParentTaskID          *string         `json:"parent_task_id,omitempty"`
 		ParentTaskUUID        *string         `json:"parent_task_uuid,omitempty"`
 		AssigneeSlug          *string         `json:"assignee,omitempty"`
-		AssigneeUUID          *string         `json:"assignee_uuid,omitempty"`
 		AssigneePrincipalRef  *string         `json:"assignee_principal_ref,omitempty"`
 		StartAt               *string         `json:"start_at,omitempty"`
 		DueAt                 *string         `json:"due_at,omitempty"`
@@ -145,7 +142,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		ArchivedAt            *string         `json:"archived_at,omitempty"`
 		CreatedBy             string          `json:"created_by"`
 		CreatedByPrincipalRef string          `json:"created_by_principal_ref,omitempty"`
-		CreatedByActor        string          `json:"created_by_actor,omitempty"`
 		CreatedByScopeRef     *string         `json:"created_by_scope_ref,omitempty"`
 		UpdatedBy             string          `json:"updated_by"`
 		UpdatedByPrincipalRef string          `json:"updated_by_principal_ref,omitempty"`
@@ -170,42 +166,32 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var priority int
 		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
-		var parentTaskUUID, assigneeActorUUID, assigneePrincipalRef *string
+		var parentTaskUUID, assigneePrincipalRef *string
 		var createdAt, updatedAt string
 		var etag int64
 		var projectUUID string
-		var createdByUUID, updatedByUUID, createdByPrincipalRef, updatedByPrincipalRef sql.NullString
+		var createdByPrincipalRef, updatedByPrincipalRef sql.NullString
 		var createdByScopeRef *string
 
 		err = database.QueryRow(`
 			SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			       state, priority,
-			       kind, parent_task_uuid, assignee_actor_uuid, assignee_principal_ref,
+			       kind, parent_task_uuid, assignee_principal_ref,
 			       start_at, due_at, labels, meta, description, specification, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
-			       created_by_actor_uuid, updated_by_actor_uuid,
 			       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 			FROM tasks WHERE uuid = ?
 		`, taskUUID).Scan(
 			&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
-			&kind, &parentTaskUUID, &assigneeActorUUID, &assigneePrincipalRef,
+			&kind, &parentTaskUUID, &assigneePrincipalRef,
 			&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
-			&createdByUUID, &updatedByUUID, &createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
+			&createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get task: %w", err)
-		}
-
-		// Get actor slugs
-		var createdBySlug, updatedBySlug string
-		if createdByUUID.Valid {
-			_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID.String).Scan(&createdBySlug)
-		}
-		if updatedByUUID.Valid {
-			_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID.String).Scan(&updatedBySlug)
 		}
 
 		// Get project info
@@ -225,23 +211,17 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Get assignee slug if assignee exists
+		// Derive assignee display handle from the principal ref.
 		var assigneeSlug *string
-		if assigneeActorUUID != nil {
-			var aSlug string
-			if err := database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *assigneeActorUUID).Scan(&aSlug); err == nil {
-				assigneeSlug = &aSlug
-			}
-		}
 		if assigneePrincipalRef != nil {
 			display := attribution.PrincipalHandle(*assigneePrincipalRef)
 			assigneeSlug = &display
 		}
-		createdBy := createdBySlug
+		var createdBy string
 		if createdByPrincipalRef.Valid {
 			createdBy = attribution.PrincipalHandle(createdByPrincipalRef.String)
 		}
-		updatedBy := updatedBySlug
+		var updatedBy string
 		if updatedByPrincipalRef.Valid {
 			updatedBy = attribution.PrincipalHandle(updatedByPrincipalRef.String)
 		}
@@ -267,7 +247,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			ParentTaskID:          parentTaskID,
 			ParentTaskUUID:        parentTaskUUID,
 			AssigneeSlug:          assigneeSlug,
-			AssigneeUUID:          assigneeActorUUID,
 			AssigneePrincipalRef:  assigneePrincipalRef,
 			StartAt:               startAt,
 			DueAt:                 dueAt,
@@ -284,7 +263,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			ArchivedAt:            archivedAt,
 			CreatedBy:             createdBy,
 			CreatedByPrincipalRef: valueOrEmpty(createdByPrincipalRef),
-			CreatedByActor:        createdBySlug,
 			CreatedByScopeRef:     createdByScopeRef,
 			UpdatedBy:             updatedBy,
 			UpdatedByPrincipalRef: valueOrEmpty(updatedByPrincipalRef),
@@ -303,10 +281,8 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		if !catExcludeComments {
 			// Query non-deleted comments for this task
 			rows, err := database.Query(`
-				SELECT c.id, c.created_at, c.body, c.created_by_principal_ref,
-				       a.slug as actor_slug, a.role as actor_role
+				SELECT c.id, c.created_at, c.body, c.created_by_principal_ref
 				FROM comments c
-				LEFT JOIN actors a ON c.actor_uuid = a.uuid
 				WHERE c.task_uuid = ? AND c.deleted_at IS NULL
 				ORDER BY c.created_at ASC
 			`, taskUUID)
@@ -317,20 +293,13 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			var comments []Comment
 			for rows.Next() {
 				var comment Comment
-				var principalRef, actorSlug, actorRole sql.NullString
-				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef, &actorSlug, &actorRole); err != nil {
+				var principalRef sql.NullString
+				if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef); err != nil {
 					_ = rows.Close()
 					return fmt.Errorf("failed to scan comment: %w", err)
 				}
 				if principalRef.Valid {
 					comment.PrincipalRef = principalRef.String
-					comment.ActorSlug = attribution.PrincipalHandle(principalRef.String)
-				}
-				if actorSlug.Valid && comment.ActorSlug == "" {
-					comment.ActorSlug = actorSlug.String
-				}
-				if actorRole.Valid {
-					comment.ActorRole = actorRole.String
 				}
 				comments = append(comments, comment)
 			}
@@ -352,10 +321,9 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		outgoingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
 			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-			       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+			       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 			FROM task_relations r
 			JOIN tasks t ON r.to_task_uuid = t.uuid
-			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.from_task_uuid = ?
 			ORDER BY r.kind, t.id
 		`, taskUUID)
@@ -378,10 +346,9 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		incomingRows, err := database.Query(`
 			SELECT r.kind, r.created_at,
 			       t.id AS task_id, t.uuid AS task_uuid, t.slug, t.title,
-			       COALESCE(r.created_by_principal_ref, a.id, '') AS created_by_id
+			       COALESCE(r.created_by_principal_ref, '') AS created_by_id
 			FROM task_relations r
 			JOIN tasks t ON r.from_task_uuid = t.uuid
-			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.to_task_uuid = ?
 			ORDER BY r.kind, t.id
 		`, taskUUID)
@@ -441,8 +408,7 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 					styledComments = append(styledComments, style.StyledComment{
 						ID:        c.ID,
 						CreatedAt: c.CreatedAt,
-						Actor:     c.ActorSlug,
-						Role:      c.ActorRole,
+						Actor:     attribution.PrincipalHandle(c.PrincipalRef),
 						Body:      c.Body,
 					})
 				}
@@ -497,9 +463,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				if task.AssigneeSlug != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "assignee: %s\n", *task.AssigneeSlug)
-				}
-				if task.AssigneeUUID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "assignee_uuid: %s\n", *task.AssigneeUUID)
 				}
 				if task.AssigneePrincipalRef != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "assignee_principal_ref: %s\n", *task.AssigneePrincipalRef)
@@ -573,8 +536,8 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 				for _, comment := range task.Comments {
 					// Print header line
-					fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s (%s)\n",
-						comment.ID, comment.CreatedAt, comment.ActorSlug, comment.ActorRole)
+					fmt.Fprintf(cmd.OutOrStdout(), "> [%s] [%s] %s\n",
+						comment.ID, comment.CreatedAt, attribution.PrincipalHandle(comment.PrincipalRef))
 
 					// Print body lines with > prefix
 					bodyLines := strings.Split(comment.Body, "\n")

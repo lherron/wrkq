@@ -28,7 +28,7 @@ func TestCpCommand(t *testing.T) {
 	}
 
 	// Create test actor
-	actorUUID := "test-actor-uuid"
+	actorUUID := "agent:test-actor"
 	_, err = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test-actor', 'Test Actor', 'human')
@@ -324,7 +324,7 @@ func TestCpCommandEventLogging(t *testing.T) {
 	_ = database.Migrate()
 
 	// Create actor and containers
-	actorUUID := "test-actor"
+	actorUUID := "agent:test-actor"
 	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test', 'Test', 'human')

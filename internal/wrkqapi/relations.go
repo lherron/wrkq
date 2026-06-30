@@ -66,16 +66,15 @@ func (a *API) RelationAdd(ctx context.Context, p RelationAddParams) (*WrkqRelati
 	if _, ierr := tx.Exec(`
 		INSERT INTO task_relations (
 			from_task_uuid, to_task_uuid, kind,
-			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			created_by_principal_ref, created_by_scope_ref
 		)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, fromUUID, toUUID, p.Kind, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr)); ierr != nil {
+		VALUES (?, ?, ?, ?, ?)
+	`, fromUUID, toUUID, p.Kind, attr.PrincipalRef, scopeBind(attr)); ierr != nil {
 		return nil, mapStoreError(ierr, p.FromTask)
 	}
 
 	payload := `{"from_task_uuid":"` + fromUUID + `","to_task_uuid":"` + toUUID + `","kind":"` + p.Kind + `"}`
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",
@@ -223,7 +222,6 @@ func (a *API) RelationRemove(ctx context.Context, p RelationRemoveParams) (*Wrkq
 
 	payload := `{"from_task_uuid":"` + fromUUID + `","to_task_uuid":"` + toUUID + `","kind":"` + p.Kind + `"}`
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "task",

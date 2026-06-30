@@ -34,11 +34,9 @@ type handoffJSON struct {
 	ScopeKind                  string     `json:"scope_kind"`
 	AgentID                    string     `json:"agent_id"`
 	ProjectID                  string     `json:"project_id"`
-	AgentActorUUID             *string    `json:"agent_actor_uuid"`
 	AgentPrincipalRef          *string    `json:"agent_principal_ref,omitempty"`
 	ProjectContainerUUID       *string    `json:"project_container_uuid"`
 	CreatedByAgentID           string     `json:"created_by_agent_id"`
-	CreatedByActorUUID         *string    `json:"created_by_actor_uuid"`
 	CreatedByPrincipalRef      string     `json:"created_by_principal_ref,omitempty"`
 	Title                      string     `json:"title"`
 	Body                       string     `json:"body"`
@@ -46,7 +44,6 @@ type handoffJSON struct {
 	IdempotencyKey             *string    `json:"idempotency_key"`
 	AcknowledgedAt             *time.Time `json:"acknowledged_at"`
 	AcknowledgedByAgentID      *string    `json:"acknowledged_by_agent_id"`
-	AcknowledgedByActorUUID    *string    `json:"acknowledged_by_actor_uuid"`
 	AcknowledgedByPrincipalRef *string    `json:"acknowledged_by_principal_ref,omitempty"`
 	AcknowledgementNote        *string    `json:"acknowledgement_note"`
 	Meta                       *string    `json:"meta"`
@@ -139,7 +136,7 @@ func runHandoffCreate(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	agentActorUUID, projectContainerUUID := lookupHandoffScopeRows(cmd.Context(), database.DB, resolved)
+	projectContainerUUID := lookupHandoffScopeRows(cmd.Context(), database.DB, resolved)
 	agentPrincipalRef := "agent:" + resolved.AgentID
 	args := store.CreateHandoffArgs{
 		ScopeRef:              resolved.CanonicalRef,
@@ -151,10 +148,8 @@ func runHandoffCreate(cmd *cobra.Command, _ []string) error {
 		Body:                  body,
 		IdempotencyKey:        idemKey,
 		Meta:                  meta,
-		AgentActorUUID:        agentActorUUID,
 		AgentPrincipalRef:     &agentPrincipalRef,
 		ProjectContainerUUID:  projectContainerUUID,
-		CreatedByActorUUID:    agentActorUUID,
 		CreatedByPrincipalRef: agentPrincipalRef,
 	}
 
@@ -297,14 +292,7 @@ func readHandoffBody(cmd *cobra.Command, bodyFile string) ([]byte, error) {
 	return data, nil
 }
 
-func lookupHandoffScopeRows(ctx context.Context, db *sql.DB, resolved scope.ResolvedScope) (*string, *string) {
-	var actorUUID *string
-	if resolved.AgentID != "" {
-		var uuid string
-		if err := db.QueryRowContext(ctx, "SELECT uuid FROM actors WHERE slug = ? LIMIT 1", resolved.AgentID).Scan(&uuid); err == nil {
-			actorUUID = &uuid
-		}
-	}
+func lookupHandoffScopeRows(ctx context.Context, db *sql.DB, resolved scope.ResolvedScope) *string {
 	var containerUUID *string
 	if resolved.ProjectID != "" {
 		var uuid string
@@ -312,7 +300,7 @@ func lookupHandoffScopeRows(ctx context.Context, db *sql.DB, resolved scope.Reso
 			containerUUID = &uuid
 		}
 	}
-	return actorUUID, containerUUID
+	return containerUUID
 }
 
 func projectedHandoff(ctx context.Context, db *sql.DB, args store.CreateHandoffArgs) store.Handoff {
@@ -329,11 +317,9 @@ func projectedHandoff(ctx context.Context, db *sql.DB, args store.CreateHandoffA
 		ScopeKind:             args.ScopeKind,
 		AgentID:               args.AgentID,
 		ProjectID:             args.ProjectID,
-		AgentActorUUID:        args.AgentActorUUID,
 		AgentPrincipalRef:     args.AgentPrincipalRef,
 		ProjectContainerUUID:  args.ProjectContainerUUID,
 		CreatedByAgentID:      args.CreatedByAgentID,
-		CreatedByActorUUID:    args.CreatedByActorUUID,
 		CreatedByPrincipalRef: args.CreatedByPrincipalRef,
 		Title:                 args.Title,
 		Body:                  args.Body,
@@ -407,11 +393,9 @@ func toHandoffJSON(h store.Handoff) handoffJSON {
 		ScopeKind:                  h.ScopeKind,
 		AgentID:                    h.AgentID,
 		ProjectID:                  h.ProjectID,
-		AgentActorUUID:             h.AgentActorUUID,
 		AgentPrincipalRef:          h.AgentPrincipalRef,
 		ProjectContainerUUID:       h.ProjectContainerUUID,
 		CreatedByAgentID:           h.CreatedByAgentID,
-		CreatedByActorUUID:         h.CreatedByActorUUID,
 		CreatedByPrincipalRef:      h.CreatedByPrincipalRef,
 		Title:                      h.Title,
 		Body:                       h.Body,
@@ -419,7 +403,6 @@ func toHandoffJSON(h store.Handoff) handoffJSON {
 		IdempotencyKey:             h.IdempotencyKey,
 		AcknowledgedAt:             h.AcknowledgedAt,
 		AcknowledgedByAgentID:      h.AcknowledgedByAgentID,
-		AcknowledgedByActorUUID:    h.AcknowledgedByActorUUID,
 		AcknowledgedByPrincipalRef: h.AcknowledgedByPrincipalRef,
 		AcknowledgementNote:        h.AcknowledgementNote,
 		Meta:                       h.Meta,

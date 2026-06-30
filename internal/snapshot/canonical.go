@@ -44,17 +44,12 @@ func ComputeSnapshotRev(data []byte) string {
 }
 
 // buildOrderedSnapshot creates an ordered map structure for canonical JSON.
-// Order: meta, actors, containers, tasks, comments, links, events
+// Order: meta, containers, tasks, comments, links, events
 func buildOrderedSnapshot(s *Snapshot) orderedMap {
-	result := make(orderedMap, 0, 7)
+	result := make(orderedMap, 0, 6)
 
 	// meta (always present)
 	result = append(result, keyValue{"meta", buildOrderedMeta(&s.Meta)})
-
-	// actors (if non-empty)
-	if len(s.Actors) > 0 {
-		result = append(result, keyValue{"actors", buildOrderedActors(s.Actors)})
-	}
 
 	// containers (if non-empty)
 	if len(s.Containers) > 0 {
@@ -138,41 +133,6 @@ func buildOrderedMeta(m *Meta) orderedMap {
 	return result
 }
 
-func buildOrderedActors(actors map[string]ActorEntry) orderedMap {
-	// Sort UUIDs lexicographically
-	uuids := make([]string, 0, len(actors))
-	for uuid := range actors {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	result := make(orderedMap, 0, len(actors))
-	for _, uuid := range uuids {
-		actor := actors[uuid]
-		result = append(result, keyValue{uuid, buildOrderedActor(&actor)})
-	}
-	return result
-}
-
-func buildOrderedActor(a *ActorEntry) orderedMap {
-	result := make(orderedMap, 0, 7)
-
-	// Fields in lexicographic order
-	result = append(result, keyValue{"created_at", a.CreatedAt})
-	if a.DisplayName != "" {
-		result = append(result, keyValue{"display_name", a.DisplayName})
-	}
-	result = append(result, keyValue{"id", a.ID})
-	if a.Meta != "" {
-		result = append(result, keyValue{"meta", a.Meta})
-	}
-	result = append(result, keyValue{"role", a.Role})
-	result = append(result, keyValue{"slug", a.Slug})
-	result = append(result, keyValue{"updated_at", a.UpdatedAt})
-
-	return result
-}
-
 func buildOrderedContainers(containers map[string]ContainerEntry) orderedMap {
 	uuids := make([]string, 0, len(containers))
 	for uuid := range containers {
@@ -196,7 +156,9 @@ func buildOrderedContainer(c *ContainerEntry) orderedMap {
 		result = append(result, keyValue{"archived_at", c.ArchivedAt})
 	}
 	result = append(result, keyValue{"created_at", c.CreatedAt})
-	result = append(result, keyValue{"created_by", c.CreatedBy})
+	if c.CreatedByPrincipalRef != "" {
+		result = append(result, keyValue{"created_by_principal_ref", c.CreatedByPrincipalRef})
+	}
 	result = append(result, keyValue{"etag", c.ETag})
 	result = append(result, keyValue{"id", c.ID})
 	if c.ParentUUID != "" {
@@ -207,7 +169,9 @@ func buildOrderedContainer(c *ContainerEntry) orderedMap {
 		result = append(result, keyValue{"title", c.Title})
 	}
 	result = append(result, keyValue{"updated_at", c.UpdatedAt})
-	result = append(result, keyValue{"updated_by", c.UpdatedBy})
+	if c.UpdatedByPrincipalRef != "" {
+		result = append(result, keyValue{"updated_by_principal_ref", c.UpdatedByPrincipalRef})
+	}
 
 	return result
 }
@@ -244,7 +208,9 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 		result = append(result, keyValue{"completed_at", t.CompletedAt})
 	}
 	result = append(result, keyValue{"created_at", t.CreatedAt})
-	result = append(result, keyValue{"created_by", t.CreatedBy})
+	if t.CreatedByPrincipalRef != "" {
+		result = append(result, keyValue{"created_by_principal_ref", t.CreatedByPrincipalRef})
+	}
 	if t.Description != "" {
 		result = append(result, keyValue{"description", t.Description})
 	}
@@ -278,7 +244,9 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 	result = append(result, keyValue{"state", t.State})
 	result = append(result, keyValue{"title", t.Title})
 	result = append(result, keyValue{"updated_at", t.UpdatedAt})
-	result = append(result, keyValue{"updated_by", t.UpdatedBy})
+	if t.UpdatedByPrincipalRef != "" {
+		result = append(result, keyValue{"updated_by_principal_ref", t.UpdatedByPrincipalRef})
+	}
 
 	return result
 }
@@ -302,14 +270,16 @@ func buildOrderedComment(c *CommentEntry) orderedMap {
 	result := make(orderedMap, 0, 10)
 
 	// Fields in lexicographic order
-	result = append(result, keyValue{"actor_uuid", c.ActorUUID})
 	result = append(result, keyValue{"body", c.Body})
 	result = append(result, keyValue{"created_at", c.CreatedAt})
+	if c.CreatedByPrincipalRef != "" {
+		result = append(result, keyValue{"created_by_principal_ref", c.CreatedByPrincipalRef})
+	}
 	if c.DeletedAt != "" {
 		result = append(result, keyValue{"deleted_at", c.DeletedAt})
 	}
-	if c.DeletedBy != "" {
-		result = append(result, keyValue{"deleted_by", c.DeletedBy})
+	if c.DeletedByPrincipalRef != "" {
+		result = append(result, keyValue{"deleted_by_principal_ref", c.DeletedByPrincipalRef})
 	}
 	result = append(result, keyValue{"etag", c.ETag})
 	result = append(result, keyValue{"id", c.ID})
@@ -344,7 +314,9 @@ func buildOrderedLink(l *LinkEntry) orderedMap {
 
 	// Fields in lexicographic order
 	result = append(result, keyValue{"created_at", l.CreatedAt})
-	result = append(result, keyValue{"created_by", l.CreatedBy})
+	if l.CreatedByPrincipalRef != "" {
+		result = append(result, keyValue{"created_by_principal_ref", l.CreatedByPrincipalRef})
+	}
 	if l.ID != "" {
 		result = append(result, keyValue{"id", l.ID})
 	}
@@ -375,9 +347,6 @@ func buildOrderedEvent(e *EventEntry) orderedMap {
 	result := make(orderedMap, 0, 8)
 
 	// Fields in lexicographic order
-	if e.ActorUUID != "" {
-		result = append(result, keyValue{"actor_uuid", e.ActorUUID})
-	}
 	if e.ETag != 0 {
 		result = append(result, keyValue{"etag", e.ETag})
 	}
@@ -385,6 +354,9 @@ func buildOrderedEvent(e *EventEntry) orderedMap {
 	result = append(result, keyValue{"id", e.ID})
 	if e.Payload != "" {
 		result = append(result, keyValue{"payload", e.Payload})
+	}
+	if e.PrincipalRef != "" {
+		result = append(result, keyValue{"principal_ref", e.PrincipalRef})
 	}
 	result = append(result, keyValue{"resource_type", e.ResourceType})
 	if e.ResourceUUID != "" {

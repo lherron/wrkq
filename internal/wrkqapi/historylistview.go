@@ -2,7 +2,6 @@ package wrkqapi
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -31,9 +30,6 @@ type HistoryListViewParams struct {
 type WrkqLogEvent struct {
 	ID           int64     `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
-	ActorUUID    *string   `json:"actor_uuid,omitempty"`
-	ActorSlug    *string   `json:"actor_slug,omitempty"`
-	ActorID      *string   `json:"actor_id,omitempty"`
 	PrincipalRef *string   `json:"principal_ref,omitempty"`
 	ScopeRef     *string   `json:"scope_ref,omitempty"`
 	ResourceType string    `json:"resource_type"`
@@ -110,12 +106,6 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 				return "", "", NewValidationError(fmt.Sprintf("container not found: %s", target), nil)
 			}
 			return uuid, "container", nil
-		case "A":
-			var uuid string
-			if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM actors WHERE id = ?", target).Scan(&uuid); err != nil {
-				return "", "", NewValidationError(fmt.Sprintf("actor not found: %s", target), nil)
-			}
-			return uuid, "actor", nil
 		default:
 			return "", "", NewValidationError(fmt.Sprintf("unknown friendly ID prefix: %s", prefix), nil)
 		}
@@ -128,9 +118,6 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 		}
 		if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM containers WHERE uuid = ?", target).Scan(&count); err == nil && count > 0 {
 			return target, "container", nil
-		}
-		if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM actors WHERE uuid = ?", target).Scan(&count); err == nil && count > 0 {
-			return target, "actor", nil
 		}
 		return "", "", NewValidationError(fmt.Sprintf("UUID not found: %s", target), nil)
 	}
@@ -159,11 +146,9 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 	}
 
 	query := `
-		SELECT e.id, e.timestamp, e.actor_uuid, e.principal_ref, e.scope_ref,
-		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
-		       a.slug as actor_slug, a.id as actor_id
+		SELECT e.id, e.timestamp, e.principal_ref, e.scope_ref,
+		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload
 		FROM event_log e
-		LEFT JOIN actors a ON a.uuid = e.actor_uuid
 		WHERE e.resource_uuid = ? AND e.resource_type = ?
 	`
 	args := []any{resourceUUID, resourceType}
@@ -208,12 +193,10 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 	for rows.Next() {
 		var e WrkqLogEvent
 		var timestampStr string
-		var actorSlug, actorID sql.NullString
 
 		if err := rows.Scan(
 			&e.ID,
 			&timestampStr,
-			&e.ActorUUID,
 			&e.PrincipalRef,
 			&e.ScopeRef,
 			&e.ResourceType,
@@ -221,8 +204,6 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 			&e.EventType,
 			&e.ETag,
 			&e.Payload,
-			&actorSlug,
-			&actorID,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}
@@ -231,13 +212,6 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 		e.Timestamp, err = time.Parse(time.RFC3339, timestampStr)
 		if err != nil {
 			e.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", timestampStr)
-		}
-
-		if actorSlug.Valid {
-			e.ActorSlug = &actorSlug.String
-		}
-		if actorID.Valid {
-			e.ActorID = &actorID.String
 		}
 
 		events = append(events, e)

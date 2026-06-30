@@ -398,11 +398,11 @@ func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttach
 	res, ierr := tx.Exec(`
 		INSERT INTO attachments (
 			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
-			created_by_actor_uuid, created_by_principal_ref, created_by_scope_ref
+			created_by_principal_ref, created_by_scope_ref
 		)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
 	`, up.taskUUID, up.filename, relativePath, up.mimeType, up.received, checksum,
-		legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr))
+		attr.PrincipalRef, scopeBind(attr))
 	if ierr != nil {
 		_ = os.Remove(absPath)
 		return nil, mapStoreError(ierr, up.taskUUID)
@@ -422,7 +422,6 @@ func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttach
 	})
 	payloadStr := string(payload)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "attachment",

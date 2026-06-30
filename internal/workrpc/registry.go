@@ -269,8 +269,6 @@ var dtoCatalog = []string{
 	"WrkqProjectsListView", // CLI compatibility projection (projects)
 	"WrkqProjectEntry",     // element of projects listView (legacy projects Project row)
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
-	"WrkqLegacyActor",
-	"WrkqLegacyActorListResult",
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
 	"WrkqHandoff",             // handoff resource DTO (legacy handoffJSON field order)

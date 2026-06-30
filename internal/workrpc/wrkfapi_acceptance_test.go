@@ -565,43 +565,51 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 	setupFrames := p3Run(t, dbPath,
 		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
 		mkRPC("u1", "wrkq.task.update", map[string]any{
-			"task": task1ID,
+			"task":  task1ID,
+			"actor": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "medium",
 			},
 		}),
 		mkRPC("u2", "wrkq.task.update", map[string]any{
-			"task": task2ID,
+			"task":  task2ID,
+			"actor": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "high",
 			},
 		}),
 		mkRPC("u3", "wrkq.task.update", map[string]any{
-			"task": task3ID,
+			"task":  task3ID,
+			"actor": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "low",
 			},
 		}),
 		mkRPC("u4", "wrkq.task.update", map[string]any{
-			"task": task4ID,
+			"task":  task4ID,
+			"actor": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "medium",
 			},
 		}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     task1ID,
+			"actor":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("a2", "wrkq.workflow.attach", map[string]any{
 			"task":     task2ID,
+			"actor":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("a3", "wrkq.workflow.attach", map[string]any{
 			"task":     task3ID,
+			"actor":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("a4", "wrkq.workflow.attach", map[string]any{
 			"task":     task4ID,
+			"actor":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("b1", "wrkf.role.bind", map[string]any{

@@ -72,23 +72,23 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 	}
 
 	var (
-		id, slug, title, description, kind string
-		parentUUID, archivedAt, webhookRaw *string
-		sortIndex                          int
-		etag                               int64
-		createdAt, updatedAt               string
-		createdByUUID, updatedByUUID       string
+		id, slug, title, description, kind           string
+		parentUUID, archivedAt, webhookRaw           *string
+		sortIndex                                    int
+		etag                                         int64
+		createdAt, updatedAt                         string
+		createdByPrincipalRef, updatedByPrincipalRef sql.NullString
 	)
 	if err := tx.QueryRowContext(ctx, `
 		SELECT id, slug, title, description, kind,
 		       parent_uuid, webhook_urls, sort_index, etag,
 		       created_at, updated_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid
+		       created_by_principal_ref, updated_by_principal_ref
 		FROM containers WHERE uuid = ?`, containerUUID).Scan(
 		&id, &slug, &title, &description, &kind,
 		&parentUUID, &webhookRaw, &sortIndex, &etag,
 		&createdAt, &updatedAt, &archivedAt,
-		&createdByUUID, &updatedByUUID,
+		&createdByPrincipalRef, &updatedByPrincipalRef,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, NewNotFoundError(selector, "container")
@@ -97,8 +97,12 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 	}
 
 	var createdBySlug, updatedBySlug string
-	_ = tx.QueryRowContext(ctx, "SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-	_ = tx.QueryRowContext(ctx, "SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+	if createdByPrincipalRef.Valid {
+		createdBySlug = principalHandle(createdByPrincipalRef.String)
+	}
+	if updatedByPrincipalRef.Valid {
+		updatedBySlug = principalHandle(updatedByPrincipalRef.String)
+	}
 
 	var parentID, parentPath *string
 	if parentUUID != nil {

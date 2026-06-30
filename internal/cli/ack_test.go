@@ -12,7 +12,7 @@ func TestAckTasks(t *testing.T) {
 	insertAckTask(t, database, "00000000-0000-0000-0000-000000000101", "T-00101", "ack-one", "completed", nil)
 	insertAckTask(t, database, "00000000-0000-0000-0000-000000000102", "T-00102", "ack-two", "completed", "2025-01-01T00:00:00Z")
 
-	counts, err := ackTasks(database, "00000000-0000-0000-0000-000000000001", []string{"T-00101", "T-00102"}, false)
+	counts, err := ackTasks(database, "agent:test-user", []string{"T-00101", "T-00102"}, false)
 	if err != nil {
 		t.Fatalf("ackTasks failed: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestAckTasksRequiresCompleted(t *testing.T) {
 
 	insertAckTask(t, database, "00000000-0000-0000-0000-000000000201", "T-00201", "ack-open", "open", nil)
 
-	_, err := ackTasks(database, "00000000-0000-0000-0000-000000000001", []string{"T-00201"}, false)
+	_, err := ackTasks(database, "agent:test-user", []string{"T-00201"}, false)
 	if err == nil {
 		t.Fatalf("expected error for non-completed task")
 	}
@@ -48,7 +48,7 @@ func TestAckTasksForce(t *testing.T) {
 
 	insertAckTask(t, database, "00000000-0000-0000-0000-000000000301", "T-00301", "ack-force", "open", nil)
 
-	counts, err := ackTasks(database, "00000000-0000-0000-0000-000000000001", []string{"T-00301"}, true)
+	counts, err := ackTasks(database, "agent:test-user", []string{"T-00301"}, true)
 	if err != nil {
 		t.Fatalf("ackTasks failed: %v", err)
 	}

@@ -60,7 +60,6 @@ type WrkqTaskCatView struct {
 	ArchivedAt            *string           `json:"archived_at,omitempty"`
 	CreatedBy             string            `json:"created_by"`
 	CreatedByPrincipalRef string            `json:"created_by_principal_ref,omitempty"`
-	CreatedByActor        string            `json:"created_by_actor,omitempty"`
 	CreatedByScopeRef     *string           `json:"created_by_scope_ref,omitempty"`
 	UpdatedBy             string            `json:"updated_by"`
 	UpdatedByPrincipalRef string            `json:"updated_by_principal_ref,omitempty"`
@@ -75,8 +74,6 @@ type CatViewComment struct {
 	CreatedAt    string `json:"created_at"`
 	Body         string `json:"body"`
 	PrincipalRef string `json:"principal_ref,omitempty"`
-	ActorSlug    string `json:"actor_slug,omitempty"`
-	ActorRole    string `json:"actor_role,omitempty"`
 }
 
 type CatViewRelation struct {
@@ -127,7 +124,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		createdAt, updatedAt                                     string
 		etag                                                     int64
 		projectUUID                                              string
-		createdByUUID, updatedByUUID                             sql.NullString
 		createdByPrincipalRef, updatedByPrincipalRef             sql.NullString
 		createdByScopeRef                                        *string
 	)
@@ -138,7 +134,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		       start_at, due_at, labels, meta, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       acknowledged_at, resolution,
-		       created_by_actor_uuid, updated_by_actor_uuid,
 		       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
@@ -146,21 +141,13 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
-		&createdByUUID, &updatedByUUID, &createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
+		&createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
 	)
 	if err == sql.ErrNoRows {
 		return nil, NewNotFoundError(p.Task, "task")
 	}
 	if err != nil {
 		return nil, NewInternalError(err)
-	}
-
-	var createdBySlug, updatedBySlug string
-	if createdByUUID.Valid {
-		_ = tx.QueryRowContext(ctx, "SELECT slug FROM actors WHERE uuid = ?", createdByUUID.String).Scan(&createdBySlug)
-	}
-	if updatedByUUID.Valid {
-		_ = tx.QueryRowContext(ctx, "SELECT slug FROM actors WHERE uuid = ?", updatedByUUID.String).Scan(&updatedBySlug)
 	}
 
 	var projectID string
@@ -178,21 +165,15 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	}
 
 	var assigneeSlug *string
-	if assigneeActorUUID != nil {
-		var aSlug string
-		if e := tx.QueryRowContext(ctx, "SELECT slug FROM actors WHERE uuid = ?", *assigneeActorUUID).Scan(&aSlug); e == nil {
-			assigneeSlug = &aSlug
-		}
-	}
 	if assigneePrincipalRef != nil {
 		display := principalHandle(*assigneePrincipalRef)
 		assigneeSlug = &display
 	}
-	createdBy := createdBySlug
+	var createdBy string
 	if createdByPrincipalRef.Valid {
 		createdBy = principalHandle(createdByPrincipalRef.String)
 	}
-	updatedBy := updatedBySlug
+	var updatedBy string
 	if updatedByPrincipalRef.Valid {
 		updatedBy = principalHandle(updatedByPrincipalRef.String)
 	}
@@ -236,7 +217,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		ArchivedAt:            archivedAt,
 		CreatedBy:             createdBy,
 		CreatedByPrincipalRef: nullStr(createdByPrincipalRef),
-		CreatedByActor:        createdBySlug,
 		CreatedByScopeRef:     createdByScopeRef,
 		UpdatedBy:             updatedBy,
 		UpdatedByPrincipalRef: nullStr(updatedByPrincipalRef),
@@ -282,10 +262,8 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 
 func catViewComments(ctx context.Context, tx *sql.Tx, taskUUID string) ([]CatViewComment, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT c.id, c.created_at, c.body, c.created_by_principal_ref,
-		       a.slug as actor_slug, a.role as actor_role
+		SELECT c.id, c.created_at, c.body, c.created_by_principal_ref
 		FROM comments c
-		LEFT JOIN actors a ON c.actor_uuid = a.uuid
 		WHERE c.task_uuid = ? AND c.deleted_at IS NULL
 		ORDER BY c.created_at ASC`, taskUUID)
 	if err != nil {
@@ -295,19 +273,12 @@ func catViewComments(ctx context.Context, tx *sql.Tx, taskUUID string) ([]CatVie
 	var comments []CatViewComment
 	for rows.Next() {
 		var comment CatViewComment
-		var principalRef, actorSlug, actorRole sql.NullString
-		if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef, &actorSlug, &actorRole); err != nil {
+		var principalRef sql.NullString
+		if err := rows.Scan(&comment.ID, &comment.CreatedAt, &comment.Body, &principalRef); err != nil {
 			return nil, NewInternalError(err)
 		}
 		if principalRef.Valid {
 			comment.PrincipalRef = principalRef.String
-			comment.ActorSlug = principalHandle(principalRef.String)
-		}
-		if actorSlug.Valid && comment.ActorSlug == "" {
-			comment.ActorSlug = actorSlug.String
-		}
-		if actorRole.Valid {
-			comment.ActorRole = actorRole.String
 		}
 		comments = append(comments, comment)
 	}
@@ -322,15 +293,13 @@ func catViewRelations(ctx context.Context, tx *sql.Tx, taskUUID string) ([]CatVi
 	}{
 		{"outgoing", `
 			SELECT r.kind, r.created_at, t.id, t.uuid, t.slug, t.title,
-			       COALESCE(r.created_by_principal_ref, a.id, '')
+			       COALESCE(r.created_by_principal_ref, '')
 			FROM task_relations r JOIN tasks t ON r.to_task_uuid = t.uuid
-			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.from_task_uuid = ? ORDER BY r.kind, t.id`},
 		{"incoming", `
 			SELECT r.kind, r.created_at, t.id, t.uuid, t.slug, t.title,
-			       COALESCE(r.created_by_principal_ref, a.id, '')
+			       COALESCE(r.created_by_principal_ref, '')
 			FROM task_relations r JOIN tasks t ON r.from_task_uuid = t.uuid
-			LEFT JOIN actors a ON r.created_by_actor_uuid = a.uuid
 			WHERE r.to_task_uuid = ? ORDER BY r.kind, t.id`},
 	} {
 		rows, err := tx.QueryContext(ctx, dir.query, taskUUID)

@@ -54,8 +54,8 @@ func TestCatViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(CatViewBlocker{})),
 	}, "\n")
 
-	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_actor,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
-		"CatViewComment{id,created_at,body,principal_ref,omitempty,actor_slug,omitempty,actor_role,omitempty}\n" +
+	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
+		"CatViewComment{id,created_at,body,principal_ref,omitempty}\n" +
 		"CatViewRelation{direction,kind,task_id,task_uuid,task_slug,task_title,created_at,created_by_id}\n" +
 		"CatViewBlocker{id,state}"
 
@@ -91,7 +91,7 @@ func TestContainerCatViewDTOFingerprint(t *testing.T) {
 // TestCommentCatViewDTOFingerprint guards the comment compat projection shape.
 func TestCommentCatViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqCommentCatView{}))
-	const want = "WrkqCommentCatView{actor_role,omitempty,actor_slug,omitempty,actor_uuid,omitempty,body,created_at,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,deleted_at,omitempty,deleted_by_actor_uuid,omitempty,deleted_by_principal_ref,omitempty,deleted_by_scope_ref,omitempty,etag,id,meta,omitempty,task_id,task_uuid,updated_at,omitempty,uuid}"
+	const want = "WrkqCommentCatView{body,created_at,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,deleted_at,omitempty,deleted_by_principal_ref,omitempty,deleted_by_scope_ref,omitempty,etag,id,meta,omitempty,task_id,task_uuid,updated_at,omitempty,uuid}"
 	if got != want {
 		t.Errorf("WrkqCommentCatView DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}
@@ -156,7 +156,7 @@ func TestHandoffDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(WrkqHandoffCreateResult{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqHandoffListResult{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqHandoffSearchResult{}))
-	const want = "WrkqHandoff{uuid,id,scope_ref,scope_kind,agent_id,project_id,agent_actor_uuid,agent_principal_ref,omitempty,project_container_uuid,created_by_agent_id,created_by_actor_uuid,created_by_principal_ref,omitempty,title,body,status,idempotency_key,acknowledged_at,acknowledged_by_agent_id,acknowledged_by_actor_uuid,acknowledged_by_principal_ref,omitempty,acknowledgement_note,meta,etag,created_at,updated_at}\n" +
+	const want = "WrkqHandoff{uuid,id,scope_ref,scope_kind,agent_id,project_id,agent_principal_ref,omitempty,project_container_uuid,created_by_agent_id,created_by_principal_ref,omitempty,title,body,status,idempotency_key,acknowledged_at,acknowledged_by_agent_id,acknowledged_by_principal_ref,omitempty,acknowledgement_note,meta,etag,created_at,updated_at}\n" +
 		"WrkqHandoffCreateResult{handoff,idempotentReplay}\n" +
 		"WrkqHandoffListResult{items,nextCursor,omitempty}\n" +
 		"WrkqHandoffSearchResult{handoffs,next_cursor,truncated,stale,omitempty,stale_event_count,omitempty,index_warning,omitempty}"
@@ -182,7 +182,7 @@ func TestFindListViewDTOFingerprint(t *testing.T) {
 func TestHistoryListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqHistoryListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLogEvent{}))
 	const want = "WrkqHistoryListView{items,next_cursor,omitempty}\n" +
-		"WrkqLogEvent{id,timestamp,actor_uuid,omitempty,actor_slug,omitempty,actor_id,omitempty,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,event_type,etag,omitempty,payload,omitempty}"
+		"WrkqLogEvent{id,timestamp,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,event_type,etag,omitempty,payload,omitempty}"
 	if got != want {
 		t.Errorf("history list view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
@@ -196,7 +196,7 @@ func TestHistoryListViewDTOFingerprint(t *testing.T) {
 func TestHistoryTailViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqHistoryTailView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqWatchEvent{}))
 	const want = "WrkqHistoryTailView{items,high_water}\n" +
-		"WrkqWatchEvent{id,timestamp,actor_uuid,omitempty,actor_slug,omitempty,actor_id,omitempty,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,etag,omitempty,payload,omitempty}"
+		"WrkqWatchEvent{id,timestamp,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,etag,omitempty,payload,omitempty}"
 	if got != want {
 		t.Errorf("history tail view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}

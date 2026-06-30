@@ -83,11 +83,11 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 
 	if _, serr := tx.Exec(`
 		INSERT INTO comments (
-			uuid, id, task_uuid, actor_uuid, created_by_principal_ref,
+			uuid, id, task_uuid, created_by_principal_ref,
 			created_by_scope_ref, body, meta, etag
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-	`, commentUUID, commentID, taskUUID, legacyActorBind(attr),
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+	`, commentUUID, commentID, taskUUID,
 		attr.PrincipalRef, scopeBind(attr), p.Body, metaStr); serr != nil {
 		return nil, mapStoreError(serr, p.Task)
 	}
@@ -289,7 +289,6 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		}
 		payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID + `","hard_delete":true}`
 		if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-			ActorUUID:    attr.LegacyActorUUID,
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "comment",
@@ -308,12 +307,11 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 	if _, eerr := tx.Exec(`
 		UPDATE comments
 		SET deleted_at = datetime('now'),
-		    deleted_by_actor_uuid = ?,
 		    deleted_by_principal_ref = ?,
 		    deleted_by_scope_ref = ?,
 		    etag = etag + 1
 		WHERE uuid = ?
-	`, legacyActorBind(attr), attr.PrincipalRef, scopeBind(attr), commentUUID); eerr != nil {
+	`, attr.PrincipalRef, scopeBind(attr), commentUUID); eerr != nil {
 		return nil, NewInternalError(eerr)
 	}
 
@@ -330,7 +328,6 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 	payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID +
 		`","deleted_by_principal_ref":"` + attr.PrincipalRef + `","soft_delete":true}`
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		ActorUUID:    attr.LegacyActorUUID,
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "comment",

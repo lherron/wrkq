@@ -20,7 +20,7 @@ func TestRmdir(t *testing.T) {
 	_ = database.Migrate()
 
 	// Create test actor
-	actorUUID := "test-actor-uuid"
+	actorUUID := "agent:test-actor"
 	_, err = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test-actor', 'Test Actor', 'human')

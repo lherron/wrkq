@@ -25,19 +25,9 @@ func createTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("failed to enable foreign keys: %v", err)
 	}
 
-	// Create minimal schema for testing
+	// Create minimal principal-only schema for testing. There is no actors
+	// table: write attribution is carried solely by *_principal_ref columns.
 	schema := `
-		CREATE TABLE actors (
-			uuid TEXT PRIMARY KEY,
-			id TEXT UNIQUE,
-			slug TEXT NOT NULL UNIQUE,
-			display_name TEXT,
-			role TEXT NOT NULL CHECK (role IN ('human','agent','system')),
-			meta TEXT,
-			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-		);
-
 		CREATE TABLE containers (
 			uuid TEXT PRIMARY KEY,
 			id TEXT UNIQUE,
@@ -48,8 +38,8 @@ func createTestDB(t *testing.T) *sql.DB {
 			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
 			updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
 			archived_at TEXT,
-			created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid),
-			updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid)
+			created_by_principal_ref TEXT,
+			updated_by_principal_ref TEXT
 		);
 
 		CREATE TABLE tasks (
@@ -78,28 +68,28 @@ func createTestDB(t *testing.T) *sql.DB {
 			updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
 			completed_at TEXT,
 			archived_at TEXT,
-			created_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid),
-			updated_by_actor_uuid TEXT NOT NULL REFERENCES actors(uuid)
+			created_by_principal_ref TEXT,
+			updated_by_principal_ref TEXT
 		);
 
 		CREATE TABLE comments (
 			uuid TEXT PRIMARY KEY,
 			id TEXT NOT NULL UNIQUE,
 			task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
-			actor_uuid TEXT NOT NULL REFERENCES actors(uuid),
+			created_by_principal_ref TEXT,
 			body TEXT NOT NULL,
 			meta TEXT,
 			etag INTEGER NOT NULL DEFAULT 1,
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at TEXT,
 			deleted_at TEXT,
-			deleted_by_actor_uuid TEXT REFERENCES actors(uuid)
+			deleted_by_principal_ref TEXT
 		);
 
 		CREATE TABLE event_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			actor_uuid TEXT,
+			principal_ref TEXT,
 			resource_type TEXT,
 			resource_uuid TEXT,
 			event_type TEXT NOT NULL,
@@ -119,19 +109,10 @@ func createTestDB(t *testing.T) *sql.DB {
 func seedTestData(t *testing.T, db *sql.DB) {
 	t.Helper()
 
-	// Insert actor
-	_, err := db.Exec(`
-		INSERT INTO actors (uuid, id, slug, display_name, role, created_at, updated_at)
-		VALUES ('actor-uuid-1', 'A-00001', 'test-actor', 'Test Actor', 'human', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert actor: %v", err)
-	}
-
 	// Insert container
-	_, err = db.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('container-uuid-1', 'P-00001', 'test-project', 'Test Project', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'actor-uuid-1', 'actor-uuid-1')
+	_, err := db.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
+		VALUES ('container-uuid-1', 'P-00001', 'test-project', 'Test Project', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'agent:test-actor', 'agent:test-actor')
 	`)
 	if err != nil {
 		t.Fatalf("failed to insert container: %v", err)
@@ -139,8 +120,8 @@ func seedTestData(t *testing.T, db *sql.DB) {
 
 	// Insert task
 	_, err = db.Exec(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, workflow_preset, preset_version, phase, risk_class, state, priority, labels, description, etag, created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid)
-		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', 'container-uuid-1', 'code_defect_fastlane', 1, 'open', 'medium', 'open', 2, '["label-b","label-a"]', 'Test description', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'actor-uuid-1', 'actor-uuid-1')
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, workflow_preset, preset_version, phase, risk_class, state, priority, labels, description, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
+		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', 'container-uuid-1', 'code_defect_fastlane', 1, 'open', 'medium', 'open', 2, '["label-b","label-a"]', 'Test description', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'agent:test-actor', 'agent:test-actor')
 	`)
 	if err != nil {
 		t.Fatalf("failed to insert task: %v", err)
@@ -148,8 +129,8 @@ func seedTestData(t *testing.T, db *sql.DB) {
 
 	// Insert comment
 	_, err = db.Exec(`
-		INSERT INTO comments (uuid, id, task_uuid, actor_uuid, body, etag, created_at)
-		VALUES ('comment-uuid-1', 'C-00001', 'task-uuid-1', 'actor-uuid-1', 'Test comment', 1, '2025-01-01T00:00:00Z')
+		INSERT INTO comments (uuid, id, task_uuid, created_by_principal_ref, body, etag, created_at)
+		VALUES ('comment-uuid-1', 'C-00001', 'task-uuid-1', 'agent:test-actor', 'Test comment', 1, '2025-01-01T00:00:00Z')
 	`)
 	if err != nil {
 		t.Fatalf("failed to insert comment: %v", err)
@@ -162,14 +143,13 @@ func TestCanonicalJSON(t *testing.T) {
 			SchemaVersion:           1,
 			MachineInterfaceVersion: 1,
 		},
-		Actors: map[string]ActorEntry{
-			"uuid-2": {ID: "A-00002", Slug: "actor-b", Role: "agent", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-			"uuid-1": {ID: "A-00001", Slug: "actor-a", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+		Containers: map[string]ContainerEntry{
+			"uuid-2": {ID: "P-00002", Slug: "proj-b", Title: "B", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a"},
+			"uuid-1": {ID: "P-00001", Slug: "proj-a", Title: "A", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a"},
 		},
-		Containers: map[string]ContainerEntry{},
-		Tasks:      map[string]TaskEntry{},
-		Comments:   map[string]CommentEntry{},
-		Links:      map[string]LinkEntry{},
+		Tasks:    map[string]TaskEntry{},
+		Comments: map[string]CommentEntry{},
+		Links:    map[string]LinkEntry{},
 	}
 
 	// Generate canonical JSON
@@ -188,7 +168,7 @@ func TestCanonicalJSON(t *testing.T) {
 		t.Errorf("canonical JSON is not deterministic:\n%s\nvs\n%s", string(data1), string(data2))
 	}
 
-	// Verify key ordering (actors should be sorted by UUID)
+	// Verify key ordering (containers should be sorted by UUID)
 	str := string(data1)
 	uuid1Pos := strings.Index(str, "uuid-1")
 	uuid2Pos := strings.Index(str, "uuid-2")
@@ -249,9 +229,6 @@ func TestExport(t *testing.T) {
 	if result.OutputPath != outputPath {
 		t.Errorf("wrong output path: %s", result.OutputPath)
 	}
-	if result.ActorCount != 1 {
-		t.Errorf("expected 1 actor, got %d", result.ActorCount)
-	}
 	if result.ContainerCount != 1 {
 		t.Errorf("expected 1 container, got %d", result.ContainerCount)
 	}
@@ -277,11 +254,20 @@ func TestExport(t *testing.T) {
 	}
 
 	// Verify content
-	if len(snap.Actors) != 1 {
-		t.Errorf("expected 1 actor in snapshot, got %d", len(snap.Actors))
+	if len(snap.Containers) != 1 {
+		t.Errorf("expected 1 container in snapshot, got %d", len(snap.Containers))
 	}
 	if len(snap.Tasks) != 1 {
 		t.Errorf("expected 1 task in snapshot, got %d", len(snap.Tasks))
+	}
+
+	// Principal attribution is preserved; no actor scaffolding leaks.
+	task := snap.Tasks["task-uuid-1"]
+	if task.CreatedByPrincipalRef != "agent:test-actor" {
+		t.Errorf("expected created_by_principal_ref agent:test-actor, got %q", task.CreatedByPrincipalRef)
+	}
+	if strings.Contains(string(data), "\"actors\"") || strings.Contains(string(data), "actor_uuid") {
+		t.Errorf("snapshot must not contain actor scaffolding: %s", string(data))
 	}
 }
 
@@ -390,8 +376,40 @@ func TestImportDryRun(t *testing.T) {
 	if !result.DryRun {
 		t.Error("dry run flag not set in result")
 	}
-	if result.ActorCount != 1 {
-		t.Errorf("expected 1 actor, got %d", result.ActorCount)
+	if result.ContainerCount != 1 {
+		t.Errorf("expected 1 container, got %d", result.ContainerCount)
+	}
+}
+
+// TestImportRejectsLegacyActorSnapshot proves that an actor-bearing snapshot is
+// hard-gated rather than lossily imported. wrkq is principal-only.
+func TestImportRejectsLegacyActorSnapshot(t *testing.T) {
+	db := createTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	legacy := []string{
+		// Top-level actors map.
+		`{"meta":{"schema_version":1,"machine_interface_version":1},"actors":{"u1":{"id":"A-00001","slug":"x","role":"human","created_at":"2025-01-01T00:00:00Z","updated_at":"2025-01-01T00:00:00Z"}}}`,
+		// Comment carrying actor_uuid.
+		`{"meta":{"schema_version":1,"machine_interface_version":1},"comments":{"c1":{"id":"C-00001","task_uuid":"t1","actor_uuid":"u1","body":"x","etag":1,"created_at":"2025-01-01T00:00:00Z"}}}`,
+		// Container carrying legacy bare created_by.
+		`{"meta":{"schema_version":1,"machine_interface_version":1},"containers":{"k1":{"id":"P-00001","slug":"p","created_by":"u1","updated_by":"u1","etag":1,"created_at":"2025-01-01T00:00:00Z","updated_at":"2025-01-01T00:00:00Z"}}}`,
+	}
+
+	for i, body := range legacy {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "state.json")
+		if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			t.Fatalf("case %d: write: %v", i, err)
+		}
+		_, err := Import(db, ImportOptions{InputPath: path})
+		if err == nil {
+			t.Errorf("case %d: expected legacy actor snapshot to be rejected, got nil error", i)
+			continue
+		}
+		if !strings.Contains(err.Error(), "principal-only") {
+			t.Errorf("case %d: expected principal-only rejection, got: %v", i, err)
+		}
 	}
 }
 
@@ -405,17 +423,14 @@ func TestValidateSnapshot(t *testing.T) {
 			name: "valid snapshot",
 			snap: &Snapshot{
 				Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Actors: map[string]ActorEntry{
-					"actor-1": {ID: "A-00001", Slug: "test", Role: "human", CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-				},
 				Containers: map[string]ContainerEntry{
-					"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+					"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 				},
 				Tasks: map[string]TaskEntry{
-					"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedBy: "actor-1", UpdatedBy: "actor-1", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+					"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 				},
 				Comments: map[string]CommentEntry{
-					"comment-1": {ID: "C-00001", TaskUUID: "task-1", ActorUUID: "actor-1", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
+					"comment-1": {ID: "C-00001", TaskUUID: "task-1", CreatedByPrincipalRef: "agent:a", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
 				},
 			},
 			wantErr: false,
@@ -431,7 +446,6 @@ func TestValidateSnapshot(t *testing.T) {
 			name: "task references unknown container",
 			snap: &Snapshot{
 				Meta:       Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Actors:     map[string]ActorEntry{},
 				Containers: map[string]ContainerEntry{},
 				Tasks: map[string]TaskEntry{
 					"task-1": {ID: "T-00001", ProjectUUID: "unknown-container"},
@@ -443,11 +457,10 @@ func TestValidateSnapshot(t *testing.T) {
 			name: "comment references unknown task",
 			snap: &Snapshot{
 				Meta:       Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Actors:     map[string]ActorEntry{"actor-1": {}},
 				Containers: map[string]ContainerEntry{},
 				Tasks:      map[string]TaskEntry{},
 				Comments: map[string]CommentEntry{
-					"comment-1": {TaskUUID: "unknown-task", ActorUUID: "actor-1"},
+					"comment-1": {TaskUUID: "unknown-task", CreatedByPrincipalRef: "agent:a"},
 				},
 			},
 			wantErr: true,
@@ -455,8 +468,7 @@ func TestValidateSnapshot(t *testing.T) {
 		{
 			name: "container references unknown parent",
 			snap: &Snapshot{
-				Meta:   Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Actors: map[string]ActorEntry{},
+				Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
 				Containers: map[string]ContainerEntry{
 					"container-1": {ID: "P-00001", ParentUUID: "unknown-parent"},
 				},

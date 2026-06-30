@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lherron/wrkq/internal/attribution"
 )
 
 // Manifest represents the bundle manifest.json structure
@@ -324,7 +326,7 @@ type TaskExport struct {
 type EventRow struct {
 	ID           int     `json:"id"`
 	Timestamp    string  `json:"timestamp"`
-	ActorUUID    *string `json:"actor_uuid"`
+	PrincipalRef *string `json:"principal_ref"`
 	ResourceType string  `json:"resource_type"`
 	ResourceUUID string  `json:"resource_uuid"`
 	EventType    string  `json:"event_type"`
@@ -395,6 +397,19 @@ func Collect(db *sql.DB, opts CreateOptions) (*Snapshot, error) {
 		opts.Since = ""
 	}
 
+	// Principal-only attribution filter: the legacy actor filter (UUID or slug
+	// resolved via the actors table) is gone. The selector must normalize to a
+	// canonical principal ref (agent:<id>); we then filter event_log by its
+	// principal_ref column. Bare slugs are tolerated as a SELECTOR via
+	// NormalizeCompat, but actor UUIDs / A-* / system:* refs are rejected.
+	if opts.Actor != "" {
+		normalized, err := attribution.NormalizeCompat(opts.Actor)
+		if err != nil {
+			return nil, fmt.Errorf("invalid actor filter %q: %w", opts.Actor, err)
+		}
+		opts.Actor = normalized
+	}
+
 	// Determine effective path prefixes
 	var pathPrefixes []string
 	if len(opts.PathPrefixes) > 0 {
@@ -413,10 +428,10 @@ func Collect(db *sql.DB, opts CreateOptions) (*Snapshot, error) {
 	`
 	args := []interface{}{}
 
-	// Filter by actor
+	// Filter by principal ref (canonical agent:<id>)
 	if opts.Actor != "" {
-		query += ` AND e.actor_uuid IN (SELECT uuid FROM actors WHERE uuid = ? OR slug = ?)`
-		args = append(args, opts.Actor, opts.Actor)
+		query += ` AND e.principal_ref = ?`
+		args = append(args, opts.Actor)
 	}
 
 	// Filter by cursor or time window
@@ -678,8 +693,8 @@ func computeBaseEtagTx(db queryRower, taskUUID string, opts CreateOptions, since
 
 	// Apply same filters as main query
 	if opts.Actor != "" {
-		query += ` AND actor_uuid IN (SELECT uuid FROM actors WHERE uuid = ? OR slug = ?)`
-		args = append(args, opts.Actor, opts.Actor)
+		query += ` AND principal_ref = ?`
+		args = append(args, opts.Actor)
 	}
 	if sinceEventID != nil {
 		query += ` AND id > ?`
@@ -725,35 +740,35 @@ func exportTaskTx(db queryRower, taskUUID string) (string, error) {
 	var createdAt, updatedAt string
 	var etag int64
 	var projectUUID string
-	// created_by/updated_by actor UUIDs are NULLABLE: a write by a caller principal
-	// with no legacy actor row (e.g. --as agent:flag-principal) records a principal
-	// ref but no actor uuid, so these columns can legitimately be NULL (legacy
-	// parity). Scanning into *string avoids a NULL→string scan crash on export.
-	var createdByUUID, updatedByUUID *string
+	// created_by/updated_by principal refs are NULLABLE: a row created before
+	// principal attribution (or by a path that recorded no principal) leaves these
+	// NULL. Scanning into *string avoids a NULL→string scan crash on export.
+	var createdByRef, updatedByRef *string
 
 	err := db.QueryRow(`
 		SELECT id, slug, title, project_uuid, state, priority,
 		       start_at, due_at, labels, meta, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid
+		       created_by_principal_ref, updated_by_principal_ref
 		FROM tasks WHERE uuid = ?
 	`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &state, &priority,
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
-		&createdByUUID, &updatedByUUID,
+		&createdByRef, &updatedByRef,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to get task: %w", err)
 	}
 
-	// Get actor slugs (best-effort display; empty when no actor uuid / no row).
+	// Human-facing handles from the canonical principal refs (strip agent:
+	// prefix; empty when no principal recorded).
 	var createdBySlug, updatedBySlug string
-	if createdByUUID != nil {
-		_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *createdByUUID).Scan(&createdBySlug)
+	if createdByRef != nil {
+		createdBySlug = attribution.PrincipalHandle(*createdByRef)
 	}
-	if updatedByUUID != nil {
-		_ = db.QueryRow("SELECT slug FROM actors WHERE uuid = ?", *updatedByUUID).Scan(&updatedBySlug)
+	if updatedByRef != nil {
+		updatedBySlug = attribution.PrincipalHandle(*updatedByRef)
 	}
 
 	// Get project info
@@ -879,7 +894,7 @@ func collectEvents(db queryRower, opts CreateOptions) ([]EventRow, error) {
 	}
 
 	query := `
-		SELECT id, timestamp, actor_uuid, resource_type, resource_uuid,
+		SELECT id, timestamp, principal_ref, resource_type, resource_uuid,
 		       event_type, etag, payload
 		FROM event_log
 		WHERE 1=1
@@ -888,8 +903,8 @@ func collectEvents(db queryRower, opts CreateOptions) ([]EventRow, error) {
 
 	// Apply same filters as main query
 	if opts.Actor != "" {
-		query += ` AND actor_uuid IN (SELECT uuid FROM actors WHERE uuid = ? OR slug = ?)`
-		args = append(args, opts.Actor, opts.Actor)
+		query += ` AND principal_ref = ?`
+		args = append(args, opts.Actor)
 	}
 	if sinceEventID != nil {
 		query += ` AND id > ?`
@@ -915,7 +930,7 @@ func collectEvents(db queryRower, opts CreateOptions) ([]EventRow, error) {
 	events := []EventRow{}
 	for rows.Next() {
 		var event EventRow
-		if err := rows.Scan(&event.ID, &event.Timestamp, &event.ActorUUID,
+		if err := rows.Scan(&event.ID, &event.Timestamp, &event.PrincipalRef,
 			&event.ResourceType, &event.ResourceUUID, &event.EventType,
 			&event.Etag, &event.Payload); err != nil {
 			return nil, fmt.Errorf("failed to scan event: %w", err)

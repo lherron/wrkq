@@ -343,7 +343,7 @@ func TestHandoffAckExplicitAsUsesRowProjectWithoutRuntimeEnv(t *testing.T) {
 
 	created := seedHandoff(t, database, "curly", "wrkq", "--as fallback", "body")
 
-	res := runHandoffAckCLI(t, []string{"--as", "curly", "handoff", "acknowledge", created.ID})
+	res := runHandoffAckCLI(t, []string{"--as", "agent:curly", "handoff", "acknowledge", created.ID})
 	if res.code != 0 || res.err != nil {
 		t.Fatalf("--as row-project ack failed code=%d err=%v stdout=%s stderr=%s", res.code, res.err, res.stdout, res.stderr)
 	}
@@ -363,7 +363,7 @@ func TestHandoffAckMismatchedActorIsValidationError(t *testing.T) {
 
 	created := seedHandoff(t, database, "curly", "wrkq", "wrong actor", "body")
 
-	res := runHandoffAckCLI(t, []string{"--as", "cody", "handoff", "acknowledge", created.ID})
+	res := runHandoffAckCLI(t, []string{"--as", "agent:cody", "handoff", "acknowledge", created.ID})
 	if res.code != 1 {
 		t.Fatalf("expected exit 1 for mismatched actor, got %d stdout=%s stderr=%s", res.code, res.stdout, res.stderr)
 	}

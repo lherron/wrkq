@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cli/appctx"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
@@ -82,28 +84,26 @@ func runContainerCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var sortIndex int
 	var etag int64
 	var createdAt, updatedAt string
-	var createdByUUID, updatedByUUID string
+	var createdByPrincipalRef, updatedByPrincipalRef sql.NullString
 
 	err = database.QueryRow(`
 		SELECT id, slug, title, description, kind,
 		       parent_uuid, webhook_urls, sort_index, etag,
 		       created_at, updated_at, archived_at,
-		       created_by_actor_uuid, updated_by_actor_uuid
+		       created_by_principal_ref, updated_by_principal_ref
 		FROM containers WHERE uuid = ?
 	`, containerUUID).Scan(
 		&id, &slug, &title, &description, &kind,
 		&parentUUID, &webhookURLsRaw, &sortIndex, &etag,
 		&createdAt, &updatedAt, &archivedAt,
-		&createdByUUID, &updatedByUUID,
+		&createdByPrincipalRef, &updatedByPrincipalRef,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to get container: %w", err)
 	}
 
-	// Get actor slugs
-	var createdBySlug, updatedBySlug string
-	_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", createdByUUID).Scan(&createdBySlug)
-	_ = database.QueryRow("SELECT slug FROM actors WHERE uuid = ?", updatedByUUID).Scan(&updatedBySlug)
+	createdBySlug := attribution.PrincipalHandle(createdByPrincipalRef.String)
+	updatedBySlug := attribution.PrincipalHandle(updatedByPrincipalRef.String)
 
 	// Get parent info if parent exists
 	var parentID, parentPath *string

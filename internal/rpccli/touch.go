@@ -168,7 +168,7 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 			}
 		}
 		if actor != "" {
-			params["actor"] = actor
+			params["principalRef"] = actor
 		}
 		if o.dueAt != "" {
 			params["dueAt"] = o.dueAt

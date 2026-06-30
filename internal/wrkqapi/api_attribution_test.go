@@ -1,10 +1,11 @@
 package wrkqapi
 
 // api_attribution_test.go — white-box coverage for the shared write-attribution
-// helper attributionFor (daedalus #10261 / #10285, T-05119). The helper records
-// the SAME caller-resolved principal legacy would record, falls back to the
-// built-in wrkq-system actor ONLY on the truly-empty/default path, and REJECTS a
-// non-empty invalid selector rather than silently coercing it to wrkq-system.
+// helper attributionFor (T-05381 principal-only). The helper records the EXACT
+// agent:<id> principal ref via attribution.NormalizeCanonical: an empty selector
+// uses the configured default_principal_ref (and fails when none is configured),
+// and any non-canonical caller value — bare slug, system: sentinel, full scope
+// ref — is REJECTED rather than silently coerced.
 
 import (
 	"path/filepath"
@@ -30,41 +31,42 @@ func newAttributionAPI(t *testing.T, defaultActor string) *API {
 func TestAttributionFor_ResolvesAndRejects(t *testing.T) {
 	noDefault := newAttributionAPI(t, "")
 
-	// Empty selector + no default → wrkq-system via the EXPLICIT default path.
-	if attr, err := noDefault.attributionFor(""); err != nil || attr.PrincipalRef != "agent:wrkq-system" {
-		t.Errorf("empty selector: want agent:wrkq-system/nil, got %q/%v", attr.PrincipalRef, err)
+	// Empty selector + no default_principal_ref → error (no silent system fallback).
+	if _, err := noDefault.attributionFor(""); err == nil {
+		t.Errorf("empty selector + no default: want error, got nil")
 	}
 
-	// Empty selector + configured default_actor → honor it (NOT wrkq-system).
-	withDefault := newAttributionAPI(t, "ops-bot")
+	// Empty selector + configured default_principal_ref → honor it.
+	withDefault := newAttributionAPI(t, "agent:ops-bot")
 	if attr, err := withDefault.attributionFor(""); err != nil || attr.PrincipalRef != "agent:ops-bot" {
-		t.Errorf("default_actor honor: want agent:ops-bot/nil, got %q/%v", attr.PrincipalRef, err)
+		t.Errorf("default principal honor: want agent:ops-bot/nil, got %q/%v", attr.PrincipalRef, err)
 	}
 
-	// Canonical principal ref with no legacy actor row → recorded exactly.
+	// Canonical principal ref → recorded exactly.
 	if attr, err := noDefault.attributionFor("agent:flag-principal"); err != nil || attr.PrincipalRef != "agent:flag-principal" {
 		t.Errorf("canonical principal: want agent:flag-principal/nil, got %q/%v", attr.PrincipalRef, err)
 	}
 
-	// Bare compat slug → agent:<slug>.
-	if attr, err := noDefault.attributionFor("bareslug"); err != nil || attr.PrincipalRef != "agent:bareslug" {
-		t.Errorf("bare slug: want agent:bareslug/nil, got %q/%v", attr.PrincipalRef, err)
+	// Bare compat slug → REJECTED (NormalizeCanonical does not accept bare slugs).
+	if _, err := noDefault.attributionFor("bareslug"); err == nil {
+		t.Errorf("bare slug: want rejection, got nil")
 	}
 
-	// The built-in "system:" no-actor default sentinels map to the system actor
-	// (the explicit intended-default path), NOT an error.
+	// The legacy "system:" sentinels are NOT valid caller principals → rejected.
 	for _, sentinel := range []string{"system:wrkq", "system:wrkf"} {
-		if attr, err := noDefault.attributionFor(sentinel); err != nil || attr.PrincipalRef != "agent:wrkq-system" {
-			t.Errorf("system sentinel %q: want agent:wrkq-system/nil, got %q/%v", sentinel, attr.PrincipalRef, err)
+		if _, err := noDefault.attributionFor(sentinel); err == nil {
+			t.Errorf("system sentinel %q: want rejection, got nil", sentinel)
 		}
 	}
 
-	// NON-EMPTY invalid selectors (e.g. a full scope ref) → error (WRKQ_VALIDATION at
-	// the RPC boundary), NEVER a silent wrkq-system rewrite that would destroy audit
-	// truth.
-	for _, bad := range []string{"agent:cody:project:wrkq", "agent:cody:role:reviewer"} {
+	// NON-EMPTY invalid selectors (full scope refs, actor UUIDs, A-*) → error
+	// (WRKQ_VALIDATION at the RPC boundary), NEVER a silent rewrite.
+	for _, bad := range []string{
+		"agent:cody:project:wrkq", "agent:cody:role:reviewer",
+		"A-00001", "00000000-0000-4000-8000-0000000000a0",
+	} {
 		if _, err := noDefault.attributionFor(bad); err == nil {
-			t.Errorf("invalid actor %q: want error, got nil (must not coerce to wrkq-system)", bad)
+			t.Errorf("invalid actor %q: want error, got nil", bad)
 		}
 	}
 }

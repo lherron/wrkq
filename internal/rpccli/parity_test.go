@@ -2307,20 +2307,6 @@ var parityCases = []parityCase{
 		args:  []string{"log", "P-00002", "--json"},
 	},
 	{
-		// Actor (A-*) history. A-00001 is the seeded local-human actor; it has no
-		// event_log rows, so this also proves the empty --json → null path for the
-		// actor resource type (daedalus: don't omit actor history from fixtures).
-		name:  "log/actor-id-empty-json-null",
-		setup: logSeed,
-		args:  []string{"log", "A-00001", "--json"},
-	},
-	{
-		// Empty history NDJSON → no output (legacy `var events []logEvent`).
-		name:  "log/actor-id-empty-ndjson",
-		setup: logSeed,
-		args:  []string{"log", "A-00001"},
-	},
-	{
 		name:  "log/porcelain-limit-next-cursor",
 		setup: logSeedMultiEvent,
 		args:  []string{"log", "P-00002", "--porcelain", "--limit", "1"},
@@ -3070,7 +3056,7 @@ var parityCases = []parityCase{
 	{
 		name:          "handoff/acknowledge-json",
 		setup:         [][]string{{"handoff", "create", "-t", "Ack me", "--body-file", "body.md", "--json"}},
-		args:          []string{"--as", "cody", "handoff", "acknowledge", "H-00001", "--note", "loaded next session", "--json"},
+		args:          []string{"--as", "agent:cody", "handoff", "acknowledge", "H-00001", "--note", "loaded next session", "--json"},
 		files:         map[string]string{"body.md": "ack body\n"},
 		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
@@ -3080,9 +3066,9 @@ var parityCases = []parityCase{
 		name: "handoff/acknowledge-already-errors",
 		setup: [][]string{
 			{"handoff", "create", "-t", "Twice", "--body-file", "body.md", "--json"},
-			{"--as", "cody", "handoff", "acknowledge", "H-00001", "--json"},
+			{"--as", "agent:cody", "handoff", "acknowledge", "H-00001", "--json"},
 		},
-		args:          []string{"--as", "cody", "handoff", "acknowledge", "H-00001", "--json"},
+		args:          []string{"--as", "agent:cody", "handoff", "acknowledge", "H-00001", "--json"},
 		files:         map[string]string{"body.md": "twice body\n"},
 		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
@@ -3091,7 +3077,7 @@ var parityCases = []parityCase{
 	{
 		name:          "handoff/acknowledge-dry-run",
 		setup:         [][]string{{"handoff", "create", "-t", "Dry ack", "--body-file", "body.md", "--json"}},
-		args:          []string{"--as", "cody", "handoff", "acknowledge", "H-00001", "--dry-run", "--json"},
+		args:          []string{"--as", "agent:cody", "handoff", "acknowledge", "H-00001", "--dry-run", "--json"},
 		files:         map[string]string{"body.md": "dry ack body\n"},
 		env:           []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
 		seedEnv:       []string{"ASP_SCOPE_REF=agent:cody:project:wrkq"},
@@ -3157,7 +3143,7 @@ var parityCases = []parityCase{
 		setup: [][]string{
 			{"handoff", "create", "-t", "Quartz pending", "--body-file", "body.md", "--json"},
 			{"handoff", "create", "-t", "Quartz done", "--body-file", "done.md", "--json"},
-			{"--as", "cody", "handoff", "acknowledge", "H-00002", "--json"},
+			{"--as", "agent:cody", "handoff", "acknowledge", "H-00002", "--json"},
 			{"index", "rebuild"},
 		},
 		args:              []string{"handoff", "search", "quartz", "--status", "acknowledged", "--json"},
@@ -3543,9 +3529,8 @@ var findMixed = [][]string{
 
 // logSeed builds a fixture for the `log` history read model: a task (one
 // task.created event), a top-level container P-00002 (one container.created
-// event), and a relation (adds a task.relation.created event to the task). The
-// seeded local-human actor A-00001 has no event_log rows, so it is the empty-history
-// fixture. Friendly IDs are deterministic: inbox=P-00001 (seeded), proj=P-00002,
+// event), and a relation (adds a task.relation.created event to the task).
+// Friendly IDs are deterministic: inbox=P-00001 (seeded), proj=P-00002,
 // the first task=T-00001.
 var logSeed = [][]string{
 	{"touch", "inbox/log-task", "-t", "Log Task", "--priority", "2"},
@@ -3696,7 +3681,7 @@ func TestAgentContextNoDBParity(t *testing.T) {
 	bins := buildParityBinaries(t)
 	dbPath := filepath.Join(t.TempDir(), "missing.db")
 	run := func(bin string) cliResult {
-		cmd := exec.Command(bin, "--db", dbPath, "--as", "local-human", "agent-context", "--json")
+		cmd := exec.Command(bin, "--db", dbPath, "--as", "agent:local-human", "agent-context", "--json")
 		cmd.Env = append(hermeticEnv(), "ASP_SCOPE_REF=agent:cody:project:wrkq")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -5027,7 +5012,7 @@ func seedFixtureFilesEnv(t *testing.T, bins binaries, setup [][]string, files ma
 	dbPath := filepath.Join(dir, "wrkq.db")
 	mustRun(t, bins.wrkqadm, dir, []string{"--db", dbPath, "init"})
 	for _, argv := range setup {
-		mustRunEnv(t, bins.wrkq, dir, append([]string{"--db", dbPath, "--as", "local-human"}, argv...), seedEnv)
+		mustRunEnv(t, bins.wrkq, dir, append([]string{"--db", dbPath, "--as", "agent:local-human"}, argv...), seedEnv)
 	}
 	return dir
 }
@@ -5085,7 +5070,7 @@ func runCLIEnv(t *testing.T, bin, dir string, args []string, extraEnv []string) 
 
 func runCLIStdin(t *testing.T, bin, dir string, args []string, extraEnv []string, stdin []byte) cliResult {
 	t.Helper()
-	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, args...)
+	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "agent:local-human"}, args...)
 	cmd := exec.Command(bin, full...)
 	cmd.Dir = dir
 	cmd.Env = append(hermeticEnv(), extraEnv...)
@@ -5112,7 +5097,7 @@ func runFollowWithMutation(t *testing.T, bin, dir string, followArgs []string, m
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "local-human"}, followArgs...)
+	full := append([]string{"--db", filepath.Join(dir, "wrkq.db"), "--as", "agent:local-human"}, followArgs...)
 	cmd := exec.CommandContext(ctx, bin, full...)
 	cmd.Dir = dir
 	cmd.Env = hermeticEnv()

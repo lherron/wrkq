@@ -230,7 +230,7 @@ func TestWrkqWebhookAdd_EventAttribution(t *testing.T) {
 	beforeEtag := g1EtagOf(t, dbPath, rootUUID)
 
 	frames := p2Run(t, dbPath,
-		mkRPC("w1", "wrkq.webhook.add", map[string]any{"url": "https://evt.test/wrkq", "actor": "clod"}),
+		mkRPC("w1", "wrkq.webhook.add", map[string]any{"url": "https://evt.test/wrkq", "actor": "agent:clod"}),
 	)
 	p2ResultOrFail(t, frames[1], "webhook.add event")
 
@@ -253,7 +253,8 @@ func TestWrkqWebhookAdd_EventAttribution(t *testing.T) {
 // caller-supplied canonical principal (--as agent:flag-principal, no legacy actor
 // row) must be recorded EXACTLY — both the container.updated event principal_ref
 // and the root container's updated_by_principal_ref — not coerced to wrkq-system.
-// A NON-EMPTY invalid actor (e.g. a full scope ref) is rejected WRKQ_VALIDATION.
+// A bare compat slug and a full scope ref are both rejected WRKQ_VALIDATION:
+// caller attribution is exact agent:<id> only.
 func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -274,13 +275,18 @@ func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 		t.Errorf("root updated_by_principal_ref: want agent:flag-principal, got %q", got)
 	}
 
-	// Bare compat slug normalizes to agent:<slug> (same as legacy --as <slug>).
-	frames2 := p2Run(t, dbPath,
+	// A bare compat slug is NO LONGER accepted as caller attribution: principal-only
+	// attribution requires an exact agent:<id> ref, so a bare slug is REJECTED
+	// WRKQ_VALIDATION and the root container is left unmutated.
+	etagBeforeBare := g1EtagOf(t, dbPath, rootUUID)
+	framesBare := p2Run(t, dbPath,
 		mkRPC("w2", "wrkq.webhook.add", map[string]any{"url": "https://attr2.test/wrkq", "actor": "bareslug"}),
 	)
-	p2ResultOrFail(t, frames2[1], "webhook.add bare-slug attribution")
-	if _, _, pr := g1LatestEvent(t, dbPath, "container.updated", rootUUID); pr != "agent:bareslug" {
-		t.Errorf("bare-slug event principal_ref: want agent:bareslug, got %q", pr)
+	if code := p2ErrCode(framesBare[1]); code != "WRKQ_VALIDATION" {
+		t.Errorf("bare-slug actor want WRKQ_VALIDATION, got %q (frame=%#v)", code, framesBare[1])
+	}
+	if etagAfterBare := g1EtagOf(t, dbPath, rootUUID); etagAfterBare != etagBeforeBare {
+		t.Errorf("rejected bare-slug add must not mutate root container: etag %d → %d", etagBeforeBare, etagAfterBare)
 	}
 
 	// A NON-EMPTY invalid actor (a full scope ref) must be REJECTED, not coerced to

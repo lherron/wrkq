@@ -26,7 +26,7 @@ func TestRmPurge(t *testing.T) {
 	_ = database.Migrate()
 
 	// Create test actor
-	actorUUID := "test-actor-uuid"
+	actorUUID := "agent:test-actor"
 	_, err = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test-actor', 'Test Actor', 'human')
@@ -420,7 +420,7 @@ func TestRmPurgeMultipleAttachments(t *testing.T) {
 
 	_ = database.Migrate()
 
-	actorUUID := "test-actor"
+	actorUUID := "agent:test-actor"
 	_, _ = database.Exec(`
 		INSERT INTO actors (uuid, slug, display_name, role)
 		VALUES (?, 'test', 'Test', 'human')

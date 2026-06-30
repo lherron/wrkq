@@ -391,8 +391,8 @@ func removeTarget(s *store.Store, attachDir string, attr attribution.Attribution
 	return removeTaskWithAttribution(s, attachDir, attr, target.UUID)
 }
 
-func removeTask(s *store.Store, attachDir, actorUUID, taskUUID string) (*rmResult, error) {
-	return removeTaskWithAttribution(s, attachDir, attributionFromLegacyActor(actorUUID), taskUUID)
+func removeTask(s *store.Store, attachDir, principalRef, taskUUID string) (*rmResult, error) {
+	return removeTaskWithAttribution(s, attachDir, attribution.Attribution{PrincipalRef: principalRef}, taskUUID)
 }
 
 func removeTaskWithAttribution(s *store.Store, attachDir string, attr attribution.Attribution, taskUUID string) (*rmResult, error) {

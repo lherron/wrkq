@@ -108,6 +108,8 @@ func e2eRPC(t *testing.T, bin, dbPath string, reqs ...string) map[string]map[str
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "--db", dbPath, "rpc", "--stdio")
+	// Principal-only attribution: seed writes need a valid caller principal.
+	cmd.Env = append(os.Environ(), "WRKQ_PRINCIPAL_REF=agent:smokey")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("e2eRPC stdin pipe: %v", err)
