@@ -134,7 +134,7 @@ func TestWorkflowTransitionDispatchesWebhookAndSkipsIdempotentReplay(t *testing.
 
 	expectRev := int64(0)
 	result, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		Actor:          "transition-actor",
+		PrincipalRef:   "transition-actor",
 		Role:           "coordinator",
 		ExpectRevision: &expectRev,
 		IdempotencyKey: "transition-once",
@@ -172,7 +172,7 @@ func TestWorkflowTransitionDispatchesWebhookAndSkipsIdempotentReplay(t *testing.
 	}
 
 	replayed, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		Actor:          "transition-actor",
+		PrincipalRef:   "transition-actor",
 		Role:           "coordinator",
 		ExpectRevision: &expectRev,
 		IdempotencyKey: "transition-once",
@@ -230,7 +230,7 @@ func TestWorkflowWebhookLegacyStringDefaultsToAllTaskOnlyNarrows(t *testing.T) {
 	}
 
 	expectRev := int64(0)
-	if _, err := svc.Transition(taskUUID, "complete", TransitionOptions{Actor: "transition-actor", Role: "coordinator", ExpectRevision: &expectRev}); err != nil {
+	if _, err := svc.Transition(taskUUID, "complete", TransitionOptions{PrincipalRef: "transition-actor", Role: "coordinator", ExpectRevision: &expectRev}); err != nil {
 		t.Fatalf("Transition: %v", err)
 	}
 

@@ -461,7 +461,7 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return wq.WorkflowTimeline(ctx, p)
 	}))
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
+		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 
 	// Handoff family (T-05117). Scope is CALLER-owned (resolved + self-scope
@@ -523,7 +523,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.WorkflowDiff(ctx, p.OldPath, p.NewPath)
 	}))
 	s.Register("wrkf.workflow.install", apiHandler(func(ctx context.Context, p installParams) (any, error) {
-		return api.WorkflowInstall(ctx, p.Path, defaultString(p.Actor, opts.DefaultActor))
+		return api.WorkflowInstall(ctx, p.Path, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 	s.Register("wrkf.instance.show", apiHandler(func(ctx context.Context, p instanceParams) (any, error) {
 		return api.InstanceShow(ctx, p.TaskSelector, p.InstanceID)
@@ -532,7 +532,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.InstanceNext(ctx, p.TaskSelector, p.InstanceID, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.evidence.add", apiHandler(func(ctx context.Context, p wrkfapi.EvidenceAddParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.EvidenceAdd(ctx, p)
 	}))
@@ -573,7 +573,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.CheckPreflight(ctx, p.TaskSelector, p.Transition, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.check.run", apiHandler(func(ctx context.Context, p wrkfapi.CheckRunParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.CheckRun(ctx, p)
 	}))
@@ -590,17 +590,17 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.HookShow(ctx, p.ID)
 	}))
 	s.Register("wrkf.hook.run", apiHandler(func(ctx context.Context, p wrkfapi.HookRunParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.HookRun(ctx, p)
 	}))
 	s.Register("wrkf.transition.apply", apiHandler(func(ctx context.Context, p wrkfapi.TransitionApplyParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.TransitionApply(ctx, p)
 	}))
 	s.Register("wrkf.run.start", apiHandler(func(ctx context.Context, p wrkfapi.RunStartParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.RunStart(ctx, p)
 	}))
@@ -620,7 +620,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.RunList(ctx, p.TaskSelector)
 	}))
 	s.Register("wrkf.action.start", apiHandler(func(ctx context.Context, p wrkfapi.ActionStartParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		return api.ActionStart(ctx, p)
 	}))
 	s.Register("wrkf.action.bindExternal", apiHandler(func(ctx context.Context, p wrkfapi.ActionBindExternalParams) (any, error) {
@@ -768,8 +768,8 @@ type diffParams struct {
 }
 
 type installParams struct {
-	Path  string `json:"path"`
-	Actor string `json:"actor,omitempty"`
+	Path         string `json:"path"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type taskParams struct {
@@ -778,7 +778,7 @@ type taskParams struct {
 
 type taskActorParams struct {
 	TaskSelector string `json:"task"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type instanceParams struct {

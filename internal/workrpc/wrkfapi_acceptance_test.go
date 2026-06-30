@@ -35,7 +35,7 @@ func p3Run(t *testing.T, dbPath string, reqs ...string) []map[string]any {
 	t.Helper()
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "p3-smokey", "version": "0.0.1"},
 		}),
 	}
@@ -458,7 +458,7 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 		mkRPC("b1", "wrkf.role.bind", map[string]any{
 			"task":        taskID,
 			"role":        "tester",
-			"actor":       "agent:alice",
+			"principal_ref":       "agent:alice",
 			"deliveryRef": "alice@wrkq:T-role",
 			"lane":        "test",
 		}),
@@ -468,7 +468,7 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 			"task":  taskID,
 			"kind":  "red_test",
 			"ref":   "test/smokey/p3/role-red-001",
-			"actor": "agent:alice",
+			"principal_ref": "agent:alice",
 			"role":  "tester",
 			"facts": p3RedFacts(),
 		}),
@@ -476,7 +476,7 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 		mkRPC("bad", "wrkf.transition.apply", map[string]any{
 			"task":           taskID,
 			"transition":     "author_red",
-			"actor":          "agent:bob",
+			"principal_ref":          "agent:bob",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "role-binding-bad",
@@ -484,7 +484,7 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 		mkRPC("ok", "wrkf.transition.apply", map[string]any{
 			"task":           taskID,
 			"transition":     "author_red",
-			"actor":          "agent:alice",
+			"principal_ref":          "agent:alice",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "role-binding-ok",
@@ -496,11 +496,11 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 		mkRPC("unbind", "wrkf.role.unbind", map[string]any{
 			"task":  taskID,
 			"role":  "tester",
-			"actor": "agent:carol",
+			"principal_ref": "agent:carol",
 		}),
 	)
 	bind := p2ResultOrFail(t, frames[1], "wrkf.role.bind")
-	if bind["role"] != "tester" || bind["actor"] != "agent:alice" || bind["deliveryRef"] != "alice@wrkq:T-role" {
+	if bind["role"] != "tester" || bind["principal_ref"] != "agent:alice" || bind["deliveryRef"] != "alice@wrkq:T-role" {
 		t.Fatalf("wrkf.role.bind returned wrong binding: %#v", bind)
 	}
 	listRaw, _ := frames[2]["result"].([]any)
@@ -519,7 +519,7 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 	for _, raw := range actions {
 		action, _ := raw.(map[string]any)
 		owner, _ := action["owner"].(map[string]any)
-		if owner["role"] == "tester" && owner["actor"] == "agent:alice" {
+		if owner["role"] == "tester" && owner["principal_ref"] == "agent:alice" {
 			owned = true
 			break
 		}
@@ -566,81 +566,81 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
 		mkRPC("u1", "wrkq.task.update", map[string]any{
 			"task":  task1ID,
-			"actor": "agent:smokey",
+			"principal_ref": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "medium",
 			},
 		}),
 		mkRPC("u2", "wrkq.task.update", map[string]any{
 			"task":  task2ID,
-			"actor": "agent:smokey",
+			"principal_ref": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "high",
 			},
 		}),
 		mkRPC("u3", "wrkq.task.update", map[string]any{
 			"task":  task3ID,
-			"actor": "agent:smokey",
+			"principal_ref": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "low",
 			},
 		}),
 		mkRPC("u4", "wrkq.task.update", map[string]any{
 			"task":  task4ID,
-			"actor": "agent:smokey",
+			"principal_ref": "agent:smokey",
 			"patch": map[string]any{
 				"riskClass": "medium",
 			},
 		}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     task1ID,
-			"actor":    "agent:smokey",
+			"principal_ref":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("a2", "wrkq.workflow.attach", map[string]any{
 			"task":     task2ID,
-			"actor":    "agent:smokey",
+			"principal_ref":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("a3", "wrkq.workflow.attach", map[string]any{
 			"task":     task3ID,
-			"actor":    "agent:smokey",
+			"principal_ref":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("a4", "wrkq.workflow.attach", map[string]any{
 			"task":     task4ID,
-			"actor":    "agent:smokey",
+			"principal_ref":    "agent:smokey",
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("b1", "wrkf.role.bind", map[string]any{
 			"task":        task1ID,
 			"role":        "tester",
-			"actor":       "agent:tester-a",
+			"principal_ref":       "agent:tester-a",
 			"deliveryRef": "tester-a@wrkq:" + task1ID,
 		}),
 		mkRPC("b1b", "wrkf.role.bind", map[string]any{
 			"task":        task1ID,
 			"role":        "tester",
-			"actor":       "agent:tester-aa",
+			"principal_ref":       "agent:tester-aa",
 			"deliveryRef": "tester-aa@wrkq:" + task1ID,
 		}),
 		mkRPC("b2", "wrkf.role.bind", map[string]any{
 			"task":        task2ID,
 			"role":        "tester",
-			"actor":       "agent:tester-b",
+			"principal_ref":       "agent:tester-b",
 			"deliveryRef": "tester-b@wrkq:" + task2ID,
 		}),
 		mkRPC("b3", "wrkf.role.bind", map[string]any{
 			"task":        task3ID,
 			"role":        "tester",
-			"actor":       "agent:tester-low",
+			"principal_ref":       "agent:tester-low",
 			"deliveryRef": "tester-low@wrkq:" + task3ID,
 		}),
 		mkRPC("e1", "wrkf.evidence.add", map[string]any{
 			"task":  task1ID,
 			"kind":  "red_test",
 			"ref":   "test/smokey/p3/event-query-red-1",
-			"actor": "agent:tester-a",
+			"principal_ref": "agent:tester-a",
 			"role":  "tester",
 			"facts": p3RedFacts(),
 		}),
@@ -648,7 +648,7 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 			"task":  task2ID,
 			"kind":  "red_test",
 			"ref":   "test/smokey/p3/event-query-red-2",
-			"actor": "agent:tester-b",
+			"principal_ref": "agent:tester-b",
 			"role":  "tester",
 			"facts": p3RedFacts(),
 		}),
@@ -656,7 +656,7 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 			"task":  task3ID,
 			"kind":  "red_test",
 			"ref":   "test/smokey/p3/event-query-red-low",
-			"actor": "agent:tester-low",
+			"principal_ref": "agent:tester-low",
 			"role":  "tester",
 			"facts": p3RedFacts(),
 		}),
@@ -664,14 +664,14 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 			"task":  task4ID,
 			"kind":  "red_test",
 			"ref":   "test/smokey/p3/event-query-red-legacy",
-			"actor": "agent:legacy",
+			"principal_ref": "agent:legacy",
 			"role":  "tester",
 			"facts": p3RedFacts(),
 		}),
 		mkRPC("t1", "wrkf.transition.apply", map[string]any{
 			"task":           task1ID,
 			"transition":     "author_red",
-			"actor":          "agent:tester-a",
+			"principal_ref":          "agent:tester-a",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "event-query-transition-1",
@@ -679,7 +679,7 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 		mkRPC("t2", "wrkf.transition.apply", map[string]any{
 			"task":           task2ID,
 			"transition":     "author_red",
-			"actor":          "agent:tester-b",
+			"principal_ref":          "agent:tester-b",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "event-query-transition-2",
@@ -687,7 +687,7 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 		mkRPC("t3", "wrkf.transition.apply", map[string]any{
 			"task":           task3ID,
 			"transition":     "author_red",
-			"actor":          "agent:tester-low",
+			"principal_ref":          "agent:tester-low",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "event-query-transition-3",
@@ -695,7 +695,7 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 		mkRPC("t4", "wrkf.transition.apply", map[string]any{
 			"task":           task4ID,
 			"transition":     "author_red",
-			"actor":          "agent:legacy",
+			"principal_ref":          "agent:legacy",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "event-query-transition-4",
@@ -828,7 +828,7 @@ func assertTransitionReplayItem(t *testing.T, raw any, allowedTasks map[string]b
 	if item["transition"] != "author_red" || item["fromPhase"] != "intake" || item["toPhase"] != "red" {
 		t.Fatalf("replay item transition fields mismatch: %#v", item)
 	}
-	if item["actorRole"] != "tester" {
+	if item["role"] != "tester" {
 		t.Fatalf("actorRole: want tester, got %#v", item)
 	}
 	task, _ := item["task"].(map[string]any)
@@ -846,8 +846,8 @@ func assertTransitionReplayItem(t *testing.T, raw any, allowedTasks map[string]b
 	previousActor := ""
 	for _, rawBinding := range bindings {
 		binding, _ := rawBinding.(map[string]any)
-		if binding["role"] == "tester" && binding["actor"] != "" {
-			actor, _ := binding["actor"].(string)
+		if binding["role"] == "tester" && binding["principal_ref"] != "" {
+			actor, _ := binding["principal_ref"].(string)
 			if previousActor != "" && actor < previousActor {
 				t.Fatalf("matchingRoleBindings not sorted by actor: %#v", bindings)
 			}

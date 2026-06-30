@@ -29,7 +29,7 @@ func TestDaemonWorkRPCRouteRequiresAuthAndDispatches(t *testing.T) {
 		JSONRPC: "2.0",
 		ID:      json.RawMessage(`1`),
 		Method:  "rpc.initialize",
-		Params:  json.RawMessage(`{"protocolVersion":"2026-06-14"}`),
+		Params:  json.RawMessage(`{"protocolVersion":"2026-06-30"}`),
 	}
 	body, _ := json.Marshal(reqFrame)
 

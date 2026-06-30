@@ -110,7 +110,7 @@ func setupDirectEvidenceFixture(t *testing.T) (*Service, string) {
 func TestProducibleByRejectsNonProducerRole(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
 
-	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:1", Actor: "agent-a", Role: "agent"})
+	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:1", PrincipalRef: "agent-a", Role: "agent"})
 	if err != nil {
 		t.Fatalf("AddEvidence behavior_note: %v", err)
 	}
@@ -118,9 +118,9 @@ func TestProducibleByRejectsNonProducerRole(t *testing.T) {
 	// Wrong role for a producibleBy-restricted kind.
 	_, err = svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:1",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		Actor: "agent-a", Role: "agent",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+		PrincipalRef: "agent-a", Role: "agent",
 	})
 	if got := wrkfCode(err); got != wrkfCodeKindRoleDenied {
 		t.Fatalf("non-producer role code = %q, want %s (err=%v)", got, wrkfCodeKindRoleDenied, err)
@@ -132,9 +132,9 @@ func TestProducibleByRejectsNonProducerRole(t *testing.T) {
 	// Empty role is rejected when producers are declared.
 	_, err = svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:2",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		Actor: "anon",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+		PrincipalRef: "anon",
 	})
 	if got := wrkfCode(err); got != wrkfCodeKindRoleDenied {
 		t.Fatalf("empty role code = %q, want %s", got, wrkfCodeKindRoleDenied)
@@ -143,9 +143,9 @@ func TestProducibleByRejectsNonProducerRole(t *testing.T) {
 	// Authorized role succeeds.
 	if _, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:3",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+		PrincipalRef: "po-a", Role: "product_owner",
 	}); err != nil {
 		t.Fatalf("authorized product_owner add: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestProducibleByRejectsNonProducerRole(t *testing.T) {
 func TestProducibleByUnsetAllowsAllRoles(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
 	// behavior_note declares no producibleBy → any role allowed.
-	if _, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:x", Actor: "anyone", Role: "agent"}); err != nil {
+	if _, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:x", PrincipalRef: "anyone", Role: "agent"}); err != nil {
 		t.Fatalf("unrestricted kind add should succeed: %v", err)
 	}
 }
@@ -165,9 +165,9 @@ func TestLinkageRefRejectsDanglingReference(t *testing.T) {
 
 	_, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:dangling",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"ev-DOESNOTEXIST"}`,
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"ev-DOESNOTEXIST"}`,
+		PrincipalRef: "po-a", Role: "product_owner",
 	})
 	if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
 		t.Fatalf("dangling ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageUnresolved, err)
@@ -181,9 +181,9 @@ func TestLinkageRefRequiredMissing(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
 	_, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:missing",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{}`,
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{}`,
+		PrincipalRef: "po-a", Role: "product_owner",
 	})
 	if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
 		t.Fatalf("missing required ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageUnresolved, err)
@@ -193,24 +193,24 @@ func TestLinkageRefRequiredMissing(t *testing.T) {
 func TestLinkageRefWrongKind(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
 	// Create a review first, then reference IT (wrong kind) from another review.
-	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:k", Actor: "agent-a", Role: "agent"})
+	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:k", PrincipalRef: "agent-a", Role: "agent"})
 	if err != nil {
 		t.Fatalf("seed note: %v", err)
 	}
 	rev, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:k1",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+		PrincipalRef: "po-a", Role: "product_owner",
 	})
 	if err != nil {
 		t.Fatalf("seed review: %v", err)
 	}
 	_, err = svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:k2",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"` + rev.ID + `"}`, // points at a review, not a behavior_note
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"` + rev.ID + `"}`, // points at a review, not a behavior_note
+		PrincipalRef: "po-a", Role: "product_owner",
 	})
 	if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
 		t.Fatalf("wrong-kind ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageUnresolved, err)
@@ -222,15 +222,15 @@ func TestLinkageRefWrongKind(t *testing.T) {
 
 func TestLinkageRefValidReferenceSucceeds(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
-	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:ok", Actor: "agent-a", Role: "agent"})
+	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:ok", PrincipalRef: "agent-a", Role: "agent"})
 	if err != nil {
 		t.Fatalf("seed note: %v", err)
 	}
 	if _, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:ok",
-		Facts: `{"verdict":"ready"}`,
-		Data:  `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{"verdict":"ready"}`,
+		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+		PrincipalRef: "po-a", Role: "product_owner",
 	}); err != nil {
 		t.Fatalf("valid linkage add should succeed: %v", err)
 	}
@@ -307,11 +307,11 @@ func setupStalenessFixture(t *testing.T) (*Service, string) {
 
 func TestLinkageLatestRejectsSupersededAndAcceptsCurrent(t *testing.T) {
 	svc, task := setupStalenessFixture(t)
-	first, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:n1", Actor: "ag", Role: "agent"})
+	first, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:n1", PrincipalRef: "ag", Role: "agent"})
 	if err != nil {
 		t.Fatalf("first note: %v", err)
 	}
-	second, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:n2", Actor: "ag", Role: "agent"})
+	second, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:n2", PrincipalRef: "ag", Role: "agent"})
 	if err != nil {
 		t.Fatalf("second note: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestLinkageLatestRejectsSupersededAndAcceptsCurrent(t *testing.T) {
 	// Referencing the superseded first note is rejected as stale.
 	_, err = svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:r:old",
-		Data: `{"noteId":"` + first.ID + `"}`, Actor: "ag", Role: "agent",
+		Data: `{"noteId":"` + first.ID + `"}`, PrincipalRef: "ag", Role: "agent",
 	})
 	if got := wrkfCode(err); got != wrkfCodeLinkageStale {
 		t.Fatalf("superseded ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageStale, err)
@@ -331,7 +331,7 @@ func TestLinkageLatestRejectsSupersededAndAcceptsCurrent(t *testing.T) {
 	// Referencing the current (latest) note succeeds.
 	if _, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:r:new",
-		Data: `{"noteId":"` + second.ID + `"}`, Actor: "ag", Role: "agent",
+		Data: `{"noteId":"` + second.ID + `"}`, PrincipalRef: "ag", Role: "agent",
 	}); err != nil {
 		t.Fatalf("current ref should succeed: %v", err)
 	}
@@ -365,13 +365,13 @@ func TestInstallValidationLatestRequiresKind(t *testing.T) {
 // F1/F2 — structured error detail with fix hint.
 func TestStructuredErrorDetailOnMissingFact(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
-	note, _ := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:f", Actor: "agent-a", Role: "agent"})
+	note, _ := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:f", PrincipalRef: "agent-a", Role: "agent"})
 
 	_, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "review", Ref: "urn:rev:f",
-		Facts: `{}`, // missing required verdict
-		Data:  `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		Actor: "po-a", Role: "product_owner",
+		Facts:        `{}`, // missing required verdict
+		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+		PrincipalRef: "po-a", Role: "product_owner",
 	})
 	detail, ok := AsErrorDetail(err)
 	if !ok {
@@ -396,8 +396,8 @@ func TestFactsParseErrorIncludesOffset(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
 	_, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:bad",
-		Facts: `{"x": }`, // malformed
-		Actor: "agent-a", Role: "agent",
+		Facts:        `{"x": }`, // malformed
+		PrincipalRef: "agent-a", Role: "agent",
 	})
 	if err == nil || !strings.Contains(err.Error(), "offset") {
 		t.Fatalf("malformed facts should report a byte offset: %v", err)

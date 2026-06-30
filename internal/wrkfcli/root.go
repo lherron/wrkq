@@ -53,7 +53,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagDB, "db", "", "Path to wrkq database file")
-	rootCmd.PersistentFlags().StringVar(&flagActor, "actor", "", "Workflow actor id")
+	rootCmd.PersistentFlags().StringVar(&flagActor, "principal-ref", "", "Workflow principal ref (agent:<id>)")
 	rootCmd.PersistentFlags().StringVar(&flagRole, "role", "", "Workflow role")
 	rootCmd.PersistentFlags().StringVar(&flagTask, "task", "", "Default task")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output JSON")
@@ -153,6 +153,9 @@ func codeFromError(err error) string {
 func actorDefault() string {
 	if flagActor != "" {
 		return flagActor
+	}
+	if v := os.Getenv("WRKF_PRINCIPAL_REF"); v != "" {
+		return v
 	}
 	if v := os.Getenv("WRKF_ACTOR"); v != "" {
 		return v
@@ -374,7 +377,7 @@ func evidenceCmd() *cobra.Command {
 				Summary:      summary,
 				Facts:        facts,
 				Data:         data,
-				Actor:        a.actor,
+				PrincipalRef: a.actor,
 				Role:         a.role,
 			})
 			if err != nil {
@@ -475,7 +478,7 @@ func evidenceCmd() *cobra.Command {
 				Summary:      summary,
 				Facts:        facts,
 				Data:         string(dataJSON),
-				Actor:        a.actor,
+				PrincipalRef: a.actor,
 				Role:         a.role,
 			})
 			if addErr != nil {
@@ -526,7 +529,7 @@ func obligationCmd() *cobra.Command {
 			Use:  use + " TASK OBLIGATION",
 			Args: cobra.ExactArgs(2),
 			RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-				obl, err := a.service.SetObligationStatusWithAuthority(args[0], args[1], status, evidenceID, reason, workflow.ObligationStatusOptions{Actor: a.actor, Role: a.role})
+				obl, err := a.service.SetObligationStatusWithAuthority(args[0], args[1], status, evidenceID, reason, workflow.ObligationStatusOptions{PrincipalRef: a.actor, Role: a.role})
 				if err != nil {
 					return err
 				}
@@ -742,7 +745,7 @@ func transitionCmd() *cobra.Command {
 				exp = &expectRevision
 			}
 			out, err := a.service.Transition(args[0], args[1], workflow.TransitionOptions{
-				Actor: a.actor, Role: a.role, ExpectRevision: exp, IdempotencyKey: idempotencyKey,
+				PrincipalRef: a.actor, Role: a.role, ExpectRevision: exp, IdempotencyKey: idempotencyKey,
 				ContextHash: contextHash, CheckIDs: checks, RunChecks: runChecks, DryRun: dryRun,
 				HookCatalog: a.hookCatalog, TemplateDir: workflow.HookCatalogDir(a.hookPath),
 			})
@@ -762,10 +765,10 @@ func transitionCmd() *cobra.Command {
 }
 
 func runCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "run", Short: "Bind actors to workflow runs"}
+	cmd := &cobra.Command{Use: "run", Short: "Bind principals to workflow runs"}
 	var actor, role, delivery, lane, externalRunRef, idempotencyKey, summary string
 	start := &cobra.Command{
-		Use:  "start TASK --role ROLE --actor ACTOR",
+		Use:  "start TASK --role ROLE --principal-ref PRINCIPAL_REF",
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
 			if actor == "" {
@@ -790,7 +793,7 @@ func runCmd() *cobra.Command {
 		}),
 	}
 	start.Flags().StringVar(&role, "role", "", "Workflow role")
-	start.Flags().StringVar(&actor, "actor", "", "Actor id")
+	start.Flags().StringVar(&actor, "principal-ref", "", "Principal ref (agent:<id>)")
 	start.Flags().StringVar(&delivery, "delivery-ref", "", "Delivery ref")
 	start.Flags().StringVar(&lane, "lane", "", "Lane")
 	start.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref")
@@ -901,7 +904,7 @@ func actionCmd() *cobra.Command {
 				Workflow:       workflowRef,
 				Action:         action,
 				Role:           role,
-				Actor:          firstNonEmpty(actor, a.actor),
+				PrincipalRef:   firstNonEmpty(actor, a.actor),
 				Lane:           lane,
 				DeliveryRef:    deliveryRef,
 				ExternalRunRef: externalRunRef,
@@ -918,7 +921,7 @@ func actionCmd() *cobra.Command {
 	start.Flags().StringVar(&action, "action", "", "Semantic action (triage|implement|review|verify|...)")
 	start.Flags().StringVar(&workflowRef, "workflow", "", "Workflow ref to attach when none exists (defaults to built-in wrkq-simple-task@1)")
 	start.Flags().StringVar(&role, "role", "", "Workflow role (defaults from action)")
-	start.Flags().StringVar(&actor, "actor", "", "Actor id")
+	start.Flags().StringVar(&actor, "principal-ref", "", "Principal ref (agent:<id>)")
 	start.Flags().StringVar(&lane, "lane", "", "Lane (defaults from action)")
 	start.Flags().StringVar(&deliveryRef, "delivery-ref", "", "Delivery ref")
 	start.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref (hrc:<runId>)")
@@ -1056,7 +1059,7 @@ func actionCmd() *cobra.Command {
 				ExpiredBefore:      expiredBefore,
 				LegacyActiveBefore: legacyActiveBefore,
 				Limit:              limit,
-				Actor:              firstNonEmpty(actor, a.actor),
+				PrincipalRef:       firstNonEmpty(actor, a.actor),
 				Summary:            runSummary,
 			})
 			if err != nil {
@@ -1069,7 +1072,7 @@ func actionCmd() *cobra.Command {
 	reap.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
 	reap.Flags().StringVar(&expiredBefore, "expired-before", "", "Reap leased active action runs expiring at or before this RFC3339 time (defaults to now)")
 	reap.Flags().StringVar(&legacyActiveBefore, "legacy-active-before", "", "Explicit cutoff for legacy unleased active action runs")
-	reap.Flags().StringVar(&actor, "actor", "", "Actor id")
+	reap.Flags().StringVar(&actor, "principal-ref", "", "Principal ref (agent:<id>)")
 	reap.Flags().StringVar(&runSummary, "summary", "", "Terminal summary")
 	reap.Flags().IntVar(&limit, "limit", 0, "Maximum runs to reap")
 
@@ -1287,7 +1290,7 @@ func supervisorCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, run)
 		}),
 	}
-	start.Flags().StringVar(&actor, "actor", "", "Actor id")
+	start.Flags().StringVar(&actor, "principal-ref", "", "Principal ref (agent:<id>)")
 	call := &cobra.Command{
 		Use:  "call TASK",
 		Args: cobra.ExactArgs(1),
@@ -1317,7 +1320,7 @@ func supervisorCmd() *cobra.Command {
 				if len(args) < 3 {
 					return fmt.Errorf("transition action requires target transition id")
 				}
-				out, err := a.service.Transition(args[0], args[2], workflow.TransitionOptions{Actor: a.actor, Role: "supervisor"})
+				out, err := a.service.Transition(args[0], args[2], workflow.TransitionOptions{PrincipalRef: a.actor, Role: "supervisor"})
 				if err != nil {
 					return err
 				}

@@ -71,7 +71,7 @@ type WorkflowPayload struct {
 	Outcome          string      `json:"outcome,omitempty"`
 	From             interface{} `json:"from,omitempty"`
 	To               interface{} `json:"to,omitempty"`
-	Actor            string      `json:"actor,omitempty"`
+	PrincipalRef     string      `json:"principal_ref,omitempty"`
 	Role             string      `json:"role,omitempty"`
 	RunID            *string     `json:"run_id,omitempty"`
 	ObservedRevision *int64      `json:"observed_revision,omitempty"`
@@ -86,19 +86,19 @@ type WorkflowPayload struct {
 // EventContext carries event-specific data that cannot be reconstructed from
 // the post-mutation task row.
 type EventContext struct {
-	Metadata   events.EventMetadata
-	Event      string
-	EventID    string
-	EventSeq   int64
-	OccurredAt string
+	Metadata     events.EventMetadata
+	Event        string
+	EventID      string
+	EventSeq     int64
+	OccurredAt   string
 	ActorUUID    *string
 	PrincipalRef string
 	Via          string
-	Transition *Transition
-	Changed    []string
-	Changes    map[string]Change
-	Subject    *Subject
-	Workflow   *WorkflowPayload
+	Transition   *Transition
+	Changed      []string
+	Changes      map[string]Change
+	Subject      *Subject
+	Workflow     *WorkflowPayload
 }
 
 // Payload is the webhook payload for task updates.

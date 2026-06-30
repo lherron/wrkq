@@ -19,7 +19,7 @@ import (
 // in active/ready, the from-state for implement_complete.
 func driveToReady(t *testing.T, svc *Service, taskUUID string) {
 	t.Helper()
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction triage: %v", err)
 	}
@@ -37,7 +37,7 @@ func driveToReady(t *testing.T, svc *Service, taskUUID string) {
 func driveToImplemented(t *testing.T, svc *Service, taskUUID string) {
 	t.Helper()
 	driveToReady(t, svc, taskUUID)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction implement: %v", err)
 	}
@@ -52,7 +52,7 @@ func driveToImplemented(t *testing.T, svc *Service, taskUUID string) {
 
 func completeAction(t *testing.T, svc *Service, taskUUID, action, facts string) *ActionCompleteResult {
 	t.Helper()
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: action, Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: action, PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction %s: %v", action, err)
 	}
@@ -214,7 +214,7 @@ func TestImplVerify_InvalidDispositionRejectedBeforeTransition(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	driveToReady(t, svc, taskUUID)
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction implement: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestImplVerify_ReplayIdempotent(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	driveToReady(t, svc, taskUUID)
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", Actor: "agent:t", IdempotencyKey: "ik"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "ik"})
 	if err != nil {
 		t.Fatalf("StartAction implement: %v", err)
 	}

@@ -2,7 +2,7 @@ package workrpc_test
 
 // registry_contract_test.go — RED gate for the unified wrkq/wrkf RPC method registry.
 //
-// These tests define the method-registration contract for protocol version 2026-06-14.
+// These tests define the method-registration contract for protocol version 2026-06-30.
 // They run against the unified registry implemented in internal/workrpc.
 //
 // Ownership invariant (§2 of docs/wrkq-wrkf-rpc.md):
@@ -70,7 +70,7 @@ func TestForbiddenMethodsAreAbsent(t *testing.T) {
 		if registered[method] {
 			t.Errorf(
 				"FORBIDDEN method %q is registered; it must not appear in the "+
-					"unified RPC registry (protocol 2026-06-14, §2 ownership boundary)",
+					"unified RPC registry (protocol 2026-06-30, §2 ownership boundary)",
 				method,
 			)
 		}
@@ -85,7 +85,7 @@ func TestRequiredMethodsArePresent(t *testing.T) {
 		if !registered[method] {
 			t.Errorf(
 				"REQUIRED method %q is not registered; it must be present in the "+
-					"unified RPC registry (protocol 2026-06-14, §11 P0)",
+					"unified RPC registry (protocol 2026-06-30, §11 P0)",
 				method,
 			)
 		}
@@ -95,7 +95,7 @@ func TestRequiredMethodsArePresent(t *testing.T) {
 // TestProtocolVersionContract asserts that the current registry reports the
 // unified protocol version.
 func TestProtocolVersionContract(t *testing.T) {
-	const want = "2026-06-14"
+	const want = "2026-06-30"
 	if workrpc.ProtocolVersion != want {
 		t.Errorf(
 			"workrpc.ProtocolVersion = %q; unified protocol requires %q (§5.1)",

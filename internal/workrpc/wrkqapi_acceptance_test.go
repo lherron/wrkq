@@ -55,7 +55,7 @@ func p2Run(t *testing.T, dbPath string, reqs ...string) []map[string]any {
 	t.Helper()
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "p2-smokey", "version": "0.0.1"},
 		}),
 	}

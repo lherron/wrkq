@@ -98,13 +98,13 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 		mkRPC("s1", "wrkf.action.start", map[string]any{
 			"task":           taskID,
 			"action":         "triage",
-			"actor":          actActor,
+			"principal_ref":          actActor,
 			"idempotencyKey": "act:start:1",
 		}),
 		mkRPC("s2", "wrkf.action.start", map[string]any{
 			"task":           taskID,
 			"action":         "triage",
-			"actor":          actActor,
+			"principal_ref":          actActor,
 			"idempotencyKey": "act:start:1",
 		}),
 		mkRPC("l1", "wrkf.run.list", map[string]any{"task": taskID}),
@@ -153,7 +153,7 @@ func TestWrkfActionBindExternal_HRCRefAndConflict(t *testing.T) {
 
 	startFrames := p3Run(t, dbPath,
 		mkRPC("s1", "wrkf.action.start", map[string]any{
-			"task": taskID, "action": "triage", "actor": actActor,
+			"task": taskID, "action": "triage", "principal_ref": actActor,
 		}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
@@ -197,7 +197,7 @@ func TestWrkfActionBindExternal_BareRefGetsHRCPrefix(t *testing.T) {
 		"a5000000-0000-4000-8000-000000000003",
 		"action-bind-bare", "Action Bind Bare")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -226,7 +226,7 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 		mkRPC("s1", "wrkf.action.start", map[string]any{
 			"task":           taskID,
 			"action":         "triage",
-			"actor":          actActor,
+			"principal_ref":          actActor,
 			"idempotencyKey": "act:lease:start:1",
 			"leaseOwner":     "agent-loop:test",
 			"leaseMs":        60000,
@@ -300,7 +300,7 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 		mkRPC("s1", "wrkf.action.start", map[string]any{
 			"task":       reapTaskID,
 			"action":     "triage",
-			"actor":      actActor,
+			"principal_ref":      actActor,
 			"leaseOwner": "agent-loop:reaper-test",
 			"leaseMs":    60000,
 		}),
@@ -314,7 +314,7 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 			"task":          reapTaskID,
 			"action":        "triage",
 			"expiredBefore": future,
-			"actor":         actActor,
+			"principal_ref":         actActor,
 		}),
 		mkRPC("completeOld", "wrkf.action.complete", map[string]any{
 			"actionRunId": reapRunID,
@@ -346,7 +346,7 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 		"a5000000-0000-4000-8000-000000000032",
 		"action-legacy-reap", "Action Legacy Reap")
 	legacyStartFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": legacyTaskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": legacyTaskID, "action": "triage", "principal_ref": actActor}),
 	)
 	legacyRunID := actRunID(t, p2ResultOrFail(t, legacyStartFrames[1], "legacy action.start"), "legacy start")
 	legacyFrames := p3Run(t, dbPath,
@@ -381,7 +381,7 @@ func TestWrkfActionComplete_EvidenceTransitionFinishAndReplay(t *testing.T) {
 		"action-complete", "Action Complete")
 	actSeedSpecification(t, dbPath, "a5000000-0000-4000-8000-000000000004", "spec: triaged deliverable")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -455,7 +455,7 @@ func TestWrkfActionComplete_TransitionFalseSkips(t *testing.T) {
 		"a5000000-0000-4000-8000-000000000005",
 		"action-complete-skip", "Action Complete Skip")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -493,7 +493,7 @@ func TestWrkfActionFail_RecordsEvidenceAndFails(t *testing.T) {
 		"a5000000-0000-4000-8000-000000000006",
 		"action-fail", "Action Fail")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -537,7 +537,7 @@ func TestWrkfAction_FullStdioFlow(t *testing.T) {
 		"action-flow", "Action Flow")
 
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -585,25 +585,25 @@ func TestWrkfActionList_IncludeClosedInstances(t *testing.T) {
 	// Drive a full lifecycle through the simple workflow to close the first
 	// instance: triage -> implement -> verify -> review (review_complete closes).
 	driveFrames := p3Run(t, dbPath,
-		mkRPC("t1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("t1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	triageRun := actRunID(t, p2ResultOrFail(t, driveFrames[1], "triage start"), "triage start")
 	p3Run(t, dbPath, mkRPC("tc", "wrkf.action.complete", map[string]any{"actionRunId": triageRun, "evidence": map[string]any{"summary": "t"}}))
 
-	implFrames := p3Run(t, dbPath, mkRPC("i1", "wrkf.action.start", map[string]any{"task": taskID, "action": "implement", "actor": actActor}))
+	implFrames := p3Run(t, dbPath, mkRPC("i1", "wrkf.action.start", map[string]any{"task": taskID, "action": "implement", "principal_ref": actActor}))
 	implRun := actRunID(t, p2ResultOrFail(t, implFrames[1], "impl start"), "impl start")
 	p3Run(t, dbPath, mkRPC("ic", "wrkf.action.complete", map[string]any{"actionRunId": implRun, "evidence": map[string]any{"summary": "i"}}))
 
-	verFrames := p3Run(t, dbPath, mkRPC("v1", "wrkf.action.start", map[string]any{"task": taskID, "action": "verify", "actor": actActor}))
+	verFrames := p3Run(t, dbPath, mkRPC("v1", "wrkf.action.start", map[string]any{"task": taskID, "action": "verify", "principal_ref": actActor}))
 	verRun := actRunID(t, p2ResultOrFail(t, verFrames[1], "verify start"), "verify start")
 	p3Run(t, dbPath, mkRPC("vc", "wrkf.action.complete", map[string]any{"actionRunId": verRun, "evidence": map[string]any{"summary": "v"}}))
 
-	revFrames := p3Run(t, dbPath, mkRPC("r1", "wrkf.action.start", map[string]any{"task": taskID, "action": "review", "actor": actActor}))
+	revFrames := p3Run(t, dbPath, mkRPC("r1", "wrkf.action.start", map[string]any{"task": taskID, "action": "review", "principal_ref": actActor}))
 	revRun := actRunID(t, p2ResultOrFail(t, revFrames[1], "review start"), "review start")
 	p3Run(t, dbPath, mkRPC("rc", "wrkf.action.complete", map[string]any{"actionRunId": revRun, "evidence": map[string]any{"summary": "r"}}))
 
 	// First instance is now closed. Start a NEW action — attaches a new instance.
-	newFrames := p3Run(t, dbPath, mkRPC("n1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}))
+	newFrames := p3Run(t, dbPath, mkRPC("n1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}))
 	newRun := actRunID(t, p2ResultOrFail(t, newFrames[1], "new triage start"), "new triage start")
 
 	frames := p3Run(t, dbPath,
@@ -638,7 +638,7 @@ func TestWrkfAction_NoLegacyTaskFields(t *testing.T) {
 		"action-no-legacy", "Action No Legacy")
 
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "actor": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 	p3Run(t, dbPath, mkRPC("c1", "wrkf.action.complete", map[string]any{"actionRunId": runID, "evidence": map[string]any{"summary": "ok"}}))

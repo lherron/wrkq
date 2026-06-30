@@ -94,7 +94,7 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 
 	run, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "triage", Actor: "agent:t", IdempotencyKey: "k1",
+		Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "k1",
 	})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
@@ -114,7 +114,7 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 
 	// Replay → same run.
 	again, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "triage", Actor: "agent:t", IdempotencyKey: "k1",
+		Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "k1",
 	})
 	if err != nil {
 		t.Fatalf("StartAction replay: %v", err)
@@ -134,7 +134,7 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 
 	// Mismatch: same key, different action → idempotency mismatch.
 	if _, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "implement", Actor: "agent:t", IdempotencyKey: "k1",
+		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "k1",
 	}); err == nil {
 		t.Errorf("expected idempotency mismatch for same key + different action")
 	}
@@ -142,7 +142,7 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 
 func TestCompleteAction_EvidenceTransitionFinishReplay(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestCompleteAction_EvidenceTransitionFinishReplay(t *testing.T) {
 // evidence/transition and with the run finished (daedalus required test #2).
 func TestCompleteAction_PartialReplayRecovers(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestCompleteAction_PartialReplayRecovers(t *testing.T) {
 		Kind:           "triage_result",
 		Ref:            "wrkf-action:" + run.RunID,
 		Summary:        "ok",
-		Actor:          run.Actor,
+		PrincipalRef:   run.PrincipalRef,
 		Role:           run.Role,
 		RunID:          run.RunID,
 		IdempotencyKey: "wrkf-action:" + run.RunID + ":evidence:triage_result",
@@ -228,7 +228,7 @@ func TestCompleteAction_PartialReplayRecovers(t *testing.T) {
 		t.Fatalf("pre-commit evidence: %v", err)
 	}
 	if _, err := svc.TransitionForSelectors("", inst.ID, "triage_complete", TransitionOptions{
-		Actor:          run.Actor,
+		PrincipalRef:   run.PrincipalRef,
 		Role:           run.Role,
 		IdempotencyKey: "wrkf-action:" + run.RunID + ":transition:triage_complete",
 		RunID:          run.RunID,
@@ -303,7 +303,7 @@ func TestCompleteAction_DefaultEvidenceKindMatchesTemplate(t *testing.T) {
 		{"verify", "verify_result"},
 		{"review", "review_result"},
 	} {
-		run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: s.action, Actor: "agent:t"})
+		run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: s.action, PrincipalRef: "agent:t"})
 		if err != nil {
 			t.Fatalf("StartAction %s: %v", s.action, err)
 		}
@@ -325,7 +325,7 @@ func TestCompleteAction_DefaultEvidenceKindMatchesTemplate(t *testing.T) {
 
 func TestFailAction_EvidenceAndTerminalNoTransition(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestFailAction_EvidenceAndTerminalNoTransition(t *testing.T) {
 // terminalization must not record success evidence or apply a success transition.
 func TestCompleteAction_TerminalFailedRunRejectsSuccessSideEffects(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestCompleteAction_TriageReadyNormalizesInProgressToOpen(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "A shaped specification.", "in_progress")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestCompleteAction_TriageNoSpecBlocksTask(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "", "open")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestCompleteAction_TriageWhitespaceSpecBlocksTask(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "   \n\t  ", "open")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -509,7 +509,7 @@ func TestCompleteAction_TriageBlockedReplayIdempotent(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "", "open")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestCompleteAction_TriageReTriageFromBlocked(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "", "open")
 
-	run1, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t", IdempotencyKey: "t1"})
+	run1, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "t1"})
 	if err != nil {
 		t.Fatalf("StartAction 1: %v", err)
 	}
@@ -550,7 +550,7 @@ func TestCompleteAction_TriageReTriageFromBlocked(t *testing.T) {
 
 	// Re-triage: a spec is now produced.
 	setTaskSpecAndState(t, svc, taskUUID, "Now properly shaped.", "blocked")
-	run2, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t", IdempotencyKey: "t2"})
+	run2, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "t2"})
 	if err != nil {
 		t.Fatalf("StartAction 2: %v", err)
 	}

@@ -33,7 +33,7 @@ type Template struct {
 
 type RoleSpec struct {
 	Description string   `json:"description,omitempty"`
-	Actors      []string `json:"actors,omitempty"`
+	Principals  []string `json:"principals,omitempty"`
 }
 
 type KindSpec struct {
@@ -41,7 +41,7 @@ type KindSpec struct {
 	Class       string         `json:"class,omitempty"`
 	Facts       *FactsContract `json:"facts,omitempty"`
 	// ProducibleBy declares which roles may produce this evidence kind
-	// (supplied-role conformance, not an authenticated-actor boundary). When
+	// (supplied-role conformance, not an authenticated-principal boundary). When
 	// empty, all roles are allowed. To allow system-produced evidence, list
 	// "system" explicitly — there is no implicit admin bypass.
 	ProducibleBy []string `json:"producibleBy,omitempty"`
@@ -98,11 +98,11 @@ type TransitionSpec struct {
 }
 
 type SeparationOfDutySpec struct {
-	DistinctActorFromEvidence  []string                    `json:"distinctActorFromEvidence,omitempty"`
-	EvidenceActorPairsDistinct []EvidenceActorDistinctPair `json:"evidenceActorPairsDistinct,omitempty"`
+	DistinctPrincipalFromEvidence  []string                        `json:"distinctPrincipalFromEvidence,omitempty"`
+	EvidencePrincipalPairsDistinct []EvidencePrincipalDistinctPair `json:"evidencePrincipalPairsDistinct,omitempty"`
 }
 
-type EvidenceActorDistinctPair struct {
+type EvidencePrincipalDistinctPair struct {
 	LeftKind  string `json:"leftKind"`
 	RightKind string `json:"rightKind"`
 }
@@ -168,16 +168,16 @@ type EffectSpec struct {
 }
 
 type ObligationCreateSpec struct {
-	Kind         string `json:"kind"`
-	OwnerRole    string `json:"ownerRole,omitempty"`
-	OwnerActor   string `json:"ownerActor,omitempty"`
-	ObligeeRole  string `json:"obligeeRole,omitempty"`
-	ObligeeActor string `json:"obligeeActor,omitempty"`
-	WaiveRole    string `json:"waiveRole,omitempty"`
-	WaiveActor   string `json:"waiveActor,omitempty"`
-	NoSelfWaive  *bool  `json:"noSelfWaive,omitempty"`
-	Blocking     bool   `json:"blocking"`
-	Reason       string `json:"reason,omitempty"`
+	Kind                string `json:"kind"`
+	OwnerRole           string `json:"ownerRole,omitempty"`
+	OwnerPrincipalRef   string `json:"ownerPrincipalRef,omitempty"`
+	ObligeeRole         string `json:"obligeeRole,omitempty"`
+	ObligeePrincipalRef string `json:"obligeePrincipalRef,omitempty"`
+	WaiveRole           string `json:"waiveRole,omitempty"`
+	WaivePrincipalRef   string `json:"waivePrincipalRef,omitempty"`
+	NoSelfWaive         *bool  `json:"noSelfWaive,omitempty"`
+	Blocking            bool   `json:"blocking"`
+	Reason              string `json:"reason,omitempty"`
 }
 
 type HookRef struct {
@@ -253,7 +253,7 @@ type Event struct {
 	Seq              int64           `json:"seq"`
 	SchemaVersion    string          `json:"schemaVersion"`
 	Type             string          `json:"type"`
-	Actor            string          `json:"actor,omitempty"`
+	PrincipalRef     string          `json:"principal_ref,omitempty"`
 	Role             string          `json:"role,omitempty"`
 	RunID            string          `json:"runId,omitempty"`
 	ObservedRevision int64           `json:"observedRevision"`
@@ -277,7 +277,7 @@ type Evidence struct {
 	Facts                json.RawMessage `json:"facts,omitempty"`
 	Data                 json.RawMessage `json:"data,omitempty"`
 	Source               json.RawMessage `json:"source,omitempty"`
-	Actor                string          `json:"actor,omitempty"`
+	PrincipalRef         string          `json:"principal_ref,omitempty"`
 	Role                 string          `json:"role,omitempty"`
 	RunID                string          `json:"runId,omitempty"`
 	ContentHash          string          `json:"contentHash,omitempty"`
@@ -312,7 +312,7 @@ type AddEvidenceParams struct {
 	Summary        string
 	Facts          string
 	Data           string
-	Actor          string
+	PrincipalRef   string
 	Role           string
 	RunID          string
 	ContentHash    string
@@ -321,13 +321,13 @@ type AddEvidenceParams struct {
 }
 
 type RoleBinding struct {
-	InstanceID  string `json:"instanceId"`
-	Role        string `json:"role"`
-	Actor       string `json:"actor"`
-	DeliveryRef string `json:"deliveryRef,omitempty"`
-	Lane        string `json:"lane,omitempty"`
-	BindingMode string `json:"bindingMode"`
-	BoundAt     string `json:"boundAt"`
+	InstanceID   string `json:"instanceId"`
+	Role         string `json:"role"`
+	PrincipalRef string `json:"principal_ref"`
+	DeliveryRef  string `json:"deliveryRef,omitempty"`
+	Lane         string `json:"lane,omitempty"`
+	BindingMode  string `json:"bindingMode"`
+	BoundAt      string `json:"boundAt"`
 }
 
 type EventQueryParams struct {
@@ -364,8 +364,8 @@ type TransitionEvent struct {
 	FromPhase            string          `json:"fromPhase,omitempty"`
 	ToPhase              string          `json:"toPhase,omitempty"`
 	TransitionedAt       string          `json:"transitionedAt"`
-	Actor                string          `json:"actor,omitempty"`
-	ActorRole            string          `json:"actorRole,omitempty"`
+	PrincipalRef         string          `json:"principal_ref,omitempty"`
+	Role                 string          `json:"role,omitempty"`
 	MatchingRoleBindings []RoleBinding   `json:"matchingRoleBindings"`
 	RoleBindings         []RoleBinding   `json:"roleBindings,omitempty"`
 	Payload              json.RawMessage `json:"payload,omitempty"`
@@ -383,26 +383,26 @@ type EventTaskRef struct {
 }
 
 type Obligation struct {
-	ID                    string          `json:"id"`
-	InstanceID            string          `json:"instanceId,omitempty"`
-	Kind                  string          `json:"kind"`
-	OwnerRole             string          `json:"ownerRole,omitempty"`
-	OwnerActor            string          `json:"ownerActor,omitempty"`
-	ObligeeRole           string          `json:"obligeeRole,omitempty"`
-	ObligeeActor          string          `json:"obligeeActor,omitempty"`
-	WaiveRole             string          `json:"waiveRole,omitempty"`
-	WaiveActor            string          `json:"waiveActor,omitempty"`
-	NoSelfWaive           bool            `json:"noSelfWaive,omitempty"`
-	Blocking              bool            `json:"blocking"`
-	Status                string          `json:"status"`
-	Reason                string          `json:"reason,omitempty"`
-	Data                  json.RawMessage `json:"data,omitempty"`
-	SatisfiedByEvidenceID string          `json:"satisfiedByEvidenceId,omitempty"`
-	ResolvedByActor       string          `json:"resolvedByActor,omitempty"`
-	ResolvedByRole        string          `json:"resolvedByRole,omitempty"`
-	ResolvedAt            string          `json:"resolvedAt,omitempty"`
-	CreatedAt             string          `json:"createdAt"`
-	UpdatedAt             string          `json:"updatedAt"`
+	ID                     string          `json:"id"`
+	InstanceID             string          `json:"instanceId,omitempty"`
+	Kind                   string          `json:"kind"`
+	OwnerRole              string          `json:"ownerRole,omitempty"`
+	OwnerPrincipalRef      string          `json:"ownerPrincipalRef,omitempty"`
+	ObligeeRole            string          `json:"obligeeRole,omitempty"`
+	ObligeePrincipalRef    string          `json:"obligeePrincipalRef,omitempty"`
+	WaiveRole              string          `json:"waiveRole,omitempty"`
+	WaivePrincipalRef      string          `json:"waivePrincipalRef,omitempty"`
+	NoSelfWaive            bool            `json:"noSelfWaive,omitempty"`
+	Blocking               bool            `json:"blocking"`
+	Status                 string          `json:"status"`
+	Reason                 string          `json:"reason,omitempty"`
+	Data                   json.RawMessage `json:"data,omitempty"`
+	SatisfiedByEvidenceID  string          `json:"satisfiedByEvidenceId,omitempty"`
+	ResolvedByPrincipalRef string          `json:"resolvedByPrincipalRef,omitempty"`
+	ResolvedByRole         string          `json:"resolvedByRole,omitempty"`
+	ResolvedAt             string          `json:"resolvedAt,omitempty"`
+	CreatedAt              string          `json:"createdAt"`
+	UpdatedAt              string          `json:"updatedAt"`
 }
 
 type Effect struct {
@@ -444,7 +444,7 @@ type CheckRun struct {
 	Code         string          `json:"code,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
 	Facts        json.RawMessage `json:"facts,omitempty"`
-	Actor        string          `json:"actor,omitempty"`
+	PrincipalRef string          `json:"principal_ref,omitempty"`
 	Role         string          `json:"role,omitempty"`
 	RunID        string          `json:"runId,omitempty"`
 	StartedAt    string          `json:"startedAt"`
@@ -455,7 +455,7 @@ type Run struct {
 	ID             string `json:"id"`
 	InstanceID     string `json:"instanceId,omitempty"`
 	Role           string `json:"role"`
-	Actor          string `json:"actor"`
+	PrincipalRef   string `json:"principal_ref"`
 	DeliveryRef    string `json:"deliveryRef,omitempty"`
 	Lane           string `json:"lane,omitempty"`
 	ExternalRunRef string `json:"externalRunRef,omitempty"`
@@ -553,10 +553,10 @@ type NextAction struct {
 }
 
 type ActionOwner struct {
-	Role        string `json:"role"`
-	Actor       string `json:"actor,omitempty"`
-	DeliveryRef string `json:"deliveryRef,omitempty"`
-	Lane        string `json:"lane,omitempty"`
+	Role         string `json:"role"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
+	DeliveryRef  string `json:"deliveryRef,omitempty"`
+	Lane         string `json:"lane,omitempty"`
 }
 
 type Blocker struct {
@@ -585,7 +585,7 @@ type ValidateResult struct {
 }
 
 type TransitionOptions struct {
-	Actor          string
+	PrincipalRef   string
 	Role           string
 	ExpectRevision *int64
 	IdempotencyKey string

@@ -38,6 +38,9 @@ func NewServer(out io.Writer) *Server {
 }
 
 func (s *Server) Register(method string, handler Handler) {
+	if isWrkfDomainMethod(method) {
+		handler = guardLegacyActorParams(handler)
+	}
 	s.handlers[method] = handler
 }
 

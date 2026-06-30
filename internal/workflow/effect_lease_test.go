@@ -85,9 +85,10 @@ func setupEffectFixture(t *testing.T, n int) *Service {
 // leased by AT MOST one goroutine (no duplicate leases).
 //
 // Contract §6 invariant 4:
-//   "claim atomically selects pending/failed/expired effects + sets
-//    status='leased', leased_by, leased_until, lease_token."
-//   Two concurrent claimers → disjoint effect sets.
+//
+//	"claim atomically selects pending/failed/expired effects + sets
+//	 status='leased', leased_by, leased_until, lease_token."
+//	Two concurrent claimers → disjoint effect sets.
 //
 // Regression guard: ClaimEffects must keep this atomic selection/update as one
 // indivisible operation so concurrent adapters cannot lease the same effect.
@@ -156,7 +157,8 @@ func TestClaimEffectsAtomicity(t *testing.T) {
 // LeaseToken and a parseable RFC3339 LeaseExpiresAt in the future.
 //
 // Contract §5.1:
-//   "wrkf.effect.claim params: { adapter, limit, leaseMs, task?, kind? } → EffectClaim"
+//
+//	"wrkf.effect.claim params: { adapter, limit, leaseMs, task?, kind? } → EffectClaim"
 //
 // Regression guard: the returned EffectClaim must respect the caller's limit
 // and expose enough lease metadata for subsequent ack/fail calls.
@@ -213,7 +215,8 @@ func TestClaimEffectsLimit(t *testing.T) {
 // succeeds and marks the effect as 'delivered' when the token matches.
 //
 // Contract §5.1:
-//   "wrkf.effect.ack params: { effectId, leaseToken, receipt? }"
+//
+//	"wrkf.effect.ack params: { effectId, leaseToken, receipt? }"
 //
 // Regression guard: AckEffect must validate the supplied lease token and clear
 // lease metadata when delivery succeeds.
@@ -254,7 +257,8 @@ func TestAckEffectCorrectToken(t *testing.T) {
 // when the supplied token does not match the stored lease_token.
 //
 // Contract §5.1 / §3 error table:
-//   "Wrong/expired token → WRKF_LEASE_CONFLICT"  (data.code, retryable=true)
+//
+//	"Wrong/expired token → WRKF_LEASE_CONFLICT"  (data.code, retryable=true)
 //
 // Regression guard: AckEffect must reject a token that does not match the
 // stored lease token.
@@ -281,8 +285,9 @@ func TestAckEffectWrongToken(t *testing.T) {
 // is otherwise correct.
 //
 // Contract §6 inv 4:
-//   "ack/fail MUST update only WHERE id=? AND status='leased' AND
-//    lease_token=? AND leased_until > now (else WRKF_LEASE_CONFLICT)"
+//
+//	"ack/fail MUST update only WHERE id=? AND status='leased' AND
+//	 lease_token=? AND leased_until > now (else WRKF_LEASE_CONFLICT)"
 //
 // Regression guard: AckEffect must enforce leased_until, not only token
 // equality.
@@ -313,8 +318,9 @@ func TestAckEffectExpiredToken(t *testing.T) {
 // when the supplied token does not match the stored lease_token.
 //
 // Contract §5.1:
-//   "wrkf.effect.fail params: { effectId, leaseToken, reason, retryable? }"
-//   "Wrong/expired token → WRKF_LEASE_CONFLICT"
+//
+//	"wrkf.effect.fail params: { effectId, leaseToken, reason, retryable? }"
+//	"Wrong/expired token → WRKF_LEASE_CONFLICT"
 //
 // Regression guard: FailEffect must require the lease token and reject
 // mismatches before mutating the effect.
@@ -341,7 +347,8 @@ func TestFailEffectWrongToken(t *testing.T) {
 // clears the lease fields (leased_by, leased_until).
 //
 // Contract §6 inv 4:
-//   "terminal/retry paths MUST clear lease_token/leased_by/leased_until."
+//
+//	"terminal/retry paths MUST clear lease_token/leased_by/leased_until."
 //
 // Regression guard: FailEffect must accept the token/retryable contract and
 // clear lease metadata on successful terminal failure.

@@ -200,12 +200,12 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			}
 		}
 		if tr.SeparationOfDuty != nil && tpl.EvidenceKinds != nil {
-			for _, kind := range tr.SeparationOfDuty.DistinctActorFromEvidence {
+			for _, kind := range tr.SeparationOfDuty.DistinctPrincipalFromEvidence {
 				if _, ok := tpl.EvidenceKinds[kind]; !ok {
 					errs = append(errs, fmt.Sprintf("transition %s SoD references unknown evidence kind %s", tr.ID, kind))
 				}
 			}
-			for _, pair := range tr.SeparationOfDuty.EvidenceActorPairsDistinct {
+			for _, pair := range tr.SeparationOfDuty.EvidencePrincipalPairsDistinct {
 				if _, ok := tpl.EvidenceKinds[pair.LeftKind]; !ok {
 					errs = append(errs, fmt.Sprintf("transition %s SoD references unknown evidence kind %s", tr.ID, pair.LeftKind))
 				}
@@ -367,9 +367,9 @@ func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash
 		return nil, err
 	}
 	_, err = s.db.Exec(`
-		INSERT INTO workflow_templates (id, version, hash, definition_json, installed_by, hook_catalog_json, hook_catalog_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, tpl.ID, tpl.Version, hash, string(canonical), emptyToNil(actor), nullIfEmpty(string(catalogCanonical)), nullIfEmpty(catalogHash))
+		INSERT INTO workflow_templates (id, version, hash, definition_json, installed_by, installed_by_principal_ref, hook_catalog_json, hook_catalog_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, tpl.ID, tpl.Version, hash, string(canonical), emptyToNil(actor), emptyToNil(actor), nullIfEmpty(string(catalogCanonical)), nullIfEmpty(catalogHash))
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +377,7 @@ func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash
 }
 
 func (s *Service) ListTemplates() ([]map[string]interface{}, error) {
-	rows, err := s.db.Query(`SELECT id, version, hash, installed_at, installed_by FROM workflow_templates ORDER BY id, version`)
+	rows, err := s.db.Query(`SELECT id, version, hash, installed_at, COALESCE(installed_by_principal_ref, installed_by) FROM workflow_templates ORDER BY id, version`)
 	if err != nil {
 		return nil, err
 	}
@@ -711,11 +711,11 @@ func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID strin
 	eventHash := chainedEventHash(prevHash, payloadJSON)
 	_, err = tx.Exec(`
 		INSERT INTO workflow_events (
-			id, instance_id, seq, schema_version, type, actor, role, run_id,
+			id, instance_id, seq, schema_version, type, actor, principal_ref, role, run_id,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
-	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	if err != nil {
 		return workflowEventMetadata{}, err
 	}
@@ -842,7 +842,7 @@ func (s *Service) Timeline(taskSelector string) ([]Event, error) {
 		return nil, err
 	}
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, seq, schema_version, type, COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''),
+		SELECT id, instance_id, seq, schema_version, type, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''),
 		       COALESCE(observed_revision,0), next_revision, COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,''), COALESCE(context_hash,''),
 		       COALESCE(idempotency_key,''), COALESCE(result,''), COALESCE(rejection_code,''), payload_json, created_at
 		FROM workflow_events WHERE instance_id = ? ORDER BY seq
@@ -855,7 +855,7 @@ func (s *Service) Timeline(taskSelector string) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var payload string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Seq, &e.SchemaVersion, &e.Type, &e.Actor, &e.Role, &e.RunID, &e.ObservedRevision, &e.NextRevision, &e.TaskDocEtag, &e.TaskDocHash, &e.ContextHash, &e.IdempotencyKey, &e.Result, &e.RejectionCode, &payload, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Seq, &e.SchemaVersion, &e.Type, &e.PrincipalRef, &e.Role, &e.RunID, &e.ObservedRevision, &e.NextRevision, &e.TaskDocEtag, &e.TaskDocHash, &e.ContextHash, &e.IdempotencyKey, &e.Result, &e.RejectionCode, &payload, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		e.Payload = json.RawMessage(payload)
@@ -931,7 +931,7 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 	}
 
 	query := `
-		SELECT e.id, e.instance_id, e.seq, e.type, COALESCE(e.actor,''), COALESCE(e.role,''),
+		SELECT e.id, e.instance_id, e.seq, e.type, COALESCE(e.principal_ref, e.actor, ''), COALESCE(e.role,''),
 		       e.payload_json, e.created_at, wi.task_ref,
 		       t.uuid, t.id, t.slug, t.project_uuid, COALESCE(t.risk_class,''),
 		       COALESCE(p.id,''), COALESCE(p.slug,'')
@@ -957,7 +957,7 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 		var item TransitionEvent
 		var payload string
 		if err := rows.Scan(
-			&item.ID, &item.InstanceID, &item.Seq, &item.EventType, &item.Actor, &item.ActorRole,
+			&item.ID, &item.InstanceID, &item.Seq, &item.EventType, &item.PrincipalRef, &item.Role,
 			&payload, &item.TransitionedAt, &item.Task.Ref,
 			&item.Task.UUID, &item.Task.ID, &item.Task.Slug, &item.Task.ProjectUUID, &item.Task.RiskClass,
 			&item.Task.ProjectID, &item.Task.ProjectSlug,
@@ -1171,14 +1171,14 @@ type RoleBindOptions struct {
 	TaskSelector string
 	InstanceID   string
 	Role         string
-	Actor        string
+	PrincipalRef string
 	DeliveryRef  string
 	Lane         string
 	BindingMode  string
 }
 
 func (s *Service) BindRole(opts RoleBindOptions) (*RoleBinding, error) {
-	if err := validateRoleBindingInput(opts.Role, opts.Actor, opts.BindingMode); err != nil {
+	if err := validateRoleBindingInput(opts.Role, opts.PrincipalRef, opts.BindingMode); err != nil {
 		return nil, err
 	}
 	mode := strings.TrimSpace(opts.BindingMode)
@@ -1193,18 +1193,19 @@ func (s *Service) BindRole(opts RoleBindOptions) (*RoleBinding, error) {
 		}
 		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
-			INSERT INTO workflow_role_bindings (instance_id, role, actor, delivery_ref, lane, binding_mode, bound_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO workflow_role_bindings (instance_id, role, actor, principal_ref, delivery_ref, lane, binding_mode, bound_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(instance_id, role, actor) DO UPDATE SET
+				principal_ref = excluded.principal_ref,
 				delivery_ref = excluded.delivery_ref,
 				lane = excluded.lane,
 				binding_mode = excluded.binding_mode,
 				bound_at = excluded.bound_at
-		`, inst.ID, strings.TrimSpace(opts.Role), strings.TrimSpace(opts.Actor), nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), mode, now)
+		`, inst.ID, strings.TrimSpace(opts.Role), strings.TrimSpace(opts.PrincipalRef), strings.TrimSpace(opts.PrincipalRef), nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), mode, now)
 		if err != nil {
 			return err
 		}
-		binding, err := getRoleBindingTx(tx, inst.ID, strings.TrimSpace(opts.Role), strings.TrimSpace(opts.Actor))
+		binding, err := getRoleBindingTx(tx, inst.ID, strings.TrimSpace(opts.Role), strings.TrimSpace(opts.PrincipalRef))
 		if err != nil {
 			return err
 		}
@@ -1229,7 +1230,7 @@ func (s *Service) UnbindRole(taskSelector, instanceID, role, actor string) ([]Ro
 		if actor == "" {
 			_, err = tx.Exec(`DELETE FROM workflow_role_bindings WHERE instance_id = ? AND role = ?`, inst.ID, role)
 		} else {
-			_, err = tx.Exec(`DELETE FROM workflow_role_bindings WHERE instance_id = ? AND role = ? AND actor = ?`, inst.ID, role, actor)
+			_, err = tx.Exec(`DELETE FROM workflow_role_bindings WHERE instance_id = ? AND role = ? AND principal_ref = ?`, inst.ID, role, actor)
 		}
 		if err != nil {
 			return err
@@ -1261,9 +1262,9 @@ func (s *Service) SetRoleBindings(taskSelector, instanceID string, roleMap map[s
 		now := s.now().Format(time.RFC3339)
 		for role, actor := range roleMap {
 			_, err := tx.Exec(`
-				INSERT INTO workflow_role_bindings (instance_id, role, actor, binding_mode, bound_at)
-				VALUES (?, ?, ?, 'required', ?)
-			`, inst.ID, strings.TrimSpace(role), strings.TrimSpace(actor), now)
+				INSERT INTO workflow_role_bindings (instance_id, role, actor, principal_ref, binding_mode, bound_at)
+				VALUES (?, ?, ?, ?, 'required', ?)
+			`, inst.ID, strings.TrimSpace(role), strings.TrimSpace(actor), strings.TrimSpace(actor), now)
 			if err != nil {
 				return err
 			}
@@ -1279,7 +1280,7 @@ func validateRoleBindingInput(role, actor, mode string) error {
 		return validationError("role", "role is required", "non-empty role", nil, "supply role")
 	}
 	if strings.TrimSpace(actor) == "" {
-		return validationError("actor", "actor is required", "non-empty actor", nil, "supply actor")
+		return validationError("principalRef", "principalRef is required", "non-empty principal_ref", nil, "supply principal_ref")
 	}
 	switch strings.TrimSpace(mode) {
 	case "", "required", "optional", "auto":
@@ -1291,10 +1292,10 @@ func validateRoleBindingInput(role, actor, mode string) error {
 
 func listRoleBindingsForInstance(q rowsQueryer, instanceID string) ([]RoleBinding, error) {
 	rows, err := q.Query(`
-		SELECT instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
+		SELECT instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
 		FROM workflow_role_bindings
 		WHERE instance_id = ?
-		ORDER BY role, actor
+		ORDER BY role, principal_ref
 	`, instanceID)
 	if err != nil {
 		return nil, err
@@ -1303,7 +1304,7 @@ func listRoleBindingsForInstance(q rowsQueryer, instanceID string) ([]RoleBindin
 	var out []RoleBinding
 	for rows.Next() {
 		var binding RoleBinding
-		if err := rows.Scan(&binding.InstanceID, &binding.Role, &binding.Actor, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
+		if err := rows.Scan(&binding.InstanceID, &binding.Role, &binding.PrincipalRef, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
 			return nil, err
 		}
 		out = append(out, binding)
@@ -1313,10 +1314,10 @@ func listRoleBindingsForInstance(q rowsQueryer, instanceID string) ([]RoleBindin
 
 func listRoleBindingsForInstanceRole(q rowsQueryer, instanceID, role string) ([]RoleBinding, error) {
 	rows, err := q.Query(`
-		SELECT instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
+		SELECT instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
 		FROM workflow_role_bindings
 		WHERE instance_id = ? AND role = ?
-		ORDER BY role, actor
+		ORDER BY role, principal_ref
 	`, instanceID, role)
 	if err != nil {
 		return nil, err
@@ -1325,7 +1326,7 @@ func listRoleBindingsForInstanceRole(q rowsQueryer, instanceID, role string) ([]
 	var out []RoleBinding
 	for rows.Next() {
 		var binding RoleBinding
-		if err := rows.Scan(&binding.InstanceID, &binding.Role, &binding.Actor, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
+		if err := rows.Scan(&binding.InstanceID, &binding.Role, &binding.PrincipalRef, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
 			return nil, err
 		}
 		out = append(out, binding)
@@ -1335,12 +1336,12 @@ func listRoleBindingsForInstanceRole(q rowsQueryer, instanceID, role string) ([]
 
 func getRoleBindingTx(tx *sql.Tx, instanceID, role, actor string) (*RoleBinding, error) {
 	row := tx.QueryRow(`
-		SELECT instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
+		SELECT instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), binding_mode, bound_at
 		FROM workflow_role_bindings
-		WHERE instance_id = ? AND role = ? AND actor = ?
+		WHERE instance_id = ? AND role = ? AND principal_ref = ?
 	`, instanceID, role, actor)
 	var binding RoleBinding
-	if err := row.Scan(&binding.InstanceID, &binding.Role, &binding.Actor, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
+	if err := row.Scan(&binding.InstanceID, &binding.Role, &binding.PrincipalRef, &binding.DeliveryRef, &binding.Lane, &binding.BindingMode, &binding.BoundAt); err != nil {
 		return nil, err
 	}
 	return &binding, nil
@@ -1585,9 +1586,9 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		}
 		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
-			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.Actor), emptyToNil(params.Role), emptyToNil(params.RunID), fmt.Sprint(task.ETag), taskHashAtProduction, now)
+			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, principal_ref, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.PrincipalRef), emptyToNil(params.PrincipalRef), emptyToNil(params.Role), emptyToNil(params.RunID), fmt.Sprint(task.ETag), taskHashAtProduction, now)
 		if err != nil {
 			return err
 		}
@@ -1632,10 +1633,10 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if _, err := tx.Exec(`UPDATE workflow_instances SET context_hash = ?, task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`, inst.ContextHash, inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
 			return err
 		}
-		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.Actor); err != nil {
+		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.PrincipalRef); err != nil {
 			return err
 		}
-		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, Actor: params.Actor, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
 		if params.IdempotencyKey != "" {
 			if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
 				return err
@@ -1648,19 +1649,19 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 
 func evidenceAddRequestHash(params AddEvidenceParams, factsRaw, dataRaw json.RawMessage) string {
 	req := struct {
-		Kind        string          `json:"kind"`
-		Ref         string          `json:"ref"`
-		Summary     string          `json:"summary,omitempty"`
-		Facts       json.RawMessage `json:"facts,omitempty"`
-		Data        json.RawMessage `json:"data,omitempty"`
-		Actor       string          `json:"actor,omitempty"`
-		Role        string          `json:"role,omitempty"`
-		RunID       string          `json:"runId,omitempty"`
-		ContentHash string          `json:"contentHash,omitempty"`
-		Build       *EvidenceBuild  `json:"build,omitempty"`
+		Kind         string          `json:"kind"`
+		Ref          string          `json:"ref"`
+		Summary      string          `json:"summary,omitempty"`
+		Facts        json.RawMessage `json:"facts,omitempty"`
+		Data         json.RawMessage `json:"data,omitempty"`
+		PrincipalRef string          `json:"principal_ref,omitempty"`
+		Role         string          `json:"role,omitempty"`
+		RunID        string          `json:"runId,omitempty"`
+		ContentHash  string          `json:"contentHash,omitempty"`
+		Build        *EvidenceBuild  `json:"build,omitempty"`
 	}{
 		Kind: params.Kind, Ref: params.Ref, Summary: params.Summary,
-		Facts: factsRaw, Data: dataRaw, Actor: params.Actor, Role: params.Role, RunID: params.RunID,
+		Facts: factsRaw, Data: dataRaw, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID,
 		ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build),
 	}
 	return rpcidem.CanonicalRequestHash(req)
@@ -1758,7 +1759,7 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 	}
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
+		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, inst.ID)
 	if err != nil {
@@ -1771,7 +1772,7 @@ func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
 func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
 	rows, err := tx.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
+		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, instanceID)
 	if err != nil {
@@ -1784,7 +1785,7 @@ func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
 func (s *Service) ShowEvidence(id string) (*Evidence, error) {
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
+		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE id = ?
 	`, id)
 	if err != nil {
@@ -1806,7 +1807,7 @@ func scanEvidenceRows(rows *sql.Rows) ([]Evidence, error) {
 	for rows.Next() {
 		var e Evidence
 		var facts, data, source string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &facts, &data, &source, &e.Actor, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.TaskHashAtProduction, &e.ProducedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Kind, &e.Ref, &e.Summary, &facts, &data, &source, &e.PrincipalRef, &e.Role, &e.RunID, &e.TaskEtagAtProduction, &e.TaskHashAtProduction, &e.ProducedAt); err != nil {
 			return nil, err
 		}
 		if facts != "" {
@@ -1941,8 +1942,8 @@ func roleBindingAllowed(q queryer, inst *Instance, tpl *Template, role, actor st
 		return true
 	}
 	if tpl != nil {
-		if spec, ok := tpl.Roles[role]; ok && len(spec.Actors) > 0 {
-			for _, allowed := range spec.Actors {
+		if spec, ok := tpl.Roles[role]; ok && len(spec.Principals) > 0 {
+			for _, allowed := range spec.Principals {
 				if allowed == "*" || allowed == actor {
 					return true
 				}
@@ -1963,7 +1964,7 @@ func roleBindingAllowed(q queryer, inst *Instance, tpl *Template, role, actor st
 		return true
 	}
 	var matched int
-	if err := q.QueryRow(`SELECT COUNT(*) FROM workflow_role_bindings WHERE instance_id = ? AND role = ? AND actor = ?`, inst.ID, role, actor).Scan(&matched); err != nil {
+	if err := q.QueryRow(`SELECT COUNT(*) FROM workflow_role_bindings WHERE instance_id = ? AND role = ? AND principal_ref = ?`, inst.ID, role, actor).Scan(&matched); err != nil {
 		return false
 	}
 	return matched > 0
@@ -1984,11 +1985,11 @@ func (s *Service) transitionOwners(inst *Instance, tpl *Template, tr TransitionS
 			continue
 		}
 		if len(roleOwners) == 0 {
-			bindingBlockers = append(bindingBlockers, Blocker{Kind: "role_binding", Ref: role, Message: fmt.Sprintf("role %s has no eligible bound actors", role)})
+			bindingBlockers = append(bindingBlockers, Blocker{Kind: "role_binding", Ref: role, Message: fmt.Sprintf("role %s has no eligible bound principals", role)})
 			continue
 		}
 		for _, owner := range roleOwners {
-			key := owner.Role + "\x00" + owner.Actor + "\x00" + owner.DeliveryRef + "\x00" + owner.Lane
+			key := owner.Role + "\x00" + owner.PrincipalRef + "\x00" + owner.DeliveryRef + "\x00" + owner.Lane
 			if seen[key] {
 				continue
 			}
@@ -2038,16 +2039,16 @@ func (s *Service) ownersForRole(inst *Instance, tpl *Template, role string) ([]A
 		return []ActionOwner{{Role: role}}, nil
 	}
 	if tpl != nil {
-		if spec, ok := tpl.Roles[role]; ok && len(spec.Actors) > 0 {
-			owners := make([]ActionOwner, 0, len(spec.Actors))
-			for _, actor := range spec.Actors {
+		if spec, ok := tpl.Roles[role]; ok && len(spec.Principals) > 0 {
+			owners := make([]ActionOwner, 0, len(spec.Principals))
+			for _, actor := range spec.Principals {
 				actor = strings.TrimSpace(actor)
 				if actor == "" {
 					continue
 				}
 				owner := ActionOwner{Role: role}
 				if actor != "*" {
-					owner.Actor = actor
+					owner.PrincipalRef = actor
 				}
 				owners = append(owners, owner)
 			}
@@ -2058,10 +2059,10 @@ func (s *Service) ownersForRole(inst *Instance, tpl *Template, role string) ([]A
 		return nil, fmt.Errorf("workflow instance is required")
 	}
 	rows, err := s.db.Query(`
-		SELECT actor, COALESCE(delivery_ref,''), COALESCE(lane,'')
+		SELECT COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,'')
 		FROM workflow_role_bindings
 		WHERE instance_id = ? AND role = ?
-		ORDER BY bound_at DESC, actor
+		ORDER BY bound_at DESC, principal_ref
 	`, inst.ID, role)
 	if err != nil {
 		return nil, err
@@ -2071,7 +2072,7 @@ func (s *Service) ownersForRole(inst *Instance, tpl *Template, role string) ([]A
 	for rows.Next() {
 		var owner ActionOwner
 		owner.Role = role
-		if err := rows.Scan(&owner.Actor, &owner.DeliveryRef, &owner.Lane); err != nil {
+		if err := rows.Scan(&owner.PrincipalRef, &owner.DeliveryRef, &owner.Lane); err != nil {
 			return nil, err
 		}
 		owners = append(owners, owner)
@@ -2093,8 +2094,8 @@ func transitionActionID(transitionID string, owner ActionOwner, ownerCount int) 
 		return id
 	}
 	suffix := owner.Role
-	if owner.Actor != "" {
-		suffix += "_" + owner.Actor
+	if owner.PrincipalRef != "" {
+		suffix += "_" + owner.PrincipalRef
 	}
 	return id + "_" + sanitizeActionID(suffix)
 }
@@ -2118,8 +2119,8 @@ func sanitizeActionID(s string) string {
 
 func transitionCommand(taskRef, transitionID string, owner ActionOwner, revision int64) string {
 	cmd := fmt.Sprintf("wrkf transition %s %s --role %s", strings.TrimPrefix(taskRef, "wrkq:"), transitionID, owner.Role)
-	if owner.Actor != "" {
-		cmd += fmt.Sprintf(" --actor %s", owner.Actor)
+	if owner.PrincipalRef != "" {
+		cmd += fmt.Sprintf(" --principal-ref %s", owner.PrincipalRef)
 	}
 	cmd += fmt.Sprintf(" --expect-revision %d", revision)
 	return cmd
@@ -2342,7 +2343,7 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 			ID:         "deliver_" + e.ID,
 			Kind:       "deliver_effect",
 			Mode:       "deterministic",
-			Owner:      ActionOwner{Role: "coordinator", Actor: binding.Actor, DeliveryRef: binding.DeliveryRef, Lane: binding.Lane},
+			Owner:      ActionOwner{Role: "coordinator", PrincipalRef: binding.PrincipalRef, DeliveryRef: binding.DeliveryRef, Lane: binding.Lane},
 			Rank:       94,
 			Why:        fmt.Sprintf("deliver pending %s effect to %s", e.Kind, binding.DeliveryRef),
 			Command:    fmt.Sprintf("wrkf effect deliver %s", e.ID),
@@ -2452,7 +2453,7 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 		}
 		expected := chosen.To
 		for _, owner := range owners {
-			if sodBlockers := separationOfDutyBlockers(tr, ev, owner.Actor); len(sodBlockers) > 0 {
+			if sodBlockers := separationOfDutyBlockers(tr, ev, owner.PrincipalRef); len(sodBlockers) > 0 {
 				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: owner.Role, BlocksOn: sodBlockers})
 				continue
 			}
@@ -2488,7 +2489,7 @@ func checkCommitBlockers(tpl *Template, tr TransitionSpec, ev []Evidence, facts 
 			blockers = append(blockers, Blocker{Kind: "check", Ref: "check:" + checkID, Message: fmt.Sprintf("%s requires latest %s check to pass", tr.ID, checkID)})
 			continue
 		}
-		currentHash := currentCheckInputHash(inst, &tr, cr.Actor, cr.Role, task, currentEv, currentObl)
+		currentHash := currentCheckInputHash(inst, &tr, cr.PrincipalRef, cr.Role, task, currentEv, currentObl)
 		if cr.InputHash != "" && currentHash != "" && cr.InputHash != currentHash {
 			blockers = append(blockers, Blocker{Kind: "stale_check", Ref: "check:" + checkID, Message: fmt.Sprintf("%s check %s was produced from stale inputs", tr.ID, checkID)})
 			continue
@@ -2612,23 +2613,23 @@ func separationOfDutyBlockers(tr TransitionSpec, ev []Evidence, actor string) []
 		return nil
 	}
 	var blockers []Blocker
-	for _, kind := range tr.SeparationOfDuty.DistinctActorFromEvidence {
+	for _, kind := range tr.SeparationOfDuty.DistinctPrincipalFromEvidence {
 		latest, ok := latestEvidenceByKind(ev, kind)
-		if !ok || strings.TrimSpace(actor) == "" || strings.TrimSpace(latest.Actor) == "" {
+		if !ok || strings.TrimSpace(actor) == "" || strings.TrimSpace(latest.PrincipalRef) == "" {
 			continue
 		}
-		if latest.Actor == actor {
-			blockers = append(blockers, Blocker{Kind: "separation_of_duty", Ref: latest.ID, Message: fmt.Sprintf("transition actor must differ from %s evidence producer", kind)})
+		if latest.PrincipalRef == actor {
+			blockers = append(blockers, Blocker{Kind: "separation_of_duty", Ref: latest.ID, Message: fmt.Sprintf("transition principal must differ from %s evidence producer", kind)})
 		}
 	}
-	for _, pair := range tr.SeparationOfDuty.EvidenceActorPairsDistinct {
+	for _, pair := range tr.SeparationOfDuty.EvidencePrincipalPairsDistinct {
 		left, leftOK := latestEvidenceByKind(ev, pair.LeftKind)
 		right, rightOK := latestEvidenceByKind(ev, pair.RightKind)
-		if !leftOK || !rightOK || strings.TrimSpace(left.Actor) == "" || strings.TrimSpace(right.Actor) == "" {
+		if !leftOK || !rightOK || strings.TrimSpace(left.PrincipalRef) == "" || strings.TrimSpace(right.PrincipalRef) == "" {
 			continue
 		}
-		if left.Actor == right.Actor {
-			blockers = append(blockers, Blocker{Kind: "separation_of_duty", Ref: left.ID + ":" + right.ID, Message: fmt.Sprintf("%s and %s evidence must be produced by different actors", pair.LeftKind, pair.RightKind)})
+		if left.PrincipalRef == right.PrincipalRef {
+			blockers = append(blockers, Blocker{Kind: "separation_of_duty", Ref: left.ID + ":" + right.ID, Message: fmt.Sprintf("%s and %s evidence must be produced by different principals", pair.LeftKind, pair.RightKind)})
 		}
 	}
 	return blockers
@@ -2715,7 +2716,7 @@ func latestCheckFor(database *db.DB, instanceID, transitionID, checkID string) (
 	var hook, outcome, code, summary, facts, actor, role, runID, completed sql.NullString
 	err := database.QueryRow(`
 		SELECT id, instance_id, transition_id, check_id, COALESCE(hook_id,''), input_hash, exit_code, verdict,
-		       outcome, code, summary, facts_json, COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
+		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
 		FROM workflow_check_runs
 		WHERE instance_id = ? AND transition_id = ? AND check_id = ?
 		ORDER BY started_at DESC, id DESC LIMIT 1
@@ -2734,7 +2735,7 @@ func latestCheckFor(database *db.DB, instanceID, transitionID, checkID string) (
 	if facts.Valid {
 		c.Facts = json.RawMessage(facts.String)
 	}
-	c.Actor = actor.String
+	c.PrincipalRef = actor.String
 	c.Role = role.String
 	c.RunID = runID.String
 	c.CompletedAt = completed.String
@@ -2821,14 +2822,14 @@ func buildCheckInput(inst *Instance, tr *TransitionSpec, actor, role string, tas
 		taskEtag = fmt.Sprint(task.ETag)
 	}
 	input := map[string]interface{}{
-		"task":        map[string]interface{}{"ref": inst.TaskRef, "uuid": inst.TaskUUID, "etag": taskEtag, "hash": taskHash},
-		"workflow":    map[string]interface{}{"instanceId": inst.ID, "state": inst.State(), "revision": inst.Revision, "contextHash": inst.ContextHash},
-		"transition":  map[string]interface{}{"id": tr.ID},
-		"actor":       map[string]interface{}{"id": actor},
-		"role":        role,
-		"facts":       facts,
-		"evidence":    ev,
-		"obligations": obl,
+		"task":          map[string]interface{}{"ref": inst.TaskRef, "uuid": inst.TaskUUID, "etag": taskEtag, "hash": taskHash},
+		"workflow":      map[string]interface{}{"instanceId": inst.ID, "state": inst.State(), "revision": inst.Revision, "contextHash": inst.ContextHash},
+		"transition":    map[string]interface{}{"id": tr.ID},
+		"principal_ref": map[string]interface{}{"id": actor},
+		"role":          role,
+		"facts":         facts,
+		"evidence":      ev,
+		"obligations":   obl,
 	}
 	inputJSON, _ := json.Marshal(input)
 	return inputJSON, facts
@@ -2844,7 +2845,7 @@ func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID strin
 	ev, _ := listEvidenceForInstance(s.db, inst.ID)
 	obl, _ := listObligationsForInstance(s.db, inst.ID, true)
 	inputJSON, facts := buildCheckInput(inst, tr, actor, role, task, ev, obl)
-	cr := &CheckRun{InstanceID: inst.ID, TransitionID: tr.ID, CheckID: checkID, HookID: check.HookID, InputHash: Hash(inputJSON), Verdict: "inconclusive", Actor: actor, Role: role, StartedAt: s.now().Format(time.RFC3339)}
+	cr := &CheckRun{InstanceID: inst.ID, TransitionID: tr.ID, CheckID: checkID, HookID: check.HookID, InputHash: Hash(inputJSON), Verdict: "inconclusive", PrincipalRef: actor, Role: role, StartedAt: s.now().Format(time.RFC3339)}
 	switch check.Type {
 	case "predicate":
 		if check.Predicate == nil {
@@ -2955,9 +2956,9 @@ func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID strin
 			_, err = tx.Exec(`
 				INSERT INTO workflow_check_runs (
 					id, instance_id, transition_id, check_id, hook_id, input_hash, exit_code, verdict,
-					outcome, code, summary, facts_json, actor, role, started_at, completed_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, cr.ID, cr.InstanceID, cr.TransitionID, cr.CheckID, nullIfEmpty(cr.HookID), cr.InputHash, cr.ExitCode, cr.Verdict, nullIfEmpty(cr.Outcome), nullIfEmpty(cr.Code), nullIfEmpty(cr.Summary), facts, emptyToNil(cr.Actor), emptyToNil(cr.Role), cr.StartedAt, cr.CompletedAt)
+					outcome, code, summary, facts_json, actor, principal_ref, role, started_at, completed_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, cr.ID, cr.InstanceID, cr.TransitionID, cr.CheckID, nullIfEmpty(cr.HookID), cr.InputHash, cr.ExitCode, cr.Verdict, nullIfEmpty(cr.Outcome), nullIfEmpty(cr.Code), nullIfEmpty(cr.Summary), facts, emptyToNil(cr.PrincipalRef), emptyToNil(cr.PrincipalRef), emptyToNil(cr.Role), cr.StartedAt, cr.CompletedAt)
 			return err
 		}); err != nil {
 			return nil, err

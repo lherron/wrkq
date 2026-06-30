@@ -14,7 +14,7 @@ import (
 
 func completeImplementWithRun(t *testing.T, svc *Service, taskUUID, facts, idempotencyKey string) (*ActionRun, *ActionCompleteResult, error) {
 	t.Helper()
-	params := StartActionParams{Task: taskUUID, Action: "implement", Actor: "agent:t"}
+	params := StartActionParams{Task: taskUUID, Action: "implement", PrincipalRef: "agent:t"}
 	if idempotencyKey != "" {
 		params.IdempotencyKey = idempotencyKey
 	}
@@ -189,7 +189,7 @@ func TestTransitionEffectMaterializesRevisionAndRunID(t *testing.T) {
 	const runID = "run_verify_launch_source"
 	rev0 := int64(0)
 	result, err := svc.Transition(taskUUID, "implement_complete", TransitionOptions{
-		Actor:          "agent:t",
+		PrincipalRef:   "agent:t",
 		Role:           "implementer",
 		ExpectRevision: &rev0,
 		IdempotencyKey: "verify-launch-render",
@@ -269,7 +269,7 @@ func TestTransitionEffectUnresolvedTokenFailsAtomically(t *testing.T) {
 
 	rev0 := int64(0)
 	_, err := svc.Transition(taskUUID, "implement_complete", TransitionOptions{
-		Actor:          "agent:t",
+		PrincipalRef:   "agent:t",
 		Role:           "implementer",
 		ExpectRevision: &rev0,
 		IdempotencyKey: "verify-launch-unresolved",

@@ -208,7 +208,7 @@ func TestTransitionCASRace(t *testing.T) {
 			defer wg.Done()
 			<-start
 			out, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-				Actor:          "human:test",
+				PrincipalRef:   "human:test",
 				Role:           "coordinator",
 				ExpectRevision: &rev0,
 			})
@@ -284,7 +284,7 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 
 	// ------ First call: must commit ------
 	result1, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		Actor:          "human:test-actor",
+		PrincipalRef:   "human:test-actor",
 		Role:           "coordinator",
 		IdempotencyKey: idemKey,
 		ExpectRevision: &rev0,
@@ -327,7 +327,7 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 	// Contract (§6 invariant 2, load order): idempotency is checked BEFORE CAS.
 	// Therefore the replay must succeed even though the instance is now at revision=1.
 	result2, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		Actor:          "human:test-actor",
+		PrincipalRef:   "human:test-actor",
 		Role:           "coordinator",
 		IdempotencyKey: idemKey,
 		ExpectRevision: &rev0, // stale, but idempotency must win
@@ -378,7 +378,7 @@ func TestTransitionIdempotencyMismatch(t *testing.T) {
 
 	// ------ First call: commit with actor "human:alice" ------
 	_, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		Actor:          "human:alice",
+		PrincipalRef:   "human:alice",
 		Role:           "coordinator",
 		IdempotencyKey: idemKey,
 		ExpectRevision: &rev0,
@@ -392,7 +392,7 @@ func TestTransitionIdempotencyMismatch(t *testing.T) {
 	// We deliberately omit ExpectRevision so the call is NOT rejected by CAS first —
 	// the mismatch check must fire before any CAS comparison.
 	_, err = svc.Transition(taskUUID, "complete", TransitionOptions{
-		Actor:          "human:bob", // different from "human:alice"
+		PrincipalRef:   "human:bob", // different from "human:alice"
 		Role:           "coordinator",
 		IdempotencyKey: idemKey,
 		// No ExpectRevision: let idempotency check reach mismatch detection.

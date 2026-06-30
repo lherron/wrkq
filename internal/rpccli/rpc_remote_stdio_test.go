@@ -43,7 +43,7 @@ func TestServeRemoteStdioForwardsInitializeReadAndDomainError(t *testing.T) {
 	defer httpServer.Close()
 
 	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"2026-06-14"}}`,
+		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"2026-06-30"}}`,
 		`{"jsonrpc":"2.0","id":"show","method":"wrkq.task.show","params":{"task":"` + taskID + `"}}`,
 		`{"jsonrpc":"2.0","id":"missing","method":"wrkq.task.show","params":{"task":"T-99999"}}`,
 		`{"jsonrpc":"2.0","id":"shutdown","method":"rpc.shutdown","params":{}}`,

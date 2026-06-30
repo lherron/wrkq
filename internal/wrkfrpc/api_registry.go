@@ -13,7 +13,7 @@ import (
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
 
-const ProtocolVersion = "2026-06-01"
+const ProtocolVersion = "2026-06-30"
 
 type RegistryOptions struct {
 	DatabasePath  string
@@ -72,10 +72,10 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.WorkflowDiff(ctx, p.OldPath, p.NewPath)
 	}))
 	s.Register("wrkf.workflow.install", apiHandler(func(ctx context.Context, p installParams) (any, error) {
-		return api.WorkflowInstall(ctx, p.Path, defaultString(p.Actor, opts.DefaultActor))
+		return api.WorkflowInstall(ctx, p.Path, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 	s.Register("wrkf.task.attach", apiHandler(func(ctx context.Context, p taskAttachParams) (any, error) {
-		return api.TaskAttach(ctx, p.TaskSelector, p.Workflow, defaultString(p.Actor, opts.DefaultActor))
+		return api.TaskAttach(ctx, p.TaskSelector, p.Workflow, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 	s.Register("wrkf.task.inspect", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
 		return api.TaskInspect(ctx, p.TaskSelector)
@@ -84,16 +84,16 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.TaskTimeline(ctx, p.TaskSelector)
 	}))
 	s.Register("wrkf.task.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		return api.TaskRefresh(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
+		return api.TaskRefresh(ctx, p.TaskSelector, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 	s.Register("wrkf.task.syncMeta", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		return api.TaskSyncMeta(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
+		return api.TaskSyncMeta(ctx, p.TaskSelector, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 	s.Register("wrkf.next", apiHandler(func(ctx context.Context, p nextParams) (any, error) {
 		return api.Next(ctx, p.TaskSelector, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.evidence.add", apiHandler(func(ctx context.Context, p wrkfapi.EvidenceAddParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.EvidenceAdd(ctx, p)
 	}))
@@ -119,7 +119,7 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.CheckPreflight(ctx, p.TaskSelector, p.Transition, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.check.run", apiHandler(func(ctx context.Context, p wrkfapi.CheckRunParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.CheckRun(ctx, p)
 	}))
@@ -136,17 +136,17 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.HookShow(ctx, p.ID)
 	}))
 	s.Register("wrkf.hook.run", apiHandler(func(ctx context.Context, p wrkfapi.HookRunParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.HookRun(ctx, p)
 	}))
 	s.Register("wrkf.transition.apply", apiHandler(func(ctx context.Context, p wrkfapi.TransitionApplyParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.TransitionApply(ctx, p)
 	}))
 	s.Register("wrkf.run.start", apiHandler(func(ctx context.Context, p wrkfapi.RunStartParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.RunStart(ctx, p)
 	}))
@@ -166,7 +166,7 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.RunList(ctx, p.TaskSelector)
 	}))
 	s.Register("wrkf.action.start", apiHandler(func(ctx context.Context, p wrkfapi.ActionStartParams) (any, error) {
-		p.Actor = defaultString(p.Actor, opts.DefaultActor)
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		return api.ActionStart(ctx, p)
 	}))
 	s.Register("wrkf.action.bindExternal", apiHandler(func(ctx context.Context, p wrkfapi.ActionBindExternalParams) (any, error) {
@@ -266,8 +266,47 @@ func decodeParams(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
 	}
+	if err := rejectLegacyActorFields(raw); err != nil {
+		return err
+	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return wrkfapi.NewValidationError("invalid params", nil)
+	}
+	return nil
+}
+
+// legacyActorParamFields are the actor-shaped wrkf participant-identity param
+// keys retired by the T-05372 cutover. They are a deliberate protocol break:
+// wrkf participant identity is now canonical `principal_ref`. A request that
+// still carries any of these top-level keys is rejected rather than silently
+// ignored by json.Unmarshal. Scan is top-level only so free-form nested blobs
+// (evidence data/facts/source) that legitimately contain an "actor" key are
+// not affected.
+var legacyActorParamFields = []string{
+	"actor", "actorRole", "actor_role",
+	"ownerActor", "owner_actor",
+	"obligeeActor", "obligee_actor",
+	"waiveActor", "waive_actor",
+	"resolvedByActor", "resolved_by_actor",
+}
+
+func rejectLegacyActorFields(raw json.RawMessage) error {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed[0] != '{' {
+		return nil
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil // malformed object is handled by the real decode below
+	}
+	for _, key := range legacyActorParamFields {
+		if _, ok := top[key]; ok {
+			return wrkfapi.NewValidationError("legacy actor-shaped wrkf param rejected", map[string]any{
+				"field":    key,
+				"expected": "principal_ref",
+				"hint":     "wrkf participant identity is canonical principal_ref (agent:<id>); the actor field was removed in the T-05372 protocol break",
+			})
+		}
 	}
 	return nil
 }
@@ -306,8 +345,8 @@ type diffParams struct {
 }
 
 type installParams struct {
-	Path  string `json:"path"`
-	Actor string `json:"actor,omitempty"`
+	Path         string `json:"path"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type taskParams struct {
@@ -316,13 +355,13 @@ type taskParams struct {
 
 type taskActorParams struct {
 	TaskSelector string `json:"task"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type taskAttachParams struct {
 	TaskSelector string `json:"task"`
 	Workflow     string `json:"workflow"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type nextParams struct {

@@ -91,7 +91,7 @@ type RoleBindParams struct {
 	TaskSelector string `json:"task,omitempty"`
 	InstanceID   string `json:"instanceId,omitempty"`
 	Role         string `json:"role"`
-	Actor        string `json:"actor"`
+	PrincipalRef string `json:"principal_ref"`
 	DeliveryRef  string `json:"deliveryRef,omitempty"`
 	Lane         string `json:"lane,omitempty"`
 	BindingMode  string `json:"bindingMode,omitempty"`
@@ -101,7 +101,7 @@ type RoleUnbindParams struct {
 	TaskSelector string `json:"task,omitempty"`
 	InstanceID   string `json:"instanceId,omitempty"`
 	Role         string `json:"role"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type RoleSetParams struct {
@@ -163,7 +163,7 @@ type EvidenceAddParams struct {
 	Summary        string                  `json:"summary,omitempty"`
 	Facts          json.RawMessage         `json:"facts,omitempty"`
 	Data           json.RawMessage         `json:"data,omitempty"`
-	Actor          string                  `json:"actor,omitempty"`
+	PrincipalRef   string                  `json:"principal_ref,omitempty"`
 	Role           string                  `json:"role,omitempty"`
 	RunID          string                  `json:"runId,omitempty"`
 	ContentHash    string                  `json:"contentHash,omitempty"`
@@ -176,14 +176,14 @@ type ObligationStatusParams struct {
 	ID           string `json:"id"`
 	EvidenceID   string `json:"evidenceId,omitempty"`
 	Reason       string `json:"reason,omitempty"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 	Role         string `json:"role,omitempty"`
 }
 
 type CheckRunParams struct {
 	TaskSelector string `json:"task"`
 	Transition   string `json:"transition"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 	Role         string `json:"role,omitempty"`
 }
 
@@ -191,7 +191,7 @@ type HookRunParams struct {
 	TaskSelector string `json:"task"`
 	Transition   string `json:"transition"`
 	HookID       string `json:"hookId"`
-	Actor        string `json:"actor,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 	Role         string `json:"role,omitempty"`
 }
 
@@ -204,7 +204,7 @@ func (p EvidenceAddParams) workflowParams() workflow.AddEvidenceParams {
 		Summary:        p.Summary,
 		Facts:          rawString(p.Facts),
 		Data:           rawString(p.Data),
-		Actor:          p.Actor,
+		PrincipalRef:   p.PrincipalRef,
 		Role:           p.Role,
 		RunID:          p.RunID,
 		ContentHash:    p.ContentHash,

@@ -16,7 +16,7 @@ const nextRoleBindingTemplate = `{
   "kind": "agent_first_workflow",
   "initial": { "status": "active", "phase": "pressure" },
   "roles": {
-    "agent": { "description": "Writer", "actors": ["agent:pbc-writer"] },
+    "agent": { "description": "Writer", "principals": ["agent:pbc-writer"] },
     "pressure_reviewer": { "description": "Reviewer" }
   },
   "states": [
@@ -121,13 +121,13 @@ func TestNextAnnotatesBoundTransitionOwners(t *testing.T) {
 		}
 		switch action.Owner.Role {
 		case "agent":
-			if action.Owner.Actor == "agent:pbc-writer" &&
-				strings.Contains(action.Command, " finalize_ready_pbc --role agent --actor agent:pbc-writer --expect-revision 0") {
+			if action.Owner.PrincipalRef == "agent:pbc-writer" &&
+				strings.Contains(action.Command, " finalize_ready_pbc --role agent --principal-ref agent:pbc-writer --expect-revision 0") {
 				writer = true
 			}
 		case "pressure_reviewer":
-			if action.Owner.Actor == "agent:pbc-reviewer" && action.Owner.DeliveryRef == "acp:pbc-reviewer" &&
-				strings.Contains(action.Command, " finalize_ready_pbc --role pressure_reviewer --actor agent:pbc-reviewer --expect-revision 0") {
+			if action.Owner.PrincipalRef == "agent:pbc-reviewer" && action.Owner.DeliveryRef == "acp:pbc-reviewer" &&
+				strings.Contains(action.Command, " finalize_ready_pbc --role pressure_reviewer --principal-ref agent:pbc-reviewer --expect-revision 0") {
 				reviewer = true
 			}
 		}

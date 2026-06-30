@@ -87,10 +87,10 @@ func (s *Service) withDelegatedTaskClosureState(obl []Obligation, includeClosed 
 
 func listObligationsForInstance(database *db.DB, instanceID string, includeClosed bool) ([]Obligation, error) {
 	query := `
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
-		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_principal_ref, owner_actor, ''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_principal_ref, obligee_actor, ''), COALESCE(waive_role,''), COALESCE(waive_principal_ref, waive_actor, ''), COALESCE(no_self_waive,1),
 		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
-		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
+		       COALESCE(resolved_by_principal_ref, resolved_by_actor, ''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE instance_id = ?`
 	if !includeClosed {
 		query += ` AND status = 'open'`
@@ -106,10 +106,10 @@ func listObligationsForInstance(database *db.DB, instanceID string, includeClose
 
 func listObligationsTx(tx *sql.Tx, instanceID string, includeClosed bool) ([]Obligation, error) {
 	query := `
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
-		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_principal_ref, owner_actor, ''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_principal_ref, obligee_actor, ''), COALESCE(waive_role,''), COALESCE(waive_principal_ref, waive_actor, ''), COALESCE(no_self_waive,1),
 		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
-		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
+		       COALESCE(resolved_by_principal_ref, resolved_by_actor, ''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE instance_id = ?`
 	if !includeClosed {
 		query += ` AND status = 'open'`
@@ -129,7 +129,7 @@ func scanObligations(rows *sql.Rows) ([]Obligation, error) {
 		var o Obligation
 		var blocking int
 		var noSelfWaive int
-		if err := rows.Scan(&o.ID, &o.InstanceID, &o.Kind, &o.OwnerRole, &o.OwnerActor, &o.ObligeeRole, &o.ObligeeActor, &o.WaiveRole, &o.WaiveActor, &noSelfWaive, &blocking, &o.Status, &o.Reason, &o.SatisfiedByEvidenceID, &o.ResolvedByActor, &o.ResolvedByRole, &o.ResolvedAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.InstanceID, &o.Kind, &o.OwnerRole, &o.OwnerPrincipalRef, &o.ObligeeRole, &o.ObligeePrincipalRef, &o.WaiveRole, &o.WaivePrincipalRef, &noSelfWaive, &blocking, &o.Status, &o.Reason, &o.SatisfiedByEvidenceID, &o.ResolvedByPrincipalRef, &o.ResolvedByRole, &o.ResolvedAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		o.Blocking = blocking == 1
@@ -703,10 +703,10 @@ func sanitizeIDPart(s string) string {
 
 func (s *Service) ShowObligation(id string) (*Obligation, error) {
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
-		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_principal_ref, owner_actor, ''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_principal_ref, obligee_actor, ''), COALESCE(waive_role,''), COALESCE(waive_principal_ref, waive_actor, ''), COALESCE(no_self_waive,1),
 		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
-		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
+		       COALESCE(resolved_by_principal_ref, resolved_by_actor, ''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE id = ?
 	`, id)
 	if err != nil {
@@ -724,12 +724,12 @@ func (s *Service) ShowObligation(id string) (*Obligation, error) {
 }
 
 type ObligationStatusOptions struct {
-	Actor string
-	Role  string
+	PrincipalRef string
+	Role         string
 }
 
 func (s *Service) SetObligationStatus(taskSelector, id, status, evidenceID, reason string) (*Obligation, error) {
-	return s.SetObligationStatusWithAuthority(taskSelector, id, status, evidenceID, reason, ObligationStatusOptions{Actor: "system:wrkf", Role: "system"})
+	return s.SetObligationStatusWithAuthority(taskSelector, id, status, evidenceID, reason, ObligationStatusOptions{PrincipalRef: "system:wrkf", Role: "system"})
 }
 
 func (s *Service) SetObligationStatusWithAuthority(taskSelector, id, status, evidenceID, reason string, opts ObligationStatusOptions) (*Obligation, error) {
@@ -747,15 +747,15 @@ func (s *Service) SetObligationStatusWithAuthority(taskSelector, id, status, evi
 		if err != nil {
 			return err
 		}
-		if !obligationStatusAllowed(*current, status, opts.Actor, opts.Role) {
+		if !obligationStatusAllowed(*current, status, opts.PrincipalRef, opts.Role) {
 			return roleDeniedError(inst.ID, "obligation:"+id+":"+status, opts.Role)
 		}
 		_, err = tx.Exec(`
 			UPDATE workflow_obligations
 			SET status = ?, satisfied_by_evidence_id = COALESCE(NULLIF(?, ''), satisfied_by_evidence_id),
-			    reason = COALESCE(NULLIF(?, ''), reason), resolved_by_actor = ?, resolved_by_role = ?, resolved_at = ?, updated_at = ?
+			    reason = COALESCE(NULLIF(?, ''), reason), resolved_by_actor = ?, resolved_by_principal_ref = ?, resolved_by_role = ?, resolved_at = ?, updated_at = ?
 			WHERE id = ? AND instance_id = ?
-		`, status, evidenceID, reason, nullIfEmpty(opts.Actor), nullIfEmpty(opts.Role), now, now, id, inst.ID)
+		`, status, evidenceID, reason, nullIfEmpty(opts.PrincipalRef), nullIfEmpty(opts.PrincipalRef), nullIfEmpty(opts.Role), now, now, id, inst.ID)
 		if err != nil {
 			return err
 		}
@@ -767,10 +767,10 @@ func (s *Service) SetObligationStatusWithAuthority(taskSelector, id, status, evi
 
 func selectObligationTx(tx *sql.Tx, id, instanceID string) (*Obligation, error) {
 	rows, err := tx.Query(`
-		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_actor,''),
-		       COALESCE(obligee_role,''), COALESCE(obligee_actor,''), COALESCE(waive_role,''), COALESCE(waive_actor,''), COALESCE(no_self_waive,1),
+		SELECT id, instance_id, kind, COALESCE(owner_role,''), COALESCE(owner_principal_ref, owner_actor, ''),
+		       COALESCE(obligee_role,''), COALESCE(obligee_principal_ref, obligee_actor, ''), COALESCE(waive_role,''), COALESCE(waive_principal_ref, waive_actor, ''), COALESCE(no_self_waive,1),
 		       blocking, status, COALESCE(reason,''), COALESCE(satisfied_by_evidence_id,''),
-		       COALESCE(resolved_by_actor,''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
+		       COALESCE(resolved_by_principal_ref, resolved_by_actor, ''), COALESCE(resolved_by_role,''), COALESCE(resolved_at,''), created_at, updated_at
 		FROM workflow_obligations WHERE id = ? AND instance_id = ?
 	`, id, instanceID)
 	if err != nil {
@@ -795,19 +795,19 @@ func obligationStatusAllowed(o Obligation, status, actor, role string) bool {
 	}
 	switch status {
 	case "satisfied":
-		if o.OwnerActor != "" {
-			return actor != "" && actor == o.OwnerActor
+		if o.OwnerPrincipalRef != "" {
+			return actor != "" && actor == o.OwnerPrincipalRef
 		}
 		if o.OwnerRole != "" {
 			return role == o.OwnerRole
 		}
 		return actor != ""
 	case "waived", "cancelled":
-		if o.NoSelfWaive && actor != "" && o.OwnerActor != "" && actor == o.OwnerActor {
+		if o.NoSelfWaive && actor != "" && o.OwnerPrincipalRef != "" && actor == o.OwnerPrincipalRef {
 			return false
 		}
-		if o.WaiveActor != "" {
-			return actor != "" && actor == o.WaiveActor
+		if o.WaivePrincipalRef != "" {
+			return actor != "" && actor == o.WaivePrincipalRef
 		}
 		if o.WaiveRole != "" {
 			return role == o.WaiveRole
@@ -1457,7 +1457,7 @@ func effectByIDTx(tx *sql.Tx, id string) ([]Effect, error) {
 
 func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs
@@ -1472,7 +1472,7 @@ func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
 		return nil, fmt.Errorf("role %s is not bound; run wrkf run bind TASK %s HANDLE", role, role)
 	}
 	var r Run
-	if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
+	if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.PrincipalRef, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
 		return nil, err
 	}
 	return &r, rows.Err()
@@ -1715,7 +1715,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		if !stateMatches(*inst, tr.From) {
 			return fmt.Errorf("transition %s cannot run from current state", transitionID)
 		}
-		if !roleAllowed(opts.Role, tr.By) || !roleBindingAllowed(tx, inst, tpl, opts.Role, opts.Actor) {
+		if !roleAllowed(opts.Role, tr.By) || !roleBindingAllowed(tx, inst, tpl, opts.Role, opts.PrincipalRef) {
 			return roleDeniedError(inst.ID, transitionID, opts.Role)
 		}
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
@@ -1741,7 +1741,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 				if !ok {
 					return fmt.Errorf("check not found: %s", checkID)
 				}
-				cr, err := s.executeCheck(inst, tr, checkID, check, opts.Actor, opts.Role, opts.HookCatalog, opts.TemplateDir, false)
+				cr, err := s.executeCheck(inst, tr, checkID, check, opts.PrincipalRef, opts.Role, opts.HookCatalog, opts.TemplateDir, false)
 				if err != nil {
 					return err
 				}
@@ -1761,10 +1761,10 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			}
 			checks[c.CheckID] = *c
 		}
-		if blockers := checkCommitBlockers(tpl, *tr, ev, taskFacts(task), inst, task, ev, obl, checks, opts.Actor, opts.Role, s.db); len(blockers) > 0 {
+		if blockers := checkCommitBlockers(tpl, *tr, ev, taskFacts(task), inst, task, ev, obl, checks, opts.PrincipalRef, opts.Role, s.db); len(blockers) > 0 {
 			return transitionBlockedError(inst.ID, transitionID, blockers)
 		}
-		if blockers := separationOfDutyBlockers(*tr, ev, opts.Actor); len(blockers) > 0 {
+		if blockers := separationOfDutyBlockers(*tr, ev, opts.PrincipalRef); len(blockers) > 0 {
 			return transitionBlockedError(inst.ID, transitionID, blockers)
 		}
 		for _, guard := range tr.Guards {
@@ -1867,21 +1867,21 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 				obligeeRole = "workflow"
 			}
 			waiveRole := strings.TrimSpace(ob.WaiveRole)
-			if waiveRole == "" && strings.TrimSpace(ob.WaiveActor) == "" {
+			if waiveRole == "" && strings.TrimSpace(ob.WaivePrincipalRef) == "" {
 				waiveRole = "system"
 			}
 			_, err = tx.Exec(`
 				INSERT INTO workflow_obligations (
-					id, instance_id, kind, owner_role, owner_actor, obligee_role, obligee_actor,
-					waive_role, waive_actor, no_self_waive, blocking, status, reason, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
-			`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerActor), nullIfEmpty(obligeeRole), nullIfEmpty(ob.ObligeeActor), nullIfEmpty(waiveRole), nullIfEmpty(ob.WaiveActor), noSelfWaiveInt, blocking, nullIfEmpty(ob.Reason), now, now)
+					id, instance_id, kind, owner_role, owner_actor, owner_principal_ref, obligee_role, obligee_actor, obligee_principal_ref,
+					waive_role, waive_actor, waive_principal_ref, no_self_waive, blocking, status, reason, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+			`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerPrincipalRef), nullIfEmpty(ob.OwnerPrincipalRef), nullIfEmpty(obligeeRole), nullIfEmpty(ob.ObligeePrincipalRef), nullIfEmpty(ob.ObligeePrincipalRef), nullIfEmpty(waiveRole), nullIfEmpty(ob.WaivePrincipalRef), nullIfEmpty(ob.WaivePrincipalRef), noSelfWaiveInt, blocking, nullIfEmpty(ob.Reason), now, now)
 			if err != nil {
 				return err
 			}
 			createdObligations = append(createdObligations, Obligation{
-				ID: id, InstanceID: updated.ID, Kind: ob.Kind, OwnerRole: ob.OwnerRole, OwnerActor: ob.OwnerActor,
-				ObligeeRole: obligeeRole, ObligeeActor: ob.ObligeeActor, WaiveRole: waiveRole, WaiveActor: ob.WaiveActor,
+				ID: id, InstanceID: updated.ID, Kind: ob.Kind, OwnerRole: ob.OwnerRole, OwnerPrincipalRef: ob.OwnerPrincipalRef,
+				ObligeeRole: obligeeRole, ObligeePrincipalRef: ob.ObligeePrincipalRef, WaiveRole: waiveRole, WaivePrincipalRef: ob.WaivePrincipalRef,
 				NoSelfWaive: noSelfWaive, Blocking: ob.Blocking, Status: "open", Reason: ob.Reason, CreatedAt: now, UpdatedAt: now,
 			})
 		}
@@ -1926,14 +1926,14 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		result["outcome"] = chosen.ID
 		resultJSON, _ := json.Marshal(result)
 		eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
-		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.Actor, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, eventPayload)
+		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, eventPayload)
 		if err != nil {
 			return err
 		}
-		ctx := workflowTransitionWebhookContext(eventMeta, updated, opts.Actor, opts.Role, opts.RunID, transitionID, chosen.ID, inst.Revision, updated.Revision, opts.IdempotencyKey, inst.State(), updated.State())
+		ctx := workflowTransitionWebhookContext(eventMeta, updated, opts.PrincipalRef, opts.Role, opts.RunID, transitionID, chosen.ID, inst.Revision, updated.Revision, opts.IdempotencyKey, inst.State(), updated.State())
 		webhookCtx = &ctx
 		webhookTaskUUID = updated.TaskUUID
-		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.Actor)
+		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.PrincipalRef)
 	})
 	if err != nil {
 		return nil, err
@@ -1966,7 +1966,7 @@ func transitionRequestHash(taskSelector, instanceID, transitionID string, opts T
 		Task           string   `json:"task"`
 		InstanceID     string   `json:"instanceId,omitempty"`
 		Transition     string   `json:"transition"`
-		Actor          string   `json:"actor,omitempty"`
+		PrincipalRef   string   `json:"principal_ref,omitempty"`
 		Role           string   `json:"role,omitempty"`
 		ExpectRevision *int64   `json:"expectRevision,omitempty"`
 		IdempotencyKey string   `json:"idempotencyKey,omitempty"`
@@ -1975,7 +1975,7 @@ func transitionRequestHash(taskSelector, instanceID, transitionID string, opts T
 		RunChecks      bool     `json:"runChecks,omitempty"`
 		DryRun         bool     `json:"dryRun,omitempty"`
 	}{
-		Task: taskSelector, InstanceID: instanceID, Transition: transitionID, Actor: opts.Actor, Role: opts.Role,
+		Task: taskSelector, InstanceID: instanceID, Transition: transitionID, PrincipalRef: opts.PrincipalRef, Role: opts.Role,
 		ExpectRevision: opts.ExpectRevision, IdempotencyKey: opts.IdempotencyKey, ContextHash: opts.ContextHash,
 		CheckIDs: append([]string(nil), opts.CheckIDs...), RunChecks: opts.RunChecks, DryRun: opts.DryRun,
 	}
@@ -2059,7 +2059,7 @@ func (s *Service) ShowCheckRun(id string) (*CheckRun, error) {
 	var hook, outcome, code, summary, facts, actor, role, runID, completed sql.NullString
 	err := s.db.QueryRow(`
 		SELECT id, instance_id, transition_id, check_id, COALESCE(hook_id,''), input_hash, exit_code, verdict,
-		       outcome, code, summary, facts_json, COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
+		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
 		FROM workflow_check_runs WHERE id = ?
 	`, id).Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &runID, &c.StartedAt, &completed)
 	if err != nil {
@@ -2077,7 +2077,7 @@ func (s *Service) ShowCheckRun(id string) (*CheckRun, error) {
 	if facts.Valid {
 		c.Facts = json.RawMessage(facts.String)
 	}
-	c.Actor, c.Role, c.RunID, c.CompletedAt = actor.String, role.String, runID.String, completed.String
+	c.PrincipalRef, c.Role, c.RunID, c.CompletedAt = actor.String, role.String, runID.String, completed.String
 	return &c, nil
 }
 
@@ -2088,7 +2088,7 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 	}
 	query := `
 		SELECT id, instance_id, transition_id, check_id, COALESCE(hook_id,''), input_hash, exit_code, verdict,
-		       outcome, code, summary, facts_json, COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
+		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
 		FROM workflow_check_runs WHERE instance_id = ?`
 	args := []interface{}{inst.ID}
 	if transitionID != "" {
@@ -2118,7 +2118,7 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 		if facts.Valid {
 			c.Facts = json.RawMessage(facts.String)
 		}
-		c.Actor, c.Role, c.RunID, c.CompletedAt = actor.String, role.String, runID.String, completed.String
+		c.PrincipalRef, c.Role, c.RunID, c.CompletedAt = actor.String, role.String, runID.String, completed.String
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -2127,7 +2127,7 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 func listEvidenceForInstance(database *db.DB, instanceID string) ([]Evidence, error) {
 	rows, err := database.Query(`
 		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(actor,''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
+		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
 		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
 	`, instanceID)
 	if err != nil {
@@ -2170,12 +2170,12 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 		now := s.now().Format(time.RFC3339)
 		_, err = tx.Exec(`
 			INSERT INTO workflow_runs (
-				id, instance_id, role, actor, delivery_ref, lane, external_run_ref,
+				id, instance_id, role, actor, principal_ref, delivery_ref, lane, external_run_ref,
 				status, started_at, idempotency_key, request_hash, action,
 				lease_owner, lease_token, lease_expires_at, heartbeat_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash), nullIfEmpty(opts.Action), nullIfEmpty(opts.LeaseOwner), nullIfEmpty(opts.LeaseToken), nullIfEmpty(opts.LeaseExpiresAt), nullIfEmpty(opts.HeartbeatAt))
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, inst.ID, role, actor, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash), nullIfEmpty(opts.Action), nullIfEmpty(opts.LeaseOwner), nullIfEmpty(opts.LeaseToken), nullIfEmpty(opts.LeaseExpiresAt), nullIfEmpty(opts.HeartbeatAt))
 		if err != nil {
 			if isRunUniqueConflict(err) {
 				return idempotencyMismatchError(opts.IdempotencyKey)
@@ -2183,16 +2183,17 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 			return err
 		}
 		_, err = tx.Exec(`
-			INSERT INTO workflow_role_bindings (instance_id, role, actor, delivery_ref, lane, binding_mode, bound_at)
-			VALUES (?, ?, ?, ?, ?, 'auto', ?)
+			INSERT INTO workflow_role_bindings (instance_id, role, actor, principal_ref, delivery_ref, lane, binding_mode, bound_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'auto', ?)
 			ON CONFLICT(instance_id, role, actor) DO UPDATE SET
+				principal_ref = excluded.principal_ref,
 				delivery_ref = COALESCE(excluded.delivery_ref, workflow_role_bindings.delivery_ref),
 				lane = COALESCE(excluded.lane, workflow_role_bindings.lane)
-		`, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), now)
+		`, inst.ID, role, actor, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), now)
 		if err != nil {
 			return err
 		}
-		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now, LeaseOwner: opts.LeaseOwner, LeaseToken: opts.LeaseToken, LeaseExpiresAt: opts.LeaseExpiresAt, HeartbeatAt: opts.HeartbeatAt}
+		run = &Run{ID: id, InstanceID: inst.ID, Role: role, PrincipalRef: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now, LeaseOwner: opts.LeaseOwner, LeaseToken: opts.LeaseToken, LeaseExpiresAt: opts.LeaseExpiresAt, HeartbeatAt: opts.HeartbeatAt}
 		return nil
 	})
 	return run, err
@@ -2239,8 +2240,8 @@ func (s *Service) BindExternal(id, externalRunRef string, opts BindExternalOptio
 		_, err = tx.Exec(`
 			UPDATE workflow_role_bindings
 			SET delivery_ref = COALESCE(NULLIF(?, ''), delivery_ref), lane = COALESCE(NULLIF(?, ''), lane)
-			WHERE instance_id = ? AND role = ? AND actor = ?
-		`, deliveryRef, lane, current.InstanceID, current.Role, current.Actor)
+			WHERE instance_id = ? AND role = ? AND principal_ref = ?
+		`, deliveryRef, lane, current.InstanceID, current.Role, current.PrincipalRef)
 		if err != nil {
 			return err
 		}
@@ -2293,11 +2294,11 @@ func (s *Service) FailRun(id, summary string) (*Run, error) {
 func (s *Service) ShowRun(id string) (*Run, error) {
 	var r Run
 	err := s.db.QueryRow(`
-		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs WHERE id = ?
-	`, id).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt)
+	`, id).Scan(&r.ID, &r.InstanceID, &r.Role, &r.PrincipalRef, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("run not found: %s", id)
@@ -2313,7 +2314,7 @@ type runRowScanner interface {
 
 func scanRun(scanner runRowScanner) (*Run, error) {
 	var r Run
-	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt)
+	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.PrincipalRef, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt)
 	if err != nil {
 		return nil, err
 	}
@@ -2322,7 +2323,7 @@ func scanRun(scanner runRowScanner) (*Run, error) {
 
 func selectRunByID(tx *sql.Tx, id string) (*Run, error) {
 	run, err := scanRun(tx.QueryRow(`
-		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs WHERE id = ?
@@ -2340,11 +2341,11 @@ func selectRunByInstanceIdempotencyKey(tx *sql.Tx, instanceID, key string) (*Run
 	var r Run
 	var requestHash string
 	err := tx.QueryRow(`
-		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(request_hash,'')
 		FROM workflow_runs WHERE instance_id = ? AND idempotency_key = ?
-	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt, &requestHash)
+	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.PrincipalRef, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt, &requestHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", nil
@@ -2358,7 +2359,7 @@ func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) s
 	payload := struct {
 		InstanceID      string `json:"instanceId"`
 		Role            string `json:"role"`
-		Actor           string `json:"actor"`
+		PrincipalRef    string `json:"principal_ref"`
 		DeliveryRef     string `json:"deliveryRef,omitempty"`
 		Lane            string `json:"lane,omitempty"`
 		ExternalRunRef  string `json:"externalRunRef,omitempty"`
@@ -2370,7 +2371,7 @@ func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) s
 	}{
 		InstanceID:      instanceID,
 		Role:            role,
-		Actor:           actor,
+		PrincipalRef:    actor,
 		DeliveryRef:     opts.DeliveryRef,
 		Lane:            opts.Lane,
 		ExternalRunRef:  opts.ExternalRunRef,
@@ -2405,7 +2406,7 @@ func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
 		return nil, err
 	}
 	rows, err := s.db.Query(`
-		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs WHERE instance_id = ? ORDER BY started_at, id
@@ -2417,7 +2418,7 @@ func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
 	var out []Run
 	for rows.Next() {
 		var r Run
-		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.PrincipalRef, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -102,7 +102,7 @@ func pdRunEnv(t *testing.T, entrypoint, dbPath string, extraEnv []string, reqs .
 	t.Helper()
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "p4-smokey", "version": "0.0.1"},
 		}),
 	}
@@ -901,7 +901,7 @@ func TestWrkqAttachment_MissingAttachDir_Fails(t *testing.T) {
 
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "p4-smokey", "version": "0.0.1"},
 		}),
 		mkRPC("a1", "wrkq.attachment.add", map[string]any{
@@ -1523,7 +1523,7 @@ func TestWrkqDeferredMethods_NoneReturnNotImplemented(t *testing.T) {
 
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "p4-contract", "version": "0.0.1"},
 		}),
 	}

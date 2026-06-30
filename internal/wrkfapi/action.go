@@ -32,7 +32,7 @@ type ActionStartParams struct {
 	Workflow       string          `json:"workflow,omitempty"`
 	Action         string          `json:"action"`
 	Role           string          `json:"role,omitempty"`
-	Actor          string          `json:"actor,omitempty"`
+	PrincipalRef   string          `json:"principal_ref,omitempty"`
 	Lane           string          `json:"lane,omitempty"`
 	DeliveryRef    json.RawMessage `json:"deliveryRef,omitempty"`
 	ExternalRunRef string          `json:"externalRunRef,omitempty"`
@@ -78,7 +78,7 @@ type ActionReapParams struct {
 	ExpiredBefore      string `json:"expiredBefore,omitempty"`
 	LegacyActiveBefore string `json:"legacyActiveBefore,omitempty"`
 	Limit              int    `json:"limit,omitempty"`
-	Actor              string `json:"actor,omitempty"`
+	PrincipalRef       string `json:"principal_ref,omitempty"`
 	Summary            string `json:"summary,omitempty"`
 }
 
@@ -120,7 +120,7 @@ func (api *API) ActionStart(ctx context.Context, params ActionStartParams) (*Act
 		Workflow:       params.Workflow,
 		Action:         params.Action,
 		Role:           params.Role,
-		Actor:          params.Actor,
+		PrincipalRef:   params.PrincipalRef,
 		Lane:           params.Lane,
 		DeliveryRef:    deliveryRef,
 		ExternalRunRef: params.ExternalRunRef,
@@ -225,7 +225,7 @@ func (api *API) ActionReap(ctx context.Context, params ActionReapParams) (*workf
 		ExpiredBefore:      params.ExpiredBefore,
 		LegacyActiveBefore: params.LegacyActiveBefore,
 		Limit:              params.Limit,
-		Actor:              params.Actor,
+		PrincipalRef:       params.PrincipalRef,
 		Summary:            params.Summary,
 	})
 	if err != nil {

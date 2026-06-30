@@ -25,7 +25,7 @@ func (api *API) RoleBind(ctx context.Context, params RoleBindParams) (*workflow.
 		TaskSelector: params.TaskSelector,
 		InstanceID:   params.InstanceID,
 		Role:         params.Role,
-		Actor:        params.Actor,
+		PrincipalRef: params.PrincipalRef,
 		DeliveryRef:  params.DeliveryRef,
 		Lane:         params.Lane,
 		BindingMode:  params.BindingMode,
@@ -40,7 +40,7 @@ func (api *API) RoleUnbind(ctx context.Context, params RoleUnbindParams) ([]work
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	bindings, err := api.service.UnbindRole(params.TaskSelector, params.InstanceID, params.Role, params.Actor)
+	bindings, err := api.service.UnbindRole(params.TaskSelector, params.InstanceID, params.Role, params.PrincipalRef)
 	if err != nil {
 		return nil, normalizeError(err)
 	}

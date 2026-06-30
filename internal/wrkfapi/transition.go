@@ -15,7 +15,7 @@ type TransitionApplyParams struct {
 	InstanceID     string   `json:"instanceId,omitempty"`
 	Transition     string   `json:"transition"`
 	Role           string   `json:"role,omitempty"`
-	Actor          string   `json:"actor,omitempty"`
+	PrincipalRef   string   `json:"principal_ref,omitempty"`
 	ExpectRevision *int64   `json:"expectRevision,omitempty"`
 	ContextHash    string   `json:"contextHash,omitempty"`
 	IdempotencyKey string   `json:"idempotencyKey,omitempty"`
@@ -29,7 +29,7 @@ func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParam
 		return TransitionResult{}, err
 	}
 	out, err := api.service.TransitionForSelectors(params.TaskSelector, params.InstanceID, params.Transition, workflow.TransitionOptions{
-		Actor:          params.Actor,
+		PrincipalRef:   params.PrincipalRef,
 		Role:           params.Role,
 		ExpectRevision: params.ExpectRevision,
 		IdempotencyKey: params.IdempotencyKey,

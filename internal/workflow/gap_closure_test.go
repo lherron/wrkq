@@ -200,7 +200,7 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 		Kind:         "verdict",
 		Ref:          "urn:test:verdict:old",
 		Facts:        `{"route":"approve"}`,
-		Actor:        "reviewer-a",
+		PrincipalRef: "reviewer-a",
 		Role:         "reviewer",
 	}); err != nil {
 		t.Fatalf("AddEvidence old verdict: %v", err)
@@ -224,7 +224,7 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 		t.Fatalf("mutate task: %v", err)
 	}
 	expectRev := int64(0)
-	_, err = svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &expectRev, IdempotencyKey: "stale-attempt"})
+	_, err = svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &expectRev, IdempotencyKey: "stale-attempt"})
 	if got := wrkfCode(err); got != "WRKF_TRANSITION_BLOCKED" {
 		t.Fatalf("stale evidence transition code = %q, want WRKF_TRANSITION_BLOCKED (err=%v)", got, err)
 	}
@@ -237,7 +237,7 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 		Kind:         "verdict",
 		Ref:          "urn:test:verdict:fresh",
 		Facts:        `{"route":"approve"}`,
-		Actor:        "reviewer-a",
+		PrincipalRef: "reviewer-a",
 		Role:         "reviewer",
 	})
 	if err != nil {
@@ -247,7 +247,7 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 		t.Fatal("fresh evidence did not record task hash provenance")
 	}
 
-	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &expectRev, IdempotencyKey: "fresh-commit"})
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &expectRev, IdempotencyKey: "fresh-commit"})
 	if err != nil {
 		t.Fatalf("Transition fresh: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestTransitionExternalEffectRemainsPending(t *testing.T) {
 	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "gap_external_effect_test", gapExternalEffectTemplate)
 
 	rev0 := int64(0)
-	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
 	if err != nil {
 		t.Fatalf("Transition: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestTransitionIdempotentReplayDrainsPendingBuiltinEffect(t *testing.T) {
 		Kind:         "verdict",
 		Ref:          "urn:test:verdict:approve",
 		Facts:        `{"route":"approve"}`,
-		Actor:        "reviewer-a",
+		PrincipalRef: "reviewer-a",
 		Role:         "reviewer",
 	}); err != nil {
 		t.Fatalf("AddEvidence verdict: %v", err)
@@ -318,7 +318,7 @@ func TestTransitionIdempotentReplayDrainsPendingBuiltinEffect(t *testing.T) {
 
 	rev0 := int64(0)
 	const idemKey = "gap-replay-drain"
-	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0, IdempotencyKey: idemKey})
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0, IdempotencyKey: idemKey})
 	if err != nil {
 		t.Fatalf("Transition: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestTransitionIdempotentReplayDrainsPendingBuiltinEffect(t *testing.T) {
 		t.Fatalf("reset effect state: %v", err)
 	}
 
-	replayed, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0, IdempotencyKey: idemKey})
+	replayed, err := svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0, IdempotencyKey: idemKey})
 	if err != nil {
 		t.Fatalf("replay transition: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestTransitionBuiltinEffectFailureIsVisible(t *testing.T) {
 	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "gap_invalid_builtin_effect_test", gapInvalidBuiltinEffectTemplate)
 
 	rev0 := int64(0)
-	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{Actor: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
+	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
 	if got := wrkfCode(err); got != wrkfCodeEffectDeliveryFailed {
 		t.Fatalf("transition error code = %q, want %s (err=%v)", got, wrkfCodeEffectDeliveryFailed, err)
 	}

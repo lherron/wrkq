@@ -174,7 +174,7 @@ func g1Run(t *testing.T, entrypoint, dbPath string, reqs ...string) []map[string
 	t.Helper()
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "g1-smokey", "version": "0.0.1"},
 		}),
 	}

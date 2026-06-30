@@ -34,7 +34,7 @@ type ActionRun struct {
 	Workflow           ActionWorkflowRef `json:"workflow"`
 	Action             string            `json:"action"`
 	Role               string            `json:"role"`
-	Actor              string            `json:"actor,omitempty"`
+	PrincipalRef       string            `json:"principal_ref,omitempty"`
 	Lane               string            `json:"lane,omitempty"`
 	DeliveryRef        string            `json:"deliveryRef,omitempty"`
 	ExternalRunRef     string            `json:"externalRunRef,omitempty"`
@@ -69,7 +69,7 @@ type StartActionParams struct {
 	Workflow       string
 	Action         string
 	Role           string
-	Actor          string
+	PrincipalRef   string
 	Lane           string
 	DeliveryRef    string
 	ExternalRunRef string
@@ -132,7 +132,7 @@ type ReapActionsParams struct {
 	ExpiredBefore      string
 	LegacyActiveBefore string
 	Limit              int
-	Actor              string
+	PrincipalRef       string
 	Summary            string
 }
 
@@ -207,23 +207,23 @@ func (s *Service) StartAction(p StartActionParams) (*ActionRun, error) {
 		}
 		workflowRef := strings.TrimSpace(p.Workflow)
 		if workflowRef == "" {
-			if _, _, err := s.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, p.Actor); err != nil {
+			if _, _, err := s.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, p.PrincipalRef); err != nil {
 				return nil, err
 			}
 			workflowRef = BuiltinSimpleTaskTemplateRef
 		} else if _, builtinErr := builtinTemplateData(workflowRef); builtinErr == nil {
-			if _, _, err := s.EnsureBuiltinTemplate(workflowRef, p.Actor); err != nil {
+			if _, _, err := s.EnsureBuiltinTemplate(workflowRef, p.PrincipalRef); err != nil {
 				return nil, err
 			}
 		}
-		attached, err := s.AttachTask(p.Task, workflowRef, p.Actor)
+		attached, err := s.AttachTask(p.Task, workflowRef, p.PrincipalRef)
 		if err != nil {
 			return nil, err
 		}
 		inst = attached
 	}
 
-	run, err := s.StartRunForSelectors("", inst.ID, role, p.Actor, StartRunOptions{
+	run, err := s.StartRunForSelectors("", inst.ID, role, p.PrincipalRef, StartRunOptions{
 		IdempotencyKey: p.IdempotencyKey,
 		DeliveryRef:    p.DeliveryRef,
 		Lane:           lane,
@@ -307,7 +307,7 @@ func (s *Service) CompleteAction(p CompleteActionParams) (*ActionCompleteResult,
 				key = fmt.Sprintf("wrkf-action:%s:transition:%s", run.ID, transitionID)
 			}
 			out, err := s.TransitionForSelectors("", fresh.ID, transitionID, TransitionOptions{
-				Actor:          run.Actor,
+				PrincipalRef:   run.PrincipalRef,
 				Role:           run.Role,
 				IdempotencyKey: key,
 				RunID:          run.ID,
@@ -430,7 +430,7 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 	var reaped []Run
 	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
 		query := `
-			SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+			SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 			       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 			       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 			FROM workflow_runs
@@ -477,7 +477,7 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 				}
 				reason = "action lease expired: " + owner
 			}
-			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.Actor), now); err != nil {
+			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.PrincipalRef), now); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`UPDATE workflow_runs SET status = 'failed', completed_at = ?, terminal_result = ?, lease_token = NULL WHERE id = ? AND status = 'active'`, now, reason, reaped[i].ID); err != nil {
@@ -554,7 +554,7 @@ func (s *Service) ListActions(p ListActionsParams) ([]ActionRun, error) {
 		args = append(args, id)
 	}
 	query := `
-		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
 		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs
@@ -578,7 +578,7 @@ func (s *Service) ListActions(p ListActionsParams) ([]ActionRun, error) {
 	out := []ActionRun{}
 	for rows.Next() {
 		var r Run
-		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.PrincipalRef, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
 			return nil, err
 		}
 		ar, err := s.toActionRun(&r, instByID[r.InstanceID])
@@ -656,7 +656,7 @@ func (s *Service) addActionEvidence(run *Run, in *ActionEvidenceInput, defaultKi
 		Summary:        in.Summary,
 		Facts:          in.Facts,
 		Data:           in.Data,
-		Actor:          run.Actor,
+		PrincipalRef:   run.PrincipalRef,
 		Role:           run.Role,
 		RunID:          run.ID,
 		ContentHash:    in.ContentHash,
@@ -713,7 +713,7 @@ func (s *Service) toActionRunWithOptions(run *Run, inst *Instance, opts actionRu
 		Workflow:       ActionWorkflowRef{ID: inst.TemplateID, Version: inst.TemplateVersion, Hash: inst.TemplateHash},
 		Action:         run.Action,
 		Role:           run.Role,
-		Actor:          run.Actor,
+		PrincipalRef:   run.PrincipalRef,
 		Lane:           run.Lane,
 		DeliveryRef:    run.DeliveryRef,
 		ExternalRunRef: run.ExternalRunRef,
@@ -779,7 +779,7 @@ func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now string
 		return err
 	}
 	if actor == "" {
-		actor = run.Actor
+		actor = run.PrincipalRef
 	}
 	source := map[string]interface{}{"type": "wrkf.action.reap", "runId": run.ID}
 	sourceJSON, _ := json.Marshal(source)
@@ -794,13 +794,13 @@ func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now string
 	var taskEtag, taskHash string
 	_ = tx.QueryRow(`SELECT COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,'') FROM workflow_instances WHERE id = ?`, run.InstanceID).Scan(&taskEtag, &taskHash)
 	_, err = tx.Exec(`
-		INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, data_json, source_json, actor, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
-		VALUES (?, ?, 'failure_result', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, id, run.InstanceID, "wrkf-action:"+run.ID+":reap", reason, string(dataJSON), string(sourceJSON), nullIfEmpty(actor), nullIfEmpty(run.Role), run.ID, nullIfEmpty(taskEtag), nullIfEmpty(taskHash), now)
+		INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, data_json, source_json, actor, principal_ref, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
+		VALUES (?, ?, 'failure_result', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, run.InstanceID, "wrkf-action:"+run.ID+":reap", reason, string(dataJSON), string(sourceJSON), nullIfEmpty(actor), nullIfEmpty(actor), nullIfEmpty(run.Role), run.ID, nullIfEmpty(taskEtag), nullIfEmpty(taskHash), now)
 	if err != nil {
 		return err
 	}
-	ev := &Evidence{ID: id, InstanceID: run.InstanceID, Kind: "failure_result", Ref: "wrkf-action:" + run.ID + ":reap", Summary: reason, Data: dataJSON, Source: sourceJSON, Actor: actor, Role: run.Role, RunID: run.ID, TaskEtagAtProduction: taskEtag, TaskHashAtProduction: taskHash, ProducedAt: now}
+	ev := &Evidence{ID: id, InstanceID: run.InstanceID, Kind: "failure_result", Ref: "wrkf-action:" + run.ID + ":reap", Summary: reason, Data: dataJSON, Source: sourceJSON, PrincipalRef: actor, Role: run.Role, RunID: run.ID, TaskEtagAtProduction: taskEtag, TaskHashAtProduction: taskHash, ProducedAt: now}
 	return storeEvidenceResult(tx, run.InstanceID, key, key, ev)
 }
 

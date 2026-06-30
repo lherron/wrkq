@@ -26,7 +26,7 @@ func TestEntrypointEquivalence(t *testing.T) {
 	wrkqInit, wrkqList, wrkqDomain := runRPCSequence(t, "wrkq", wrkqDB)
 	wrkfInit, wrkfList, wrkfDomain := runRPCSequence(t, "wrkf", wrkfDB)
 
-	if wrkqInit["protocolVersion"] != "2026-06-14" || wrkfInit["protocolVersion"] != "2026-06-14" {
+	if wrkqInit["protocolVersion"] != "2026-06-30" || wrkfInit["protocolVersion"] != "2026-06-30" {
 		t.Fatalf("protocolVersion mismatch: wrkq=%v wrkf=%v", wrkqInit["protocolVersion"], wrkfInit["protocolVersion"])
 	}
 	if _, ok := wrkqInit["schemaHash"]; ok {
@@ -61,7 +61,7 @@ func TestEntrypointEquivalence(t *testing.T) {
 func runRPCSequence(t *testing.T, entrypoint, dbPath string) (map[string]any, map[string]any, map[string]any) {
 	t.Helper()
 	frames := runRPC(t, entrypoint, dbPath, []string{
-		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"2026-06-14","client":{"name":"test","version":"0.0.1"}}}`,
+		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"2026-06-30","client":{"name":"test","version":"0.0.1"}}}`,
 		`{"jsonrpc":"2.0","id":"list","method":"wrkf.workflow.list","params":{}}`,
 		`{"jsonrpc":"2.0","id":"domain","method":"wrkq.task.create","params":{}}`,
 		`{"jsonrpc":"2.0","id":"shutdown","method":"rpc.shutdown","params":{}}`,

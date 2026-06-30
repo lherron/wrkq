@@ -26,7 +26,7 @@ func TestCodec_RequestRoundtrip(t *testing.T) {
 		method = "wrkf.initialize"
 	)
 	params, _ := json.Marshal(map[string]any{
-		"protocolVersion": "2026-06-01",
+		"protocolVersion": "2026-06-30",
 		"client":          map[string]any{"name": "test-client", "version": "0.0.1"},
 	})
 
@@ -92,7 +92,7 @@ func TestCodec_RequestRoundtrip(t *testing.T) {
 // the required "jsonrpc" field.
 func TestCodec_ResponseEncoding(t *testing.T) {
 	result, _ := json.Marshal(map[string]any{
-		"protocolVersion": "2026-06-01",
+		"protocolVersion": "2026-06-30",
 		"server":          map[string]any{"name": "wrkf", "version": "test", "pid": 99},
 		"capabilities":    map[string]any{"cancel": true, "effectClaimLease": true},
 		"schemaHash":      "sha256:deadbeef",

@@ -95,7 +95,7 @@ func e2eRPC(t *testing.T, bin, dbPath string, reqs ...string) map[string]map[str
 	t.Helper()
 	seq := []string{
 		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-14",
+			"protocolVersion": "2026-06-30",
 			"client":          map[string]any{"name": "e2e-bridge", "version": "0.0.1"},
 		}),
 	}

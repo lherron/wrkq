@@ -50,7 +50,8 @@ func setupRunFixture(t *testing.T) (*Service, string) {
 // idempotencyKey returns the SAME run (replay), inserting no duplicate row.
 //
 // Contract §5.1 / §6 invariant 3:
-//   same key → same Run (replay).
+//
+//	same key → same Run (replay).
 //
 // Regression guard: StartRunOptions.IdempotencyKey must replay the original run.
 func TestStartRunIdempotency(t *testing.T) {
@@ -105,7 +106,8 @@ func TestStartRunIdempotency(t *testing.T) {
 // with a different role returns WRKF_IDEMPOTENCY_MISMATCH, not a silent success.
 //
 // Contract §5.1 / §6 invariant 3:
-//   same key + different role/task → conflict (WRKF_IDEMPOTENCY_MISMATCH).
+//
+//	same key + different role/task → conflict (WRKF_IDEMPOTENCY_MISMATCH).
 //
 // Regression guard: a reused idempotency key with different run identity must
 // return WRKF_IDEMPOTENCY_MISMATCH.
@@ -138,8 +140,9 @@ func TestStartRunIdempotencyMismatch(t *testing.T) {
 // returns a conflict error.
 //
 // Contract §5.1:
-//   wrkf.run.bindExternal sets external_run_ref (unique when non-empty).
-//   Second bind with different non-empty ref → conflict.
+//
+//	wrkf.run.bindExternal sets external_run_ref (unique when non-empty).
+//	Second bind with different non-empty ref → conflict.
 //
 // Regression guard: BindExternalOptions participates in the external-run
 // binding contract, and conflicting refs must remain rejected.
@@ -199,14 +202,15 @@ func TestBindExternal(t *testing.T) {
 
 // TestFinishRunIdempotency verifies both legs of terminal-state idempotency:
 //
-//   leg a) FinishRun twice with IDENTICAL (status, summary) → existing terminal Run
-//          returned, no error (pure idempotent replay).
-//   leg b) FinishRun on an already-terminal run with a DIFFERENT summary →
-//          WRKF_IDEMPOTENCY_MISMATCH (conflicting terminal payload).
+//	leg a) FinishRun twice with IDENTICAL (status, summary) → existing terminal Run
+//	       returned, no error (pure idempotent replay).
+//	leg b) FinishRun on an already-terminal run with a DIFFERENT summary →
+//	       WRKF_IDEMPOTENCY_MISMATCH (conflicting terminal payload).
 //
 // Contract §5.1 / §6 invariant 3:
-//   "Repeated terminal with identical payload → existing terminal Run;
-//    conflicting terminal payload → conflict."
+//
+//	"Repeated terminal with identical payload → existing terminal Run;
+//	 conflicting terminal payload → conflict."
 //
 // Regression guard: StartRunOptions creates distinct runs for the two legs, and
 // FinishRun must reject a conflicting terminal payload instead of overwriting it.

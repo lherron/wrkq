@@ -71,7 +71,7 @@ func TestTimeline_DTO(t *testing.T) {
 		_ = ev.InstanceID
 		_ = ev.Seq
 		_ = ev.Type
-		_ = ev.Actor
+		_ = ev.PrincipalRef
 		_ = ev.Role
 		_ = ev.ObservedRevision
 		_ = ev.NextRevision

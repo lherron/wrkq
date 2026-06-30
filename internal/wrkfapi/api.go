@@ -358,7 +358,7 @@ func (api *API) CheckRun(ctx context.Context, params CheckRunParams) (CheckRunRe
 	if err := ctx.Err(); err != nil {
 		return CheckRunResult{}, err
 	}
-	runs, err := api.service.RunChecks(params.TaskSelector, params.Transition, params.Actor, params.Role, api.hookCatalog, api.templateDir)
+	runs, err := api.service.RunChecks(params.TaskSelector, params.Transition, params.PrincipalRef, params.Role, api.hookCatalog, api.templateDir)
 	if err != nil {
 		return CheckRunResult{}, normalizeError(err)
 	}
@@ -475,7 +475,7 @@ func (api *API) HookRun(ctx context.Context, params HookRunParams) (*workflow.Ch
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	run, err := api.service.RunSingleHook(params.TaskSelector, params.Transition, params.HookID, params.Actor, params.Role, api.hookCatalog, api.templateDir)
+	run, err := api.service.RunSingleHook(params.TaskSelector, params.Transition, params.HookID, params.PrincipalRef, params.Role, api.hookCatalog, api.templateDir)
 	if err != nil {
 		return nil, normalizeError(err)
 	}
@@ -490,7 +490,7 @@ func (api *API) setObligationStatus(ctx context.Context, params ObligationStatus
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	obl, err := api.service.SetObligationStatusWithAuthority(params.TaskSelector, params.ID, status, params.EvidenceID, params.Reason, workflow.ObligationStatusOptions{Actor: params.Actor, Role: params.Role})
+	obl, err := api.service.SetObligationStatusWithAuthority(params.TaskSelector, params.ID, status, params.EvidenceID, params.Reason, workflow.ObligationStatusOptions{PrincipalRef: params.PrincipalRef, Role: params.Role})
 	if err != nil {
 		return nil, normalizeError(err)
 	}
