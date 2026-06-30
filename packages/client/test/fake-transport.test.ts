@@ -13,6 +13,7 @@ import { FakeTransport } from "../src/testing/fake-transport";
 import type { WrkfEventQueryResult, WrkfTransitionResult } from "../src/wrkf/types";
 import type {
   WrkqContainer,
+  WrkqTaskCreateParams,
   WrkqHandoff,
   WrkqTask,
   WrkqTaskCopyResult,
@@ -163,6 +164,39 @@ describe("wrkq namespace", () => {
     expect(task.riskClass).toBe("medium");
     expect(task.etag).toBe(2);
     expect(task.assigneePrincipalRef).toBe("agent:larry");
+  });
+
+  test("T-05381 task.create uses principalRef and rejects legacy actor attribution", async () => {
+    const transport = new FakeTransport().onResult("wrkq.task.create", MOCK_TASK);
+    const client = await clientWith(transport);
+
+    await client.wrkq.task.create({
+      title: "principal-only task",
+      kind: "task",
+      state: "open",
+      principalRef: "agent:calchas",
+      idempotencyKey: "principal-only-create",
+    } as WrkqTaskCreateParams);
+
+    expect(transport.capturedRequests[0]!.params).toMatchObject({
+      principalRef: "agent:calchas",
+    });
+    expect(transport.capturedRequests[0]!.params).not.toHaveProperty("actor");
+
+    // T-05381 removes `actor` as a wrkq mutation caller-attribution DTO field.
+    // The client must fail before emitting a JSON-RPC frame so legacy callers
+    // cannot be silently honored by an older server.
+    await expect(
+      client.wrkq.task.create({
+        title: "legacy actor task",
+        kind: "task",
+        state: "open",
+        actor: "agent:calchas",
+        idempotencyKey: "legacy-actor-create",
+      } as WrkqTaskCreateParams),
+    ).rejects.toThrow(/actor|principalRef/i);
+
+    expect(transport.capturedRequests).toHaveLength(1);
   });
 
   test("task.update forwards expectEtag CAS precondition verbatim", async () => {
