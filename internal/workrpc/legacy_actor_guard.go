@@ -15,8 +15,7 @@ import (
 //
 // The scan is top-level only so free-form nested blobs (evidence
 // data/facts/source) that legitimately contain an "actor" key are not
-// affected, and it is applied ONLY to wrkf-domain methods (see
-// isWrkfDomainMethod) so unrelated wrkq core/admin surfaces that still accept
+// affected, and it is applied ONLY to wrkf.* methods (see isWrkfDomainMethod) so unrelated wrkq core/admin surfaces that still accept
 // `actor` are untouched.
 var legacyActorParamFields = []string{
 	"actor", "actorRole", "actor_role",
@@ -28,8 +27,13 @@ var legacyActorParamFields = []string{
 
 // isWrkfDomainMethod reports whether an RPC method carries wrkf workflow
 // participant identity and must therefore reject legacy actor-shaped params.
+//
+// Scope is the wrkf.* namespace ONLY. The wrkq.workflow.* methods
+// (attach/refresh/inspect/timeline) are core caller/installer attribution and
+// still read canonical camelCase `actor` per the wrkq core convention — they
+// are NOT wrkf participant identity and must not be rejected here.
 func isWrkfDomainMethod(method string) bool {
-	return strings.HasPrefix(method, "wrkf.") || strings.HasPrefix(method, "wrkq.workflow.")
+	return strings.HasPrefix(method, "wrkf.")
 }
 
 // guardLegacyActorParams wraps a wrkf-domain handler so a request carrying a
