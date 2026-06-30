@@ -166,13 +166,7 @@ class WorkClientImpl implements WorkClient {
       pause: (p) => this.call("wrkq.index.pause", p ?? {}),
       resume: (p) => this.call("wrkq.index.resume", p ?? {}),
     },
-    admin: {
-      legacyActor: {
-        list: (p) => this.call("wrkq.admin.legacyActor.list", p ?? {}),
-        create: (p) => this.call("wrkq.admin.legacyActor.create", p),
-        update: (p) => this.call("wrkq.admin.legacyActor.update", p),
-      },
-    },
+    admin: {},
   };
 
   readonly wrkf: WrkfFacade = {

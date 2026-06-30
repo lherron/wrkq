@@ -13,7 +13,6 @@ export type {
   WrkqContainerFacade,
   WrkqFacade,
   WrkqIndexFacade,
-  WrkqLegacyActorFacade,
   WrkqRelationFacade,
   WrkqSearchFacade,
   WrkqTaskFacade,

@@ -44,11 +44,6 @@ import type {
   WrkqIndexStatus,
   WrkqIndexUpdateResult,
   WrkqIndexVacuumResult,
-  WrkqLegacyActor,
-  WrkqLegacyActorCreateParams,
-  WrkqLegacyActorListParams,
-  WrkqLegacyActorListResult,
-  WrkqLegacyActorUpdateParams,
   WrkqRelation,
   WrkqRelationAddParams,
   WrkqRelationListParams,
@@ -142,25 +137,8 @@ export interface WrkqWorkflowFacade {
   refresh(params: WrkqWorkflowRefreshParams): Promise<WrkqWorkflowInspectResult>;
 }
 
-/**
- * Legacy actor read/admin compatibility surface (wrkq.admin.legacyActor.*).
- *
- * Actor rows are a LEGACY display/admin cache: these methods never issue,
- * validate, or authorize principals, and no actor row is a prerequisite for any
- * task/comment/container/workflow write. Use principal-based attribution for new
- * work; this facade exists for taskboard's admin actors page and display
- * enrichment.
- */
-export interface WrkqLegacyActorFacade {
-  list(params?: WrkqLegacyActorListParams): Promise<WrkqLegacyActorListResult>;
-  create(params: WrkqLegacyActorCreateParams): Promise<WrkqLegacyActor>;
-  update(params: WrkqLegacyActorUpdateParams): Promise<WrkqLegacyActor>;
-}
-
-/** Admin/legacy compatibility namespace (wrkq.admin.*). */
-export interface WrkqAdminFacade {
-  readonly legacyActor: WrkqLegacyActorFacade;
-}
+/** Admin namespace placeholder; legacy actor admin methods were removed in T-05381. */
+export interface WrkqAdminFacade {}
 
 /**
  * Handoff family (wrkq.handoff.*). Scope is CALLER-owned but NOT project-root:

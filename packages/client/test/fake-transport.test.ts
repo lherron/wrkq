@@ -567,57 +567,9 @@ describe("wrkq namespace", () => {
     expect(res.instance.id).toBe("wfi_x");
   });
 
-  test("admin.legacyActor facade forwards list, create, and update", async () => {
-    const MOCK_ACTOR = {
-      uuid: "a-u-1",
-      id: "A-00001",
-      slug: "larry",
-      displayName: "Larry",
-      role: "agent",
-      meta: { team: "core" },
-      createdAt: "2026-06-14T00:00:00Z",
-      updatedAt: "2026-06-14T00:00:00Z",
-    };
-    const transport = new FakeTransport()
-      .onResult("wrkq.admin.legacyActor.list", { items: [MOCK_ACTOR] })
-      .onResult("wrkq.admin.legacyActor.create", MOCK_ACTOR)
-      .onResult("wrkq.admin.legacyActor.update", { ...MOCK_ACTOR, displayName: "Larry P" });
-    const client = await clientWith(transport);
-
-    const listed = await client.wrkq.admin.legacyActor.list();
-    const created = await client.wrkq.admin.legacyActor.create({
-      slug: "larry",
-      displayName: "Larry",
-      role: "agent",
-      meta: { team: "core" },
-    });
-    const updated = await client.wrkq.admin.legacyActor.update({
-      actor: "larry",
-      patch: { displayName: "Larry P", meta: null },
-      expectUpdatedAt: "2026-06-14T00:00:00Z",
-    });
-
-    expect(listed.items).toHaveLength(1);
-    expect(listed.items[0]!.id).toBe("A-00001");
-    expect(created.slug).toBe("larry");
-    expect(updated.displayName).toBe("Larry P");
-    // DTO must not leak a principalRef field.
-    expect("principalRef" in created).toBe(false);
-    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
-      "wrkq.admin.legacyActor.list",
-      "wrkq.admin.legacyActor.create",
-      "wrkq.admin.legacyActor.update",
-    ]);
-    expect(transport.capturedRequests[1]!.params).toMatchObject({
-      slug: "larry",
-      role: "agent",
-      meta: { team: "core" },
-    });
-    expect(transport.capturedRequests[2]!.params).toMatchObject({
-      actor: "larry",
-      patch: { displayName: "Larry P", meta: null },
-      expectUpdatedAt: "2026-06-14T00:00:00Z",
-    });
+  test("T-05381 removes the legacy actor admin facade", async () => {
+    const client = await clientWith(new FakeTransport());
+    expect((client.wrkq.admin as Record<string, unknown>).legacyActor).toBeUndefined();
   });
 
   test("workflow.timeline returns typed events envelope", async () => {

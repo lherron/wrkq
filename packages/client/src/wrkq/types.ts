@@ -497,69 +497,6 @@ export interface WrkqWorkflowRefreshParams {
   idempotencyKey?: string;
 }
 
-// ── Legacy actor admin cache (wrkq.admin.legacyActor.*) ──────────────────────
-
-/**
- * WrkqLegacyActor is the legacy actor display/admin-cache DTO (T-04850).
- *
- * Actor rows are a LEGACY read/admin compatibility surface: they do NOT issue,
- * validate, or authorize principals. There is deliberately no `principalRef`
- * field. Task/comment/container/workflow writes attribute by `principalRef` and
- * never require an actor row. Prefer principal-based attribution for new work.
- */
-export interface WrkqLegacyActor {
-  uuid: string;
-  id: string;
-  slug: string;
-  displayName?: string;
-  /** One of "human" | "agent" | "system". */
-  role: string;
-  meta?: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Result envelope for wrkq.admin.legacyActor.list. */
-export interface WrkqLegacyActorListResult {
-  items: WrkqLegacyActor[];
-}
-
-/** Params for wrkq.admin.legacyActor.list (no filters today). */
-export interface WrkqLegacyActorListParams {
-  [k: string]: never;
-}
-
-/** Params for wrkq.admin.legacyActor.create. */
-export interface WrkqLegacyActorCreateParams {
-  slug: string;
-  displayName?: string;
-  /** Defaults to "agent". One of "human" | "agent" | "system". */
-  role?: string;
-  /** Replacement meta object (must be a JSON object). */
-  meta?: Record<string, unknown>;
-  idempotencyKey?: string;
-}
-
-/** Mutable fields for wrkq.admin.legacyActor.update. slug/id/uuid/createdAt are immutable. */
-export interface WrkqLegacyActorPatch {
-  /** Set or clear (null) the display name. */
-  displayName?: string | null;
-  /** One of "human" | "agent" | "system". */
-  role?: string;
-  /** Replace (object) or clear (null) the meta object. */
-  meta?: Record<string, unknown> | null;
-}
-
-/** Params for wrkq.admin.legacyActor.update. */
-export interface WrkqLegacyActorUpdateParams {
-  /** Actor selector: uuid, friendly id, or slug. */
-  actor: string;
-  patch: WrkqLegacyActorPatch;
-  /** Optimistic-concurrency guard against the actor's current updatedAt. */
-  expectUpdatedAt?: string;
-  idempotencyKey?: string;
-}
-
 // ── Handoff (T-05117) ────────────────────────────────────────────────────────
 
 /**

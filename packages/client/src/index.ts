@@ -33,7 +33,6 @@ export type {
 export type {
   WrkqAdminFacade,
   WrkqFacade,
-  WrkqLegacyActorFacade,
 } from "./wrkq/facade.js";
 export type { WrkfFacade } from "./wrkf/facade.js";
 export type * from "./wrkq/types.js";
