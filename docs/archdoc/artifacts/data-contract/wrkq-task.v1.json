@@ -3,7 +3,7 @@
   "id": "artifact:wrkq/task-data-contract",
   "profile": "data-contract.v1",
   "title": "Task",
-  "summary": "Semantic DTO contract for the persisted wrkq task as exposed by domain.Task JSON tags, including external-principal and runtime-scope attribution and the refined domain.State and paths.Slug wire types.",
+  "summary": "Composite source-linked DTO contract for the wrkq task surface. It documents the persisted internal/domain.Task JSON tags together with the snake_case wrkq cat --json / WrkqTaskCatView read projection layered on top, and cross-references the canonical camelCase RPC resource WrkqTask (internal/wrkqapi/types.go). Because it spans both persisted and read-projection fields, this artifact is composite: every field carries an origin (persisted vs read-projection) identifying its owning surface. domain.Task is the source of truth only for persisted storage-backed fields, not for the entire public API.",
   "scope": {
     "system": "wrkq",
     "boundedContext": "task management",
@@ -63,12 +63,28 @@
   },
   "provenance": [
     {
+      "id": "wrkqapi-wrkqtask",
+      "sourceType": "source_file",
+      "authority": "authoritative",
+      "locator": "internal/wrkqapi/types.go:13",
+      "observedAt": "2026-06-29T00:00:00Z",
+      "note": "WrkqTask is the canonical stable camelCase task resource DTO returned by wrkq.task.create, wrkq.task.show, and wrkq.task.list. It is a separate public surface from the persisted domain.Task and the snake_case cat read projection."
+    },
+    {
+      "id": "wrkqapi-catview",
+      "sourceType": "source_file",
+      "authority": "authoritative",
+      "locator": "internal/wrkqapi/catview.go:25",
+      "observedAt": "2026-06-29T00:00:00Z",
+      "note": "WrkqTaskCatView is the server-owned snake_case compatibility read projection for wrkq cat --json / wrkq.task.catView, carrying read decorators (path, artifact_dir, comments, relations, blockers). It is explicitly NOT the canonical RPC resource DTO."
+    },
+    {
       "id": "domain-task-struct",
       "sourceType": "source_file",
       "authority": "authoritative",
       "locator": "internal/domain/types.go:92",
       "observedAt": "2026-06-06T19:27:28Z",
-      "note": "domain.Task struct with JSON tags and database column mappings."
+      "note": "domain.Task struct with JSON tags and database column mappings; authoritative for persisted storage-backed fields only."
     },
     {
       "id": "domain-validation",
@@ -212,7 +228,7 @@
           "authority": "authoritative"
         }
       ],
-      "note": "domain.Task is the JSON DTO source of truth."
+      "note": "domain.Task is the source of truth for the persisted storage-backed fields documented here; the canonical RPC resource is WrkqTask and the legacy read projection is WrkqTaskCatView."
     },
     {
       "target": "internal/db/migrations",
@@ -1494,6 +1510,8 @@
       "No nested labels or meta schema is defined in the Task domain type."
     ],
     "notes": [
+      "This is a composite contract: it documents persisted internal/domain.Task fields and the snake_case read-projection fields together; each field's origin (persisted vs read-projection) identifies its owning surface.",
+      "Source-of-truth rule: canonical RPC task resource fields come from internal/wrkqapi.WrkqTask (camelCase; wrkq.task.create/show/list); legacy/read projection fields come from internal/wrkqapi.WrkqTaskCatView (snake_case; wrkq cat --json / wrkq.task.catView); persisted fields come from internal/domain.Task JSON tags. domain.Task is not the universal public DTO source of truth.",
       "required and nullable are independent dimensions.",
       "Database-only sdk_session_id is omitted because the Task JSON tag is json:\"-\".",
       "session_id is the JSON name for the cp_session_id database column.",

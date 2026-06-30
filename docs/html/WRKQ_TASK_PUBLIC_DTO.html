@@ -778,7 +778,7 @@ p {
             <div class="hero-copy">
               <div class="eyebrow">Go source -> JSON DTO -> CLI and daemon reads</div>
               <h1 id="title">wrkq Task Public DTO Contract</h1>
-              <p class="lead">The canonical task object is the JSON projection of <span class="inline-code">domain.Task</span>; public read commands add path, display, comment, and relation decorators around that persisted shape.</p>
+              <p class="lead">wrkq exposes three distinct public Task DTO surfaces that must not be collapsed onto one struct: the camelCase RPC resource <span class="inline-code">internal/wrkqapi.WrkqTask</span>, the snake_case legacy read projection <span class="inline-code">internal/wrkqapi.WrkqTaskCatView</span>, and the persisted storage struct <span class="inline-code">internal/domain.Task</span>. Each owns a different slice of the contract.</p>
             </div>
             <div class="hero-board" aria-label="Contract route summary">
               <div class="route-card">
@@ -840,11 +840,49 @@ p {
               </div>
               <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">internal/cli/daemon.go</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
             </article>
+
+            <article class="contract-object public" id="dto-families">
+              <div class="contract-object-head">
+                <div>
+                  <span class="badge client">DTO families</span>
+                  <h3>Three public Task DTO contracts</h3>
+                  <p>Each public Task DTO surface owns a different slice of the contract. Do not treat <span class="inline-code">internal/domain.Task</span> as the single source of truth for every caller: it anchors only the persisted storage fields. The canonical RPC task resource is <span class="inline-code">internal/wrkqapi.WrkqTask</span>, and the legacy CLI read shape is <span class="inline-code">internal/wrkqapi.WrkqTaskCatView</span>.</p>
+                </div>
+                <div class="object-chip-row">
+                  <span class="badge client">rpc</span>
+                  <span class="badge runtime">cli</span>
+                  <span class="badge persistence">storage</span>
+                </div>
+              </div>
+              <div class="method-ledger">
+                <div class="method-row header">
+                  <span>DTO / package</span>
+                  <span>Surfaces</span>
+                  <span>Contract &amp; casing</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">internal/wrkqapi.WrkqTask</span>
+                  <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">rpc</span><span><span class="inline-code">wrkq.task.create</span>, <span class="inline-code">wrkq.task.show</span>, <span class="inline-code">wrkq.task.list</span></span></span></span>
+                  <span class="method-copy">Canonical stable task resource DTO. Field names are <strong>camelCase</strong> (<span class="inline-code">projectUuid</span>, <span class="inline-code">createdAt</span>, <span class="inline-code">assigneePrincipalRef</span>) and are covered by the workrpc DTO catalog and protocol schema hash. This is the contract for new JSON-RPC consumers.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">internal/wrkqapi.WrkqTaskCatView</span>
+                  <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">cli</span><span><span class="inline-code">wrkq cat --json</span>, <span class="inline-code">wrkq.task.catView</span></span></span></span>
+                  <span class="method-copy">Server-owned compatibility read projection that reproduces a legacy <span class="inline-code">wrkq cat --json</span> object byte-for-byte. Field names are <strong>snake_case</strong> (<span class="inline-code">project_uuid</span>, <span class="inline-code">artifact_dir</span>, <span class="inline-code">session_id</span>) and it carries read decorators (path, artifact dir, comments, relations, blockers). It is explicitly <em>not</em> the canonical RPC resource DTO.</span>
+                </div>
+                <div class="method-row">
+                  <span class="method-name">internal/domain.Task</span>
+                  <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">store</span><span>tasks table / domain JSON</span></span></span>
+                  <span class="method-copy">The persisted task struct. Its JSON tags, pointer/omitempty rules, and the <span class="inline-code">sdk_session_id</span> vs serialized <span class="inline-code">session_id</span> boundary are authoritative for persisted storage-backed fields only — not for the whole public API.</span>
+                </div>
+              </div>
+              <div class="source-note">Source: <span class="inline-code">internal/wrkqapi/types.go</span> (<span class="inline-code">WrkqTask</span>), <span class="inline-code">internal/wrkqapi/catview.go</span> (<span class="inline-code">WrkqTaskCatView</span>), <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">internal/domain/types.go</span> (<span class="inline-code">domain.Task</span>), <span class="inline-code">docs/wrkq-wrkf-rpc.md</span>, <span class="inline-code">internal/workrpc/schema.go</span>. The persisted-field ledger below details the <span class="inline-code">internal/domain.Task</span> surface; see the RPC catalog for the full camelCase <span class="inline-code">WrkqTask</span> resource.</div>
+            </article>
           </section>
 
           <section id="task" aria-labelledby="task-title">
             <h2 id="task-title"><span class="section-num">02</span> Task DTO</h2>
-            <p class="section-intro">The public task object starts with porcelain/read-rendered fields, then groups the persisted fields by identity, routing, lifecycle, workflow, content, created attribution, updated attribution, deletion, and deprecated compatibility.</p>
+            <p class="section-intro">This ledger documents the <span class="inline-code">internal/domain.Task</span> persisted surface and the snake_case <span class="inline-code">WrkqTaskCatView</span> read projection layered on top of it: it starts with porcelain/read-rendered decorators, then groups the persisted fields by identity, routing, lifecycle, workflow, content, created attribution, updated attribution, deletion, and deprecated compatibility. For the camelCase RPC resource see <span class="inline-code">internal/wrkqapi.WrkqTask</span> and the workrpc DTO catalog.</p>
             <article class="contract-object public" id="task-dto">
               <div class="contract-object-head">
                 <div>
@@ -1052,7 +1090,8 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
               </article>
               <article class="panel">
                 <h3>Scope notes</h3>
-                <p class="minor">This artifact is source-linked to the current tree, including committed external-principal/scope attribution (migration <span class="inline-code">000026</span>) and the refined <span class="inline-code">domain.State</span> / <span class="inline-code">paths.Slug</span> wire types. It is the canonical public task-object contract; an older generated snapshot once lived alongside it and has been removed in favor of this page.</p>
+                <p class="minor">This page is the curated, human-facing Task DTO documentation, source-linked to the current tree (including external-principal/scope attribution migration <span class="inline-code">000026</span> and the refined <span class="inline-code">domain.State</span> / <span class="inline-code">paths.Slug</span> wire types). The persisted-field ledger documents the <span class="inline-code">internal/domain.Task</span> surface; the camelCase <span class="inline-code">internal/wrkqapi.WrkqTask</span> RPC resource and the snake_case <span class="inline-code">internal/wrkqapi.WrkqTaskCatView</span> read projection are the other two public surfaces. No single struct is the universal public DTO source of truth.</p>
+                <p class="minor">Generated vs. curated: this page (<span class="inline-code">WRKQ_TASK_PUBLIC_DTO.html</span>) is the hand-curated reference. <span class="inline-code">WRKQ_TASK_CONTRACT.html</span> is a disposable/regenerable archdoc projection of the structured artifact <span class="inline-code">docs/archdoc/artifacts/data-contract/wrkq-task.v1.json</span> and is non-canonical; prefer this page when they disagree.</p>
               </article>
             </div>
           </section>
