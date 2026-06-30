@@ -56,6 +56,40 @@ func actionFixture(t *testing.T) (*Service, string) {
 	return svc, taskUUID
 }
 
+// T-05067: action leases are durable recovery metadata, so a migrated workflow
+// DB must expose the fields the coordinator/reaper can rely on.
+func TestActionLeaseRecoveryMigrationAddsRunColumns(t *testing.T) {
+	svc, _ := actionFixture(t)
+
+	rows, err := svc.db.Query(`PRAGMA table_info(workflow_runs)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(workflow_runs): %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	got := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan workflow_runs column: %v", err)
+		}
+		got[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read workflow_runs columns: %v", err)
+	}
+
+	for _, want := range []string{"lease_owner", "lease_token", "lease_expires_at", "heartbeat_at"} {
+		if !got[want] {
+			t.Errorf("workflow_runs missing %s column for action lease recovery", want)
+		}
+	}
+}
+
 func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 
@@ -326,6 +360,52 @@ func TestFailAction_EvidenceAndTerminalNoTransition(t *testing.T) {
 	}
 	if inst.Phase != "intake" {
 		t.Errorf("instance phase = %q, want intake", inst.Phase)
+	}
+}
+
+// T-05067: a failed/reaped action is terminal. Retrying success completion after
+// terminalization must not record success evidence or apply a success transition.
+func TestCompleteAction_TerminalFailedRunRejectsSuccessSideEffects(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", Actor: "agent:t"})
+	if err != nil {
+		t.Fatalf("StartAction: %v", err)
+	}
+	if _, err := svc.FailAction(FailActionParams{
+		ActionRunID: run.RunID,
+		Summary:     "action lease expired: agent-loop",
+		Evidence:    &ActionEvidenceInput{Summary: "lease expired"},
+	}); err != nil {
+		t.Fatalf("FailAction: %v", err)
+	}
+
+	if _, err := svc.CompleteAction(CompleteActionParams{
+		ActionRunID: run.RunID,
+		Evidence:    &ActionEvidenceInput{Summary: "should not be recorded"},
+		RunSummary:  "should not complete",
+	}); err == nil {
+		t.Fatalf("CompleteAction on terminal failed run succeeded; want lease/terminal conflict")
+	}
+
+	show, err := svc.ShowAction(run.RunID)
+	if err != nil {
+		t.Fatalf("ShowAction: %v", err)
+	}
+	if show.Status != "failed" {
+		t.Errorf("terminal run status = %q, want failed", show.Status)
+	}
+	if len(show.EvidenceKinds) != 1 || show.EvidenceKinds[0] != "failure_result" {
+		t.Errorf("terminal failed run evidence kinds = %v, want only [failure_result]", show.EvidenceKinds)
+	}
+	if len(show.TransitionEventIDs) != 0 {
+		t.Errorf("terminal failed run recorded success transition ids %v, want none", show.TransitionEventIDs)
+	}
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	if inst.Phase != "intake" {
+		t.Errorf("instance phase after terminal completion attempt = %q, want intake", inst.Phase)
 	}
 }
 
