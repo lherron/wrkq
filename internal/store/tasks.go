@@ -86,25 +86,53 @@ func sortedFieldNames(fields map[string]interface{}) []string {
 
 func summarizeWebhookValue(field string, value interface{}) interface{} {
 	if value == nil {
+		if field == "labels" {
+			return []string{}
+		}
 		return nil
 	}
 	switch field {
 	case "description", "specification":
-		text, _ := value.(string)
+		text, ok := value.(string)
+		if !ok {
+			return value
+		}
 		sum := sha256.Sum256([]byte(text))
 		return map[string]interface{}{
 			"length": len(text),
 			"sha256": hex.EncodeToString(sum[:]),
 		}
 	case "labels":
-		if text, ok := value.(string); ok {
-			var labels []string
-			if err := json.Unmarshal([]byte(text), &labels); err == nil {
-				return labels
-			}
-		}
+		return summarizeWebhookLabels(value)
 	}
 	return value
+}
+
+func summarizeWebhookLabels(value interface{}) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" || text == "null" {
+			return []string{}
+		}
+		var labels []string
+		if err := json.Unmarshal([]byte(text), &labels); err == nil && labels != nil {
+			return labels
+		}
+	case []interface{}:
+		labels := make([]string, 0, len(v))
+		for _, item := range v {
+			label, ok := item.(string)
+			if !ok {
+				return []string{}
+			}
+			labels = append(labels, label)
+		}
+		return labels
+	}
+	return []string{}
 }
 
 func normalizeStateValue(value interface{}) (domain.State, error) {
@@ -171,7 +199,7 @@ func buildWebhookChanges(oldValues map[string]interface{}, fields map[string]int
 	changes := make(map[string]webhooks.Change, len(fields))
 	for _, field := range sortedFieldNames(fields) {
 		changes[field] = webhooks.Change{
-			From: oldValues[field],
+			From: summarizeWebhookValue(field, oldValues[field]),
 			To:   summarizeWebhookValue(field, fields[field]),
 		}
 	}

@@ -225,6 +225,140 @@ func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
 	}
 }
 
+func TestTaskStoreCreateWebhookExposesNeedsSmoketestLabelEdge(t *testing.T) {
+	database := setupWebhookTestDB(t)
+	actorUUID := setupWebhookTestActor(t, database)
+	s := New(database)
+
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
+	if err != nil {
+		t.Fatalf("failed to create container: %v", err)
+	}
+
+	calls := make(chan webhooks.Payload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		body, _ := io.ReadAll(r.Body)
+		var payload webhooks.Payload
+		_ = json.Unmarshal(body, &payload)
+		calls <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
+	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
+		t.Fatalf("failed to set webhook urls: %v", err)
+	}
+
+	task, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "created-needs-smoketest",
+		Title:       "Created needs smoketest",
+		Description: "Test",
+		ProjectUUID: container.UUID,
+		State:       "open",
+		Priority:    2,
+		Labels:      `["needs_smoketest","ui"]`,
+	})
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	select {
+	case payload := <-calls:
+		if payload.TicketUUID != task.UUID || payload.Event != "created" {
+			t.Fatalf("unexpected create payload: %+v", payload)
+		}
+		if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
+			t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
+		}
+		change, ok := payload.Changes["labels"]
+		if !ok {
+			t.Fatalf("missing labels change: %+v", payload.Changes)
+		}
+		if change.From != nil {
+			t.Fatalf("labels from = %+v, want nil for create", change.From)
+		}
+		toLabels := webhookChangeLabels(t, change.To)
+		if !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
+			t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for webhook")
+	}
+}
+
+func TestTaskStoreUpdateWebhookExposesNeedsSmoketestLabelAdditionEdge(t *testing.T) {
+	database := setupWebhookTestDB(t)
+	actorUUID := setupWebhookTestActor(t, database)
+	s := New(database)
+
+	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
+	if err != nil {
+		t.Fatalf("failed to create container: %v", err)
+	}
+
+	task, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug:        "updated-needs-smoketest",
+		Title:       "Updated needs smoketest",
+		Description: "Test",
+		ProjectUUID: container.UUID,
+		State:       "open",
+		Priority:    2,
+		Labels:      `["ui"]`,
+	})
+	if err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	calls := make(chan webhooks.Payload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { _ = r.Body.Close() }()
+		body, _ := io.ReadAll(r.Body)
+		var payload webhooks.Payload
+		_ = json.Unmarshal(body, &payload)
+		calls <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
+	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
+		t.Fatalf("failed to set webhook urls: %v", err)
+	}
+
+	if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{"labels": `["ui","needs_smoketest"]`}, 0); err != nil {
+		t.Fatalf("failed to update labels: %v", err)
+	}
+
+	select {
+	case payload := <-calls:
+		if payload.TicketUUID != task.UUID || payload.Event != "updated" {
+			t.Fatalf("unexpected update payload: %+v", payload)
+		}
+		if len(payload.Changed) != 1 || payload.Changed[0] != "labels" {
+			t.Fatalf("changed = %+v, want [labels]", payload.Changed)
+		}
+		if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
+			t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
+		}
+		change, ok := payload.Changes["labels"]
+		if !ok {
+			t.Fatalf("missing labels change: %+v", payload.Changes)
+		}
+		fromLabels := webhookChangeLabels(t, change.From)
+		toLabels := webhookChangeLabels(t, change.To)
+		if webhookLabelsContainInterfaces(fromLabels, "needs_smoketest") {
+			t.Fatalf("labels from should not contain needs_smoketest: %+v", fromLabels)
+		}
+		if !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
+			t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for webhook")
+	}
+}
+
 func TestTaskStoreMoveDispatchesWebhookV2(t *testing.T) {
 	database := setupWebhookTestDB(t)
 	actorUUID := setupWebhookTestActor(t, database)
@@ -931,4 +1065,39 @@ func TestWebhookPayloadBlockedByOmittedWhenEmpty(t *testing.T) {
 	if _, exists := payloadMap["blocked_by"]; exists {
 		t.Fatalf("blocked_by should be omitted when empty, but found in payload: %s", string(rawPayload))
 	}
+}
+
+func webhookChangeLabels(t *testing.T, value interface{}) []interface{} {
+	t.Helper()
+	switch labels := value.(type) {
+	case []interface{}:
+		return labels
+	case []string:
+		out := make([]interface{}, 0, len(labels))
+		for _, label := range labels {
+			out = append(out, label)
+		}
+		return out
+	default:
+		t.Fatalf("labels change endpoint = %+v (%T), want JSON label array", value, value)
+		return nil
+	}
+}
+
+func webhookLabelsContainStrings(labels []string, needle string) bool {
+	for _, label := range labels {
+		if label == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func webhookLabelsContainInterfaces(labels []interface{}, needle string) bool {
+	for _, label := range labels {
+		if label == needle {
+			return true
+		}
+	}
+	return false
 }

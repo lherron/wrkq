@@ -186,6 +186,10 @@ state value, and commands do not enforce a strict state-transition graph.
 
 Task priority is `1` through `4`; `1` is highest.
 
+Task labels are replacement-oriented string arrays. `needs_smoketest` is a
+reserved automation label that requests Smokey on the label-addition edge in
+`created` / `updated` webhook payloads. It is not a lifecycle state.
+
 Resolution values:
 
 `done`, `wont_do`, `duplicate`, `needs_info`

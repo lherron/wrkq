@@ -63,6 +63,7 @@ wrkq set T-00001 --state in_progress --priority 1 --description "Starting work"
 Supported states: idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted
 Priority: 1-4
 Common fields: state, priority, title, labels, due_at, start_at, description, specification
+Reserved label: needs_smoketest requests Smokey through webhook automation; it is not a state.
 Run `wrkq set --help` for the full current field surface.
 
 ## Add comment
