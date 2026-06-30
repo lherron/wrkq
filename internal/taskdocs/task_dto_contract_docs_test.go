@@ -32,7 +32,6 @@ func TestPublicTaskDTOPageDocumentsDistinctTaskDTOSurfaces(t *testing.T) {
 		"internal/domain.Task",
 		"persisted",
 		"sdk_session_id",
-		"session_id",
 		"WRKQ_TASK_CONTRACT.html",
 	}
 	for _, needle := range required {
@@ -92,7 +91,6 @@ func TestTaskDataContractArtifactDocumentsCompositeOriginsAndProvenance(t *testi
 	assertFieldOrigin(t, artifact, "path", "read-projection")
 	assertFieldOrigin(t, artifact, "artifact_dir", "read-projection")
 	assertFieldOrigin(t, artifact, "uuid", "persisted")
-	assertFieldOrigin(t, artifact, "session_id", "persisted")
 }
 
 func assertFieldOrigin(t *testing.T, artifact map[string]any, fieldName, wantOrigin string) {

@@ -175,7 +175,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "state", "slug", "title", "project_uuid", "kind", "run_status", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "cp_project_id", "cp_work_item_id", "cp_run_id", "cp_session_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
+		case "state", "slug", "title", "project_uuid", "kind", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_actor_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err
@@ -1262,7 +1262,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	// Use string intermediates for nullable time fields since SQLite stores times as strings
 	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution, parentTaskUUID *string
-	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, sdkSessionID, runStatus *string
+	var sdkSessionID *string
 	var workflowPreset, phase, riskClass *string
 	var presetVersion sql.NullInt64
 	var createdAt, updatedAt string
@@ -1275,7 +1275,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 			   start_at, due_at, labels, meta, description, specification, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
-			   cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, sdk_session_id, run_status,
+			   sdk_session_id,
 			   created_by_actor_uuid, updated_by_actor_uuid,
 			   created_by_principal_ref, updated_by_principal_ref,
 			   created_by_scope_ref, updated_by_scope_ref
@@ -1287,7 +1287,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
-		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &sdkSessionID, &runStatus,
+		&sdkSessionID,
 		&createdByActor, &updatedByActor,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,
@@ -1304,12 +1304,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.ParentTaskUUID = parentTaskUUID
 	task.Resolution = resolution
 	task.AcknowledgedAt = parseTimeNullable(acknowledgedAt)
-	task.CPProjectID = cpProjectID
-	task.CPWorkItemID = cpWorkItemID
-	task.CPRunID = cpRunID
-	task.CPSessionID = cpSessionID
 	task.SDKSessionID = sdkSessionID
-	task.RunStatus = runStatus
 	task.WorkflowPreset = workflowPreset
 	task.Phase = phase
 	task.RiskClass = riskClass

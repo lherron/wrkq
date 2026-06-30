@@ -194,11 +194,6 @@ type TaskPatch struct {
 	RequestedByProjectID *string         `json:"requestedBy,omitempty"`
 	AssignedProjectID    *string         `json:"assignedProject,omitempty"`
 	Resolution           *string         `json:"resolution,omitempty"`
-	CPProjectID          *string         `json:"cpProjectId,omitempty"`
-	CPWorkItemID         *string         `json:"cpWorkItemId,omitempty"`
-	CPRunID              *string         `json:"cpRunId,omitempty"`
-	SessionID            *string         `json:"sessionId,omitempty"`
-	RunStatus            *string         `json:"runStatus,omitempty"`
 	DueAt                *string         `json:"dueAt,omitempty"`
 	StartAt              *string         `json:"startAt,omitempty"`
 	// CausedBy replaces the full causal-lineage set. A non-nil pointer to an empty
@@ -216,7 +211,6 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 		"slug": true, "title": true, "description": true, "specification": true, "state": true,
 		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
 		"assigneePrincipalRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
-		"cpProjectId": true, "cpWorkItemId": true, "cpRunId": true, "sessionId": true, "runStatus": true,
 		"dueAt": true, "startAt": true, "causedBy": true,
 	}
 	for key := range raw {

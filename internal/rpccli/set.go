@@ -19,7 +19,7 @@ import (
 func newSetCmd() *cobra.Command {
 	var description, specification, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
 	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy string
-	var cpProjectID, cpWorkItemID, cpRunID, sessionID, runStatus, metaFile string
+	var metaFile string
 	var priority, jobs, batchSize int
 	var ifMatch int64
 	var dryRun, continueOnError, ordered bool
@@ -108,26 +108,6 @@ func newSetCmd() *cobra.Command {
 				patch["resolution"] = resolution
 				dryFields["resolution"] = resolution
 			}
-			if cpProjectID != "" {
-				patch["cpProjectId"] = cpProjectID
-				dryFields["cp_project_id"] = cpProjectID
-			}
-			if cpWorkItemID != "" {
-				patch["cpWorkItemId"] = cpWorkItemID
-				dryFields["cp_work_item_id"] = cpWorkItemID
-			}
-			if cpRunID != "" {
-				patch["cpRunId"] = cpRunID
-				dryFields["cp_run_id"] = cpRunID
-			}
-			if sessionID != "" {
-				patch["sessionId"] = sessionID
-				dryFields["cp_session_id"] = sessionID
-			}
-			if runStatus != "" {
-				patch["runStatus"] = runStatus
-				dryFields["run_status"] = runStatus
-			}
 			// caused_by: --caused-by '' clears, omitted leaves unchanged. The empty
 			// slice (vs absent) signals an explicit clear to the server.
 			if cmd.Flags().Changed("caused-by") {
@@ -200,11 +180,6 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Update requester project ID")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Update assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Update task resolution")
-	cmd.Flags().StringVar(&cpProjectID, "cp-project-id", "", "Update CP project ID")
-	cmd.Flags().StringVar(&cpWorkItemID, "cp-work-item-id", "", "Update CP work item ID")
-	cmd.Flags().StringVar(&cpRunID, "cp-run-id", "", "Update CP run ID")
-	cmd.Flags().StringVar(&sessionID, "session-id", "", "Update session ID")
-	cmd.Flags().StringVar(&runStatus, "run-status", "", "Update async run status")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
 	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
 	return cmd

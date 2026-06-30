@@ -134,16 +134,6 @@ schemas:
               type: string
             resolution:
               type: string
-            cpProjectId:
-              type: string
-            cpWorkItemId:
-              type: string
-            cpRunId:
-              type: string
-            sessionId:
-              type: string
-            runStatus:
-              type: string
             dueAt:
               type: string
             startAt:

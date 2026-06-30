@@ -128,14 +128,8 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		if got.payload.ETag != 3 {
 			t.Fatalf("unexpected etag: %d", got.payload.ETag)
 		}
-		if got.payload.RunStatus != nil {
-			t.Fatalf("unexpected run_status: %s", *got.payload.RunStatus)
-		}
 		if got.payload.Resolution != nil {
 			t.Fatalf("unexpected resolution: %s", *got.payload.Resolution)
-		}
-		if got.payload.CPRunID != nil || got.payload.SessionID != nil || got.payload.CPProjectID != nil {
-			t.Fatalf("unexpected run linkage payload: %+v", got.payload)
 		}
 		if got.payload.SchemaVersion != 2 {
 			t.Fatalf("unexpected schema_version: %d", got.payload.SchemaVersion)

@@ -31,11 +31,6 @@ type lsEntry struct {
 	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
 	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
 	Resolution           *string `json:"resolution,omitempty"`
-	CPProjectID          *string `json:"cp_project_id,omitempty"`
-	CPWorkItemID         *string `json:"cp_work_item_id,omitempty"`
-	CPRunID              *string `json:"cp_run_id,omitempty"`
-	SessionID            *string `json:"session_id,omitempty"`
-	RunStatus            *string `json:"run_status,omitempty"`
 }
 
 // newLsCmd mirrors `wrkq ls` via wrkq.task.lsView (the server-owned compatibility

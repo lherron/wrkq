@@ -14,7 +14,7 @@ import (
 // verify, review, ...). The action API is a thin composition over the existing
 // wrkf primitives — run.start, run.bindExternal, evidence.add, transition.apply,
 // run.finish/fail — not a second ledger. It does not touch tasks.state directly
-// and never reads or writes legacy cp_*/run_status task fields.
+// and never reads or writes legacy task scalar linkage fields.
 
 // ActionWorkflowRef identifies the workflow template backing an action run.
 type ActionWorkflowRef struct {

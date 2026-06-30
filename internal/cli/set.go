@@ -23,7 +23,7 @@ var setCmd = &cobra.Command{
 	Aliases: []string{"edit"},
 	Short:   "Mutate task fields",
 	Long: `Updates one or more task fields quickly.
-Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, parent_task, assignee, requested_by, assigned_project, resolution, cp_project_id, cp_work_item_id, cp_run_id, session_id, run_status
+Supported fields: state, priority, title, slug, labels, meta, due_at, start_at, description, specification, kind, parent_task, assignee, requested_by, assigned_project, resolution
 
 Reparenting:
   --parent-task (or --parent-id) accepts a task ID or path. The task is set
@@ -52,8 +52,7 @@ Examples:
   wrkq set T-00001 --kind bug
   wrkq set T-00001 --parent-task T-00002
   wrkq set T-00001 --parent-id ""
-  wrkq set T-00001 --assignee agent-claude
-  wrkq set T-00001 --cp-run-id run123 --run-status queued`,
+  wrkq set T-00001 --assignee agent-claude`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: appctx.WithApp(appctx.WithActor(), runSet),
 }
@@ -83,11 +82,6 @@ var (
 	setRequestedBy     string
 	setAssignedProject string
 	setResolution      string
-	setCPProjectID     string
-	setCPWorkItemID    string
-	setCPRunID         string
-	setSessionID       string
-	setRunStatus       string
 	setCausedBy        string
 )
 
@@ -117,11 +111,6 @@ func init() {
 	setCmd.Flags().StringVar(&setRequestedBy, "requested-by", "", "Update requester project ID")
 	setCmd.Flags().StringVar(&setAssignedProject, "assigned-project", "", "Update assignee project ID")
 	setCmd.Flags().StringVar(&setResolution, "resolution", "", "Update task resolution (done, wont_do, duplicate, needs_info)")
-	setCmd.Flags().StringVar(&setCPProjectID, "cp-project-id", "", "Update CP project ID (async run linkage)")
-	setCmd.Flags().StringVar(&setCPWorkItemID, "cp-work-item-id", "", "Update CP work item ID (multi-agent coordination)")
-	setCmd.Flags().StringVar(&setCPRunID, "cp-run-id", "", "Update CP run ID (async run linkage)")
-	setCmd.Flags().StringVar(&setSessionID, "session-id", "", "Update session ID (async run linkage)")
-	setCmd.Flags().StringVar(&setRunStatus, "run-status", "", "Update async run status (queued, running, completed, failed, cancelled, timed_out)")
 	setCausedBy = causedByUnset
 	setCmd.Flags().StringVar(&setCausedBy, "caused-by", causedByUnset, "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
 	setCmd.Flags().Lookup("caused-by").DefValue = ""
@@ -408,34 +397,6 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 			return nil, err
 		}
 		fields["resolution"] = setResolution
-	}
-
-	// Handle CP project ID
-	if setCPProjectID != "" {
-		fields["cp_project_id"] = setCPProjectID
-	}
-
-	// Handle CP work item ID
-	if setCPWorkItemID != "" {
-		fields["cp_work_item_id"] = setCPWorkItemID
-	}
-
-	// Handle CP run ID
-	if setCPRunID != "" {
-		fields["cp_run_id"] = setCPRunID
-	}
-
-	// Handle session ID (stored internally as cp_session_id)
-	if setSessionID != "" {
-		fields["cp_session_id"] = setSessionID
-	}
-
-	// Handle run status
-	if setRunStatus != "" {
-		if err := domain.ValidateRunStatus(setRunStatus); err != nil {
-			return nil, err
-		}
-		fields["run_status"] = setRunStatus
 	}
 
 	// Handle caused-by lineage. The sentinel default distinguishes "omitted" (no

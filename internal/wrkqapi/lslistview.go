@@ -45,11 +45,6 @@ type WrkqLsEntry struct {
 	AssignedProjectID    *string `json:"assigned_project_id,omitempty"`
 	AcknowledgedAt       *string `json:"acknowledged_at,omitempty"`
 	Resolution           *string `json:"resolution,omitempty"`
-	CPProjectID          *string `json:"cp_project_id,omitempty"`
-	CPWorkItemID         *string `json:"cp_work_item_id,omitempty"`
-	CPRunID              *string `json:"cp_run_id,omitempty"`
-	SessionID            *string `json:"session_id,omitempty"`
-	RunStatus            *string `json:"run_status,omitempty"`
 }
 
 // WrkqLsListView is the server-owned COMPATIBILITY list projection for `wrkq ls`.
@@ -201,8 +196,7 @@ func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cur
 
 func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string, includeHidden bool, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
 	query := `SELECT id, slug, title, created_at, updated_at, state, kind,
-		requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
-		cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status
+		requested_by_project_id, assigned_project_id, acknowledged_at, resolution
 		FROM tasks WHERE project_uuid = ?`
 	args := []any{containerUUID}
 	if !includeHidden {
@@ -227,8 +221,7 @@ func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string
 		var e WrkqLsEntry
 		var slug string
 		if err := rows.Scan(&e.ID, &slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind,
-			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution,
-			&e.CPProjectID, &e.CPWorkItemID, &e.CPRunID, &e.SessionID, &e.RunStatus); err != nil {
+			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution); err != nil {
 			return nil, NewInternalError(err)
 		}
 		e.Type = "task"
@@ -253,12 +246,10 @@ func (a *API) lsSingleTask(ctx context.Context, path string) (*WrkqLsEntry, erro
 	var slug string
 	if err := a.db.QueryRowContext(ctx, `
 		SELECT slug, title, created_at, updated_at, state, kind, requested_by_project_id,
-		       assigned_project_id, acknowledged_at, resolution,
-		       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status
+		       assigned_project_id, acknowledged_at, resolution
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind, &e.RequestedByProjectID,
-		&e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution,
-		&e.CPProjectID, &e.CPWorkItemID, &e.CPRunID, &e.SessionID, &e.RunStatus); err != nil {
+		&e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution); err != nil {
 		return nil, NewInternalError(err)
 	}
 	e.Type = "task"

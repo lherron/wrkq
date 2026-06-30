@@ -868,12 +868,12 @@ p {
                 <div class="method-row">
                   <span class="method-name">internal/wrkqapi.WrkqTaskCatView</span>
                   <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">cli</span><span><span class="inline-code">wrkq cat --json</span>, <span class="inline-code">wrkq.task.catView</span></span></span></span>
-                  <span class="method-copy">Server-owned compatibility read projection that reproduces a legacy <span class="inline-code">wrkq cat --json</span> object byte-for-byte. Field names are <strong>snake_case</strong> (<span class="inline-code">project_uuid</span>, <span class="inline-code">artifact_dir</span>, <span class="inline-code">session_id</span>) and it carries read decorators (path, artifact dir, comments, relations, blockers). It is explicitly <em>not</em> the canonical RPC resource DTO.</span>
+                  <span class="method-copy">Server-owned compatibility read projection that reproduces a legacy <span class="inline-code">wrkq cat --json</span> object byte-for-byte. Field names are <strong>snake_case</strong> (<span class="inline-code">project_uuid</span>, <span class="inline-code">artifact_dir</span>) and it carries read decorators (path, artifact dir, comments, relations, blockers). It is explicitly <em>not</em> the canonical RPC resource DTO.</span>
                 </div>
                 <div class="method-row">
                   <span class="method-name">internal/domain.Task</span>
                   <span class="method-copy contract-pair"><span class="pair-line"><span class="pair-label">store</span><span>tasks table / domain JSON</span></span></span>
-                  <span class="method-copy">The persisted task struct. Its JSON tags, pointer/omitempty rules, and the <span class="inline-code">sdk_session_id</span> vs serialized <span class="inline-code">session_id</span> boundary are authoritative for persisted storage-backed fields only — not for the whole public API.</span>
+                  <span class="method-copy">The persisted task struct. Its JSON tags and pointer/omitempty rules are authoritative for persisted storage-backed fields only — not for the whole public API.</span>
                 </div>
               </div>
               <div class="source-note">Source: <span class="inline-code">internal/wrkqapi/types.go</span> (<span class="inline-code">WrkqTask</span>), <span class="inline-code">internal/wrkqapi/catview.go</span> (<span class="inline-code">WrkqTaskCatView</span>), <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">internal/domain/types.go</span> (<span class="inline-code">domain.Task</span>), <span class="inline-code">docs/wrkq-wrkf-rpc.md</span>, <span class="inline-code">internal/workrpc/schema.go</span>. The persisted-field ledger below details the <span class="inline-code">internal/domain.Task</span> surface; see the RPC catalog for the full camelCase <span class="inline-code">WrkqTask</span> resource.</div>
@@ -937,13 +937,6 @@ p {
   start_at?: RFC3339Timestamp // Planned or actual start timestamp used by scheduling and planning views.
   due_at?: RFC3339Timestamp // Due timestamp used for sorting, filtering, and planning views.
 
-  // Control-plane run fields
-  cp_project_id?: string // Control-plane project binding for async coordination.
-  cp_work_item_id?: string // Stable control-plane WorkItem binding that can survive multiple runs.
-  cp_run_id?: string // Control-plane run id for the current or latest async run.
-  session_id?: string // Public JSON field backed by the cp_session_id database column.
-  run_status?: TaskRunStatus // Current or terminal async run status tracked on the task.
-
   // Workflow fields
   workflow_preset?: string // Workflow preset name; must be set together with preset_version and phase or all three must be absent.
   preset_version?: number // Workflow preset version paired with workflow_preset and phase.
@@ -977,7 +970,7 @@ p {
   deleted_by_scope_ref?: ScopeRef // Runtime scope that soft-deleted the task, cleared when restored.
 
   // Deprecated compatibility fields
-  sdk_session_id?: string | null // Deprecated database-only SDK session column; domain.Task marks it json:'-' and callers should use session_id instead.
+  sdk_session_id?: string | null // Deprecated database-only SDK session column; domain.Task marks it json:'-'.
 }
 
 type CommentReadDTO = { // Minimal comment shape embedded in task read responses.
@@ -1027,7 +1020,6 @@ type JSONText&lt;T&gt; = string // SQLite TEXT containing JSON with the semantic
 type TaskState = 'idea' | 'draft' | 'open' | 'in_progress' | 'completed' | 'blocked' | 'cancelled' | 'archived' | 'deleted' // Lifecycle states backed by the domain.State wire type; accepted by domain.ParseState and task-table CHECK constraints.
 type TaskKind = 'task' | 'subtask' | 'spike' | 'bug' | 'chore' // Work-item categories accepted by domain validation.
 type TaskResolution = 'done' | 'wont_do' | 'duplicate' | 'needs_info' // Resolution values accepted when a task is closed or triaged.
-type TaskRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' // Async control-plane run statuses accepted by domain validation.
 type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted when workflow metadata is present.</code></pre></div>
               <div class="source-note">Source: <span class="inline-code">internal/domain/validation.go</span>, <span class="inline-code">internal/domain/state.go</span>, <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/paths/slug.go</span>, <span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span></div>
             </article>
@@ -1046,8 +1038,7 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
               <article class="callout">
                 <h3>Storage only</h3>
                 <ul class="callout-list">
-                  <li><span class="inline-code">sdk_session_id</span> is selected by store/view code but is marked <span class="inline-code">json:"-"</span> on <span class="inline-code">domain.Task</span>.</li>
-                  <li>The public replacement is <span class="inline-code">session_id</span>, backed by <span class="inline-code">cp_session_id</span>.</li>
+                  <li><span class="inline-code">sdk_session_id</span> remains storage-only and is marked <span class="inline-code">json:"-"</span> on <span class="inline-code">domain.Task</span>.</li>
                 </ul>
               </article>
             </div>
@@ -1064,7 +1055,7 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
                 </div>
               </div>
               <div class="code-panel"><pre><code>type TaskDeprecatedCompatibilityFields = { // Deprecated or &lt;strong&gt;Legacy&lt;/strong&gt; task fields retained for read compatibility and migration safety.
-  sdk_session_id?: string | null // Deprecated database-only SDK session column; domain.Task marks it json:'-' and callers should use session_id instead.
+  sdk_session_id?: string | null // Deprecated database-only SDK session column; domain.Task marks it json:'-'.
   assignee_actor_uuid?: UUIDv4String | null // &lt;strong&gt;Legacy&lt;/strong&gt; actor UUID assignment cache still serialized by domain.Task; prefer assignee_principal_ref.
   created_by_actor_uuid?: UUIDv4String | null // &lt;strong&gt;Legacy&lt;/strong&gt; creator actor UUID cache still serialized when non-empty; prefer created_by_principal_ref.
   updated_by_actor_uuid?: UUIDv4String | null // &lt;strong&gt;Legacy&lt;/strong&gt; updater actor UUID cache still serialized when non-empty; prefer updated_by_principal_ref.
@@ -1080,10 +1071,9 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
                 <h3>Source map</h3>
                 <ul class="source-list minor">
                   <li><span class="inline-code">internal/domain/types.go</span> for <span class="inline-code">Task</span> JSON tags and deprecated <span class="inline-code">SDKSessionID</span>.</li>
-                  <li><span class="inline-code">internal/domain/validation.go</span> for priority, kind, resolution, run status, risk class, UUID, and timestamp validation.</li>
+                  <li><span class="inline-code">internal/domain/validation.go</span> for priority, kind, resolution, risk class, UUID, and timestamp validation.</li>
                   <li><span class="inline-code">internal/domain/state.go</span> for the <span class="inline-code">domain.State</span> wire type and <span class="inline-code">ParseState</span> lifecycle validation.</li>
                   <li><span class="inline-code">internal/paths/slug.go</span> for the <span class="inline-code">paths.Slug</span> wire type, <span class="inline-code">NewSlug</span>, and slug normalization/validation rules.</li>
-                  <li><span class="inline-code">internal/db/migrations/000006_async_run_linkage.sql</span> for CP run/session fields and deprecated <span class="inline-code">sdk_session_id</span>.</li>
                   <li><span class="inline-code">internal/db/migrations/000026_external_principal_attribution.sql</span> for canonical principal/scope attribution and legacy actor UUID cache semantics.</li>
                   <li><span class="inline-code">internal/cli/cat.go</span> and <span class="inline-code">internal/cli/daemon.go</span> for public read decorators.</li>
                 </ul>
@@ -1102,7 +1092,7 @@ type TaskRiskClass = 'low' | 'medium' | 'high' // Workflow risk classes accepted
     </div>
 
     <script>
-      window.DTO_CONTRACT_KEYWORDS = ['Task', 'TaskState', 'TaskKind', 'TaskResolution', 'TaskRunStatus', 'TaskRiskClass', 'UUIDv4String', 'RFC3339Timestamp', 'PrincipalRef', 'ScopeRef', 'JSONText', 'CommentReadDTO', 'TaskRelationReadDTO']
+      window.DTO_CONTRACT_KEYWORDS = ['Task', 'TaskState', 'TaskKind', 'TaskResolution', 'TaskRiskClass', 'UUIDv4String', 'RFC3339Timestamp', 'PrincipalRef', 'ScopeRef', 'JSONText', 'CommentReadDTO', 'TaskRelationReadDTO']
     </script>
     <script>
 ;(() => {

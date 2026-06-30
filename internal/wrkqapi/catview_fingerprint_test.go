@@ -54,7 +54,7 @@ func TestCatViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(CatViewBlocker{})),
 	}, "\n")
 
-	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,acknowledged_at,omitempty,resolution,omitempty,cp_project_id,omitempty,cp_work_item_id,omitempty,cp_run_id,omitempty,session_id,omitempty,run_status,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_actor,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
+	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_actor,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
 		"CatViewComment{id,created_at,body,principal_ref,omitempty,actor_slug,omitempty,actor_role,omitempty}\n" +
 		"CatViewRelation{direction,kind,task_id,task_uuid,task_slug,task_title,created_at,created_by_id}\n" +
 		"CatViewBlocker{id,state}"
@@ -263,7 +263,7 @@ func TestSearchIndexViewDTOFingerprint(t *testing.T) {
 // TestLsListViewDTOFingerprint guards the ls projection shapes.
 func TestLsListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqLsListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLsEntry{}))
-	const want = "WrkqLsListView{items,next_cursor,omitempty}\nWrkqLsEntry{type,id,slug,title,omitempty,path,created_at,updated_at,state,omitempty,kind,omitempty,task_count,omitempty,active_task_count,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,cp_project_id,omitempty,cp_work_item_id,omitempty,cp_run_id,omitempty,session_id,omitempty,run_status,omitempty}"
+	const want = "WrkqLsListView{items,next_cursor,omitempty}\nWrkqLsEntry{type,id,slug,title,omitempty,path,created_at,updated_at,state,omitempty,kind,omitempty,task_count,omitempty,active_task_count,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty}"
 	if got != want {
 		t.Errorf("ls list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}

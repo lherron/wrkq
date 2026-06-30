@@ -194,15 +194,6 @@ Resolution values:
 
 `done`, `wont_do`, `duplicate`, `needs_info`
 
-Async/control-plane linkage fields currently present on tasks:
-
-`cp_project_id`, `cp_work_item_id`, `cp_run_id`, `session_id`
-(`cp_session_id` in storage), `run_status`
-
-Valid `run_status` values:
-
-`queued`, `running`, `completed`, `failed`, `cancelled`, `timed_out`
-
 Workflow-assist fields currently present on tasks:
 
 `workflow_preset`, `preset_version`, `phase`, `risk_class`

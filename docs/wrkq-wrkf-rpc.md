@@ -586,11 +586,6 @@ interface WrkqTaskUpdateParams {
     requestedBy?: string;
     assignedProject?: string;
     resolution?: "done" | "wont_do" | "duplicate" | "needs_info";
-    cpProjectId?: string;
-    cpWorkItemId?: string;
-    cpRunId?: string;
-    sessionId?: string; // stored as cp_session_id
-    runStatus?: "queued" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
     dueAt?: string | null;
     startAt?: string | null;
     causedBy?: string[];   // replaces the full causal-lineage set; [] clears, absent = no change (absent-vs-empty preserved)
@@ -1636,7 +1631,7 @@ run *is* a `workflow_runs` row (carrying a semantic `action` label), evidence is
 recorded via `wrkf.evidence.add`, and state moves go through `wrkf.transition.apply`.
 When no workflow is attached and none is supplied, the built-in
 `wrkq-simple-task@1` workflow is installed and attached automatically. The action
-surface never reads or writes legacy `cp_*` / `run_status` task fields.
+surface never reads or writes legacy task scalar linkage fields.
 
 ```
 wrkf.action.start

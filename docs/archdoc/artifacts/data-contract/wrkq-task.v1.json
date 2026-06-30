@@ -39,7 +39,6 @@
       "routing fields",
       "lifecycle state",
       "assignment",
-      "control-plane linkage",
       "workflow metadata",
       "content",
       "audit timestamps",
@@ -92,7 +91,7 @@
       "authority": "authoritative",
       "locator": "internal/domain/validation.go",
       "observedAt": "2026-06-28T00:00:00Z",
-      "note": "Task kind, resolution, run_status, risk_class, priority, UUID, and timestamp validation helpers; ValidateState delegates to domain.ParseState."
+      "note": "Task kind, resolution, risk_class, priority, UUID, and timestamp validation helpers; ValidateState delegates to domain.ParseState."
     },
     {
       "id": "domain-state",
@@ -159,14 +158,6 @@
       "note": "Cross-project routing, acknowledgement, and resolution columns."
     },
     {
-      "id": "async-run-linkage",
-      "sourceType": "migration",
-      "authority": "authoritative",
-      "locator": "internal/db/migrations/000006_async_run_linkage.sql",
-      "observedAt": "2026-06-06T19:27:28Z",
-      "note": "Control-plane run linkage and run_status constraint."
-    },
-    {
       "id": "task-meta",
       "sourceType": "migration",
       "authority": "authoritative",
@@ -181,14 +172,6 @@
       "locator": "internal/db/migrations/000009_idea_state.sql",
       "observedAt": "2026-06-06T19:27:28Z",
       "note": "Idea state and recreated task constraints."
-    },
-    {
-      "id": "cp-work-item",
-      "sourceType": "migration",
-      "authority": "authoritative",
-      "locator": "internal/db/migrations/000011_cp_work_item_id.sql",
-      "observedAt": "2026-06-06T19:27:28Z",
-      "note": "Stable control-plane WorkItem binding."
     },
     {
       "id": "task-specification",
@@ -784,123 +767,6 @@
         ],
         "origin": "persisted",
         "group": "lifecycle"
-      },
-      {
-        "name": "cp_project_id",
-        "type": "string",
-        "required": false,
-        "nullable": true,
-        "description": "Control-plane project binding for async coordination.",
-        "provenance": [
-          {
-            "sourceType": "source_file",
-            "locator": "internal/domain/types.go:108",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "migration",
-            "locator": "internal/db/migrations/000006_async_run_linkage.sql:5",
-            "authority": "authoritative"
-          }
-        ],
-        "origin": "persisted",
-        "group": "control_plane"
-      },
-      {
-        "name": "cp_work_item_id",
-        "type": "string",
-        "required": false,
-        "nullable": true,
-        "description": "Stable control-plane WorkItem binding across multiple runs.",
-        "provenance": [
-          {
-            "sourceType": "source_file",
-            "locator": "internal/domain/types.go:109",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "migration",
-            "locator": "internal/db/migrations/000011_cp_work_item_id.sql:5",
-            "authority": "authoritative"
-          }
-        ],
-        "origin": "persisted",
-        "group": "control_plane"
-      },
-      {
-        "name": "cp_run_id",
-        "type": "string",
-        "required": false,
-        "nullable": true,
-        "description": "Control-plane run id for the current or latest async run.",
-        "provenance": [
-          {
-            "sourceType": "source_file",
-            "locator": "internal/domain/types.go:110",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "migration",
-            "locator": "internal/db/migrations/000006_async_run_linkage.sql:6",
-            "authority": "authoritative"
-          }
-        ],
-        "origin": "persisted",
-        "group": "control_plane"
-      },
-      {
-        "name": "session_id",
-        "type": "string",
-        "required": false,
-        "nullable": true,
-        "description": "JSON field backed by the cp_session_id database column.",
-        "constraints": [
-          "database column name is cp_session_id"
-        ],
-        "provenance": [
-          {
-            "sourceType": "source_file",
-            "locator": "internal/domain/types.go:111",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "migration",
-            "locator": "internal/db/migrations/000006_async_run_linkage.sql:7",
-            "authority": "authoritative"
-          }
-        ],
-        "origin": "persisted",
-        "group": "control_plane"
-      },
-      {
-        "name": "run_status",
-        "type": "TaskRunStatus",
-        "required": false,
-        "nullable": true,
-        "description": "Async run status accepted by domain validation.",
-        "constraints": [
-          "validated by domain.ValidateRunStatus",
-          "database CHECK enforces the same literals"
-        ],
-        "provenance": [
-          {
-            "sourceType": "source_file",
-            "locator": "internal/domain/types.go:113",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "source_file",
-            "locator": "internal/domain/validation.go:81",
-            "authority": "authoritative"
-          },
-          {
-            "sourceType": "migration",
-            "locator": "internal/db/migrations/000006_async_run_linkage.sql:9",
-            "authority": "authoritative"
-          }
-        ],
-        "origin": "persisted",
-        "group": "control_plane"
       },
       {
         "name": "workflow_preset",
@@ -1514,7 +1380,6 @@
       "Source-of-truth rule: canonical RPC task resource fields come from internal/wrkqapi.WrkqTask (camelCase; wrkq.task.create/show/list); legacy/read projection fields come from internal/wrkqapi.WrkqTaskCatView (snake_case; wrkq cat --json / wrkq.task.catView); persisted fields come from internal/domain.Task JSON tags. domain.Task is not the universal public DTO source of truth.",
       "required and nullable are independent dimensions.",
       "Database-only sdk_session_id is omitted because the Task JSON tag is json:\"-\".",
-      "session_id is the JSON name for the cp_session_id database column.",
       "Principal refs (created/updated/deleted_by_principal_ref) and scope refs (created/updated/deleted_by_scope_ref) are the canonical attribution fields after migration 000026; the *_actor_uuid fields are legacy caches that serialize only when populated.",
       "created/updated attribution fields use omitempty non-pointer strings (absent when empty, never JSON null); the deleted_by_* fields are nullable pointers cleared on restore.",
       "Read-projection fields are rendered by CLI/daemon read decorators and are not persisted on domain.Task.",
@@ -1549,39 +1414,33 @@
         "description": "Task lifecycle, priority, kind, outcome, and scheduling fields."
       },
       {
-        "id": "control_plane",
-        "title": "Control Plane Run Linkage",
-        "order": 5,
-        "description": "ACP run/session linkage and async run state."
-      },
-      {
         "id": "workflow",
         "title": "Workflow Metadata",
-        "order": 6,
+        "order": 5,
         "description": "Workflow preset, phase, version, and risk metadata."
       },
       {
         "id": "content",
         "title": "Content And Metadata",
-        "order": 7,
+        "order": 6,
         "description": "Human-authored content, structured metadata, and optimistic concurrency."
       },
       {
         "id": "created",
         "title": "Created Attribution",
-        "order": 8,
+        "order": 7,
         "description": "Creation time and creator principal/scope attribution."
       },
       {
         "id": "updated",
         "title": "Updated Attribution",
-        "order": 9,
+        "order": 8,
         "description": "Mutation time and updater principal/scope attribution."
       },
       {
         "id": "deleted",
         "title": "Completion, Archive, And Deletion",
-        "order": 10,
+        "order": 9,
         "description": "Terminal timestamps and soft-delete attribution."
       }
     ],
@@ -1786,11 +1645,6 @@
           "assignee_principal_ref",
           "acknowledged_at",
           "resolution",
-          "cp_project_id",
-          "cp_work_item_id",
-          "cp_run_id",
-          "session_id",
-          "run_status",
           "workflow_preset",
           "preset_version",
           "phase",
@@ -1838,11 +1692,6 @@
           "assignee_principal_ref",
           "acknowledged_at",
           "resolution",
-          "cp_project_id",
-          "cp_work_item_id",
-          "cp_run_id",
-          "session_id",
-          "run_status",
           "workflow_preset",
           "preset_version",
           "phase",
@@ -1938,12 +1787,6 @@
         "type": "'done' | 'wont_do' | 'duplicate' | 'needs_info'",
         "validator": "domain.ValidateResolution",
         "description": "Resolution values accepted when a task is closed or triaged."
-      },
-      {
-        "name": "TaskRunStatus",
-        "type": "'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'",
-        "validator": "domain.ValidateRunStatus",
-        "description": "Async control-plane run statuses accepted by domain validation."
       },
       {
         "name": "TaskRiskClass",

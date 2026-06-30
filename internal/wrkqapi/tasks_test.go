@@ -2,6 +2,8 @@ package wrkqapi
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/store"
@@ -39,5 +41,21 @@ func TestTaskUpdatePatchLabelsPersistsReturnShape(t *testing.T) {
 		if updated.Labels[i] != want {
 			t.Fatalf("labels[%d] = %q, want %q; labels=%+v", i, updated.Labels[i], want, updated.Labels)
 		}
+	}
+}
+
+func TestTaskPatchRejectsLegacyLinkageFields(t *testing.T) {
+	fields := []string{"cpProjectId", "cpWorkItemId", "cpRunId", "sessionId", "runStatus"}
+	for _, field := range fields {
+		t.Run(field, func(t *testing.T) {
+			var patch TaskPatch
+			err := json.Unmarshal([]byte(`{"`+field+`":"legacy"}`), &patch)
+			if err == nil {
+				t.Fatalf("expected unsupported field error")
+			}
+			if !strings.Contains(err.Error(), `unsupported task patch field "`+field+`"`) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }

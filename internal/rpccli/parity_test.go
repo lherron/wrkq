@@ -1330,9 +1330,9 @@ var parityCases = []parityCase{
 		mutates: true,
 	},
 	{
-		name:    "set/routing-resolution-cp",
+		name:    "set/routing-resolution",
 		setup:   [][]string{{"touch", "inbox/sroute", "-t", "Route"}},
-		args:    []string{"set", "inbox/sroute", "--requested-by", "P-REQ", "--assigned-project", "P-ASG", "--resolution", "done", "--cp-project-id", "cp-proj", "--cp-work-item-id", "wi-1", "--cp-run-id", "run-1", "--session-id", "sess-1", "--run-status", "running"},
+		args:    []string{"set", "inbox/sroute", "--requested-by", "P-REQ", "--assigned-project", "P-ASG", "--resolution", "done"},
 		mutates: true,
 	},
 	{
@@ -5247,9 +5247,6 @@ func snapshot(t *testing.T, dir string) string {
 		       COALESCE(labels, ''), COALESCE(meta, ''),
 		       COALESCE(requested_by_project_id, ''), COALESCE(assigned_project_id, ''),
 		       COALESCE(resolution, ''),
-		       COALESCE(cp_project_id, ''), COALESCE(cp_work_item_id, ''),
-		       COALESCE(cp_run_id, ''), COALESCE(cp_session_id, ''),
-		       COALESCE(run_status, ''),
 		       COALESCE(start_at, ''), COALESCE(due_at, ''),
 		       etag,
 		       CASE WHEN acknowledged_at IS NOT NULL AND acknowledged_at != '' THEN 'ack' ELSE '-' END,
@@ -5263,10 +5260,9 @@ func snapshot(t *testing.T, dir string) string {
 	for rows.Next() {
 		var id, slug, state, kind, projectUUID, description, specification, labels, meta string
 		var parentTaskUUID, assignee, requestedBy, assignedProject, resolution string
-		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus string
 		var startAt, dueAt, ackd, done string
 		var prio, etag int
-		if err := rows.Scan(&id, &slug, &state, &prio, &kind, &projectUUID, &parentTaskUUID, &assignee, &description, &specification, &labels, &meta, &requestedBy, &assignedProject, &resolution, &cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus, &startAt, &dueAt, &etag, &ackd, &done); err != nil {
+		if err := rows.Scan(&id, &slug, &state, &prio, &kind, &projectUUID, &parentTaskUUID, &assignee, &description, &specification, &labels, &meta, &requestedBy, &assignedProject, &resolution, &startAt, &dueAt, &etag, &ackd, &done); err != nil {
 			t.Fatalf("snapshot scan: %v", err)
 		}
 		b.WriteString("task|" + strings.Join([]string{
@@ -5275,7 +5271,6 @@ func snapshot(t *testing.T, dir string) string {
 			parentTaskUUID, assignee,
 			description, specification, labels, meta, startAt, dueAt,
 			requestedBy, assignedProject, resolution,
-			cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus,
 			strconv.Itoa(etag), ackd, done,
 		}, "|"))
 		b.WriteByte('\n')

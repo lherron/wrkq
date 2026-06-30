@@ -869,11 +869,6 @@ th {
   assignee_actor_uuid?: UUIDv4String // Actor UUID for the currently assigned human or agent. references actors(uuid) set null on actor deletion trust:high evidence:2
   acknowledged_at?: RFC3339Timestamp // Timestamp marking acknowledgement of a routed request. serialized by Go time.Time as RFC3339-compatible JSON trust:high evidence:2
   resolution?: &#39;done&#39; | &#39;wont_do&#39; | &#39;duplicate&#39; | &#39;needs_info&#39; // Final or triage resolution accepted by domain validation. validated by domain.ValidateResolution trust:high evidence:3
-  cp_project_id?: string // Control-plane project binding for async coordination. trust:high evidence:2
-  cp_work_item_id?: string // Stable control-plane WorkItem binding across multiple runs. trust:high evidence:2
-  cp_run_id?: string // Control-plane run id for the current or latest async run. trust:high evidence:2
-  session_id?: string // JSON field backed by the cp_session_id database column. database column name is cp_session_id trust:high evidence:2
-  run_status?: &#39;queued&#39; | &#39;running&#39; | &#39;completed&#39; | &#39;failed&#39; | &#39;cancelled&#39; | &#39;timed_out&#39; // Async run status accepted by domain validation. validated by domain.ValidateRunStatus database CHECK enforces the same literals trust:high evidence:3
   workflow_preset?: string // Workflow preset name for ACP workflow handling. must be all null or all set with preset_version and phase trust:high evidence:2
   preset_version?: number // Workflow preset version paired with workflow_preset and phase. must be all null or all set with workflow_preset and phase trust:high evidence:2
   phase?: string // Workflow phase paired with workflow_preset and preset_version. must be all null or all set with workflow_preset and preset_version trust:high evidence:2
@@ -895,7 +890,7 @@ th {
 }</code></pre>
 </div>
 <div class="source-note">Projection: <span class="inline-code">data-contract-view.v1</span></div>
-</article></section><section aria-labelledby="scope"><h2 id="scope">Scope Notes</h2><p>The deprecated sdk_session_id database column is intentionally absent from this JSON contract because domain.Task marks it json:&quot;-&quot;. The session_id JSON field is backed by the cp_session_id database column.</p></section>
+</article></section><section aria-labelledby="scope"><h2 id="scope">Scope Notes</h2><p>The deprecated sdk_session_id database column is intentionally absent from this JSON contract because domain.Task marks it json:&quot;-&quot;. Legacy control-plane task linkage columns remain storage-only until the destructive cleanup migration and are not part of this JSON contract.</p></section>
 			</section>
 			<section id="source" class="source-note">Rendered by archdoc explainer.</section>
 		</div>

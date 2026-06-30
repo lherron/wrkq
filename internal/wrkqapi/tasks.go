@@ -1276,24 +1276,6 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 		}
 		fields["resolution"] = *patch.Resolution
 	}
-	if patch.CPProjectID != nil {
-		fields["cp_project_id"] = *patch.CPProjectID
-	}
-	if patch.CPWorkItemID != nil {
-		fields["cp_work_item_id"] = *patch.CPWorkItemID
-	}
-	if patch.CPRunID != nil {
-		fields["cp_run_id"] = *patch.CPRunID
-	}
-	if patch.SessionID != nil {
-		fields["cp_session_id"] = *patch.SessionID
-	}
-	if patch.RunStatus != nil {
-		if err := domain.ValidateRunStatus(*patch.RunStatus); err != nil {
-			return nil, NewValidationError(err.Error(), map[string]any{"field": "runStatus"})
-		}
-		fields["run_status"] = *patch.RunStatus
-	}
 	if patch.DueAt != nil {
 		fields["due_at"] = *patch.DueAt
 	}

@@ -138,12 +138,7 @@ type Task struct {
 	AssigneePrincipalRef  *string    `json:"assignee_principal_ref,omitempty" db:"assignee_principal_ref"`
 	AcknowledgedAt        *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
 	Resolution            *string    `json:"resolution,omitempty" db:"resolution"`
-	CPProjectID           *string    `json:"cp_project_id,omitempty" db:"cp_project_id"`
-	CPWorkItemID          *string    `json:"cp_work_item_id,omitempty" db:"cp_work_item_id"`
-	CPRunID               *string    `json:"cp_run_id,omitempty" db:"cp_run_id"`
-	CPSessionID           *string    `json:"session_id,omitempty" db:"cp_session_id"`
 	SDKSessionID          *string    `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null
-	RunStatus             *string    `json:"run_status,omitempty" db:"run_status"`
 	WorkflowPreset        *string    `json:"workflow_preset,omitempty" db:"workflow_preset"`
 	PresetVersion         *int       `json:"preset_version,omitempty" db:"preset_version"`
 	Phase                 *string    `json:"phase,omitempty" db:"phase"`

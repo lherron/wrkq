@@ -123,14 +123,9 @@ type Payload struct {
 	State          string            `json:"state"`
 	Priority       int               `json:"priority"`
 	Kind           string            `json:"kind"`
-	RunStatus      *string           `json:"run_status"`
 	Resolution     *string           `json:"resolution"`
 	Meta           json.RawMessage   `json:"meta"`
 	ETag           int64             `json:"etag"`
-	CPProjectID    *string           `json:"cp_project_id"`
-	CPWorkItemID   *string           `json:"cp_work_item_id"`
-	CPRunID        *string           `json:"cp_run_id"`
-	SessionID      *string           `json:"session_id"`
 	BlockedBy      []BlockerInfo     `json:"blocked_by,omitempty"`
 	Subject        *Subject          `json:"subject,omitempty"`
 	Workflow       *WorkflowPayload  `json:"workflow,omitempty"`
@@ -150,14 +145,9 @@ type TaskInfo struct {
 	State          string
 	Priority       int
 	Kind           string
-	RunStatus      *string
 	Resolution     *string
 	Meta           *string
 	ETag           int64
-	CPProjectID    *string
-	CPWorkItemID   *string
-	CPRunID        *string
-	CPSessionID    *string // internal name, exposed as session_id
 	BlockedBy      []BlockerInfo
 }
 
@@ -199,7 +189,7 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 		}
 	}
 	labels := parseLabels(info.Labels)
-	origin := resolveOrigin(database, ctx.ActorUUID, ctx.Via, firstNonNil(info.CPRunID, info.CPSessionID))
+	origin := resolveOrigin(database, ctx.ActorUUID, ctx.Via, nil)
 	eventID := ""
 	if ctx.Metadata.ID > 0 {
 		eventID = fmt.Sprintf("evt_%d", ctx.Metadata.ID)
@@ -248,14 +238,9 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 		State:          info.State,
 		Priority:       info.Priority,
 		Kind:           info.Kind,
-		RunStatus:      info.RunStatus,
 		Resolution:     info.Resolution,
 		Meta:           meta,
 		ETag:           info.ETag,
-		CPProjectID:    info.CPProjectID,
-		CPWorkItemID:   info.CPWorkItemID,
-		CPRunID:        info.CPRunID,
-		SessionID:      info.CPSessionID,
 		BlockedBy:      info.BlockedBy,
 		Workflow:       ctx.Workflow,
 	}
@@ -275,15 +260,6 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 		return
 	}
 	dispatchURLs(urls, payload)
-}
-
-func firstNonNil(values ...*string) *string {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
 }
 
 func parseLabels(raw *string) []string {
@@ -332,13 +308,11 @@ type taskInfoQueryer interface {
 // LookupTaskInfoWith fetches task info using either a DB or an open transaction.
 func LookupTaskInfoWith(database taskInfoQueryer, taskUUID string) (TaskInfo, error) {
 	var info TaskInfo
-	var runStatus, resolution, meta, labels sql.NullString
-	var cpProjectID, cpWorkItemID, cpRunID, cpSessionID sql.NullString
+	var resolution, meta, labels sql.NullString
 
 	err := database.QueryRow(`
 		SELECT t.id, t.uuid, t.project_uuid, c.id, t.slug, t.title, cp.path,
-		       t.state, t.priority, t.kind, t.run_status, t.resolution, t.meta, t.labels, t.etag,
-		       t.cp_project_id, t.cp_work_item_id, t.cp_run_id, t.cp_session_id
+		       t.state, t.priority, t.kind, t.resolution, t.meta, t.labels, t.etag
 		FROM tasks t
 		JOIN containers c ON c.uuid = t.project_uuid
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
@@ -346,22 +320,16 @@ func LookupTaskInfoWith(database taskInfoQueryer, taskUUID string) (TaskInfo, er
 	`, taskUUID).Scan(
 		&info.TaskID, &info.TaskUUID, &info.ProjectUUID, &info.ProjectID, &info.Slug, &info.Title, &info.ContainerPath,
 		&info.State, &info.Priority, &info.Kind,
-		&runStatus, &resolution, &meta, &labels, &info.ETag,
-		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID,
+		&resolution, &meta, &labels, &info.ETag,
 	)
 	if err != nil {
 		return TaskInfo{}, fmt.Errorf("lookup task info: %w", err)
 	}
 
 	info.ProjectScopeID = strings.Split(strings.Trim(info.ContainerPath, "/"), "/")[0]
-	info.RunStatus = nullStringToPtr(runStatus)
 	info.Resolution = nullStringToPtr(resolution)
 	info.Meta = nullStringToPtr(meta)
 	info.Labels = nullStringToPtr(labels)
-	info.CPProjectID = nullStringToPtr(cpProjectID)
-	info.CPWorkItemID = nullStringToPtr(cpWorkItemID)
-	info.CPRunID = nullStringToPtr(cpRunID)
-	info.CPSessionID = nullStringToPtr(cpSessionID)
 
 	// Query incomplete blockers for this task
 	blockerRows, err := database.Query(`

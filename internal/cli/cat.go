@@ -138,11 +138,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		Specification         string          `json:"specification"`
 		AcknowledgedAt        *string         `json:"acknowledged_at,omitempty"`
 		Resolution            *string         `json:"resolution,omitempty"`
-		CPProjectID           *string         `json:"cp_project_id,omitempty"`
-		CPWorkItemID          *string         `json:"cp_work_item_id,omitempty"`
-		CPRunID               *string         `json:"cp_run_id,omitempty"`
-		SessionID             *string         `json:"session_id,omitempty"`
-		RunStatus             *string         `json:"run_status,omitempty"`
 		Etag                  int64           `json:"etag"`
 		CreatedAt             string          `json:"created_at"`
 		UpdatedAt             string          `json:"updated_at"`
@@ -175,7 +170,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 		var priority int
 		var startAt, dueAt, labels, meta, completedAt, archivedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
-		var cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
 		var parentTaskUUID, assigneeActorUUID, assigneePrincipalRef *string
 		var createdAt, updatedAt string
 		var etag int64
@@ -190,7 +184,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			       start_at, due_at, labels, meta, description, specification, etag,
 			       created_at, updated_at, completed_at, archived_at,
 			       acknowledged_at, resolution,
-			       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status,
 			       created_by_actor_uuid, updated_by_actor_uuid,
 			       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 			FROM tasks WHERE uuid = ?
@@ -200,7 +193,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 			&createdAt, &updatedAt, &completedAt, &archivedAt,
 			&acknowledgedAt, &resolution,
-			&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus,
 			&createdByUUID, &updatedByUUID, &createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
 		)
 		if err != nil {
@@ -285,11 +277,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 			Specification:         specification,
 			AcknowledgedAt:        acknowledgedAt,
 			Resolution:            resolution,
-			CPProjectID:           cpProjectID,
-			CPWorkItemID:          cpWorkItemID,
-			CPRunID:               cpRunID,
-			SessionID:             cpSessionID,
-			RunStatus:             runStatus,
 			Etag:                  etag,
 			CreatedAt:             createdAt,
 			UpdatedAt:             updatedAt,
@@ -541,21 +528,6 @@ func runCat(app *appctx.App, cmd *cobra.Command, args []string) error {
 				}
 				if task.Resolution != nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "resolution: %s\n", *task.Resolution)
-				}
-				if task.CPProjectID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_project_id: %s\n", *task.CPProjectID)
-				}
-				if task.CPWorkItemID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_work_item_id: %s\n", *task.CPWorkItemID)
-				}
-				if task.CPRunID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "cp_run_id: %s\n", *task.CPRunID)
-				}
-				if task.SessionID != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "session_id: %s\n", *task.SessionID)
-				}
-				if task.RunStatus != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "run_status: %s\n", *task.RunStatus)
 				}
 				if len(task.BlockedBy) > 0 {
 					parts := make([]string, len(task.BlockedBy))

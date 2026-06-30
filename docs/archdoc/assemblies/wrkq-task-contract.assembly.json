@@ -78,7 +78,7 @@
       "id": "scope",
       "title": "Scope Notes",
       "contentKind": "prose",
-      "body": "The deprecated sdk_session_id database column is intentionally absent from this JSON contract because domain.Task marks it json:\"-\". The session_id JSON field is backed by the cp_session_id database column."
+      "body": "The deprecated sdk_session_id database column is intentionally absent from this JSON contract because domain.Task marks it json:\"-\". Legacy control-plane task linkage columns remain storage-only until the destructive cleanup migration and are not part of this JSON contract."
     }
   ],
   "revision": {

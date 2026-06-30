@@ -53,11 +53,6 @@ type WrkqTaskCatView struct {
 	Specification         string            `json:"specification"`
 	AcknowledgedAt        *string           `json:"acknowledged_at,omitempty"`
 	Resolution            *string           `json:"resolution,omitempty"`
-	CPProjectID           *string           `json:"cp_project_id,omitempty"`
-	CPWorkItemID          *string           `json:"cp_work_item_id,omitempty"`
-	CPRunID               *string           `json:"cp_run_id,omitempty"`
-	SessionID             *string           `json:"session_id,omitempty"`
-	RunStatus             *string           `json:"run_status,omitempty"`
 	Etag                  int64             `json:"etag"`
 	CreatedAt             string            `json:"created_at"`
 	UpdatedAt             string            `json:"updated_at"`
@@ -124,18 +119,17 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		id, slug, title, state, description, specification, kind   string
-		priority                                                   int
-		startAt, dueAt, labels, meta, completedAt, archivedAt      *string
-		requestedBy, assignedProject, acknowledgedAt, resolution   *string
-		cpProjectID, cpWorkItemID, cpRunID, cpSessionID, runStatus *string
-		parentTaskUUID, assigneeActorUUID, assigneePrincipalRef    *string
-		createdAt, updatedAt                                       string
-		etag                                                       int64
-		projectUUID                                                string
-		createdByUUID, updatedByUUID                               sql.NullString
-		createdByPrincipalRef, updatedByPrincipalRef               sql.NullString
-		createdByScopeRef                                          *string
+		id, slug, title, state, description, specification, kind string
+		priority                                                 int
+		startAt, dueAt, labels, meta, completedAt, archivedAt    *string
+		requestedBy, assignedProject, acknowledgedAt, resolution *string
+		parentTaskUUID, assigneeActorUUID, assigneePrincipalRef  *string
+		createdAt, updatedAt                                     string
+		etag                                                     int64
+		projectUUID                                              string
+		createdByUUID, updatedByUUID                             sql.NullString
+		createdByPrincipalRef, updatedByPrincipalRef             sql.NullString
+		createdByScopeRef                                        *string
 	)
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
@@ -144,7 +138,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		       start_at, due_at, labels, meta, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       acknowledged_at, resolution,
-		       cp_project_id, cp_work_item_id, cp_run_id, cp_session_id, run_status,
 		       created_by_actor_uuid, updated_by_actor_uuid,
 		       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
@@ -153,7 +146,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
-		&cpProjectID, &cpWorkItemID, &cpRunID, &cpSessionID, &runStatus,
 		&createdByUUID, &updatedByUUID, &createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
 	)
 	if err == sql.ErrNoRows {
@@ -237,11 +229,6 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		Specification:         specification,
 		AcknowledgedAt:        acknowledgedAt,
 		Resolution:            resolution,
-		CPProjectID:           cpProjectID,
-		CPWorkItemID:          cpWorkItemID,
-		CPRunID:               cpRunID,
-		SessionID:             cpSessionID,
-		RunStatus:             runStatus,
 		Etag:                  etag,
 		CreatedAt:             createdAt,
 		UpdatedAt:             updatedAt,

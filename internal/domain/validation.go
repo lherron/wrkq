@@ -81,16 +81,6 @@ func ValidateResolution(resolution string) error {
 	}
 }
 
-// ValidateRunStatus validates an async run status
-func ValidateRunStatus(status string) error {
-	switch status {
-	case "queued", "running", "completed", "failed", "cancelled", "timed_out":
-		return nil
-	default:
-		return fmt.Errorf("invalid run_status: must be one of: queued, running, completed, failed, cancelled, timed_out")
-	}
-}
-
 // ValidateSectionRole validates a section role
 func ValidateSectionRole(role string) error {
 	switch role {

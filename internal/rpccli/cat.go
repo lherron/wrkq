@@ -251,11 +251,6 @@ type catTask struct {
 	Specification         string          `json:"specification"`
 	AcknowledgedAt        *string         `json:"acknowledged_at,omitempty"`
 	Resolution            *string         `json:"resolution,omitempty"`
-	CPProjectID           *string         `json:"cp_project_id,omitempty"`
-	CPWorkItemID          *string         `json:"cp_work_item_id,omitempty"`
-	CPRunID               *string         `json:"cp_run_id,omitempty"`
-	SessionID             *string         `json:"session_id,omitempty"`
-	RunStatus             *string         `json:"run_status,omitempty"`
 	Etag                  int64           `json:"etag"`
 	CreatedAt             string          `json:"created_at"`
 	UpdatedAt             string          `json:"updated_at"`
@@ -360,21 +355,6 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			}
 			if t.Resolution != nil {
 				fmt.Fprintf(w, "resolution: %s\n", *t.Resolution)
-			}
-			if t.CPProjectID != nil {
-				fmt.Fprintf(w, "cp_project_id: %s\n", *t.CPProjectID)
-			}
-			if t.CPWorkItemID != nil {
-				fmt.Fprintf(w, "cp_work_item_id: %s\n", *t.CPWorkItemID)
-			}
-			if t.CPRunID != nil {
-				fmt.Fprintf(w, "cp_run_id: %s\n", *t.CPRunID)
-			}
-			if t.SessionID != nil {
-				fmt.Fprintf(w, "session_id: %s\n", *t.SessionID)
-			}
-			if t.RunStatus != nil {
-				fmt.Fprintf(w, "run_status: %s\n", *t.RunStatus)
 			}
 			if len(t.BlockedBy) > 0 {
 				parts := make([]string, len(t.BlockedBy))
