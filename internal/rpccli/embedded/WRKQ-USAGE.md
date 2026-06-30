@@ -64,6 +64,7 @@ Supported states: idea, draft, open, in_progress, completed, blocked, cancelled,
 Priority: 1-4
 Common fields: state, priority, title, labels, due_at, start_at, description, specification, caused_by
 Lineage: --caused-by T-XXXXX[,T-YYYYY] records the task(s) whose delivered work caused this defect/rework (wrkq set ... --caused-by "" clears it; wrkq find --caused-by T-XXXXX lists attributed tasks).
+Reserved label: needs_smoketest requests Smokey through webhook automation; it is not a state.
 Run `wrkq set --help` for the full current field surface.
 
 ## Add comment

@@ -24,6 +24,9 @@ wrkq set T-00001 --state completed      # Complete task
 ## States
 `idea` | `draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled` | `archived` | `deleted`
 
+## Reserved Labels
+`needs_smoketest` requests Smokey through webhook automation; it is not a state.
+
 ## Project Scope
 ```bash
 wrkq projects                          # List all projects
