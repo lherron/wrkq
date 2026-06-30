@@ -539,6 +539,10 @@ export interface WrkfActionRun {
   startedAt: string;
   completedAt?: string;
   terminalResult?: string;
+  leaseOwner?: string;
+  leaseToken?: string;
+  leaseExpiresAt?: string;
+  heartbeatAt?: string;
   evidenceIds?: string[];
   evidenceKinds?: string[];
   transitionEventIds?: string[];
@@ -566,6 +570,8 @@ export interface WrkfActionStartParams {
   deliveryRef?: string | Record<string, unknown>;
   externalRunRef?: string;
   idempotencyKey?: string;
+  leaseOwner?: string;
+  leaseMs?: number;
 }
 
 export interface WrkfActionBindExternalParams {
@@ -578,6 +584,7 @@ export interface WrkfActionBindExternalParams {
 
 export interface WrkfActionCompleteParams {
   actionRunId: string;
+  leaseToken?: string;
   evidence?: WrkfActionEvidenceInput;
   /** Transition id to apply, or false to skip; omit for default resolution. */
   transition?: string | false;
@@ -593,8 +600,26 @@ export interface WrkfActionCompleteResult {
 
 export interface WrkfActionFailParams {
   actionRunId: string;
+  leaseToken?: string;
   summary: string;
   evidence?: WrkfActionEvidenceInput;
+}
+
+export interface WrkfActionHeartbeatParams {
+  actionRunId: string;
+  leaseToken: string;
+  leaseMs?: number;
+}
+
+export interface WrkfActionReapParams {
+  task?: string;
+  instanceId?: string;
+  action?: string;
+  expiredBefore?: string;
+  legacyActiveBefore?: string;
+  limit?: number;
+  actor?: string;
+  summary?: string;
 }
 
 export interface WrkfActionShowParams {
@@ -612,6 +637,10 @@ export interface WrkfActionListParams {
 }
 
 export interface WrkfActionListResult {
+  items: WrkfActionRun[];
+}
+
+export interface WrkfActionReapResult {
   items: WrkfActionRun[];
 }
 

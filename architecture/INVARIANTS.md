@@ -67,6 +67,14 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `just verify exits 0`
 - **last_verified:** 2026-06-22
 
+## wrkq.wrkf-action.lease-recovery
+
+- **scope:** wrkf.action coordinator-owned recovery
+- **predicate:** Coordinator-owned wrkf.action runs may opt into durable leases. A leased active action run carries one current lease token, non-secret owner/expiry/heartbeat audit fields, and rejects heartbeat, complete, or fail attempts unless the caller presents the current unexpired token. Expired leased action runs are recovered by terminalizing the workflow_runs row as failed, clearing the secret token, and recording run-linked failure evidence; they are not reclaimed in place. Legacy unleased active actions remain valid blockers unless a caller explicitly supplies a legacyActiveBefore cutoff to the reap path.
+- **source:** `internal/db/migrations/000034_workflow_action_leases.sql`, `internal/workflow/action.go`, `internal/wrkfapi/action.go`, `internal/workrpc/registry.go`
+- **required_tests:** `go test ./internal/workflow`, `go test ./internal/workrpc -run 'Action|WrkfAction'`
+- **last_verified:** 2026-06-30
+
 ## wrkq.wrkf-rpc.attachment-byte-transfer
 
 - **scope:** attachment content crossing the wrkq/wrkf RPC boundary

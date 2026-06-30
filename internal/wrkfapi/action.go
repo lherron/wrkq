@@ -37,6 +37,8 @@ type ActionStartParams struct {
 	DeliveryRef    json.RawMessage `json:"deliveryRef,omitempty"`
 	ExternalRunRef string          `json:"externalRunRef,omitempty"`
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+	LeaseOwner     string          `json:"leaseOwner,omitempty"`
+	LeaseMs        int64           `json:"leaseMs,omitempty"`
 }
 
 type ActionBindExternalParams struct {
@@ -49,6 +51,7 @@ type ActionBindExternalParams struct {
 
 type ActionCompleteParams struct {
 	ActionRunID              string                `json:"actionRunId"`
+	LeaseToken               string                `json:"leaseToken,omitempty"`
 	Evidence                 *ActionEvidenceParams `json:"evidence,omitempty"`
 	Transition               json.RawMessage       `json:"transition,omitempty"`
 	TransitionIdempotencyKey string                `json:"transitionIdempotencyKey,omitempty"`
@@ -57,8 +60,26 @@ type ActionCompleteParams struct {
 
 type ActionFailParams struct {
 	ActionRunID string                `json:"actionRunId"`
+	LeaseToken  string                `json:"leaseToken,omitempty"`
 	Summary     string                `json:"summary"`
 	Evidence    *ActionEvidenceParams `json:"evidence,omitempty"`
+}
+
+type ActionHeartbeatParams struct {
+	ActionRunID string `json:"actionRunId"`
+	LeaseToken  string `json:"leaseToken"`
+	LeaseMs     int64  `json:"leaseMs,omitempty"`
+}
+
+type ActionReapParams struct {
+	Task               string `json:"task,omitempty"`
+	InstanceID         string `json:"instanceId,omitempty"`
+	Action             string `json:"action,omitempty"`
+	ExpiredBefore      string `json:"expiredBefore,omitempty"`
+	LegacyActiveBefore string `json:"legacyActiveBefore,omitempty"`
+	Limit              int    `json:"limit,omitempty"`
+	Actor              string `json:"actor,omitempty"`
+	Summary            string `json:"summary,omitempty"`
 }
 
 type ActionShowParams struct {
@@ -104,6 +125,8 @@ func (api *API) ActionStart(ctx context.Context, params ActionStartParams) (*Act
 		DeliveryRef:    deliveryRef,
 		ExternalRunRef: params.ExternalRunRef,
 		IdempotencyKey: params.IdempotencyKey,
+		LeaseOwner:     params.LeaseOwner,
+		LeaseMs:        params.LeaseMs,
 	})
 	if err != nil {
 		return nil, normalizeError(err)
@@ -142,6 +165,7 @@ func (api *API) ActionComplete(ctx context.Context, params ActionCompleteParams)
 	}
 	out, err := api.service.CompleteAction(workflow.CompleteActionParams{
 		ActionRunID:              params.ActionRunID,
+		LeaseToken:               params.LeaseToken,
 		Evidence:                 actionEvidenceInput(params.Evidence),
 		TransitionMode:           mode,
 		TransitionID:             transitionID,
@@ -165,6 +189,7 @@ func (api *API) ActionFail(ctx context.Context, params ActionFailParams) (*Actio
 	}
 	run, err := api.service.FailAction(workflow.FailActionParams{
 		ActionRunID: params.ActionRunID,
+		LeaseToken:  params.LeaseToken,
 		Summary:     params.Summary,
 		Evidence:    actionEvidenceInput(params.Evidence),
 	})
@@ -172,6 +197,41 @@ func (api *API) ActionFail(ctx context.Context, params ActionFailParams) (*Actio
 		return nil, normalizeError(err)
 	}
 	return run, nil
+}
+
+func (api *API) ActionHeartbeat(ctx context.Context, params ActionHeartbeatParams) (*ActionRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	run, err := api.service.HeartbeatAction(workflow.HeartbeatActionParams{
+		ActionRunID: params.ActionRunID,
+		LeaseToken:  params.LeaseToken,
+		LeaseMs:     params.LeaseMs,
+	})
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return run, nil
+}
+
+func (api *API) ActionReap(ctx context.Context, params ActionReapParams) (*workflow.ReapActionsResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result, err := api.service.ReapActions(workflow.ReapActionsParams{
+		Task:               params.Task,
+		InstanceID:         params.InstanceID,
+		Action:             params.Action,
+		ExpiredBefore:      params.ExpiredBefore,
+		LegacyActiveBefore: params.LegacyActiveBefore,
+		Limit:              params.Limit,
+		Actor:              params.Actor,
+		Summary:            params.Summary,
+	})
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return result, nil
 }
 
 func (api *API) ActionShow(ctx context.Context, params ActionShowParams) (*ActionRun, error) {

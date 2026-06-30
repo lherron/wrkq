@@ -1,0 +1,34 @@
+id: wrkq.wrkf-action.lease-recovery
+kind: invariant
+status: active
+owner_project: wrkq
+scope: wrkf.action coordinator-owned recovery
+predicate: >
+  Coordinator-owned wrkf.action runs may opt into durable leases. A leased active
+  action run carries one current lease token, non-secret owner/expiry/heartbeat
+  audit fields, and rejects heartbeat, complete, or fail attempts unless the
+  caller presents the current unexpired token. Expired leased action runs are
+  recovered by terminalizing the workflow_runs row as failed, clearing the
+  secret token, and recording run-linked failure evidence; they are not reclaimed
+  in place. Legacy unleased active actions remain valid blockers unless a caller
+  explicitly supplies a legacyActiveBefore cutoff to the reap path.
+authority:
+  repo: wrkq
+  surface: wrkf.action.* over workflow_runs
+source:
+  - internal/db/migrations/000034_workflow_action_leases.sql
+  - internal/workflow/action.go
+  - internal/wrkfapi/action.go
+  - internal/workrpc/registry.go
+required_tests:
+  - go test ./internal/workflow
+  - "go test ./internal/workrpc -run 'Action|WrkfAction'"
+last_verified:
+  date: 2026-06-30
+  evidence: "go test ./internal/workflow; go test ./internal/workrpc -run 'Action|WrkfAction' green for action lease schema, token guards, heartbeat/renew, reap, and terminal failed completion guard (T-05067 implementer run)"
+reopen_when:
+  - wrkf.action lease token exposure rules change
+  - action reaping stops terminalizing expired active runs as failed
+  - legacy unleased active action blocker semantics change
+supersedes: []
+superseded_by: null

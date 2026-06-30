@@ -20,6 +20,7 @@ package workrpc_test
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/db"
 )
@@ -209,6 +210,162 @@ func TestWrkfActionBindExternal_BareRefGetsHRCPrefix(t *testing.T) {
 	bound := p2ResultOrFail(t, frames[1], "bindExternal bare")
 	if got, _ := bound["externalRunRef"].(string); got != "hrc:run-bare-7" {
 		t.Errorf("bare ref externalRunRef = %q, want hrc:run-bare-7", got)
+	}
+}
+
+func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	taskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000030",
+		"action-lease", "Action Lease")
+
+	startFrames := p3Run(t, dbPath,
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task":           taskID,
+			"action":         "triage",
+			"actor":          actActor,
+			"idempotencyKey": "act:lease:start:1",
+			"leaseOwner":     "agent-loop:test",
+			"leaseMs":        60000,
+		}),
+	)
+	started := p2ResultOrFail(t, startFrames[1], "leased action.start")
+	runID := actRunID(t, started, "leased start")
+	token, _ := started["leaseToken"].(string)
+	if token == "" {
+		t.Fatalf("leased action.start did not return leaseToken: %#v", started)
+	}
+	if got, _ := started["leaseOwner"].(string); got != "agent-loop:test" {
+		t.Fatalf("leaseOwner = %q, want agent-loop:test", got)
+	}
+	readFrames := p3Run(t, dbPath,
+		mkRPC("show", "wrkf.action.show", map[string]any{"actionRunId": runID}),
+		mkRPC("list", "wrkf.action.list", map[string]any{"task": taskID}),
+	)
+	shown := p2ResultOrFail(t, readFrames[1], "action.show")
+	if _, ok := shown["leaseToken"]; ok {
+		t.Fatalf("action.show leaked leaseToken: %#v", shown)
+	}
+	listed := p2ResultOrFail(t, readFrames[2], "action.list")
+	items, _ := listed["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("action.list items = %#v, want one item", listed["items"])
+	}
+	if item, _ := items[0].(map[string]any); item != nil {
+		if _, ok := item["leaseToken"]; ok {
+			t.Fatalf("action.list leaked leaseToken: %#v", item)
+		}
+	}
+
+	guardFrames := p3Run(t, dbPath,
+		mkRPC("hbBad", "wrkf.action.heartbeat", map[string]any{"actionRunId": runID, "leaseToken": "wrong-token", "leaseMs": 60000}),
+		mkRPC("hb", "wrkf.action.heartbeat", map[string]any{"actionRunId": runID, "leaseToken": token, "leaseMs": 60000}),
+		mkRPC("renew", "wrkf.action.renewLease", map[string]any{"actionRunId": runID, "leaseToken": token, "leaseMs": 60000}),
+		mkRPC("completeBad", "wrkf.action.complete", map[string]any{
+			"actionRunId": runID,
+			"transition":  false,
+			"evidence":    map[string]any{"summary": "missing token must fail"},
+		}),
+		mkRPC("complete", "wrkf.action.complete", map[string]any{
+			"actionRunId": runID,
+			"leaseToken":  token,
+			"transition":  false,
+			"evidence":    map[string]any{"summary": "leased complete"},
+		}),
+	)
+	if code := p2ErrCode(guardFrames[1]); code != "WRKF_LEASE_CONFLICT" {
+		t.Fatalf("wrong-token heartbeat code = %q, want WRKF_LEASE_CONFLICT", code)
+	}
+	heartbeat := p2ResultOrFail(t, guardFrames[2], "action.heartbeat")
+	if got, _ := heartbeat["leaseToken"].(string); got != token {
+		t.Fatalf("heartbeat leaseToken = %q, want original token", got)
+	}
+	p2ResultOrFail(t, guardFrames[3], "action.renewLease")
+	if code := p2ErrCode(guardFrames[4]); code != "WRKF_LEASE_CONFLICT" {
+		t.Fatalf("complete without token code = %q, want WRKF_LEASE_CONFLICT", code)
+	}
+	completed := p2ResultOrFail(t, guardFrames[5], "leased action.complete")
+	completedRun, _ := completed["run"].(map[string]any)
+	if got, _ := completedRun["status"].(string); got != "completed" {
+		t.Fatalf("leased complete status = %q, want completed", got)
+	}
+
+	reapTaskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000031",
+		"action-lease-reap", "Action Lease Reap")
+	reapStartFrames := p3Run(t, dbPath,
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task":       reapTaskID,
+			"action":     "triage",
+			"actor":      actActor,
+			"leaseOwner": "agent-loop:reaper-test",
+			"leaseMs":    60000,
+		}),
+	)
+	reapStarted := p2ResultOrFail(t, reapStartFrames[1], "leased action.start for reap")
+	reapRunID := actRunID(t, reapStarted, "reap start")
+	reapToken, _ := reapStarted["leaseToken"].(string)
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	reapFrames := p3Run(t, dbPath,
+		mkRPC("reap", "wrkf.action.reap", map[string]any{
+			"task":          reapTaskID,
+			"action":        "triage",
+			"expiredBefore": future,
+			"actor":         actActor,
+		}),
+		mkRPC("completeOld", "wrkf.action.complete", map[string]any{
+			"actionRunId": reapRunID,
+			"leaseToken":  reapToken,
+			"transition":  false,
+			"evidence":    map[string]any{"summary": "old token must fail after reap"},
+		}),
+	)
+	reaped := p2ResultOrFail(t, reapFrames[1], "action.reap")
+	reapedItems, _ := reaped["items"].([]any)
+	if len(reapedItems) != 1 {
+		t.Fatalf("action.reap items = %#v, want one reaped run", reaped["items"])
+	}
+	reapedRun, _ := reapedItems[0].(map[string]any)
+	if got, _ := reapedRun["runId"].(string); got != reapRunID {
+		t.Fatalf("reaped runId = %q, want %q", got, reapRunID)
+	}
+	if got, _ := reapedRun["status"].(string); got != "failed" {
+		t.Fatalf("reaped status = %q, want failed", got)
+	}
+	if _, ok := reapedRun["leaseToken"]; ok {
+		t.Fatalf("action.reap leaked terminal leaseToken: %#v", reapedRun)
+	}
+	if code := p2ErrCode(reapFrames[2]); code != "WRKF_LEASE_CONFLICT" {
+		t.Fatalf("complete after reap code = %q, want WRKF_LEASE_CONFLICT", code)
+	}
+
+	legacyTaskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000032",
+		"action-legacy-reap", "Action Legacy Reap")
+	legacyStartFrames := p3Run(t, dbPath,
+		mkRPC("s1", "wrkf.action.start", map[string]any{"task": legacyTaskID, "action": "triage", "actor": actActor}),
+	)
+	legacyRunID := actRunID(t, p2ResultOrFail(t, legacyStartFrames[1], "legacy action.start"), "legacy start")
+	legacyFrames := p3Run(t, dbPath,
+		mkRPC("reapNoCutoff", "wrkf.action.reap", map[string]any{"task": legacyTaskID, "action": "triage", "expiredBefore": future}),
+		mkRPC("reapWithCutoff", "wrkf.action.reap", map[string]any{"task": legacyTaskID, "action": "triage", "expiredBefore": future, "legacyActiveBefore": future}),
+	)
+	noCutoff := p2ResultOrFail(t, legacyFrames[1], "legacy action.reap without cutoff")
+	noCutoffItems, _ := noCutoff["items"].([]any)
+	if len(noCutoffItems) != 0 {
+		t.Fatalf("legacy reap without cutoff items = %#v, want empty", noCutoff["items"])
+	}
+	withCutoff := p2ResultOrFail(t, legacyFrames[2], "legacy action.reap with cutoff")
+	withCutoffItems, _ := withCutoff["items"].([]any)
+	if len(withCutoffItems) != 1 {
+		t.Fatalf("legacy reap with cutoff items = %#v, want one", withCutoff["items"])
+	}
+	legacyReaped, _ := withCutoffItems[0].(map[string]any)
+	if got, _ := legacyReaped["runId"].(string); got != legacyRunID {
+		t.Fatalf("legacy reaped runId = %q, want %q", got, legacyRunID)
 	}
 }
 

@@ -175,6 +175,13 @@ func leaseConflictError(effectID, token string) error {
 	}
 }
 
+func actionLeaseConflictError(actionRunID string) error {
+	return &wrkfError{
+		code: wrkfCodeLeaseConflict,
+		msg:  fmt.Sprintf("action lease conflict: action run %s", actionRunID),
+	}
+}
+
 func effectNotDeliverableError(effectID, status string) error {
 	return &wrkfError{
 		code: wrkfCodeNotDeliverable,

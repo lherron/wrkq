@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // action.go — low-ceremony wrkf.action.* surface.
@@ -40,6 +42,10 @@ type ActionRun struct {
 	StartedAt          string            `json:"startedAt"`
 	CompletedAt        string            `json:"completedAt,omitempty"`
 	TerminalResult     string            `json:"terminalResult,omitempty"`
+	LeaseOwner         string            `json:"leaseOwner,omitempty"`
+	LeaseToken         string            `json:"leaseToken,omitempty"`
+	LeaseExpiresAt     string            `json:"leaseExpiresAt,omitempty"`
+	HeartbeatAt        string            `json:"heartbeatAt,omitempty"`
 	EvidenceIDs        []string          `json:"evidenceIds,omitempty"`
 	EvidenceKinds      []string          `json:"evidenceKinds,omitempty"`
 	TransitionEventIDs []string          `json:"transitionEventIds,omitempty"`
@@ -68,6 +74,8 @@ type StartActionParams struct {
 	DeliveryRef    string
 	ExternalRunRef string
 	IdempotencyKey string
+	LeaseOwner     string
+	LeaseMs        int64
 }
 
 // BindActionExternalParams drives BindActionExternal.
@@ -95,6 +103,7 @@ const (
 // CompleteActionParams drives CompleteAction.
 type CompleteActionParams struct {
 	ActionRunID              string
+	LeaseToken               string
 	Evidence                 *ActionEvidenceInput
 	TransitionMode           TransitionMode
 	TransitionID             string
@@ -105,8 +114,30 @@ type CompleteActionParams struct {
 // FailActionParams drives FailAction.
 type FailActionParams struct {
 	ActionRunID string
+	LeaseToken  string
 	Summary     string
 	Evidence    *ActionEvidenceInput
+}
+
+type HeartbeatActionParams struct {
+	ActionRunID string
+	LeaseToken  string
+	LeaseMs     int64
+}
+
+type ReapActionsParams struct {
+	Task               string
+	InstanceID         string
+	Action             string
+	ExpiredBefore      string
+	LegacyActiveBefore string
+	Limit              int
+	Actor              string
+	Summary            string
+}
+
+type ReapActionsResult struct {
+	Items []ActionRun `json:"items"`
 }
 
 // ActionCompleteResult is the committed result of CompleteAction.
@@ -146,6 +177,25 @@ func (s *Service) StartAction(p StartActionParams) (*ActionRun, error) {
 	if lane == "" {
 		lane = defaultLaneForAction(action)
 	}
+	leaseOwner := strings.TrimSpace(p.LeaseOwner)
+	leaseRequested := leaseOwner != "" || p.LeaseMs > 0
+	if leaseRequested && leaseOwner == "" {
+		return nil, validationError("leaseOwner", "leaseOwner is required when leaseMs is supplied", "leaseOwner", nil, "supply leaseOwner and leaseMs together")
+	}
+	if leaseRequested && p.LeaseMs <= 0 {
+		return nil, validationError("leaseMs", "leaseMs must be greater than zero when leaseOwner is supplied", "positive milliseconds", nil, "supply leaseOwner and leaseMs together")
+	}
+	leaseToken, leaseExpiresAt, heartbeatAt := "", "", ""
+	if leaseRequested {
+		var err error
+		leaseToken, err = newLeaseToken()
+		if err != nil {
+			return nil, err
+		}
+		now := s.now().UTC()
+		leaseExpiresAt = now.Add(time.Duration(p.LeaseMs) * time.Millisecond).Format(time.RFC3339)
+		heartbeatAt = now.Format(time.RFC3339)
+	}
 
 	inst, err := s.resolveActiveInstance(p.Task, p.InstanceID)
 	if err != nil {
@@ -179,11 +229,16 @@ func (s *Service) StartAction(p StartActionParams) (*ActionRun, error) {
 		Lane:           lane,
 		ExternalRunRef: normalizeExternalRunRef(p.ExternalRunRef),
 		Action:         action,
+		LeaseOwner:     leaseOwner,
+		LeaseToken:     leaseToken,
+		LeaseExpiresAt: leaseExpiresAt,
+		HeartbeatAt:    heartbeatAt,
+		LeaseMs:        p.LeaseMs,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return s.toActionRun(run, inst)
+	return s.toActionRunWithOptions(run, inst, actionRunViewOptions{includeLeaseToken: leaseRequested})
 }
 
 // BindActionExternal binds an action run to an external runtime run (normally
@@ -211,6 +266,9 @@ func (s *Service) CompleteAction(p CompleteActionParams) (*ActionCompleteResult,
 	}
 	run, err := s.ShowRun(p.ActionRunID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.validateActionSettlement(run, p.LeaseToken, "complete"); err != nil {
 		return nil, err
 	}
 	inst, err := instanceByIDQuery(s.db, run.InstanceID)
@@ -286,6 +344,9 @@ func (s *Service) FailAction(p FailActionParams) (*ActionRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateActionSettlement(run, p.LeaseToken, "fail"); err != nil {
+		return nil, err
+	}
 	if p.Evidence != nil {
 		if _, err := s.addActionEvidence(run, p.Evidence, "failure_result"); err != nil {
 			return nil, err
@@ -296,6 +357,151 @@ func (s *Service) FailAction(p FailActionParams) (*ActionRun, error) {
 		return nil, err
 	}
 	return s.toActionRun(failed, nil)
+}
+
+func (s *Service) HeartbeatAction(p HeartbeatActionParams) (*ActionRun, error) {
+	if strings.TrimSpace(p.ActionRunID) == "" {
+		return nil, validationError("actionRunId", "actionRunId is required", "actionRunId", nil, "supply the action run id")
+	}
+	if strings.TrimSpace(p.LeaseToken) == "" {
+		return nil, actionLeaseConflictError(p.ActionRunID)
+	}
+	leaseMs := p.LeaseMs
+	if leaseMs <= 0 {
+		leaseMs = 5 * 60 * 1000
+	}
+	now := s.now().UTC()
+	expiresAt := now.Add(time.Duration(leaseMs) * time.Millisecond).Format(time.RFC3339)
+	heartbeatAt := now.Format(time.RFC3339)
+	var run *Run
+	if err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		current, err := selectRunByID(tx, p.ActionRunID)
+		if err != nil {
+			return err
+		}
+		if current.Status != "active" || current.LeaseToken == "" || current.LeaseToken != strings.TrimSpace(p.LeaseToken) || !leaseStillCurrent(current.LeaseExpiresAt, now) {
+			return actionLeaseConflictError(p.ActionRunID)
+		}
+		if _, err := tx.Exec(`UPDATE workflow_runs SET lease_expires_at = ?, heartbeat_at = ? WHERE id = ?`, expiresAt, heartbeatAt, current.ID); err != nil {
+			return err
+		}
+		current.LeaseExpiresAt = expiresAt
+		current.HeartbeatAt = heartbeatAt
+		run = current
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return s.toActionRunWithOptions(run, nil, actionRunViewOptions{includeLeaseToken: true})
+}
+
+func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
+	expiredBefore, err := parseOptionalActionTime(p.ExpiredBefore)
+	if err != nil {
+		return nil, validationError("expiredBefore", "expiredBefore must be RFC3339", "RFC3339 timestamp", nil, "supply an RFC3339 timestamp")
+	}
+	if expiredBefore.IsZero() {
+		expiredBefore = s.now().UTC()
+	} else {
+		expiredBefore = expiredBefore.UTC()
+	}
+	legacyBefore, err := parseOptionalActionTime(p.LegacyActiveBefore)
+	if err != nil {
+		return nil, validationError("legacyActiveBefore", "legacyActiveBefore must be RFC3339", "RFC3339 timestamp", nil, "supply an RFC3339 timestamp")
+	}
+	if !legacyBefore.IsZero() {
+		legacyBefore = legacyBefore.UTC()
+	}
+	limit := p.Limit
+	if limit <= 0 || limit > actionListMaxLimit {
+		limit = actionListMaxLimit
+	}
+	instanceFilter := strings.TrimSpace(p.InstanceID)
+	if instanceFilter == "" && strings.TrimSpace(p.Task) != "" {
+		inst, err := s.resolveActiveInstance(p.Task, "")
+		if err != nil {
+			return nil, err
+		}
+		if inst == nil {
+			return &ReapActionsResult{Items: []ActionRun{}}, nil
+		}
+		instanceFilter = inst.ID
+	}
+	var reaped []Run
+	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		query := `
+			SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
+			       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+			       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
+			FROM workflow_runs
+			WHERE status = 'active' AND action IS NOT NULL
+			  AND ((lease_expires_at IS NOT NULL AND lease_expires_at <= ?)`
+		args := []interface{}{expiredBefore.Format(time.RFC3339)}
+		if !legacyBefore.IsZero() {
+			query += ` OR (lease_expires_at IS NULL AND started_at <= ?)`
+			args = append(args, legacyBefore.Format(time.RFC3339))
+		}
+		query += `)`
+		if instanceFilter != "" {
+			query += ` AND instance_id = ?`
+			args = append(args, instanceFilter)
+		}
+		if action := strings.TrimSpace(p.Action); action != "" {
+			query += ` AND action = ?`
+			args = append(args, action)
+		}
+		query += ` ORDER BY started_at, id LIMIT ?`
+		args = append(args, limit)
+		rows, err := tx.Query(query, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			run, err := scanRun(rows)
+			if err != nil {
+				return err
+			}
+			reaped = append(reaped, *run)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		now := s.now().UTC().Format(time.RFC3339)
+		for i := range reaped {
+			reason := strings.TrimSpace(p.Summary)
+			if reason == "" {
+				owner := reaped[i].LeaseOwner
+				if owner == "" {
+					owner = "legacy-unleased"
+				}
+				reason = "action lease expired: " + owner
+			}
+			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.Actor), now); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE workflow_runs SET status = 'failed', completed_at = ?, terminal_result = ?, lease_token = NULL WHERE id = ? AND status = 'active'`, now, reason, reaped[i].ID); err != nil {
+				return err
+			}
+			reaped[i].Status = "failed"
+			reaped[i].CompletedAt = now
+			reaped[i].TerminalResult = reason
+			reaped[i].LeaseToken = ""
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ActionRun, 0, len(reaped))
+	for i := range reaped {
+		ar, err := s.toActionRun(&reaped[i], nil)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *ar)
+	}
+	return &ReapActionsResult{Items: out}, nil
 }
 
 // ShowAction returns the canonical view of one action run, including run-linked
@@ -349,7 +555,8 @@ func (s *Service) ListActions(p ListActionsParams) ([]ActionRun, error) {
 	}
 	query := `
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs
 		WHERE instance_id IN (` + strings.Join(placeholders, ",") + `) AND action IS NOT NULL`
 	if status := strings.TrimSpace(p.Status); status != "" {
@@ -371,7 +578,7 @@ func (s *Service) ListActions(p ListActionsParams) ([]ActionRun, error) {
 	out := []ActionRun{}
 	for rows.Next() {
 		var r Run
-		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
+		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
 			return nil, err
 		}
 		ar, err := s.toActionRun(&r, instByID[r.InstanceID])
@@ -482,7 +689,15 @@ func (s *Service) defaultTransitionFor(inst *Instance, role string) (string, err
 	}
 }
 
+type actionRunViewOptions struct {
+	includeLeaseToken bool
+}
+
 func (s *Service) toActionRun(run *Run, inst *Instance) (*ActionRun, error) {
+	return s.toActionRunWithOptions(run, inst, actionRunViewOptions{})
+}
+
+func (s *Service) toActionRunWithOptions(run *Run, inst *Instance, opts actionRunViewOptions) (*ActionRun, error) {
 	if inst == nil {
 		loaded, err := instanceByIDQuery(s.db, run.InstanceID)
 		if err != nil {
@@ -490,7 +705,7 @@ func (s *Service) toActionRun(run *Run, inst *Instance) (*ActionRun, error) {
 		}
 		inst = loaded
 	}
-	return &ActionRun{
+	out := &ActionRun{
 		ActionRunID:    run.ID,
 		RunID:          run.ID,
 		Task:           strings.TrimPrefix(inst.TaskRef, "wrkq:"),
@@ -506,7 +721,87 @@ func (s *Service) toActionRun(run *Run, inst *Instance) (*ActionRun, error) {
 		StartedAt:      run.StartedAt,
 		CompletedAt:    run.CompletedAt,
 		TerminalResult: run.TerminalResult,
-	}, nil
+		LeaseOwner:     run.LeaseOwner,
+		LeaseExpiresAt: run.LeaseExpiresAt,
+		HeartbeatAt:    run.HeartbeatAt,
+	}
+	if opts.includeLeaseToken {
+		out.LeaseToken = run.LeaseToken
+	}
+	return out, nil
+}
+
+func (s *Service) validateActionSettlement(run *Run, token, op string) error {
+	if run.Status == "completed" && op == "complete" {
+		return nil
+	}
+	if run.Status != "active" {
+		return actionLeaseConflictError(run.ID)
+	}
+	if run.LeaseToken == "" {
+		return nil
+	}
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(token) != run.LeaseToken || !leaseStillCurrent(run.LeaseExpiresAt, s.now().UTC()) {
+		return actionLeaseConflictError(run.ID)
+	}
+	return nil
+}
+
+func leaseStillCurrent(expiresAt string, now time.Time) bool {
+	if strings.TrimSpace(expiresAt) == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(expiresAt))
+	if err != nil {
+		return false
+	}
+	return t.After(now)
+}
+
+func parseOptionalActionTime(raw string) (time.Time, error) {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, strings.TrimSpace(raw))
+}
+
+func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now string) error {
+	key := "wrkf-action:" + run.ID + ":reap-failure"
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM workflow_evidence_idempotency WHERE instance_id = ? AND idempotency_key = ?`, run.InstanceID, key).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	id, err := nextSeqID(tx, "workflow_evidence_seq", "ev")
+	if err != nil {
+		return err
+	}
+	if actor == "" {
+		actor = run.Actor
+	}
+	source := map[string]interface{}{"type": "wrkf.action.reap", "runId": run.ID}
+	sourceJSON, _ := json.Marshal(source)
+	data := map[string]interface{}{
+		"actionRunId":    run.ID,
+		"leaseOwner":     run.LeaseOwner,
+		"leaseExpiresAt": run.LeaseExpiresAt,
+		"heartbeatAt":    run.HeartbeatAt,
+		"reason":         reason,
+	}
+	dataJSON, _ := json.Marshal(data)
+	var taskEtag, taskHash string
+	_ = tx.QueryRow(`SELECT COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,'') FROM workflow_instances WHERE id = ?`, run.InstanceID).Scan(&taskEtag, &taskHash)
+	_, err = tx.Exec(`
+		INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, data_json, source_json, actor, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
+		VALUES (?, ?, 'failure_result', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, run.InstanceID, "wrkf-action:"+run.ID+":reap", reason, string(dataJSON), string(sourceJSON), nullIfEmpty(actor), nullIfEmpty(run.Role), run.ID, nullIfEmpty(taskEtag), nullIfEmpty(taskHash), now)
+	if err != nil {
+		return err
+	}
+	ev := &Evidence{ID: id, InstanceID: run.InstanceID, Kind: "failure_result", Ref: "wrkf-action:" + run.ID + ":reap", Summary: reason, Data: dataJSON, Source: sourceJSON, Actor: actor, Role: run.Role, RunID: run.ID, TaskEtagAtProduction: taskEtag, TaskHashAtProduction: taskHash, ProducedAt: now}
+	return storeEvidenceResult(tx, run.InstanceID, key, key, ev)
 }
 
 func (s *Service) runEvidence(runID string) ([]string, []string, error) {

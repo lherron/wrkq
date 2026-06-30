@@ -464,6 +464,10 @@ type Run struct {
 	StartedAt      string `json:"startedAt"`
 	CompletedAt    string `json:"completedAt,omitempty"`
 	TerminalResult string `json:"terminalResult,omitempty"`
+	LeaseOwner     string `json:"leaseOwner,omitempty"`
+	LeaseToken     string `json:"-"`
+	LeaseExpiresAt string `json:"leaseExpiresAt,omitempty"`
+	HeartbeatAt    string `json:"heartbeatAt,omitempty"`
 }
 
 type StartRunOptions struct {
@@ -474,7 +478,12 @@ type StartRunOptions struct {
 	// Action is the optional semantic-action label (triage/implement/...) for
 	// runs created through the wrkf.action.* surface. Empty for low-level
 	// wrkf.run.start callers.
-	Action string
+	Action         string
+	LeaseOwner     string
+	LeaseToken     string
+	LeaseExpiresAt string
+	HeartbeatAt    string
+	LeaseMs        int64
 }
 
 type BindExternalOptions struct {

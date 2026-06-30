@@ -178,6 +178,15 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.action.fail", apiHandler(func(ctx context.Context, p wrkfapi.ActionFailParams) (any, error) {
 		return api.ActionFail(ctx, p)
 	}))
+	s.Register("wrkf.action.heartbeat", apiHandler(func(ctx context.Context, p wrkfapi.ActionHeartbeatParams) (any, error) {
+		return api.ActionHeartbeat(ctx, p)
+	}))
+	s.Register("wrkf.action.renewLease", apiHandler(func(ctx context.Context, p wrkfapi.ActionHeartbeatParams) (any, error) {
+		return api.ActionHeartbeat(ctx, p)
+	}))
+	s.Register("wrkf.action.reap", apiHandler(func(ctx context.Context, p wrkfapi.ActionReapParams) (any, error) {
+		return api.ActionReap(ctx, p)
+	}))
 	s.Register("wrkf.action.show", apiHandler(func(ctx context.Context, p wrkfapi.ActionShowParams) (any, error) {
 		return api.ActionShow(ctx, p)
 	}))

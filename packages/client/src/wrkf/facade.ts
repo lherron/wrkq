@@ -15,8 +15,11 @@ import type {
   WrkfActionCompleteParams,
   WrkfActionCompleteResult,
   WrkfActionFailParams,
+  WrkfActionHeartbeatParams,
   WrkfActionListParams,
   WrkfActionListResult,
+  WrkfActionReapParams,
+  WrkfActionReapResult,
   WrkfActionRun,
   WrkfActionShowParams,
   WrkfActionStartParams,
@@ -152,6 +155,9 @@ export interface WrkfActionFacade {
   bindExternal(params: WrkfActionBindExternalParams): Promise<WrkfActionRun>;
   complete(params: WrkfActionCompleteParams): Promise<WrkfActionCompleteResult>;
   fail(params: WrkfActionFailParams): Promise<WrkfActionRun>;
+  heartbeat(params: WrkfActionHeartbeatParams): Promise<WrkfActionRun>;
+  renewLease(params: WrkfActionHeartbeatParams): Promise<WrkfActionRun>;
+  reap(params: WrkfActionReapParams): Promise<WrkfActionReapResult>;
   show(params: WrkfActionShowParams): Promise<WrkfActionRun>;
   list(params: WrkfActionListParams): Promise<WrkfActionListResult>;
 }

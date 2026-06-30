@@ -1475,7 +1475,8 @@ func effectByIDTx(tx *sql.Tx, id string) ([]Effect, error) {
 func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs
 		WHERE instance_id = ? AND role = ? AND status = 'active' AND COALESCE(delivery_ref,'') != ''
 		ORDER BY started_at DESC, id DESC LIMIT 1
@@ -1488,7 +1489,7 @@ func (s *Service) latestRunForRole(instanceID, role string) (*Run, error) {
 		return nil, fmt.Errorf("role %s is not bound; run wrkf run bind TASK %s HANDLE", role, role)
 	}
 	var r Run
-	if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
+	if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
 		return nil, err
 	}
 	return &r, rows.Err()
@@ -2187,10 +2188,11 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 		_, err = tx.Exec(`
 			INSERT INTO workflow_runs (
 				id, instance_id, role, actor, delivery_ref, lane, external_run_ref,
-				status, started_at, idempotency_key, request_hash, action
+				status, started_at, idempotency_key, request_hash, action,
+				lease_owner, lease_token, lease_expires_at, heartbeat_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
-		`, id, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash), nullIfEmpty(opts.Action))
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
+		`, id, inst.ID, role, actor, nullIfEmpty(opts.DeliveryRef), nullIfEmpty(opts.Lane), nullIfEmpty(opts.ExternalRunRef), now, nullIfEmpty(opts.IdempotencyKey), nullIfEmpty(requestHash), nullIfEmpty(opts.Action), nullIfEmpty(opts.LeaseOwner), nullIfEmpty(opts.LeaseToken), nullIfEmpty(opts.LeaseExpiresAt), nullIfEmpty(opts.HeartbeatAt))
 		if err != nil {
 			if isRunUniqueConflict(err) {
 				return idempotencyMismatchError(opts.IdempotencyKey)
@@ -2207,7 +2209,7 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 		if err != nil {
 			return err
 		}
-		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now}
+		run = &Run{ID: id, InstanceID: inst.ID, Role: role, Actor: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now, LeaseOwner: opts.LeaseOwner, LeaseToken: opts.LeaseToken, LeaseExpiresAt: opts.LeaseExpiresAt, HeartbeatAt: opts.HeartbeatAt}
 		return nil
 	})
 	return run, err
@@ -2286,12 +2288,13 @@ func (s *Service) FinishRun(id, status, summary string) (*Run, error) {
 			}
 			return idempotencyMismatchError(id)
 		}
-		if _, err := tx.Exec(`UPDATE workflow_runs SET status = ?, terminal_result = ?, completed_at = ? WHERE id = ?`, status, summary, now, id); err != nil {
+		if _, err := tx.Exec(`UPDATE workflow_runs SET status = ?, terminal_result = ?, completed_at = ?, lease_token = NULL WHERE id = ?`, status, summary, now, id); err != nil {
 			return err
 		}
 		current.Status = status
 		current.TerminalResult = summary
 		current.CompletedAt = now
+		current.LeaseToken = ""
 		run = current
 		return nil
 	}); err != nil {
@@ -2308,9 +2311,10 @@ func (s *Service) ShowRun(id string) (*Run, error) {
 	var r Run
 	err := s.db.QueryRow(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs WHERE id = ?
-	`, id).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
+	`, id).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("run not found: %s", id)
@@ -2326,7 +2330,7 @@ type runRowScanner interface {
 
 func scanRun(scanner runRowScanner) (*Run, error) {
 	var r Run
-	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult)
+	err := scanner.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt)
 	if err != nil {
 		return nil, err
 	}
@@ -2336,7 +2340,8 @@ func scanRun(scanner runRowScanner) (*Run, error) {
 func selectRunByID(tx *sql.Tx, id string) (*Run, error) {
 	run, err := scanRun(tx.QueryRow(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs WHERE id = ?
 	`, id))
 	if err != nil {
@@ -2353,9 +2358,10 @@ func selectRunByInstanceIdempotencyKey(tx *sql.Tx, instanceID, key string) (*Run
 	var requestHash string
 	err := tx.QueryRow(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''), COALESCE(request_hash,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(request_hash,'')
 		FROM workflow_runs WHERE instance_id = ? AND idempotency_key = ?
-	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &requestHash)
+	`, instanceID, key).Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt, &requestHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, "", nil
@@ -2374,6 +2380,9 @@ func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) s
 		Lane            string `json:"lane,omitempty"`
 		ExternalRunRef  string `json:"externalRunRef,omitempty"`
 		Action          string `json:"action,omitempty"`
+		LeaseOwner      string `json:"leaseOwner,omitempty"`
+		LeaseMs         int64  `json:"leaseMs,omitempty"`
+		LeaseRequested  bool   `json:"leaseRequested,omitempty"`
 		IdempotencySalt string `json:"idempotencySalt"`
 	}{
 		InstanceID:      instanceID,
@@ -2383,6 +2392,9 @@ func runStartRequestHash(instanceID, role, actor string, opts StartRunOptions) s
 		Lane:            opts.Lane,
 		ExternalRunRef:  opts.ExternalRunRef,
 		Action:          opts.Action,
+		LeaseOwner:      opts.LeaseOwner,
+		LeaseMs:         opts.LeaseMs,
+		LeaseRequested:  opts.LeaseOwner != "" || opts.LeaseExpiresAt != "",
 		IdempotencySalt: "workflow.run.start.v1",
 	}
 	b, _ := json.Marshal(payload)
@@ -2411,7 +2423,8 @@ func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
 	}
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, role, actor, COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,'')
+		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
 		FROM workflow_runs WHERE instance_id = ? ORDER BY started_at, id
 	`, inst.ID)
 	if err != nil {
@@ -2421,7 +2434,7 @@ func (s *Service) ListRuns(taskSelector string) ([]Run, error) {
 	var out []Run
 	for rows.Next() {
 		var r Run
-		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult); err != nil {
+		if err := rows.Scan(&r.ID, &r.InstanceID, &r.Role, &r.Actor, &r.DeliveryRef, &r.Lane, &r.ExternalRunRef, &r.Action, &r.Status, &r.StartedAt, &r.CompletedAt, &r.TerminalResult, &r.LeaseOwner, &r.LeaseToken, &r.LeaseExpiresAt, &r.HeartbeatAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

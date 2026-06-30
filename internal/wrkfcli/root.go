@@ -870,11 +870,13 @@ func actionCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "action", Short: "Low-ceremony task lifecycle actions over wrkf runs"}
 	var (
 		workflowRef, action, role, actor, lane, deliveryRef, externalRunRef, idempotencyKey string
+		leaseOwner, leaseToken, expiredBefore, legacyActiveBefore                           string
 		evidenceKind, evidenceRef, evidenceSummary, evidenceFacts, evidenceData             string
 		runSummary, transition                                                              string
 		noTransition, includeClosed                                                         bool
 		status, actionFilter                                                                string
 		limit                                                                               int
+		leaseMs                                                                             int64
 	)
 
 	actionEvidence := func() *workflow.ActionEvidenceInput {
@@ -904,6 +906,8 @@ func actionCmd() *cobra.Command {
 				DeliveryRef:    deliveryRef,
 				ExternalRunRef: externalRunRef,
 				IdempotencyKey: idempotencyKey,
+				LeaseOwner:     leaseOwner,
+				LeaseMs:        leaseMs,
 			})
 			if err != nil {
 				return err
@@ -919,6 +923,8 @@ func actionCmd() *cobra.Command {
 	start.Flags().StringVar(&deliveryRef, "delivery-ref", "", "Delivery ref")
 	start.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref (hrc:<runId>)")
 	start.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key")
+	start.Flags().StringVar(&leaseOwner, "lease-owner", "", "Lease owner")
+	start.Flags().Int64Var(&leaseMs, "lease-ms", 0, "Lease duration in milliseconds")
 
 	bind := &cobra.Command{
 		Use:  "bind ACTION_RUN --external-run-ref hrc:RUNID",
@@ -960,6 +966,7 @@ func actionCmd() *cobra.Command {
 			}
 			out, err := a.service.CompleteAction(workflow.CompleteActionParams{
 				ActionRunID:    args[0],
+				LeaseToken:     leaseToken,
 				Evidence:       actionEvidence(),
 				TransitionMode: mode,
 				TransitionID:   transitionID,
@@ -977,6 +984,7 @@ func actionCmd() *cobra.Command {
 	complete.Flags().StringVar(&evidenceFacts, "facts", "", "Evidence facts JSON object")
 	complete.Flags().StringVar(&evidenceData, "data", "", "Evidence data JSON")
 	complete.Flags().StringVar(&runSummary, "run-summary", "", "Run terminal summary")
+	complete.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token for leased action runs")
 	complete.Flags().StringVar(&transition, "transition", "", "Explicit transition id (default: auto-resolve)")
 	complete.Flags().BoolVar(&noTransition, "no-transition", false, "Skip the transition; finish the run only")
 
@@ -989,6 +997,7 @@ func actionCmd() *cobra.Command {
 			}
 			run, err := a.service.FailAction(workflow.FailActionParams{
 				ActionRunID: args[0],
+				LeaseToken:  leaseToken,
 				Summary:     runSummary,
 				Evidence:    actionEvidence(),
 			})
@@ -999,6 +1008,7 @@ func actionCmd() *cobra.Command {
 		}),
 	}
 	fail.Flags().StringVar(&runSummary, "run-summary", "", "Failure summary")
+	fail.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token for leased action runs")
 	fail.Flags().StringVar(&evidenceKind, "kind", "", "Failure evidence kind (defaults to failure_result)")
 	fail.Flags().StringVar(&evidenceRef, "ref", "", "Failure evidence ref")
 	fail.Flags().StringVar(&evidenceSummary, "summary", "", "Failure evidence summary")
@@ -1016,6 +1026,52 @@ func actionCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, run)
 		}),
 	}
+
+	heartbeat := &cobra.Command{
+		Use:     "heartbeat ACTION_RUN --lease-token TOKEN",
+		Aliases: []string{"renew-lease"},
+		Args:    cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := a.service.HeartbeatAction(workflow.HeartbeatActionParams{
+				ActionRunID: args[0],
+				LeaseToken:  leaseToken,
+				LeaseMs:     leaseMs,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, run)
+		}),
+	}
+	heartbeat.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token")
+	heartbeat.Flags().Int64Var(&leaseMs, "lease-ms", 0, "Lease duration in milliseconds")
+
+	reap := &cobra.Command{
+		Use:  "reap",
+		Args: cobra.NoArgs,
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			out, err := a.service.ReapActions(workflow.ReapActionsParams{
+				Task:               firstNonEmpty(cmd.Flag("task").Value.String()),
+				Action:             actionFilter,
+				ExpiredBefore:      expiredBefore,
+				LegacyActiveBefore: legacyActiveBefore,
+				Limit:              limit,
+				Actor:              firstNonEmpty(actor, a.actor),
+				Summary:            runSummary,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, out)
+		}),
+	}
+	reap.Flags().String("task", "", "Task selector")
+	reap.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
+	reap.Flags().StringVar(&expiredBefore, "expired-before", "", "Reap leased active action runs expiring at or before this RFC3339 time (defaults to now)")
+	reap.Flags().StringVar(&legacyActiveBefore, "legacy-active-before", "", "Explicit cutoff for legacy unleased active action runs")
+	reap.Flags().StringVar(&actor, "actor", "", "Actor id")
+	reap.Flags().StringVar(&runSummary, "summary", "", "Terminal summary")
+	reap.Flags().IntVar(&limit, "limit", 0, "Maximum runs to reap")
 
 	list := &cobra.Command{
 		Use:  "list TASK",
@@ -1039,7 +1095,7 @@ func actionCmd() *cobra.Command {
 	list.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
 	list.Flags().IntVar(&limit, "limit", 0, "Maximum runs to return")
 
-	cmd.AddCommand(start, bind, complete, fail, show, list)
+	cmd.AddCommand(start, bind, complete, fail, heartbeat, reap, show, list)
 	return cmd
 }
 
