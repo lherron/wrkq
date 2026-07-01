@@ -26,8 +26,8 @@ var rpcCmd = &cobra.Command{
 		// Apply the launch-time caller principal (--principal-ref / --as) as the
 		// rpc server's default principal so a session launched with an explicit
 		// agent identity attributes writes without every mutation re-passing
-		// principalRef in its params. Exact agent:<id> only; the two flags must
-		// agree when both are set.
+		// principalRef in its params. Full ScopeRefs are reduced to agent:<id>;
+		// the two flags must resolve to the same agent when both are set.
 		if principal, err := launchPrincipalRef(cmd); err != nil {
 			return err
 		} else if principal != "" {
@@ -45,9 +45,10 @@ var rpcCmd = &cobra.Command{
 }
 
 // launchPrincipalRef resolves the rpc server's default caller principal from the
-// global --principal-ref / --as flags. Both must be exact agent:<id>; if both are
-// supplied they must match. Empty when neither flag is set (the server then falls
-// back to WRKQ_PRINCIPAL_REF / config default_principal_ref).
+// global --principal-ref / --as flags. Both accept agent:<id> or full agent
+// ScopeRefs and resolve to agent:<id>; if both are supplied they must resolve to
+// the same agent. Empty when neither flag is set (the server then falls back to
+// WRKQ_PRINCIPAL_REF / config default_principal_ref).
 func launchPrincipalRef(cmd *cobra.Command) (string, error) {
 	read := func(name string) string {
 		if f := cmd.Flags().Lookup(name); f != nil {
@@ -61,17 +62,17 @@ func launchPrincipalRef(cmd *cobra.Command) (string, error) {
 	if principalFlag != "" {
 		p, err := attribution.NormalizeCanonical(principalFlag)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("invalid --principal-ref: %w", err)
 		}
 		principal = p
 	}
 	if asFlag != "" {
 		p, err := attribution.NormalizeCanonical(asFlag)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("invalid --as: %w", err)
 		}
 		if principal != "" && principal != p {
-			return "", fmt.Errorf("--principal-ref and --as must match")
+			return "", fmt.Errorf("--principal-ref resolves to %s but --as resolves to %s; use one flag or make both point to the same agent", principal, p)
 		}
 		principal = p
 	}

@@ -6,9 +6,10 @@ scope: write-attribution principal resolution for every wrkqapi mutation crossin
 predicate: >
   Every wrkq-core write records an exact caller principal (`agent:<id>`) plus
   optional scope before any write/no-op/dry-run success. Caller attribution is
-  principal-only: accepted sources are --principal-ref, exact --as as a
-  transitional alias, WRKQ_PRINCIPAL_REF, a valid ASP scope-derived agent, or
-  config default_principal_ref. Missing identity is WRKQ_VALIDATION.
+  principal-only: accepted sources are --principal-ref / --as /
+  WRKQ_PRINCIPAL_REF / config default_principal_ref as either agent:<id> or a
+  full agent ScopeRef reduced to agent:<id>, plus valid ASP scope-derived
+  agents. Missing identity is WRKQ_VALIDATION.
 
   The runtime never maps to agent:wrkq-system, never accepts system:*,
   actor UUID, A-* friendly IDs, bare caller slugs, WRKQ_ACTOR, WRKQ_ACTOR_ID,
@@ -20,12 +21,12 @@ authority:
 enforced_by: "internal/wrkqapi/api.go attributionFor returns (Attribution, error); every wrkqapi write threads that error so missing/invalid principal identity is WRKQ_VALIDATION before any write/event/no-op/dry-run; T-05381 principal-only ruling"
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site"
 source:
-  - internal/wrkqapi/api.go                    # attributionFor: exact agent:<id> only; empty/invalid → WRKQ_VALIDATION
-  - internal/attribution/principal.go          # Resolve / NormalizeCanonical / ValidatePrincipalRef (principal grammar = agent:<id>)
+  - internal/wrkqapi/api.go                    # attributionFor: agent:<id> or full agent ScopeRef input; empty/invalid → WRKQ_VALIDATION
+  - internal/attribution/principal.go          # Resolve / NormalizeCanonical (agent ScopeRef → agent:<id>) / ValidatePrincipalRef (stored principal grammar = agent:<id>)
   - internal/workrpc/bootstrap/bootstrap.go    # default_principal_ref is optional; empty means no ambient system fallback
   - internal/wrkqapi/webhooks.go               # validates actor BEFORE the no-change branch (no successful no-op for an invalid actor)
 required_tests:
-  - internal/attribution/principal_test.go     # principal-only Resolve precedence; legacy actor env/config ignored; bare --as rejected
+  - internal/attribution/principal_test.go     # principal-only Resolve precedence; full ScopeRef flags reduce; legacy actor env/config ignored; bare --as rejected
   - internal/workrpc/webhook_test.go           # TestWrkqWebhookAdd_ExactAttribution (changed-add exact + invalid reject) + TestWrkqWebhook_NoChangeInvalidActorRejected (duplicate add / missing remove invalid actor → WRKQ_VALIDATION, etag unchanged, no event)
   - internal/workrpc/commentdelete_mode_test.go # TestCommentAdd_ExactAttribution (non-webhook producer records the caller principal exactly)
   - internal/rpccli/parity_test.go             # webhook/add-with-principal mutates row (cross-binary updated_by_principal_ref parity)
@@ -36,6 +37,6 @@ reopen_when:
   - attributionFor stops returning an error for missing/invalid principal identity
   - any wrkqapi mutation returns a successful response (including no-change/dry-run) without validating caller principal identity
   - a system:* or legacy actor selector source is reintroduced for wrkq-core caller attribution
-  - the principal grammar (attribution.ValidatePrincipalRef = agent:<id>) changes
+  - the stored principal grammar (attribution.ValidatePrincipalRef = agent:<id>) changes
 supersedes: []
 superseded_by: null

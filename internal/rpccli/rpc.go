@@ -14,9 +14,10 @@ import (
 )
 
 // launchPrincipalRef resolves the rpc server's default caller principal from the
-// global --principal-ref / --as flags. Both must be exact agent:<id>; if both are
-// supplied they must match. Empty when neither is set (the server then falls back
-// to WRKQ_PRINCIPAL_REF / config default_principal_ref).
+// global --principal-ref / --as flags. Both accept agent:<id> or full agent
+// ScopeRefs and resolve to agent:<id>; if both are supplied they must resolve to
+// the same agent. Empty when neither is set (the server then falls back to
+// WRKQ_PRINCIPAL_REF / config default_principal_ref).
 func launchPrincipalRef(cmd *cobra.Command) (string, error) {
 	read := func(name string) string {
 		if f := cmd.Flags().Lookup(name); f != nil {
@@ -28,21 +29,29 @@ func launchPrincipalRef(cmd *cobra.Command) (string, error) {
 	asFlag := read("as")
 	var principal string
 	if principalFlag != "" {
-		p, err := attribution.NormalizeCanonical(principalFlag)
+		p, err := normalizePrincipalFlag("--principal-ref", principalFlag)
 		if err != nil {
 			return "", err
 		}
 		principal = p
 	}
 	if asFlag != "" {
-		p, err := attribution.NormalizeCanonical(asFlag)
+		p, err := normalizePrincipalFlag("--as", asFlag)
 		if err != nil {
 			return "", err
 		}
 		if principal != "" && principal != p {
-			return "", fmt.Errorf("--principal-ref and --as must match")
+			return "", fmt.Errorf("--principal-ref resolves to %s but --as resolves to %s; use one flag or make both point to the same agent", principal, p)
 		}
 		principal = p
+	}
+	return principal, nil
+}
+
+func normalizePrincipalFlag(name, value string) (string, error) {
+	principal, err := attribution.NormalizeCanonical(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: %w", name, err)
 	}
 	return principal, nil
 }
@@ -77,8 +86,8 @@ func newRPCCmd() *cobra.Command {
 			// Apply the launch-time caller principal (--principal-ref / --as) as
 			// the rpc server's default principal so a session launched with an
 			// explicit agent identity attributes writes without every mutation
-			// re-passing principalRef. Exact agent:<id> only; the flags must
-			// agree when both are set.
+			// re-passing principalRef. Full ScopeRefs are reduced to agent:<id>;
+			// the flags must resolve to the same agent when both are set.
 			if principal, perr := launchPrincipalRef(cmd); perr != nil {
 				return perr
 			} else if principal != "" {

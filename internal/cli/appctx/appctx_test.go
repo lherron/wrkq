@@ -192,7 +192,7 @@ func TestBootstrap_WithActor_RejectsBareSlug(t *testing.T) {
 	t.Setenv("WRKQ_DB_PATH", dbPath)
 
 	// A bare slug (not agent:<id>) is rejected as caller attribution.
-	for _, bad := range []string{"local-human", "A-00001", "system:scheduler", "agent:scope:project:p:task:t"} {
+	for _, bad := range []string{"local-human", "A-00001", "system:scheduler"} {
 		cmd := &cobra.Command{}
 		cmd.Flags().String("db", "", "Database path")
 		cmd.Flags().String("as", "", "Actor")
@@ -201,6 +201,45 @@ func TestBootstrap_WithActor_RejectsBareSlug(t *testing.T) {
 		if _, err := Bootstrap(cmd, WithActor()); err == nil {
 			t.Errorf("Bootstrap should reject caller attribution %q", bad)
 		}
+	}
+}
+
+func TestBootstrap_WithActor_ScopeRefFlagReducesToAgent(t *testing.T) {
+	clearAttributionEnv(t)
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("Failed to run migrations: %v", err)
+	}
+	_ = database.Close()
+
+	oldCwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldCwd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+
+	t.Setenv("WRKQ_DB_PATH", dbPath)
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("db", "", "Database path")
+	cmd.Flags().String("as", "", "Actor")
+	_ = cmd.ParseFlags([]string{"--as", "agent:scope:project:p:task:t"})
+
+	app, err := Bootstrap(cmd, WithActor())
+	if err != nil {
+		t.Fatalf("Bootstrap failed: %v", err)
+	}
+	defer app.Close()
+
+	if app.PrincipalRef != "agent:scope" {
+		t.Errorf("PrincipalRef should reduce to agent identity, got %q", app.PrincipalRef)
 	}
 }
 

@@ -395,7 +395,10 @@ func runCommentAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Legacy: applyProjectRootToSelector(taskRef, false).
 	task = sc.selector(task, false)

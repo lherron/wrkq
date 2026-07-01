@@ -74,9 +74,10 @@ func WithSearch(cfg SearchConfig) Option {
 // ─── attribution ─────────────────────────────────────────────────────────────
 
 // attributionFor resolves principal-only write attribution. The parameter name
-// remains actor while older RPC DTOs are retired, but the accepted value is only
-// an exact agent:<id> principal ref. Empty uses the configured
-// default_principal_ref; if none is configured the mutation fails.
+// remains actor while older RPC DTOs are retired. Accepted non-empty values are
+// agent:<id> or full agent ScopeRefs, both persisted as the durable agent:<id>
+// principal. Empty uses the configured default_principal_ref; if none is
+// configured the mutation fails.
 func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 	principalInput := strings.TrimSpace(actor)
 	if principalInput == "" {
@@ -84,14 +85,23 @@ func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 	}
 	if principalInput == "" {
 		return attribution.Attribution{}, NewValidationError(
-			"principalRef is required",
-			map[string]any{"field": "principalRef"})
+			"principalRef is required; include principalRef \"agent:<id>\" or launch with --principal-ref agent:<id> / --as agent:<id>",
+			map[string]any{
+				"field":    "principalRef",
+				"expected": "agent:<id>",
+				"example":  "agent:cody",
+			})
 	}
 	principal, err := attribution.NormalizeCanonical(principalInput)
 	if err != nil {
 		return attribution.Attribution{}, NewValidationError(
 			"invalid principalRef: "+err.Error(),
-			map[string]any{"field": "principalRef", "principalRef": principalInput})
+			map[string]any{
+				"field":        "principalRef",
+				"principalRef": principalInput,
+				"expected":     "agent:<id> or full agent ScopeRef",
+				"example":      "agent:cody",
+			})
 	}
 	return attribution.Attribution{PrincipalRef: principal}, nil
 }

@@ -42,7 +42,7 @@ func TestNormalizeCompat(t *testing.T) {
 	}{
 		{name: "bare slug", value: "clod", want: "agent:clod"},
 		{name: "canonical", value: "agent:clod", want: "agent:clod"},
-		{name: "full scope rejected", value: "agent:clod:project:wrkq", wantErr: true},
+		{name: "full scope reduces", value: "agent:clod:project:wrkq", want: "agent:clod"},
 		{name: "invalid bare rejected", value: "clod/bad", wantErr: true},
 	}
 
@@ -56,6 +56,22 @@ func TestNormalizeCompat(t *testing.T) {
 				t.Fatalf("NormalizeCompat(%q) = %q, want %q", tt.value, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeCanonicalReducesFullScopeRef(t *testing.T) {
+	for _, input := range []string{
+		"agent:cody:project:wrkq",
+		"agent:cody:project:wrkq:task:T-05397",
+		"agent:cody:project:wrkq:task:T-05397:role:implementer",
+	} {
+		got, err := NormalizeCanonical(input)
+		if err != nil {
+			t.Fatalf("NormalizeCanonical(%q) failed: %v", input, err)
+		}
+		if got != "agent:cody" {
+			t.Fatalf("NormalizeCanonical(%q) = %q, want agent:cody", input, got)
+		}
 	}
 }
 
@@ -164,6 +180,38 @@ func TestResolveRejectsBareAs(t *testing.T) {
 	}
 	if _, err := Resolve(ResolveOptions{Command: cmd}); err == nil {
 		t.Fatal("expected bare --as to be rejected")
+	}
+}
+
+func TestResolveAllowsFullScopeFlagsWhenTheyResolveToSameAgent(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("principal-ref", "", "principal")
+	cmd.Flags().String("as", "", "principal")
+	if err := cmd.ParseFlags([]string{"--principal-ref", "agent:cody:project:wrkq:task:T-1", "--as", "agent:cody"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	attr, err := Resolve(ResolveOptions{Command: cmd})
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if attr.PrincipalRef != "agent:cody" {
+		t.Fatalf("PrincipalRef = %q, want agent:cody", attr.PrincipalRef)
+	}
+}
+
+func TestResolveRejectsConflictingPrincipalFlags(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("principal-ref", "", "principal")
+	cmd.Flags().String("as", "", "principal")
+	if err := cmd.ParseFlags([]string{"--principal-ref", "agent:cody:project:wrkq", "--as", "agent:clod"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	_, err := Resolve(ResolveOptions{Command: cmd})
+	if err == nil {
+		t.Fatal("expected conflicting principal flags to be rejected")
+	}
+	if got := err.Error(); !containsAll(got, "resolves to agent:cody", "resolves to agent:clod", "same agent") {
+		t.Fatalf("error %q does not explain the conflict", got)
 	}
 }
 

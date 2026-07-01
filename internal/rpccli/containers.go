@@ -34,7 +34,10 @@ func runMkdir(cmd *cobra.Command, args []string, kind string) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Legacy: applyProjectRootToPaths(args, defaultToRoot=false).
 	paths := sc.paths(args, false)
@@ -108,7 +111,10 @@ func runRmdir(cmd *cobra.Command, args []string, force, yes bool) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	// Legacy: applyProjectRootToPaths(args, defaultToRoot=false).
@@ -281,19 +287,33 @@ func mkdirKindFor(path, userKind string) (string, error) {
 }
 
 // actorFlag returns the caller principal from the global attribution flags.
-// --principal-ref is canonical; --as is its transitional alias. The value is
-// forwarded verbatim as the mutation's principalRef and validated server-side
-// (exact agent:<id>); legacy slugs / actor UUIDs / system:* are rejected there.
-func actorFlag(cmd *cobra.Command) string {
+// --principal-ref is canonical; --as is its transitional alias. Both accept
+// agent:<id> or a full agent ScopeRef, which is reduced to agent:<id> before it
+// crosses the RPC boundary.
+func actorFlag(cmd *cobra.Command) (string, error) {
+	var principal string
 	if f := cmd.Flag("principal-ref"); f != nil {
 		if v := f.Value.String(); v != "" {
-			return v
+			normalized, err := normalizePrincipalFlag("--principal-ref", v)
+			if err != nil {
+				return "", err
+			}
+			principal = normalized
 		}
 	}
 	if f := cmd.Flag("as"); f != nil {
-		return f.Value.String()
+		if v := f.Value.String(); v != "" {
+			normalized, err := normalizePrincipalFlag("--as", v)
+			if err != nil {
+				return "", err
+			}
+			if principal != "" && normalized != principal {
+				return "", fmt.Errorf("--principal-ref resolves to %s but --as resolves to %s; use one flag or make both point to the same agent", principal, normalized)
+			}
+			principal = normalized
+		}
 	}
-	return ""
+	return principal, nil
 }
 
 // encodeJSONIndent matches the legacy json.NewEncoder(SetIndent("", "  ")).Encode

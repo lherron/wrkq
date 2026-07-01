@@ -22,6 +22,6 @@ func ExecuteAdmin() error {
 func init() {
 	// Global flags for wrkqadm
 	rootAdmCmd.PersistentFlags().String("db", "", "Path to database file (overrides WRKQ_DB_PATH)")
-	rootAdmCmd.PersistentFlags().String("principal-ref", "", "Canonical caller principal ref for write attribution (agent:<id>)")
-	rootAdmCmd.PersistentFlags().String("as", "", "Alias for --principal-ref; must be exactly agent:<id>")
+	rootAdmCmd.PersistentFlags().String("principal-ref", "", "Caller principal for write attribution: agent:<id> or full agent ScopeRef")
+	rootAdmCmd.PersistentFlags().String("as", "", "Alias for --principal-ref; accepts agent:<id> or a full agent ScopeRef")
 }

@@ -45,7 +45,10 @@ func runMv(cmd *cobra.Command, args []string, flags mvFlags) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Legacy: applyProjectRootToSelector(false) for every source and the dst.
 	dst := sc.selector(args[len(args)-1], false)

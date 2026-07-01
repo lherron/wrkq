@@ -82,7 +82,10 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	// Caller-side scoping (legacy: applyProjectRootToSelector(arg, false) +

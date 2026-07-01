@@ -130,7 +130,10 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	// stdin `-` expansion (legacy: single "-" reads newline-separated refs).

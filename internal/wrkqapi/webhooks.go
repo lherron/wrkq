@@ -211,8 +211,9 @@ func normalizeWebhookURLs(raw []string) ([]string, error) {
 func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor string) (json.RawMessage, error) {
 	// Validate the explicit actor BEFORE returning any mutation-family response —
 	// including the idempotent no-change branch — so a malformed explicit actor
-	// (e.g. a full scope ref) never yields a successful no-op. attributionFor
-	// rejects invalid non-empty selectors with WRKQ_VALIDATION (daedalus #10291).
+	// never yields a successful no-op. attributionFor rejects invalid non-empty
+	// selectors with WRKQ_VALIDATION (daedalus #10291) and reduces valid full
+	// ScopeRefs to their durable agent principal.
 	attr, aerr := a.attributionFor(actor)
 	if aerr != nil {
 		return nil, aerr

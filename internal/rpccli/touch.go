@@ -85,7 +85,10 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 	priority := o.priority
 
 	// Legacy: applyProjectRootToPaths(args, false) for the new-task paths and

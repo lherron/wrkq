@@ -91,9 +91,9 @@ Key variables:
 | `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Local SQLite database path compatibility inputs; reject `rpc://` values. |
 | `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` | Bearer token used by remote `WRKQ_DB=rpc://...` calls and wrkqd HTTP auth. |
 | `WRKQ_ATTACH_DIR` | Attachment byte storage root. |
-| `WRKQ_PRINCIPAL_REF` | Canonical mutation principal, exactly `agent:<id>`. |
-| `WRKQ_ACTOR_ID` | Compatibility alias; best-effort translated to an `agent:<id>` principal. |
-| `WRKQ_ACTOR` | Compatibility alias; bare slugs normalize to `agent:<slug>`. |
+| `WRKQ_PRINCIPAL_REF` | Mutation principal input: `agent:<id>` or full agent ScopeRef, reduced to `agent:<id>`. |
+| `WRKQ_ACTOR_ID` | Legacy actor/display-cache input; ignored for wrkq-core caller attribution. |
+| `WRKQ_ACTOR` | Legacy actor/display-cache input; ignored for wrkq-core caller attribution. |
 | `WRKQ_PROJECT_ROOT` | Default project/container path for relative task paths. |
 | `ASP_PROJECT` | Runtime project fallback when `WRKQ_PROJECT_ROOT` is not explicitly exported. |
 | `WRKQ_OUTPUT` | Default output mode. |
@@ -119,18 +119,21 @@ Project-root precedence:
 
 Principal attribution for mutating commands:
 
-1. `--as <ref>` flag. Accepts canonical `agent:<id>` or a bare compat slug.
-2. `WRKQ_PRINCIPAL_REF`. Must be canonical `agent:<id>`.
-3. `WRKQ_ACTOR`. Compatibility alias; bare slugs normalize to `agent:<slug>`.
-4. `WRKQ_ACTOR_ID`. Compatibility alias; if a legacy actor row exists it uses
-   that slug, otherwise it normalizes the literal value.
-5. A validated ASP scope (`ASP_SCOPE_REF`, `ASP_HANDLE`, or
+1. `--principal-ref <ref>` or `--as <ref>` flag. Accepts `agent:<id>` or a
+   full agent ScopeRef such as `agent:<id>:project:<projectId>`, reduced to
+   `agent:<id>`. If both flags are supplied they must resolve to the same
+   agent.
+2. `WRKQ_PRINCIPAL_REF`. Accepts `agent:<id>` or a full agent ScopeRef and
+   reduces it to `agent:<id>`.
+3. A validated ASP scope (`ASP_SCOPE_REF`, `ASP_HANDLE`, or
    `ASP_AGENT_ID`+`ASP_PROJECT`) reduced to `agent:<agentId>`.
-6. `default_actor` in config, as a compatibility fallback.
+4. `default_principal_ref` in config.
 
 wrkq validates principal syntax but never creates actors or requires an actor
-row for ordinary writes. Full scope refs are persisted as scope provenance and
-are not valid principal refs.
+row for ordinary writes. Bare slugs, actor UUIDs, `A-*` actor IDs, `system:*`,
+`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, and `default_actor` are not caller attribution
+sources. Passing a full ScopeRef as a principal input keeps only the agent
+identity; scope provenance must travel through `scope_ref` / runtime scope.
 
 ## 5. Domain Model
 

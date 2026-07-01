@@ -161,7 +161,10 @@ func newAttachPutCmd() *cobra.Command {
 				return err
 			}
 			defer closeFn()
-			actor := actorFlag(cmd)
+			actor, err := actorFlag(cmd)
+			if err != nil {
+				return err
+			}
 
 			// Legacy: applyProjectRootToSelector(taskRef, false). The source FILE path
 			// is a host-local filesystem path, NOT a selector — never project-scoped.
@@ -385,7 +388,10 @@ func runAttachPutStdin(cmd *cobra.Command, taskRef, name, mime string) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 	scopedTask := sc.selector(taskRef, false)
 
 	in := cmd.InOrStdin()
@@ -525,7 +531,10 @@ func newAttachRmCmd() *cobra.Command {
 				return err
 			}
 			defer closeFn()
-			actor := actorFlag(cmd)
+			actor, err := actorFlag(cmd)
+			if err != nil {
+				return err
+			}
 
 			results := []map[string]interface{}{}
 			for _, ref := range args {

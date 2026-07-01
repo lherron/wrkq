@@ -43,7 +43,10 @@ func runApply(cmd *cobra.Command, args []string, format string, withMetadata, dr
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Legacy: applyProjectRootToSelector(args[0], false) then ResolveTask.
 	taskID := sc.selector(args[0], false)

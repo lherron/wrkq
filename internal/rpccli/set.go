@@ -204,7 +204,10 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	if len(args) == 1 && args[0] == "-" {
 		scanner := bufio.NewScanner(cmd.InOrStdin())

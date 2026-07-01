@@ -4,8 +4,8 @@ package wrkqapi
 // helper attributionFor (T-05381 principal-only). The helper records the EXACT
 // agent:<id> principal ref via attribution.NormalizeCanonical: an empty selector
 // uses the configured default_principal_ref (and fails when none is configured),
-// and any non-canonical caller value — bare slug, system: sentinel, full scope
-// ref — is REJECTED rather than silently coerced.
+// full agent ScopeRefs reduce to their agent identity, and invalid caller values
+// such as bare slugs / system sentinels / actor IDs are rejected.
 
 import (
 	"path/filepath"
@@ -47,6 +47,11 @@ func TestAttributionFor_ResolvesAndRejects(t *testing.T) {
 		t.Errorf("canonical principal: want agent:flag-principal/nil, got %q/%v", attr.PrincipalRef, err)
 	}
 
+	// Full ScopeRef input → reduced to the durable agent principal.
+	if attr, err := noDefault.attributionFor("agent:cody:project:wrkq:task:T-05397"); err != nil || attr.PrincipalRef != "agent:cody" {
+		t.Errorf("full scope principal: want agent:cody/nil, got %q/%v", attr.PrincipalRef, err)
+	}
+
 	// Bare compat slug → REJECTED (NormalizeCanonical does not accept bare slugs).
 	if _, err := noDefault.attributionFor("bareslug"); err == nil {
 		t.Errorf("bare slug: want rejection, got nil")
@@ -59,11 +64,11 @@ func TestAttributionFor_ResolvesAndRejects(t *testing.T) {
 		}
 	}
 
-	// NON-EMPTY invalid selectors (full scope refs, actor UUIDs, A-*) → error
-	// (WRKQ_VALIDATION at the RPC boundary), NEVER a silent rewrite.
+	// NON-EMPTY invalid selectors (malformed scope refs, actor UUIDs, A-*) →
+	// error (WRKQ_VALIDATION at the RPC boundary), NEVER a silent rewrite.
 	for _, bad := range []string{
-		"agent:cody:project:wrkq", "agent:cody:role:reviewer",
-		"A-00001", "00000000-0000-4000-8000-0000000000a0",
+		"agent:cody:role:reviewer", "A-00001",
+		"00000000-0000-4000-8000-0000000000a0",
 	} {
 		if _, err := noDefault.attributionFor(bad); err == nil {
 			t.Errorf("invalid actor %q: want error, got nil", bad)

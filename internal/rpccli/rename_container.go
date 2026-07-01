@@ -71,7 +71,10 @@ func runRenameContainer(cmd *cobra.Command, ref, newSlug string, f renameContain
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	// Caller-side scoping (legacy: applyProjectRootToSelector(ref, false)). The

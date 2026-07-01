@@ -108,7 +108,10 @@ func runCp(cmd *cobra.Command, args []string, f cpFlags) error {
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	sources := args[:len(args)-1]
 	destination := args[len(args)-1]

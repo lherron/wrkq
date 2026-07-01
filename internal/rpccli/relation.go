@@ -126,7 +126,10 @@ func runRelationMutate(cmd *cobra.Command, args []string, method, flagKey, verb 
 		return err
 	}
 	defer closeFn()
-	actor := actorFlag(cmd)
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
 
 	// Legacy: applyProjectRootToSelector(false) for both endpoints.
 	from = sc.selector(from, false)

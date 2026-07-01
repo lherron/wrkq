@@ -107,7 +107,11 @@ func runWebhookMutate(cmd *cobra.Command, method, url, verb string) error {
 	defer closeFn()
 
 	params := map[string]any{"url": url}
-	if actor := actorFlag(cmd); actor != "" {
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if actor != "" {
 		params["actor"] = actor
 	}
 	raw, cerr := tr.Call(cmd.Context(), method, params)

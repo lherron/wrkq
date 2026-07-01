@@ -178,7 +178,11 @@ func runContainerSet(cmd *cobra.Command, args []string, opts containerSetOptions
 	defer closeFn()
 
 	params["container"] = sc.selector(args[0], false)
-	if actor := actorFlag(cmd); actor != "" {
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if actor != "" {
 		params["actor"] = actor
 	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.container.webhookSet", params)
@@ -194,7 +198,11 @@ func runContainerSetRPC(cmd *cobra.Command, params map[string]any, all bool) err
 		return err
 	}
 	defer closeFn()
-	if actor := actorFlag(cmd); actor != "" {
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
+	if actor != "" {
 		params["actor"] = actor
 	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.container.webhookSet", params)

@@ -253,8 +253,8 @@ func TestWrkqWebhookAdd_EventAttribution(t *testing.T) {
 // caller-supplied canonical principal (--as agent:flag-principal, no legacy actor
 // row) must be recorded EXACTLY — both the container.updated event principal_ref
 // and the root container's updated_by_principal_ref — not coerced to wrkq-system.
-// A bare compat slug and a full scope ref are both rejected WRKQ_VALIDATION:
-// caller attribution is exact agent:<id> only.
+// A bare compat slug is rejected WRKQ_VALIDATION, while a full agent ScopeRef
+// is accepted and reduced to its durable agent:<id> principal.
 func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -276,8 +276,8 @@ func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	}
 
 	// A bare compat slug is NO LONGER accepted as caller attribution: principal-only
-	// attribution requires an exact agent:<id> ref, so a bare slug is REJECTED
-	// WRKQ_VALIDATION and the root container is left unmutated.
+	// attribution requires agent:<id> or a full agent ScopeRef, so a bare slug is
+	// REJECTED WRKQ_VALIDATION and the root container is left unmutated.
 	etagBeforeBare := g1EtagOf(t, dbPath, rootUUID)
 	framesBare := p2Run(t, dbPath,
 		mkRPC("w2", "wrkq.webhook.add", map[string]any{"url": "https://attr2.test/wrkq", "actor": "bareslug"}),
@@ -289,18 +289,19 @@ func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 		t.Errorf("rejected bare-slug add must not mutate root container: etag %d → %d", etagBeforeBare, etagAfterBare)
 	}
 
-	// A NON-EMPTY invalid actor (a full scope ref) must be REJECTED, not coerced to
-	// wrkq-system — coercion would destroy audit truth (daedalus #10285). The root
-	// container must be left unmutated.
-	etagBefore := g1EtagOf(t, dbPath, rootUUID)
+	// A full ScopeRef is accepted at the caller boundary and reduced to the durable
+	// principal identity. The project/task context belongs in scope provenance, not
+	// the principal_ref column.
 	frames3 := p2Run(t, dbPath,
 		mkRPC("w3", "wrkq.webhook.add", map[string]any{"url": "https://attr3.test/wrkq", "actor": "agent:cody:project:wrkq"}),
 	)
-	if code := p2ErrCode(frames3[1]); code != "WRKQ_VALIDATION" {
-		t.Errorf("invalid actor want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames3[1])
+	p2ResultOrFail(t, frames3[1], "webhook.add full-scope attribution")
+	_, _, scopePrincipalRef := g1LatestEvent(t, dbPath, "container.updated", rootUUID)
+	if scopePrincipalRef != "agent:cody" {
+		t.Errorf("full-scope event principal_ref: want agent:cody, got %q", scopePrincipalRef)
 	}
-	if etagAfter := g1EtagOf(t, dbPath, rootUUID); etagAfter != etagBefore {
-		t.Errorf("rejected add must not mutate root container: etag %d → %d", etagBefore, etagAfter)
+	if got := g1ContainerField(t, dbPath, rootUUID, "updated_by_principal_ref"); got != "agent:cody" {
+		t.Errorf("full-scope root updated_by_principal_ref: want agent:cody, got %q", got)
 	}
 }
 
@@ -312,7 +313,7 @@ func TestWrkqWebhook_NoChangeInvalidActorRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
-	const badActor = "agent:cody:project:wrkq" // a full scope ref is not a valid principal
+	const badActor = "agent:cody:role:reviewer" // malformed: role requires a project segment
 
 	t.Run("duplicate-add", func(t *testing.T) {
 		dbPath := migratedDB(t)

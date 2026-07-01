@@ -36,34 +36,39 @@ type ResolveOptions struct {
 func ValidatePrincipalRef(ref string) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return fmt.Errorf("principal ref is required")
+		return fmt.Errorf("principal ref is required; store the normalized agent identity as agent:<id>")
 	}
 	parsed, err := scope.ParseScopeRef(ref)
 	if err != nil {
 		return fmt.Errorf("invalid principal ref %q: %w", ref, err)
 	}
 	if parsed.Kind != scope.KindAgent || parsed.ProjectID != "" || parsed.TaskID != "" || parsed.RoleName != "" {
-		return fmt.Errorf("invalid principal ref %q: must be exactly agent:<id>; full scope refs belong in scope_ref", ref)
+		return fmt.Errorf("invalid stored principal ref %q: expected normalized agent:<id>; pass full ScopeRefs through NormalizeCanonical before storage", ref)
 	}
 	return nil
 }
 
-// NormalizeCanonical validates a canonical principal ref without accepting bare
-// compat slugs.
+// NormalizeCanonical accepts an exact agent principal ref or a full agent
+// ScopeRef and returns the principal identity portion. Bare compat slugs are
+// intentionally not accepted for caller attribution.
 func NormalizeCanonical(ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
-	if err := ValidatePrincipalRef(ref); err != nil {
-		return "", err
+	if ref == "" {
+		return "", fmt.Errorf("principal ref is required; use agent:<id> (for example agent:cody)")
 	}
-	return ref, nil
+	parsed, err := scope.ParseScopeRef(ref)
+	if err != nil {
+		return "", principalInputError(ref, err)
+	}
+	return "agent:" + parsed.AgentID, nil
 }
 
-// NormalizeCompat accepts either an exact canonical principal ref or a bare
-// token and returns agent:<token>. It rejects full scope refs.
+// NormalizeCompat accepts an exact/full agent principal input or a bare token
+// and returns agent:<id>.
 func NormalizeCompat(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("principal value is required")
+		return "", fmt.Errorf("principal value is required; use agent:<id> (for example agent:cody)")
 	}
 	if strings.HasPrefix(value, "agent:") {
 		return NormalizeCanonical(value)
@@ -73,6 +78,16 @@ func NormalizeCompat(value string) (string, error) {
 		return "", err
 	}
 	return ref, nil
+}
+
+func principalInputError(ref string, err error) error {
+	if !strings.Contains(ref, ":") && scope.TokenPattern.MatchString(ref) {
+		return fmt.Errorf("invalid principal ref %q: missing agent: prefix; use agent:%s", ref, ref)
+	}
+	if strings.HasPrefix(ref, "agent:") {
+		return fmt.Errorf("invalid principal ref %q: expected agent:<id> or a full agent ScopeRef such as agent:<id>:project:<projectId>; %w", ref, err)
+	}
+	return fmt.Errorf("invalid principal ref %q: principal attribution only supports agent identities; use agent:<id> (for example agent:cody)", ref)
 }
 
 // DeriveFromScope reduces a validated resolved scope to the agent identity
@@ -99,8 +114,14 @@ func Resolve(opts ResolveOptions) (Attribution, error) {
 		if err != nil {
 			return Attribution{}, err
 		}
-		if as := flagValue(opts.Command, "as"); as != "" && as != principal {
-			return Attribution{}, fmt.Errorf("--principal-ref and --as must match")
+		if as := flagValue(opts.Command, "as"); as != "" {
+			asPrincipal, err := NormalizeCanonical(as)
+			if err != nil {
+				return Attribution{}, err
+			}
+			if asPrincipal != principal {
+				return Attribution{}, fmt.Errorf("--principal-ref resolves to %s but --as resolves to %s; use one flag or make both point to the same agent", principal, asPrincipal)
+			}
 		}
 		return buildAttribution(principal, scopeRef)
 	}
@@ -132,7 +153,7 @@ func Resolve(opts ResolveOptions) (Attribution, error) {
 		return buildAttribution(principal, scopeRef)
 	}
 
-	return Attribution{}, fmt.Errorf("no principal configured (set --principal-ref, --as, %s, a valid ASP scope, or config default_principal_ref)", PrincipalEnv)
+	return Attribution{}, fmt.Errorf("no principal configured; set --principal-ref agent:<id>, --as agent:<id>, %s=agent:<id>, a valid ASP scope, or config default_principal_ref", PrincipalEnv)
 }
 
 func flagValue(cmd *cobra.Command, name string) string {
