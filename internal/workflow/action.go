@@ -602,6 +602,15 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 	if err != nil {
 		return nil, err
 	}
+	if out != nil && out.Transition != nil {
+		transitionID, _ := out.Transition["transition"].(string)
+		transition, deliverErr := s.deliverBuiltinTransitionEffects(out.Transition, transitionID)
+		if deliverErr != nil {
+			return out, deliverErr
+		}
+		out.Transition = transition
+		out.Effects = transitionEffectsFromMap(transition)
+	}
 	return out, nil
 }
 

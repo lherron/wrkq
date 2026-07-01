@@ -27,6 +27,11 @@ func TestBuiltinSimpleTaskV2ExecutableActionsValidate(t *testing.T) {
 	if got := tpl.ExecutableActions["verify"].SourceBinding.Action; got != "implement" {
 		t.Fatalf("verify source action = %q, want implement", got)
 	}
+	assertV2EffectState(t, tpl, "triage_complete", "ready", "open")
+	assertV2EffectState(t, tpl, "implement_complete", "blocked", "blocked")
+	assertV2EffectState(t, tpl, "verify_complete", "verified", "completed")
+	assertV2EffectState(t, tpl, "verify_complete", "failed", "blocked")
+	assertV2EffectState(t, tpl, "verify_complete", "blocked", "blocked")
 
 	v1Data, err := builtinTemplateData("wrkq-simple-task")
 	if err != nil {
@@ -42,6 +47,33 @@ func TestBuiltinSimpleTaskV2ExecutableActionsValidate(t *testing.T) {
 	if len(v1.ExecutableActions) != 0 {
 		t.Fatalf("v1 executableActions len = %d, want 0", len(v1.ExecutableActions))
 	}
+}
+
+func assertV2EffectState(t *testing.T, tpl *Template, transitionID, outcomeID, wantState string) {
+	t.Helper()
+	for _, tr := range tpl.Transitions {
+		if tr.ID != transitionID {
+			continue
+		}
+		for _, outcome := range tr.Outcomes {
+			if outcome.ID != outcomeID {
+				continue
+			}
+			for _, effect := range outcome.Effects {
+				if effect.Kind != "set_task_state" {
+					continue
+				}
+				got, _ := effect.Data["state"].(string)
+				if got != wantState {
+					t.Fatalf("%s/%s set_task_state = %q, want %q", transitionID, outcomeID, got, wantState)
+				}
+				return
+			}
+			t.Fatalf("%s/%s missing set_task_state effect", transitionID, outcomeID)
+		}
+		t.Fatalf("%s missing outcome %s", transitionID, outcomeID)
+	}
+	t.Fatalf("missing transition %s", transitionID)
 }
 
 func TestValidateExecutableActionsRejectsMalformedReferences(t *testing.T) {

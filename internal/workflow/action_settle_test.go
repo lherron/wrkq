@@ -7,6 +7,7 @@ import (
 
 func TestSettleActionCompletedIdempotentAndProjection(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
+	setTaskSpecAndState(t, svc, taskUUID, "Shaped spec.", "in_progress")
 	attachSimpleTaskV2(t, svc, taskUUID)
 	claim := claimActionForTest(t, svc, taskUUID, "triage")
 
@@ -26,6 +27,9 @@ func TestSettleActionCompletedIdempotentAndProjection(t *testing.T) {
 	}
 	if inst.Phase != "ready" || inst.Revision != 1 {
 		t.Fatalf("instance state = %+v, want active/ready rev 1", inst.State())
+	}
+	if got := readTaskState(t, svc, taskUUID); got != "open" {
+		t.Fatalf("task state after v2 triage = %q, want open", got)
 	}
 	shown, err := svc.ShowRun(claim.Binding.Run.ID)
 	if err != nil {
@@ -178,6 +182,67 @@ func TestSettleActionVerifyRequiresClaimedSourceCommit(t *testing.T) {
 	}
 	if inst.Status != "closed" || inst.Phase != "done" {
 		t.Fatalf("instance state = %+v, want closed/done", inst.State())
+	}
+	if got := readTaskState(t, svc, taskUUID); got != "completed" {
+		t.Fatalf("task state after v2 verify = %q, want completed", got)
+	}
+}
+
+func TestSettleActionV2BlockerEffectsSetTaskBlocked(t *testing.T) {
+	t.Run("implement_blocked", func(t *testing.T) {
+		svc, taskUUID := actionFixture(t)
+		attachSimpleTaskV2(t, svc, taskUUID)
+		triage := claimActionForTest(t, svc, taskUUID, "triage")
+		settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+
+		impl := claimActionForTest(t, svc, taskUUID, "implement")
+		settleClaimForTest(t, svc, impl, `{"result":"blocked"}`, "blocked")
+		inst, err := svc.LatestInstance(taskUUID)
+		if err != nil {
+			t.Fatalf("LatestInstance: %v", err)
+		}
+		if inst.Status != "active" || inst.Phase != "ready" {
+			t.Fatalf("instance state = %+v, want active/ready", inst.State())
+		}
+		if got := readTaskState(t, svc, taskUUID); got != "blocked" {
+			t.Fatalf("task state after v2 implement blocked = %q, want blocked", got)
+		}
+	})
+
+	for _, c := range []struct {
+		name  string
+		facts string
+	}{
+		{
+			name:  "verify_failed",
+			facts: `{"result":"failed","source.commit.sha":"abc123","verified.commit.sha":"abc123","git.clean":true}`,
+		},
+		{
+			name:  "verify_blocked",
+			facts: `{"result":"blocked","source.commit.sha":"abc123","verified.commit.sha":"abc123","git.clean":true}`,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, taskUUID := actionFixture(t)
+			attachSimpleTaskV2(t, svc, taskUUID)
+			triage := claimActionForTest(t, svc, taskUUID, "triage")
+			settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+			impl := claimActionForTest(t, svc, taskUUID, "implement")
+			settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+
+			verify := claimActionForTest(t, svc, taskUUID, "verify")
+			settleClaimForTest(t, svc, verify, c.facts, c.name)
+			inst, err := svc.LatestInstance(taskUUID)
+			if err != nil {
+				t.Fatalf("LatestInstance: %v", err)
+			}
+			if inst.Status != "active" || inst.Phase != "ready" {
+				t.Fatalf("instance state = %+v, want active/ready", inst.State())
+			}
+			if got := readTaskState(t, svc, taskUUID); got != "blocked" {
+				t.Fatalf("task state after %s = %q, want blocked", c.name, got)
+			}
+		})
 	}
 }
 

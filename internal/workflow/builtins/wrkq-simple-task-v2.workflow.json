@@ -136,7 +136,17 @@
           "to": {
             "status": "active",
             "phase": "ready"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:open",
+              "data": {
+                "state": "open"
+              }
+            }
+          ]
         },
         {
           "id": "operator_required",
@@ -187,7 +197,17 @@
           "to": {
             "status": "active",
             "phase": "ready"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
         },
         {
           "id": "operator_required",
@@ -223,7 +243,17 @@
           "to": {
             "status": "closed",
             "phase": "done"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
         },
         {
           "id": "failed",
@@ -238,7 +268,42 @@
           "to": {
             "status": "active",
             "phase": "ready"
-          }
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
         },
         {
           "id": "operator_required",
