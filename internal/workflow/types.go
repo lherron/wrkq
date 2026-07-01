@@ -13,22 +13,60 @@ type State struct {
 }
 
 type Template struct {
-	SchemaVersion   string                     `json:"schemaVersion"`
-	ID              string                     `json:"id"`
-	Version         string                     `json:"version"`
-	Kind            string                     `json:"kind"`
-	Description     string                     `json:"description,omitempty"`
-	Initial         State                      `json:"initial"`
-	Roles           map[string]RoleSpec        `json:"roles"`
-	States          []State                    `json:"states"`
-	EvidenceKinds   map[string]KindSpec        `json:"evidenceKinds,omitempty"`
-	ObligationKinds map[string]KindSpec        `json:"obligationKinds,omitempty"`
-	Checks          map[string]CheckSpec       `json:"checks,omitempty"`
-	Transitions     []TransitionSpec           `json:"transitions"`
-	StateHooks      map[string][]HookRef       `json:"stateHooks,omitempty"`
-	NextActionModel map[string]json.RawMessage `json:"nextActionModel,omitempty"`
-	Supervisor      map[string]json.RawMessage `json:"supervisor,omitempty"`
-	Raw             map[string]json.RawMessage `json:"-"`
+	SchemaVersion     string                          `json:"schemaVersion"`
+	ID                string                          `json:"id"`
+	Version           string                          `json:"version"`
+	Kind              string                          `json:"kind"`
+	Description       string                          `json:"description,omitempty"`
+	Initial           State                           `json:"initial"`
+	Roles             map[string]RoleSpec             `json:"roles"`
+	States            []State                         `json:"states"`
+	EvidenceKinds     map[string]KindSpec             `json:"evidenceKinds,omitempty"`
+	ObligationKinds   map[string]KindSpec             `json:"obligationKinds,omitempty"`
+	Checks            map[string]CheckSpec            `json:"checks,omitempty"`
+	Transitions       []TransitionSpec                `json:"transitions"`
+	ExecutableActions map[string]ExecutableActionSpec `json:"executableActions,omitempty"`
+	StateHooks        map[string][]HookRef            `json:"stateHooks,omitempty"`
+	NextActionModel   map[string]json.RawMessage      `json:"nextActionModel,omitempty"`
+	Supervisor        map[string]json.RawMessage      `json:"supervisor,omitempty"`
+	Raw               map[string]json.RawMessage      `json:"-"`
+}
+
+type ExecutableActionSpec struct {
+	ID                 string             `json:"id,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	From               *State             `json:"from,omitempty"`
+	Role               string             `json:"role"`
+	Transition         string             `json:"transition"`
+	ResultEvidenceKind string             `json:"resultEvidenceKind"`
+	HandlerContract    string             `json:"handlerContract,omitempty"`
+	WorkClass          string             `json:"workClass,omitempty"`
+	RiskClass          string             `json:"riskClass,omitempty"`
+	WorkspaceMode      string             `json:"workspaceMode,omitempty"`
+	SideEffectClasses  []string           `json:"sideEffectClasses,omitempty"`
+	SourceBinding      *SourceBindingSpec `json:"sourceBinding,omitempty"`
+	Continuation       *ContinuationSpec  `json:"continuation,omitempty"`
+	Rank               int                `json:"rank,omitempty"`
+}
+
+type SourceBindingSpec struct {
+	Kind          string            `json:"kind"`
+	Action        string            `json:"action"`
+	RequiredFacts []string          `json:"requiredFacts,omitempty"`
+	BindFields    *SourceBindFields `json:"bindFields,omitempty"`
+}
+
+type SourceBindFields struct {
+	SourceRunID      string `json:"sourceRunId,omitempty"`
+	SourceEvidenceID string `json:"sourceEvidenceId,omitempty"`
+	CommitSha        string `json:"commitSha,omitempty"`
+	ArtifactRef      string `json:"artifactRef,omitempty"`
+}
+
+type ContinuationSpec struct {
+	Next               string `json:"next"`
+	AttentionScope     string `json:"attentionScope,omitempty"`
+	RequireExactSource bool   `json:"requireExactSource,omitempty"`
 }
 
 type RoleSpec struct {
@@ -468,6 +506,64 @@ type Run struct {
 	LeaseToken     string `json:"-"`
 	LeaseExpiresAt string `json:"leaseExpiresAt,omitempty"`
 	HeartbeatAt    string `json:"heartbeatAt,omitempty"`
+}
+
+type ActionNextScope struct {
+	Project   string   `json:"project,omitempty"`
+	Path      string   `json:"path,omitempty"`
+	Recursive bool     `json:"recursive,omitempty"`
+	Templates []string `json:"templates,omitempty"`
+}
+
+type ActionNextFilters struct {
+	Actions           []string `json:"actions,omitempty"`
+	Roles             []string `json:"roles,omitempty"`
+	Statuses          []string `json:"statuses,omitempty"`
+	Phases            []string `json:"phases,omitempty"`
+	IncludeBlocked    bool     `json:"includeBlocked,omitempty"`
+	IncludeActiveRuns bool     `json:"includeActiveRuns,omitempty"`
+}
+
+type ActionNextParams struct {
+	Task       string            `json:"task,omitempty"`
+	InstanceID string            `json:"instanceId,omitempty"`
+	Scope      ActionNextScope   `json:"scope,omitempty"`
+	Filters    ActionNextFilters `json:"filters,omitempty"`
+	Limit      int               `json:"limit,omitempty"`
+}
+
+type ActionNextResult struct {
+	Candidates []ActionCandidate `json:"candidates"`
+	NextCursor string            `json:"nextCursor,omitempty"`
+}
+
+type ActionCandidate struct {
+	InstanceID            string               `json:"instanceId"`
+	Task                  string               `json:"task"`
+	SemanticActionKey     string               `json:"semanticActionKey"`
+	Action                string               `json:"action"`
+	Transition            string               `json:"transition"`
+	Role                  string               `json:"role"`
+	RequiredEvidenceKind  string               `json:"requiredEvidenceKind"`
+	ExpectedStateRevision int64                `json:"expectedStateRevision"`
+	ExpectedState         State                `json:"expectedState"`
+	ExpectedTaskDocHash   string               `json:"expectedTaskDocHash,omitempty"`
+	InputHash             string               `json:"inputHash,omitempty"`
+	Source                *ActionSourceBinding `json:"source,omitempty"`
+	HandlerContract       string               `json:"handlerContract,omitempty"`
+	WorkspaceMode         string               `json:"workspaceMode,omitempty"`
+	WorkspaceRef          string               `json:"workspaceRef,omitempty"`
+	SideEffectClasses     []string             `json:"sideEffectClasses,omitempty"`
+	Rank                  int                  `json:"rank"`
+	Blocked               bool                 `json:"blocked,omitempty"`
+	BlockedReason         string               `json:"blockedReason,omitempty"`
+}
+
+type ActionSourceBinding struct {
+	SourceRunID      string `json:"sourceRunId"`
+	SourceEvidenceID string `json:"sourceEvidenceId,omitempty"`
+	CommitSha        string `json:"commitSha,omitempty"`
+	ArtifactRef      string `json:"artifactRef,omitempty"`
 }
 
 type StartRunOptions struct {

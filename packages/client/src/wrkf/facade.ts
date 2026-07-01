@@ -12,15 +12,21 @@
 
 import type {
   WrkfActionBindExternalParams,
+  WrkfActionClaimParams,
+  WrkfActionClaimResult,
   WrkfActionCompleteParams,
   WrkfActionCompleteResult,
   WrkfActionFailParams,
   WrkfActionHeartbeatParams,
   WrkfActionListParams,
   WrkfActionListResult,
+  WrkfActionNextParams,
+  WrkfActionNextResult,
   WrkfActionReapParams,
   WrkfActionReapResult,
   WrkfActionRun,
+  WrkfActionSettleParams,
+  WrkfActionSettleResult,
   WrkfActionShowParams,
   WrkfActionStartParams,
   WrkfCheckListParams,
@@ -151,6 +157,9 @@ export interface WrkfRunFacade {
 }
 
 export interface WrkfActionFacade {
+  next(params: WrkfActionNextParams): Promise<WrkfActionNextResult>;
+  claim(params: WrkfActionClaimParams): Promise<WrkfActionClaimResult>;
+  settle(params: WrkfActionSettleParams): Promise<WrkfActionSettleResult>;
   start(params: WrkfActionStartParams): Promise<WrkfActionRun>;
   bindExternal(params: WrkfActionBindExternalParams): Promise<WrkfActionRun>;
   complete(params: WrkfActionCompleteParams): Promise<WrkfActionCompleteResult>;

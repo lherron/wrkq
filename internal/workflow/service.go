@@ -252,7 +252,139 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			}
 		}
 	}
+	errs = append(errs, validateExecutableActions(tpl, stateSet, transitions)...)
 	return errs
+}
+
+func validateExecutableActions(tpl *Template, stateSet map[string]bool, transitions map[string]bool) []string {
+	if len(tpl.ExecutableActions) == 0 {
+		return nil
+	}
+	var errs []string
+	for actionID, spec := range tpl.ExecutableActions {
+		id := strings.TrimSpace(spec.ID)
+		if id == "" {
+			id = strings.TrimSpace(actionID)
+		}
+		if id == "" {
+			errs = append(errs, "executable action id is required")
+			continue
+		}
+		label := "executable action " + id
+		if spec.ID != "" && spec.ID != actionID {
+			errs = append(errs, fmt.Sprintf("%s id %q must match map key %q", label, spec.ID, actionID))
+		}
+		role := strings.TrimSpace(spec.Role)
+		if role == "" {
+			errs = append(errs, fmt.Sprintf("%s role is required", label))
+		} else if _, ok := tpl.Roles[role]; !ok && role != "supervisor" && role != "system" {
+			errs = append(errs, fmt.Sprintf("%s references unknown role %s", label, role))
+		}
+		transitionID := strings.TrimSpace(spec.Transition)
+		if transitionID == "" {
+			errs = append(errs, fmt.Sprintf("%s transition is required", label))
+		} else if !transitions[transitionID] {
+			errs = append(errs, fmt.Sprintf("%s references unknown transition %s", label, transitionID))
+		} else if tr, err := findTransition(tpl, transitionID); err == nil {
+			if role != "" && !roleAllowed(role, tr.By) {
+				errs = append(errs, fmt.Sprintf("%s role %s is not allowed by transition %s", label, role, transitionID))
+			}
+			if spec.From != nil && stateKey(*spec.From) != stateKey(State{}) {
+				if !stateSet[stateKey(*spec.From)] {
+					errs = append(errs, fmt.Sprintf("%s from state is not declared", label))
+				} else if !stateCompatible(*spec.From, tr.From) {
+					errs = append(errs, fmt.Sprintf("%s from state does not match transition %s from state", label, transitionID))
+				}
+			}
+		}
+		evidenceKind := strings.TrimSpace(spec.ResultEvidenceKind)
+		if evidenceKind == "" {
+			errs = append(errs, fmt.Sprintf("%s resultEvidenceKind is required", label))
+		} else if _, ok := tpl.EvidenceKinds[evidenceKind]; !ok {
+			errs = append(errs, fmt.Sprintf("%s references unknown evidence kind %s", label, evidenceKind))
+		}
+		if spec.Continuation != nil {
+			next := strings.TrimSpace(spec.Continuation.Next)
+			if next == "" {
+				errs = append(errs, fmt.Sprintf("%s continuation next is required", label))
+			} else if _, ok := tpl.ExecutableActions[next]; !ok {
+				errs = append(errs, fmt.Sprintf("%s continuation targets missing executable action %s", label, next))
+			}
+			switch strings.TrimSpace(spec.Continuation.AttentionScope) {
+			case "", "instance", "workspace":
+			default:
+				errs = append(errs, fmt.Sprintf("%s continuation attentionScope must be instance or workspace", label))
+			}
+		}
+		if requiresSourceBinding(id, spec) {
+			if spec.SourceBinding == nil {
+				errs = append(errs, fmt.Sprintf("%s sourceBinding is required", label))
+			} else {
+				errs = append(errs, validateSourceBinding(tpl, label, spec.SourceBinding)...)
+			}
+		} else if spec.SourceBinding != nil {
+			errs = append(errs, validateSourceBinding(tpl, label, spec.SourceBinding)...)
+		}
+		switch strings.TrimSpace(spec.WorkspaceMode) {
+		case "", "none", "read-only", "exclusive":
+		default:
+			errs = append(errs, fmt.Sprintf("%s workspaceMode must be none, read-only, or exclusive", label))
+		}
+	}
+	return errs
+}
+
+func requiresSourceBinding(id string, spec ExecutableActionSpec) bool {
+	return strings.TrimSpace(id) == "verify"
+}
+
+func validateSourceBinding(tpl *Template, label string, binding *SourceBindingSpec) []string {
+	var errs []string
+	if binding == nil {
+		return errs
+	}
+	if strings.TrimSpace(binding.Kind) != "previous_action" {
+		errs = append(errs, fmt.Sprintf("%s sourceBinding kind must be previous_action", label))
+	}
+	sourceAction := strings.TrimSpace(binding.Action)
+	if sourceAction == "" {
+		errs = append(errs, fmt.Sprintf("%s sourceBinding action is required", label))
+	} else if _, ok := tpl.ExecutableActions[sourceAction]; !ok {
+		errs = append(errs, fmt.Sprintf("%s sourceBinding references missing executable action %s", label, sourceAction))
+	}
+	if len(binding.RequiredFacts) > 0 && sourceAction != "" {
+		if sourceSpec, ok := tpl.ExecutableActions[sourceAction]; ok {
+			kind, ok := tpl.EvidenceKinds[sourceSpec.ResultEvidenceKind]
+			for _, fact := range binding.RequiredFacts {
+				fact = strings.TrimSpace(fact)
+				if fact == "" {
+					errs = append(errs, fmt.Sprintf("%s sourceBinding requiredFacts must not contain empty entries", label))
+					continue
+				}
+				if !ok || kind.Facts == nil || kind.Facts.Properties == nil {
+					errs = append(errs, fmt.Sprintf("%s sourceBinding required fact %s is not declared on %s", label, fact, sourceSpec.ResultEvidenceKind))
+					continue
+				}
+				if _, exists := kind.Facts.Properties[fact]; !exists {
+					errs = append(errs, fmt.Sprintf("%s sourceBinding required fact %s is not declared on %s", label, fact, sourceSpec.ResultEvidenceKind))
+				}
+			}
+		}
+	}
+	return errs
+}
+
+func stateCompatible(actionFrom, transitionFrom State) bool {
+	if actionFrom.Status != "" && transitionFrom.Status != "" && actionFrom.Status != transitionFrom.Status {
+		return false
+	}
+	if actionFrom.Phase != "" && transitionFrom.Phase != "" && actionFrom.Phase != transitionFrom.Phase {
+		return false
+	}
+	if actionFrom.Outcome != "" && transitionFrom.Outcome != "" && actionFrom.Outcome != transitionFrom.Outcome {
+		return false
+	}
+	return true
 }
 
 func containsInlineExecutable(canonical []byte) bool {

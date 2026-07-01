@@ -559,6 +559,165 @@ export interface WrkfActionEvidenceInput {
   idempotencyKey?: string;
 }
 
+export interface WrkfActionNextScope {
+  project?: string;
+  path?: string;
+  recursive?: boolean;
+  templates?: string[];
+}
+
+export interface WrkfActionNextFilters {
+  actions?: string[];
+  roles?: string[];
+  statuses?: string[];
+  phases?: string[];
+  includeBlocked?: boolean;
+  includeActiveRuns?: boolean;
+}
+
+export interface WrkfActionNextParams {
+  task?: string;
+  instanceId?: string;
+  scope?: WrkfActionNextScope;
+  filters?: WrkfActionNextFilters;
+  limit?: number;
+}
+
+export interface WrkfActionSourceBinding {
+  sourceRunId: string;
+  sourceEvidenceId?: string;
+  commitSha?: string;
+  artifactRef?: string;
+}
+
+export interface WrkfActionCandidate {
+  instanceId: string;
+  task: string;
+  semanticActionKey: string;
+  action: string;
+  transition: string;
+  role: string;
+  requiredEvidenceKind: string;
+  expectedStateRevision: number;
+  expectedState: WrkfState;
+  expectedTaskDocHash?: string;
+  inputHash?: string;
+  source?: WrkfActionSourceBinding;
+  handlerContract?: string;
+  workspaceMode?: "none" | "read-only" | "exclusive" | (string & {});
+  workspaceRef?: string;
+  sideEffectClasses?: string[];
+  rank: number;
+  blocked?: boolean;
+  blockedReason?: string;
+  [k: string]: unknown;
+}
+
+export interface WrkfActionNextResult {
+  candidates: WrkfActionCandidate[];
+  nextCursor?: string;
+}
+
+export interface WrkfActionClaimPrefer {
+  instanceId?: string;
+  semanticActionKey?: string;
+  action?: string;
+}
+
+export interface WrkfRunnerCapability {
+  handlerContract?: string;
+  handlerId?: string;
+  handlerVersion?: string;
+  actions?: string[];
+  roles?: string[];
+  sideEffectClasses?: string[];
+  workspaceModes?: string[];
+}
+
+export interface WrkfActionClaimParams {
+  task?: string;
+  instanceId?: string;
+  prefer?: WrkfActionClaimPrefer;
+  runnerId: string;
+  agentRef: string;
+  scopeRef?: string;
+  capabilities?: WrkfRunnerCapability[];
+  leaseMs: number;
+  idempotencyKey?: string;
+}
+
+export interface WrkfWorkflowRunAttempt {
+  id: string;
+  instanceId: string;
+  semanticActionKey: string;
+  action: string;
+  role: string;
+  attempt: number;
+  status: string;
+  agentRef?: string;
+  scopeRef?: string;
+  handlerContract?: string;
+  handlerId?: string;
+  handlerVersion?: string;
+  externalRunRef?: string;
+  workspaceRef?: string;
+  source?: WrkfActionSourceBinding;
+  startedAt: string;
+  completedAt?: string;
+  terminalSummary?: string;
+  [k: string]: unknown;
+}
+
+export interface WrkfActionTaskBinding {
+  uuid: string;
+  ref: string;
+  path?: string;
+}
+
+export interface WrkfActionRunAuthority {
+  runnerId: string;
+  ownerToken: string;
+  ownerGeneration: number;
+  leaseExpiresAt: string;
+}
+
+export interface WrkfFencedRunBinding {
+  run: WrkfWorkflowRunAttempt;
+  task: WrkfActionTaskBinding;
+  instance: WrkfInstance;
+  authority: WrkfActionRunAuthority;
+}
+
+export interface WrkfActionClaimResult {
+  binding?: WrkfFencedRunBinding;
+}
+
+export interface WrkfActionSettleParams {
+  actionRunId?: string;
+  runId?: string;
+  ownerToken?: string;
+  ownerGeneration?: number;
+  result:
+    | "completed"
+    | "semantic_blocked"
+    | "operational_failed"
+    | "operator_required"
+    | "cancelled"
+    | (string & {});
+  evidence?: WrkfActionEvidenceInput;
+  /** Transition id to apply, or false to skip; omit for executable action transition. */
+  transition?: string | false;
+  terminalSummary?: string;
+}
+
+export interface WrkfActionSettleResult {
+  run: WrkfWorkflowRunAttempt;
+  evidence?: WrkfEvidence;
+  transition?: WrkfTransitionResult;
+  effects?: WrkfEffect[];
+  obligations?: WrkfObligation[];
+}
+
 export interface WrkfActionStartParams {
   task?: string;
   instanceId?: string;

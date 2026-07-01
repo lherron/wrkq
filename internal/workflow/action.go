@@ -140,6 +140,99 @@ type ReapActionsResult struct {
 	Items []ActionRun `json:"items"`
 }
 
+type ClaimActionParams struct {
+	Task           string             `json:"task,omitempty"`
+	InstanceID     string             `json:"instanceId,omitempty"`
+	Prefer         ActionClaimPrefer  `json:"prefer,omitempty"`
+	RunnerID       string             `json:"runnerId"`
+	AgentRef       string             `json:"agentRef"`
+	ScopeRef       string             `json:"scopeRef,omitempty"`
+	Capabilities   []RunnerCapability `json:"capabilities,omitempty"`
+	LeaseMs        int64              `json:"leaseMs"`
+	IdempotencyKey string             `json:"idempotencyKey,omitempty"`
+}
+
+type ActionClaimPrefer struct {
+	InstanceID        string `json:"instanceId,omitempty"`
+	SemanticActionKey string `json:"semanticActionKey,omitempty"`
+	Action            string `json:"action,omitempty"`
+}
+
+type RunnerCapability struct {
+	HandlerContract   string   `json:"handlerContract,omitempty"`
+	HandlerID         string   `json:"handlerId,omitempty"`
+	HandlerVersion    string   `json:"handlerVersion,omitempty"`
+	Actions           []string `json:"actions,omitempty"`
+	Roles             []string `json:"roles,omitempty"`
+	SideEffectClasses []string `json:"sideEffectClasses,omitempty"`
+	WorkspaceModes    []string `json:"workspaceModes,omitempty"`
+}
+
+type ClaimActionResult struct {
+	Binding *FencedRunBinding `json:"binding,omitempty"`
+}
+
+type SettleActionParams struct {
+	ActionRunID     string               `json:"actionRunId,omitempty"`
+	RunID           string               `json:"runId,omitempty"`
+	OwnerToken      string               `json:"ownerToken,omitempty"`
+	OwnerGeneration int64                `json:"ownerGeneration,omitempty"`
+	Result          string               `json:"result"`
+	Evidence        *ActionEvidenceInput `json:"evidence,omitempty"`
+	TransitionMode  TransitionMode       `json:"-"`
+	TransitionID    string               `json:"-"`
+	TerminalSummary string               `json:"terminalSummary,omitempty"`
+}
+
+type SettleActionResult struct {
+	Run         WorkflowRunAttempt     `json:"run"`
+	Evidence    *Evidence              `json:"evidence,omitempty"`
+	Transition  map[string]interface{} `json:"transition,omitempty"`
+	Effects     []Effect               `json:"effects,omitempty"`
+	Obligations []Obligation           `json:"obligations,omitempty"`
+}
+
+type FencedRunBinding struct {
+	Run       WorkflowRunAttempt `json:"run"`
+	Task      ActionTaskBinding  `json:"task"`
+	Instance  Instance           `json:"instance"`
+	Authority ActionRunAuthority `json:"authority"`
+}
+
+type WorkflowRunAttempt struct {
+	ID                string               `json:"id"`
+	InstanceID        string               `json:"instanceId"`
+	SemanticActionKey string               `json:"semanticActionKey"`
+	Action            string               `json:"action"`
+	Role              string               `json:"role"`
+	Attempt           int64                `json:"attempt"`
+	Status            string               `json:"status"`
+	AgentRef          string               `json:"agentRef,omitempty"`
+	ScopeRef          string               `json:"scopeRef,omitempty"`
+	HandlerContract   string               `json:"handlerContract,omitempty"`
+	HandlerID         string               `json:"handlerId,omitempty"`
+	HandlerVersion    string               `json:"handlerVersion,omitempty"`
+	ExternalRunRef    string               `json:"externalRunRef,omitempty"`
+	WorkspaceRef      string               `json:"workspaceRef,omitempty"`
+	Source            *ActionSourceBinding `json:"source,omitempty"`
+	StartedAt         string               `json:"startedAt"`
+	CompletedAt       string               `json:"completedAt,omitempty"`
+	TerminalSummary   string               `json:"terminalSummary,omitempty"`
+}
+
+type ActionTaskBinding struct {
+	UUID string `json:"uuid"`
+	Ref  string `json:"ref"`
+	Path string `json:"path,omitempty"`
+}
+
+type ActionRunAuthority struct {
+	RunnerID        string `json:"runnerId"`
+	OwnerToken      string `json:"ownerToken"`
+	OwnerGeneration int64  `json:"ownerGeneration"`
+	LeaseExpiresAt  string `json:"leaseExpiresAt"`
+}
+
 // ActionCompleteResult is the committed result of CompleteAction.
 type ActionCompleteResult struct {
 	Run        *ActionRun             `json:"run"`
@@ -256,6 +349,1060 @@ func (s *Service) BindActionExternal(p BindActionExternalParams) (*ActionRun, er
 		return nil, err
 	}
 	return s.toActionRun(run, nil)
+}
+
+func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
+	if strings.TrimSpace(p.RunnerID) == "" {
+		return nil, validationError("runnerId", "runnerId is required", "runnerId", nil, "supply the runner identity")
+	}
+	if strings.TrimSpace(p.AgentRef) == "" {
+		return nil, validationError("agentRef", "agentRef is required", "agentRef", nil, "supply agentRef")
+	}
+	if p.LeaseMs <= 0 {
+		return nil, validationError("leaseMs", "leaseMs must be greater than zero", "positive milliseconds", nil, "supply leaseMs")
+	}
+	var binding *FencedRunBinding
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		task := strings.TrimSpace(p.Task)
+		instanceID := strings.TrimSpace(firstNonEmptyAction(p.InstanceID, p.Prefer.InstanceID))
+		inst, err := resolveInstanceSelectors(tx, task, instanceID)
+		if err != nil {
+			return err
+		}
+		filters := ActionNextFilters{}
+		if action := strings.TrimSpace(p.Prefer.Action); action != "" {
+			filters.Actions = []string{action}
+		}
+		next, err := s.actionCandidatesForInstance(tx, inst, ActionNextParams{Filters: filters})
+		if err != nil {
+			return err
+		}
+		candidate, ok := selectClaimCandidate(next.Candidates, p.Prefer)
+		if !ok {
+			binding = nil
+			return nil
+		}
+		if err := validateRunnerCapabilities(candidate, p.Capabilities); err != nil {
+			return err
+		}
+		token, err := newLeaseToken()
+		if err != nil {
+			return err
+		}
+		now := s.now().UTC()
+		nowText := now.Format(time.RFC3339)
+		expiresAt := now.Add(time.Duration(p.LeaseMs) * time.Millisecond).Format(time.RFC3339)
+		attempt, err := nextAttemptForSemanticKey(tx, candidate.InstanceID, candidate.SemanticActionKey)
+		if err != nil {
+			return err
+		}
+		run, err := activeRunForSemanticKey(tx, candidate.InstanceID, candidate.SemanticActionKey)
+		if err != nil {
+			return err
+		}
+		if run != nil {
+			if err := validateClaimReplay(run, candidate, p.RunnerID, now); err != nil {
+				return err
+			}
+			ownerGeneration := run.OwnerGeneration + 1
+			_, err := tx.Exec(`
+				UPDATE workflow_runs
+				SET lease_owner = ?, lease_token = ?, lease_expires_at = ?, heartbeat_at = ?,
+				    owner_generation = ?, agent_ref = ?, scope_ref = COALESCE(NULLIF(?, ''), scope_ref)
+				WHERE id = ?
+			`, p.RunnerID, token, expiresAt, nowText, ownerGeneration, p.AgentRef, p.ScopeRef, run.ID)
+			if err != nil {
+				return err
+			}
+			run.LeaseOwner = p.RunnerID
+			run.LeaseToken = token
+			run.LeaseExpiresAt = expiresAt
+			run.HeartbeatAt = nowText
+			run.OwnerGeneration = ownerGeneration
+			run.AgentRef = p.AgentRef
+			if strings.TrimSpace(p.ScopeRef) != "" {
+				run.ScopeRef = p.ScopeRef
+			}
+		} else {
+			id, err := nextSeqID(tx, "workflow_run_seq", "run")
+			if err != nil {
+				return err
+			}
+			sourceRunID, sourceEvidenceID, sourceCommit := "", "", ""
+			if candidate.Source != nil {
+				sourceRunID = candidate.Source.SourceRunID
+				sourceEvidenceID = candidate.Source.SourceEvidenceID
+				sourceCommit = candidate.Source.CommitSha
+			}
+			_, err = tx.Exec(`
+				INSERT INTO workflow_runs (
+					id, instance_id, role, actor, principal_ref, status, started_at,
+					idempotency_key, action, lease_owner, lease_token, lease_expires_at, heartbeat_at,
+					semantic_action_key, attempt, agent_ref, scope_ref, handler_contract,
+					workspace_ref, source_run_id, source_evidence_id, source_commit_sha, owner_generation
+				)
+				VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+			`, id, candidate.InstanceID, candidate.Role, p.AgentRef, p.AgentRef, nowText, nullIfEmpty(p.IdempotencyKey),
+				candidate.Action, p.RunnerID, token, expiresAt, nowText, candidate.SemanticActionKey, attempt,
+				p.AgentRef, nullIfEmpty(p.ScopeRef), nullIfEmpty(candidate.HandlerContract), nullIfEmpty(candidate.WorkspaceRef),
+				nullIfEmpty(sourceRunID), nullIfEmpty(sourceEvidenceID), nullIfEmpty(sourceCommit))
+			if err != nil {
+				if isRunUniqueConflict(err) {
+					return actionLeaseConflictError(candidate.SemanticActionKey)
+				}
+				return err
+			}
+			run = &claimedRun{
+				ID: id, InstanceID: candidate.InstanceID, SemanticActionKey: candidate.SemanticActionKey,
+				Action: candidate.Action, Role: candidate.Role, Attempt: attempt, Status: "active",
+				AgentRef: p.AgentRef, ScopeRef: p.ScopeRef, HandlerContract: candidate.HandlerContract,
+				WorkspaceRef: candidate.WorkspaceRef, SourceRunID: sourceRunID, SourceEvidenceID: sourceEvidenceID,
+				SourceCommitSha: sourceCommit, StartedAt: nowText, LeaseOwner: p.RunnerID, LeaseToken: token,
+				LeaseExpiresAt: expiresAt, HeartbeatAt: nowText, OwnerGeneration: 1,
+			}
+		}
+		taskDoc, err := loadTaskDoc(tx, inst.TaskUUID)
+		if err != nil {
+			return err
+		}
+		binding = claimedRunBinding(run, inst, taskDoc)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &ClaimActionResult{Binding: binding}, nil
+}
+
+func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error) {
+	runID := strings.TrimSpace(firstNonEmptyAction(p.ActionRunID, p.RunID))
+	if runID == "" {
+		return nil, validationError("runId", "runId is required", "runId", nil, "supply the claimed run id")
+	}
+	resultStatus := strings.TrimSpace(p.Result)
+	if resultStatus == "" {
+		return nil, validationError("result", "result is required", "terminal result", []string{"completed", "semantic_blocked", "operational_failed", "operator_required", "cancelled"}, "supply the terminal action result")
+	}
+	var out *SettleActionResult
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		run, err := claimedRunByIDTx(tx, runID)
+		if err != nil {
+			return err
+		}
+		if isTerminalRunStatus(run.Status) {
+			replayed, err := replaySettledActionTx(tx, run, p)
+			if err != nil {
+				return err
+			}
+			out = replayed
+			return nil
+		}
+		now := s.now().UTC()
+		if err := validateSettleOwnership(run, p, now); err != nil {
+			return err
+		}
+		inst, err := instanceByIDQuery(tx, run.InstanceID)
+		if err != nil {
+			return err
+		}
+		tpl, _, err := showTemplateTx(tx, inst.TemplateID+"@"+inst.TemplateVersion)
+		if err != nil {
+			return err
+		}
+		actionSpec, ok := tpl.ExecutableActions[run.Action]
+		if !ok {
+			return validationError("action", "run action is not declared as executable", "executable action", []string{run.Action}, "claim a v2 executable action before settling")
+		}
+		if actionSpec.Role != "" && actionSpec.Role != run.Role {
+			return actionLeaseConflictError(run.ID)
+		}
+		transitionID := strings.TrimSpace(p.TransitionID)
+		switch p.TransitionMode {
+		case TransitionSkip:
+			transitionID = ""
+		case TransitionExplicit:
+			if transitionID == "" {
+				return validationError("transition", "transition id is required", "transition id", nil, "supply transition or omit it for the executable action transition")
+			}
+		default:
+			transitionID = strings.TrimSpace(actionSpec.Transition)
+		}
+		var evidence *Evidence
+		if p.Evidence != nil {
+			kind := strings.TrimSpace(p.Evidence.Kind)
+			if kind == "" {
+				kind = actionSpec.ResultEvidenceKind
+			}
+			if kind != actionSpec.ResultEvidenceKind {
+				return validationError("evidence.kind", "settlement evidence kind must match executable action result kind", actionSpec.ResultEvidenceKind, []string{actionSpec.ResultEvidenceKind}, "use the candidate requiredEvidenceKind")
+			}
+			if err := validateSettleEvidenceFacts(tx, run, kind, p.Evidence); err != nil {
+				return err
+			}
+			evidence, err = s.addActionEvidenceTx(tx, inst, tpl, AddEvidenceParams{
+				InstanceID:     inst.ID,
+				Kind:           kind,
+				Ref:            firstNonEmptyAction(p.Evidence.Ref, "wrkf-action:"+run.ID),
+				Summary:        p.Evidence.Summary,
+				Facts:          p.Evidence.Facts,
+				Data:           p.Evidence.Data,
+				PrincipalRef:   run.AgentRef,
+				Role:           run.Role,
+				RunID:          run.ID,
+				ContentHash:    p.Evidence.ContentHash,
+				Build:          nil,
+				IdempotencyKey: firstNonEmptyAction(p.Evidence.IdempotencyKey, "wrkf-action:"+run.ID+":settle:evidence:"+kind),
+			})
+			if err != nil {
+				return err
+			}
+		} else if transitionID != "" {
+			return validationError("evidence", "settlement evidence is required when applying a transition", "run-linked evidence", nil, "include evidence for the executable action result kind")
+		}
+
+		var transition map[string]interface{}
+		if transitionID != "" {
+			transition, err = s.applyActionTransitionTx(tx, inst, tpl, transitionID, run.AgentRef, run.Role, run.ID)
+			if err != nil {
+				return err
+			}
+		} else if evidence != nil {
+			if err := s.refreshInstanceContextTx(tx, inst, run.AgentRef); err != nil {
+				return err
+			}
+		}
+
+		summary := settleTerminalSummary(p, evidence)
+		completedAt := now.Format(time.RFC3339)
+		_, err = tx.Exec(`
+			UPDATE workflow_runs
+			SET status = ?, terminal_result = ?, completed_at = ?,
+			    lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+			WHERE id = ? AND status = 'active'
+		`, resultStatus, summary, completedAt, run.ID)
+		if err != nil {
+			return err
+		}
+		run.Status = resultStatus
+		run.TerminalSummary = summary
+		run.CompletedAt = completedAt
+		run.LeaseOwner = ""
+		run.LeaseToken = ""
+		run.LeaseExpiresAt = ""
+		run.HeartbeatAt = ""
+		out = &SettleActionResult{
+			Run:         workflowRunAttemptFromClaimed(run),
+			Evidence:    evidence,
+			Transition:  transition,
+			Effects:     transitionEffectsFromMap(transition),
+			Obligations: transitionObligationsFromMap(transition),
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type claimedRun struct {
+	ID                string
+	InstanceID        string
+	SemanticActionKey string
+	Action            string
+	Role              string
+	Attempt           int64
+	Status            string
+	AgentRef          string
+	ScopeRef          string
+	HandlerContract   string
+	HandlerID         string
+	HandlerVersion    string
+	ExternalRunRef    string
+	WorkspaceRef      string
+	SourceRunID       string
+	SourceEvidenceID  string
+	SourceCommitSha   string
+	StartedAt         string
+	CompletedAt       string
+	TerminalSummary   string
+	LeaseOwner        string
+	LeaseToken        string
+	LeaseExpiresAt    string
+	HeartbeatAt       string
+	OwnerGeneration   int64
+}
+
+func selectClaimCandidate(candidates []ActionCandidate, prefer ActionClaimPrefer) (ActionCandidate, bool) {
+	for _, candidate := range candidates {
+		if prefer.SemanticActionKey != "" && candidate.SemanticActionKey != prefer.SemanticActionKey {
+			continue
+		}
+		if prefer.Action != "" && candidate.Action != prefer.Action {
+			continue
+		}
+		return candidate, true
+	}
+	return ActionCandidate{}, false
+}
+
+func validateRunnerCapabilities(candidate ActionCandidate, caps []RunnerCapability) error {
+	if len(caps) == 0 {
+		return nil
+	}
+	for _, cap := range caps {
+		if capabilityMatches(candidate, cap) {
+			return nil
+		}
+	}
+	return validationError("capabilities", "runner capabilities do not match candidate", "matching capability", []string{candidate.Action, candidate.Role, candidate.HandlerContract}, "supply a capability covering the candidate action, role, handler contract, workspace mode, and side effects")
+}
+
+func capabilityMatches(candidate ActionCandidate, cap RunnerCapability) bool {
+	if strings.TrimSpace(cap.HandlerContract) != "" && strings.TrimSpace(cap.HandlerContract) != candidate.HandlerContract {
+		return false
+	}
+	if len(cap.Actions) > 0 && !matchesAnyFilter(candidate.Action, cap.Actions) {
+		return false
+	}
+	if len(cap.Roles) > 0 && !matchesAnyFilter(candidate.Role, cap.Roles) {
+		return false
+	}
+	if len(cap.WorkspaceModes) > 0 && !matchesAnyFilter(candidate.WorkspaceMode, cap.WorkspaceModes) {
+		return false
+	}
+	if len(cap.SideEffectClasses) > 0 {
+		allowed := map[string]bool{}
+		for _, c := range cap.SideEffectClasses {
+			allowed[strings.TrimSpace(c)] = true
+		}
+		for _, c := range candidate.SideEffectClasses {
+			if !allowed[strings.TrimSpace(c)] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func nextAttemptForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (int64, error) {
+	var attempt int64
+	err := tx.QueryRow(`
+		SELECT COALESCE(MAX(attempt), 0) + 1
+		FROM workflow_runs
+		WHERE instance_id = ? AND semantic_action_key = ?
+	`, instanceID, semanticKey).Scan(&attempt)
+	return attempt, err
+}
+
+func activeRunForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (*claimedRun, error) {
+	row := tx.QueryRow(`
+		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
+		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
+		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
+		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''),
+		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0)
+		FROM workflow_runs
+		WHERE instance_id = ? AND semantic_action_key = ? AND status = 'active'
+		ORDER BY started_at, id
+		LIMIT 1
+	`, instanceID, semanticKey)
+	run, err := scanClaimedRun(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return run, nil
+}
+
+func claimedRunByIDTx(tx *sql.Tx, id string) (*claimedRun, error) {
+	row := tx.QueryRow(`
+		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
+		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
+		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
+		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''),
+		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0)
+		FROM workflow_runs
+		WHERE id = ?
+	`, id)
+	run, err := scanClaimedRun(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("run not found: %s", id)
+		}
+		return nil, err
+	}
+	return run, nil
+}
+
+func scanClaimedRun(scanner runRowScanner) (*claimedRun, error) {
+	var r claimedRun
+	err := scanner.Scan(
+		&r.ID, &r.InstanceID, &r.SemanticActionKey, &r.Action, &r.Role, &r.Attempt,
+		&r.Status, &r.AgentRef, &r.ScopeRef, &r.HandlerContract, &r.HandlerID, &r.HandlerVersion,
+		&r.ExternalRunRef, &r.WorkspaceRef, &r.SourceRunID, &r.SourceEvidenceID, &r.SourceCommitSha,
+		&r.StartedAt, &r.CompletedAt, &r.TerminalSummary, &r.LeaseOwner, &r.LeaseToken,
+		&r.LeaseExpiresAt, &r.HeartbeatAt, &r.OwnerGeneration,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+func validateSettleOwnership(run *claimedRun, p SettleActionParams, now time.Time) error {
+	if run.Status != "active" {
+		return actionLeaseConflictError(run.ID)
+	}
+	if strings.TrimSpace(p.OwnerToken) == "" || strings.TrimSpace(p.OwnerToken) != run.LeaseToken {
+		return actionLeaseConflictError(run.ID)
+	}
+	if p.OwnerGeneration <= 0 || p.OwnerGeneration != run.OwnerGeneration {
+		return actionLeaseConflictError(run.ID)
+	}
+	if !leaseStillCurrent(run.LeaseExpiresAt, now) {
+		return actionLeaseConflictError(run.ID)
+	}
+	return nil
+}
+
+func settleTerminalSummary(p SettleActionParams, evidence *Evidence) string {
+	if strings.TrimSpace(p.TerminalSummary) != "" {
+		return strings.TrimSpace(p.TerminalSummary)
+	}
+	if evidence != nil && strings.TrimSpace(evidence.Summary) != "" {
+		return strings.TrimSpace(evidence.Summary)
+	}
+	return strings.TrimSpace(p.Result)
+}
+
+func workflowRunAttemptFromClaimed(run *claimedRun) WorkflowRunAttempt {
+	return WorkflowRunAttempt{
+		ID:                run.ID,
+		InstanceID:        run.InstanceID,
+		SemanticActionKey: run.SemanticActionKey,
+		Action:            run.Action,
+		Role:              run.Role,
+		Attempt:           run.Attempt,
+		Status:            run.Status,
+		AgentRef:          run.AgentRef,
+		ScopeRef:          run.ScopeRef,
+		HandlerContract:   run.HandlerContract,
+		HandlerID:         run.HandlerID,
+		HandlerVersion:    run.HandlerVersion,
+		ExternalRunRef:    run.ExternalRunRef,
+		WorkspaceRef:      run.WorkspaceRef,
+		Source:            claimedRunSource(run),
+		StartedAt:         run.StartedAt,
+		CompletedAt:       run.CompletedAt,
+		TerminalSummary:   run.TerminalSummary,
+	}
+}
+
+func replaySettledActionTx(tx *sql.Tx, run *claimedRun, p SettleActionParams) (*SettleActionResult, error) {
+	if run.Status != strings.TrimSpace(p.Result) {
+		return nil, idempotencyMismatchError(run.ID)
+	}
+	var evidence *Evidence
+	if p.Evidence != nil {
+		kind := strings.TrimSpace(p.Evidence.Kind)
+		if kind == "" {
+			kind = actionDefaultEvidenceKind(run.Action)
+		}
+		ev, err := settledEvidenceForRunTx(tx, run.ID, kind)
+		if err != nil {
+			return nil, err
+		}
+		if ev == nil || !actionEvidenceReplayMatches(ev, p.Evidence) {
+			return nil, idempotencyMismatchError(run.ID)
+		}
+		evidence = ev
+	}
+	expectedSummary := settleTerminalSummary(p, evidence)
+	if expectedSummary != "" && run.TerminalSummary != expectedSummary {
+		return nil, idempotencyMismatchError(run.ID)
+	}
+	transition, err := settledTransitionForRunTx(tx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &SettleActionResult{
+		Run:         workflowRunAttemptFromClaimed(run),
+		Evidence:    evidence,
+		Transition:  transition,
+		Effects:     transitionEffectsFromMap(transition),
+		Obligations: transitionObligationsFromMap(transition),
+	}, nil
+}
+
+func validateClaimReplay(run *claimedRun, candidate ActionCandidate, runnerID string, now time.Time) error {
+	if run.SemanticActionKey != candidate.SemanticActionKey || run.Action != candidate.Action || run.Role != candidate.Role {
+		return actionLeaseConflictError(candidate.SemanticActionKey)
+	}
+	if run.HandlerContract != "" && candidate.HandlerContract != "" && run.HandlerContract != candidate.HandlerContract {
+		return actionLeaseConflictError(candidate.SemanticActionKey)
+	}
+	if !claimSourceCompatible(run, candidate.Source) {
+		return actionLeaseConflictError(candidate.SemanticActionKey)
+	}
+	if run.LeaseOwner != "" && run.LeaseOwner != runnerID && leaseStillCurrent(run.LeaseExpiresAt, now) {
+		return actionLeaseConflictError(run.ID)
+	}
+	return nil
+}
+
+func claimSourceCompatible(run *claimedRun, source *ActionSourceBinding) bool {
+	if source == nil {
+		return run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceCommitSha == ""
+	}
+	return run.SourceRunID == source.SourceRunID &&
+		run.SourceEvidenceID == source.SourceEvidenceID &&
+		run.SourceCommitSha == source.CommitSha
+}
+
+func claimedRunBinding(run *claimedRun, inst *Instance, task *taskDoc) *FencedRunBinding {
+	return &FencedRunBinding{
+		Run: workflowRunAttemptFromClaimed(run),
+		Task: ActionTaskBinding{
+			UUID: task.UUID,
+			Ref:  strings.TrimPrefix(inst.TaskRef, "wrkq:"),
+			Path: task.Slug,
+		},
+		Instance: *inst,
+		Authority: ActionRunAuthority{
+			RunnerID:        run.LeaseOwner,
+			OwnerToken:      run.LeaseToken,
+			OwnerGeneration: run.OwnerGeneration,
+			LeaseExpiresAt:  run.LeaseExpiresAt,
+		},
+	}
+}
+
+func claimedRunSource(run *claimedRun) *ActionSourceBinding {
+	if run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceCommitSha == "" {
+		return nil
+	}
+	return &ActionSourceBinding{
+		SourceRunID:      run.SourceRunID,
+		SourceEvidenceID: run.SourceEvidenceID,
+		CommitSha:        run.SourceCommitSha,
+	}
+}
+
+func settledEvidenceForRunTx(tx *sql.Tx, runID, kind string) (*Evidence, error) {
+	rows, err := tx.Query(`
+		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
+		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
+		FROM workflow_evidence
+		WHERE run_id = ? AND kind = ?
+		ORDER BY produced_at, id
+	`, runID, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items, err := scanEvidenceRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return &items[0], nil
+}
+
+func settledTransitionForRunTx(tx *sql.Tx, runID string) (map[string]interface{}, error) {
+	var raw string
+	err := tx.QueryRow(`
+		SELECT COALESCE(result_json,'')
+		FROM workflow_events
+		WHERE run_id = ? AND type = 'workflow.transitioned'
+		ORDER BY seq DESC
+		LIMIT 1
+	`, runID).Scan(&raw)
+	if err == sql.ErrNoRows || strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func actionEvidenceReplayMatches(ev *Evidence, in *ActionEvidenceInput) bool {
+	if ev == nil || in == nil {
+		return ev == nil && in == nil
+	}
+	if strings.TrimSpace(in.Summary) != "" && strings.TrimSpace(in.Summary) != strings.TrimSpace(ev.Summary) {
+		return false
+	}
+	if strings.TrimSpace(in.Facts) != "" && canonicalJSONForCompare(in.Facts) != canonicalJSONForCompare(string(ev.Facts)) {
+		return false
+	}
+	if strings.TrimSpace(in.Data) != "" && canonicalJSONForCompare(in.Data) != canonicalJSONForCompare(string(ev.Data)) {
+		return false
+	}
+	if strings.TrimSpace(in.ContentHash) != "" && strings.TrimSpace(in.ContentHash) != strings.TrimSpace(ev.ContentHash) {
+		return false
+	}
+	return true
+}
+
+func canonicalJSONForCompare(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var v interface{}
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return raw
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
+func validateSettleEvidenceFacts(tx *sql.Tx, run *claimedRun, kind string, evidence *ActionEvidenceInput) error {
+	facts := map[string]interface{}{}
+	if evidence != nil && strings.TrimSpace(evidence.Facts) != "" {
+		if err := json.Unmarshal([]byte(evidence.Facts), &facts); err != nil {
+			return validationError("evidence.facts", "facts must be valid JSON"+jsonLocationSuffix(err), "valid JSON", nil, "fix the JSON syntax in facts")
+		}
+	}
+	if run.Action == "implement" && kind == "implement_result" && stringFact(facts, "result") == "done" {
+		required := []string{"commit.sha", "base.sha", "postcondition", "repair.turns"}
+		if missing := missingRequiredFacts(facts, required); len(missing) > 0 {
+			return validationError("evidence.facts", "implement success is missing git_committed_clean facts", "commit-bound implement facts", missing, "include commit.sha, base.sha, postcondition, git.clean, and repair.turns")
+		}
+		if stringFact(facts, "postcondition") != "git_committed_clean" {
+			return validationError("evidence.facts.postcondition", "implement success must assert git_committed_clean", "git_committed_clean", []string{"git_committed_clean"}, "run the handler git postcondition before settling")
+		}
+		if !boolFact(facts, "git.clean") {
+			return validationError("evidence.facts.git.clean", "implement success requires git.clean=true", "true", []string{"true"}, "settle operator_required instead of completed when the worktree is dirty")
+		}
+	}
+	if run.Action == "verify" && kind == "verify_result" {
+		expectedCommit, expectedArtifact, err := sourceIdentityForRunTx(tx, run)
+		if err != nil {
+			return err
+		}
+		if expectedCommit != "" {
+			if stringFact(facts, "source.commit.sha") != expectedCommit || stringFact(facts, "verified.commit.sha") != expectedCommit {
+				return validationError("evidence.facts", "verify settlement must match the claimed source commit", expectedCommit, []string{expectedCommit}, "verify the exact implementation commit from the claim source binding")
+			}
+			return nil
+		}
+		if expectedArtifact != "" {
+			sourceArtifact := firstNonEmptyAction(stringFact(facts, "source.artifact.digest"), stringFact(facts, "source.artifact.ref"))
+			verifiedArtifact := firstNonEmptyAction(stringFact(facts, "verified.artifact.digest"), stringFact(facts, "verified.artifact.ref"))
+			if sourceArtifact != expectedArtifact || verifiedArtifact != expectedArtifact {
+				return validationError("evidence.facts", "verify settlement must match the claimed source artifact", expectedArtifact, []string{expectedArtifact}, "verify the exact implementation artifact from the claim source binding")
+			}
+			return nil
+		}
+		return validationError("source", "verify run is missing a stored source commit or artifact identity", "source identity", nil, "claim the verify candidate produced by action.next")
+	}
+	return nil
+}
+
+func boolFact(facts map[string]interface{}, key string) bool {
+	v, ok := facts[key]
+	if !ok {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	default:
+		return false
+	}
+}
+
+func sourceIdentityForRunTx(tx *sql.Tx, run *claimedRun) (string, string, error) {
+	if strings.TrimSpace(run.SourceCommitSha) != "" {
+		return strings.TrimSpace(run.SourceCommitSha), "", nil
+	}
+	if strings.TrimSpace(run.SourceEvidenceID) == "" {
+		return "", "", nil
+	}
+	ev, err := evidenceByIDTx(tx, run.SourceEvidenceID)
+	if err != nil {
+		return "", "", err
+	}
+	facts := evidenceFactsMap(*ev)
+	artifact := firstNonEmptyAction(stringFact(facts, "artifact.digest"), ev.ContentHash)
+	return "", artifact, nil
+}
+
+func evidenceByIDTx(tx *sql.Tx, id string) (*Evidence, error) {
+	rows, err := tx.Query(`
+		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
+		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
+		FROM workflow_evidence WHERE id = ?
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items, err := scanEvidenceRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("evidence not found: %s", id)
+	}
+	return &items[0], nil
+}
+
+func firstNonEmptyAction(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template, params AddEvidenceParams) (*Evidence, error) {
+	var kindSpec *KindSpec
+	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
+		kindSpec = &spec
+	}
+	if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
+		return nil, err
+	}
+	facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
+	if err != nil {
+		return nil, err
+	}
+	var dataArg interface{}
+	var dataRaw json.RawMessage
+	if strings.TrimSpace(params.Data) != "" {
+		if !json.Valid([]byte(params.Data)) {
+			return nil, validationError("data", "data must be valid JSON"+jsonLocationSuffix(json.Unmarshal([]byte(params.Data), new(json.RawMessage))), "valid JSON", nil, "fix the JSON syntax in --data")
+		}
+		dataArg = params.Data
+		dataRaw = json.RawMessage(params.Data)
+	}
+	var factsRaw json.RawMessage
+	if facts != nil {
+		factsRaw = facts.Raw
+	}
+	requestHash := ""
+	if params.IdempotencyKey != "" {
+		requestHash = evidenceAddRequestHash(params, factsRaw, dataRaw)
+		replayed, err := replayEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash)
+		if err != nil {
+			return nil, err
+		}
+		if replayed != nil {
+			return replayed, nil
+		}
+	}
+	task, err := loadTaskDoc(tx, inst.TaskUUID)
+	if err != nil {
+		return nil, err
+	}
+	if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
+		existing, err := listEvidenceTx(tx, inst.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateLinkageRefs(existing, kindSpec, dataRaw); err != nil {
+			return nil, err
+		}
+	}
+	id, err := nextSeqID(tx, "workflow_evidence_seq", "ev")
+	if err != nil {
+		return nil, err
+	}
+	taskHashAtProduction := taskDocHash(task)
+	source := map[string]interface{}{"type": "external_ref", "ref": params.Ref, "taskHashAtProduction": taskHashAtProduction}
+	if len(dataRaw) > 0 {
+		source["dataHash"] = Hash(dataRaw)
+	}
+	if strings.TrimSpace(params.ContentHash) != "" {
+		source["contentHash"] = strings.TrimSpace(params.ContentHash)
+	}
+	sourceJSON, _ := json.Marshal(source)
+	var factsArg interface{}
+	if facts != nil {
+		factsArg = string(facts.Raw)
+	}
+	now := s.now().UTC().Format(time.RFC3339)
+	_, err = tx.Exec(`
+		INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, principal_ref, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.PrincipalRef), emptyToNil(params.PrincipalRef), emptyToNil(params.Role), emptyToNil(params.RunID), fmt.Sprint(task.ETag), taskHashAtProduction, now)
+	if err != nil {
+		return nil, err
+	}
+	ev := &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+	if params.IdempotencyKey != "" {
+		if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
+			return nil, err
+		}
+	}
+	return ev, nil
+}
+
+func (s *Service) refreshInstanceContextTx(tx *sql.Tx, inst *Instance, actor string) error {
+	task, err := loadTaskDoc(tx, inst.TaskUUID)
+	if err != nil {
+		return err
+	}
+	ev, err := listEvidenceTx(tx, inst.ID)
+	if err != nil {
+		return err
+	}
+	obl, err := listObligationsTx(tx, inst.ID, false)
+	if err != nil {
+		return err
+	}
+	eff, err := listEffectsTx(tx, inst.ID, false)
+	if err != nil {
+		return err
+	}
+	inst.TaskDocEtag = fmt.Sprint(task.ETag)
+	inst.TaskDocHash = taskDocHash(task)
+	inst.ContextHash = contextHash(inst.TemplateHash, inst.State(), inst.Revision, inst.TaskDocHash, ev, obl, eff)
+	inst.UpdatedAt = s.now().UTC().Format(time.RFC3339)
+	if _, err := tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, context_hash = ?, updated_at = ? WHERE id = ?`,
+		inst.TaskDocEtag, inst.TaskDocHash, inst.ContextHash, inst.UpdatedAt, inst.ID); err != nil {
+		return err
+	}
+	return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor)
+}
+
+func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Template, transitionID, actor, role, runID string) (map[string]interface{}, error) {
+	key := fmt.Sprintf("wrkf-action:%s:settle:transition:%s", runID, transitionID)
+	opts := TransitionOptions{PrincipalRef: actor, Role: role, IdempotencyKey: key, RunID: runID}
+	requestHash := transitionRequestHash("", inst.ID, transitionID, opts)
+	if replayed, err := replayTransitionResult(tx, inst.ID, key, requestHash); err != nil {
+		return nil, err
+	} else if replayed != nil {
+		return replayed, nil
+	}
+	tr, err := findTransition(tpl, transitionID)
+	if err != nil {
+		return nil, err
+	}
+	if !stateMatches(*inst, tr.From) {
+		return nil, fmt.Errorf("transition %s cannot run from current state", transitionID)
+	}
+	if !roleAllowed(role, tr.By) || !roleBindingAllowed(tx, inst, tpl, role, actor) {
+		return nil, roleDeniedError(inst.ID, transitionID, role)
+	}
+	task, err := loadTaskDoc(tx, inst.TaskUUID)
+	if err != nil {
+		return nil, err
+	}
+	ev, err := listEvidenceTx(tx, inst.ID)
+	if err != nil {
+		return nil, err
+	}
+	obl, err := listObligationsTx(tx, inst.ID, true)
+	if err != nil {
+		return nil, err
+	}
+	if blockers := transitionBlockers(*tr, ev, obl, taskDocHash(task)); len(blockers) > 0 {
+		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
+	}
+	checks := map[string]CheckRun{}
+	for _, checkID := range tr.Checks {
+		if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
+			checks[checkID] = latest
+		}
+	}
+	if blockers := checkCommitBlockers(tpl, *tr, ev, taskFacts(task), inst, task, ev, obl, checks, actor, role, s.db); len(blockers) > 0 {
+		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
+	}
+	if blockers := separationOfDutyBlockers(*tr, ev, actor); len(blockers) > 0 {
+		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
+	}
+	for _, guard := range tr.Guards {
+		if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
+			return nil, transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "guard", Message: "transition guard failed"}})
+		}
+	}
+	var chosen *OutcomeCase
+	for i := range tr.Outcomes {
+		out := &tr.Outcomes[i]
+		if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
+			chosen = out
+			break
+		}
+	}
+	if chosen == nil {
+		return nil, transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}})
+	}
+	if chosen.To.Status == "closed" {
+		depBlockers, err := taskRelationBlockers(tx, inst.TaskUUID)
+		if err != nil {
+			return nil, err
+		}
+		if len(depBlockers) > 0 {
+			return nil, transitionBlockedError(inst.ID, transitionID, depBlockers)
+		}
+	}
+	if blockers := postconditionBlockers(inst, *tr, chosen, ev, obl, checks, task); len(blockers) > 0 {
+		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
+	}
+
+	nextRevision := inst.Revision + 1
+	now := s.now().UTC().Format(time.RFC3339)
+	updated := *inst
+	updated.Status = chosen.To.Status
+	updated.Phase = chosen.To.Phase
+	updated.Outcome = chosen.To.Outcome
+	updated.Revision = nextRevision
+	updated.UpdatedAt = now
+	if updated.Status == "closed" {
+		updated.ClosedAt = now
+	} else {
+		updated.ClosedAt = ""
+	}
+	updated.TaskDocEtag = fmt.Sprint(task.ETag)
+	updated.TaskDocHash = taskDocHash(task)
+	updated.ContextHash = contextHash(updated.TemplateHash, updated.State(), updated.Revision, updated.TaskDocHash, nil, nil, nil)
+	res, err := tx.Exec(`
+		UPDATE workflow_instances
+		SET status = ?, phase = ?, outcome = ?, revision = ?, context_hash = ?, task_doc_etag = ?, task_doc_hash = ?,
+		    updated_at = ?, closed_at = ?
+		WHERE id = ? AND revision = ?
+	`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.ContextHash, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected != 1 {
+		actual, loadErr := instanceRevisionContextTx(tx, updated.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		return nil, staleRevisionError(updated.ID, inst.Revision, actual.revision)
+	}
+
+	createdObligations := make([]Obligation, 0, len(chosen.Obligations))
+	for _, ob := range chosen.Obligations {
+		id, err := nextSeqID(tx, "workflow_obligation_seq", "obl")
+		if err != nil {
+			return nil, err
+		}
+		blocking := 0
+		if ob.Blocking {
+			blocking = 1
+		}
+		noSelfWaive := true
+		if ob.NoSelfWaive != nil {
+			noSelfWaive = *ob.NoSelfWaive
+		}
+		noSelfWaiveInt := 0
+		if noSelfWaive {
+			noSelfWaiveInt = 1
+		}
+		obligeeRole := strings.TrimSpace(ob.ObligeeRole)
+		if obligeeRole == "" {
+			obligeeRole = "workflow"
+		}
+		waiveRole := strings.TrimSpace(ob.WaiveRole)
+		if waiveRole == "" && strings.TrimSpace(ob.WaivePrincipalRef) == "" {
+			waiveRole = "system"
+		}
+		_, err = tx.Exec(`
+			INSERT INTO workflow_obligations (
+				id, instance_id, kind, owner_role, owner_actor, owner_principal_ref, obligee_role, obligee_actor, obligee_principal_ref,
+				waive_role, waive_actor, waive_principal_ref, no_self_waive, blocking, status, reason, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+		`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerPrincipalRef), nullIfEmpty(ob.OwnerPrincipalRef), nullIfEmpty(obligeeRole), nullIfEmpty(ob.ObligeePrincipalRef), nullIfEmpty(ob.ObligeePrincipalRef), nullIfEmpty(waiveRole), nullIfEmpty(ob.WaivePrincipalRef), nullIfEmpty(ob.WaivePrincipalRef), noSelfWaiveInt, blocking, nullIfEmpty(ob.Reason), now, now)
+		if err != nil {
+			return nil, err
+		}
+		createdObligations = append(createdObligations, Obligation{
+			ID: id, InstanceID: updated.ID, Kind: ob.Kind, OwnerRole: ob.OwnerRole, OwnerPrincipalRef: ob.OwnerPrincipalRef,
+			ObligeeRole: obligeeRole, ObligeePrincipalRef: ob.ObligeePrincipalRef, WaiveRole: waiveRole, WaivePrincipalRef: ob.WaivePrincipalRef,
+			NoSelfWaive: noSelfWaive, Blocking: ob.Blocking, Status: "open", Reason: ob.Reason, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	createdEffects := make([]Effect, 0, len(chosen.Effects))
+	for _, ef := range chosen.Effects {
+		id, err := nextSeqID(tx, "workflow_effect_seq", "eff")
+		if err != nil {
+			return nil, err
+		}
+		seq, err := nextEffectSequenceTx(tx, updated.ID)
+		if err != nil {
+			return nil, err
+		}
+		renderedEffect, semanticKey, err := renderEffectSpec(ef, effectRenderContext{
+			instance: updated, outcomeID: chosen.ID, runID: runID, sequence: seq,
+		})
+		if err != nil {
+			return nil, err
+		}
+		payload, _ := json.Marshal(renderedEffect)
+		effectKey := fmt.Sprintf("%s:%s", updated.ID, semanticKey)
+		_, err = tx.Exec(`
+			INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+		`, id, updated.ID, updated.Revision, seq, renderedEffect.Kind, string(payload), effectKey, semanticKey, now, now)
+		if err != nil {
+			return nil, err
+		}
+		createdEffects = append(createdEffects, Effect{
+			ID: id, InstanceID: updated.ID, Revision: updated.Revision, Sequence: seq, Kind: renderedEffect.Kind, Payload: json.RawMessage(payload),
+			Status: "pending", IdempotencyKey: effectKey, SemanticKey: semanticKey, CreatedAt: now, UpdatedAt: now,
+		})
+	}
+	eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+	if err != nil {
+		return nil, err
+	}
+	result := transitionResultMap(inst.TaskRef, updated, eventID, createdEffects, createdObligations)
+	result["transition"] = transitionID
+	result["outcome"] = chosen.ID
+	result["idempotent"] = false
+	resultJSON, _ := json.Marshal(result)
+	eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
+	if _, err := insertTransitionEventWithID(tx, eventID, updated.ID, actor, role, runID, inst.Revision, updated.Revision, key, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, eventPayload); err != nil {
+		return nil, err
+	}
+	if err := updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, actor); err != nil {
+		return nil, err
+	}
+	*inst = updated
+	return result, nil
+}
+
+func transitionEffectsFromMap(result map[string]interface{}) []Effect {
+	if result == nil {
+		return nil
+	}
+	effects, _ := result["effects"].([]Effect)
+	return effects
+}
+
+func transitionObligationsFromMap(result map[string]interface{}) []Obligation {
+	if result == nil {
+		return nil
+	}
+	obligations, _ := result["obligations"].([]Obligation)
+	return obligations
 }
 
 // CompleteAction records run-linked evidence, optionally applies the matching
@@ -477,16 +1624,27 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 				}
 				reason = "action lease expired: " + owner
 			}
+			status := "failed"
+			ambiguous, err := reapRequiresOperatorTx(tx, &reaped[i])
+			if err != nil {
+				return err
+			}
+			if ambiguous {
+				status = "operator_required"
+			}
 			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.PrincipalRef), now); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`UPDATE workflow_runs SET status = 'failed', completed_at = ?, terminal_result = ?, lease_token = NULL WHERE id = ? AND status = 'active'`, now, reason, reaped[i].ID); err != nil {
+			if _, err := tx.Exec(`UPDATE workflow_runs SET status = ?, completed_at = ?, terminal_result = ?, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL WHERE id = ? AND status = 'active'`, status, now, reason, reaped[i].ID); err != nil {
 				return err
 			}
-			reaped[i].Status = "failed"
+			reaped[i].Status = status
 			reaped[i].CompletedAt = now
 			reaped[i].TerminalResult = reason
+			reaped[i].LeaseOwner = ""
 			reaped[i].LeaseToken = ""
+			reaped[i].LeaseExpiresAt = ""
+			reaped[i].HeartbeatAt = ""
 		}
 		return nil
 	})
@@ -763,6 +1921,36 @@ func parseOptionalActionTime(raw string) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	return time.Parse(time.RFC3339, strings.TrimSpace(raw))
+}
+
+func reapRequiresOperatorTx(tx *sql.Tx, run *Run) (bool, error) {
+	var semanticKey, workspaceRef string
+	err := tx.QueryRow(`
+		SELECT COALESCE(semantic_action_key,''), COALESCE(workspace_ref,'')
+		FROM workflow_runs WHERE id = ?
+	`, run.ID).Scan(&semanticKey, &workspaceRef)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(semanticKey) == "" {
+		return false, nil
+	}
+	if strings.TrimSpace(run.ExternalRunRef) != "" || strings.TrimSpace(workspaceRef) != "" {
+		return true, nil
+	}
+	inst, err := instanceByIDQuery(tx, run.InstanceID)
+	if err != nil {
+		return false, err
+	}
+	tpl, _, err := showTemplateTx(tx, inst.TemplateID+"@"+inst.TemplateVersion)
+	if err != nil {
+		return false, err
+	}
+	spec, ok := tpl.ExecutableActions[run.Action]
+	if !ok {
+		return false, nil
+	}
+	return len(spec.SideEffectClasses) > 0, nil
 }
 
 func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now string) error {

@@ -15,6 +15,11 @@ import (
 
 type ActionRun = workflow.ActionRun
 type ActionWorkflowRef = workflow.ActionWorkflowRef
+type ActionNextParams = workflow.ActionNextParams
+type ActionNextResult = workflow.ActionNextResult
+type ActionClaimParams = workflow.ClaimActionParams
+type ActionClaimResult = workflow.ClaimActionResult
+type ActionSettleRun = workflow.WorkflowRunAttempt
 
 type ActionEvidenceParams struct {
 	Kind           string          `json:"kind,omitempty"`
@@ -56,6 +61,17 @@ type ActionCompleteParams struct {
 	Transition               json.RawMessage       `json:"transition,omitempty"`
 	TransitionIdempotencyKey string                `json:"transitionIdempotencyKey,omitempty"`
 	RunSummary               string                `json:"runSummary,omitempty"`
+}
+
+type ActionSettleParams struct {
+	ActionRunID     string                `json:"actionRunId,omitempty"`
+	RunID           string                `json:"runId,omitempty"`
+	OwnerToken      string                `json:"ownerToken,omitempty"`
+	OwnerGeneration int64                 `json:"ownerGeneration,omitempty"`
+	Result          string                `json:"result"`
+	Evidence        *ActionEvidenceParams `json:"evidence,omitempty"`
+	Transition      json.RawMessage       `json:"transition,omitempty"`
+	TerminalSummary string                `json:"terminalSummary,omitempty"`
 }
 
 type ActionFailParams struct {
@@ -104,6 +120,66 @@ type ActionCompleteResult struct {
 	Run        *workflow.ActionRun `json:"run"`
 	Evidence   *workflow.Evidence  `json:"evidence,omitempty"`
 	Transition *TransitionResult   `json:"transition,omitempty"`
+}
+
+type ActionSettleResult struct {
+	Run         workflow.WorkflowRunAttempt `json:"run"`
+	Evidence    *workflow.Evidence          `json:"evidence,omitempty"`
+	Transition  *TransitionResult           `json:"transition,omitempty"`
+	Effects     []workflow.Effect           `json:"effects,omitempty"`
+	Obligations []workflow.Obligation       `json:"obligations,omitempty"`
+}
+
+func (api *API) ActionNext(ctx context.Context, params ActionNextParams) (*ActionNextResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result, err := api.service.ActionNext(params)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return result, nil
+}
+
+func (api *API) ActionClaim(ctx context.Context, params ActionClaimParams) (*ActionClaimResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result, err := api.service.ClaimAction(workflow.ClaimActionParams(params))
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return result, nil
+}
+
+func (api *API) ActionSettle(ctx context.Context, params ActionSettleParams) (*ActionSettleResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	mode, transitionID, err := parseTransitionDirective(params.Transition)
+	if err != nil {
+		return nil, err
+	}
+	out, err := api.service.SettleAction(workflow.SettleActionParams{
+		ActionRunID:     params.ActionRunID,
+		RunID:           params.RunID,
+		OwnerToken:      params.OwnerToken,
+		OwnerGeneration: params.OwnerGeneration,
+		Result:          params.Result,
+		Evidence:        actionEvidenceInput(params.Evidence),
+		TransitionMode:  mode,
+		TransitionID:    transitionID,
+		TerminalSummary: params.TerminalSummary,
+	})
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	result := &ActionSettleResult{Run: out.Run, Evidence: out.Evidence, Effects: out.Effects, Obligations: out.Obligations}
+	if out.Transition != nil {
+		tr := transitionResultFromAny(out.Transition)
+		result.Transition = &tr
+	}
+	return result, nil
 }
 
 func (api *API) ActionStart(ctx context.Context, params ActionStartParams) (*ActionRun, error) {

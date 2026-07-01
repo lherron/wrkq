@@ -874,13 +874,14 @@ func actionCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "action", Short: "Low-ceremony task lifecycle actions over wrkf runs"}
 	var (
 		workflowRef, action, role, actor, lane, deliveryRef, externalRunRef, idempotencyKey string
-		leaseOwner, leaseToken, expiredBefore, legacyActiveBefore                           string
+		leaseOwner, leaseToken, ownerToken, expiredBefore, legacyActiveBefore               string
+		instanceID, semanticActionKey, runnerID, scopeRef                                   string
 		evidenceKind, evidenceRef, evidenceSummary, evidenceFacts, evidenceData             string
-		runSummary, transition                                                              string
-		noTransition, includeClosed                                                         bool
+		runSummary, settleResult, transition                                                string
+		noTransition, includeClosed, includeBlocked                                         bool
 		status, actionFilter                                                                string
 		limit                                                                               int
-		leaseMs                                                                             int64
+		leaseMs, ownerGeneration                                                            int64
 	)
 
 	actionEvidence := func() *workflow.ActionEvidenceInput {
@@ -929,6 +930,76 @@ func actionCmd() *cobra.Command {
 	start.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key")
 	start.Flags().StringVar(&leaseOwner, "lease-owner", "", "Lease owner")
 	start.Flags().Int64Var(&leaseMs, "lease-ms", 0, "Lease duration in milliseconds")
+
+	next := &cobra.Command{
+		Use:  "next [TASK]",
+		Args: cobra.MaximumNArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			task := ""
+			if len(args) > 0 {
+				task = args[0]
+			}
+			result, err := a.service.ActionNext(workflow.ActionNextParams{
+				Task:       task,
+				InstanceID: instanceID,
+				Filters: workflow.ActionNextFilters{
+					Actions:        cliFilterList(actionFilter),
+					Roles:          cliFilterList(role),
+					Statuses:       cliFilterList(status),
+					IncludeBlocked: includeBlocked,
+				},
+				Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, result)
+		}),
+	}
+	next.Flags().StringVar(&instanceID, "instance-id", "", "Workflow instance id")
+	next.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
+	next.Flags().StringVar(&role, "role", "", "Filter by role")
+	next.Flags().StringVar(&status, "status", "", "Filter by workflow status")
+	next.Flags().BoolVar(&includeBlocked, "include-blocked", false, "Include blocked candidates with reasons")
+	next.Flags().IntVar(&limit, "limit", 0, "Maximum candidates to return")
+
+	claim := &cobra.Command{
+		Use:  "claim [TASK]",
+		Args: cobra.MaximumNArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			task := ""
+			if len(args) > 0 {
+				task = args[0]
+			}
+			claimLeaseMs := leaseMs
+			if claimLeaseMs <= 0 {
+				claimLeaseMs = 300000
+			}
+			result, err := a.service.ClaimAction(workflow.ClaimActionParams{
+				Task:       task,
+				InstanceID: instanceID,
+				Prefer: workflow.ActionClaimPrefer{
+					SemanticActionKey: semanticActionKey,
+					Action:            actionFilter,
+				},
+				RunnerID: runnerID,
+				AgentRef: firstNonEmpty(actor, a.actor),
+				ScopeRef: scopeRef,
+				LeaseMs:  claimLeaseMs,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, result)
+		}),
+	}
+	claim.Flags().StringVar(&instanceID, "instance-id", "", "Workflow instance id")
+	claim.Flags().StringVar(&semanticActionKey, "semantic-action-key", "", "Preferred semantic action key")
+	claim.Flags().StringVar(&actionFilter, "action", "", "Preferred action")
+	claim.Flags().StringVar(&runnerID, "runner-id", "", "Runner identity")
+	claim.Flags().StringVar(&actor, "agent-ref", "", "Agent ref (agent:<id>)")
+	claim.Flags().StringVar(&scopeRef, "scope-ref", "", "Runtime scope ref")
+	claim.Flags().Int64Var(&leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
 
 	bind := &cobra.Command{
 		Use:  "bind ACTION_RUN --external-run-ref hrc:RUNID",
@@ -991,6 +1062,47 @@ func actionCmd() *cobra.Command {
 	complete.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token for leased action runs")
 	complete.Flags().StringVar(&transition, "transition", "", "Explicit transition id (default: auto-resolve)")
 	complete.Flags().BoolVar(&noTransition, "no-transition", false, "Skip the transition; finish the run only")
+
+	settle := &cobra.Command{
+		Use:  "settle ACTION_RUN --result RESULT --owner-token TOKEN --owner-generation N",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			mode := workflow.TransitionDefault
+			transitionID := ""
+			switch {
+			case noTransition:
+				mode = workflow.TransitionSkip
+			case transition != "":
+				mode = workflow.TransitionExplicit
+				transitionID = transition
+			}
+			out, err := a.service.SettleAction(workflow.SettleActionParams{
+				ActionRunID:     args[0],
+				OwnerToken:      ownerToken,
+				OwnerGeneration: ownerGeneration,
+				Result:          settleResult,
+				Evidence:        actionEvidence(),
+				TransitionMode:  mode,
+				TransitionID:    transitionID,
+				TerminalSummary: runSummary,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, out)
+		}),
+	}
+	settle.Flags().StringVar(&settleResult, "result", "completed", "Terminal settlement result")
+	settle.Flags().StringVar(&ownerToken, "owner-token", "", "Current owner token from action.claim")
+	settle.Flags().Int64Var(&ownerGeneration, "owner-generation", 0, "Current owner generation from action.claim")
+	settle.Flags().StringVar(&evidenceKind, "kind", "", "Evidence kind (defaults to executable action result kind)")
+	settle.Flags().StringVar(&evidenceRef, "ref", "", "Evidence ref")
+	settle.Flags().StringVar(&evidenceSummary, "summary", "", "Evidence summary")
+	settle.Flags().StringVar(&evidenceFacts, "facts", "", "Evidence facts JSON object")
+	settle.Flags().StringVar(&evidenceData, "data", "", "Evidence data JSON")
+	settle.Flags().StringVar(&runSummary, "terminal-summary", "", "Run terminal summary")
+	settle.Flags().StringVar(&transition, "transition", "", "Explicit transition id (default: executable action transition)")
+	settle.Flags().BoolVar(&noTransition, "no-transition", false, "Skip the workflow transition; terminalize the run only")
 
 	fail := &cobra.Command{
 		Use:  "fail ACTION_RUN --run-summary SUMMARY",
@@ -1099,8 +1211,16 @@ func actionCmd() *cobra.Command {
 	list.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
 	list.Flags().IntVar(&limit, "limit", 0, "Maximum runs to return")
 
-	cmd.AddCommand(start, bind, complete, fail, heartbeat, reap, show, list)
+	cmd.AddCommand(next, claim, start, bind, complete, settle, fail, heartbeat, reap, show, list)
 	return cmd
+}
+
+func cliFilterList(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func firstNonEmpty(values ...string) string {

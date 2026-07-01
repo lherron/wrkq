@@ -19,6 +19,7 @@ package workrpc_test
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,13 +99,13 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 		mkRPC("s1", "wrkf.action.start", map[string]any{
 			"task":           taskID,
 			"action":         "triage",
-			"principal_ref":          actActor,
+			"principal_ref":  actActor,
 			"idempotencyKey": "act:start:1",
 		}),
 		mkRPC("s2", "wrkf.action.start", map[string]any{
 			"task":           taskID,
 			"action":         "triage",
-			"principal_ref":          actActor,
+			"principal_ref":  actActor,
 			"idempotencyKey": "act:start:1",
 		}),
 		mkRPC("l1", "wrkf.run.list", map[string]any{"task": taskID}),
@@ -138,6 +139,222 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 	runs, _ := frames[3]["result"].([]any)
 	if len(runs) != 1 {
 		t.Fatalf("expected exactly 1 run after replay, got %d: %#v", len(runs), frames[3]["result"])
+	}
+}
+
+func TestWrkfActionNextV2CandidatesAndSourceBinding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	taskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000033",
+		"action-next-v2", "Action Next V2")
+
+	triageFrames := p3Run(t, dbPath,
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@2", "action": "triage", "principal_ref": actActor,
+		}),
+	)
+	triageRun := actRunID(t, p2ResultOrFail(t, triageFrames[1], "start triage"), "start triage")
+	frames := p3Run(t, dbPath,
+		mkRPC("c1", "wrkf.action.complete", map[string]any{
+			"actionRunId": triageRun,
+			"evidence":    map[string]any{"summary": "triaged", "facts": map[string]any{"result": "ready"}},
+		}),
+		mkRPC("next-impl", "wrkf.action.next", map[string]any{"task": taskID}),
+	)
+	p2ResultOrFail(t, frames[1], "complete triage")
+	nextImpl := p2ResultOrFail(t, frames[2], "action.next implement")
+	implCandidates, _ := nextImpl["candidates"].([]any)
+	if len(implCandidates) != 1 {
+		t.Fatalf("implement candidates = %#v, want one", nextImpl["candidates"])
+	}
+	implCandidate, _ := implCandidates[0].(map[string]any)
+	if implCandidate["action"] != "implement" || implCandidate["requiredEvidenceKind"] != "implement_result" {
+		t.Fatalf("implement candidate = %#v", implCandidate)
+	}
+
+	implFrames := p3Run(t, dbPath,
+		mkRPC("s2", "wrkf.action.start", map[string]any{"task": taskID, "action": "implement", "principal_ref": actActor}),
+	)
+	implRun := actRunID(t, p2ResultOrFail(t, implFrames[1], "start implement"), "start implement")
+	verifyFrames := p3Run(t, dbPath,
+		mkRPC("c2", "wrkf.action.complete", map[string]any{
+			"actionRunId": implRun,
+			"evidence": map[string]any{
+				"summary": "implemented",
+				"facts": map[string]any{
+					"result":        "done",
+					"commit.sha":    "abc123",
+					"git.clean":     true,
+					"base.sha":      "base000",
+					"postcondition": "git_committed_clean",
+					"repair.turns":  0,
+				},
+			},
+		}),
+		mkRPC("next-verify", "wrkf.action.next", map[string]any{"task": taskID}),
+	)
+	p2ResultOrFail(t, verifyFrames[1], "complete implement")
+	nextVerify := p2ResultOrFail(t, verifyFrames[2], "action.next verify")
+	verifyCandidates, _ := nextVerify["candidates"].([]any)
+	if len(verifyCandidates) != 1 {
+		t.Fatalf("verify candidates = %#v, want one", nextVerify["candidates"])
+	}
+	verifyCandidate, _ := verifyCandidates[0].(map[string]any)
+	if verifyCandidate["action"] != "verify" {
+		t.Fatalf("verify candidate = %#v", verifyCandidate)
+	}
+	source, _ := verifyCandidate["source"].(map[string]any)
+	if source == nil || source["sourceRunId"] != implRun || source["commitSha"] != "abc123" {
+		t.Fatalf("verify source = %#v, want run %s commit abc123", source, implRun)
+	}
+	key, _ := verifyCandidate["semanticActionKey"].(string)
+	if !strings.Contains(key, implRun) || !strings.Contains(key, "abc123") {
+		t.Fatalf("semanticActionKey = %q, want run id and commit", key)
+	}
+}
+
+func TestWrkfActionClaimV2FencedRunAndReplay(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	taskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000034",
+		"action-claim-v2", "Action Claim V2")
+
+	triageFrames := p3Run(t, dbPath,
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@2", "action": "triage", "principal_ref": actActor,
+		}),
+	)
+	triageRun := actRunID(t, p2ResultOrFail(t, triageFrames[1], "start triage"), "start triage")
+	readyFrames := p3Run(t, dbPath,
+		mkRPC("c1", "wrkf.action.complete", map[string]any{
+			"actionRunId": triageRun,
+			"evidence":    map[string]any{"summary": "triaged", "facts": map[string]any{"result": "ready"}},
+		}),
+		mkRPC("claim-1", "wrkf.action.claim", map[string]any{
+			"task": taskID, "runnerId": "runner-a", "agentRef": "agent:cody", "scopeRef": "cody@wrkq:T-05386", "leaseMs": float64(300000),
+		}),
+		mkRPC("claim-2", "wrkf.action.claim", map[string]any{
+			"task": taskID, "runnerId": "runner-a", "agentRef": "agent:cody", "scopeRef": "cody@wrkq:T-05386", "leaseMs": float64(300000),
+		}),
+	)
+	p2ResultOrFail(t, readyFrames[1], "complete triage")
+	claim1 := p2ResultOrFail(t, readyFrames[2], "claim implement")
+	claim2 := p2ResultOrFail(t, readyFrames[3], "claim implement replay")
+
+	binding1 := actClaimBinding(t, claim1, "claim implement")
+	binding2 := actClaimBinding(t, claim2, "claim implement replay")
+	run1, _ := binding1["run"].(map[string]any)
+	run2, _ := binding2["run"].(map[string]any)
+	if run1["action"] != "implement" || run1["role"] != "implementer" {
+		t.Fatalf("claimed run = %#v, want implement/implementer", run1)
+	}
+	if run1["id"] == "" || run2["id"] != run1["id"] {
+		t.Fatalf("claim replay run id mismatch: first=%#v replay=%#v", run1, run2)
+	}
+	if run1["semanticActionKey"] == "" {
+		t.Fatalf("claimed run missing semanticActionKey: %#v", run1)
+	}
+	auth1, _ := binding1["authority"].(map[string]any)
+	auth2, _ := binding2["authority"].(map[string]any)
+	if auth1["ownerToken"] == "" || auth1["runnerId"] != "runner-a" {
+		t.Fatalf("authority = %#v, want runner-a token", auth1)
+	}
+	if auth2["ownerGeneration"] != float64(2) {
+		t.Fatalf("replay ownerGeneration = %#v, want 2", auth2["ownerGeneration"])
+	}
+	if auth2["ownerToken"] == auth1["ownerToken"] {
+		t.Fatalf("replay should rotate owner token")
+	}
+
+	showFrames := p3Run(t, dbPath,
+		mkRPC("show", "wrkf.action.show", map[string]any{"actionRunId": run1["id"]}),
+	)
+	show := p2ResultOrFail(t, showFrames[1], "action.show claimed run")
+	if _, ok := show["leaseToken"]; ok {
+		t.Fatalf("action.show exposed leaseToken: %#v", show)
+	}
+}
+
+func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	taskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000035",
+		"action-settle-v2", "Action Settle V2")
+	tplPath := "internal/workflow/builtins/wrkq-simple-task-v2.workflow.json"
+	attachFrames := p3Run(t, dbPath,
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
+			"task":     taskID,
+			"workflow": "wrkq-simple-task@2",
+		}),
+	)
+	p2ResultOrFail(t, attachFrames[1], "install v2")
+	p2ResultOrFail(t, attachFrames[2], "attach v2")
+
+	triage := actRPCClaim(t, dbPath, taskID, "triage")
+	actRPCSettle(t, dbPath, triage, map[string]any{"result": "ready"}, "triaged")
+	impl := actRPCClaim(t, dbPath, taskID, "implement")
+	actRPCSettle(t, dbPath, impl, map[string]any{
+		"result":        "done",
+		"commit.sha":    "abc123",
+		"git.clean":     true,
+		"base.sha":      "base000",
+		"postcondition": "git_committed_clean",
+		"repair.turns":  float64(0),
+	}, "implemented")
+	p3Run(t, dbPath,
+		mkRPC("unrelated", "wrkf.evidence.add", map[string]any{
+			"task": taskID, "kind": "implement_result", "ref": "manual:latest",
+			"summary": "unrelated latest", "principal_ref": actActor, "role": "implementer",
+			"facts": map[string]any{"result": "done", "commit.sha": "wrong-latest"},
+		}),
+	)
+
+	verify := actRPCClaim(t, dbPath, taskID, "verify")
+	run, _ := verify["run"].(map[string]any)
+	source, _ := run["source"].(map[string]any)
+	if source == nil || source["commitSha"] != "abc123" {
+		t.Fatalf("verify claim source = %#v, want abc123", source)
+	}
+	wrong := p3Run(t, dbPath,
+		mkRPC("bad-verify", "wrkf.action.settle", map[string]any{
+			"runId":           run["id"],
+			"ownerToken":      verify["ownerToken"],
+			"ownerGeneration": verify["ownerGeneration"],
+			"result":          "completed",
+			"evidence": map[string]any{
+				"summary": "verified wrong latest",
+				"facts": map[string]any{
+					"result":              "verified",
+					"source.commit.sha":   "wrong-latest",
+					"verified.commit.sha": "wrong-latest",
+					"git.clean":           true,
+				},
+			},
+		}),
+	)
+	if _, ok := wrong[1]["error"]; !ok {
+		t.Fatalf("wrong-source verify settle must error, got %#v", wrong[1])
+	}
+	final := actRPCSettle(t, dbPath, verify, map[string]any{
+		"result":              "verified",
+		"source.commit.sha":   "abc123",
+		"verified.commit.sha": "abc123",
+		"git.clean":           true,
+	}, "verified")
+	tr, _ := final["transition"].(map[string]any)
+	state, _ := tr["state"].(map[string]any)
+	if state["status"] != "closed" || state["phase"] != "done" {
+		t.Fatalf("final transition state = %#v, want closed/done", state)
 	}
 }
 
@@ -187,6 +404,54 @@ func TestWrkfActionBindExternal_HRCRefAndConflict(t *testing.T) {
 	}
 }
 
+func actClaimBinding(t *testing.T, result map[string]any, label string) map[string]any {
+	t.Helper()
+	binding, _ := result["binding"].(map[string]any)
+	if binding == nil {
+		t.Fatalf("%s: result missing binding: %#v", label, result)
+	}
+	return binding
+}
+
+func actRPCClaim(t *testing.T, dbPath, taskID, action string) map[string]any {
+	t.Helper()
+	frames := p3Run(t, dbPath,
+		mkRPC("claim-"+action, "wrkf.action.claim", map[string]any{
+			"task": taskID, "prefer": map[string]any{"action": action},
+			"runnerId": "runner-" + action, "agentRef": "agent:" + action, "leaseMs": float64(300000),
+		}),
+	)
+	binding := actClaimBinding(t, p2ResultOrFail(t, frames[1], "claim "+action), "claim "+action)
+	run, _ := binding["run"].(map[string]any)
+	auth, _ := binding["authority"].(map[string]any)
+	if run == nil || auth == nil {
+		t.Fatalf("claim %s binding = %#v", action, binding)
+	}
+	return map[string]any{
+		"run":             run,
+		"ownerToken":      auth["ownerToken"],
+		"ownerGeneration": auth["ownerGeneration"],
+	}
+}
+
+func actRPCSettle(t *testing.T, dbPath string, claim map[string]any, facts map[string]any, summary string) map[string]any {
+	t.Helper()
+	run, _ := claim["run"].(map[string]any)
+	frames := p3Run(t, dbPath,
+		mkRPC("settle-"+summary, "wrkf.action.settle", map[string]any{
+			"runId":           run["id"],
+			"ownerToken":      claim["ownerToken"],
+			"ownerGeneration": claim["ownerGeneration"],
+			"result":          "completed",
+			"evidence": map[string]any{
+				"summary": summary,
+				"facts":   facts,
+			},
+		}),
+	)
+	return p2ResultOrFail(t, frames[1], "settle "+summary)
+}
+
 // bindExternal also accepts a bare run id and prefixes hrc:.
 func TestWrkfActionBindExternal_BareRefGetsHRCPrefix(t *testing.T) {
 	if testing.Short() {
@@ -226,7 +491,7 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 		mkRPC("s1", "wrkf.action.start", map[string]any{
 			"task":           taskID,
 			"action":         "triage",
-			"principal_ref":          actActor,
+			"principal_ref":  actActor,
 			"idempotencyKey": "act:lease:start:1",
 			"leaseOwner":     "agent-loop:test",
 			"leaseMs":        60000,
@@ -298,11 +563,11 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 		"action-lease-reap", "Action Lease Reap")
 	reapStartFrames := p3Run(t, dbPath,
 		mkRPC("s1", "wrkf.action.start", map[string]any{
-			"task":       reapTaskID,
-			"action":     "triage",
-			"principal_ref":      actActor,
-			"leaseOwner": "agent-loop:reaper-test",
-			"leaseMs":    60000,
+			"task":          reapTaskID,
+			"action":        "triage",
+			"principal_ref": actActor,
+			"leaseOwner":    "agent-loop:reaper-test",
+			"leaseMs":       60000,
 		}),
 	)
 	reapStarted := p2ResultOrFail(t, reapStartFrames[1], "leased action.start for reap")
@@ -314,7 +579,7 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 			"task":          reapTaskID,
 			"action":        "triage",
 			"expiredBefore": future,
-			"principal_ref":         actActor,
+			"principal_ref": actActor,
 		}),
 		mkRPC("completeOld", "wrkf.action.complete", map[string]any{
 			"actionRunId": reapRunID,
@@ -366,6 +631,51 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 	legacyReaped, _ := withCutoffItems[0].(map[string]any)
 	if got, _ := legacyReaped["runId"].(string); got != legacyRunID {
 		t.Fatalf("legacy reaped runId = %q, want %q", got, legacyRunID)
+	}
+}
+
+func TestWrkfActionReapV2SideEffectAmbiguityOperatorRequired(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	taskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000036",
+		"action-reap-v2-operator", "Action Reap V2 Operator")
+	tplPath := "internal/workflow/builtins/wrkq-simple-task-v2.workflow.json"
+	attachFrames := p3Run(t, dbPath,
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
+			"task":     taskID,
+			"workflow": "wrkq-simple-task@2",
+		}),
+	)
+	p2ResultOrFail(t, attachFrames[1], "install v2")
+	p2ResultOrFail(t, attachFrames[2], "attach v2")
+	triage := actRPCClaim(t, dbPath, taskID, "triage")
+	actRPCSettle(t, dbPath, triage, map[string]any{"result": "ready"}, "triaged")
+	impl := actRPCClaim(t, dbPath, taskID, "implement")
+	run, _ := impl["run"].(map[string]any)
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	reapFrames := p3Run(t, dbPath,
+		mkRPC("reap", "wrkf.action.reap", map[string]any{
+			"task":          taskID,
+			"action":        "implement",
+			"expiredBefore": future,
+			"principal_ref": actActor,
+		}),
+	)
+	reaped := p2ResultOrFail(t, reapFrames[1], "action.reap v2 implement")
+	items, _ := reaped["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("v2 implement reap items = %#v, want one", reaped["items"])
+	}
+	item, _ := items[0].(map[string]any)
+	if item["runId"] != run["id"] {
+		t.Fatalf("v2 reaped runId = %#v, want %s", item["runId"], run["id"])
+	}
+	if item["status"] != "operator_required" {
+		t.Fatalf("v2 reaped status = %#v, want operator_required", item["status"])
 	}
 }
 

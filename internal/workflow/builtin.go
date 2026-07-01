@@ -9,9 +9,13 @@ import (
 // low-ceremony task lifecycle workflow used by wrkf.action.* when a caller does
 // not supply an explicit workflow.
 const BuiltinSimpleTaskTemplateRef = "wrkq-simple-task@1"
+const BuiltinSimpleTaskV2TemplateRef = "wrkq-simple-task@2"
 
 //go:embed builtins/wrkq-simple-task.workflow.json
 var builtinSimpleTaskJSON []byte
+
+//go:embed builtins/wrkq-simple-task-v2.workflow.json
+var builtinSimpleTaskV2JSON []byte
 
 // EnsureBuiltinTemplate installs the embedded built-in workflow identified by
 // templateRef if it is not already installed. Installation is idempotent: a
@@ -40,6 +44,8 @@ func builtinTemplateData(templateRef string) ([]byte, error) {
 	switch templateRef {
 	case BuiltinSimpleTaskTemplateRef, "wrkq-simple-task":
 		return builtinSimpleTaskJSON, nil
+	case BuiltinSimpleTaskV2TemplateRef:
+		return builtinSimpleTaskV2JSON, nil
 	default:
 		return nil, fmt.Errorf("unknown built-in workflow: %s", templateRef)
 	}

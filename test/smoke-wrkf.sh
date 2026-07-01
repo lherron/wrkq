@@ -15,11 +15,11 @@ go build -tags sqlite_fts5 -o "$BIN/wrkf" "$ROOT/cmd/wrkf"
 
 cd "$TMPDIR"
 export WRKQ_DB_PATH="$DB"
-export WRKQ_ACTOR="local-human"
+export WRKQ_ACTOR="agent:local-human"
 unset ASP_PROJECT
 
 "$BIN/wrkqadm" init --db "$DB" >/dev/null
-"$BIN/wrkq" --db "$DB" --as local-human touch inbox/wrkf-smoke -t "wrkf smoke" >/dev/null
+"$BIN/wrkq" --db "$DB" --as agent:local-human touch inbox/wrkf-smoke -t "wrkf smoke" >/dev/null
 
 cat >"$TMPDIR/hook.sh" <<'HOOK'
 #!/usr/bin/env bash
@@ -138,7 +138,7 @@ FLOW
 "$BIN/wrkf" --db "$DB" workflow list --json | jq -e '.templates | length == 1' >/dev/null
 "$BIN/wrkf" --db "$DB" workflow show smoke_flow@1 --json | jq -e '.id == "smoke_flow"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" --actor human:local-human task attach T-00001 --workflow smoke_flow@1 --json | jq -e '.phase == "plan" and .revision == 0' >/dev/null
+"$BIN/wrkf" --db "$DB" --principal-ref agent:local-human task attach T-00001 --workflow smoke_flow@1 --json | jq -e '.phase == "plan" and .revision == 0' >/dev/null
 "$BIN/wrkf" --db "$DB" task inspect T-00001 --json | jq -e '.templateId == "smoke_flow"' >/dev/null
 "$BIN/wrkf" --db "$DB" task timeline T-00001 --json | jq -e '.events | length == 1' >/dev/null
 "$BIN/wrkf" --db "$DB" task refresh T-00001 --json | jq -e '.instance.taskDocHash | startswith("sha256:")' >/dev/null
@@ -182,17 +182,17 @@ EV="$("$BIN/wrkf" --db "$DB" evidence list T-00001 --json | jq -r '.evidence[0].
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" hook show finish_hook --json | jq -e '.id == "finish_hook"' >/dev/null
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" hook run T-00001 finish --hook finish_hook --json | jq -e '.verdict == "pass"' >/dev/null
 
-RUN="$("$BIN/wrkf" --db "$DB" run start T-00001 --role coordinator --actor human:local-human --json | jq -r '.id')"
+RUN="$("$BIN/wrkf" --db "$DB" run start T-00001 --role coordinator --principal-ref agent:local-human --json | jq -r '.id')"
 "$BIN/wrkf" --db "$DB" run show "$RUN" --json | jq -e '.status == "active"' >/dev/null
 "$BIN/wrkf" --db "$DB" run list T-00001 --json | jq -e '.runs | length == 1' >/dev/null
-"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check run T-00001 finish --role coordinator --actor human:local-human --json | jq -e '.checks[0].verdict == "pass"' >/dev/null
+"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check run T-00001 finish --role coordinator --principal-ref agent:local-human --json | jq -e '.checks[0].verdict == "pass"' >/dev/null
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" check show chk_000001 --json | jq -e '.id == "chk_000001"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" transition T-00001 finish --role coordinator --actor human:local-human --expect-revision 1 --idempotency-key finish --json | jq -e '.state.outcome == "completed" and .revision == 2' >/dev/null
+"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" transition T-00001 finish --role coordinator --principal-ref agent:local-human --expect-revision 1 --idempotency-key finish --json | jq -e '.state.outcome == "completed" and .revision == 2' >/dev/null
 "$BIN/wrkf" --db "$DB" run finish "$RUN" --summary "done" --json | jq -e '.status == "completed"' >/dev/null
 "$BIN/wrkf" --db "$DB" next T-00001 --role coordinator --json | jq -e '.actions | length == 0' >/dev/null
 
-"$BIN/wrkf" --db "$DB" supervisor start T-00001 --actor human:local-human --json | jq -e '.role == "supervisor"' >/dev/null
+"$BIN/wrkf" --db "$DB" supervisor start T-00001 --principal-ref agent:local-human --json | jq -e '.role == "supervisor"' >/dev/null
 "$BIN/wrkf" --db "$DB" supervisor call T-00001 --reason smoke --json | jq -e '.kind == "supervisor_call"' >/dev/null
 "$BIN/wrkf" --db "$DB" supervisor action T-00001 escalate --reason smoke --json | jq -e '.kind == "supervisor_escalation"' >/dev/null
 "$BIN/wrkf" --db "$DB" supervisor action T-00001 create-obligation cleanup --reason follow-up --json | jq -e '.kind == "cleanup" and .status == "open"' >/dev/null

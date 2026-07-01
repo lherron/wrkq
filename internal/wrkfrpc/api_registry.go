@@ -52,6 +52,9 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 			},
 			"capabilities": map[string]any{
 				"cancel":             true,
+				"actionNext":         true,
+				"actionClaim":        true,
+				"actionSettle":       true,
 				"effectClaimLease":   true,
 				"runExternalBinding": true,
 			},
@@ -164,6 +167,15 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.run.list", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
 		return api.RunList(ctx, p.TaskSelector)
+	}))
+	s.Register("wrkf.action.next", apiHandler(func(ctx context.Context, p wrkfapi.ActionNextParams) (any, error) {
+		return api.ActionNext(ctx, p)
+	}))
+	s.Register("wrkf.action.claim", apiHandler(func(ctx context.Context, p wrkfapi.ActionClaimParams) (any, error) {
+		return api.ActionClaim(ctx, p)
+	}))
+	s.Register("wrkf.action.settle", apiHandler(func(ctx context.Context, p wrkfapi.ActionSettleParams) (any, error) {
+		return api.ActionSettle(ctx, p)
 	}))
 	s.Register("wrkf.action.start", apiHandler(func(ctx context.Context, p wrkfapi.ActionStartParams) (any, error) {
 		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
