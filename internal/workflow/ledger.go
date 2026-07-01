@@ -2031,11 +2031,11 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID 
 	eventHash := chainedEventHash(prevHash, payloadJSON)
 	_, err := tx.Exec(`
 		INSERT INTO workflow_events (
-			id, instance_id, seq, schema_version, type, actor, role, run_id,
+			id, instance_id, seq, schema_version, type, actor, principal_ref, role, run_id,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
-	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	if err != nil {
 		return workflowEventMetadata{}, err
 	}
