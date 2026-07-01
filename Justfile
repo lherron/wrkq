@@ -48,12 +48,15 @@ db-reset:
 
 # Build shipped CLI binaries (wrkq, wrkf, wrkqadm, wrkqd)
 build:
+  #!/usr/bin/env bash
+  set -euo pipefail
   echo "Building wrkq, wrkf, wrkqadm, and wrkqd binaries..."
   rm -f bin/wrkq-rpccli bin/wrkq-legacy
-  go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
-  go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
-  go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
-  go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
+  LDFLAGS="$(scripts/ldflags.sh)"
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
 # Build the temporary old-vs-new RPC cutover oracle binaries.
 build-rpc-oracle:
@@ -72,15 +75,15 @@ agent-compile:
 
 # Build all binaries with vendored deps, no network, and conservative parallelism
 agent-build:
+  #!/usr/bin/env bash
+  set -euo pipefail
   mkdir -p bin
-  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
-    go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
-  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
-    go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
-  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
-    go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
-  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
-    go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
+  LDFLAGS="$(scripts/ldflags.sh)"
+  export GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0'
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
 # Run the wrkq CLI
 run *args:
@@ -186,10 +189,11 @@ install-system:
   #!/usr/bin/env bash
   set -euo pipefail
   echo "Building wrkq binaries..."
-  go build -tags sqlite_fts5 -o bin/wrkq ./cmd/wrkq
-  go build -tags sqlite_fts5 -o bin/wrkf ./cmd/wrkf
-  go build -tags sqlite_fts5 -o bin/wrkqadm ./cmd/wrkqadm
-  go build -tags sqlite_fts5 -o bin/wrkqd ./cmd/wrkqd
+  LDFLAGS="$(scripts/ldflags.sh)"
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
   # Remove old binary first to avoid crashes when overwriting running binaries
   sudo rm -f /usr/local/bin/wrkq

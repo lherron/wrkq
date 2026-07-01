@@ -73,6 +73,7 @@ func init() {
 	rootCmd.AddCommand(hookCmd())
 	rootCmd.AddCommand(rpcCmd())
 	rootCmd.AddCommand(supervisorCmd())
+	rootCmd.AddCommand(versionCmd())
 }
 
 func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
@@ -1220,7 +1221,7 @@ func rpcCmd() *cobra.Command {
 				workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
 					Database:         a.db,
 					DatabasePath:     a.db.Path(),
-					ServerVersion:    "dev",
+					ServerVersion:    Version,
 					Entrypoint:       "wrkf",
 					DefaultActor:     a.actor,
 					DefaultRole:      a.role,
