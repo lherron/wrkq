@@ -346,7 +346,7 @@ This document replaces the current wrkf-only framing with a unified protocol. It
 Recommended protocol version for this breaking replacement:
 
 ```text
-2026-06-14
+2026-06-30
 ```
 
 ### 5.2 Entrypoint equivalence
@@ -429,7 +429,7 @@ Initialize params:
 
 ```json
 {
-  "protocolVersion": "2026-06-14",
+  "protocolVersion": "2026-06-30",
   "client": { "name": "@wrkq/client", "version": "0.1.0" }
 }
 ```
@@ -438,7 +438,7 @@ Initialize result:
 
 ```json
 {
-  "protocolVersion": "2026-06-14",
+  "protocolVersion": "2026-06-30",
   "server": {
     "name": "wrkq-wrkf-rpc",
     "version": "0.1.0",
@@ -1911,7 +1911,7 @@ Do not document `wrkqd` HTTP as a client transport.
 ### P0 — Protocol contract rewrite
 
 1. Create `docs/wrkq-wrkf-rpc.md`.
-2. Define protocol version `2026-06-14`.
+2. Define protocol version `2026-06-30`.
 3. Define lifecycle as `rpc.*`.
 4. Define `wrkq.*` and `wrkf.*` method catalogs.
 5. Make the direct-task-mutation invariant explicit.
@@ -2028,7 +2028,7 @@ The work is complete when all of the following are true.
 - `wrkq rpc --stdio` exists.
 - `wrkf rpc --stdio` and `wrkq rpc --stdio` expose the same facade.
 - stdout from both RPC entrypoints contains JSON-RPC frames only.
-- `rpc.initialize` returns protocol version `2026-06-14`.
+- `rpc.initialize` returns protocol version `2026-06-30`.
 - `rpc.initialize` returns the complete method list.
 - Business methods before initialize return structured validation errors.
 - `$/cancelRequest` is accepted and documented as best-effort.

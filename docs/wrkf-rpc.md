@@ -58,7 +58,7 @@ Protocol version string: **`2026-06-01`**.
 ```
 `cancel: true` means *accepted, best-effort*. Protocol-version mismatch on initialize → `WRKF_VALIDATION` with `data.expected`/`data.actual`.
 
-RPC mode loads config + DB once and keeps the `workflow.Service` warm for the process lifetime. Config (db path, hook catalog path, actor/role defaults) arrives via argv flags on `wrkf rpc --stdio` and/or `initialize` params — never environment-only magic.
+RPC mode loads config + DB once and keeps the `workflow.Service` warm for the process lifetime. Config (db path, hook catalog path, principal_ref/role defaults) arrives via argv flags on `wrkf rpc --stdio` and/or `initialize` params — never environment-only magic.
 
 ---
 
@@ -80,13 +80,13 @@ JSON-RPC `error` object. `data.code` is the stable contract; `message` is human-
 | `WRKF_STALE_REVISION` | -32009 | true | `expectRevision` ≠ committed revision (CAS) |
 | `WRKF_CONTEXT_MISMATCH` | -32010 | true | `contextHash` ≠ committed context hash (CAS) |
 | `WRKF_TRANSITION_BLOCKED` | -32011 | false | guards/blockers/obligations not satisfied (carries `blocksOn`) |
-| `WRKF_ROLE_DENIED` | -32012 | false | actor/role not permitted for transition |
+| `WRKF_ROLE_DENIED` | -32012 | false | principal/role not permitted for transition |
 | `WRKF_IDEMPOTENCY_MISMATCH` | -32013 | false | same key, different request hash |
 | `WRKF_LEASE_CONFLICT` | -32014 | true | ack/fail with wrong/expired lease token |
 | `WRKF_EFFECT_NOT_DELIVERABLE` | -32015 | false | effect not in a deliverable state |
 | `WRKF_HOOK_FAILED` | -32016 | context-dependent; value supplied in `data.retryable` | hook/check execution failed |
 | `WRKF_DB_MIGRATION_REQUIRED` | -32017 | false | DB schema behind required migration |
-| `WRKF_KIND_ROLE_DENIED` | -32018 | false | evidence kind is not producible by the supplied role (template `producibleBy` conformance — supplied-role only, **not** an authenticated-actor boundary) |
+| `WRKF_KIND_ROLE_DENIED` | -32018 | false | evidence kind is not producible by the supplied role (template `producibleBy` conformance — supplied-role only, **not** an authenticated-principal boundary) |
 | `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | a declared evidence `data` linkage ref did not resolve to a live evidence id on the same instance (template `linkageRefs`) |
 | `WRKF_LINKAGE_STALE` | -32020 | false | a `linkageRefs` entry with `latest:true` points at a superseded (non-current) evidence of the expected kind; `data.fix` names the current id |
 | `WRKF_INTERNAL` | -32603 | false | unclassified internal error |
@@ -182,7 +182,7 @@ New named DTOs to add (replace current `map[string]interface{}` returns). All fi
 
 **`wrkf.transition.apply` params** (maps onto `TransitionOptions`):
 ```json
-{ "task": "T-00001", "transition": "plan_ready", "role": "coordinator", "actor": "human:local",
+{ "task": "T-00001", "transition": "plan_ready", "role": "coordinator", "principal_ref": "human:local",
   "expectRevision": 0, "contextHash": "sha256:...", "idempotencyKey": "acp:T-00001:plan_ready:0",
   "runChecks": false, "dryRun": false }
 ```
@@ -191,7 +191,7 @@ New named DTOs to add (replace current `map[string]interface{}` returns). All fi
 
 **`wrkf.run.start` params:**
 ```json
-{ "task": "...", "role": "...", "actor": "...", "idempotencyKey": "...",
+{ "task": "...", "role": "...", "principal_ref": "...", "idempotencyKey": "...",
   "deliveryRef": "?", "lane": "?", "externalRunRef": "?" }
 ```
 - `idempotencyKey` unique per `(instance_id, idempotencyKey)`. Same key → same `Run` (replay). Same key + different role/task → conflict (`WRKF_IDEMPOTENCY_MISMATCH`).

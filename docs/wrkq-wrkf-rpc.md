@@ -1,7 +1,7 @@
 # wrkq/wrkf unified RPC protocol — machine contract
 
 Status: authoritative  
-Protocol version: **2026-06-14**  
+Protocol version: **2026-06-30**  
 Replaces: `docs/wrkf-rpc.md` (version 2026-06-01)  
 Implementation target: `internal/workrpc` (replacing `internal/wrkfrpc`)
 
@@ -78,7 +78,7 @@ wrkf.workflow.attach
 behavior:
 
 ```
-- same protocolVersion (2026-06-14)
+- same protocolVersion (2026-06-30)
 - same protocolSchemaHash
 - same capabilities object
 - same method catalog
@@ -145,7 +145,7 @@ Params:
 
 ```json
 {
-  "protocolVersion": "2026-06-14",
+  "protocolVersion": "2026-06-30",
   "client": { "name": "@wrkq/client", "version": "0.1.0" }
 }
 ```
@@ -154,7 +154,7 @@ Result:
 
 ```json
 {
-  "protocolVersion": "2026-06-14",
+  "protocolVersion": "2026-06-30",
   "protocolSchemaHash": "sha256:<hex64>",
   "server": {
     "name": "wrkq-wrkf-rpc",
@@ -1291,7 +1291,7 @@ The workflow payload keeps the task fields populated and adds:
 `subject.{ticket_id,ticket_uuid,workflow_instance_id}` plus a `workflow` object
 with `instance_id`, wrkf `event_id`/`event_seq`, `schema_version:
 "wrkf.workflow-event.v0"`, `type`, `transition`, `outcome`, `from`, `to`,
-`actor`, `role`, `run_id`, revision fields, task-doc hash fields, and
+`principal_ref`, `role`, `run_id`, revision fields, task-doc hash fields, and
 `context_hash`. Legacy webhook URL strings are task-event subscriptions. A stored
 object entry can opt into workflow events without forcing task-only subscribers to
 receive them:
@@ -1463,7 +1463,7 @@ interface WrkfEvidenceAddParams {
   summary?: string;
   facts?: Record<string, unknown>;
   data?: unknown;
-  actor?: string;
+  principal_ref?: string;
   role?: string;
   runId?: string;        // persisted; see §9.7
   idempotencyKey?: string;
@@ -1527,8 +1527,8 @@ interface WrkfTransitionEvent {
   fromPhase?: string;
   toPhase?: string;
   transitionedAt: string;
-  actor?: string;
-  actorRole?: string;
+  principal_ref?: string;
+  role?: string;
   matchingRoleBindings: WrkfRoleBinding[];
   roleBindings?: WrkfRoleBinding[];
   payload?: Record<string, unknown>;
@@ -1579,7 +1579,7 @@ interface WrkfTransitionApplyParams {
   // If both supplied, must resolve to same instance.
   transition: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   expectRevision?: number;   // CAS; see §9.3
   contextHash?: string;      // CAS; see §9.3
   idempotencyKey?: string;
@@ -1615,7 +1615,7 @@ interface WrkfRunStartParams {
   task?: string;
   instanceId?: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   idempotencyKey?: string;
   deliveryRef?: string;
   lane?: string;
@@ -1649,7 +1649,7 @@ interface WrkfActionStartParams {
   workflow?: string;            // defaults to built-in wrkq-simple-task@1
   action: "triage" | "implement" | "review" | "verify" | (string & {});
   role?: string;                // defaults from action (triage→triager, ...)
-  actor?: string;
+  principal_ref?: string;
   lane?: string;                // defaults from action
   deliveryRef?: string | object;
   externalRunRef?: string;
@@ -1664,7 +1664,7 @@ interface WrkfActionRun {
   workflow: { id: string; version: string; hash?: string };
   action: string;
   role: string;
-  actor?: string;
+  principal_ref?: string;
   lane?: string;
   deliveryRef?: string;
   externalRunRef?: string;      // HRC bindings standardized as hrc:<runId>
@@ -1838,7 +1838,7 @@ silent acceptance of an unenforced key is forbidden.
 
 Persist committed evidence keyed by `(instanceId, idempotencyKey)`. Canonical
 request hash covers normalized params (`kind`, `ref`, `summary`, `facts`, `data`,
-`actor`, `role`, `runId`) excluding the key itself.
+`principal_ref`, `role`, `runId`) excluding the key itself.
 
 Replay semantics:
 
