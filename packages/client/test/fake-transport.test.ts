@@ -40,8 +40,8 @@ const MOCK_TASK: WrkqTask = {
   riskClass: "medium",
   etag: 2,
   assigneePrincipalRef: "agent:larry",
-  createdAt: "2026-06-14T00:00:00Z",
-  updatedAt: "2026-06-14T00:00:00Z",
+  createdAt: "2026-06-30T00:00:00Z",
+  updatedAt: "2026-06-30T00:00:00Z",
 };
 
 const MOCK_CONTAINER: WrkqContainer = {
@@ -52,8 +52,8 @@ const MOCK_CONTAINER: WrkqContainer = {
   kind: "project",
   path: "project",
   etag: 1,
-  createdAt: "2026-06-14T00:00:00Z",
-  updatedAt: "2026-06-14T00:00:00Z",
+  createdAt: "2026-06-30T00:00:00Z",
+  updatedAt: "2026-06-30T00:00:00Z",
 };
 
 const MOCK_TRANSITION_RESULT: WrkfTransitionResult = {
@@ -88,13 +88,13 @@ const MOCK_EVENT_QUERY_RESULT: WrkfEventQueryResult = {
       fromPhase: "intake",
       toPhase: "red",
       transitionedAt: "2026-06-15T14:00:00Z",
-      actor: "agent:tester",
-      actorRole: "tester",
+      principal_ref: "agent:tester",
+      role: "tester",
       matchingRoleBindings: [
         {
           instanceId: "wfi_abc123",
           role: "tester",
-          actor: "agent:tester",
+          principal_ref: "agent:tester",
           bindingMode: "required",
           boundAt: "2026-06-15T13:59:00Z",
         },
@@ -108,7 +108,7 @@ const MOCK_EVENT_QUERY_RESULT: WrkfEventQueryResult = {
 describe("createClient lifecycle", () => {
   test("autoInitialize sends rpc.initialize with the protocol version", async () => {
     const transport = new FakeTransport().onResult("rpc.initialize", {
-      protocolVersion: "2026-06-14",
+      protocolVersion: "2026-06-30",
       protocolSchemaHash: "sha256:x",
       server: { name: "wrkq-wrkf-rpc", version: "dev", pid: 1, entrypoint: "wrkq" },
       database: { path: "/db", migrationHash: "sha256:y" },
@@ -126,7 +126,7 @@ describe("createClient lifecycle", () => {
     const frame = transport.capturedRequests[0]!;
     expect(frame.method).toBe("rpc.initialize");
     expect(frame.jsonrpc).toBe("2.0");
-    expect(frame.params).toMatchObject({ protocolVersion: "2026-06-14" });
+    expect(frame.params).toMatchObject({ protocolVersion: "2026-06-30" });
     await client.close();
     expect(transport.closed).toBe(true);
   });
@@ -601,7 +601,7 @@ describe("wrkf namespace", () => {
       task: "T-00001",
       transition: "plan_ready",
       role: "coordinator",
-      actor: "human:local",
+      principal_ref: "human:local",
       expectRevision: 0,
       contextHash: "sha256:abc",
       idempotencyKey: "k:plan_ready:0",
@@ -679,7 +679,7 @@ describe("wrkf namespace", () => {
     const binding = {
       instanceId: "wfi_1",
       role: "implementer",
-      actor: "agent:cody",
+      principal_ref: "agent:cody",
       deliveryRef: "cody@wrkq:T-1",
       lane: "main",
       bindingMode: "required",
@@ -695,12 +695,12 @@ describe("wrkf namespace", () => {
     await client.wrkf.role.bind({
       task: "T-00001",
       role: "implementer",
-      actor: "agent:cody",
+      principal_ref: "agent:cody",
       deliveryRef: "cody@wrkq:T-1",
       lane: "main",
     });
     await client.wrkf.role.list({ task: "T-00001" });
-    await client.wrkf.role.unbind({ task: "T-00001", role: "implementer", actor: "agent:cody" });
+    await client.wrkf.role.unbind({ task: "T-00001", role: "implementer", principal_ref: "agent:cody" });
     await client.wrkf.role.set({ task: "T-00001", roleMap: { implementer: "agent:cody" } });
 
     expect(transport.capturedRequests.map((r) => r.method)).toEqual([
@@ -715,7 +715,7 @@ describe("wrkf namespace", () => {
     const transport = new FakeTransport().onResult("wrkf.effect.claim", {
       effects: [{ id: "eff_1", status: "leased" }],
       leaseToken: "lease_abc",
-      leaseExpiresAt: "2026-06-14T01:00:00Z",
+      leaseExpiresAt: "2026-06-30T01:00:00Z",
     });
     const client = await clientWith(transport);
     const claim = await client.wrkf.effect.claim({ adapter: "wake_role", limit: 5, leaseMs: 60000 });

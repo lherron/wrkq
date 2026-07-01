@@ -4,7 +4,7 @@
  *
  * Mirrors docs/wrkq-wrkf-rpc.md §6.2 and §7. All RPC DTO JSON fields are
  * camelCase. Field sets verified against the live `wrkq rpc --stdio` server
- * (proto 2026-06-14).
+ * (proto 2026-06-30).
  */
 
 import type { WrkfEvent, WrkfInstance } from "../wrkf/types.js";

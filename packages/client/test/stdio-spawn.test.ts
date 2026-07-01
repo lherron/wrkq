@@ -23,7 +23,7 @@ describe("StdioTransport spawn construction", () => {
     expect(spec.env.WRKQ_DB).toBeUndefined();
   });
 
-  test("T-05381 wrkq sessions reject legacy actor while wrkf keeps workflow actor", () => {
+  test("wrkq sessions reject legacy actor; wrkf launches with canonical --principal-ref", () => {
     let wrkqRejectedActor = false;
     try {
       buildStdioSpawnSpec({
@@ -36,13 +36,14 @@ describe("StdioTransport spawn construction", () => {
     }
     expect(wrkqRejectedActor).toBe(true);
 
-    // T-05381 only removes wrkq-core caller-attribution actor scaffolding.
-    // wrkf workflow role-binding vocabulary still launches with --actor.
+    // T-05372: wrkf participant identity is canonical principal_ref — the wrkf
+    // binary launches with --principal-ref, never the legacy --actor flag.
     const wrkfSpec = buildStdioSpawnSpec({
       command: "wrkf",
-      actor: "agent:cody",
+      principalRef: "agent:cody",
     });
-    expect(wrkfSpec.argv).toEqual(["--actor", "agent:cody", "rpc", "--stdio"]);
+    expect(wrkfSpec.argv).toEqual(["--principal-ref", "agent:cody", "rpc", "--stdio"]);
+    expect(wrkfSpec.argv).not.toContain("--actor");
   });
 
   test("local dbPath stays on path-only --db", () => {
@@ -98,11 +99,11 @@ describe("StdioTransport spawn construction", () => {
     ).toThrow("dbLocator and dbPath refer to different database locators");
   });
 
-  test("wrkf local path keeps wrkf-only flags", () => {
+  test("wrkf local path uses canonical --principal-ref and wrkf-only flags", () => {
     const spec = buildStdioSpawnSpec({
       command: "wrkf",
       dbLocator: "/tmp/wrkq.db",
-      actor: "agent:cody",
+      principalRef: "agent:cody",
       role: "coordinator",
       hookCatalogPath: "/tmp/hooks.json",
     });
@@ -110,7 +111,7 @@ describe("StdioTransport spawn construction", () => {
     expect(spec.argv).toEqual([
       "--db",
       "/tmp/wrkq.db",
-      "--actor",
+      "--principal-ref",
       "agent:cody",
       "--role",
       "coordinator",
@@ -119,5 +120,6 @@ describe("StdioTransport spawn construction", () => {
       "rpc",
       "--stdio",
     ]);
+    expect(spec.argv).not.toContain("--actor");
   });
 });

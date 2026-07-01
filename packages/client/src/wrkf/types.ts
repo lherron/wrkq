@@ -4,7 +4,7 @@
  *
  * Mirrors docs/wrkq-wrkf-rpc.md §6.3 and §7. All RPC DTO JSON fields are
  * camelCase. Field sets verified against the live `wrkf rpc --stdio` server
- * (proto 2026-06-14).
+ * (proto 2026-06-30).
  *
  * Several wrkf result envelopes return broad workflow-runtime structs; we type
  * the well-known fields and allow extra keys (`[k: string]: unknown`) rather
@@ -75,7 +75,7 @@ export interface WrkfEvidence {
   summary?: string;
   facts?: Record<string, unknown>;
   data?: unknown;
-  actor?: string;
+  principal_ref?: string;
   role?: string;
   /** Persisted run linkage; see docs/wrkq-wrkf-rpc.md §9.7. */
   runId?: string;
@@ -121,7 +121,7 @@ export interface WrkfRun {
   instanceId?: string;
   status?: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   externalRunRef?: string;
   deliveryRef?: string;
   lane?: string;
@@ -232,7 +232,7 @@ export interface WrkfEvidenceAddParams {
   summary?: string;
   facts?: Record<string, unknown>;
   data?: unknown;
-  actor?: string;
+  principal_ref?: string;
   role?: string;
   /** Persisted run linkage; see docs/wrkq-wrkf-rpc.md §9.7. */
   runId?: string;
@@ -261,7 +261,7 @@ export interface WrkfEvidenceSuggestParams {
 export interface WrkfRoleBinding {
   instanceId: string;
   role: string;
-  actor: string;
+  principal_ref: string;
   deliveryRef?: string;
   lane?: string;
   bindingMode: string;
@@ -277,7 +277,7 @@ export interface WrkfRoleBindParams {
   task?: string;
   instanceId?: string;
   role: string;
-  actor: string;
+  principal_ref: string;
   deliveryRef?: string;
   lane?: string;
   bindingMode?: "required" | "optional" | "auto" | string;
@@ -287,7 +287,7 @@ export interface WrkfRoleUnbindParams {
   task?: string;
   instanceId?: string;
   role: string;
-  actor?: string;
+  principal_ref?: string;
 }
 
 export interface WrkfRoleSetParams {
@@ -335,8 +335,8 @@ export interface WrkfTransitionEvent {
   fromPhase?: string;
   toPhase?: string;
   transitionedAt: string;
-  actor?: string;
-  actorRole?: string;
+  principal_ref?: string;
+  role?: string;
   matchingRoleBindings: WrkfRoleBinding[];
   roleBindings?: WrkfRoleBinding[];
   payload?: {
@@ -450,7 +450,7 @@ export interface WrkfTransitionApplyParams {
   instanceId?: string;
   transition: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.3. */
   expectRevision?: number;
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.3. */
@@ -477,7 +477,7 @@ export interface WrkfRunStartParams {
   task?: string;
   instanceId?: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   idempotencyKey?: string;
   deliveryRef?: string;
   lane?: string;
@@ -531,7 +531,7 @@ export interface WrkfActionRun {
   workflow: WrkfActionWorkflowRef;
   action: string;
   role: string;
-  actor?: string;
+  principal_ref?: string;
   lane?: string;
   deliveryRef?: string;
   externalRunRef?: string;
@@ -565,7 +565,7 @@ export interface WrkfActionStartParams {
   workflow?: string;
   action: "triage" | "implement" | "review" | "verify" | (string & {});
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   lane?: string;
   deliveryRef?: string | Record<string, unknown>;
   externalRunRef?: string;
@@ -618,7 +618,7 @@ export interface WrkfActionReapParams {
   expiredBefore?: string;
   legacyActiveBefore?: string;
   limit?: number;
-  actor?: string;
+  principal_ref?: string;
   summary?: string;
 }
 

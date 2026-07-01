@@ -146,7 +146,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
     const run = await client.wrkf.run.start({
       task: task.id,
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
       externalRunRef: "agent-loop-run-1",
       idempotencyKey: `itest:run:${task.id}:1`,
     });
@@ -160,7 +160,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
       summary: "needs patch",
       facts: { verdict: "needs_patch" },
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
     });
     expect(needsPatch.facts?.verdict).toBe("needs_patch");
 
@@ -173,7 +173,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
       summary: "ready",
       facts: { verdict: "ready" },
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
       runId: run.id,
     });
     expect(ready.facts?.verdict).toBe("ready");
@@ -186,7 +186,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
         task: task.id,
         transition: "plan_ready",
         role: "coordinator",
-        actor: "agent:agent-loop",
+        principal_ref: "agent:agent-loop",
         expectRevision: 0,
         contextHash: staleHash,
       });
@@ -203,7 +203,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
       task: task.id,
       transition: "plan_ready",
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
       expectRevision: fresh.instance.revision,
       contextHash: fresh.instance.contextHash,
       idempotencyKey: `itest:transition:${task.id}:plan_ready:${fresh.instance.revision}`,
@@ -307,7 +307,7 @@ describe("evidence idempotency & canonicalization via @wrkq/client", () => {
       facts: { verdict: "needs_patch" },
       data: { z: 3, a: 1, m: 2 },
       role: "coordinator",
-      actor: "agent:test",
+      principal_ref: "agent:test",
       idempotencyKey: idemKey,
     });
     expect(typeof e1.id).toBe("string");
@@ -321,7 +321,7 @@ describe("evidence idempotency & canonicalization via @wrkq/client", () => {
       facts: { verdict: "needs_patch" },
       data: { a: 1, m: 2, z: 3 }, // same values, different key order
       role: "coordinator",
-      actor: "agent:test",
+      principal_ref: "agent:test",
       idempotencyKey: idemKey,
     });
 
@@ -340,7 +340,7 @@ describe("evidence idempotency & canonicalization via @wrkq/client", () => {
       summary: "original",
       facts: { verdict: "needs_patch" },
       role: "coordinator",
-      actor: "agent:test",
+      principal_ref: "agent:test",
       idempotencyKey: idemKey,
     });
 
@@ -354,7 +354,7 @@ describe("evidence idempotency & canonicalization via @wrkq/client", () => {
         summary: "original",
         facts: { verdict: "needs_patch" },
         role: "coordinator",
-        actor: "agent:test",
+        principal_ref: "agent:test",
         idempotencyKey: idemKey,
       });
     } catch (e) {
@@ -447,7 +447,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
     const run = await wrkfClient.wrkf.run.start({
       task: task.id,
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
       externalRunRef: "wrkf-loop-run-1",
       idempotencyKey: `itest:wrkf-e2e:run:${task.id}:1`,
     });
@@ -461,7 +461,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
       summary: "needs patch",
       facts: { verdict: "needs_patch" },
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
     });
     expect(needsPatch.facts?.verdict).toBe("needs_patch");
 
@@ -474,7 +474,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
       summary: "ready",
       facts: { verdict: "ready" },
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
       runId: run.id,
     });
     expect(ready.facts?.verdict).toBe("ready");
@@ -487,7 +487,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
         task: task.id,
         transition: "plan_ready",
         role: "coordinator",
-        actor: "agent:agent-loop",
+        principal_ref: "agent:agent-loop",
         expectRevision: 0,
         contextHash: staleHash,
       });
@@ -504,7 +504,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
       task: task.id,
       transition: "plan_ready",
       role: "coordinator",
-      actor: "agent:agent-loop",
+      principal_ref: "agent:agent-loop",
       expectRevision: fresh.instance.revision,
       contextHash: fresh.instance.contextHash,
       idempotencyKey: `itest:wrkf-e2e:transition:${task.id}:plan_ready:${fresh.instance.revision}`,

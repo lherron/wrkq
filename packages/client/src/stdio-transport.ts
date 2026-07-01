@@ -7,7 +7,7 @@
  * exits.
  *
  * Contract: docs/wrkq-wrkf-rpc.md §1, §4, §7.
- * - Global flags (--db/--principal-ref/--actor/--role/--hook-catalog) precede the `rpc --stdio`
+ * - Global flags (--db/--principal-ref/--role/--hook-catalog) precede the `rpc --stdio`
  *   subcommand, matching the CLI surface. Remote rpc:// DB locators are passed
  *   through WRKQ_DB instead of path-only --db.
  * - close() == graceful (stdin EOF == rpc.exit) then await exit, escalate on
@@ -30,7 +30,7 @@ export interface StdioSpawnOptions {
   dbPath?: string;
   /** wrkq --principal-ref */
   principalRef?: string;
-  /** wrkf --actor; legacy wrkq compatibility when a DB locator is explicit. */
+  /** wrkf participant identity -> --principal-ref (wrkq legacy: --as with explicit DB locator). */
   actor?: string;
   /** --role */
   role?: string;
@@ -94,16 +94,23 @@ export function buildStdioSpawnSpec(opts: StdioSpawnOptions): StdioSpawnSpec {
       argv.push("--db", dbLocator);
     }
   }
-  if (!isWrkf && opts.principalRef) {
-    argv.push("--principal-ref", opts.principalRef);
-  }
-  if (opts.actor) {
-    if (isWrkf) {
-      argv.push("--actor", opts.actor);
-    } else if (dbLocator) {
-      argv.push("--as", opts.actor);
-    } else {
-      throw new Error("actor is no longer accepted for wrkq caller attribution; use principalRef");
+  if (isWrkf) {
+    // wrkf participant identity is canonical principal_ref (T-05372): the wrkf
+    // binary's global flag is --principal-ref. Accept either spawn option for
+    // back-compat (legacy callers still pass `actor`), but always emit
+    // --principal-ref.
+    const identity = opts.principalRef ?? opts.actor;
+    if (identity) argv.push("--principal-ref", identity);
+  } else {
+    if (opts.principalRef) {
+      argv.push("--principal-ref", opts.principalRef);
+    }
+    if (opts.actor) {
+      if (dbLocator) {
+        argv.push("--as", opts.actor);
+      } else {
+        throw new Error("actor is no longer accepted for wrkq caller attribution; use principalRef");
+      }
     }
   }
   if (isWrkf && opts.role) argv.push("--role", opts.role);
@@ -129,7 +136,7 @@ export class StdioTransport implements Transport {
 
     // The two entrypoints share the RPC server but NOT the global CLI flag
     // surface: `wrkq` attributes writes via `--as` and has no role/hook-catalog
-    // flags, while `wrkf` uses `--actor`/`--role`/`--hook-catalog`. Map session
+    // flags, while `wrkf` uses `--principal-ref`/`--role`/`--hook-catalog`. Map session
     // options to whichever the launched binary accepts; per-call `actor`/`role`
     // still travel in method params either way.
     const { argv, env } = buildStdioSpawnSpec(opts);

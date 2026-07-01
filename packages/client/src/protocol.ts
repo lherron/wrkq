@@ -5,7 +5,7 @@
  */
 
 /** Unified protocol version (docs/wrkq-wrkf-rpc.md). */
-export const PROTOCOL_VERSION = "2026-06-14";
+export const PROTOCOL_VERSION = "2026-06-30";
 
 export interface InitializeParams {
   protocolVersion?: string;

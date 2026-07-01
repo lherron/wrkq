@@ -22,7 +22,7 @@ Spec: [`docs/wrkq-wrkf-rpc-client-forward-spec.md`](../../docs/wrkq-wrkf-rpc-cli
 
 Bun ≥ 1.3. The `wrkq` (or `wrkf`) binary must be on `PATH` or referenced by an
 absolute path. Both entrypoints serve the identical protocol (proto
-`2026-06-14`); the choice of binary does not change client semantics.
+`2026-06-30`); the choice of binary does not change client semantics.
 
 ## Install / import
 

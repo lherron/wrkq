@@ -66,7 +66,7 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     const run = await client.wrkf.action.start({
       task: task.id,
       action: "triage",
-      actor: ACTOR,
+      principal_ref: ACTOR,
       idempotencyKey: "action-itest:start:1",
     });
     expect(typeof run.runId).toBe("string");
@@ -80,7 +80,7 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     const again = await client.wrkf.action.start({
       task: task.id,
       action: "triage",
-      actor: ACTOR,
+      principal_ref: ACTOR,
       idempotencyKey: "action-itest:start:1",
     });
     expect(again.runId).toBe(run.runId);
