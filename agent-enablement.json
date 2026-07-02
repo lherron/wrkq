@@ -3,14 +3,9 @@
   "rubricVersion": "rubric.md@d793717",
   "catalogVersion": "not-recorded",
   "floor": {
-    "lastSweep": "2026-07-02",
-    "sweepId": "ae-phase3-wrkq-2026-07-02",
-    "sweptBy": "agent-enablement phase-3 projection sweep",
-    "writer": "pm",
-    "etag": 1,
-    "axes": {
-      "F0": "PRESENT"
-    }
+    "lastSweep": null,
+    "etag": 0,
+    "axes": {}
   },
   "observations": [],
   "depth": {
