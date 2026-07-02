@@ -838,9 +838,9 @@ func TestWrkqAttachment_WrkfEntrypoint_SameAttachDir(t *testing.T) {
 	}
 	dbPath := migratedDB(t)
 	attachDir := t.TempDir()
-	// The wrkf entrypoint derives caller attribution from its --actor (WRKF_ACTOR);
+	// The wrkf entrypoint derives caller attribution from its principal ref;
 	// supply a canonical principal so writes pass principal-only validation.
-	extraEnv := []string{"WRKQ_ATTACH_DIR=" + attachDir, "WRKF_ACTOR=agent:smokey"}
+	extraEnv := []string{"WRKQ_ATTACH_DIR=" + attachDir, "WRKF_PRINCIPAL_REF=agent:smokey"}
 
 	cf := pdRunEnv(t, "wrkf", dbPath, extraEnv,
 		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "Attach Wrkf Entrypoint", "kind": "task"}),

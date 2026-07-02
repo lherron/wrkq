@@ -2,6 +2,7 @@ package rpccli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -136,6 +137,7 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}
+	applyHelpTemplates(root)
 	return root
 }
 
@@ -167,4 +169,87 @@ func dbOverride(cmd *cobra.Command) string {
 		return f.Value.String()
 	}
 	return ""
+}
+
+const rootHelpTemplate = `{{with .Short}}{{.}}{{end}}
+Usage:
+  {{.UseLine}}
+Commands:
+{{commandColumns .Commands 4}}{{if .HasAvailableLocalFlags}}Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+Use "{{.CommandPath}} <command> --help" for command details.
+`
+
+const commandHelpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}{{end}}
+Usage:
+  {{.UseLine}}{{if gt (len .Aliases) 0}}
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
+Commands:
+{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}  {{rpad .Name .NamePadding }} {{.Short}}
+{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+`
+
+func applyHelpTemplates(root *cobra.Command) {
+	cobra.AddTemplateFunc("commandColumns", commandColumns)
+	root.SetHelpTemplate(rootHelpTemplate)
+	for _, cmd := range root.Commands() {
+		applyCommandHelpTemplate(cmd)
+	}
+}
+
+func applyCommandHelpTemplate(cmd *cobra.Command) {
+	cmd.SetHelpTemplate(commandHelpTemplate)
+	for _, child := range cmd.Commands() {
+		applyCommandHelpTemplate(child)
+	}
+}
+
+func commandColumns(commands []*cobra.Command, columns int) string {
+	if columns <= 0 {
+		columns = 4
+	}
+	names := make([]string, 0, len(commands))
+	maxLen := 0
+	for _, cmd := range commands {
+		if !cmd.IsAvailableCommand() && cmd.Name() != "help" {
+			continue
+		}
+		name := cmd.Name()
+		names = append(names, name)
+		if len(name) > maxLen {
+			maxLen = len(name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+
+	width := maxLen + 2
+	var b strings.Builder
+	for i := 0; i < len(names); i += columns {
+		end := i + columns
+		if end > len(names) {
+			end = len(names)
+		}
+		b.WriteString("  ")
+		for j, name := range names[i:end] {
+			if j > 0 {
+				b.WriteString("  ")
+			}
+			if j == end-i-1 {
+				b.WriteString(name)
+				continue
+			}
+			fmt.Fprintf(&b, "%-*s", width, name)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
