@@ -3,11 +3,146 @@
   "rubricVersion": "rubric.md@d793717",
   "catalogVersion": "not-recorded",
   "floor": {
-    "lastSweep": null,
-    "etag": 0,
-    "axes": {}
+    "lastSweep": "2026-07-02",
+    "sweepId": "pm-wrkq-20260702T191711Z",
+    "sweptBy": "project-minder",
+    "writer": "pm",
+    "etag": 2,
+    "axes": {
+      "F0": "PARTIAL",
+      "P0": "PARTIAL",
+      "S1": "PRESENT",
+      "S3": "PRESENT",
+      "S6": "PARTIAL",
+      "S7": "PRESENT"
+    }
   },
-  "observations": [],
+  "observations": [
+    {
+      "checkId": "validate-justfile",
+      "derivedFrom": "pm/validate-justfile@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "P0"
+      ],
+      "evidence": "justfile: recipes present default, info, test, lint, verify"
+    },
+    {
+      "checkId": "validate-gitignore",
+      "derivedFrom": "pm/validate-gitignore@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "F0"
+      ],
+      "evidence": ".gitignore: checked 7 required entries; all present"
+    },
+    {
+      "checkId": "validate-readme",
+      "derivedFrom": "pm/validate-readme@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "F0"
+      ],
+      "evidence": "README.md: H1 title, description, quick start/getting started/install, usage/examples"
+    },
+    {
+      "checkId": "validate-runtime",
+      "derivedFrom": "pm/validate-runtime@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "F0"
+      ],
+      "evidence": "go.mod present"
+    },
+    {
+      "checkId": "validate-agent-spaces",
+      "derivedFrom": "pm/validate-agent-spaces@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "F0"
+      ],
+      "evidence": "asp-targets.toml present; .gitignore present"
+    },
+    {
+      "checkId": "validate-agent-md",
+      "derivedFrom": "pm/validate-agent-md@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "S3"
+      ],
+      "evidence": "AGENTS.md present; CLAUDE.md present"
+    },
+    {
+      "checkId": "validate-githooks",
+      "derivedFrom": "pm/validate-githooks@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "ABSENT",
+      "axes": [
+        "P0",
+        "S6"
+      ],
+      "evidence": "No lefthook.yml found in project root."
+    },
+    {
+      "checkId": "validate-gitleaks",
+      "derivedFrom": "pm/validate-gitleaks@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "ABSENT",
+      "axes": [
+        "F0"
+      ],
+      "evidence": "gitleaks hook not found; gitleaks local config/ignore not found"
+    },
+    {
+      "checkId": "validate-linting",
+      "derivedFrom": "pm/validate-linting@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PARTIAL",
+      "axes": [
+        "S6"
+      ],
+      "evidence": "justfile: lint recipe present; lint config present; hook runs lint no; gaps: hooked lint"
+    },
+    {
+      "checkId": "validate-typechecking",
+      "derivedFrom": "pm/validate-typechecking@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "S1",
+        "S6"
+      ],
+      "evidence": "justfile: Go compile via test recipe present; tsconfig not applicable/missing; hook evidence missing"
+    },
+    {
+      "checkId": "validate-tests",
+      "derivedFrom": "pm/validate-tests@v1",
+      "sweepId": "pm-wrkq-20260702T191711Z",
+      "at": "2026-07-02T19:17:11.209Z",
+      "result": "PRESENT",
+      "axes": [
+        "S6",
+        "S7"
+      ],
+      "evidence": "justfile: test recipe present; package test not applicable/missing; Go tests present"
+    }
+  ],
   "depth": {
     "lastAssess": "2026-07-02",
     "writer": "ae",
@@ -132,5 +267,27 @@
       }
     }
   },
-  "escalations": []
+  "escalations": [
+    {
+      "axis": "F0",
+      "kind": "floor-gap",
+      "opened": "2026-07-02",
+      "sourceSweepId": "pm-wrkq-20260702T191637Z",
+      "status": "pending-task"
+    },
+    {
+      "axis": "P0",
+      "kind": "floor-gap",
+      "opened": "2026-07-02",
+      "sourceSweepId": "pm-wrkq-20260702T191637Z",
+      "status": "pending-task"
+    },
+    {
+      "axis": "S6",
+      "kind": "floor-gap",
+      "opened": "2026-07-02",
+      "sourceSweepId": "pm-wrkq-20260702T191637Z",
+      "status": "pending-task"
+    }
+  ]
 }
