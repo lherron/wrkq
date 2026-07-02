@@ -92,5 +92,6 @@ If you have questions, number them for easier responses.
 - [wrkq product/domain/CLI/daemon spec](docs/SPEC.md) — canonical product and command contract.
 - [wrkf JSON-RPC stdio contract](docs/wrkf-rpc.md) — frozen machine contract for wrkf RPC.
 - [wrkq change validation](docs/change-validation.md) — when to run verify / verify-full / install+smoke and where the wrkf template fits.
+- [Agent-enablement changelog](docs/enablement-changelog.md) — target-local retro carrier for sensor/workflow changes.
 - [Rule-authoring template](docs/rule-template.md) — author any new build-failing rule deliberately with a 7-field candidate and when-to-use policy.
 - [Embedded agent usage block](internal/cli/embedded/WRKQ-USAGE.md) — task lifecycle and wrkq command quick reference.

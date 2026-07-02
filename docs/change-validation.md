@@ -17,8 +17,9 @@ S1-S4 and S8 guard surfaces.
 
 Run `just verify-full` when the change affects executable behavior, cross-tool
 contracts, workflow/RPC surfaces, or before closing tasks that require the full
-gate. Its recipe in [Justfile](Justfile) routes through `just verify` and `just
-smoke`; `verify-rpc` is already inside the fast gate. This is the S5 backstop.
+gate. Its recipe in [Justfile](Justfile) routes through `just verify`, `just
+smoke`, and the canonical wrkf adoption probe; `verify-rpc` is already inside
+the fast gate. This is the S5 backstop.
 
 ## Installed-binary smoke
 
@@ -33,6 +34,13 @@ For multi-role wrkq code changes, attach the wrkf template at
 [wrkf/templates/wrkq-code-change.workflow.json](wrkf/templates/wrkq-code-change.workflow.json).
 It carries red, verify, full-verify, review, and installed-binary evidence
 through the S10 workflow; it does not replace the commands above.
+
+## Enablement retro carrier
+
+After an agent-enablement pass changes wrkq's sensors, workflow, or docs, add a
+dated entry to [docs/enablement-changelog.md](docs/enablement-changelog.md).
+Keep it short: what changed, what proof ran, what should promote or sunset, and
+whether the change stays target-local.
 
 ## New build-failing rules
 

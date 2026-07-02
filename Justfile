@@ -320,8 +320,8 @@ test-verbose:
 verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
   @echo "✓ All checks passed"
 
-# Run the full slow backstop tier (verify [incl. RPC] + smoke)
-verify-full: verify smoke
+# Run the full slow backstop tier (verify [incl. RPC] + smoke + canonical adoption probe)
+verify-full: verify smoke check-wrkf-adoption
   @echo "✓ Full verification passed"
 
 # --- Documentation tasks ---
@@ -356,6 +356,7 @@ smoke: build
   test/smoke-wrkf-rpc.sh
   test/smoke-wrkf-wrkq-code-change.sh
   test/smoke-wrkf-adoption.sh
+  test/smoke-wrkf-adoption-negative.sh
   @echo "✓ Smoke test passed"
 
 # Probe the canonical wrkf adoption signal. This is intentionally standalone;

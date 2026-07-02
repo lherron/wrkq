@@ -12,7 +12,9 @@
 #   instance phase == review (reached active/review)
 #
 # FIRE-ON-BAD: removing the `wrkf run start` calls leaves workflow_runs=0 and
-# the assertion fails with "expected >= 3 workflow_runs, got 0".
+# the assertion fails with "expected >= 3 workflow_runs, got 0". The
+# companion negative smoke sets WRKF_ADOPTION_NEGATIVE_SKIP_RUN_STARTS=1 to
+# exercise that failure mode without editing this file.
 #
 # Pattern: mirrors test/smoke-wrkf-wrkq-code-change.sh (S10) happy-path section.
 set -euo pipefail
@@ -37,7 +39,7 @@ unset ASP_PROJECT
 "$BIN/wrkqadm" init --db "$DB" >/dev/null
 
 # Create the test task
-"$BIN/wrkq" --db "$DB" --as local-human touch inbox/s14-adopt \
+"$BIN/wrkq" --db "$DB" --as agent:local-human touch inbox/s14-adopt \
   -t "S14 adoption smoke task" >/dev/null
 
 TEMPLATE="$ROOT/wrkf/templates/wrkq-code-change.workflow.json"
@@ -52,14 +54,16 @@ TEMPLATE="$ROOT/wrkf/templates/wrkq-code-change.workflow.json"
 # ── bind all three roles via `run start` (DISTINCT actors) ───────────────────
 # This is the surface under test: each call creates a workflow_runs row
 # AND a workflow_role_bindings row for the given role/actor pair.
-"$BIN/wrkf" --db "$DB" run start T-00001 --role tester      --actor agent:tester      --json \
-  | jq -e '.role == "tester" and .status == "active"' >/dev/null
+if [ "${WRKF_ADOPTION_NEGATIVE_SKIP_RUN_STARTS:-}" != "1" ]; then
+  "$BIN/wrkf" --db "$DB" run start T-00001 --role tester      --principal-ref agent:tester      --json \
+    | jq -e '.role == "tester" and .status == "active"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" run start T-00001 --role implementer --actor agent:implementer --json \
-  | jq -e '.role == "implementer" and .status == "active"' >/dev/null
+  "$BIN/wrkf" --db "$DB" run start T-00001 --role implementer --principal-ref agent:implementer --json \
+    | jq -e '.role == "implementer" and .status == "active"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" run start T-00001 --role reviewer    --actor agent:reviewer    --json \
-  | jq -e '.role == "reviewer" and .status == "active"' >/dev/null
+  "$BIN/wrkf" --db "$DB" run start T-00001 --role reviewer    --principal-ref agent:reviewer    --json \
+    | jq -e '.role == "reviewer" and .status == "active"' >/dev/null
+fi
 
 # ── ASSERT SCOPED: workflow_runs >= 3 ────────────────────────────────────────
 RUN_COUNT="$("$BIN/wrkf" --db "$DB" run list T-00001 --json | jq '.runs | length')"
@@ -71,24 +75,24 @@ fi
 # ── drive lifecycle: author_red → implement → full_verify ────────────────────
 
 # transition 1: author_red (tester) — open/intake → active/red
-"$BIN/wrkf" --db "$DB" --actor agent:tester --role tester \
+"$BIN/wrkf" --db "$DB" --principal-ref agent:tester --role tester \
   evidence add T-00001 --kind red_test --ref "git:sha-red-s14" \
   --facts '{"verdict":"red"}' --summary "S14 red smoke" --json \
   | jq -e '.kind == "red_test"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" --role tester --actor agent:tester \
+"$BIN/wrkf" --db "$DB" --role tester --principal-ref agent:tester \
   transition T-00001 author_red \
   --expect-revision 0 --idempotency-key s14-author-red --json \
   | jq -e '.state.phase == "red" and .revision == 1' >/dev/null
 
 # transition 2: implement (implementer) — active/red → active/verify
 # SoD: verify.actor (agent:implementer) ≠ red_test.actor (agent:tester) ✓
-"$BIN/wrkf" --db "$DB" --actor agent:implementer --role implementer \
+"$BIN/wrkf" --db "$DB" --principal-ref agent:implementer --role implementer \
   evidence add T-00001 --kind verify --ref "git:sha-green-s14" \
   --facts '{"verdict":"pass"}' --summary "S14 verify green" --json \
   | jq -e '.kind == "verify"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" --role implementer --actor agent:implementer \
+"$BIN/wrkf" --db "$DB" --role implementer --principal-ref agent:implementer \
   transition T-00001 implement \
   --expect-revision 1 --idempotency-key s14-implement --json \
   | jq -e '.state.phase == "verify" and .revision == 2' >/dev/null
@@ -96,12 +100,12 @@ fi
 # transition 3: full_verify (tester) — active/verify → active/review
 # SoD: verify_full.actor (agent:tester) ≠ verify.actor (agent:implementer) ✓
 # Effect: opens a blocking review_signoff obligation owned by reviewer
-"$BIN/wrkf" --db "$DB" --actor agent:tester --role tester \
+"$BIN/wrkf" --db "$DB" --principal-ref agent:tester --role tester \
   evidence add T-00001 --kind verify_full --ref "git:sha-smoke-s14" \
   --facts '{"verdict":"pass"}' --summary "S14 full verify green" --json \
   | jq -e '.kind == "verify_full"' >/dev/null
 
-"$BIN/wrkf" --db "$DB" --role tester --actor agent:tester \
+"$BIN/wrkf" --db "$DB" --role tester --principal-ref agent:tester \
   transition T-00001 full_verify \
   --expect-revision 2 --idempotency-key s14-full-verify --json \
   | jq -e '.state.phase == "review" and .revision == 3' >/dev/null
