@@ -160,6 +160,7 @@ func TestHandoffAckIdentityRejectsBareSlug(t *testing.T) {
 // shared scope.Resolve the create path calls — and that the resolved canonical
 // ref is what would cross the boundary as the explicit scopeRef.
 func TestHandoffScopeEnvPrecedence(t *testing.T) {
+	t.Setenv("AGENT_SCOPE_REF", "")
 	t.Setenv("ASP_SCOPE_REF", "agent:cody:project:wrkq")
 	t.Setenv("ASP_HANDLE", "")
 	t.Setenv("ASP_AGENT_ID", "")

@@ -15,12 +15,12 @@ go build -tags sqlite_fts5 -o "$BIN/wrkf" "$ROOT/cmd/wrkf"
 
 cd "$TMPDIR"
 export WRKQ_DB_PATH="$DB"
-export WRKQ_ACTOR="local-human"
+export WRKQ_ACTOR="agent:local-human"
 unset ASP_PROJECT
 
 "$BIN/wrkqadm" init --db "$DB" >/dev/null
-"$BIN/wrkq" --db "$DB" --as local-human touch inbox/wrkf-rpc-smoke -t "wrkf rpc smoke" >/dev/null
-"$BIN/wrkq" --db "$DB" --as local-human touch inbox/pbc-rpc-walk -t "pbc rpc walk" >/dev/null
+"$BIN/wrkq" --db "$DB" --as agent:local-human touch inbox/wrkf-rpc-smoke -t "wrkf rpc smoke" >/dev/null
+"$BIN/wrkq" --db "$DB" --as agent:local-human touch inbox/pbc-rpc-walk -t "pbc rpc walk" >/dev/null
 
 cat >"$TMPDIR/hook.sh" <<'HOOK'
 #!/usr/bin/env bash
@@ -148,8 +148,8 @@ proc = subprocess.Popen(
         db_path,
         "--hook-catalog",
         hooks_path,
-        "--actor",
-        "human:local-human",
+        "--principal-ref",
+        "agent:local-human",
         "--role",
         "coordinator",
         "rpc",
@@ -193,9 +193,9 @@ def rpc(method, params=None, expect_error=None):
 
 init = rpc(
     "rpc.initialize",
-    {"protocolVersion": "2026-06-14", "client": {"name": "smoke", "version": "0"}},
+    {"protocolVersion": "2026-06-30", "client": {"name": "smoke", "version": "0"}},
 )
-assert init["protocolVersion"] == "2026-06-14", init
+assert init["protocolVersion"] == "2026-06-30", init
 assert init["database"]["path"] == db_path, init
 assert init["capabilities"]["effectClaimLease"] is True, init
 assert init["protocolSchemaHash"].startswith("sha256:"), init
@@ -337,7 +337,7 @@ satisfied = rpc(
         "task": "T-00001",
         "id": obl,
         "evidenceId": evidence[0]["id"],
-        "actor": "human:local-human",
+        "principal_ref": "agent:local-human",
         "role": "coordinator",
     },
 )
@@ -357,7 +357,7 @@ run = rpc(
     {
         "task": "T-00001",
         "role": "coordinator",
-        "actor": "human:local-human",
+        "principal_ref": "agent:local-human",
         "idempotencyKey": "run-1",
     },
 )
@@ -378,7 +378,7 @@ assert len(runs) == 1, runs
 
 check_run = rpc(
     "wrkf.check.run",
-    {"task": "T-00001", "transition": "finish", "actor": "human:local-human", "role": "coordinator"},
+    {"task": "T-00001", "transition": "finish", "principal_ref": "agent:local-human", "role": "coordinator"},
 )
 assert check_run["runs"][0]["verdict"] == "pass", check_run
 
@@ -394,7 +394,7 @@ closed = rpc(
         "task": "T-00001",
         "transition": "finish",
         "role": "coordinator",
-        "actor": "human:local-human",
+        "principal_ref": "agent:local-human",
         "expectRevision": 1,
         "idempotencyKey": "finish",
     },
@@ -417,15 +417,15 @@ pbc_ref = f"{pbc_inst['id']}@{pbc_inst['version']}"
 pbc_att = rpc("wrkq.workflow.attach", {"task": "T-00002", "workflow": pbc_ref})["instance"]
 assert pbc_att["phase"] == "intake" and pbc_att["revision"] == 0, pbc_att
 
-PBC_ROLE, PBC_ACTOR = "agent", "human:local-human"
+PBC_ROLE, PBC_ACTOR = "agent", "agent:local-human"
 
 
 def pbc_step(transition, evidence, want_phase):
     for kind, facts, ref in evidence:
-        actor = "human:pressure-reviewer" if kind == "pressure_pass" else PBC_ACTOR
+        actor = "agent:pressure-reviewer" if kind == "pressure_pass" else PBC_ACTOR
         rpc(
             "wrkf.evidence.add",
-            {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts, "actor": actor},
+            {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts, "principal_ref": actor},
         )
     # re-read context before each transition: adding evidence rotates the contextHash
     cur = rpc("wrkf.instance.show", {"task": "T-00002"})
@@ -433,7 +433,7 @@ def pbc_step(transition, evidence, want_phase):
         "task": "T-00002",
         "transition": transition,
         "role": PBC_ROLE,
-        "actor": PBC_ACTOR,
+        "principal_ref": PBC_ACTOR,
         "expectRevision": cur["revision"],
         "contextHash": cur["contextHash"],
         "idempotencyKey": f"pbc:{transition}:{cur['revision']}",

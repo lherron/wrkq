@@ -62,7 +62,7 @@ do_request() {
   if [[ "$method" == "GET" ]]; then
     code=$(curl -sS -o "$tmp" -w "%{http_code}" \
       -H "Content-Type: application/json" \
-      -H "X-Wrkq-Actor: smoke-agent" \
+      -H "X-Wrkq-Principal-Ref: agent:smoke-agent" \
       "$url")
   else
     if [[ -z "$body" ]]; then
@@ -70,7 +70,7 @@ do_request() {
     fi
     code=$(curl -sS -o "$tmp" -w "%{http_code}" \
       -H "Content-Type: application/json" \
-      -H "X-Wrkq-Actor: smoke-agent" \
+      -H "X-Wrkq-Principal-Ref: agent:smoke-agent" \
       -X "$method" \
       -d "$body" \
       "$url")
@@ -87,7 +87,7 @@ do_request() {
 wait_health() {
   local base_url="$1"
   for _ in {1..50}; do
-    if curl -fsS -H "Content-Type: application/json" -H "X-Wrkq-Actor: smoke-agent" "$base_url/health" >/dev/null 2>&1; then
+    if curl -fsS -H "Content-Type: application/json" -H "X-Wrkq-Principal-Ref: agent:smoke-agent" "$base_url/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.1
@@ -126,7 +126,6 @@ PID1=$!
 wait_health "$BASE1"
 
 do_request "POST" "$BASE1" "/containers/tree" "{}" >/dev/null
-do_request "POST" "$BASE1" "/actors/list" "{}" >/dev/null
 
 TASK_CREATE_JSON=$(do_request "POST" "$BASE1" "/tasks/create" "$(cat <<'JSON'
 {
