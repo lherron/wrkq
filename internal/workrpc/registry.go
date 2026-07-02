@@ -17,6 +17,8 @@ type RegistryOptions struct {
 	ServerVersion    string
 	Entrypoint       string
 	DefaultActor     string
+	WrkqDefaultActor string
+	UseWrkqDefault   bool
 	DefaultRole      string
 	AttachDir        string
 	AttachmentsMaxMB int
@@ -301,7 +303,11 @@ var dtoCatalog = []string{
 }
 
 func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
-	wq := wrkqapi.New(opts.Database, api, opts.DefaultActor, opts.AttachDir, opts.AttachmentsMaxMB, wrkqapi.WithSearch(opts.Search))
+	wrkqDefaultActor := opts.DefaultActor
+	if opts.UseWrkqDefault {
+		wrkqDefaultActor = opts.WrkqDefaultActor
+	}
+	wq := wrkqapi.New(opts.Database, api, wrkqDefaultActor, opts.AttachDir, opts.AttachmentsMaxMB, wrkqapi.WithSearch(opts.Search))
 
 	s.Register("wrkq.task.create", apiHandler(func(ctx context.Context, p wrkqapi.TaskCreateParams) (any, error) {
 		return wq.TaskCreate(ctx, p)
@@ -464,7 +470,7 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return wq.WorkflowTimeline(ctx, p)
 	}))
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, opts.DefaultActor))
+		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, wrkqDefaultActor))
 	}))
 
 	// Handoff family (T-05117). Scope is CALLER-owned (resolved + self-scope

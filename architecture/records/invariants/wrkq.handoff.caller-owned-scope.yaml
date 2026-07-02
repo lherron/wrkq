@@ -7,16 +7,17 @@ predicate: >
   Handoff scope is CALLER-owned but NOT project-root. The CLI caller layer (legacy
   internal/cli AND the RPC-backed mirror internal/rpccli) resolves the effective
   agent/project scope via internal/scope.Resolve from --scope OR agent-runtime env
-  (ASP_SCOPE_REF -> ASP_HANDLE -> ASP_AGENT_ID+ASP_PROJECT), and for CREATE it
-  enforces self-scope (scope.EnforceSelfScope: refuse writing a handoff that
-  targets another agent) BEFORE submitting.
+  (--scope -> AGENT_SCOPE_REF -> ASP_SCOPE_REF -> ASP_HANDLE ->
+  ASP_AGENT_ID+ASP_PROJECT), and for CREATE it enforces self-scope
+  (scope.EnforceSelfScope: refuse writing a handoff that targets another agent)
+  BEFORE submitting.
 
   The handoff RPC methods (wrkq.handoff.create / get / listView / acknowledge)
   receive ONLY the EXPLICIT effective fields — scopeRef / agentId / projectId for
   create+list, actorAgentId / principalRef / acting scopeRef for create+acknowledge.
-  They MUST NOT read ASP_SCOPE_REF, ASP_HANDLE, ASP_AGENT_ID, or ASP_PROJECT: scope
-  resolution + self-scope enforcement are caller semantics, not a server read-model
-  concern. The server owns ONLY the durable semantics it can prove without
+  They MUST NOT read AGENT_SCOPE_REF, ASP_SCOPE_REF, ASP_HANDLE, ASP_AGENT_ID, or
+  ASP_PROJECT: scope resolution + self-scope enforcement are caller semantics, not
+  a server read-model concern. The server owns ONLY the durable semantics it can prove without
   authenticated identity: the handoff.created / handoff.acknowledged events, the
   idempotency replay + payload-mismatch conflict, the acknowledge etag CAS, the
   "already acknowledged" mapping, the not-found contract, and explicit-param
@@ -45,7 +46,7 @@ authority:
 enforced_by: "internal/scope.Resolve + scope.EnforceSelfScope at the caller call sites + explicit effective-scope params on the handoff methods (the server never reads ASP_* env); daedalus ruling hrcchat#10211 (T-05117)"
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site"
 source:
-  - internal/scope/resolve.go                  # Resolve + EnforceSelfScope (single source of truth)
+  - internal/scope/resolve.go                  # Resolve + EnforceSelfScope (single source of truth; AGENT_SCOPE_REF canonical, ASP_* compat)
   - internal/rpccli/handoff.go                 # mirror: caller scope.Resolve + EnforceSelfScope (create) + explicit params; no server env read
   - internal/wrkqapi/handoffs.go               # server: HandoffCreate/Get/ListView/Acknowledge over EXPLICIT scope/principal; no ASP_* read
   - internal/workrpc/registry.go               # wrkq.handoff.* registration (shared wrkq + wrkf entrypoints via RegisterAPI)
@@ -55,6 +56,7 @@ required_tests:
   - internal/wrkqapi/catview_fingerprint_test.go        # TestHandoffDTOFingerprint (WrkqHandoff legacy field order pinned)
   - internal/workrpc/catview_catalog_test.go            # TestCatViewInCatalogs (handoff methods + DTOs in both catalogs)
   - internal/workrpc/handoff_test.go                    # server create/get/list/ack + idempotent replay/mismatch + ack ifMatch CAS + dryRun no-write + already-acknowledged + event payloads + TestHandoffCreate_IncoherentScopeRejected (scopeRef vs agentId/projectId coherence → WRKQ_VALIDATION, no write/event)
+  - internal/scope/resolve_test.go                      # AGENT_SCOPE_REF precedence + AGENT/ASP disagreement diagnostics
   - internal/rpccli/handoff_test.go                     # mirror NO-server-env-read guard + self-scope violation (caller-side) + env scope precedence
   - internal/rpccli/parity_test.go                      # TestParity/handoff/* (create/get/list/ack; idempotent replay; dryRun; output modes) byte-match legacy
   - internal/rpccli/transport_test.go                   # TestTransportEquivalence (handoff get/listView agree in-proc vs subprocess)
@@ -63,7 +65,7 @@ last_verified:
   date: 2026-06-30
   evidence: "T-05381 record update: handoff notes amended to principal-only vocabulary where actor UUID fields are no longer part of the intended DTO contract; package compile check go test -run TestDoesNotExist ./internal/wrkqapi ./internal/workrpc green."
 reopen_when:
-  - a handoff RPC method begins reading ASP_SCOPE_REF / ASP_HANDLE / ASP_AGENT_ID / ASP_PROJECT
+  - a handoff RPC method begins reading AGENT_SCOPE_REF / ASP_SCOPE_REF / ASP_HANDLE / ASP_AGENT_ID / ASP_PROJECT
   - the scope resolution precedence or self-scope enforcement rule changes without updating the mirror + parity
   - a new handoff mirror command resolves scope server-side instead of caller-side
   - an authenticated wrkqd adds server-side self-scope validation (revisit the LOW-risk factoring)

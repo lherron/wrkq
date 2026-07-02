@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/wrkfapi"
@@ -24,6 +26,7 @@ type app struct {
 	db          *db.DB
 	service     *workflow.Service
 	actor       string
+	wrkqActor   string
 	role        string
 	json        bool
 	hookCatalog *workflow.HookCatalog
@@ -82,7 +85,11 @@ func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*
 		if err != nil {
 			return fmt.Errorf("failed to resolve hook catalog: %w", err)
 		}
-		a := &app{actor: actorDefault(), role: roleDefault(), json: flagJSON, hookPath: hookPath}
+		actor, wrkqActor, err := actorDefaults(cmd)
+		if err != nil {
+			return err
+		}
+		a := &app{actor: actor, wrkqActor: wrkqActor, role: roleDefault(), json: flagJSON, hookPath: hookPath}
 		cat, err := workflow.LoadHookCatalog(hookPath)
 		if err != nil {
 			return fmt.Errorf("failed to load hook catalog: %w", err)
@@ -151,20 +158,45 @@ func codeFromError(err error) string {
 	return "WRKF_ERROR"
 }
 
-func actorDefault() string {
-	if flagActor != "" {
-		return flagActor
+const wrkfPrincipalEnv = "WRKF_PRINCIPAL_REF"
+
+func actorDefaults(cmd *cobra.Command) (workflowActor, wrkqDefaultActor string, err error) {
+	principal, err := wrkfPrincipalDefault(cmd)
+	if err != nil {
+		return "", "", err
 	}
-	if v := os.Getenv("WRKF_PRINCIPAL_REF"); v != "" {
-		return v
+	if principal != "" {
+		return principal, principal, nil
 	}
 	if v := os.Getenv("WRKF_ACTOR"); v != "" {
-		return v
+		return v, "", nil
 	}
 	if v := os.Getenv("WRKQ_ACTOR"); v != "" {
-		return v
+		return v, "", nil
 	}
-	return "system:wrkf"
+	return "system:wrkf", "", nil
+}
+
+func wrkfPrincipalDefault(cmd *cobra.Command) (string, error) {
+	attr, err := attribution.ResolveWithPrincipalEnvs(attribution.ResolveOptions{
+		Command:       cmd,
+		ResolvedScope: resolvedRuntimeScope(),
+	}, wrkfPrincipalEnv)
+	if attribution.IsNoPrincipalConfigured(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return attr.PrincipalRef, nil
+}
+
+func resolvedRuntimeScope() *scope.ResolvedScope {
+	resolved, _, err := scope.Resolve("")
+	if err != nil {
+		return nil
+	}
+	return &resolved
 }
 
 func roleDefault() string {
@@ -1344,6 +1376,8 @@ func rpcCmd() *cobra.Command {
 					ServerVersion:    Version,
 					Entrypoint:       "wrkf",
 					DefaultActor:     a.actor,
+					WrkqDefaultActor: a.wrkqActor,
+					UseWrkqDefault:   true,
 					DefaultRole:      a.role,
 					AttachDir:        attachDir,
 					AttachmentsMaxMB: attachMaxMB,

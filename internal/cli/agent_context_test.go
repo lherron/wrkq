@@ -21,7 +21,7 @@ func resetAgentContextFlags() {
 // clearScopeEnvT clears scope env vars for the test's lifetime.
 func clearScopeEnvT(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"ASP_SCOPE_REF", "ASP_HANDLE", "ASP_AGENT_ID", "ASP_PROJECT"} {
+	for _, k := range []string{"AGENT_SCOPE_REF", "ASP_SCOPE_REF", "ASP_HANDLE", "ASP_AGENT_ID", "ASP_PROJECT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -88,6 +88,29 @@ func TestAgentContext_ResolvesScopeRefEnv(t *testing.T) {
 		t.Errorf("CanonicalRef=%q, want agent:clod:project:wrkq", o.Scope.CanonicalRef)
 	}
 	if o.Env.ASPScopeRef != "agent:clod:project:wrkq:task:primary" {
+		t.Errorf("env not echoed correctly: %+v", o.Env)
+	}
+}
+
+func TestAgentContext_ResolvesAgentScopeRefEnv(t *testing.T) {
+	clearScopeEnvT(t)
+	t.Setenv("AGENT_SCOPE_REF", "agent:cody:project:wrkq:task:T-05423")
+	t.Setenv("ASP_SCOPE_REF", "agent:clod:project:wrkq")
+
+	o := runAgentContextForTest(t)
+	if o.Error != "" {
+		t.Fatalf("unexpected error: %s", o.Error)
+	}
+	if o.Scope == nil {
+		t.Fatalf("expected resolved scope")
+	}
+	if o.Scope.Source != scope.SourceAgentScopeRefEnv {
+		t.Errorf("Source=%q, want %q", o.Scope.Source, scope.SourceAgentScopeRefEnv)
+	}
+	if o.Scope.AgentID != "cody" {
+		t.Errorf("AgentID=%q, want cody", o.Scope.AgentID)
+	}
+	if o.Env.AgentScopeRef != "agent:cody:project:wrkq:task:T-05423" {
 		t.Errorf("env not echoed correctly: %+v", o.Env)
 	}
 }

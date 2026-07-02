@@ -38,8 +38,8 @@ func newAgentContextCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent-context",
 		Short: "Print the resolved agent scope and environment context",
-		Long: `Resolve the active agent scope from --scope, ASP_SCOPE_REF, ASP_HANDLE,
-or ASP_AGENT_ID + ASP_PROJECT and print the result.
+		Long: `Resolve the active agent scope from --scope, AGENT_SCOPE_REF,
+ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID + ASP_PROJECT and print the result.
 
 Useful for debugging agent runtime context. Works without a database
 connection — actor / container UUID lookups are best-effort extras.
@@ -212,12 +212,13 @@ func fillAgentContextContainerLookup(cmd *cobra.Command, tr Transport, project s
 
 func printAgentContextHuman(stdout, stderr io.Writer, out agentContextOutput) {
 	fmt.Fprintln(stdout, "Environment:")
-	fmt.Fprintf(stdout, "  ASP_SCOPE_REF = %s\n", quoteOrEmpty(out.Env.ASPScopeRef))
-	fmt.Fprintf(stdout, "  ASP_HANDLE    = %s\n", quoteOrEmpty(out.Env.ASPHandle))
-	fmt.Fprintf(stdout, "  ASP_AGENT_ID  = %s\n", quoteOrEmpty(out.Env.ASPAgentID))
-	fmt.Fprintf(stdout, "  ASP_PROJECT   = %s\n", quoteOrEmpty(out.Env.ASPProject))
+	fmt.Fprintf(stdout, "  AGENT_SCOPE_REF = %s\n", quoteOrEmpty(out.Env.AgentScopeRef))
+	fmt.Fprintf(stdout, "  ASP_SCOPE_REF   = %s\n", quoteOrEmpty(out.Env.ASPScopeRef))
+	fmt.Fprintf(stdout, "  ASP_HANDLE      = %s\n", quoteOrEmpty(out.Env.ASPHandle))
+	fmt.Fprintf(stdout, "  ASP_AGENT_ID    = %s\n", quoteOrEmpty(out.Env.ASPAgentID))
+	fmt.Fprintf(stdout, "  ASP_PROJECT     = %s\n", quoteOrEmpty(out.Env.ASPProject))
 	if out.OverrideFlag != "" {
-		fmt.Fprintf(stdout, "  --scope       = %s\n", out.OverrideFlag)
+		fmt.Fprintf(stdout, "  --scope         = %s\n", out.OverrideFlag)
 	}
 
 	fmt.Fprintln(stdout)

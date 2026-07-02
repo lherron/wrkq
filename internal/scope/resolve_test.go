@@ -16,7 +16,7 @@ func setEnv(t *testing.T, key, value string) {
 // the test.
 func clearScopeEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"ASP_SCOPE_REF", "ASP_HANDLE", "ASP_AGENT_ID", "ASP_PROJECT"} {
+	for _, k := range []string{"AGENT_SCOPE_REF", "ASP_SCOPE_REF", "ASP_HANDLE", "ASP_AGENT_ID", "ASP_PROJECT"} {
 		t.Setenv(k, "")
 	}
 }
@@ -115,6 +115,79 @@ func TestResolve_ScopeRefEnv(t *testing.T) {
 	}
 	if len(diags) != 0 {
 		t.Errorf("expected no diagnostics, got %v", diags)
+	}
+}
+
+func TestResolve_AgentScopeRefEnv(t *testing.T) {
+	clearScopeEnv(t)
+	setEnv(t, "AGENT_SCOPE_REF", "agent:cody:project:wrkq:task:T-05423:role:implementer")
+	r, diags, err := Resolve("")
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if r.Source != SourceAgentScopeRefEnv {
+		t.Errorf("Source=%q, want %q", r.Source, SourceAgentScopeRefEnv)
+	}
+	if r.CanonicalRef != "agent:cody:project:wrkq" {
+		t.Errorf("CanonicalRef=%q", r.CanonicalRef)
+	}
+	if got, want := r.FullRef(), "agent:cody:project:wrkq:task:T-05423:role:implementer"; got != want {
+		t.Errorf("FullRef()=%q, want %q", got, want)
+	}
+	if len(diags) != 0 {
+		t.Errorf("expected no diagnostics, got %v", diags)
+	}
+}
+
+func TestResolve_OverrideBeatsAgentScopeRef(t *testing.T) {
+	clearScopeEnv(t)
+	setEnv(t, "AGENT_SCOPE_REF", "agent:cody:project:wrkq")
+	r, _, err := Resolve("agent:clod:project:wrkq")
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if r.Source != SourceOverride {
+		t.Errorf("Source=%q, want %q", r.Source, SourceOverride)
+	}
+	if r.AgentID != "clod" {
+		t.Errorf("AgentID=%q, want clod", r.AgentID)
+	}
+}
+
+func TestResolve_AgentScopeRefBeatsASPScopeRefWithDiagnostic(t *testing.T) {
+	clearScopeEnv(t)
+	setEnv(t, "AGENT_SCOPE_REF", "agent:cody:project:wrkq")
+	setEnv(t, "ASP_SCOPE_REF", "agent:clod:project:wrkq")
+	r, diags, err := Resolve("")
+	if err != nil {
+		t.Fatalf("Resolve error: %v", err)
+	}
+	if r.Source != SourceAgentScopeRefEnv {
+		t.Errorf("Source=%q, want %q", r.Source, SourceAgentScopeRefEnv)
+	}
+	if r.AgentID != "cody" {
+		t.Errorf("AgentID=%q, want cody", r.AgentID)
+	}
+	found := false
+	for _, d := range diags {
+		if d.Code == "AGENT_SCOPE_REF_ASP_SCOPE_REF_DISAGREE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected AGENT_SCOPE_REF_ASP_SCOPE_REF_DISAGREE diagnostic, got %v", diags)
+	}
+}
+
+func TestResolve_InvalidAgentScopeRefNamesEnv(t *testing.T) {
+	clearScopeEnv(t)
+	setEnv(t, "AGENT_SCOPE_REF", "bad scope")
+	_, _, err := Resolve("")
+	if err == nil {
+		t.Fatal("expected invalid AGENT_SCOPE_REF error")
+	}
+	if !strings.Contains(err.Error(), "AGENT_SCOPE_REF") {
+		t.Fatalf("error should mention AGENT_SCOPE_REF: %v", err)
 	}
 }
 

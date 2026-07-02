@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
@@ -14,46 +13,14 @@ import (
 )
 
 // launchPrincipalRef resolves the rpc server's default caller principal from the
-// global --principal-ref / --as flags. Both accept agent:<id> or full agent
-// ScopeRefs and resolve to agent:<id>; if both are supplied they must resolve to
-// the same agent. Empty when neither is set (the server then falls back to
-// WRKQ_PRINCIPAL_REF / config default_principal_ref).
+// shared wrkq caller attribution sources. Empty means no launch-time default was
+// configured and the server keeps its configured default_principal_ref.
 func launchPrincipalRef(cmd *cobra.Command) (string, error) {
-	read := func(name string) string {
-		if f := cmd.Flags().Lookup(name); f != nil {
-			return strings.TrimSpace(f.Value.String())
-		}
-		return ""
-	}
-	principalFlag := read("principal-ref")
-	asFlag := read("as")
-	var principal string
-	if principalFlag != "" {
-		p, err := normalizePrincipalFlag("--principal-ref", principalFlag)
-		if err != nil {
-			return "", err
-		}
-		principal = p
-	}
-	if asFlag != "" {
-		p, err := normalizePrincipalFlag("--as", asFlag)
-		if err != nil {
-			return "", err
-		}
-		if principal != "" && principal != p {
-			return "", fmt.Errorf("--principal-ref resolves to %s but --as resolves to %s; use one flag or make both point to the same agent", principal, p)
-		}
-		principal = p
-	}
-	return principal, nil
-}
-
-func normalizePrincipalFlag(name, value string) (string, error) {
-	principal, err := attribution.NormalizeCanonical(value)
+	attr, err := optionalCommandAttribution(cmd, attribution.PrincipalEnv)
 	if err != nil {
-		return "", fmt.Errorf("invalid %s: %w", name, err)
+		return "", err
 	}
-	return principal, nil
+	return attr.PrincipalRef, nil
 }
 
 func newRPCCmd() *cobra.Command {

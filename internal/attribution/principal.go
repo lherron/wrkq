@@ -2,6 +2,7 @@ package attribution
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -14,6 +15,11 @@ import (
 const (
 	PrincipalEnv = "WRKQ_PRINCIPAL_REF"
 )
+
+// ErrNoPrincipalConfigured identifies the expected "no ambient principal"
+// outcome for optional caller defaults. Mutating wrkq-core servers still make
+// the final required-principal decision.
+var ErrNoPrincipalConfigured = errors.New("no principal configured")
 
 // Attribution is the canonical identity/provenance pair attached to a write.
 type Attribution struct {
@@ -99,11 +105,20 @@ func DeriveFromScope(resolved scope.ResolvedScope) (string, error) {
 	return NormalizeCanonical("agent:" + resolved.AgentID)
 }
 
-// Resolve resolves acting attribution using principal-only precedence:
+// Resolve resolves wrkq acting attribution using principal-only precedence:
 // --principal-ref, --as, WRKQ_PRINCIPAL_REF, scope-derived, config
 // default_principal_ref. Legacy actor env/config values are intentionally not
 // attribution sources.
 func Resolve(opts ResolveOptions) (Attribution, error) {
+	return ResolveWithPrincipalEnvs(opts, PrincipalEnv)
+}
+
+// ResolveWithPrincipalEnvs resolves acting attribution using the shared
+// principal-only precedence: --principal-ref, --as, the supplied explicit
+// product principal env vars in order, scope-derived, config
+// default_principal_ref. It is used by wrkq and wrkf entrypoints so full runtime
+// ScopeRefs are reduced consistently to stored agent:<id> principals.
+func ResolveWithPrincipalEnvs(opts ResolveOptions, principalEnvNames ...string) (Attribution, error) {
 	var scopeRef string
 	if opts.ResolvedScope != nil {
 		scopeRef = opts.ResolvedScope.FullRef()
@@ -132,12 +147,17 @@ func Resolve(opts ResolveOptions) (Attribution, error) {
 		}
 		return buildAttribution(principal, scopeRef)
 	}
-	if value := os.Getenv(PrincipalEnv); value != "" {
-		principal, err := NormalizeCanonical(value)
-		if err != nil {
-			return Attribution{}, err
+	for _, envName := range principalEnvNames {
+		if envName == "" {
+			continue
 		}
-		return buildAttribution(principal, scopeRef)
+		if value := os.Getenv(envName); value != "" {
+			principal, err := NormalizeCanonical(value)
+			if err != nil {
+				return Attribution{}, fmt.Errorf("invalid %s: %w", envName, err)
+			}
+			return buildAttribution(principal, scopeRef)
+		}
 	}
 	if opts.ResolvedScope != nil {
 		principal, err := DeriveFromScope(*opts.ResolvedScope)
@@ -153,7 +173,12 @@ func Resolve(opts ResolveOptions) (Attribution, error) {
 		return buildAttribution(principal, scopeRef)
 	}
 
-	return Attribution{}, fmt.Errorf("no principal configured; set --principal-ref agent:<id>, --as agent:<id>, %s=agent:<id>, a valid ASP scope, or config default_principal_ref", PrincipalEnv)
+	return Attribution{}, fmt.Errorf("%w; set --principal-ref agent:<id>, --as agent:<id>, %s=agent:<id>, a valid runtime scope, or config default_principal_ref", ErrNoPrincipalConfigured, PrincipalEnv)
+}
+
+// IsNoPrincipalConfigured reports the optional-default miss from Resolve.
+func IsNoPrincipalConfigured(err error) bool {
+	return errors.Is(err, ErrNoPrincipalConfigured)
 }
 
 func flagValue(cmd *cobra.Command, name string) string {

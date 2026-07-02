@@ -363,6 +363,7 @@ func clearAttributionEnv(t *testing.T) {
 		"WRKQ_PRINCIPAL_REF",
 		"WRKQ_ACTOR",
 		"WRKQ_ACTOR_ID",
+		"AGENT_SCOPE_REF",
 		"ASP_SCOPE_REF",
 		"ASP_HANDLE",
 		"ASP_AGENT_ID",

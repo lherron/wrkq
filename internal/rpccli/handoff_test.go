@@ -63,10 +63,7 @@ func TestHandoffAckParams_ExplicitActorAndOmitempty(t *testing.T) {
 }
 
 func TestHandoffAckIdentityFallsBackToExactRow(t *testing.T) {
-	t.Setenv("ASP_SCOPE_REF", "")
-	t.Setenv("ASP_HANDLE", "")
-	t.Setenv("ASP_AGENT_ID", "")
-	t.Setenv("ASP_PROJECT", "")
+	clearHandoffScopeEnv(t)
 
 	got, err := resolveHandoffAckIdentity(&cobra.Command{}, handoffJSON{
 		ID:        "H-00001",
@@ -83,10 +80,7 @@ func TestHandoffAckIdentityFallsBackToExactRow(t *testing.T) {
 }
 
 func TestHandoffAckIdentityExplicitAsUsesRowProject(t *testing.T) {
-	t.Setenv("ASP_SCOPE_REF", "")
-	t.Setenv("ASP_HANDLE", "")
-	t.Setenv("ASP_AGENT_ID", "")
-	t.Setenv("ASP_PROJECT", "")
+	clearHandoffScopeEnv(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("as", "", "")
@@ -105,6 +99,13 @@ func TestHandoffAckIdentityExplicitAsUsesRowProject(t *testing.T) {
 	}
 	if got.actorAgentID != "curly" || got.principalRef != "agent:curly" || got.scopeRef != "agent:curly:project:wrkq" {
 		t.Fatalf("identity mismatch: %#v", got)
+	}
+}
+
+func clearHandoffScopeEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"AGENT_SCOPE_REF", "ASP_SCOPE_REF", "ASP_HANDLE", "ASP_AGENT_ID", "ASP_PROJECT"} {
+		t.Setenv(key, "")
 	}
 }
 

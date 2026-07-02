@@ -18,6 +18,7 @@ type handoffCreateExecResult struct {
 
 func runHandoffCreateCLI(t *testing.T, args []string, stdin string) handoffCreateExecResult {
 	t.Helper()
+	t.Setenv("AGENT_SCOPE_REF", "")
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetArgs(args)

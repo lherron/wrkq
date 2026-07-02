@@ -8,10 +8,11 @@ import (
 
 // Source identifies where the resolved scope value came from.
 const (
-	SourceOverride    = "override"
-	SourceScopeRefEnv = "ASP_SCOPE_REF"
-	SourceHandleEnv   = "ASP_HANDLE"
-	SourceComposedEnv = "ASP_AGENT_ID+ASP_PROJECT"
+	SourceOverride         = "override"
+	SourceAgentScopeRefEnv = "AGENT_SCOPE_REF"
+	SourceScopeRefEnv      = "ASP_SCOPE_REF"
+	SourceHandleEnv        = "ASP_HANDLE"
+	SourceComposedEnv      = "ASP_AGENT_ID+ASP_PROJECT"
 )
 
 // DiagnosticLevel is the severity of a diagnostic emitted during resolution.
@@ -54,19 +55,21 @@ type ResolvedScope struct {
 // EnvSnapshot captures the env vars we inspect for resolution. Useful for
 // `wrkq agent-context` introspection.
 type EnvSnapshot struct {
-	ASPScopeRef string `json:"ASP_SCOPE_REF,omitempty"`
-	ASPHandle   string `json:"ASP_HANDLE,omitempty"`
-	ASPAgentID  string `json:"ASP_AGENT_ID,omitempty"`
-	ASPProject  string `json:"ASP_PROJECT,omitempty"`
+	AgentScopeRef string `json:"AGENT_SCOPE_REF,omitempty"`
+	ASPScopeRef   string `json:"ASP_SCOPE_REF,omitempty"`
+	ASPHandle     string `json:"ASP_HANDLE,omitempty"`
+	ASPAgentID    string `json:"ASP_AGENT_ID,omitempty"`
+	ASPProject    string `json:"ASP_PROJECT,omitempty"`
 }
 
 // ReadEnv reads the env vars we care about into an EnvSnapshot.
 func ReadEnv() EnvSnapshot {
 	return EnvSnapshot{
-		ASPScopeRef: os.Getenv("ASP_SCOPE_REF"),
-		ASPHandle:   os.Getenv("ASP_HANDLE"),
-		ASPAgentID:  os.Getenv("ASP_AGENT_ID"),
-		ASPProject:  os.Getenv("ASP_PROJECT"),
+		AgentScopeRef: os.Getenv("AGENT_SCOPE_REF"),
+		ASPScopeRef:   os.Getenv("ASP_SCOPE_REF"),
+		ASPHandle:     os.Getenv("ASP_HANDLE"),
+		ASPAgentID:    os.Getenv("ASP_AGENT_ID"),
+		ASPProject:    os.Getenv("ASP_PROJECT"),
 	}
 }
 
@@ -90,17 +93,17 @@ func parseScopeInput(s string) (ParsedScopeRef, error) {
 
 // correctiveExample is the user-facing example string used in resolution
 // errors and the agent-context CLI.
-const correctiveExample = `set ASP_SCOPE_REF, ASP_HANDLE, or both ASP_AGENT_ID and ASP_PROJECT.
+const correctiveExample = `set AGENT_SCOPE_REF, ASP_SCOPE_REF, ASP_HANDLE, or both ASP_AGENT_ID and ASP_PROJECT.
 Examples:
+  AGENT_SCOPE_REF=agent:cody:project:wrkq
   ASP_SCOPE_REF=agent:cody:project:wrkq
   ASP_HANDLE=cody@wrkq
   ASP_AGENT_ID=cody ASP_PROJECT=wrkq
 Or pass --scope cody@wrkq.`
 
-// Resolve resolves the active scope using --override → ASP_SCOPE_REF →
-// ASP_HANDLE → ASP_AGENT_ID+ASP_PROJECT, normalizes to project kind for v1,
-// and returns diagnostics on disagreement between ASP_SCOPE_REF and
-// ASP_HANDLE.
+// Resolve resolves the active scope using --override → AGENT_SCOPE_REF →
+// ASP_SCOPE_REF → ASP_HANDLE → ASP_AGENT_ID+ASP_PROJECT, normalizes to project
+// kind for v1, and returns diagnostics on disagreement between env aliases.
 //
 // When override is non-empty, env vars are ignored entirely (still surfaced
 // for introspection callers via ReadEnv).
@@ -120,7 +123,36 @@ func Resolve(override string) (ResolvedScope, []Diagnostic, error) {
 		return finalize(parsed, override, SourceOverride, diags), diags, nil
 	}
 
-	// 2. ASP_SCOPE_REF wins over ASP_HANDLE; emit a diagnostic if they
+	// 2. AGENT_SCOPE_REF is the canonical runtime scope env. It wins over
+	//    ASP_SCOPE_REF; emit a diagnostic when both parse but disagree.
+	if env.AgentScopeRef != "" {
+		parsed, err := ParseScopeRef(env.AgentScopeRef)
+		if err != nil {
+			return ResolvedScope{}, diags, fmt.Errorf("invalid AGENT_SCOPE_REF %q: %w", env.AgentScopeRef, err)
+		}
+		if env.ASPScopeRef != "" {
+			aspParsed, aspErr := ParseScopeRef(env.ASPScopeRef)
+			if aspErr != nil {
+				diags = append(diags, Diagnostic{
+					Level:   DiagWarn,
+					Code:    "ASP_SCOPE_REF_INVALID",
+					Message: fmt.Sprintf("ASP_SCOPE_REF %q failed to parse: %v; using AGENT_SCOPE_REF", env.ASPScopeRef, aspErr),
+				})
+			} else if !sameAgentProjectTaskRole(parsed, aspParsed) {
+				diags = append(diags, Diagnostic{
+					Level: DiagWarn,
+					Code:  "AGENT_SCOPE_REF_ASP_SCOPE_REF_DISAGREE",
+					Message: fmt.Sprintf(
+						"AGENT_SCOPE_REF (%s) and ASP_SCOPE_REF (%s) disagree; preferring AGENT_SCOPE_REF",
+						parsed.ScopeRef, aspParsed.ScopeRef,
+					),
+				})
+			}
+		}
+		return finalize(parsed, env.AgentScopeRef, SourceAgentScopeRefEnv, diags), diags, nil
+	}
+
+	// 3. ASP_SCOPE_REF wins over ASP_HANDLE; emit a diagnostic if they
 	//    disagree.
 	if env.ASPScopeRef != "" {
 		parsed, err := ParseScopeRef(env.ASPScopeRef)
@@ -151,7 +183,7 @@ func Resolve(override string) (ResolvedScope, []Diagnostic, error) {
 		return finalize(parsed, env.ASPScopeRef, SourceScopeRefEnv, diags), diags, nil
 	}
 
-	// 3. ASP_HANDLE next.
+	// 4. ASP_HANDLE next.
 	if env.ASPHandle != "" {
 		parsed, err := ParseScopeHandle(env.ASPHandle)
 		if err != nil {
@@ -160,7 +192,7 @@ func Resolve(override string) (ResolvedScope, []Diagnostic, error) {
 		return finalize(parsed, env.ASPHandle, SourceHandleEnv, diags), diags, nil
 	}
 
-	// 4. ASP_AGENT_ID + ASP_PROJECT composed.
+	// 5. ASP_AGENT_ID + ASP_PROJECT composed.
 	if env.ASPAgentID != "" && env.ASPProject != "" {
 		composed := fmt.Sprintf("%s@%s", env.ASPAgentID, env.ASPProject)
 		parsed, err := ParseScopeHandle(composed)
@@ -184,7 +216,7 @@ func Resolve(override string) (ResolvedScope, []Diagnostic, error) {
 	}
 
 	return ResolvedScope{}, diags, fmt.Errorf(
-		"no scope resolvable: --scope, ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID+ASP_PROJECT must be set.\n%s",
+		"no scope resolvable: --scope, AGENT_SCOPE_REF, ASP_SCOPE_REF, ASP_HANDLE, or ASP_AGENT_ID+ASP_PROJECT must be set.\n%s",
 		correctiveExample,
 	)
 }

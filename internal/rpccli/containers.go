@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
 )
 
@@ -291,29 +293,33 @@ func mkdirKindFor(path, userKind string) (string, error) {
 // agent:<id> or a full agent ScopeRef, which is reduced to agent:<id> before it
 // crosses the RPC boundary.
 func actorFlag(cmd *cobra.Command) (string, error) {
-	var principal string
-	if f := cmd.Flag("principal-ref"); f != nil {
-		if v := f.Value.String(); v != "" {
-			normalized, err := normalizePrincipalFlag("--principal-ref", v)
-			if err != nil {
-				return "", err
-			}
-			principal = normalized
-		}
+	attr, err := optionalCommandAttribution(cmd, attribution.PrincipalEnv)
+	if err != nil {
+		return "", err
 	}
-	if f := cmd.Flag("as"); f != nil {
-		if v := f.Value.String(); v != "" {
-			normalized, err := normalizePrincipalFlag("--as", v)
-			if err != nil {
-				return "", err
-			}
-			if principal != "" && normalized != principal {
-				return "", fmt.Errorf("--principal-ref resolves to %s but --as resolves to %s; use one flag or make both point to the same agent", principal, normalized)
-			}
-			principal = normalized
-		}
+	return attr.PrincipalRef, nil
+}
+
+func optionalCommandAttribution(cmd *cobra.Command, principalEnvNames ...string) (attribution.Attribution, error) {
+	attr, err := attribution.ResolveWithPrincipalEnvs(attribution.ResolveOptions{
+		Command:       cmd,
+		ResolvedScope: resolvedRuntimeScope(),
+	}, principalEnvNames...)
+	if attribution.IsNoPrincipalConfigured(err) {
+		return attribution.Attribution{}, nil
 	}
-	return principal, nil
+	if err != nil {
+		return attribution.Attribution{}, err
+	}
+	return attr, nil
+}
+
+func resolvedRuntimeScope() *scope.ResolvedScope {
+	resolved, _, err := scope.Resolve("")
+	if err != nil {
+		return nil
+	}
+	return &resolved
 }
 
 // encodeJSONIndent matches the legacy json.NewEncoder(SetIndent("", "  ")).Encode

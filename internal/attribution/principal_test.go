@@ -152,6 +152,62 @@ func TestResolveScopeOutranksConfigDefaultPrincipal(t *testing.T) {
 	}
 }
 
+func TestResolveWithPrincipalEnvsProductEnvOutranksScope(t *testing.T) {
+	t.Setenv("WRKF_PRINCIPAL_REF", "agent:env-principal")
+
+	attr, err := ResolveWithPrincipalEnvs(ResolveOptions{
+		ResolvedScope: &scope.ResolvedScope{
+			AgentID:   "scope-agent",
+			ProjectID: "wrkq",
+			TaskID:    "T-05423",
+		},
+		Config: &config.Config{DefaultPrincipalRef: "agent:config-principal"},
+	}, "WRKF_PRINCIPAL_REF")
+	if err != nil {
+		t.Fatalf("ResolveWithPrincipalEnvs failed: %v", err)
+	}
+	if attr.PrincipalRef != "agent:env-principal" {
+		t.Fatalf("PrincipalRef = %q, want agent:env-principal", attr.PrincipalRef)
+	}
+	if attr.ScopeRef != "agent:scope-agent:project:wrkq:task:T-05423" {
+		t.Fatalf("ScopeRef = %q, want full scope", attr.ScopeRef)
+	}
+}
+
+func TestResolveWithPrincipalEnvsScopeOutranksConfig(t *testing.T) {
+	attr, err := ResolveWithPrincipalEnvs(ResolveOptions{
+		ResolvedScope: &scope.ResolvedScope{AgentID: "cody", ProjectID: "wrkq"},
+		Config:        &config.Config{DefaultPrincipalRef: "agent:config-principal"},
+	}, "WRKF_PRINCIPAL_REF")
+	if err != nil {
+		t.Fatalf("ResolveWithPrincipalEnvs failed: %v", err)
+	}
+	if attr.PrincipalRef != "agent:cody" {
+		t.Fatalf("PrincipalRef = %q, want agent:cody", attr.PrincipalRef)
+	}
+}
+
+func TestResolveWithPrincipalEnvsFlagsOutrankProductEnv(t *testing.T) {
+	t.Setenv("WRKF_PRINCIPAL_REF", "agent:env-principal")
+	cmd := &cobra.Command{}
+	cmd.Flags().String("principal-ref", "", "principal")
+	cmd.Flags().String("as", "", "principal")
+	if err := cmd.ParseFlags([]string{"--principal-ref", "agent:flag-principal:project:wrkq"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+
+	attr, err := ResolveWithPrincipalEnvs(ResolveOptions{
+		Command:       cmd,
+		ResolvedScope: &scope.ResolvedScope{AgentID: "scope-agent", ProjectID: "wrkq"},
+	}, "WRKF_PRINCIPAL_REF")
+	if err != nil {
+		t.Fatalf("ResolveWithPrincipalEnvs failed: %v", err)
+	}
+	if attr.PrincipalRef != "agent:flag-principal" {
+		t.Fatalf("PrincipalRef = %q, want agent:flag-principal", attr.PrincipalRef)
+	}
+}
+
 func TestResolveNoInputFailsWithPrincipalHint(t *testing.T) {
 	_, err := Resolve(ResolveOptions{})
 	if err == nil {

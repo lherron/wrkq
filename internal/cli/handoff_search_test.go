@@ -20,6 +20,7 @@ type handoffSearchExecResult struct {
 
 func runHandoffSearchCLI(t *testing.T, args []string) handoffSearchExecResult {
 	t.Helper()
+	t.Setenv("AGENT_SCOPE_REF", "")
 
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetArgs(args)

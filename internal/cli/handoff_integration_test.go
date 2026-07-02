@@ -17,6 +17,7 @@ type handoffIntegrationExecResult struct {
 
 func runHandoffIntegrationCLI(t *testing.T, args []string, stdin string) handoffIntegrationExecResult {
 	t.Helper()
+	t.Setenv("AGENT_SCOPE_REF", "")
 	resetHandoffIntegrationState(t)
 
 	var stdout, stderr bytes.Buffer
