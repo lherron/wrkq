@@ -7,7 +7,7 @@ Generated from `agent-enablement.json`. This markdown is a projection, not autho
 Rubric: rubric.md@d793717
 Catalog: not-recorded
 AE assessment: 2026-07-02 (agent-enablement/assessments/wrkq/assessment.json)
-PM floor: 2026-07-02 (etag 2)
+PM floor: 2026-07-02 (etag 4)
 
 ## Profile Summary
 Required: 16
