@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "rubricVersion": "rubric.md@d793717",
+  "catalogVersion": "not-recorded",
+  "floor": {
+    "lastSweep": "2026-07-02",
+    "sweepId": "ae-phase3-wrkq-2026-07-02",
+    "sweptBy": "agent-enablement phase-3 projection sweep",
+    "writer": "pm",
+    "etag": 1,
+    "axes": {
+      "F0": "PRESENT"
+    }
+  },
+  "observations": [],
+  "depth": {
+    "lastAssess": "2026-07-02",
+    "writer": "ae",
+    "etag": 1,
+    "assessment": "agent-enablement/assessments/wrkq/assessment.json",
+    "axes": {
+      "F0": "PRESENT.DORMANT.satisfied.dormant",
+      "P0": "PRESENT.EXERCISED.satisfied.exercised",
+      "S1": "PARTIAL.EXERCISED.open_delta",
+      "S2": "PRESENT.DORMANT.satisfied.dormant",
+      "S3": "PRESENT.EXERCISED.satisfied.exercised",
+      "S4": "PRESENT.EXERCISED.satisfied.exercised",
+      "S5": "PRESENT.EXERCISED.satisfied.exercised",
+      "S6": "PRESENT.EXERCISED.satisfied.exercised",
+      "S7": "PRESENT.EXERCISED.satisfied.exercised",
+      "S8": "PRESENT.EXERCISED.satisfied.exercised",
+      "TA": "PRESENT.EXERCISED.satisfied.exercised",
+      "TB": "PRESENT.EXERCISED.satisfied.exercised",
+      "TC": "PARTIAL.DORMANT.satisfied.dormant",
+      "TD": "PRESENT.DORMANT.satisfied.dormant",
+      "TE": "PRESENT.EXERCISED.satisfied.exercised",
+      "TF": "PRESENT.EXERCISED.satisfied.exercised"
+    },
+    "profileSummary": {
+      "generatedBy": "agent-enablement/validate-contract.mjs --sync-target",
+      "source": {
+        "profile": "agent-enablement/assessments/wrkq/profile.json",
+        "assessment": "agent-enablement/assessments/wrkq/assessment.json",
+        "deltas": "agent-enablement/assessments/wrkq/deltas.json",
+        "profileHash": "4b5fbccaac6f8a14a80829d9e4e7aa46ba3fa25c7043ce9b3b8b0b664c9f94e4",
+        "assessmentHash": "85ce13b198a9460fca633ccd0f8a99b0a5e460eaa82b1f86ce88a1a3cdfe1246",
+        "deltasHash": "f4b9b0f95914a111f15a79315e63955082675360e925024d7695d40e016f78bb"
+      },
+      "decidedAt": "2026-07-02",
+      "assessedAt": "2026-07-02",
+      "profileStatusCounts": {
+        "required": 16,
+        "not_applicable": 1,
+        "frontier": 1
+      },
+      "openDeltaIds": [],
+      "failingOpenAxes": [
+        "S1",
+        "TC"
+      ],
+      "axes": {
+        "F0": {
+          "status": "required",
+          "rationale": "Baseline hygiene remains PM/floor-owned and presence-only."
+        },
+        "P0": {
+          "status": "required",
+          "minimumRung": "GUARD-local-green-hook-enforced",
+          "rationale": "wrkq is a core local-first task/workflow CLI; verify and hook enforcement are preconditions for every other guard."
+        },
+        "S1": {
+          "status": "required",
+          "minimumRung": "ELIMINATE-where-expressible",
+          "rationale": "Domain parsing and DB boundaries are central to task/workflow correctness."
+        },
+        "S2": {
+          "status": "required",
+          "rationale": "Command and workflow shapes are repeated enough that discovery priors matter."
+        },
+        "S3": {
+          "status": "required",
+          "rationale": "Agents routinely enter wrkq through AGENTS.md and territory docs."
+        },
+        "S3.affordanceGating": {
+          "status": "not_applicable",
+          "rationale": "wrkq exposes static CLI/RPC surfaces; it does not assemble model prompts or dynamically project skills/tools."
+        },
+        "S4": {
+          "status": "required",
+          "rationale": "Layer and diagnostic guards are already in the verify chain and remain core."
+        },
+        "S5": {
+          "status": "required",
+          "rationale": "Suppression cost is needed before expanding build-failing guards."
+        },
+        "S6": {
+          "status": "required",
+          "minimumRung": "GUARD-local-green-hook-enforced",
+          "rationale": "The local hook-enforced verify loop is wrkq's handoff gate."
+        },
+        "S7": {
+          "status": "required",
+          "rationale": "wrkq has generated/RPC/doc surfaces that rot without sensors."
+        },
+        "S8": {
+          "status": "required",
+          "rationale": "Rule taste and cut-line discipline prevent guard sprawl."
+        },
+        "TA": {
+          "status": "required",
+          "rationale": "wrkq dogfoods multi-agent workflow roles through wrkf."
+        },
+        "TB": {
+          "status": "required",
+          "rationale": "Process carriers are part of the target workflow."
+        },
+        "TC": {
+          "status": "required",
+          "rationale": "The Phase 1 pass creates the missing target-local retro carrier."
+        },
+        "TD": {
+          "status": "required",
+          "rationale": "Executable discovery tools already exist and are useful to agents."
+        },
+        "TE": {
+          "status": "required",
+          "rationale": "RPC and workflow acceptance specs are public contract proof."
+        },
+        "TE.claimScopedEvidenceRouting": {
+          "status": "frontier",
+          "rationale": "Claim-scoped evidence routing remains frontier; probe opportunistically but do not score as a hard gap."
+        },
+        "TF": {
+          "status": "required",
+          "rationale": "wrkq/wrkf is itself the executable work-state control plane and must prove adoption, not only implementation."
+        }
+      }
+    }
+  },
+  "escalations": []
+}
