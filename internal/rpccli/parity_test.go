@@ -1372,6 +1372,13 @@ var parityCases = []parityCase{
 		normalizeUUID: true,
 	},
 	{
+		name:          "comment/add-message-flag",
+		setup:         [][]string{{"touch", "inbox/ct-message", "-t", "CT Message"}},
+		args:          []string{"comment", "add", "inbox/ct-message", "-m", "hello from -m"},
+		mutates:       true,
+		normalizeUUID: true,
+	},
+	{
 		name:          "comment/add-stdin-dash",
 		setup:         [][]string{{"touch", "inbox/ct-stdin", "-t", "CT Stdin"}},
 		args:          []string{"comment", "add", "inbox/ct-stdin", "-"},

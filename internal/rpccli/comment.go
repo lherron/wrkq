@@ -365,27 +365,34 @@ func newCommentCatCmd() *cobra.Command {
 
 func newCommentAddCmd() *cobra.Command {
 	var asJSON bool
+	var message string
 	cmd := &cobra.Command{
 		Use:   "add <task> [comment-text]",
 		Short: "Add a comment to a task",
 		Long: `Add a comment to a task.
 
-Comment text can be supplied as a positional argument. Use '-' as the
-comment-text argument to read the body from stdin. If comment-text is omitted,
-the body is also read from stdin.`,
+Comment text can be supplied with -m/--message or as a positional argument.
+Use '-' as the comment-text argument to read the body from stdin. If
+comment-text is omitted, the body is also read from stdin.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCommentAdd(cmd, args)
+			return runCommentAdd(cmd, args, message)
 		},
 	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Comment text")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
-func runCommentAdd(cmd *cobra.Command, args []string) error {
+func runCommentAdd(cmd *cobra.Command, args []string, message string) error {
 	task := args[0]
 	var body string
-	if len(args) > 1 {
+	if message != "" && len(args) > 1 {
+		return fmt.Errorf("only one comment source allowed: use -m, positional argument, or stdin ('-')")
+	}
+	if message != "" {
+		body = message
+	} else if len(args) > 1 {
 		var err error
 		body, err = readTextValue(args[1], "comment", cmd.InOrStdin())
 		if err != nil {
