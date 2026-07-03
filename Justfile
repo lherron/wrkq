@@ -306,6 +306,10 @@ doc-links:
 architecture-records *args:
   go run ./cmd/architecture-records --root . {{args}}
 
+# Run vendored archagent fitkit S6 guard fitness: pre-push hook must delegate to just verify.
+fitkit-s6:
+  node tools/fitkit/s6-hook-runs-verify.mjs --root .
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -317,7 +321,7 @@ test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
 # Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + @wrkq/client unit+integration RPC)
-verify: suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
+verify: fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
   @echo "✓ All checks passed"
 
 # Run the full slow backstop tier (verify [incl. RPC] + smoke + canonical adoption probe)

@@ -1,0 +1,19 @@
+{
+  "sourceRepo": "archagent",
+  "sourceCommit": "c27038e5a4fd88b92ea7059796ff13ced7e90d36",
+  "sourceFiles": [
+    "agent-enablement/fitkit/src/diagnostic.ts",
+    "agent-enablement/fitkit/src/evidence.ts",
+    "agent-enablement/fitkit/src/fitness.ts",
+    "agent-enablement/fitkit/src/perturbation.ts",
+    "agent-enablement/fitkit/src/seat.ts",
+    "agent-enablement/fitkit/src/verdict.ts",
+    "agent-enablement/fitkit/src/wrkq-pilot.ts"
+  ],
+  "artifact": "tools/fitkit/s6-hook-runs-verify.mjs",
+  "contentSha256": "f195680f910d10fce656942dcba5c1eda8edaf549a6d873dc09d25c29e1e67cf",
+  "vendoredAt": "2026-07-03T00:00:00Z",
+  "fitnessId": "fit:s6/hook-runs-verify",
+  "gateBudgetMs": 100,
+  "notes": "Self-contained Node artifact; no runtime archagent checkout, no package manager, no network package resolution."
+}
