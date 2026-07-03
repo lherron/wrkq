@@ -10,7 +10,7 @@ AE assessment: 2026-07-02 (agent-enablement/assessments/wrkq/assessment.json)
 PM floor: 2026-07-03 (etag 10)
 
 ## Profile Summary
-Required: 16
+Required: 17
 Frontier: 1
 Deferred: 0
 Open deltas: none

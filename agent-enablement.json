@@ -172,14 +172,14 @@
         "profile": "agent-enablement/assessments/wrkq/profile.json",
         "assessment": "agent-enablement/assessments/wrkq/assessment.json",
         "deltas": "agent-enablement/assessments/wrkq/deltas.json",
-        "profileHash": "4b5fbccaac6f8a14a80829d9e4e7aa46ba3fa25c7043ce9b3b8b0b664c9f94e4",
+        "profileHash": "165370c11ae705909a174afae5fc90799403696d9800d1df0ff13251dc73b4ca",
         "assessmentHash": "d3e4276da039868cbb6082756b6afad5fab7e4651578e56f0d3cc33d875cf61e",
         "deltasHash": "f4b9b0f95914a111f15a79315e63955082675360e925024d7695d40e016f78bb"
       },
       "decidedAt": "2026-07-02",
       "assessedAt": "2026-07-02",
       "profileStatusCounts": {
-        "required": 16,
+        "required": 17,
         "not_applicable": 1,
         "frontier": 1
       },
@@ -251,6 +251,11 @@
         "TD": {
           "status": "required",
           "rationale": "Executable discovery tools already exist and are useful to agents."
+        },
+        "TD.selfDescribingSurfaceConformance": {
+          "status": "required",
+          "minimumRung": "registry-derived-help-docs-plus-drift-gate",
+          "rationale": "wrkq ships a CLI whose live help surface is already proven by fit:td/surface-conformance; the suite should select that guard instead of treating it as an unprofiled runner-only proof."
         },
         "TE": {
           "status": "required",
