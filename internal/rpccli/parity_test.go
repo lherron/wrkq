@@ -1371,6 +1371,14 @@ var parityCases = []parityCase{
 		mutates:       true,
 		normalizeUUID: true,
 	},
+	{
+		name:          "comment/add-stdin-dash",
+		setup:         [][]string{{"touch", "inbox/ct-stdin", "-t", "CT Stdin"}},
+		args:          []string{"comment", "add", "inbox/ct-stdin", "-"},
+		stdin:         []byte("stdin-backed comment\nsecond line\n"),
+		mutates:       true,
+		normalizeUUID: true,
+	},
 
 	// comment rm ✓ caller-owned-confirmation seam via wrkq.comment.delete with an
 	// EXPLICIT mode (soft default / purge for --purge). The mirror owns the [y/N]
