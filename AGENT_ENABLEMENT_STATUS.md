@@ -7,7 +7,7 @@ Generated from `agent-enablement.json`. This markdown is a projection, not autho
 Rubric: rubric.md@d793717
 Catalog: not-recorded
 AE assessment: 2026-07-02 (agent-enablement/assessments/wrkq/assessment.json)
-PM floor: 2026-07-02 (etag 7)
+PM floor: 2026-07-03 (etag 9)
 
 ## Profile Summary
 Required: 16
@@ -26,7 +26,7 @@ Failing/open axes: S1, TC
 
 ## PM Observations
 - validate-justfile: PRESENT (P0) - justfile: recipes present default, info, test, lint, verify
-- validate-gitignore: PRESENT (F0) - .gitignore: checked 7 required entries; all present
+- validate-gitignore: PRESENT (F0) - .gitignore: checked 7 required entries; all present; sha256 3c9220211ca67df6d7579d19fb7808603a320c30be8152ae2157dc6d70741970
 - validate-readme: PRESENT (F0) - README.md: H1 title, description, quick start/getting started/install, usage/examples
 - validate-runtime: PRESENT (F0) - go.mod present
 - validate-agent-spaces: PRESENT (F0) - asp-targets.toml present; .gitignore present

@@ -3,11 +3,11 @@
   "rubricVersion": "rubric.md@d793717",
   "catalogVersion": "not-recorded",
   "floor": {
-    "lastSweep": "2026-07-02",
-    "sweepId": "pm-wrkq-20260702T192835Z",
+    "lastSweep": "2026-07-03",
+    "sweepId": "pm-wrkq-20260703T010600Z",
     "sweptBy": "project-minder",
     "writer": "pm",
-    "etag": 7,
+    "etag": 9,
     "axes": {
       "F0": "PARTIAL",
       "P0": "PARTIAL",
@@ -21,8 +21,8 @@
     {
       "checkId": "validate-justfile",
       "derivedFrom": "pm/validate-justfile@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "P0"
@@ -31,20 +31,20 @@
     },
     {
       "checkId": "validate-gitignore",
-      "derivedFrom": "pm/validate-gitignore@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "derivedFrom": "pm/validate-gitignore@v2",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "F0"
       ],
-      "evidence": ".gitignore: checked 7 required entries; all present"
+      "evidence": ".gitignore: checked 7 required entries; all present; sha256 3c9220211ca67df6d7579d19fb7808603a320c30be8152ae2157dc6d70741970"
     },
     {
       "checkId": "validate-readme",
       "derivedFrom": "pm/validate-readme@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "F0"
@@ -54,8 +54,8 @@
     {
       "checkId": "validate-runtime",
       "derivedFrom": "pm/validate-runtime@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "F0"
@@ -65,8 +65,8 @@
     {
       "checkId": "validate-agent-spaces",
       "derivedFrom": "pm/validate-agent-spaces@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "F0"
@@ -76,8 +76,8 @@
     {
       "checkId": "validate-agent-md",
       "derivedFrom": "pm/validate-agent-md@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "S3"
@@ -87,8 +87,8 @@
     {
       "checkId": "validate-githooks",
       "derivedFrom": "pm/validate-githooks@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "ABSENT",
       "axes": [
         "P0",
@@ -99,8 +99,8 @@
     {
       "checkId": "validate-gitleaks",
       "derivedFrom": "pm/validate-gitleaks@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "ABSENT",
       "axes": [
         "F0"
@@ -110,8 +110,8 @@
     {
       "checkId": "validate-linting",
       "derivedFrom": "pm/validate-linting@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PARTIAL",
       "axes": [
         "S6"
@@ -121,8 +121,8 @@
     {
       "checkId": "validate-typechecking",
       "derivedFrom": "pm/validate-typechecking@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "S1",
@@ -133,8 +133,8 @@
     {
       "checkId": "validate-tests",
       "derivedFrom": "pm/validate-tests@v1",
-      "sweepId": "pm-wrkq-20260702T192835Z",
-      "at": "2026-07-02T19:28:35.516Z",
+      "sweepId": "pm-wrkq-20260703T010600Z",
+      "at": "2026-07-03T01:06:00.313Z",
       "result": "PRESENT",
       "axes": [
         "S6",
@@ -273,7 +273,7 @@
       "wrkq": "T-05445",
       "opened": "2026-07-02",
       "kind": "floor-gap",
-      "sourceSweepId": "pm-wrkq-20260702T192835Z",
+      "sourceSweepId": "pm-wrkq-20260703T010600Z",
       "status": "open",
       "score": "PARTIAL"
     },
@@ -282,7 +282,7 @@
       "wrkq": "T-05446",
       "opened": "2026-07-02",
       "kind": "floor-gap",
-      "sourceSweepId": "pm-wrkq-20260702T192835Z",
+      "sourceSweepId": "pm-wrkq-20260703T010600Z",
       "status": "open",
       "score": "PARTIAL"
     },
@@ -291,7 +291,7 @@
       "wrkq": "T-05448",
       "opened": "2026-07-02",
       "kind": "floor-gap",
-      "sourceSweepId": "pm-wrkq-20260702T192835Z",
+      "sourceSweepId": "pm-wrkq-20260703T010600Z",
       "status": "open",
       "score": "PARTIAL"
     }
