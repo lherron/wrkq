@@ -101,14 +101,16 @@ Key variables:
 
 Database defaults:
 - If `.wrkq/wrkq.db` exists in the current directory, it is used.
-- Otherwise the default is `~/.local/share/wrkq/wrkq.db`.
+- Otherwise there is no implicit database path; commands that need a database
+  fail with a message naming `WRKQ_DB_PATH` and `--db`.
 - `rpc://host` locators default to port `7171`.
 - Admin and daemon path-owning surfaces (`wrkqadm --db`, `wrkqd --db`,
   `wrkq server --db-path`) remain local-path-only.
 
 Attachment defaults:
 - If the DB is `.wrkq/wrkq.db`, attachments default to `.wrkq/attachments`.
-- Otherwise attachments default to `~/.local/share/wrkq/attachments`.
+- Otherwise attachment byte storage must be configured explicitly with
+  `WRKQ_ATTACH_DIR` or `attach_dir`.
 
 Project-root precedence:
 

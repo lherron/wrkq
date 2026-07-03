@@ -23,7 +23,7 @@ Every mutable row carries `etag INTEGER` (increments on write). All mutating com
 
 ## Attachments
 
-Metadata in DB, bytes on disk at `<attach_dir>/tasks/<task_uuid>/...`. Paths are keyed by task UUID, so task moves don't rewrite paths. Soft delete preserves files; `--purge` removes the directory. Default `attach_dir` is `~/.local/share/wrkq/attachments` — user-specific, untracked.
+Metadata in DB, bytes on disk at `<attach_dir>/tasks/<task_uuid>/...`. Paths are keyed by task UUID, so task moves don't rewrite paths. Soft delete preserves files; `--purge` removes the directory. The project-local `.wrkq/wrkq.db` database defaults to `.wrkq/attachments`; other database paths require an explicit `WRKQ_ATTACH_DIR` or `attach_dir`.
 
 ## Comments
 

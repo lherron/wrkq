@@ -35,6 +35,10 @@ type DB struct {
 // locked"/internal-error failure). busy_timeout then lets contending writers
 // wait and serialize rather than failing instantly. See docs/wrkq-wrkf-rpc.md.
 func Open(path string) (*DB, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("database path not specified (use --db flag or set WRKQ_DB_PATH)")
+	}
+
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)

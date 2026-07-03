@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -107,6 +106,9 @@ func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*
 			}
 			if cfg.RemoteEndpoint != "" {
 				return fmt.Errorf("wrkf requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
+			}
+			if cfg.DBPath == "" {
+				return config.MissingDatabasePathError()
 			}
 			database, err := db.Open(cfg.DBPath)
 			if err != nil {
@@ -1404,28 +1406,15 @@ func wrkqdTokenFromEnv() string {
 }
 
 // rpcAttachDir resolves the attachment storage directory for the RPC server,
-// returning only an explicitly-configured directory (WRKQ_ATTACH_DIR, or a
-// config.yaml attach_dir that differs from the cwd/home auto-default). An empty
-// result makes attachment.add report WRKQ_VALIDATION rather than silently
-// writing to the per-user default. Mirrors internal/cli.rpcAttachDir so both
+// returning only an explicitly configured directory. An empty result makes
+// attachment.add report WRKQ_VALIDATION rather than silently writing to an
+// implicit host path. Mirrors internal/workrpc/bootstrap.AttachDir so both
 // entrypoints behave identically.
 func rpcAttachDir(configured string) string {
 	if env := os.Getenv("WRKQ_ATTACH_DIR"); env != "" {
 		return env
 	}
-	if configured != "" && configured != defaultAttachDir() {
-		return configured
-	}
-	return ""
-}
-
-// defaultAttachDir mirrors config.Load's home auto-default.
-func defaultAttachDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".local", "share", "wrkq", "attachments")
+	return configured
 }
 
 func supervisorCmd() *cobra.Command {

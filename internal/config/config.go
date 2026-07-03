@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,12 @@ import (
 	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
+
+const MissingDatabasePathMessage = "database path not specified (use --db flag or set WRKQ_DB_PATH)"
+
+func MissingDatabasePathError() error {
+	return errors.New(MissingDatabasePathMessage)
+}
 
 // Config represents the application configuration
 type Config struct {
@@ -163,16 +170,8 @@ func Load() (*Config, error) {
 
 	// Set defaults if not configured
 	if cfg.DBPath == "" && cfg.RemoteEndpoint == "" {
-		// Check for project-local database first
 		if _, err := os.Stat(".wrkq/wrkq.db"); err == nil {
 			cfg.DBPath = ".wrkq/wrkq.db"
-		} else {
-			// Fall back to user-global database
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get home directory: %w", err)
-			}
-			cfg.DBPath = filepath.Join(homeDir, ".local", "share", "wrkq", "wrkq.db")
 		}
 	}
 	if cfg.DBLocator == "" {
@@ -184,15 +183,8 @@ func Load() (*Config, error) {
 	}
 
 	if cfg.AttachDir == "" {
-		// Use project-local attachments if using local database
 		if cfg.DBPath == ".wrkq/wrkq.db" {
 			cfg.AttachDir = ".wrkq/attachments"
-		} else {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get home directory: %w", err)
-			}
-			cfg.AttachDir = filepath.Join(homeDir, ".local", "share", "wrkq", "attachments")
 		}
 	}
 

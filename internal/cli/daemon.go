@@ -58,6 +58,9 @@ func ServeDaemon(opts DaemonOptions) error {
 	if cfg.RemoteEndpoint != "" {
 		return fmt.Errorf("wrkqd requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
 	}
+	if cfg.DBPath == "" {
+		return config.MissingDatabasePathError()
+	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {

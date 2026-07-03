@@ -121,6 +121,9 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 		if app.Config.RemoteEndpoint != "" {
 			return nil, fmt.Errorf("remote database locator %q is not valid for this local command", app.Config.DBLocator)
 		}
+		if app.Config.DBPath == "" {
+			return nil, config.MissingDatabasePathError()
+		}
 		database, err := db.Open(app.Config.DBPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open database: %w", err)

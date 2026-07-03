@@ -965,7 +965,7 @@ Attachment storage config (attach dir + max size) is sourced from the SAME wrkq
 configuration on both the `wrkq` and `wrkf` rpc entrypoints. When no attach dir
 is explicitly configured (`WRKQ_ATTACH_DIR` unset and no `attach_dir` in config),
 `wrkq.attachment.add` returns `WRKQ_VALIDATION` rather than writing to the
-per-user default. A duplicate filename for a task → `WRKQ_CONFLICT`; size over
+implicit host path. A duplicate filename for a task → `WRKQ_CONFLICT`; size over
 the limit → `WRKQ_VALIDATION` (the partial file is cleaned up). `idempotencyKey`
 is enforced (replay on match, `WRKQ_CONFLICT` on hash mismatch, no duplicate file
 or row).

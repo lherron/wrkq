@@ -11,7 +11,6 @@ package bootstrap
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
@@ -94,7 +93,7 @@ func Open(dbLocatorOverride string) (*Handle, error) {
 		return nil, fmt.Errorf("remote database locator %q cannot be opened as a local SQLite database", cfg.DBLocator)
 	}
 	if cfg.DBPath == "" {
-		return nil, fmt.Errorf("database path not specified")
+		return nil, config.MissingDatabasePathError()
 	}
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
@@ -139,26 +138,12 @@ func DefaultPrincipalRef(principalRef string) string {
 }
 
 // AttachDir resolves the attachment storage directory for the RPC server. It
-// returns only an *explicitly configured* directory: WRKQ_ATTACH_DIR takes
-// precedence, then a config.yaml attach_dir that differs from the cwd/home
-// auto-default. When nothing is explicitly configured it returns "" so
-// attachment.add reports WRKQ_VALIDATION rather than silently writing to the
-// per-user default location.
+// returns only an explicitly configured directory. When nothing is configured it
+// returns "" so attachment.add reports WRKQ_VALIDATION rather than silently
+// writing to an implicit host path.
 func AttachDir(configured string) string {
 	if env := os.Getenv("WRKQ_ATTACH_DIR"); env != "" {
 		return env
 	}
-	if configured != "" && configured != defaultAttachDir() {
-		return configured
-	}
-	return ""
-}
-
-// defaultAttachDir mirrors config.Load's auto-default so AttachDir can ignore it.
-func defaultAttachDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".local", "share", "wrkq", "attachments")
+	return configured
 }

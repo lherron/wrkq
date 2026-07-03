@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestApplyDBLocatorRemote(t *testing.T) {
 	cfg := &Config{}
@@ -60,4 +64,76 @@ func TestLoadRemoteDBPathWithoutWRKQDBIsRejected(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Fatal("expected path-only WRKQ_DB_PATH rejection")
 	}
+}
+
+func TestLoadWithoutDBPathDoesNotDefaultToHomeDB(t *testing.T) {
+	isolateLoadConfig(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DBPath != "" {
+		t.Fatalf("DBPath=%q want empty without env, config, --db, or .wrkq/wrkq.db", cfg.DBPath)
+	}
+	if cfg.DBLocator != "" {
+		t.Fatalf("DBLocator=%q want empty without configured database", cfg.DBLocator)
+	}
+	if cfg.AttachDir != "" {
+		t.Fatalf("AttachDir=%q want empty without project-local DB or explicit attach dir", cfg.AttachDir)
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".local", "share", "wrkq", "wrkq.db")); !os.IsNotExist(err) {
+		t.Fatalf("home fallback DB should not exist, stat err=%v", err)
+	}
+}
+
+func TestLoadProjectLocalDBDefaultStillWorks(t *testing.T) {
+	cwd := isolateLoadConfig(t)
+	if err := os.MkdirAll(filepath.Join(cwd, ".wrkq"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, ".wrkq", "wrkq.db"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DBPath != ".wrkq/wrkq.db" {
+		t.Fatalf("DBPath=%q want project-local default", cfg.DBPath)
+	}
+	if cfg.DBLocator != ".wrkq/wrkq.db" {
+		t.Fatalf("DBLocator=%q want project-local default", cfg.DBLocator)
+	}
+	if cfg.AttachDir != ".wrkq/attachments" {
+		t.Fatalf("AttachDir=%q want project-local attachment default", cfg.AttachDir)
+	}
+}
+
+func isolateLoadConfig(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	for _, key := range []string{
+		"WRKQ_DB",
+		"WRKQ_DB_PATH",
+		"WRKQ_DB_PATH_FILE",
+		"WRKQ_ATTACH_DIR",
+		"WRKQ_PROJECT_ROOT",
+		"ASP_PROJECT",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("HOME", tmp)
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCwd)
+	})
+	return tmp
 }

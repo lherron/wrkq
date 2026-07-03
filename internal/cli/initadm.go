@@ -58,6 +58,9 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 	dbPathFlag := cmd.Flag("db").Value.String()
 	if dbPathFlag != "" {
 		cfg.DBPath = dbPathFlag
+		if initAdmAttachDir == "" && cfg.AttachDir == "" {
+			cfg.AttachDir = filepath.Join(filepath.Dir(cfg.DBPath), "attachments")
+		}
 	} else {
 		cfg.DBPath = ".wrkq/wrkq.db"
 		// Use project-local attachments for local database
