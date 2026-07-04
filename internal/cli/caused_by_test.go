@@ -52,6 +52,44 @@ func resetCausedByCLIState(t *testing.T) {
 	}
 }
 
+func isolateCausedByCLIConfig(t *testing.T, dbPath, projectRoot string) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	runDir := t.TempDir()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(runDir); err != nil {
+		t.Fatalf("chdir test run dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCwd)
+	})
+
+	for _, key := range []string{
+		"WRKQ_DB",
+		"WRKQ_DB_PATH",
+		"WRKQ_DB_PATH_FILE",
+		"WRKQ_ATTACH_DIR",
+		"WRKQ_PROJECT_ROOT",
+		"WRKQ_OUTPUT",
+		"AGENT_SCOPE_REF",
+		"ASP_SCOPE_REF",
+		"ASP_HANDLE",
+		"ASP_AGENT_ID",
+		"ASP_PROJECT",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("PRAESIDIUM_HOME", homeDir)
+	t.Setenv("WRKQ_DB_PATH", dbPath)
+	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
+	t.Setenv("WRKQ_PROJECT_ROOT", projectRoot)
+}
+
 func mustCausedByCLI(t *testing.T, args ...string) string {
 	t.Helper()
 	res := runCausedByCLI(t, args...)
@@ -79,9 +117,7 @@ func TestCausedByCLIRoundTripFindAndClear(t *testing.T) {
 	database, dbPath := setupTestEnv(t)
 	insertContainer(t, database, "00000000-0000-0000-0000-000000000101", "P-00101", "wrkq", "wrkq", "", "2024-01-01T00:00:00Z")
 	insertContainer(t, database, "00000000-0000-0000-0000-000000000102", "P-00102", "inbox", "Inbox", "00000000-0000-0000-0000-000000000101", "2024-01-01T00:00:00Z")
-	t.Setenv("WRKQ_DB_PATH", dbPath)
-	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:test-user")
-	t.Setenv("PRAESIDIUM_HOME", t.TempDir())
+	isolateCausedByCLIConfig(t, dbPath, "wrkq")
 
 	producerOne := mustSingleTaskID(t, mustCausedByCLI(t, "touch", "inbox/producer-one", "--json"))
 	producerTwo := mustSingleTaskID(t, mustCausedByCLI(t, "touch", "inbox/producer-two", "--json"))
