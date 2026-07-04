@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(workflowCmd())
 	rootCmd.AddCommand(taskCmd())
 	rootCmd.AddCommand(runCmd())
+	rootCmd.AddCommand(watchCmd())
 	rootCmd.AddCommand(actionCmd())
 	rootCmd.AddCommand(nextCmd())
 	rootCmd.AddCommand(checkCmd())
@@ -123,7 +124,13 @@ func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*
 		}
 		runErr := fn(a, cmd, args)
 		if runErr != nil && flagJSON {
+			if errorAlreadyReported(runErr) {
+				return runErr
+			}
 			renderJSONErrorEnvelope(cmd, runErr)
+			if exit, ok := runErr.(cliExitError); ok {
+				return exitErrorReported(exit.code, runErr)
+			}
 			return errReported
 		}
 		return runErr
@@ -137,7 +144,7 @@ var errReported = errors.New("wrkf: error reported")
 
 // IsReported reports whether err was already rendered to the user.
 func IsReported(err error) bool {
-	return errors.Is(err, errReported)
+	return errors.Is(err, errReported) || errorAlreadyReported(err)
 }
 
 // renderJSONErrorEnvelope emits the structured {"error":{...}} envelope to

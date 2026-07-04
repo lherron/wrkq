@@ -12,6 +12,6 @@ func main() {
 		if !wrkfcli.IsReported(err) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
-		os.Exit(1)
+		os.Exit(wrkfcli.ExitCodeForError(err))
 	}
 }

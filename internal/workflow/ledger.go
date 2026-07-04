@@ -2194,6 +2194,9 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 			return err
 		}
 		run = &Run{ID: id, InstanceID: inst.ID, Role: role, PrincipalRef: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now, LeaseOwner: opts.LeaseOwner, LeaseToken: opts.LeaseToken, LeaseExpiresAt: opts.LeaseExpiresAt, HeartbeatAt: opts.HeartbeatAt}
+		if _, err := insertEventReturning(tx, inst.ID, "workflow.run_started", actor, role, id, inst.Revision, inst.Revision, opts.IdempotencyKey, taskDocEtagInt(inst), inst.TaskDocHash, inst.ContextHash, runLifecyclePayload(run)); err != nil {
+			return err
+		}
 		return nil
 	})
 	return run, err
@@ -2279,6 +2282,13 @@ func (s *Service) FinishRun(id, status, summary string) (*Run, error) {
 		current.TerminalResult = summary
 		current.CompletedAt = now
 		current.LeaseToken = ""
+		inst, err := instanceByIDQuery(tx, current.InstanceID)
+		if err != nil {
+			return err
+		}
+		if _, err := insertEventReturning(tx, current.InstanceID, "workflow.run_finished", current.PrincipalRef, current.Role, current.ID, inst.Revision, inst.Revision, "", taskDocEtagInt(inst), inst.TaskDocHash, inst.ContextHash, runLifecyclePayload(current)); err != nil {
+			return err
+		}
 		run = current
 		return nil
 	}); err != nil {
