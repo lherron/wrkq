@@ -9,7 +9,7 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 
 - **severity:** medium
 - **accepted_by:** Lance (2026-06-22)
-- **blast_radius:** built-in wrkq-simple-task@1 instances may evaluate under a replaced definition
-- **mitigation:** forward-fix divergence if it surfaces; do not claim old-instance hash pinning
-- **review_trigger:** versioned built-in workflow definitions are introduced; old-instance divergence is observed
+- **blast_radius:** built-in wrkq-simple-task instances at any embedded version may evaluate under a replaced same id/version definition after EnsureBuiltinTemplate supersedes the stored definition
+- **mitigation:** Treat same-version built-in supersede as an accepted operational recovery mechanism, not hash-pinned immutability. It is intentionally relied on to recover pre-existing wedged wrkq-simple-task@2/@3 operator_required instances after the operator_resolved lane is installed; historical event/run records remain append-only and are not rewritten.
+- **review_trigger:** built-in workflow definitions stop using same-version supersede for recovery; old-instance divergence is observed
 - **expiry:** none

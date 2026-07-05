@@ -5,15 +5,23 @@ owner_project: wrkq
 accepted_by: Lance
 date: 2026-06-22
 severity: medium
-blast_radius: built-in wrkq-simple-task@1 instances may evaluate under a replaced definition
-mitigation: forward-fix divergence if it surfaces; do not claim old-instance hash pinning
+blast_radius: built-in wrkq-simple-task instances at any embedded version may evaluate under a replaced same id/version definition after EnsureBuiltinTemplate supersedes the stored definition
+mitigation: >
+  Treat same-version built-in supersede as an accepted operational recovery
+  mechanism, not hash-pinned immutability. It is intentionally relied on to
+  recover pre-existing wedged wrkq-simple-task@2/@3 operator_required
+  instances after the operator_resolved lane is installed; historical event/run
+  records remain append-only and are not rewritten.
 expiry: null
 review_trigger:
-  - versioned built-in workflow definitions are introduced
+  - built-in workflow definitions stop using same-version supersede for recovery
   - old-instance divergence is observed
 reopen_when:
   - built-in workflow migration semantics change
 source:
   - hrcchat#9647
+  - hrcchat#12358
+  - internal/workflow/builtin.go
+  - internal/workflow/operator_resolution_test.go
 supersedes: []
 superseded_by: null

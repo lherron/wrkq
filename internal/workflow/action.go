@@ -1229,6 +1229,11 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 	if err != nil {
 		return nil, err
 	}
+	if params.Kind == "operator_resolution" {
+		if err := validateOperatorResolutionReason(params.Summary, facts); err != nil {
+			return nil, err
+		}
+	}
 	var dataArg interface{}
 	var dataRaw json.RawMessage
 	if strings.TrimSpace(params.Data) != "" {
@@ -1298,6 +1303,21 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 		}
 	}
 	return ev, nil
+}
+
+func validateOperatorResolutionReason(summary string, facts *parsedEvidenceFacts) error {
+	if strings.TrimSpace(summary) != "" {
+		return nil
+	}
+	if facts != nil {
+		if raw, ok := facts.Fields["reason"]; ok {
+			var reason string
+			if err := json.Unmarshal(raw, &reason); err == nil && strings.TrimSpace(reason) != "" {
+				return nil
+			}
+		}
+	}
+	return validationError("summary", "operator_resolution requires a human/operator reason in summary or facts.reason", "non-empty summary or facts.reason", nil, "include the operator reason before resolving operator_required")
 }
 
 func (s *Service) refreshInstanceContextTx(tx *sql.Tx, inst *Instance, actor string) error {

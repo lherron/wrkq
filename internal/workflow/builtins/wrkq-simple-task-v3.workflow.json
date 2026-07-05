@@ -168,6 +168,21 @@
     "failure_result": {
       "class": "note",
       "description": "Operational or ownership failure result."
+    },
+    "operator_resolution": {
+      "class": "note",
+      "description": "Supervisor/operator decision resolving a waiting/operator_required workflow.",
+      "producibleBy": ["supervisor"],
+      "facts": {
+        "required": ["resolution"],
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "enum": ["resume_ready", "cancelled"]
+          },
+          "reason": { "type": "string" }
+        }
+      }
     }
   },
   "transitions": [
@@ -432,6 +447,74 @@
             "status": "waiting",
             "phase": "operator_required"
           }
+        }
+      ]
+    },
+    {
+      "id": "operator_resolved",
+      "description": "Supervisor recorded operator resolution evidence for a workflow waiting on human/operator intervention.",
+      "from": {
+        "status": "waiting",
+        "phase": "operator_required"
+      },
+      "by": ["supervisor"],
+      "requires": [
+        {
+          "evidence": {
+            "kind": "operator_resolution"
+          }
+        }
+      ],
+      "outcomes": [
+        {
+          "id": "resume_ready",
+          "when": {
+            "evidenceExists": {
+              "kind": "operator_resolution",
+              "facts": {
+                "resolution": "resume_ready"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:open",
+              "data": {
+                "state": "open"
+              }
+            }
+          ]
+        },
+        {
+          "id": "cancelled",
+          "when": {
+            "evidenceExists": {
+              "kind": "operator_resolution",
+              "facts": {
+                "resolution": "cancelled"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "cancelled"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
+              "data": {
+                "state": "cancelled"
+              }
+            }
+          ]
         }
       ]
     }

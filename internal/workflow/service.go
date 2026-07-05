@@ -1647,6 +1647,9 @@ func showTemplateTx(q queryer, ref string) (*Template, string, error) {
 }
 
 func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
+	if err := s.EnsureBuiltinTemplateForSelectors(params.TaskSelector, params.InstanceID, params.PrincipalRef); err != nil {
+		return nil, err
+	}
 	var ev *Evidence
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 		inst, err := resolveInstanceSelectors(tx, params.TaskSelector, params.InstanceID)
@@ -1669,6 +1672,11 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
 		if err != nil {
 			return err
+		}
+		if params.Kind == "operator_resolution" {
+			if err := validateOperatorResolutionReason(params.Summary, facts); err != nil {
+				return err
+			}
 		}
 		var dataArg interface{}
 		var dataRaw json.RawMessage
@@ -2381,6 +2389,9 @@ func resolveFact(ctx evalContext, path string) interface{} {
 func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 	inst, err := s.LatestInstance(taskSelector)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.EnsureInstanceBuiltinTemplate(inst, ""); err != nil {
 		return nil, err
 	}
 	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)

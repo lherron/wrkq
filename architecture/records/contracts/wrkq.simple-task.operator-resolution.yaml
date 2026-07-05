@@ -1,0 +1,59 @@
+id: wrkq.simple-task.operator-resolution
+kind: contract
+status: active
+owner_project: wrkq
+scope: wrkq-simple-task@2/@3 operator_required recovery lane
+predicate: >
+  `wrkq-simple-task@2` and `wrkq-simple-task@3` expose exactly one supervisor
+  recovery transition from `status=waiting, phase=operator_required`:
+  `operator_resolved`. The transition requires latest direct
+  `operator_resolution` evidence, a `note` evidence kind producible by
+  `supervisor`, with `facts.resolution` in `resume_ready|cancelled` and a
+  human/operator reason in either evidence summary or `facts.reason`.
+  `resume_ready` moves only to `active/ready` and sets the wrkq task state back
+  to `open`; `cancelled` moves to `closed/cancelled` and sets the wrkq task
+  state to `cancelled`. It never resumes directly to implemented/done and never
+  rewrites prior run terminal states or previous operator_required evidence.
+  On successful resolution, pending/failed supervisor_call and
+  supervisor_escalation effects for the same instance at or before the resolved
+  revision are delivered with receipts linking the operator_resolution evidence
+  id and transition event id. Unexpired leased supervisor effects may be
+  delivered only with an explicit supervisorOverride receipt; unrelated effects
+  are untouched.
+authority:
+  repo: wrkq
+  surface: internal/workflow built-in template, wrkf evidence/transition/effect surfaces
+consumers:
+  - wrkf action runners recovering operator_required instances
+  - supervisors resolving out-of-band operator truth
+  - effect adapters observing supervisor_call/supervisor_escalation receipts
+source:
+  - internal/workflow/builtins/wrkq-simple-task-v2.workflow.json
+  - internal/workflow/builtins/wrkq-simple-task-v3.workflow.json
+  - internal/workflow/builtin.go
+  - internal/workflow/action_next.go
+  - internal/workflow/service.go
+  - internal/workflow/ledger.go
+  - internal/workflow/operator_resolution_test.go
+  - hrcchat#12358
+required_tests:
+  - TestBuiltinSimpleTaskOperatorResolutionContract
+  - TestOperatorResolvedNoEvidenceGate
+  - TestOperatorResolvedResumeAndCancelPaths
+  - TestOperatorResolvedRequiresHumanReason
+  - TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede
+  - TestOperatorResolvedSupervisorEffectCleanupReceipts
+  - go test ./internal/workflow
+last_verified:
+  date: 2026-07-05
+  evidence: "go test ./internal/workflow -run 'TestBuiltinSimpleTask(V2ExecutableActionsValidate|V3BatchLandingContract|OperatorResolutionContract)|TestOperatorResolved|TestActionNextV3LandingCandidateBindsPRVerifiedSource|TestSettleActionV3|TestActionNextV2CandidatesByPhaseAndReadOnly'"
+reopen_when:
+  - operator_required has no supervisor operator_resolved transition in @2 or @3
+  - operator_resolved can run without operator_resolution evidence
+  - operator_resolution can be recorded without a human/operator reason
+  - resume_ready moves anywhere other than active/ready or sets task state other than open
+  - cancelled moves anywhere other than closed/cancelled or sets task state other than cancelled
+  - supervisor_call/supervisor_escalation resolution receipts omit evidence or transition linkage
+  - unrelated effects are delivered during operator resolution
+supersedes: []
+superseded_by: null

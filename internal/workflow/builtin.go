@@ -3,6 +3,7 @@ package workflow
 import (
 	_ "embed"
 	"fmt"
+	"strings"
 )
 
 // BuiltinSimpleTaskTemplateRef is the canonical ref for the built-in
@@ -55,4 +56,28 @@ func builtinTemplateData(templateRef string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unknown built-in workflow: %s", templateRef)
 	}
+}
+
+func (s *Service) EnsureInstanceBuiltinTemplate(inst *Instance, actor string) error {
+	if inst == nil {
+		return nil
+	}
+	ref := inst.TemplateID + "@" + inst.TemplateVersion
+	if _, err := builtinTemplateData(ref); err != nil {
+		return nil
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = "wrkf:builtin"
+	}
+	_, _, err := s.EnsureBuiltinTemplate(ref, actor)
+	return err
+}
+
+func (s *Service) EnsureBuiltinTemplateForSelectors(taskSelector, instanceID, actor string) error {
+	inst, err := resolveInstanceSelectors(s.db, taskSelector, instanceID)
+	if err != nil {
+		return err
+	}
+	return s.EnsureInstanceBuiltinTemplate(inst, actor)
 }

@@ -19,7 +19,10 @@ predicate: >
   exact command hash unchanged, content hash unchanged, rerun passed, and
   barChanged()==false. The rebased H1 head is landing evidence only and is not
   labeled exact-source verified unless a separate full verify_result is produced
-  at H1.
+  at H1. @3 also carries the shared `operator_resolved` supervisor recovery
+  transition from `waiting/operator_required` described by
+  `wrkq.simple-task.operator-resolution`; that lane is orthogonal to batch
+  landing and never resumes directly to implemented/done.
 authority:
   repo: wrkq
   surface: internal/workflow built-in template, wrkf.action.*, wrkf.event.query
@@ -34,6 +37,7 @@ source:
   - internal/workflow/action_settle_test.go
   - internal/workflow/action_next_test.go
   - internal/workflow/executable_actions_test.go
+  - internal/workflow/operator_resolution_test.go
   - hrcchat#12339
 required_tests:
   - TestBuiltinSimpleTaskV3BatchLandingContract
@@ -41,6 +45,7 @@ required_tests:
   - TestSettleActionV3PRVerifiedAwaitingMergeQueue
   - TestSettleActionV3LandingGateMatrix
   - TestSettleActionV3LandingResultClosesWithEvidenceChain
+  - TestBuiltinSimpleTaskOperatorResolutionContract
   - go test ./internal/workflow
 last_verified:
   date: 2026-07-05
@@ -52,5 +57,6 @@ reopen_when:
   - landing_result can close without merged main SHA or FrozenBar rerun proof
   - landing evidence labels rebased H1 as exact-source verified without a separate verify_result at H1
   - wrkq starts reading GitHub/PR API state as the source of merge readiness
+  - "@3 loses the shared waiting/operator_required operator_resolved exit"
 supersedes: []
 superseded_by: null

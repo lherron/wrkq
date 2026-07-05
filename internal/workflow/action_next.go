@@ -19,6 +19,9 @@ func (s *Service) ActionNext(p ActionNextParams) (*ActionNextResult, error) {
 	if inst == nil {
 		return &ActionNextResult{Candidates: []ActionCandidate{}}, nil
 	}
+	if err := s.EnsureInstanceBuiltinTemplate(inst, ""); err != nil {
+		return nil, err
+	}
 	return s.actionCandidatesForInstance(s.db, inst, p)
 }
 
