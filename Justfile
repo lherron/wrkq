@@ -306,7 +306,7 @@ doc-links:
 architecture-records *args:
   go run ./cmd/architecture-records --root . {{args}}
 
-# Run vendored archagent fitkit S6 guard fitness: pre-push hook must delegate to just verify.
+# Run local fitkit S6 guard: pre-push hook must delegate to just verify.
 fitkit-s6:
   node tools/fitkit/s6-hook-runs-verify.mjs --root .
 

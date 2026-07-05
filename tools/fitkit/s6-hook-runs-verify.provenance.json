@@ -1,0 +1,13 @@
+{
+  "guardId": "fit:s6/hook-runs-verify",
+  "ownerProject": "wrkq",
+  "localSourceFiles": [
+    "tools/fitkit/s6-hook-runs-verify.mjs"
+  ],
+  "checkedSurfaces": [
+    "Justfile",
+    "justfile",
+    ".git/hooks/pre-push"
+  ],
+  "reason": "First-party wrkq guard replacing a vendored archagent artifact; the guard directly verifies the local Justfile verify target and installed pre-push hook."
+}
