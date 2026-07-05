@@ -174,7 +174,7 @@
         "assessment": "agent-enablement/assessments/wrkq/assessment.json",
         "deltas": "agent-enablement/assessments/wrkq/deltas.json",
         "profileHash": "165370c11ae705909a174afae5fc90799403696d9800d1df0ff13251dc73b4ca",
-        "assessmentHash": "6ceb933688a05d57c1a82bf699abdd16011367e4d2d6cb8a7f0cc63e1a9ef764",
+        "assessmentHash": "a0fe5888bcde61b331aec2dd5a5055e9f88644e38ac4b5ff14bd287bf693aa8d",
         "deltasHash": "bf3add6b120f65a5e033540893ff8239f931c5f45361f15a0647f391cf628a94"
       },
       "decidedAt": "2026-07-02",
