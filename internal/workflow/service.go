@@ -335,7 +335,12 @@ func validateExecutableActions(tpl *Template, stateSet map[string]bool, transiti
 }
 
 func requiresSourceBinding(id string, spec ExecutableActionSpec) bool {
-	return strings.TrimSpace(id) == "verify"
+	switch strings.TrimSpace(id) {
+	case "verify", "landing":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateSourceBinding(tpl *Template, label string, binding *SourceBindingSpec) []string {
@@ -367,6 +372,27 @@ func validateSourceBinding(tpl *Template, label string, binding *SourceBindingSp
 				}
 				if _, exists := kind.Facts.Properties[fact]; !exists {
 					errs = append(errs, fmt.Sprintf("%s sourceBinding required fact %s is not declared on %s", label, fact, sourceSpec.ResultEvidenceKind))
+				}
+			}
+		}
+	}
+	if binding.BindFields != nil && sourceAction != "" {
+		if sourceSpec, ok := tpl.ExecutableActions[sourceAction]; ok {
+			kind, ok := tpl.EvidenceKinds[sourceSpec.ResultEvidenceKind]
+			for field, fact := range map[string]string{
+				"commitSha":   binding.BindFields.CommitSha,
+				"artifactRef": binding.BindFields.ArtifactRef,
+			} {
+				fact = strings.TrimSpace(fact)
+				if fact == "" {
+					continue
+				}
+				if !ok || kind.Facts == nil || kind.Facts.Properties == nil {
+					errs = append(errs, fmt.Sprintf("%s sourceBinding bindFields.%s fact %s is not declared on %s", label, field, fact, sourceSpec.ResultEvidenceKind))
+					continue
+				}
+				if _, exists := kind.Facts.Properties[fact]; !exists {
+					errs = append(errs, fmt.Sprintf("%s sourceBinding bindFields.%s fact %s is not declared on %s", label, field, fact, sourceSpec.ResultEvidenceKind))
 				}
 			}
 		}

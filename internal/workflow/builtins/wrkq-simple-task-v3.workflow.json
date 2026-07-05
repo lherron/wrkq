@@ -1,0 +1,511 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "wrkq-simple-task",
+  "version": "3",
+  "kind": "agent_first_workflow",
+  "description": "Built-in executable-action task lifecycle with batch PR verification and release-manager landing.",
+  "initial": {
+    "status": "active",
+    "phase": "intake"
+  },
+  "roles": {
+    "triager": {
+      "description": "Shapes the task into a ready implementation target."
+    },
+    "implementer": {
+      "description": "Implements the task and records commit-bound proof."
+    },
+    "tester": {
+      "description": "Verifies the exact implementation commit or artifact."
+    },
+    "release_manager": {
+      "description": "Lands a pr_verified branch after rebase and FrozenBar rerun evidence."
+    },
+    "system": {
+      "description": "Internal workflow projection authority."
+    }
+  },
+  "states": [
+    {
+      "status": "active",
+      "phase": "intake",
+      "description": "Task is awaiting triage."
+    },
+    {
+      "status": "active",
+      "phase": "ready",
+      "description": "Task is ready for implementation."
+    },
+    {
+      "status": "active",
+      "phase": "implemented",
+      "description": "Implementation evidence is recorded; exact-source verification may begin."
+    },
+    {
+      "status": "waiting",
+      "phase": "operator_required",
+      "description": "Automatic execution is unsafe or blocked and needs operator attention."
+    },
+    {
+      "status": "waiting",
+      "phase": "awaiting_merge",
+      "description": "Batch verification produced a PR-bound proof and is awaiting release-manager landing."
+    },
+    {
+      "status": "closed",
+      "phase": "done",
+      "description": "Terminal success."
+    },
+    {
+      "status": "closed",
+      "phase": "cancelled",
+      "description": "Terminal cancellation."
+    }
+  ],
+  "evidenceKinds": {
+    "triage_result": {
+      "class": "note",
+      "description": "Triage result.",
+      "facts": {
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": ["ready", "operator_required"]
+          }
+        }
+      }
+    },
+    "implement_result": {
+      "class": "note",
+      "description": "Commit-bound implementation result.",
+      "facts": {
+        "required": ["result"],
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": ["done", "blocked", "operator_required"]
+          },
+          "commit.sha": { "type": "string" },
+          "artifact.digest": { "type": "string" },
+          "git.clean": { "type": "boolean" },
+          "base.sha": { "type": "string" },
+          "postcondition": {
+            "type": "string",
+            "enum": ["git_committed_clean"]
+          },
+          "repair.turns": { "type": "integer" }
+        }
+      }
+    },
+    "verify_result": {
+      "class": "verify",
+      "description": "Verification result bound to a specific implementation source.",
+      "facts": {
+        "required": ["result"],
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": ["verified", "pr_verified", "failed", "blocked", "operator_required"]
+          },
+          "source.commit.sha": { "type": "string" },
+          "verified.commit.sha": { "type": "string" },
+          "branch.head.sha": { "type": "string" },
+          "bar.hash": { "type": "string" },
+          "pr.url": { "type": "string" },
+          "artifact.digest": { "type": "string" },
+          "install.exit": { "type": "integer" },
+          "smoke.exit": { "type": "integer" },
+          "git.clean": { "type": "boolean" }
+        }
+      }
+    },
+    "landing_result": {
+      "class": "verify",
+      "description": "Release-manager landing result linking pr_verified evidence, rebase/range evidence, merged main SHA, and FrozenBar rerun proof.",
+      "facts": {
+        "required": [
+          "result",
+          "source.verify.evidence_id",
+          "source.branch.head.sha",
+          "source.bar.hash",
+          "source.pr.url",
+          "rebased.head.sha",
+          "merged.main.sha",
+          "pr.url",
+          "rebase.range",
+          "frozen_bar.result",
+          "frozen_bar.command_hash",
+          "frozen_bar.expected_command_hash",
+          "frozen_bar.content_hash",
+          "frozen_bar.expected_content_hash",
+          "bar.changed"
+        ],
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": ["landed", "reverify_required", "operator_required"]
+          },
+          "source.verify.evidence_id": { "type": "string" },
+          "source.branch.head.sha": { "type": "string" },
+          "source.bar.hash": { "type": "string" },
+          "source.pr.url": { "type": "string" },
+          "rebased.head.sha": { "type": "string" },
+          "merged.main.sha": { "type": "string" },
+          "pr.url": { "type": "string" },
+          "rebase.range": { "type": "string" },
+          "frozen_bar.result": {
+            "type": "string",
+            "enum": ["passed", "failed"]
+          },
+          "frozen_bar.command_hash": { "type": "string" },
+          "frozen_bar.expected_command_hash": { "type": "string" },
+          "frozen_bar.content_hash": { "type": "string" },
+          "frozen_bar.expected_content_hash": { "type": "string" },
+          "bar.changed": { "type": "boolean" }
+        }
+      }
+    },
+    "failure_result": {
+      "class": "note",
+      "description": "Operational or ownership failure result."
+    }
+  },
+  "transitions": [
+    {
+      "id": "triage_complete",
+      "description": "Triage accepted the task for implementation.",
+      "from": {
+        "status": "active",
+        "phase": "intake"
+      },
+      "by": ["triager"],
+      "outcomes": [
+        {
+          "id": "ready",
+          "when": {
+            "evidenceExists": {
+              "kind": "triage_result",
+              "facts": {
+                "result": "ready"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:open",
+              "data": {
+                "state": "open"
+              }
+            }
+          ]
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "otherwise": true
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "implement_complete",
+      "description": "Implementation produced commit-bound evidence or a safe terminal blocker.",
+      "from": {
+        "status": "active",
+        "phase": "ready"
+      },
+      "by": ["implementer"],
+      "outcomes": [
+        {
+          "id": "done",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implemented"
+          }
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "otherwise": true
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "verify_complete",
+      "description": "Verification checked the exact source commit or artifact from implementation.",
+      "from": {
+        "status": "active",
+        "phase": "implemented"
+      },
+      "by": ["tester"],
+      "outcomes": [
+        {
+          "id": "verified",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "verified"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
+        },
+        {
+          "id": "pr_verified",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "pr_verified"
+              }
+            }
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "awaiting_merge"
+          }
+        },
+        {
+          "id": "failed",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "failed"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "ready"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:blocked",
+              "data": {
+                "state": "blocked"
+              }
+            }
+          ]
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "otherwise": true
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "landing_complete",
+      "description": "Release manager landed a pr_verified branch after rebase and FrozenBar rerun evidence.",
+      "from": {
+        "status": "waiting",
+        "phase": "awaiting_merge"
+      },
+      "by": ["release_manager"],
+      "outcomes": [
+        {
+          "id": "landed",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "landed"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "otherwise": true
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "operator_required"
+          }
+        }
+      ]
+    }
+  ],
+  "executableActions": {
+    "triage": {
+      "from": {
+        "status": "active",
+        "phase": "intake"
+      },
+      "role": "triager",
+      "transition": "triage_complete",
+      "resultEvidenceKind": "triage_result",
+      "handlerContract": "praesidium.wrkq-simple-task.triage@1",
+      "workspaceMode": "read-only",
+      "rank": 10
+    },
+    "implement": {
+      "from": {
+        "status": "active",
+        "phase": "ready"
+      },
+      "role": "implementer",
+      "transition": "implement_complete",
+      "resultEvidenceKind": "implement_result",
+      "handlerContract": "praesidium.wrkq-simple-task.implement@1",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": ["worktree.write", "git.commit"],
+      "continuation": {
+        "next": "verify",
+        "attentionScope": "workspace",
+        "requireExactSource": true
+      },
+      "rank": 20
+    },
+    "verify": {
+      "from": {
+        "status": "active",
+        "phase": "implemented"
+      },
+      "role": "tester",
+      "transition": "verify_complete",
+      "resultEvidenceKind": "verify_result",
+      "handlerContract": "praesidium.wrkq-simple-task.verify@1",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": ["install", "smoke", "test", "git.push", "github.pr.create"],
+      "sourceBinding": {
+        "kind": "previous_action",
+        "action": "implement",
+        "requiredFacts": ["commit.sha"]
+      },
+      "rank": 30
+    },
+    "landing": {
+      "from": {
+        "status": "waiting",
+        "phase": "awaiting_merge"
+      },
+      "role": "release_manager",
+      "transition": "landing_complete",
+      "resultEvidenceKind": "landing_result",
+      "handlerContract": "praesidium.wrkq-simple-task.landing@1",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": ["git.rebase", "test", "git.merge"],
+      "sourceBinding": {
+        "kind": "previous_action",
+        "action": "verify",
+        "requiredFacts": ["result", "branch.head.sha", "bar.hash", "pr.url"],
+        "bindFields": {
+          "commitSha": "branch.head.sha",
+          "artifactRef": "bar.hash"
+        }
+      },
+      "rank": 40
+    }
+  }
+}

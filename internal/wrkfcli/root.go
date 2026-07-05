@@ -921,7 +921,7 @@ func actionCmd() *cobra.Command {
 		evidenceKind, evidenceRef, evidenceSummary, evidenceFacts, evidenceData                              string
 		runSummary, settleResult, transition                                                                 string
 		noTransition, includeClosed, includeBlocked                                                          bool
-		status, actionFilter                                                                                 string
+		status, phase, actionFilter                                                                          string
 		limit                                                                                                int
 		leaseMs, workspaceLeaseMs, ownerGeneration, workspaceGeneration                                      int64
 	)
@@ -988,6 +988,7 @@ func actionCmd() *cobra.Command {
 					Actions:        cliFilterList(actionFilter),
 					Roles:          cliFilterList(role),
 					Statuses:       cliFilterList(status),
+					Phases:         cliFilterList(phase),
 					IncludeBlocked: includeBlocked,
 				},
 				Limit: limit,
@@ -1002,6 +1003,7 @@ func actionCmd() *cobra.Command {
 	next.Flags().StringVar(&actionFilter, "action", "", "Filter by action")
 	next.Flags().StringVar(&role, "role", "", "Filter by role")
 	next.Flags().StringVar(&status, "status", "", "Filter by workflow status")
+	next.Flags().StringVar(&phase, "phase", "", "Filter by workflow phase")
 	next.Flags().BoolVar(&includeBlocked, "include-blocked", false, "Include blocked candidates with reasons")
 	next.Flags().IntVar(&limit, "limit", 0, "Maximum candidates to return")
 

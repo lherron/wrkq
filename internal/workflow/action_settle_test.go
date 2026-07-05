@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -246,6 +247,146 @@ func TestSettleActionV2BlockerEffectsSetTaskBlocked(t *testing.T) {
 	}
 }
 
+func TestSettleActionV3PRVerifiedAwaitingMergeQueue(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	advanceV3ToImplemented(t, svc, taskUUID, "h0")
+
+	verify := claimActionForTest(t, svc, taskUUID, "verify")
+	out := settleClaimForTest(t, svc, verify, prVerifiedFacts("h0", "bar0", "https://example.test/pr/1"), "pr verified")
+	if out.Transition == nil {
+		t.Fatalf("pr_verified settlement missing transition")
+	}
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	if inst.Status != "waiting" || inst.Phase != "awaiting_merge" {
+		t.Fatalf("instance state = %+v, want waiting/awaiting_merge", inst.State())
+	}
+	if got := readTaskState(t, svc, taskUUID); got == "completed" {
+		t.Fatalf("task state after pr_verified = %q, want not completed", got)
+	}
+	queue, err := svc.QueryEvents(EventQueryParams{ToPhase: "awaiting_merge"})
+	if err != nil {
+		t.Fatalf("QueryEvents awaiting_merge: %v", err)
+	}
+	if len(queue.Items) != 1 || queue.Items[0].Task.UUID != taskUUID || queue.Items[0].ToPhase != "awaiting_merge" {
+		t.Fatalf("awaiting_merge queue = %+v, want task %s", queue.Items, taskUUID)
+	}
+}
+
+func TestSettleActionV3LandingGateMatrix(t *testing.T) {
+	cases := []struct {
+		name        string
+		clearSource bool
+		mutate      func(map[string]interface{})
+		wantError   string
+	}{
+		{
+			name:        "missing_source_verify_evidence",
+			clearSource: true,
+			wantError:   "source pr_verified evidence",
+		},
+		{
+			name: "missing_pr_sha_binding",
+			mutate: func(f map[string]interface{}) {
+				f["source.branch.head.sha"] = "wrong-h0"
+			},
+			wantError: "original branch head",
+		},
+		{
+			name: "failed_bar_rerun",
+			mutate: func(f map[string]interface{}) {
+				f["frozen_bar.result"] = "failed"
+			},
+			wantError: "passed FrozenBar",
+		},
+		{
+			name: "command_hash_drift",
+			mutate: func(f map[string]interface{}) {
+				f["frozen_bar.command_hash"] = "cmd-drift"
+			},
+			wantError: "commandHash",
+		},
+		{
+			name: "content_hash_drift",
+			mutate: func(f map[string]interface{}) {
+				f["frozen_bar.content_hash"] = "content-drift"
+			},
+			wantError: "contentHash",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, taskUUID := actionFixture(t)
+			verify := prepareV3AwaitingMerge(t, svc, taskUUID)
+			landing := claimActionForTest(t, svc, taskUUID, "landing")
+			if tc.clearSource {
+				if _, err := svc.db.Exec(`UPDATE workflow_runs SET source_evidence_id = NULL, source_commit_sha = NULL WHERE id = ?`, landing.Binding.Run.ID); err != nil {
+					t.Fatalf("clear landing source: %v", err)
+				}
+			}
+			facts := validLandingFactsMap(verify.Evidence.ID)
+			if tc.mutate != nil {
+				tc.mutate(facts)
+			}
+			before := actionNextMutationCounts(t, svc)
+			_, err := svc.SettleAction(SettleActionParams{
+				ActionRunID:     landing.Binding.Run.ID,
+				OwnerToken:      landing.Binding.Authority.OwnerToken,
+				OwnerGeneration: landing.Binding.Authority.OwnerGeneration,
+				Result:          "completed",
+				Evidence:        &ActionEvidenceInput{Summary: "landing", Facts: mustJSON(t, facts)},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("SettleAction error = %v, want %q", err, tc.wantError)
+			}
+			if after := actionNextMutationCounts(t, svc); after != before {
+				t.Fatalf("failed landing mutated rows: before=%+v after=%+v", before, after)
+			}
+			inst, err := svc.LatestInstance(taskUUID)
+			if err != nil {
+				t.Fatalf("LatestInstance: %v", err)
+			}
+			if inst.Status != "waiting" || inst.Phase != "awaiting_merge" {
+				t.Fatalf("instance state after failed landing = %+v, want waiting/awaiting_merge", inst.State())
+			}
+			if got := readTaskState(t, svc, taskUUID); got == "completed" {
+				t.Fatalf("task state after failed landing = %q, want not completed", got)
+			}
+		})
+	}
+}
+
+func TestSettleActionV3LandingResultClosesWithEvidenceChain(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	verify := prepareV3AwaitingMerge(t, svc, taskUUID)
+	landing := claimActionForTest(t, svc, taskUUID, "landing")
+	out := settleClaimForTest(t, svc, landing, mustJSON(t, validLandingFactsMap(verify.Evidence.ID)), "landed")
+	if out.Evidence == nil || out.Evidence.Kind != "landing_result" {
+		t.Fatalf("landing evidence = %+v", out.Evidence)
+	}
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	if inst.Status != "closed" || inst.Phase != "done" {
+		t.Fatalf("instance state = %+v, want closed/done", inst.State())
+	}
+	if got := readTaskState(t, svc, taskUUID); got != "completed" {
+		t.Fatalf("task state after landing = %q, want completed", got)
+	}
+	ev, err := svc.ListEvidence(taskUUID)
+	if err != nil {
+		t.Fatalf("ListEvidence: %v", err)
+	}
+	for _, e := range ev {
+		if e.Kind == "verify_result" && strings.Contains(string(e.Facts), `"verified.commit.sha":"h1"`) {
+			t.Fatalf("rebased head H1 was recorded as exact-source verified: %+v", e)
+		}
+	}
+}
+
 func TestActionReapV2RecoveryDistinguishesSideEffectAmbiguity(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
@@ -293,6 +434,55 @@ func TestActionReapV2RecoveryDistinguishesSideEffectAmbiguity(t *testing.T) {
 	if run.LeaseToken != "" || run.LeaseOwner != "" || run.Status != "operator_required" {
 		t.Fatalf("reaped implement run = %+v", run)
 	}
+}
+
+func advanceV3ToImplemented(t *testing.T, svc *Service, taskUUID, commit string) {
+	t.Helper()
+	attachSimpleTaskV3(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+	impl := claimActionForTest(t, svc, taskUUID, "implement")
+	settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"`+commit+`","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+}
+
+func prepareV3AwaitingMerge(t *testing.T, svc *Service, taskUUID string) *SettleActionResult {
+	t.Helper()
+	advanceV3ToImplemented(t, svc, taskUUID, "h0")
+	verify := claimActionForTest(t, svc, taskUUID, "verify")
+	return settleClaimForTest(t, svc, verify, prVerifiedFacts("h0", "bar0", "https://example.test/pr/1"), "pr verified")
+}
+
+func prVerifiedFacts(head, bar, prURL string) string {
+	return `{"result":"pr_verified","source.commit.sha":"` + head + `","verified.commit.sha":"` + head + `","branch.head.sha":"` + head + `","bar.hash":"` + bar + `","pr.url":"` + prURL + `","git.clean":true}`
+}
+
+func validLandingFactsMap(sourceEvidenceID string) map[string]interface{} {
+	return map[string]interface{}{
+		"result":                           "landed",
+		"source.verify.evidence_id":        sourceEvidenceID,
+		"source.branch.head.sha":           "h0",
+		"source.bar.hash":                  "bar0",
+		"source.pr.url":                    "https://example.test/pr/1",
+		"rebased.head.sha":                 "h1",
+		"merged.main.sha":                  "main1",
+		"pr.url":                           "https://example.test/pr/1",
+		"rebase.range":                     "h0..h1",
+		"frozen_bar.result":                "passed",
+		"frozen_bar.command_hash":          "cmd0",
+		"frozen_bar.expected_command_hash": "cmd0",
+		"frozen_bar.content_hash":          "content0",
+		"frozen_bar.expected_content_hash": "content0",
+		"bar.changed":                      false,
+	}
+}
+
+func mustJSON(t *testing.T, v interface{}) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return string(b)
 }
 
 func claimActionForTest(t *testing.T, svc *Service, taskUUID, action string) *ClaimActionResult {

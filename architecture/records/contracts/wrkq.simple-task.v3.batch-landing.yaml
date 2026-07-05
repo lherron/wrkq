@@ -1,0 +1,56 @@
+id: wrkq.simple-task.v3.batch-landing
+kind: contract
+status: active
+owner_project: wrkq
+scope: wrkq-simple-task@3 batch pr_verified awaiting_merge and release-manager landing
+predicate: >
+  `wrkq-simple-task@3` is additive to `wrkq-simple-task@2`: interactive @2
+  verification remains verified -> closed/done with a completed task state. In
+  @3, batch verification may settle `verify_result.result=pr_verified` with
+  caller-supplied facts binding the branch head H0, frozen-bar hash, and PR URL;
+  this moves the workflow to `status=waiting, phase=awaiting_merge` without
+  completing the wrkq task. `awaiting_merge` is the wrkf/wrkq-owned operator
+  merge queue, queryable from workflow phase/event and action-next surfaces;
+  GitHub PR state is never read as authority by wrkq. Closing requires the
+  `landing` executable action with role `release_manager` and
+  `landing_result` evidence linked to the source pr_verified evidence. A landed
+  result must preserve H0, PR URL, and original bar hash, record rebased head H1,
+  merged main SHA, rebase/range evidence, and pass the FrozenBar landing gate:
+  exact command hash unchanged, content hash unchanged, rerun passed, and
+  barChanged()==false. The rebased H1 head is landing evidence only and is not
+  labeled exact-source verified unless a separate full verify_result is produced
+  at H1.
+authority:
+  repo: wrkq
+  surface: internal/workflow built-in template, wrkf.action.*, wrkf.event.query
+consumers:
+  - wrkq-drain batch/overnight coordinator
+  - morning release-manager merge-train operator
+  - wrkf action runners consuming wrkq-simple-task@3
+source:
+  - internal/workflow/builtins/wrkq-simple-task-v3.workflow.json
+  - internal/workflow/action.go
+  - internal/workflow/action_next.go
+  - internal/workflow/action_settle_test.go
+  - internal/workflow/action_next_test.go
+  - internal/workflow/executable_actions_test.go
+  - hrcchat#12339
+required_tests:
+  - TestBuiltinSimpleTaskV3BatchLandingContract
+  - TestActionNextV3LandingCandidateBindsPRVerifiedSource
+  - TestSettleActionV3PRVerifiedAwaitingMergeQueue
+  - TestSettleActionV3LandingGateMatrix
+  - TestSettleActionV3LandingResultClosesWithEvidenceChain
+  - go test ./internal/workflow
+last_verified:
+  date: 2026-07-05
+  evidence: "just verify-full green, plus installed ~/.local/bin wrkf throwaway-DB smoke for pr_verified awaiting_merge, bad FrozenBar landing rejection, valid landing close, and no H1 exact-source verify_result"
+reopen_when:
+  - wrkq-simple-task@3 pr_verified no longer stops at waiting/awaiting_merge
+  - awaiting_merge stops being queryable through wrkf/wrkq workflow phase surfaces
+  - landing_result can close without source pr_verified evidence
+  - landing_result can close without merged main SHA or FrozenBar rerun proof
+  - landing evidence labels rebased H1 as exact-source verified without a separate verify_result at H1
+  - wrkq starts reading GitHub/PR API state as the source of merge readiness
+supersedes: []
+superseded_by: null

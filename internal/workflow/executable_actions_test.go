@@ -49,6 +49,42 @@ func TestBuiltinSimpleTaskV2ExecutableActionsValidate(t *testing.T) {
 	}
 }
 
+func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
+	data, err := builtinTemplateData(BuiltinSimpleTaskV3TemplateRef)
+	if err != nil {
+		t.Fatalf("builtinTemplateData(v3): %v", err)
+	}
+	tpl, canonical, err := ParseTemplate(data)
+	if err != nil {
+		t.Fatalf("ParseTemplate(v3): %v", err)
+	}
+	if errs := ValidateTemplate(tpl, canonical, nil); len(errs) > 0 {
+		t.Fatalf("ValidateTemplate(v3) errors: %v", errs)
+	}
+	if tpl.ID != "wrkq-simple-task" || tpl.Version != "3" {
+		t.Fatalf("template ref = %s@%s, want wrkq-simple-task@3", tpl.ID, tpl.Version)
+	}
+	if len(tpl.ExecutableActions) != 4 {
+		t.Fatalf("executableActions len = %d, want 4", len(tpl.ExecutableActions))
+	}
+	verify := tpl.ExecutableActions["verify"]
+	if !containsString(verify.SideEffectClasses, "git.push") || !containsString(verify.SideEffectClasses, "github.pr.create") {
+		t.Fatalf("v3 verify sideEffectClasses = %v, want git.push and github.pr.create", verify.SideEffectClasses)
+	}
+	landing := tpl.ExecutableActions["landing"]
+	if landing.Role != "release_manager" || landing.ResultEvidenceKind != "landing_result" || landing.SourceBinding == nil {
+		t.Fatalf("landing action = %+v", landing)
+	}
+	if landing.SourceBinding.Action != "verify" || landing.SourceBinding.BindFields == nil ||
+		landing.SourceBinding.BindFields.CommitSha != "branch.head.sha" ||
+		landing.SourceBinding.BindFields.ArtifactRef != "bar.hash" {
+		t.Fatalf("landing source binding = %+v", landing.SourceBinding)
+	}
+	assertV2EffectState(t, tpl, "verify_complete", "verified", "completed")
+	assertNoEffectState(t, tpl, "verify_complete", "pr_verified", "completed")
+	assertV2EffectState(t, tpl, "landing_complete", "landed", "completed")
+}
+
 func assertV2EffectState(t *testing.T, tpl *Template, transitionID, outcomeID, wantState string) {
 	t.Helper()
 	for _, tr := range tpl.Transitions {
@@ -74,6 +110,39 @@ func assertV2EffectState(t *testing.T, tpl *Template, transitionID, outcomeID, w
 		t.Fatalf("%s missing outcome %s", transitionID, outcomeID)
 	}
 	t.Fatalf("missing transition %s", transitionID)
+}
+
+func assertNoEffectState(t *testing.T, tpl *Template, transitionID, outcomeID, unwantedState string) {
+	t.Helper()
+	for _, tr := range tpl.Transitions {
+		if tr.ID != transitionID {
+			continue
+		}
+		for _, outcome := range tr.Outcomes {
+			if outcome.ID != outcomeID {
+				continue
+			}
+			for _, effect := range outcome.Effects {
+				if effect.Kind != "set_task_state" {
+					continue
+				}
+				if got, _ := effect.Data["state"].(string); got == unwantedState {
+					t.Fatalf("%s/%s unexpectedly sets task state %q", transitionID, outcomeID, unwantedState)
+				}
+			}
+			return
+		}
+	}
+	t.Fatalf("missing transition/outcome %s/%s", transitionID, outcomeID)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidateExecutableActionsRejectsMalformedReferences(t *testing.T) {

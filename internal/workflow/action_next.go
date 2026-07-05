@@ -199,8 +199,8 @@ func resolveActionCandidateSource(q queryer, tpl *Template, ev []Evidence, bindi
 		if missing := missingRequiredFacts(facts, required); len(missing) > 0 {
 			continue
 		}
-		commit := stringFact(facts, "commit.sha")
-		artifact := stringFact(facts, "artifact.digest")
+		commit := boundSourceFact(facts, binding, "commitSha", "commit.sha")
+		artifact := boundSourceFact(facts, binding, "artifactRef", "artifact.digest")
 		if artifact == "" {
 			artifact = e.ContentHash
 		}
@@ -218,6 +218,22 @@ func resolveActionCandidateSource(q queryer, tpl *Template, ev []Evidence, bindi
 		return nil, fmt.Sprintf("source binding %s evidence with required facts %s is missing", sourceSpec.ResultEvidenceKind, strings.Join(required, ","))
 	}
 	return nil, fmt.Sprintf("source binding %s evidence is missing", sourceSpec.ResultEvidenceKind)
+}
+
+func boundSourceFact(facts map[string]interface{}, binding *SourceBindingSpec, field, fallback string) string {
+	path := ""
+	if binding != nil && binding.BindFields != nil {
+		switch field {
+		case "commitSha":
+			path = strings.TrimSpace(binding.BindFields.CommitSha)
+		case "artifactRef":
+			path = strings.TrimSpace(binding.BindFields.ArtifactRef)
+		}
+	}
+	if path == "" {
+		path = fallback
+	}
+	return stringFact(facts, path)
 }
 
 func listEvidenceForInstanceRows(q rowsQueryer, instanceID string) ([]Evidence, error) {

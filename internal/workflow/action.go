@@ -1102,6 +1102,58 @@ func validateSettleEvidenceFacts(tx *sql.Tx, run *claimedRun, kind string, evide
 		}
 		return validationError("source", "verify run is missing a stored source commit or artifact identity", "source identity", nil, "claim the verify candidate produced by action.next")
 	}
+	if run.Action == "landing" && kind == "landing_result" {
+		if strings.TrimSpace(run.SourceEvidenceID) == "" {
+			return validationError("source", "landing run is missing source pr_verified evidence", "source pr_verified evidence", nil, "claim the landing candidate produced by action.next")
+		}
+		source, err := evidenceByIDTx(tx, run.SourceEvidenceID)
+		if err != nil {
+			return err
+		}
+		if source.InstanceID != run.InstanceID || source.Kind != "verify_result" {
+			return validationError("source", "landing source must be verify_result evidence on the same instance", "same-instance verify_result", []string{run.SourceEvidenceID}, "claim the landing candidate produced by action.next")
+		}
+		sourceFacts := evidenceFactsMap(*source)
+		if stringFact(sourceFacts, "result") != "pr_verified" {
+			return validationError("source", "landing source verify_result must be pr_verified", "pr_verified", []string{stringFact(sourceFacts, "result")}, "land only from batch pr_verified evidence")
+		}
+		if stringFact(facts, "source.verify.evidence_id") != run.SourceEvidenceID {
+			return validationError("evidence.facts.source.verify.evidence_id", "landing_result must link the claimed source verify evidence", run.SourceEvidenceID, []string{run.SourceEvidenceID}, "copy the source evidence id from the landing claim")
+		}
+		sourceHead := stringFact(sourceFacts, "branch.head.sha")
+		if strings.TrimSpace(run.SourceCommitSha) != "" && sourceHead != run.SourceCommitSha {
+			return validationError("source", "landing claim source head does not match source pr_verified evidence", run.SourceCommitSha, []string{sourceHead}, "reclaim the landing action from current pr_verified evidence")
+		}
+		if stringFact(facts, "source.branch.head.sha") != sourceHead {
+			return validationError("evidence.facts.source.branch.head.sha", "landing_result must preserve original branch head H0", sourceHead, []string{sourceHead}, "copy branch.head.sha from the pr_verified evidence")
+		}
+		sourceBar := stringFact(sourceFacts, "bar.hash")
+		if stringFact(facts, "source.bar.hash") != sourceBar {
+			return validationError("evidence.facts.source.bar.hash", "landing_result must preserve original bar hash", sourceBar, []string{sourceBar}, "copy bar.hash from the pr_verified evidence")
+		}
+		sourcePR := stringFact(sourceFacts, "pr.url")
+		if stringFact(facts, "source.pr.url") != sourcePR || stringFact(facts, "pr.url") != sourcePR {
+			return validationError("evidence.facts.pr.url", "landing_result PR URL must match pr_verified evidence", sourcePR, []string{sourcePR}, "copy pr.url from the pr_verified evidence")
+		}
+		if stringFact(facts, "result") != "landed" {
+			return nil
+		}
+		if missing := missingRequiredFacts(facts, []string{"rebased.head.sha", "merged.main.sha", "rebase.range"}); len(missing) > 0 {
+			return validationError("evidence.facts", "landed result is missing rebase or merged-main evidence", "landing chain facts", missing, "include rebased.head.sha, merged.main.sha, and rebase.range before closing")
+		}
+		if stringFact(facts, "frozen_bar.result") != "passed" {
+			return validationError("evidence.facts.frozen_bar.result", "landed result requires a passed FrozenBar rerun", "passed", []string{stringFact(facts, "frozen_bar.result")}, "route reverify_required or operator_required instead of landed")
+		}
+		if stringFact(facts, "frozen_bar.command_hash") == "" || stringFact(facts, "frozen_bar.command_hash") != stringFact(facts, "frozen_bar.expected_command_hash") {
+			return validationError("evidence.facts.frozen_bar.command_hash", "landed result requires unchanged FrozenBar commandHash", stringFact(facts, "frozen_bar.expected_command_hash"), []string{stringFact(facts, "frozen_bar.command_hash")}, "rerun the exact frozen bar.command or route reverify_required")
+		}
+		if stringFact(facts, "frozen_bar.content_hash") == "" || stringFact(facts, "frozen_bar.content_hash") != stringFact(facts, "frozen_bar.expected_content_hash") {
+			return validationError("evidence.facts.frozen_bar.content_hash", "landed result requires unchanged FrozenBar contentHash", stringFact(facts, "frozen_bar.expected_content_hash"), []string{stringFact(facts, "frozen_bar.content_hash")}, "route reverify_required when the bar content changes")
+		}
+		if boolFact(facts, "bar.changed") {
+			return validationError("evidence.facts.bar.changed", "landed result requires barChanged()==false at the rebased tree", "false", []string{"true"}, "route reverify_required when the frozen bar changes")
+		}
+	}
 	return nil
 }
 
@@ -1494,7 +1546,28 @@ func (s *Service) CompleteAction(p CompleteActionParams) (*ActionCompleteResult,
 
 	result := &ActionCompleteResult{}
 	if p.Evidence != nil {
-		ev, err := s.addActionEvidence(run, p.Evidence, actionDefaultEvidenceKind(run.Action))
+		defaultKind := actionDefaultEvidenceKind(run.Action)
+		if tpl, _, tplErr := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion); tplErr == nil {
+			if spec, ok := tpl.ExecutableActions[run.Action]; ok && strings.TrimSpace(spec.ResultEvidenceKind) != "" {
+				defaultKind = strings.TrimSpace(spec.ResultEvidenceKind)
+			}
+		}
+		kind := strings.TrimSpace(p.Evidence.Kind)
+		if kind == "" {
+			kind = defaultKind
+		}
+		if run.Action == "landing" && kind == "landing_result" {
+			if err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+				claimed, err := claimedRunByIDTx(tx, run.ID)
+				if err != nil {
+					return err
+				}
+				return validateSettleEvidenceFacts(tx, claimed, kind, p.Evidence)
+			}); err != nil {
+				return nil, err
+			}
+		}
+		ev, err := s.addActionEvidence(run, p.Evidence, defaultKind)
 		if err != nil {
 			return nil, err
 		}
@@ -2158,6 +2231,8 @@ func defaultRoleForAction(action string) string {
 		return "reviewer"
 	case "verify":
 		return "tester"
+	case "landing":
+		return "release_manager"
 	default:
 		return action
 	}

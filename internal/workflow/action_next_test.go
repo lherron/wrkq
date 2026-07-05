@@ -15,6 +15,16 @@ func attachSimpleTaskV2(t *testing.T, svc *Service, taskUUID string) {
 	}
 }
 
+func attachSimpleTaskV3(t *testing.T, svc *Service, taskUUID string) {
+	t.Helper()
+	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskV3TemplateRef, "agent:t"); err != nil {
+		t.Fatalf("EnsureBuiltinTemplate(v3): %v", err)
+	}
+	if _, err := svc.AttachTask(taskUUID, BuiltinSimpleTaskV3TemplateRef, "agent:t"); err != nil {
+		t.Fatalf("AttachTask(v3): %v", err)
+	}
+}
+
 func TestActionNextV2CandidatesByPhaseAndReadOnly(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
@@ -128,6 +138,31 @@ func TestActionNextBlockedVerifyWhenSourceMissing(t *testing.T) {
 	assertActionCandidates(t, blocked, "verify")
 	if !blocked.Candidates[0].Blocked || blocked.Candidates[0].BlockedReason == "" {
 		t.Fatalf("blocked candidate missing reason: %+v", blocked.Candidates[0])
+	}
+}
+
+func TestActionNextV3LandingCandidateBindsPRVerifiedSource(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV3(t, svc, taskUUID)
+	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
+	startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"h0","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	verify := claimActionForTest(t, svc, taskUUID, "verify")
+	verified := settleClaimForTest(t, svc, verify, `{"result":"pr_verified","source.commit.sha":"h0","verified.commit.sha":"h0","branch.head.sha":"h0","bar.hash":"bar0","pr.url":"https://example.test/pr/1","git.clean":true}`, "pr verified")
+
+	result, err := svc.ActionNext(ActionNextParams{
+		Task:    taskUUID,
+		Filters: ActionNextFilters{Statuses: []string{"waiting"}, Phases: []string{"awaiting_merge"}},
+	})
+	if err != nil {
+		t.Fatalf("ActionNext awaiting_merge: %v", err)
+	}
+	assertActionCandidates(t, result, "landing")
+	c := result.Candidates[0]
+	if c.RequiredEvidenceKind != "landing_result" || c.Role != "release_manager" {
+		t.Fatalf("landing candidate = %+v", c)
+	}
+	if c.Source == nil || c.Source.SourceEvidenceID != verified.Evidence.ID || c.Source.CommitSha != "h0" || c.Source.ArtifactRef != "bar0" {
+		t.Fatalf("landing source = %+v, want evidence %s H0 h0 bar0", c.Source, verified.Evidence.ID)
 	}
 }
 
