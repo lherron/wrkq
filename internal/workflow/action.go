@@ -141,15 +141,17 @@ type ReapActionsResult struct {
 }
 
 type ClaimActionParams struct {
-	Task           string             `json:"task,omitempty"`
-	InstanceID     string             `json:"instanceId,omitempty"`
-	Prefer         ActionClaimPrefer  `json:"prefer,omitempty"`
-	RunnerID       string             `json:"runnerId"`
-	AgentRef       string             `json:"agentRef"`
-	ScopeRef       string             `json:"scopeRef,omitempty"`
-	Capabilities   []RunnerCapability `json:"capabilities,omitempty"`
-	LeaseMs        int64              `json:"leaseMs"`
-	IdempotencyKey string             `json:"idempotencyKey,omitempty"`
+	Task             string             `json:"task,omitempty"`
+	InstanceID       string             `json:"instanceId,omitempty"`
+	Prefer           ActionClaimPrefer  `json:"prefer,omitempty"`
+	RunnerID         string             `json:"runnerId"`
+	AgentRef         string             `json:"agentRef"`
+	ScopeRef         string             `json:"scopeRef,omitempty"`
+	Capabilities     []RunnerCapability `json:"capabilities,omitempty"`
+	LeaseMs          int64              `json:"leaseMs"`
+	WorkspaceRoot    string             `json:"workspaceRoot,omitempty"`
+	WorkspaceLeaseMs int64              `json:"workspaceLeaseMs,omitempty"`
+	IdempotencyKey   string             `json:"idempotencyKey,omitempty"`
 }
 
 type ActionClaimPrefer struct {
@@ -173,15 +175,17 @@ type ClaimActionResult struct {
 }
 
 type SettleActionParams struct {
-	ActionRunID     string               `json:"actionRunId,omitempty"`
-	RunID           string               `json:"runId,omitempty"`
-	OwnerToken      string               `json:"ownerToken,omitempty"`
-	OwnerGeneration int64                `json:"ownerGeneration,omitempty"`
-	Result          string               `json:"result"`
-	Evidence        *ActionEvidenceInput `json:"evidence,omitempty"`
-	TransitionMode  TransitionMode       `json:"-"`
-	TransitionID    string               `json:"-"`
-	TerminalSummary string               `json:"terminalSummary,omitempty"`
+	ActionRunID         string               `json:"actionRunId,omitempty"`
+	RunID               string               `json:"runId,omitempty"`
+	OwnerToken          string               `json:"ownerToken,omitempty"`
+	OwnerGeneration     int64                `json:"ownerGeneration,omitempty"`
+	WorkspaceToken      string               `json:"workspaceToken,omitempty"`
+	WorkspaceGeneration int64                `json:"workspaceGeneration,omitempty"`
+	Result              string               `json:"result"`
+	Evidence            *ActionEvidenceInput `json:"evidence,omitempty"`
+	TransitionMode      TransitionMode       `json:"-"`
+	TransitionID        string               `json:"-"`
+	TerminalSummary     string               `json:"terminalSummary,omitempty"`
 }
 
 type SettleActionResult struct {
@@ -193,10 +197,11 @@ type SettleActionResult struct {
 }
 
 type FencedRunBinding struct {
-	Run       WorkflowRunAttempt `json:"run"`
-	Task      ActionTaskBinding  `json:"task"`
-	Instance  Instance           `json:"instance"`
-	Authority ActionRunAuthority `json:"authority"`
+	Run       WorkflowRunAttempt       `json:"run"`
+	Task      ActionTaskBinding        `json:"task"`
+	Instance  Instance                 `json:"instance"`
+	Authority ActionRunAuthority       `json:"authority"`
+	Workspace *WorkspaceLeaseAuthority `json:"workspace,omitempty"`
 }
 
 type WorkflowRunAttempt struct {
@@ -365,6 +370,15 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 		task := strings.TrimSpace(p.Task)
 		instanceID := strings.TrimSpace(firstNonEmptyAction(p.InstanceID, p.Prefer.InstanceID))
+		workspaceRoot := ""
+		var workspace *WorkspaceLease
+		if strings.TrimSpace(p.WorkspaceRoot) != "" {
+			var err error
+			workspaceRoot, err = canonicalWorkspaceRoot(p.WorkspaceRoot)
+			if err != nil {
+				return err
+			}
+		}
 		inst, err := resolveInstanceSelectors(tx, task, instanceID)
 		if err != nil {
 			return err
@@ -401,8 +415,21 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 			return err
 		}
 		if run != nil {
+			if err := validateWorkspaceReplay(run, workspaceRoot); err != nil {
+				return err
+			}
+			if run.WorkspaceRef != "" && workspaceRoot == "" {
+				workspaceRoot = run.WorkspaceRef
+			}
 			if err := validateClaimReplay(run, candidate, p.RunnerID, now); err != nil {
 				return err
+			}
+			if workspaceRoot != "" {
+				workspaceLeaseMs := firstPositiveAction(p.WorkspaceLeaseMs, p.LeaseMs)
+				workspace, err = claimWorkspaceTx(tx, workspaceRoot, p.RunnerID, workspaceLeaseMs, now)
+				if err != nil {
+					return err
+				}
 			}
 			ownerGeneration := run.OwnerGeneration + 1
 			_, err := tx.Exec(`
@@ -424,6 +451,13 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 				run.ScopeRef = p.ScopeRef
 			}
 		} else {
+			if workspaceRoot != "" {
+				workspaceLeaseMs := firstPositiveAction(p.WorkspaceLeaseMs, p.LeaseMs)
+				workspace, err = claimWorkspaceTx(tx, workspaceRoot, p.RunnerID, workspaceLeaseMs, now)
+				if err != nil {
+					return err
+				}
+			}
 			id, err := nextSeqID(tx, "workflow_run_seq", "run")
 			if err != nil {
 				return err
@@ -444,7 +478,7 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 				VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 			`, id, candidate.InstanceID, candidate.Role, p.AgentRef, p.AgentRef, nowText, nullIfEmpty(p.IdempotencyKey),
 				candidate.Action, p.RunnerID, token, expiresAt, nowText, candidate.SemanticActionKey, attempt,
-				p.AgentRef, nullIfEmpty(p.ScopeRef), nullIfEmpty(candidate.HandlerContract), nullIfEmpty(candidate.WorkspaceRef),
+				p.AgentRef, nullIfEmpty(p.ScopeRef), nullIfEmpty(candidate.HandlerContract), nullIfEmpty(firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef)),
 				nullIfEmpty(sourceRunID), nullIfEmpty(sourceEvidenceID), nullIfEmpty(sourceCommit))
 			if err != nil {
 				if isRunUniqueConflict(err) {
@@ -456,7 +490,7 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 				ID: id, InstanceID: candidate.InstanceID, SemanticActionKey: candidate.SemanticActionKey,
 				Action: candidate.Action, Role: candidate.Role, Attempt: attempt, Status: "active",
 				AgentRef: p.AgentRef, ScopeRef: p.ScopeRef, HandlerContract: candidate.HandlerContract,
-				WorkspaceRef: candidate.WorkspaceRef, SourceRunID: sourceRunID, SourceEvidenceID: sourceEvidenceID,
+				WorkspaceRef: firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef), SourceRunID: sourceRunID, SourceEvidenceID: sourceEvidenceID,
 				SourceCommitSha: sourceCommit, StartedAt: nowText, LeaseOwner: p.RunnerID, LeaseToken: token,
 				LeaseExpiresAt: expiresAt, HeartbeatAt: nowText, OwnerGeneration: 1,
 			}
@@ -466,6 +500,14 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 			return err
 		}
 		binding = claimedRunBinding(run, inst, taskDoc)
+		if workspace != nil {
+			binding.Workspace = &WorkspaceLeaseAuthority{
+				CanonicalRoot:   workspace.CanonicalRoot,
+				LeaseToken:      workspace.LeaseToken,
+				OwnerGeneration: workspace.OwnerGeneration,
+				LeaseExpiresAt:  workspace.LeaseExpiresAt,
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -515,6 +557,9 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 		}
 		if actionSpec.Role != "" && actionSpec.Role != run.Role {
 			return actionLeaseConflictError(run.ID)
+		}
+		if err := validateWorkspaceSettleAuthorityTx(tx, run, p, now); err != nil {
+			return err
 		}
 		transitionID := strings.TrimSpace(p.TransitionID)
 		switch p.TransitionMode {
@@ -777,6 +822,42 @@ func validateSettleOwnership(run *claimedRun, p SettleActionParams, now time.Tim
 		return actionLeaseConflictError(run.ID)
 	}
 	return nil
+}
+
+func validateWorkspaceReplay(run *claimedRun, canonicalRoot string) error {
+	if strings.TrimSpace(run.WorkspaceRef) == "" && strings.TrimSpace(canonicalRoot) != "" {
+		return actionLeaseConflictError(run.ID)
+	}
+	if strings.TrimSpace(run.WorkspaceRef) == "" || strings.TrimSpace(canonicalRoot) == "" {
+		return nil
+	}
+	if run.WorkspaceRef != canonicalRoot {
+		return actionLeaseConflictError(run.ID)
+	}
+	return nil
+}
+
+func validateWorkspaceSettleAuthorityTx(tx *sql.Tx, run *claimedRun, p SettleActionParams, now time.Time) error {
+	if strings.TrimSpace(run.WorkspaceRef) == "" {
+		return nil
+	}
+	lease, err := workspaceLeaseByRootTx(tx, run.WorkspaceRef)
+	if err != nil {
+		return actionLeaseConflictError(run.ID)
+	}
+	if !workspaceLeaseMatches(lease, p.WorkspaceToken, p.WorkspaceGeneration, now) {
+		return actionLeaseConflictError(run.ID)
+	}
+	return nil
+}
+
+func firstPositiveAction(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func settleTerminalSummary(p SettleActionParams, evidence *Evidence) string {

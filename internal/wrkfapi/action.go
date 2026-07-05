@@ -20,6 +20,11 @@ type ActionNextResult = workflow.ActionNextResult
 type ActionClaimParams = workflow.ClaimActionParams
 type ActionClaimResult = workflow.ClaimActionResult
 type ActionSettleRun = workflow.WorkflowRunAttempt
+type WorkspaceLease = workflow.WorkspaceLease
+type WorkspaceClaimParams = workflow.ClaimWorkspaceParams
+type WorkspaceHeartbeatParams = workflow.HeartbeatWorkspaceParams
+type WorkspaceReleaseParams = workflow.ReleaseWorkspaceParams
+type WorkspaceShowParams = workflow.ShowWorkspaceParams
 
 type ActionEvidenceParams struct {
 	Kind           string          `json:"kind,omitempty"`
@@ -64,14 +69,16 @@ type ActionCompleteParams struct {
 }
 
 type ActionSettleParams struct {
-	ActionRunID     string                `json:"actionRunId,omitempty"`
-	RunID           string                `json:"runId,omitempty"`
-	OwnerToken      string                `json:"ownerToken,omitempty"`
-	OwnerGeneration int64                 `json:"ownerGeneration,omitempty"`
-	Result          string                `json:"result"`
-	Evidence        *ActionEvidenceParams `json:"evidence,omitempty"`
-	Transition      json.RawMessage       `json:"transition,omitempty"`
-	TerminalSummary string                `json:"terminalSummary,omitempty"`
+	ActionRunID         string                `json:"actionRunId,omitempty"`
+	RunID               string                `json:"runId,omitempty"`
+	OwnerToken          string                `json:"ownerToken,omitempty"`
+	OwnerGeneration     int64                 `json:"ownerGeneration,omitempty"`
+	WorkspaceToken      string                `json:"workspaceToken,omitempty"`
+	WorkspaceGeneration int64                 `json:"workspaceGeneration,omitempty"`
+	Result              string                `json:"result"`
+	Evidence            *ActionEvidenceParams `json:"evidence,omitempty"`
+	Transition          json.RawMessage       `json:"transition,omitempty"`
+	TerminalSummary     string                `json:"terminalSummary,omitempty"`
 }
 
 type ActionFailParams struct {
@@ -161,15 +168,17 @@ func (api *API) ActionSettle(ctx context.Context, params ActionSettleParams) (*A
 		return nil, err
 	}
 	out, err := api.service.SettleAction(workflow.SettleActionParams{
-		ActionRunID:     params.ActionRunID,
-		RunID:           params.RunID,
-		OwnerToken:      params.OwnerToken,
-		OwnerGeneration: params.OwnerGeneration,
-		Result:          params.Result,
-		Evidence:        actionEvidenceInput(params.Evidence),
-		TransitionMode:  mode,
-		TransitionID:    transitionID,
-		TerminalSummary: params.TerminalSummary,
+		ActionRunID:         params.ActionRunID,
+		RunID:               params.RunID,
+		OwnerToken:          params.OwnerToken,
+		OwnerGeneration:     params.OwnerGeneration,
+		WorkspaceToken:      params.WorkspaceToken,
+		WorkspaceGeneration: params.WorkspaceGeneration,
+		Result:              params.Result,
+		Evidence:            actionEvidenceInput(params.Evidence),
+		TransitionMode:      mode,
+		TransitionID:        transitionID,
+		TerminalSummary:     params.TerminalSummary,
 	})
 	if err != nil {
 		return nil, normalizeError(err)
@@ -180,6 +189,50 @@ func (api *API) ActionSettle(ctx context.Context, params ActionSettleParams) (*A
 		result.Transition = &tr
 	}
 	return result, nil
+}
+
+func (api *API) WorkspaceClaim(ctx context.Context, params WorkspaceClaimParams) (*WorkspaceLease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lease, err := api.service.ClaimWorkspace(workflow.ClaimWorkspaceParams(params))
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return lease, nil
+}
+
+func (api *API) WorkspaceHeartbeat(ctx context.Context, params WorkspaceHeartbeatParams) (*WorkspaceLease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lease, err := api.service.HeartbeatWorkspace(workflow.HeartbeatWorkspaceParams(params))
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return lease, nil
+}
+
+func (api *API) WorkspaceRelease(ctx context.Context, params WorkspaceReleaseParams) (*WorkspaceLease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lease, err := api.service.ReleaseWorkspace(workflow.ReleaseWorkspaceParams(params))
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return lease, nil
+}
+
+func (api *API) WorkspaceShow(ctx context.Context, params WorkspaceShowParams) (*WorkspaceLease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lease, err := api.service.ShowWorkspace(workflow.ShowWorkspaceParams(params))
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return lease, nil
 }
 
 func (api *API) ActionStart(ctx context.Context, params ActionStartParams) (*ActionRun, error) {

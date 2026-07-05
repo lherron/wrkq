@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(runCmd())
 	rootCmd.AddCommand(watchCmd())
 	rootCmd.AddCommand(actionCmd())
+	rootCmd.AddCommand(workspaceCmd())
 	rootCmd.AddCommand(nextCmd())
 	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(transitionCmd())
@@ -914,15 +915,15 @@ func runCmd() *cobra.Command {
 func actionCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "action", Short: "Low-ceremony task lifecycle actions over wrkf runs"}
 	var (
-		workflowRef, action, role, actor, lane, deliveryRef, externalRunRef, idempotencyKey string
-		leaseOwner, leaseToken, ownerToken, expiredBefore, legacyActiveBefore               string
-		instanceID, semanticActionKey, runnerID, scopeRef                                   string
-		evidenceKind, evidenceRef, evidenceSummary, evidenceFacts, evidenceData             string
-		runSummary, settleResult, transition                                                string
-		noTransition, includeClosed, includeBlocked                                         bool
-		status, actionFilter                                                                string
-		limit                                                                               int
-		leaseMs, ownerGeneration                                                            int64
+		workflowRef, action, role, actor, lane, deliveryRef, externalRunRef, idempotencyKey                  string
+		leaseOwner, leaseToken, ownerToken, workspaceRoot, workspaceToken, expiredBefore, legacyActiveBefore string
+		instanceID, semanticActionKey, runnerID, scopeRef                                                    string
+		evidenceKind, evidenceRef, evidenceSummary, evidenceFacts, evidenceData                              string
+		runSummary, settleResult, transition                                                                 string
+		noTransition, includeClosed, includeBlocked                                                          bool
+		status, actionFilter                                                                                 string
+		limit                                                                                                int
+		leaseMs, workspaceLeaseMs, ownerGeneration, workspaceGeneration                                      int64
 	)
 
 	actionEvidence := func() *workflow.ActionEvidenceInput {
@@ -1023,10 +1024,12 @@ func actionCmd() *cobra.Command {
 					SemanticActionKey: semanticActionKey,
 					Action:            actionFilter,
 				},
-				RunnerID: runnerID,
-				AgentRef: firstNonEmpty(actor, a.actor),
-				ScopeRef: scopeRef,
-				LeaseMs:  claimLeaseMs,
+				RunnerID:         runnerID,
+				AgentRef:         firstNonEmpty(actor, a.actor),
+				ScopeRef:         scopeRef,
+				LeaseMs:          claimLeaseMs,
+				WorkspaceRoot:    workspaceRoot,
+				WorkspaceLeaseMs: workspaceLeaseMs,
 			})
 			if err != nil {
 				return err
@@ -1041,6 +1044,8 @@ func actionCmd() *cobra.Command {
 	claim.Flags().StringVar(&actor, "agent-ref", "", "Agent ref (agent:<id>)")
 	claim.Flags().StringVar(&scopeRef, "scope-ref", "", "Runtime scope ref")
 	claim.Flags().Int64Var(&leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
+	claim.Flags().StringVar(&workspaceRoot, "workspace-root", "", "Canonicalized physical worktree root to lease with the action")
+	claim.Flags().Int64Var(&workspaceLeaseMs, "workspace-lease-ms", 0, "Workspace lease duration in milliseconds (defaults to --lease-ms)")
 
 	bind := &cobra.Command{
 		Use:  "bind ACTION_RUN --external-run-ref hrc:RUNID",
@@ -1118,14 +1123,16 @@ func actionCmd() *cobra.Command {
 				transitionID = transition
 			}
 			out, err := a.service.SettleAction(workflow.SettleActionParams{
-				ActionRunID:     args[0],
-				OwnerToken:      ownerToken,
-				OwnerGeneration: ownerGeneration,
-				Result:          settleResult,
-				Evidence:        actionEvidence(),
-				TransitionMode:  mode,
-				TransitionID:    transitionID,
-				TerminalSummary: runSummary,
+				ActionRunID:         args[0],
+				OwnerToken:          ownerToken,
+				OwnerGeneration:     ownerGeneration,
+				WorkspaceToken:      workspaceToken,
+				WorkspaceGeneration: workspaceGeneration,
+				Result:              settleResult,
+				Evidence:            actionEvidence(),
+				TransitionMode:      mode,
+				TransitionID:        transitionID,
+				TerminalSummary:     runSummary,
 			})
 			if err != nil {
 				return err
@@ -1136,6 +1143,8 @@ func actionCmd() *cobra.Command {
 	settle.Flags().StringVar(&settleResult, "result", "completed", "Terminal settlement result")
 	settle.Flags().StringVar(&ownerToken, "owner-token", "", "Current owner token from action.claim")
 	settle.Flags().Int64Var(&ownerGeneration, "owner-generation", 0, "Current owner generation from action.claim")
+	settle.Flags().StringVar(&workspaceToken, "workspace-token", "", "Current workspace token from action.claim workspace authority")
+	settle.Flags().Int64Var(&workspaceGeneration, "workspace-generation", 0, "Current workspace generation from action.claim workspace authority")
 	settle.Flags().StringVar(&evidenceKind, "kind", "", "Evidence kind (defaults to executable action result kind)")
 	settle.Flags().StringVar(&evidenceRef, "ref", "", "Evidence ref")
 	settle.Flags().StringVar(&evidenceSummary, "summary", "", "Evidence summary")
@@ -1262,6 +1271,89 @@ func cliFilterList(value string) []string {
 		return nil
 	}
 	return []string{value}
+}
+
+func workspaceCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "workspace", Short: "Claim and fence physical worktree workspace leases"}
+	var (
+		ownerID         string
+		leaseToken      string
+		leaseMs         int64
+		ownerGeneration int64
+	)
+	claim := &cobra.Command{
+		Use:  "claim ROOT --owner-id OWNER",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			if leaseMs <= 0 {
+				leaseMs = 300000
+			}
+			lease, err := a.service.ClaimWorkspace(workflow.ClaimWorkspaceParams{
+				WorkspaceRoot: args[0],
+				OwnerID:       firstNonEmpty(ownerID, a.actor),
+				LeaseMs:       leaseMs,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, lease)
+		}),
+	}
+	claim.Flags().StringVar(&ownerID, "owner-id", "", "Workspace lease owner")
+	claim.Flags().Int64Var(&leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
+
+	heartbeat := &cobra.Command{
+		Use:     "heartbeat ROOT --lease-token TOKEN --owner-generation N",
+		Aliases: []string{"renew-lease"},
+		Args:    cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			lease, err := a.service.HeartbeatWorkspace(workflow.HeartbeatWorkspaceParams{
+				WorkspaceRoot:   args[0],
+				LeaseToken:      leaseToken,
+				OwnerGeneration: ownerGeneration,
+				LeaseMs:         leaseMs,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, lease)
+		}),
+	}
+	heartbeat.Flags().StringVar(&leaseToken, "lease-token", "", "Current workspace lease token")
+	heartbeat.Flags().Int64Var(&ownerGeneration, "owner-generation", 0, "Current workspace lease generation")
+	heartbeat.Flags().Int64Var(&leaseMs, "lease-ms", 0, "Lease duration in milliseconds")
+
+	release := &cobra.Command{
+		Use:  "release ROOT --lease-token TOKEN --owner-generation N",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			lease, err := a.service.ReleaseWorkspace(workflow.ReleaseWorkspaceParams{
+				WorkspaceRoot:   args[0],
+				LeaseToken:      leaseToken,
+				OwnerGeneration: ownerGeneration,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, lease)
+		}),
+	}
+	release.Flags().StringVar(&leaseToken, "lease-token", "", "Current workspace lease token")
+	release.Flags().Int64Var(&ownerGeneration, "owner-generation", 0, "Current workspace lease generation")
+
+	show := &cobra.Command{
+		Use:  "show ROOT",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			lease, err := a.service.ShowWorkspace(workflow.ShowWorkspaceParams{WorkspaceRoot: args[0]})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, lease)
+		}),
+	}
+	cmd.AddCommand(claim, heartbeat, release, show)
+	return cmd
 }
 
 func firstNonEmpty(values ...string) string {

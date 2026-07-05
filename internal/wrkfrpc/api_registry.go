@@ -55,6 +55,7 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 				"actionNext":         true,
 				"actionClaim":        true,
 				"actionSettle":       true,
+				"workspaceLease":     true,
 				"effectClaimLease":   true,
 				"runExternalBinding": true,
 			},
@@ -204,6 +205,18 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.action.list", apiHandler(func(ctx context.Context, p wrkfapi.ActionListParams) (any, error) {
 		return api.ActionList(ctx, p)
+	}))
+	s.Register("wrkf.workspace.claim", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceClaimParams) (any, error) {
+		return api.WorkspaceClaim(ctx, p)
+	}))
+	s.Register("wrkf.workspace.heartbeat", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceHeartbeatParams) (any, error) {
+		return api.WorkspaceHeartbeat(ctx, p)
+	}))
+	s.Register("wrkf.workspace.release", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceReleaseParams) (any, error) {
+		return api.WorkspaceRelease(ctx, p)
+	}))
+	s.Register("wrkf.workspace.show", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceShowParams) (any, error) {
+		return api.WorkspaceShow(ctx, p)
 	}))
 	s.Register("wrkf.effect.list", apiHandler(func(ctx context.Context, p effectListParams) (any, error) {
 		return api.EffectList(ctx, p.TaskSelector, p.All)

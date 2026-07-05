@@ -643,6 +643,8 @@ export interface WrkfActionClaimParams {
   scopeRef?: string;
   capabilities?: WrkfRunnerCapability[];
   leaseMs: number;
+  workspaceRoot?: string;
+  workspaceLeaseMs?: number;
   idempotencyKey?: string;
 }
 
@@ -681,11 +683,19 @@ export interface WrkfActionRunAuthority {
   leaseExpiresAt: string;
 }
 
+export interface WrkfWorkspaceLeaseAuthority {
+  canonicalRoot: string;
+  leaseToken: string;
+  ownerGeneration: number;
+  leaseExpiresAt: string;
+}
+
 export interface WrkfFencedRunBinding {
   run: WrkfWorkflowRunAttempt;
   task: WrkfActionTaskBinding;
   instance: WrkfInstance;
   authority: WrkfActionRunAuthority;
+  workspace?: WrkfWorkspaceLeaseAuthority;
 }
 
 export interface WrkfActionClaimResult {
@@ -697,6 +707,8 @@ export interface WrkfActionSettleParams {
   runId?: string;
   ownerToken?: string;
   ownerGeneration?: number;
+  workspaceToken?: string;
+  workspaceGeneration?: number;
   result:
     | "completed"
     | "semantic_blocked"
@@ -716,6 +728,40 @@ export interface WrkfActionSettleResult {
   transition?: WrkfTransitionResult;
   effects?: WrkfEffect[];
   obligations?: WrkfObligation[];
+}
+
+export interface WrkfWorkspaceLease {
+  canonicalRoot: string;
+  leaseOwner?: string;
+  leaseToken?: string;
+  ownerGeneration: number;
+  leaseExpiresAt?: string;
+  heartbeatAt?: string;
+  claimedAt?: string;
+  releasedAt?: string;
+}
+
+export interface WrkfWorkspaceClaimParams {
+  workspaceRoot: string;
+  ownerId: string;
+  leaseMs: number;
+}
+
+export interface WrkfWorkspaceHeartbeatParams {
+  workspaceRoot: string;
+  leaseToken: string;
+  ownerGeneration: number;
+  leaseMs?: number;
+}
+
+export interface WrkfWorkspaceReleaseParams {
+  workspaceRoot: string;
+  leaseToken: string;
+  ownerGeneration: number;
+}
+
+export interface WrkfWorkspaceShowParams {
+  workspaceRoot: string;
 }
 
 export interface WrkfActionStartParams {

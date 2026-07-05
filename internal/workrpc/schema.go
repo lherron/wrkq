@@ -69,6 +69,11 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkfDiffResult":               dtoType[wrkfapi.DiffResult](),
 	"WrkfSuggestResult":            dtoType[wrkfapi.SuggestResult](),
 	"WrkfEffectClaimResult":        dtoType[wrkfapi.EffectClaim](),
+	"WrkfWorkspaceLease":           dtoType[wrkfapi.WorkspaceLease](),
+	"WrkfWorkspaceClaimParams":     dtoType[wrkfapi.WorkspaceClaimParams](),
+	"WrkfWorkspaceHeartbeatParams": dtoType[wrkfapi.WorkspaceHeartbeatParams](),
+	"WrkfWorkspaceReleaseParams":   dtoType[wrkfapi.WorkspaceReleaseParams](),
+	"WrkfWorkspaceShowParams":      dtoType[wrkfapi.WorkspaceShowParams](),
 }
 
 func dtoType[T any]() reflect.Type {
