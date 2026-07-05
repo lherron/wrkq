@@ -697,4 +697,6 @@ type TransitionOptions struct {
 	RunID string
 }
 
+type TransitionResult = map[string]interface{}
+
 type nowFunc func() time.Time

@@ -1195,7 +1195,7 @@ func (s *Service) refreshInstanceContextTx(tx *sql.Tx, inst *Instance, actor str
 	return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor)
 }
 
-func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Template, transitionID, actor, role, runID string) (map[string]interface{}, error) {
+func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Template, transitionID, actor, role, runID string) (TransitionResult, error) {
 	key := fmt.Sprintf("wrkf-action:%s:settle:transition:%s", runID, transitionID)
 	opts := TransitionOptions{PrincipalRef: actor, Role: role, IdempotencyKey: key, RunID: runID}
 	requestHash := transitionRequestHash("", inst.ID, transitionID, opts)
@@ -1207,12 +1207,6 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	tr, err := findTransition(tpl, transitionID)
 	if err != nil {
 		return nil, err
-	}
-	if !stateMatches(*inst, tr.From) {
-		return nil, fmt.Errorf("transition %s cannot run from current state", transitionID)
-	}
-	if !roleAllowed(role, tr.By) || !roleBindingAllowed(tx, inst, tpl, role, actor) {
-		return nil, roleDeniedError(inst.ID, transitionID, role)
 	}
 	task, err := loadTaskDoc(tx, inst.TaskUUID)
 	if err != nil {
@@ -1226,49 +1220,34 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	if err != nil {
 		return nil, err
 	}
-	if blockers := transitionBlockers(*tr, ev, obl, taskDocHash(task)); len(blockers) > 0 {
-		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
-	}
 	checks := map[string]CheckRun{}
 	for _, checkID := range tr.Checks {
 		if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
 			checks[checkID] = latest
 		}
 	}
-	if blockers := checkCommitBlockers(tpl, *tr, ev, taskFacts(task), inst, task, ev, obl, checks, actor, role, s.db); len(blockers) > 0 {
-		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
+	decision, err := s.EvaluateTransitionDecision(TransitionDecisionInput{
+		Instance:           inst,
+		Template:           tpl,
+		Transition:         *tr,
+		Task:               task,
+		Evidence:           ev,
+		Obligations:        obl,
+		Checks:             checks,
+		Role:               role,
+		PrincipalRef:       actor,
+		RoleQuery:          tx,
+		DependencyQuery:    tx,
+		CheckDatabase:      s.db,
+		RequireRoleBinding: true,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if blockers := separationOfDutyBlockers(*tr, ev, actor); len(blockers) > 0 {
-		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
+	if !decision.Legal {
+		return nil, transitionDecisionError(inst.ID, transitionID, role, decision)
 	}
-	for _, guard := range tr.Guards {
-		if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
-			return nil, transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "guard", Message: "transition guard failed"}})
-		}
-	}
-	var chosen *OutcomeCase
-	for i := range tr.Outcomes {
-		out := &tr.Outcomes[i]
-		if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
-			chosen = out
-			break
-		}
-	}
-	if chosen == nil {
-		return nil, transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}})
-	}
-	if chosen.To.Status == "closed" {
-		depBlockers, err := taskRelationBlockers(tx, inst.TaskUUID)
-		if err != nil {
-			return nil, err
-		}
-		if len(depBlockers) > 0 {
-			return nil, transitionBlockedError(inst.ID, transitionID, depBlockers)
-		}
-	}
-	if blockers := postconditionBlockers(inst, *tr, chosen, ev, obl, checks, task); len(blockers) > 0 {
-		return nil, transitionBlockedError(inst.ID, transitionID, blockers)
-	}
+	chosen := decision.Outcome
 
 	nextRevision := inst.Revision + 1
 	now := s.now().UTC().Format(time.RFC3339)

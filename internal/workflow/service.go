@@ -2445,7 +2445,6 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 			})
 		}
 	}
-	facts := taskFacts(task)
 	for _, e := range pendingEff {
 		if e.Status != "pending" && e.Status != "failed" {
 			continue
@@ -2501,92 +2500,56 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: ownerBlockers})
 			continue
 		}
-		blockers := transitionBlockers(tr, ev, obl, taskDocHashOrEmpty(task))
-		if len(blockers) > 0 {
-			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: blockers})
-			for _, b := range blockers {
-				if b.Kind == "evidence" {
-					resp.Actions = append(resp.Actions, NextAction{ID: "collect_" + b.Ref, Kind: "collect_evidence", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 80, Why: b.Message, Unblocks: []string{tr.ID}, Guardrails: Guardrails{Hard: []string{"reference source truth as evidence"}, Warnings: []string{}}})
-				}
-				if b.Kind == "obligation" {
-					resp.Actions = append(resp.Actions, NextAction{ID: "satisfy_" + b.Ref, Kind: "satisfy_obligation", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 50, Why: b.Message, Unblocks: []string{tr.ID}, Guardrails: Guardrails{Hard: []string{"satisfy or waive the blocking obligation"}, Warnings: []string{}}})
-				}
-			}
-			continue
-		}
 		checks := map[string]CheckRun{}
 		for _, checkID := range tr.Checks {
 			if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
 				checks[checkID] = latest
 			}
 		}
-		checkBlockers := checkCommitBlockers(tpl, tr, ev, facts, inst, task, ev, obl, checks, "", ownerRole, s.db)
-		if len(checkBlockers) > 0 {
-			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: checkBlockers})
-			addedEvidenceActions := map[string]bool{}
-			for _, b := range checkBlockers {
-				if b.Kind == "check_input" && strings.HasPrefix(b.Ref, "evidence:") {
-					kind := strings.TrimPrefix(b.Ref, "evidence:")
-					if !addedEvidenceActions[kind] {
-						resp.Actions = append(resp.Actions, NextAction{ID: "collect_" + kind, Kind: "collect_evidence", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 80, Why: b.Message, Unblocks: []string{tr.ID}, Guardrails: Guardrails{Hard: []string{"reference source truth as evidence before running the check"}, Warnings: []string{}}})
-						addedEvidenceActions[kind] = true
-					}
-					continue
-				}
-				if b.Kind == "check" || b.Kind == "stale_check" {
-					checkID := strings.TrimPrefix(b.Ref, "check:")
-					resp.Actions = append(resp.Actions, NextAction{ID: "run_check_" + checkID, Kind: "run_check", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 90, Why: b.Message, Unblocks: []string{tr.ID}, Command: fmt.Sprintf("wrkf check run %s %s", strings.TrimPrefix(inst.TaskRef, "wrkq:"), tr.ID), Guardrails: Guardrails{Hard: []string{"do not commit stale check results"}, Warnings: []string{}}})
-				}
-			}
+		decision, err := s.EvaluateTransitionDecision(TransitionDecisionInput{
+			Instance:        inst,
+			Template:        tpl,
+			Transition:      tr,
+			Task:            task,
+			Evidence:        ev,
+			Obligations:     obl,
+			Checks:          checks,
+			Facts:           taskFacts(task),
+			Role:            ownerRole,
+			DependencyQuery: s.db,
+			CheckDatabase:   s.db,
+		})
+		if err != nil {
+			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "task_dependency", Message: err.Error()}}})
 			continue
 		}
-		if sodBlockers := separationOfDutyBlockers(tr, ev, ""); len(sodBlockers) > 0 {
-			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: sodBlockers})
+		if !decision.Legal {
+			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: decision.Blockers})
+			resp.Actions = append(resp.Actions, transitionFollowUpActions(inst, tr.ID, ownerRole, decision.FollowUps)...)
 			continue
 		}
-		ctx := evalContext{Evidence: ev, Obligations: obl, Checks: checks, Facts: facts, Task: task, State: inst.State()}
-		guardBlocked := false
-		for _, guard := range tr.Guards {
-			if !evalPredicate(guard, ctx) {
-				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "guard", Message: "transition guard failed"}}})
-				guardBlocked = true
-				break
-			}
-		}
-		if guardBlocked {
-			continue
-		}
-		var chosen *OutcomeCase
-		for i := range tr.Outcomes {
-			out := &tr.Outcomes[i]
-			if evalPredicate(out.When, ctx) {
-				chosen = out
-				break
-			}
-		}
-		if chosen == nil {
-			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}}})
-			continue
-		}
-		if chosen.To.Status == "closed" {
-			depBlockers, depErr := taskRelationBlockers(s.db, inst.TaskUUID)
-			if depErr != nil {
-				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: []Blocker{{Kind: "task_dependency", Message: depErr.Error()}}})
-				continue
-			}
-			if len(depBlockers) > 0 {
-				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: depBlockers})
-				continue
-			}
-		}
-		if postBlockers := postconditionBlockers(inst, tr, chosen, ev, obl, checks, task); len(postBlockers) > 0 {
-			resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: ownerRole, BlocksOn: postBlockers})
-			continue
-		}
-		expected := chosen.To
+		expected := *decision.ExpectedState
 		for _, owner := range owners {
-			if sodBlockers := separationOfDutyBlockers(tr, ev, owner.PrincipalRef); len(sodBlockers) > 0 {
-				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: owner.Role, BlocksOn: sodBlockers})
+			ownerDecision, err := s.EvaluateTransitionDecision(TransitionDecisionInput{
+				Instance:        inst,
+				Template:        tpl,
+				Transition:      tr,
+				Task:            task,
+				Evidence:        ev,
+				Obligations:     obl,
+				Checks:          checks,
+				Facts:           taskFacts(task),
+				Role:            owner.Role,
+				PrincipalRef:    owner.PrincipalRef,
+				DependencyQuery: s.db,
+				CheckDatabase:   s.db,
+			})
+			if err != nil {
+				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: owner.Role, BlocksOn: []Blocker{{Kind: "task_dependency", Message: err.Error()}}})
+				continue
+			}
+			if !ownerDecision.Legal {
+				resp.BlockedTransitions = append(resp.BlockedTransitions, BlockedTransition{ID: tr.ID, Role: owner.Role, BlocksOn: ownerDecision.Blockers})
 				continue
 			}
 			resp.Actions = append(resp.Actions, NextAction{ID: transitionActionID(tr.ID, owner, len(owners)), Kind: "transition", Mode: "deterministic", Owner: owner, Rank: 100, Why: "transition is legal and prerequisites are satisfied", Command: transitionCommand(inst.TaskRef, tr.ID, owner, inst.Revision), ExpectedState: &expected, Guardrails: Guardrails{Hard: []string{"provide expected revision"}, Warnings: []string{}}})
@@ -2594,6 +2557,24 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 	}
 	sort.SliceStable(resp.Actions, func(i, j int) bool { return resp.Actions[i].Rank > resp.Actions[j].Rank })
 	return resp, nil
+}
+
+func transitionFollowUpActions(inst *Instance, transitionID, ownerRole string, followUps []TransitionFollowUp) []NextAction {
+	var actions []NextAction
+	for _, followUp := range followUps {
+		b := followUp.Blocker
+		switch followUp.Kind {
+		case "collect_evidence":
+			actions = append(actions, NextAction{ID: "collect_" + followUp.Ref, Kind: "collect_evidence", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 80, Why: b.Message, Unblocks: []string{transitionID}, Guardrails: Guardrails{Hard: []string{"reference source truth as evidence"}, Warnings: []string{}}})
+		case "satisfy_obligation":
+			actions = append(actions, NextAction{ID: "satisfy_" + followUp.Ref, Kind: "satisfy_obligation", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 50, Why: b.Message, Unblocks: []string{transitionID}, Guardrails: Guardrails{Hard: []string{"satisfy or waive the blocking obligation"}, Warnings: []string{}}})
+		case "collect_check_evidence":
+			actions = append(actions, NextAction{ID: "collect_" + followUp.Ref, Kind: "collect_evidence", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 80, Why: b.Message, Unblocks: []string{transitionID}, Guardrails: Guardrails{Hard: []string{"reference source truth as evidence before running the check"}, Warnings: []string{}}})
+		case "run_check":
+			actions = append(actions, NextAction{ID: "run_check_" + followUp.CheckID, Kind: "run_check", Mode: "deterministic", Owner: ActionOwner{Role: ownerRole}, Rank: 90, Why: b.Message, Unblocks: []string{transitionID}, Command: fmt.Sprintf("wrkf check run %s %s", strings.TrimPrefix(inst.TaskRef, "wrkq:"), transitionID), Guardrails: Guardrails{Hard: []string{"do not commit stale check results"}, Warnings: []string{}}})
+		}
+	}
+	return actions
 }
 
 func checkCommitBlockers(tpl *Template, tr TransitionSpec, ev []Evidence, facts map[string]interface{}, inst *Instance, task *taskDoc, currentEv []Evidence, currentObl []Obligation, checks map[string]CheckRun, actor, role string, database *db.DB) []Blocker {

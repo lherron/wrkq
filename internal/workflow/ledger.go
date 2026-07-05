@@ -1670,13 +1670,13 @@ func (s *Service) RetryEffect(id string) (*Effect, error) {
 	return s.ShowEffect(id)
 }
 
-func (s *Service) Transition(taskSelector, transitionID string, opts TransitionOptions) (map[string]interface{}, error) {
+func (s *Service) Transition(taskSelector, transitionID string, opts TransitionOptions) (TransitionResult, error) {
 	return s.TransitionForSelectors(taskSelector, "", transitionID, opts)
 }
 
-func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID string, opts TransitionOptions) (map[string]interface{}, error) {
+func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID string, opts TransitionOptions) (TransitionResult, error) {
 	requestHash := transitionRequestHash(taskSelector, instanceID, transitionID, opts)
-	var result map[string]interface{}
+	var result TransitionResult
 	var webhookCtx *webhooks.EventContext
 	var webhookTaskUUID string
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
@@ -1712,12 +1712,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		if err != nil {
 			return err
 		}
-		if !stateMatches(*inst, tr.From) {
-			return fmt.Errorf("transition %s cannot run from current state", transitionID)
-		}
-		if !roleAllowed(opts.Role, tr.By) || !roleBindingAllowed(tx, inst, tpl, opts.Role, opts.PrincipalRef) {
-			return roleDeniedError(inst.ID, transitionID, opts.Role)
-		}
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {
 			return err
@@ -1729,10 +1723,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		obl, err := listObligationsTx(tx, inst.ID, true)
 		if err != nil {
 			return err
-		}
-		blockers := transitionBlockers(*tr, ev, obl, taskDocHash(task))
-		if len(blockers) > 0 {
-			return transitionBlockedError(inst.ID, transitionID, blockers)
 		}
 		checks := map[string]CheckRun{}
 		if opts.RunChecks {
@@ -1761,40 +1751,28 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			}
 			checks[c.CheckID] = *c
 		}
-		if blockers := checkCommitBlockers(tpl, *tr, ev, taskFacts(task), inst, task, ev, obl, checks, opts.PrincipalRef, opts.Role, s.db); len(blockers) > 0 {
-			return transitionBlockedError(inst.ID, transitionID, blockers)
+		decision, err := s.EvaluateTransitionDecision(TransitionDecisionInput{
+			Instance:           inst,
+			Template:           tpl,
+			Transition:         *tr,
+			Task:               task,
+			Evidence:           ev,
+			Obligations:        obl,
+			Checks:             checks,
+			Role:               opts.Role,
+			PrincipalRef:       opts.PrincipalRef,
+			RoleQuery:          tx,
+			DependencyQuery:    tx,
+			CheckDatabase:      s.db,
+			RequireRoleBinding: true,
+		})
+		if err != nil {
+			return err
 		}
-		if blockers := separationOfDutyBlockers(*tr, ev, opts.PrincipalRef); len(blockers) > 0 {
-			return transitionBlockedError(inst.ID, transitionID, blockers)
+		if !decision.Legal {
+			return transitionDecisionError(inst.ID, transitionID, opts.Role, decision)
 		}
-		for _, guard := range tr.Guards {
-			if !evalPredicate(guard, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
-				return transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "guard", Message: "transition guard failed"}})
-			}
-		}
-		var chosen *OutcomeCase
-		for i := range tr.Outcomes {
-			out := &tr.Outcomes[i]
-			if evalPredicate(out.When, evalContext{Evidence: ev, Obligations: obl, Checks: checks, Task: task, State: inst.State()}) {
-				chosen = out
-				break
-			}
-		}
-		if chosen == nil {
-			return transitionBlockedError(inst.ID, transitionID, []Blocker{{Kind: "outcome", Message: "no transition outcome matched"}})
-		}
-		if chosen.To.Status == "closed" {
-			depBlockers, err := taskRelationBlockers(tx, inst.TaskUUID)
-			if err != nil {
-				return err
-			}
-			if len(depBlockers) > 0 {
-				return transitionBlockedError(inst.ID, transitionID, depBlockers)
-			}
-		}
-		if blockers := postconditionBlockers(inst, *tr, chosen, ev, obl, checks, task); len(blockers) > 0 {
-			return transitionBlockedError(inst.ID, transitionID, blockers)
-		}
+		chosen := decision.Outcome
 		if opts.DryRun {
 			result = map[string]interface{}{"dryRun": true, "transition": transitionID, "outcome": chosen.ID, "state": chosen.To}
 			return nil
