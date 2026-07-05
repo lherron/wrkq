@@ -506,36 +506,36 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 	}
 }
 
-func TestTransportEquivalence_LegacyVsMirrorRPCStdio(t *testing.T) {
+func TestSubprocessTransport_StdioTaskShowIsStable(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds wrkq + wrkq-rpccli binaries; skipped under -short")
+		t.Skip("builds production wrkq binaries; skipped under -short")
 	}
 	dbPath, taskID := migratedDBWithTask(t)
-	bins := buildParityBinaries(t)
+	bins := buildProductionBinaries(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	legacy, err := NewSubprocess(ctx, bins.wrkq, dbPath, nil)
+	first, err := NewSubprocess(ctx, bins.wrkq, dbPath, nil)
 	if err != nil {
-		t.Fatalf("legacy NewSubprocess: %v", err)
+		t.Fatalf("first NewSubprocess: %v", err)
 	}
-	defer func() { _ = legacy.Close() }()
-	mirror, err := NewSubprocess(ctx, bins.mirror, dbPath, nil)
+	defer func() { _ = first.Close() }()
+	second, err := NewSubprocess(ctx, bins.wrkq, dbPath, nil)
 	if err != nil {
-		t.Fatalf("mirror NewSubprocess: %v", err)
+		t.Fatalf("second NewSubprocess: %v", err)
 	}
-	defer func() { _ = mirror.Close() }()
+	defer func() { _ = second.Close() }()
 
-	legacyResult, err := legacy.Call(ctx, "wrkq.task.show", map[string]string{"task": taskID})
+	firstResult, err := first.Call(ctx, "wrkq.task.show", map[string]string{"task": taskID})
 	if err != nil {
-		t.Fatalf("legacy task.show: %v", err)
+		t.Fatalf("first task.show: %v", err)
 	}
-	mirrorResult, err := mirror.Call(ctx, "wrkq.task.show", map[string]string{"task": taskID})
+	secondResult, err := second.Call(ctx, "wrkq.task.show", map[string]string{"task": taskID})
 	if err != nil {
-		t.Fatalf("mirror task.show: %v", err)
+		t.Fatalf("second task.show: %v", err)
 	}
-	if !jsonEqual(t, legacyResult, mirrorResult) {
-		t.Errorf("rpc --stdio task.show results differ:\n legacy: %s\n mirror: %s", legacyResult, mirrorResult)
+	if !jsonEqual(t, firstResult, secondResult) {
+		t.Errorf("rpc --stdio task.show results differ:\n first: %s\n second: %s", firstResult, secondResult)
 	}
 }
 
@@ -627,7 +627,7 @@ func TestTransportEquivalence_AttachmentBytes(t *testing.T) {
 // (T-05103): a binary attachment fetched via wrkq.attachment.getBytes must NOT
 // leak raw bytes onto the SERVER's stdout — every server stdout line is a
 // well-formed JSON-RPC frame. The decoded raw bytes are emitted only by the
-// wrkq-rpccli CLI after frame decode (proven by the attach-get parity cases).
+// production wrkq CLI after frame decode (proven by the attach-get parity cases).
 func TestStdoutPurity_AttachmentGetBytes(t *testing.T) {
 	dbPath, taskID := migratedDBWithTask(t)
 	attachDir := t.TempDir()

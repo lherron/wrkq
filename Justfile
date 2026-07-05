@@ -58,12 +58,6 @@ build:
   go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
-# Build the temporary old-vs-new RPC cutover oracle binaries.
-build-rpc-oracle:
-  echo "Building wrkq legacy/RPC oracle binaries..."
-  go build -tags sqlite_fts5 -o bin/wrkq-legacy ./cmd/wrkq-legacy
-  go build -tags sqlite_fts5 -o bin/wrkq-rpccli ./cmd/wrkq-rpccli
-
 # Conservative no-network check for agents/CI sandboxes
 agent-check:
   scripts/agent-check.sh

@@ -78,7 +78,7 @@ func TestRmPurgePromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
-	bins := buildParityBinaries(t)
+	bins := buildProductionBinaries(t)
 
 	cases := []struct {
 		name  string
@@ -100,7 +100,7 @@ func TestRmPurgePromptOwnership(t *testing.T) {
 			newDir := copyFixture(t, base)
 
 			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
 
 			if oldExit != newExit {
 				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
@@ -136,7 +136,7 @@ func TestCommentRmPromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
-	bins := buildParityBinaries(t)
+	bins := buildProductionBinaries(t)
 
 	cases := []struct {
 		name  string
@@ -160,7 +160,7 @@ func TestCommentRmPromptOwnership(t *testing.T) {
 			newDir := copyFixture(t, base)
 
 			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
 
 			if oldExit != newExit {
 				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
@@ -196,7 +196,7 @@ func TestCpPromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
-	bins := buildParityBinaries(t)
+	bins := buildProductionBinaries(t)
 
 	// Six sources so the >5 prompt engages; a destination container to copy into.
 	setup := [][]string{
@@ -229,7 +229,7 @@ func TestCpPromptOwnership(t *testing.T) {
 			newDir := copyFixture(t, base)
 
 			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
 
 			if oldExit != newExit {
 				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
@@ -264,7 +264,7 @@ func TestRmdirForcePromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
-	bins := buildParityBinaries(t)
+	bins := buildProductionBinaries(t)
 
 	cases := []struct {
 		name  string
@@ -287,7 +287,7 @@ func TestRmdirForcePromptOwnership(t *testing.T) {
 			newDir := copyFixture(t, base)
 
 			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.mirror, newDir, tc.args, tc.input)
+			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
 
 			if oldExit != newExit {
 				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)

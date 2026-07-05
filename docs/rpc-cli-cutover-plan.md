@@ -16,10 +16,8 @@ while path-owning admin/daemon surfaces remain path-only.
 
 - `cmd/wrkq` imports `internal/rpccli`, so the production `wrkq` entrypoint is
   RPC-backed.
-- `cmd/wrkq-legacy` imports `internal/cli` as the temporary direct-store oracle,
-  and `cmd/wrkq-rpccli` remains the temporary mirror used by parity tests.
-- `just install` installs only shipped binaries and removes stale
-  `wrkq-rpccli` installs.
+- The direct-store and mirror oracle commands have been removed.
+- `just install` installs only shipped binaries and removes stale mirror installs.
 - `internal/rpccli/root.go` has no remaining top-level stubs.
 - `TestPrimaryCutoverInventoryGate` fails on top-level stubs, `partial`,
   `not-started`, `rpc-gap`, or `seam-smoke` rows in the migration matrix.
@@ -48,7 +46,7 @@ Local RPC CLI cutover is complete when:
 
 1. The installed `wrkq` binary uses `internal/rpccli` for all retained
    day-to-day commands.
-2. `wrkq-rpccli` is no longer installed as a production migration artifact.
+2. The temporary mirror command is no longer installed as a production migration artifact.
 3. Retained commands obtain durable wrkq behavior through the JSON-RPC boundary.
 4. Local-only commands are explicitly local-only: `server`, `agent`, `usage`,
    `version`, `whoami`, `agent-context`, and caller-host file/prompt/output work.
@@ -179,15 +177,12 @@ remote production support on it.
 
 1. Change `cmd/wrkq/main.go` to execute `internal/rpccli`. **Done.**
 2. Make `internal/rpccli` configurable for the production command name:
-   - `wrkq` help should say `wrkq`, not `wrkq-rpccli`;
-   - `cmd/wrkq-rpccli` can pass `wrkq-rpccli` while it still exists for test
-     comparison.
+   - `wrkq` help should say `wrkq`.
 3. Keep `wrkq rpc --stdio` on the same bootstrap/registry path as the mirror.
 4. Update `Justfile`: **Done for install/build split.**
    - build production `bin/wrkq` from the RPC-backed command;
-   - stop installing `wrkq-rpccli` by default;
-   - keep a test-only or developer-only build target for the old-vs-new oracle
-     only until the post-cutover cleanup removes it.
+   - stop installing the mirror command by default;
+   - remove the pre-cutover comparison build target after contract tests replace it.
 5. Add a structural guard:
    - `cmd/wrkq` must not import `internal/cli`;
    - retained `internal/rpccli` commands must not import forbidden durable
@@ -204,7 +199,7 @@ remote production support on it.
 Run before the swap while both binaries exist:
 
 - `go test -tags sqlite_fts5 ./internal/rpccli`
-- the old-vs-new parity harness, including PTY cases
+- the production command contract tests, including PTY cases
 - transport-equivalence tests for in-process vs subprocess stdio
 - search/index transport tests
 - protocol init tests proving version, schema hash, capability/method presence,
@@ -245,12 +240,12 @@ After installed `wrkq` is RPC-backed and smoke-tested:
 2. Keep or move the `wrkqadm` and `wrkqd` pieces:
    - either leave `internal/cli` as admin/daemon-only;
    - or split to `internal/admincli` and `internal/wrkqdhttp` in a follow-up.
-3. Convert old-vs-new parity tests into RPC-backed command contract tests:
+3. Convert pre-cutover comparison parity tests into RPC-backed command contract tests:
    - retained commands get golden/semantic tests against `cmd/wrkq`;
    - transport tests stay in `internal/rpccli`;
    - no test should require production legacy command handlers to compile.
-4. Remove `cmd/wrkq-rpccli` after the oracle is retired.
-5. Remove build/install references to `wrkq-rpccli`.
+4. Remove the retired mirror command after the oracle is retired.
+5. Remove build/install references to the mirror command.
 6. Update generated docs and `docs/html/*` artifacts that list old commands,
    bundle routes, actor admin routes, or the mirror binary.
 
@@ -445,10 +440,10 @@ Not part of the RPC CLI cutover:
 5. Fix T-01853.
 6. Run pre-swap parity and transport tests.
 7. Swap `cmd/wrkq` to `internal/rpccli`.
-8. Stop installing `wrkq-rpccli`.
+8. Stop installing the mirror command.
 9. Run `just verify-full`, `just install`, and installed smokes.
 10. Remove/quarantine legacy day-to-day `internal/cli` code and retire
-    old-vs-new oracle tests.
+    pre-cutover comparison oracle tests.
 11. Finish T-04317 before remote `wrkqd` transport is called production.
 12. Add `WRKQ_DB=rpc://max3[:port]` locator support and the `wrkqd` remote
     workrpc transport.

@@ -33,7 +33,7 @@ source:
   - internal/cli/appctx/appctx.go             # --project override delegates to projectroot
 required_tests:
   - internal/projectroot/projectroot_test.go            # TestTransform (pure transform guard)
-  - internal/rpccli/parity_test.go                      # TestParity/pr/* (WRKQ_PROJECT_ROOT, ASP_PROJECT, --project; ls + read selectors + mutations)
+  - internal/rpccli/parity_test.go                      # production contract pr/* (WRKQ_PROJECT_ROOT, ASP_PROJECT, --project; ls + read selectors + mutations)
   - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard (rpccli must not import internal/cli)
 last_verified:
   date: 2026-06-22

@@ -16,7 +16,7 @@ predicate: >
   sleeps/times out/stalls/emits terminal lines; wrkq.history.tailView returns a bounded
   ASCENDING raw event_log page (principal/resource hydration + high-water). Each
   page is hard-capped server-side (monitorMaxPageLimit) so a hammering client can never
-  pull an unbounded slice in one frame. The CLIENT (wrkq-rpccli) owns ALL streaming
+  pull an unbounded slice in one frame. The CLIENT (production wrkq) owns ALL streaming
   control flow: the blocking poll loop + interval, the monotonic high-water cursor carried
   across polls, the timeout/stall clocks, the per-event NDJSON lines, EXACTLY ONE terminal
   NDJSON record before exit, the exit codes (0=met, 1=timeout/stall, 2=selector/usage,
@@ -24,7 +24,7 @@ predicate: >
   stateView are TWO independent snapshots, so the terminal decision is intentionally
   RACE-TOLERANT (a met condition may be observed before the matching event is paged in);
   tests assert race-tolerantly. The JSON-RPC server stdout stays JSON-RPC-pure — the
-  per-event / terminal NDJSON is emitted ONLY by wrkq-rpccli after RPC-frame decode. The
+  per-event / terminal NDJSON is emitted ONLY by production wrkq after RPC-frame decode. The
   raw tail (watch / monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape:
   INCLUDES resource_id, STRING timestamp, nullable resource_uuid, and no actor
   fields), DISTINCT from WrkqLogEvent.
@@ -47,7 +47,7 @@ source:
   - internal/rpccli/watch.go                    # watch / monitor --raw (client: follow loop, deprecation warning, human/NDJSON render)
   - internal/workrpc/registry.go                # method + DTO catalog registration (both wrkq + wrkf entrypoints via RegisterAPI)
 required_tests:
-  - internal/rpccli/parity_test.go              # TestParity/monitor/*, TestParity/watch/*
+  - internal/rpccli/parity_test.go              # production contract monitor/*, production contract watch/*
   - internal/rpccli/transport_test.go           # TestTransportEquivalence_InProcVsSubprocess (eventsView/stateView/tailView arms)
   - internal/wrkqapi/monitorview_test.go        # TestMonitorEventsView_* (incl. _LastNGapIndependent: --last N start cursor = MIN(id)-1 over last N existing rows, gap-independent) / TestMonitorStateView_* / TestHistoryTailView_*
   - internal/wrkqapi/catview_fingerprint_test.go # TestMonitorViewDTOFingerprint, TestHistoryTailViewDTOFingerprint
