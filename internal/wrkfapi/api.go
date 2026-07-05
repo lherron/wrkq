@@ -687,6 +687,9 @@ func normalizeError(err error) error {
 		case CodeIdempotencyMismatch:
 			return NewIdempotencyMismatchError("")
 		case CodeLeaseConflict:
+			if strings.Contains(err.Error(), "action lease conflict") {
+				return newError(CodeLeaseConflict, err.Error(), true, nil, err)
+			}
 			return NewLeaseConflictError("", "")
 		case CodeEffectNotDeliverable:
 			return NewEffectNotDeliverableError("", "")

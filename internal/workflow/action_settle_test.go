@@ -94,6 +94,145 @@ func TestSettleActionRejectsWrongOwnershipWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestSettleActionExpiredSuccessLeavesDowngradeLane(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+
+	root := t.TempDir()
+	impl, err := svc.ClaimAction(ClaimActionParams{
+		Task:          taskUUID,
+		RunnerID:      "runner-impl",
+		AgentRef:      "agent:impl",
+		Prefer:        ActionClaimPrefer{Action: "implement"},
+		LeaseMs:       300000,
+		WorkspaceRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("ClaimAction implement: %v", err)
+	}
+	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
+	expireWorkspaceLeaseForTest(t, svc, root)
+
+	beforeEvents := countTable(t, svc, "workflow_events")
+	_, err = svc.SettleAction(SettleActionParams{
+		ActionRunID:         impl.Binding.Run.ID,
+		OwnerToken:          impl.Binding.Authority.OwnerToken,
+		OwnerGeneration:     impl.Binding.Authority.OwnerGeneration,
+		WorkspaceToken:      impl.Binding.Workspace.LeaseToken,
+		WorkspaceGeneration: impl.Binding.Workspace.OwnerGeneration,
+		Result:              "completed",
+		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
+	})
+	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
+		t.Fatalf("expired success settle error = %v, want lease conflict", err)
+	}
+
+	out, err := svc.SettleAction(SettleActionParams{
+		ActionRunID:     impl.Binding.Run.ID,
+		OwnerToken:      impl.Binding.Authority.OwnerToken,
+		OwnerGeneration: impl.Binding.Authority.OwnerGeneration,
+		Result:          "operator_required",
+		Evidence: &ActionEvidenceInput{
+			Summary: "completed settle was refused after lease expiry; commit a75cfb1 requires resumed verification",
+			Facts:   `{"reason":"completed settle refused after lease expiry","commit.sha":"a75cfb1"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("downgrade settle after refused success: %v", err)
+	}
+	if out.Run.Status != "operator_required" || out.Evidence == nil || out.Evidence.Kind != "failure_result" {
+		t.Fatalf("downgrade output = %+v evidence=%+v, want operator_required failure_result", out.Run, out.Evidence)
+	}
+	if out.Transition != nil || len(out.Effects) != 0 || len(out.Obligations) != 0 {
+		t.Fatalf("downgrade settlement applied transition side effects: %+v", out)
+	}
+	if got := countTable(t, svc, "workflow_events"); got != beforeEvents {
+		t.Fatalf("downgrade emitted transition events = %d, want %d", got, beforeEvents)
+	}
+	next, err := svc.ActionNext(ActionNextParams{Task: taskUUID})
+	if err != nil {
+		t.Fatalf("ActionNext after downgrade: %v", err)
+	}
+	assertActionCandidates(t, next, "implement")
+}
+
+func TestSettleActionRecoveredInstanceRunsNextAction(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+	impl := claimActionForTest(t, svc, taskUUID, "implement")
+	settleClaimForTest(t, svc, impl, `{"result":"operator_required"}`, "needs operator")
+
+	addOperatorResolution(t, svc, taskUUID, "resume_ready", "operator cleared side-effect ambiguity")
+	transitionOperatorResolved(t, svc, taskUUID)
+	next, err := svc.ActionNext(ActionNextParams{Task: taskUUID})
+	if err != nil {
+		t.Fatalf("ActionNext recovered: %v", err)
+	}
+	assertActionCandidates(t, next, "implement")
+
+	recovered := claimActionForTest(t, svc, taskUUID, "implement")
+	out := settleClaimForTest(t, svc, recovered, `{"result":"done","commit.sha":"a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented after recovery")
+	if out.Run.Status != "completed" || out.Transition == nil {
+		t.Fatalf("recovered implement settle = %+v, transition=%+v", out.Run, out.Transition)
+	}
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	if inst.Status != "active" || inst.Phase != "implemented" {
+		t.Fatalf("recovered instance state = %+v, want active/implemented", inst.State())
+	}
+}
+
+func TestSettleActionOperatorResolutionReceiptsDoNotCollideWithNextActionEffects(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+	impl := claimActionForTest(t, svc, taskUUID, "implement")
+	settleClaimForTest(t, svc, impl, `{"result":"operator_required"}`, "needs operator")
+	addOperatorResolution(t, svc, taskUUID, "resume_ready", "operator cleared side-effect ambiguity")
+	transitionOperatorResolved(t, svc, taskUUID)
+
+	recovered := claimActionForTest(t, svc, taskUUID, "implement")
+	out := settleClaimForTest(t, svc, recovered, `{"result":"blocked"}`, "blocked after recovery")
+	if len(out.Effects) != 1 || out.Effects[0].Kind != "set_task_state" || out.Effects[0].Status != "delivered" {
+		t.Fatalf("recovered blocked effects = %+v, want delivered set_task_state", out.Effects)
+	}
+
+	effects, err := svc.ListEffects(taskUUID, true)
+	if err != nil {
+		t.Fatalf("ListEffects: %v", err)
+	}
+	var deliveredOpen, deliveredBlocked int
+	seenSemanticKeys := map[string]bool{}
+	for _, eff := range effects {
+		if eff.Kind != "set_task_state" {
+			continue
+		}
+		if seenSemanticKeys[eff.SemanticKey] {
+			t.Fatalf("duplicate set_task_state semantic key after recovery: %q effects=%+v", eff.SemanticKey, effects)
+		}
+		seenSemanticKeys[eff.SemanticKey] = true
+		if eff.Status != "delivered" || len(eff.Receipt) == 0 {
+			t.Fatalf("set_task_state effect = %+v, want delivered with receipt", eff)
+		}
+		switch {
+		case strings.HasSuffix(eff.SemanticKey, ":open"):
+			deliveredOpen++
+		case strings.HasSuffix(eff.SemanticKey, ":blocked"):
+			deliveredBlocked++
+		}
+	}
+	if deliveredOpen < 2 || deliveredBlocked != 1 {
+		t.Fatalf("set_task_state effects open=%d blocked=%d all=%+v", deliveredOpen, deliveredBlocked, effects)
+	}
+}
+
 func TestSettleActionImplementRequiresGitCommittedCleanFacts(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)

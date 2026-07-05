@@ -540,7 +540,12 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 			return nil
 		}
 		now := s.now().UTC()
-		if err := validateSettleOwnership(run, p, now); err != nil {
+		downgrade := isDowngradeSettlementResult(resultStatus)
+		if downgrade {
+			if err := validateSettleDowngradeAuthority(run, p); err != nil {
+				return err
+			}
+		} else if err := validateSettleOwnership(run, p, now); err != nil {
 			return err
 		}
 		inst, err := instanceByIDQuery(tx, run.InstanceID)
@@ -558,31 +563,49 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 		if actionSpec.Role != "" && actionSpec.Role != run.Role {
 			return actionLeaseConflictError(run.ID)
 		}
-		if err := validateWorkspaceSettleAuthorityTx(tx, run, p, now); err != nil {
-			return err
+		if !downgrade {
+			if err := validateWorkspaceSettleAuthorityTx(tx, run, p, now); err != nil {
+				return err
+			}
 		}
 		transitionID := strings.TrimSpace(p.TransitionID)
-		switch p.TransitionMode {
-		case TransitionSkip:
-			transitionID = ""
-		case TransitionExplicit:
-			if transitionID == "" {
-				return validationError("transition", "transition id is required", "transition id", nil, "supply transition or omit it for the executable action transition")
+		if downgrade {
+			if p.TransitionMode == TransitionExplicit && transitionID != "" {
+				return validationError("transition", "downgrade settlement cannot apply a workflow transition", "no transition", nil, "omit transition or set transition=false when settling a non-completed action result")
 			}
-		default:
-			transitionID = strings.TrimSpace(actionSpec.Transition)
+			transitionID = ""
+		} else {
+			switch p.TransitionMode {
+			case TransitionSkip:
+				transitionID = ""
+			case TransitionExplicit:
+				if transitionID == "" {
+					return validationError("transition", "transition id is required", "transition id", nil, "supply transition or omit it for the executable action transition")
+				}
+			default:
+				transitionID = strings.TrimSpace(actionSpec.Transition)
+			}
+		}
+		expectedEvidenceKind := strings.TrimSpace(actionSpec.ResultEvidenceKind)
+		if downgrade {
+			expectedEvidenceKind = "failure_result"
+		}
+		if expectedEvidenceKind == "" {
+			expectedEvidenceKind = actionDefaultEvidenceKind(run.Action)
 		}
 		var evidence *Evidence
 		if p.Evidence != nil {
 			kind := strings.TrimSpace(p.Evidence.Kind)
 			if kind == "" {
-				kind = actionSpec.ResultEvidenceKind
+				kind = expectedEvidenceKind
 			}
-			if kind != actionSpec.ResultEvidenceKind {
-				return validationError("evidence.kind", "settlement evidence kind must match executable action result kind", actionSpec.ResultEvidenceKind, []string{actionSpec.ResultEvidenceKind}, "use the candidate requiredEvidenceKind")
+			if kind != expectedEvidenceKind {
+				return validationError("evidence.kind", "settlement evidence kind must match settlement result kind", expectedEvidenceKind, []string{expectedEvidenceKind}, "use implement/verify result evidence for completed settlements and failure_result for downgrade settlements")
 			}
-			if err := validateSettleEvidenceFacts(tx, run, kind, p.Evidence); err != nil {
-				return err
+			if !downgrade {
+				if err := validateSettleEvidenceFacts(tx, run, kind, p.Evidence); err != nil {
+					return err
+				}
 			}
 			evidence, err = s.addActionEvidenceTx(tx, inst, tpl, AddEvidenceParams{
 				InstanceID:     inst.ID,
@@ -601,6 +624,8 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 			if err != nil {
 				return err
 			}
+		} else if downgrade {
+			return validationError("evidence", "downgrade settlement evidence is required", "failure_result evidence", nil, "include failure_result evidence explaining why the action cannot be completed")
 		} else if transitionID != "" {
 			return validationError("evidence", "settlement evidence is required when applying a transition", "run-linked evidence", nil, "include evidence for the executable action result kind")
 		}
@@ -822,6 +847,23 @@ func validateSettleOwnership(run *claimedRun, p SettleActionParams, now time.Tim
 		return actionLeaseConflictError(run.ID)
 	}
 	return nil
+}
+
+func validateSettleDowngradeAuthority(run *claimedRun, p SettleActionParams) error {
+	if run.Status != "active" {
+		return actionLeaseConflictError(run.ID)
+	}
+	if strings.TrimSpace(p.OwnerToken) == "" || strings.TrimSpace(p.OwnerToken) != run.LeaseToken {
+		return actionLeaseConflictError(run.ID)
+	}
+	if p.OwnerGeneration <= 0 || p.OwnerGeneration != run.OwnerGeneration {
+		return actionLeaseConflictError(run.ID)
+	}
+	return nil
+}
+
+func isDowngradeSettlementResult(result string) bool {
+	return strings.TrimSpace(result) != "completed"
 }
 
 func validateWorkspaceReplay(run *claimedRun, canonicalRoot string) error {
