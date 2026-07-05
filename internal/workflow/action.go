@@ -1260,6 +1260,7 @@ func firstNonEmptyAction(values ...string) string {
 }
 
 func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template, params AddEvidenceParams) (*Evidence, error) {
+	policy := ResolveWorkflowPolicy(tpl)
 	var kindSpec *KindSpec
 	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
 		kindSpec = &spec
@@ -1271,10 +1272,8 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 	if err != nil {
 		return nil, err
 	}
-	if params.Kind == "operator_resolution" {
-		if err := validateOperatorResolutionReason(params.Summary, facts); err != nil {
-			return nil, err
-		}
+	if err := policy.ValidateEvidence(params, facts); err != nil {
+		return nil, err
 	}
 	var dataArg interface{}
 	var dataRaw json.RawMessage
@@ -1339,6 +1338,9 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 		return nil, err
 	}
 	ev := &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+	if err := policy.OnEvidenceAdded(tx, inst, ev); err != nil {
+		return nil, err
+	}
 	if params.IdempotencyKey != "" {
 		if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
 			return nil, err
