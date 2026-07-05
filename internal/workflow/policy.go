@@ -1,6 +1,11 @@
 package workflow
 
-import "database/sql"
+import (
+	"database/sql"
+	"encoding/json"
+	"strings"
+	"sync"
+)
 
 // WorkflowPolicy owns template-specific workflow behavior that the generic
 // evidence and ledger paths should not embed directly.
@@ -12,11 +17,76 @@ type WorkflowPolicy interface {
 
 type defaultWorkflowPolicy struct{}
 
+type workflowPolicyKey struct {
+	templateID string
+	version    string
+}
+
+var workflowPolicyRegistry = struct {
+	sync.RWMutex
+	exact    map[workflowPolicyKey]WorkflowPolicy
+	fallback map[string]WorkflowPolicy
+}{
+	exact: map[workflowPolicyKey]WorkflowPolicy{
+		{templateID: "wrkq-simple-task", version: "1"}: simpleTaskWorkflowPolicy{},
+		{templateID: "wrkq-simple-task", version: "2"}: simpleTaskWorkflowPolicy{},
+		{templateID: "wrkq-simple-task", version: "3"}: simpleTaskWorkflowPolicy{},
+	},
+	fallback: map[string]WorkflowPolicy{},
+}
+
 func ResolveWorkflowPolicy(tpl *Template) WorkflowPolicy {
-	if tpl != nil && tpl.ID == "wrkq-simple-task" {
-		return simpleTaskWorkflowPolicy{}
+	if tpl == nil {
+		return defaultWorkflowPolicy{}
+	}
+	id := strings.TrimSpace(tpl.ID)
+	version := strings.TrimSpace(tpl.Version)
+	workflowPolicyRegistry.RLock()
+	defer workflowPolicyRegistry.RUnlock()
+	if policy, ok := workflowPolicyRegistry.exact[workflowPolicyKey{templateID: id, version: version}]; ok && policy != nil {
+		return policy
+	}
+	if policy, ok := workflowPolicyRegistry.fallback[id]; ok && policy != nil {
+		return policy
 	}
 	return defaultWorkflowPolicy{}
+}
+
+func registerWorkflowPolicy(templateID, version string, policy WorkflowPolicy) func() {
+	id := strings.TrimSpace(templateID)
+	ver := strings.TrimSpace(version)
+	if policy == nil {
+		policy = defaultWorkflowPolicy{}
+	}
+
+	workflowPolicyRegistry.Lock()
+	defer workflowPolicyRegistry.Unlock()
+	if ver == "" {
+		previous, hadPrevious := workflowPolicyRegistry.fallback[id]
+		workflowPolicyRegistry.fallback[id] = policy
+		return func() {
+			workflowPolicyRegistry.Lock()
+			defer workflowPolicyRegistry.Unlock()
+			if hadPrevious {
+				workflowPolicyRegistry.fallback[id] = previous
+			} else {
+				delete(workflowPolicyRegistry.fallback, id)
+			}
+		}
+	}
+
+	key := workflowPolicyKey{templateID: id, version: ver}
+	previous, hadPrevious := workflowPolicyRegistry.exact[key]
+	workflowPolicyRegistry.exact[key] = policy
+	return func() {
+		workflowPolicyRegistry.Lock()
+		defer workflowPolicyRegistry.Unlock()
+		if hadPrevious {
+			workflowPolicyRegistry.exact[key] = previous
+		} else {
+			delete(workflowPolicyRegistry.exact, key)
+		}
+	}
 }
 
 func (defaultWorkflowPolicy) ValidateEvidence(AddEvidenceParams, *parsedEvidenceFacts) error {
@@ -38,6 +108,21 @@ func (simpleTaskWorkflowPolicy) ValidateEvidence(params AddEvidenceParams, facts
 		return validateOperatorResolutionReason(params.Summary, facts)
 	}
 	return nil
+}
+
+func validateOperatorResolutionReason(summary string, facts *parsedEvidenceFacts) error {
+	if strings.TrimSpace(summary) != "" {
+		return nil
+	}
+	if facts != nil {
+		if raw, ok := facts.Fields["reason"]; ok {
+			var reason string
+			if err := json.Unmarshal(raw, &reason); err == nil && strings.TrimSpace(reason) != "" {
+				return nil
+			}
+		}
+	}
+	return validationError("summary", "operator_resolution requires a human/operator reason in summary or facts.reason", "non-empty summary or facts.reason", nil, "include the operator reason before resolving operator_required")
 }
 
 func (simpleTaskWorkflowPolicy) OnEvidenceAdded(tx *sql.Tx, inst *Instance, ev *Evidence) error {
