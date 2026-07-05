@@ -6,15 +6,15 @@ Generated from `agent-enablement.json`. This markdown is a projection, not autho
 
 Rubric: rubric.md@d793717
 Catalog: not-recorded
-AE assessment: 2026-07-02 (agent-enablement/assessments/wrkq/assessment.json)
+AE assessment: 2026-07-05 (agent-enablement/assessments/wrkq/assessment.json)
 PM floor: 2026-07-03 (etag 10)
 
 ## Profile Summary
 Required: 17
 Frontier: 1
 Deferred: 0
-Open deltas: none
-Failing/open axes: S1, TC
+Open deltas: delta:add-secret-scan-hook-floor, delta:adopt-discovery-tools-in-agent-router, delta:bound-db-raw-access, delta:exercise-retro-cadence, delta:extend-self-describing-help-gate, delta:extract-cli-surface-manifest, delta:prove-cli-scaffold-adoption, delta:split-verify-evidence-predicates
+Failing/open axes: F0, S1, TC, TD.selfDescribingSurfaceConformance
 
 ## PM Floor Axes
 - F0: PARTIAL
@@ -43,7 +43,7 @@ Failing/open axes: S1, TC
 - S6: floor-gap / open (T-05448)
 
 ## Depth Axes
-- F0: PRESENT.DORMANT.satisfied.dormant
+- F0: PARTIAL.NOT_APPLICABLE.open_delta
 - P0: PRESENT.EXERCISED.satisfied.exercised
 - S1: PARTIAL.EXERCISED.open_delta
 - S2: PRESENT.DORMANT.satisfied.dormant
@@ -55,7 +55,8 @@ Failing/open axes: S1, TC
 - S8: PRESENT.EXERCISED.satisfied.exercised
 - TA: PRESENT.EXERCISED.satisfied.exercised
 - TB: PRESENT.EXERCISED.satisfied.exercised
-- TC: PARTIAL.DORMANT.satisfied.dormant
+- TC: PARTIAL.DORMANT.open_delta
 - TD: PRESENT.DORMANT.satisfied.dormant
+- TD.selfDescribingSurfaceConformance: PARTIAL.EXERCISED.open_delta
 - TE: PRESENT.EXERCISED.satisfied.exercised
 - TF: PRESENT.EXERCISED.satisfied.exercised
