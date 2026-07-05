@@ -379,7 +379,8 @@ client-test:
   cd packages/client && bun run typecheck && bun run test:unit
 
 # Run @wrkq/client integration tests against the REAL installed `wrkq`/`wrkf rpc --stdio`
-client-integration: install
+# Verification must not sync downstream repos; publishing/installing the local client is enough.
+client-integration: (install "no-sync=1")
   cd packages/client && bun run test:integration
 
 # Full RPC verification: Go build/install unaffected + TS unit + TS integration
