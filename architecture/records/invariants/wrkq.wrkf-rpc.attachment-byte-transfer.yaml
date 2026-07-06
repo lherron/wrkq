@@ -9,7 +9,7 @@ predicate: >
   required server-local host path. The CLI owns reading local stdin/files and writing
   decoded bytes to stdout or `--as <path>`; the server owns storage, authoritative
   size validation (vs attachments_max_mb), checksum, metadata/event mutation, and
-  cleanup (temp file + atomic rename). RAW bytes are emitted ONLY by wrkq-rpccli after
+  cleanup (temp file + atomic rename). RAW bytes are emitted ONLY by production wrkq after
   RPC-frame decode — the JSON-RPC server stdout stays JSON-RPC-pure. Absence of byte
   capability (no explicitly-configured attach dir) HARD-GATES with WRKQ_VALIDATION; it
   never silently falls back to a host path. A server-local/staged path may exist later
@@ -29,7 +29,7 @@ source:
   - internal/rpccli/attach.go                   # runAttachGet / runAttachPutStdin (CLI: stdin/stdout/--as byte I/O, post-decode)
   - internal/workrpc/registry.go                # method + DTO catalog registration
 required_tests:
-  - internal/rpccli/parity_test.go              # TestParity/attach-get/*, TestParity/attach-put-stdin/*
+  - internal/rpccli/parity_test.go              # production contract attach-get/*, production contract attach-put-stdin/*
   - internal/rpccli/transport_test.go           # TestTransportEquivalence_AttachmentBytes, TestStdoutPurity_AttachmentGetBytes
   - internal/wrkqapi/catview_fingerprint_test.go # TestAttachmentBytesDTOFingerprint
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (getBytes/addBytes + DTOs)

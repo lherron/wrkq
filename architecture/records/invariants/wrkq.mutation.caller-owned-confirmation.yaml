@@ -41,7 +41,7 @@ required_tests:
   - internal/workrpc/commentdelete_mode_test.go       # TestCommentDelete_* (soft default/explicit, purge, invalid→VALIDATION, ifMatch→CONFLICT/match, non-interactive) + TestCommentDelete_SoftEventParity/PurgeEventParity (durable event payload shape + new-etag byte-match — the snapshot oracle can't see event drift)
   - internal/rpccli/comment_rm_test.go                # TestCommentDeleteParams_ForwardsIfMatch (mirror forwards the etag CAS to the server after the precheck passes; omits when absent)
   - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership / TestCommentRmPromptOwnership / TestRmdirForcePromptOwnership (mirror owns each prompt's exact text/accept-token/abort/--yes on a real TTY)
-  - internal/rpccli/parity_test.go                    # TestParity/rm/*, TestParity/comment-rm/*, TestParity/rmdir/* (incl. --force two-phase) + comment row in the durable snapshot
+  - internal/rpccli/parity_test.go                    # production contract rm/*, production contract comment-rm/*, production contract rmdir/* (incl. --force two-phase) + comment row in the durable snapshot
   - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror routes durable mutation through the RPC boundary only)
 last_verified:
   date: 2026-06-30

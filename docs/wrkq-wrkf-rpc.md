@@ -429,7 +429,7 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > (+ `monitor watch --raw`). Daedalus ruled (#10211) monitor + watch IN SCOPE as
 > **BOUNDED POLLING over RPC — NO server push/subscribe/stream in v1**
 > (`wrkq.wrkf-rpc.bounded-polling-streaming` arch record, shared by both). The
-> SERVER owns only stateless bounded read models; the CLIENT (wrkq-rpccli) owns the
+> SERVER owns only stateless bounded read models; the CLIENT (production wrkq) owns the
 > blocking poll loop, the interval, the monotonic high-water cursor carried across
 > polls, the timeout/stall clocks, the per-event NDJSON lines, EXACTLY ONE terminal
 > NDJSON record, the exit codes (0=met, 1=timeout/stall, 2=selector/usage,
@@ -920,7 +920,7 @@ Attachment CONTENT that must cross the client↔server boundary — **`attach ge
 explicit **protocol data** (base64 + declared size + checksum), NEVER as a
 server-local host path. The server owns storage/size-validation/checksum/metadata/
 cleanup; the CLI owns reading local stdin/files and writing decoded bytes to
-stdout or `--as <path>`. RAW bytes are emitted ONLY by `wrkq-rpccli` after RPC-
+stdout or `--as <path>`. RAW bytes are emitted ONLY by `production wrkq` after RPC-
 frame decode — the JSON-RPC server stdout stays pure.
 
 Transfers are **chunked**: the frame cap (8 MiB) is below the default attach limit

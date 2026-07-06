@@ -59,9 +59,8 @@ Important implementation packages:
 | Path | Responsibility |
 | --- | --- |
 | `cmd/wrkq`, `cmd/wrkqadm`, `cmd/wrkqd`, `cmd/wrkf` | Shipped binary entry points. |
-| `cmd/wrkq-legacy`, `cmd/wrkq-rpccli` | Temporary RPC cutover oracle binaries used by tests; not installed by default. |
-| `internal/rpccli` | RPC-backed production `wrkq` command adapters and temporary mirror root. |
-| `internal/cli` | Legacy oracle commands plus `wrkqadm` and daemon helpers. |
+| `internal/rpccli` | RPC-backed production `wrkq` command adapters and command contract tests. |
+| `internal/cli` | Retired legacy day-to-day command code plus current `wrkqadm` and daemon helpers. |
 | `internal/config` | Config/env loading and defaults. |
 | `internal/db` | SQLite open, migrations, schema status. |
 | `internal/domain` | Domain structs and validation enums. |

@@ -62,11 +62,9 @@ var topLevelCommands = []mirroredCommand{
 	// whoami is local/config attribution parity; registered separately.
 }
 
-// NewRootCmd builds the compatibility mirror's cobra tree. Tests keep using the
-// wrkq-rpccli command name while the production entrypoint calls
-// NewRootCmdFor("wrkq").
+// NewRootCmd builds the production RPC-backed cobra tree.
 func NewRootCmd() *cobra.Command {
-	return NewRootCmdFor("wrkq-rpccli")
+	return NewRootCmdFor("wrkq")
 }
 
 // NewRootCmdFor builds the RPC-backed cobra tree using the supplied command
@@ -77,13 +75,9 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	if commandName == "" {
 		commandName = "wrkq"
 	}
-	short := "Task management CLI"
-	if commandName == "wrkq-rpccli" {
-		short = "RPC-backed mirror of wrkq (parity harness, not for production use)"
-	}
 	root := &cobra.Command{
 		Use:           commandName,
-		Short:         short,
+		Short:         "Task management CLI",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -158,7 +152,7 @@ func newStubCmd(mc mirroredCommand) *cobra.Command {
 		Short:   "(mirror stub — not implemented in seam smoke slice)",
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("%s: not implemented in wrkq-rpccli (seam smoke slice)", cmd.Name())
+			return fmt.Errorf("%s: not implemented in wrkq RPC CLI", cmd.Name())
 		},
 	}
 }

@@ -58,7 +58,7 @@ required_tests:
   - internal/workrpc/handoff_test.go                    # server create/get/list/ack + idempotent replay/mismatch + ack ifMatch CAS + dryRun no-write + already-acknowledged + event payloads + TestHandoffCreate_IncoherentScopeRejected (scopeRef vs agentId/projectId coherence → WRKQ_VALIDATION, no write/event)
   - internal/scope/resolve_test.go                      # AGENT_SCOPE_REF precedence + AGENT/ASP disagreement diagnostics
   - internal/rpccli/handoff_test.go                     # mirror NO-server-env-read guard + self-scope violation (caller-side) + env scope precedence
-  - internal/rpccli/parity_test.go                      # TestParity/handoff/* (create/get/list/ack; idempotent replay; dryRun; output modes) byte-match legacy
+  - internal/rpccli/parity_test.go                      # production contract handoff/read-write coverage
   - internal/rpccli/transport_test.go                   # TestTransportEquivalence (handoff get/listView agree in-proc vs subprocess)
   - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard (mirror routes durable handoff behavior through the RPC boundary only)
 last_verified:

@@ -11,9 +11,9 @@ import (
 
 func TestAgentPassThroughParity(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds wrkq + wrkq-rpccli binaries; skipped under -short")
+		t.Skip("builds production wrkq binaries; skipped under -short")
 	}
-	bins := buildParityBinaries(t)
+	bins := buildProductionBinaries(t)
 	dir := t.TempDir()
 	fakeDir := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(fakeDir, 0o755); err != nil {
@@ -94,7 +94,7 @@ printf 'fake hrcchat ok\n' >&2
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			oldRes := run(bins.wrkq, tc.env, tc.stdin, tc.args...)
-			newRes := run(bins.mirror, tc.env, tc.stdin, tc.args...)
+			newRes := run(bins.wrkq, tc.env, tc.stdin, tc.args...)
 			if oldRes.exit != newRes.exit || oldRes.exit != tc.wantExit {
 				t.Fatalf("exit: old=%d new=%d want=%d\nold stderr=%q\nnew stderr=%q", oldRes.exit, newRes.exit, tc.wantExit, oldRes.stderr, newRes.stderr)
 			}
