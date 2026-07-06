@@ -1094,6 +1094,9 @@ wrkq.workflow.timeline
 interface WrkqWorkflowAttachParams {
   task: string;
   workflow: string;
+  supersede?: boolean;
+  predecessorInstanceId?: string;
+  predecessorRevision?: number;
   actor?: string;
   idempotencyKey?: string;
 }

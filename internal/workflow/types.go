@@ -262,27 +262,40 @@ type FactEqualsPredicate struct {
 }
 
 type Instance struct {
-	ID              string `json:"id"`
-	TaskUUID        string `json:"taskUuid,omitempty"`
-	TaskRef         string `json:"taskRef"`
-	ProjectID       string `json:"projectId,omitempty"`
-	TemplateID      string `json:"templateId"`
-	TemplateVersion string `json:"templateVersion"`
-	TemplateHash    string `json:"templateHash"`
-	Status          string `json:"status"`
-	Phase           string `json:"phase,omitempty"`
-	Outcome         string `json:"outcome,omitempty"`
-	Revision        int64  `json:"revision"`
-	ContextHash     string `json:"contextHash"`
-	TaskDocEtag     string `json:"taskDocEtag"`
-	TaskDocHash     string `json:"taskDocHash"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
-	ClosedAt        string `json:"closedAt,omitempty"`
+	ID              string              `json:"id"`
+	TaskUUID        string              `json:"taskUuid,omitempty"`
+	TaskRef         string              `json:"taskRef"`
+	ProjectID       string              `json:"projectId,omitempty"`
+	TemplateID      string              `json:"templateId"`
+	TemplateVersion string              `json:"templateVersion"`
+	TemplateHash    string              `json:"templateHash"`
+	Status          string              `json:"status"`
+	Phase           string              `json:"phase,omitempty"`
+	Outcome         string              `json:"outcome,omitempty"`
+	Revision        int64               `json:"revision"`
+	ContextHash     string              `json:"contextHash"`
+	TaskDocEtag     string              `json:"taskDocEtag"`
+	TaskDocHash     string              `json:"taskDocHash"`
+	CreatedAt       string              `json:"createdAt"`
+	UpdatedAt       string              `json:"updatedAt"`
+	ClosedAt        string              `json:"closedAt,omitempty"`
+	Supersedes      *InstanceLineageRef `json:"supersedes,omitempty"`
+	SupersededBy    *InstanceLineageRef `json:"supersededBy,omitempty"`
 }
 
 func (i Instance) State() State {
 	return State{Status: i.Status, Phase: i.Phase, Outcome: i.Outcome}
+}
+
+type InstanceLineageRef struct {
+	InstanceID      string `json:"instanceId"`
+	TemplateID      string `json:"templateId,omitempty"`
+	TemplateVersion string `json:"templateVersion,omitempty"`
+	TemplateHash    string `json:"templateHash,omitempty"`
+	Revision        int64  `json:"revision"`
+	Status          string `json:"status,omitempty"`
+	Phase           string `json:"phase,omitempty"`
+	Outcome         string `json:"outcome,omitempty"`
 }
 
 type Event struct {

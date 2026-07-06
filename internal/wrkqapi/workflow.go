@@ -41,7 +41,11 @@ func (a *API) WorkflowAttach(ctx context.Context, p WorkflowAttachParams) (*Wrkq
 		}
 	}
 
-	inst, err := a.wf.TaskAttach(ctx, p.Task, p.Workflow, defaultString(p.Actor, a.defaultPrincipalRef))
+	inst, err := a.wf.TaskAttach(ctx, p.Task, p.Workflow, defaultString(p.Actor, a.defaultPrincipalRef), workflow.AttachTaskOptions{
+		Supersede:             p.Supersede,
+		PredecessorInstanceID: p.PredecessorInstanceID,
+		PredecessorRevision:   p.PredecessorRevision,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -125,19 +125,19 @@ func (api *API) InstallTemplate(ctx context.Context, path, actor string) (Instal
 	return api.WorkflowInstall(ctx, path, actor)
 }
 
-func (api *API) TaskAttach(ctx context.Context, taskSelector, templateRef, actor string) (*workflow.Instance, error) {
+func (api *API) TaskAttach(ctx context.Context, taskSelector, templateRef, actor string, opts ...workflow.AttachTaskOptions) (*workflow.Instance, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	inst, err := api.service.AttachTask(taskSelector, templateRef, actor)
+	inst, err := api.service.AttachTask(taskSelector, templateRef, actor, opts...)
 	if err != nil {
 		return nil, normalizeError(err)
 	}
 	return inst, nil
 }
 
-func (api *API) AttachTask(ctx context.Context, taskSelector, templateRef, actor string) (*workflow.Instance, error) {
-	return api.TaskAttach(ctx, taskSelector, templateRef, actor)
+func (api *API) AttachTask(ctx context.Context, taskSelector, templateRef, actor string, opts ...workflow.AttachTaskOptions) (*workflow.Instance, error) {
+	return api.TaskAttach(ctx, taskSelector, templateRef, actor, opts...)
 }
 
 func (api *API) TaskInspect(ctx context.Context, taskSelector string) (*workflow.Instance, error) {
