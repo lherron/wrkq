@@ -1,3 +1,4 @@
 [commands]
+prep = "if [ -f .git ]; then G=$(git rev-parse --absolute-git-dir) && rm .git && ln -s \"$G\" .git; fi && mkdir -p .git/hooks && printf '#!/bin/sh\njust verify\n' > .git/hooks/pre-push && chmod +x .git/hooks/pre-push"
 install = "go build ./..."
 test = "go test ./..."
