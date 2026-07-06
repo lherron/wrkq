@@ -263,10 +263,13 @@ type CommentListParams struct {
 
 // WorkflowAttachParams mirrors WrkqWorkflowAttachParams.
 type WorkflowAttachParams struct {
-	Task           string `json:"task"`
-	Workflow       string `json:"workflow"`
-	Actor          string `json:"actor,omitempty"`
-	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	Task                  string `json:"task"`
+	Workflow              string `json:"workflow"`
+	Supersede             bool   `json:"supersede,omitempty"`
+	PredecessorInstanceID string `json:"predecessorInstanceId,omitempty"`
+	PredecessorRevision   *int64 `json:"predecessorRevision,omitempty"`
+	Actor                 string `json:"actor,omitempty"`
+	IdempotencyKey        string `json:"idempotencyKey,omitempty"`
 }
 
 // WorkflowTaskParams is the task-scoped selector for inspect/timeline.

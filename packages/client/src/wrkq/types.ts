@@ -463,6 +463,9 @@ export interface WrkqWorkflowAttachParams {
   task: string;
   /** Template ref, e.g. "code_change@1". */
   workflow: string;
+  supersede?: boolean;
+  predecessorInstanceId?: string;
+  predecessorRevision?: number;
   actor?: string;
   idempotencyKey?: string;
 }

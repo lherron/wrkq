@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
 
@@ -79,7 +80,11 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.WorkflowInstall(ctx, p.Path, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
 	s.Register("wrkf.task.attach", apiHandler(func(ctx context.Context, p taskAttachParams) (any, error) {
-		return api.TaskAttach(ctx, p.TaskSelector, p.Workflow, defaultString(p.PrincipalRef, opts.DefaultActor))
+		return api.TaskAttach(ctx, p.TaskSelector, p.Workflow, defaultString(p.PrincipalRef, opts.DefaultActor), workflow.AttachTaskOptions{
+			Supersede:             p.Supersede,
+			PredecessorInstanceID: p.PredecessorInstanceID,
+			PredecessorRevision:   p.PredecessorRevision,
+		})
 	}))
 	s.Register("wrkf.task.inspect", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
 		return api.TaskInspect(ctx, p.TaskSelector)
@@ -384,9 +389,12 @@ type taskActorParams struct {
 }
 
 type taskAttachParams struct {
-	TaskSelector string `json:"task"`
-	Workflow     string `json:"workflow"`
-	PrincipalRef string `json:"principal_ref,omitempty"`
+	TaskSelector          string `json:"task"`
+	Workflow              string `json:"workflow"`
+	Supersede             bool   `json:"supersede,omitempty"`
+	PredecessorInstanceID string `json:"predecessorInstanceId,omitempty"`
+	PredecessorRevision   *int64 `json:"predecessorRevision,omitempty"`
+	PrincipalRef          string `json:"principal_ref,omitempty"`
 }
 
 type nextParams struct {

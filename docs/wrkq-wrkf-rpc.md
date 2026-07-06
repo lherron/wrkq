@@ -1324,6 +1324,9 @@ binding. There must be no `wrkf.task.attach` or `wrkf.workflow.attach` method.
 interface WrkqWorkflowAttachParams {
   task: string;
   workflow: string;      // template ref, e.g. "code_change@1"
+  supersede?: boolean;   // explicit live-generation replacement opt-in
+  predecessorInstanceId?: string; // required with supersede
+  predecessorRevision?: number;   // required with supersede
   actor?: string;
   idempotencyKey?: string;
 }

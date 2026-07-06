@@ -321,6 +321,9 @@ func workflowCmd() *cobra.Command {
 func taskCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "task", Short: "Attach and inspect workflow instances on tasks"}
 	var workflowRef string
+	var supersede bool
+	var predecessorInstance string
+	var predecessorRevision int64
 	attach := &cobra.Command{
 		Use:  "attach TASK --workflow ID@VERSION",
 		Args: cobra.ExactArgs(1),
@@ -328,7 +331,15 @@ func taskCmd() *cobra.Command {
 			if workflowRef == "" {
 				return fmt.Errorf("--workflow is required")
 			}
-			inst, err := a.service.AttachTask(args[0], workflowRef, a.actor)
+			var revision *int64
+			if cmd.Flags().Changed("predecessor-revision") {
+				revision = &predecessorRevision
+			}
+			inst, err := a.service.AttachTask(args[0], workflowRef, a.actor, workflow.AttachTaskOptions{
+				Supersede:             supersede,
+				PredecessorInstanceID: predecessorInstance,
+				PredecessorRevision:   revision,
+			})
 			if err != nil {
 				return err
 			}
@@ -336,6 +347,9 @@ func taskCmd() *cobra.Command {
 		}),
 	}
 	attach.Flags().StringVar(&workflowRef, "workflow", "", "Template ref id@version")
+	attach.Flags().BoolVar(&supersede, "supersede", false, "Supersede the current live workflow instance")
+	attach.Flags().StringVar(&predecessorInstance, "predecessor-instance", "", "Expected current workflow instance id for --supersede")
+	attach.Flags().Int64Var(&predecessorRevision, "predecessor-revision", 0, "Expected current workflow revision for --supersede")
 	inspect := &cobra.Command{
 		Use:  "inspect TASK",
 		Args: cobra.ExactArgs(1),

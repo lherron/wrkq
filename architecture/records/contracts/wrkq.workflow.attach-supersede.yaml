@@ -1,0 +1,55 @@
+id: wrkq.workflow.attach-supersede
+kind: contract
+status: active
+owner_project: wrkq
+scope: wrkq.workflow.attach live workflow generation replacement
+predicate: >
+  `wrkq.workflow.attach` may replace a live workflow generation only when the
+  caller explicitly opts into `supersede` and supplies a current-generation CAS
+  guard naming the live predecessor instance id and revision. Supersede closes
+  the matched predecessor inside the same immediate transaction as the successor
+  insert, with predecessor state `status=closed, phase=superseded`, preserving
+  the partial unique index over non-closed workflow instances. Supersede is an
+  engine-owned replacement path: it does not drive template cancellation
+  transitions, create task-state effects, or mutate the wrkq task lifecycle
+  state. Lineage is durable in workflow events: the predecessor receives a
+  `workflow.superseded` event naming the successor, and the successor
+  `workflow.attached` payload names the superseded predecessor. Closed
+  superseded instances classify as non-success in watch/readback consumers.
+authority:
+  repo: wrkq
+  surface: wrkq.workflow.attach / wrkf task attach --supersede
+consumers:
+  - wrkq-drain batch/overnight coordinator
+  - wrkf action runners attaching successor workflow generations
+  - "@wrkq/client"
+source:
+  - internal/workflow/service.go
+  - internal/workflow/watch.go
+  - internal/workflow/attach_supersede_test.go
+  - internal/workflow/watch_test.go
+  - internal/workflow/operator_resolution_test.go
+  - internal/wrkqapi/types.go
+  - internal/wrkqapi/workflow.go
+  - internal/wrkfcli/root.go
+  - packages/client/src/wrkq/types.ts
+  - packages/client/test/wrkf-attach-supersede-contract.test.ts
+required_tests:
+  - TestAttachTaskSupersedeReplacesLiveInstanceWithLineage
+  - TestAttachTaskSupersedeRejectsStalePredecessorAfterReplacement
+  - TestWorkflowInstanceActiveUniqueIndexIntact
+  - TestOperatorResolvedResumeAndCancelPaths
+  - TestWatchInstanceClosedClassMapping
+  - go test ./internal/workflow
+  - bun test packages/client/test/wrkf-attach-supersede-contract.test.ts
+last_verified:
+  date: 2026-07-06
+  evidence: "bun test packages/client/test/wrkf-attach-supersede-contract.test.ts and focused go test ./internal/workflow attach/operator/watch guards green during T-05822 implementation"
+reopen_when:
+  - wrkq.workflow.attach accepts supersede without predecessor instance/revision CAS
+  - supersede closes a predecessor outside the successor attach transaction
+  - supersede writes wrkq task lifecycle state or creates task-state effects
+  - workflow.superseded / supersededPredecessor event lineage is removed or stops projecting in inspect
+  - closed/superseded watch/readback returns success
+supersedes: []
+superseded_by: null

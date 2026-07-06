@@ -602,7 +602,31 @@ func emptyToNil(s string) interface{} {
 	return s
 }
 
-func (s *Service) AttachTask(taskSelector, templateRef, actor string) (*Instance, error) {
+type AttachTaskOptions struct {
+	Supersede             bool
+	PredecessorInstanceID string
+	PredecessorRevision   *int64
+}
+
+func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...AttachTaskOptions) (*Instance, error) {
+	var options AttachTaskOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	if len(opts) > 1 {
+		return nil, validationError("options", "only one attach options value is supported", "single options object", nil, "pass one AttachTaskOptions value")
+	}
+	if options.Supersede {
+		if strings.TrimSpace(options.PredecessorInstanceID) == "" {
+			return nil, validationError("predecessorInstanceId", "predecessor instance id is required for supersede", "current live workflow instance id", nil, "inspect the task and pass the current instance id")
+		}
+		if options.PredecessorRevision == nil {
+			return nil, validationError("predecessorRevision", "predecessor revision is required for supersede", "current live workflow revision", nil, "inspect the task and pass the current revision")
+		}
+	} else if strings.TrimSpace(options.PredecessorInstanceID) != "" || options.PredecessorRevision != nil {
+		return nil, validationError("supersede", "predecessor guard requires supersede", "supersede=true", nil, "set supersede when passing predecessor CAS fields")
+	}
+
 	taskUUID, taskID, err := selectors.ResolveTask(s.db, taskSelector)
 	if err != nil {
 		return nil, err
@@ -626,15 +650,78 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string) (*Instance
 	var inst *Instance
 	var attachedEvent workflowEventMetadata
 	var dispatchAttachedWebhook bool
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
 		task, err := loadTaskDoc(tx, taskUUID)
 		if err != nil {
 			return err
 		}
 		taskHash := taskDocHash(task)
 		instanceID := fmt.Sprintf("wfi_%s_%d", strings.ToLower(strings.ReplaceAll(taskID, "-", "")), s.now().UnixNano())
-		ctxHash := contextHash(templateHash, tpl.Initial, 0, taskHash, nil, nil, nil)
 		now := s.now().Format(time.RFC3339)
+		var predecessor *InstanceLineageRef
+		if options.Supersede {
+			current, err := activeInstanceByTaskUUIDQuery(tx, taskUUID)
+			if err != nil {
+				return err
+			}
+			if current.ID != strings.TrimSpace(options.PredecessorInstanceID) {
+				return validationError("predecessorInstanceId", "current live workflow instance does not match predecessor guard", current.ID, []string{current.ID}, "retry with the current live workflow instance")
+			}
+			if current.Revision != *options.PredecessorRevision {
+				return staleRevisionError(current.ID, *options.PredecessorRevision, current.Revision)
+			}
+			closed := *current
+			closed.Status = "closed"
+			closed.Phase = "superseded"
+			closed.Outcome = ""
+			closed.Revision = current.Revision + 1
+			closed.UpdatedAt = now
+			closed.ClosedAt = now
+			closed.TaskDocEtag = fmt.Sprint(task.ETag)
+			closed.TaskDocHash = taskHash
+			closed.ContextHash = contextHash(closed.TemplateHash, closed.State(), closed.Revision, closed.TaskDocHash, nil, nil, nil)
+			res, err := tx.Exec(`
+				UPDATE workflow_instances
+				SET status = 'closed', phase = 'superseded', outcome = NULL, revision = ?, context_hash = ?,
+				    task_doc_etag = ?, task_doc_hash = ?, updated_at = ?, closed_at = ?
+				WHERE task_uuid = ? AND id = ? AND status != 'closed' AND revision = ?
+			`, closed.Revision, closed.ContextHash, closed.TaskDocEtag, closed.TaskDocHash, closed.UpdatedAt, closed.ClosedAt, taskUUID, current.ID, current.Revision)
+			if err != nil {
+				return err
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected != 1 {
+				actual, loadErr := instanceRevisionContextTx(tx, current.ID)
+				if loadErr != nil {
+					return loadErr
+				}
+				return staleRevisionError(current.ID, current.Revision, actual.revision)
+			}
+			successorRef := instanceLineageRef(Instance{
+				ID:              instanceID,
+				TemplateID:      id,
+				TemplateVersion: version,
+				TemplateHash:    templateHash,
+				Status:          tpl.Initial.Status,
+				Phase:           tpl.Initial.Phase,
+				Outcome:         tpl.Initial.Outcome,
+				Revision:        0,
+			})
+			predecessor = instanceLineageRef(closed)
+			payload := map[string]interface{}{
+				"predecessor": instanceLineageRef(*current),
+				"successor":   successorRef,
+				"from":        current.State(),
+				"to":          closed.State(),
+			}
+			if _, err := insertEventReturning(tx, current.ID, "workflow.superseded", actor, "", "", current.Revision, closed.Revision, "", task.ETag, taskHash, closed.ContextHash, payload); err != nil {
+				return err
+			}
+		}
+		ctxHash := contextHash(templateHash, tpl.Initial, 0, taskHash, nil, nil, nil)
 		_, err = tx.Exec(`
 			INSERT INTO workflow_instances (
 				id, task_uuid, task_ref, project_id, template_id, template_version, template_hash,
@@ -649,6 +736,10 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string) (*Instance
 		}
 		inst = &Instance{ID: instanceID, TaskUUID: taskUUID, TaskRef: "wrkq:" + taskID, ProjectID: task.ProjectID, TemplateID: id, TemplateVersion: version, TemplateHash: templateHash, Status: tpl.Initial.Status, Phase: tpl.Initial.Phase, Outcome: tpl.Initial.Outcome, Revision: 0, ContextHash: ctxHash, TaskDocEtag: fmt.Sprint(task.ETag), TaskDocHash: taskHash, CreatedAt: now, UpdatedAt: now}
 		attachedPayload := map[string]interface{}{"template": templateRef, "state": tpl.Initial}
+		if predecessor != nil {
+			inst.Supersedes = predecessor
+			attachedPayload["supersededPredecessor"] = predecessor
+		}
 		attachedEvent, err = insertEventReturning(tx, instanceID, "workflow.attached", actor, "", "", 0, 0, "", task.ETag, taskHash, ctxHash, attachedPayload)
 		if err != nil {
 			return err
@@ -952,15 +1043,11 @@ func (s *Service) ActiveInstance(taskSelector string) (*Instance, error) {
 }
 
 func (s *Service) activeInstanceByTaskUUID(taskUUID string) (*Instance, error) {
-	row := s.db.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
-		FROM workflow_instances
-		WHERE task_uuid = ? AND status != 'closed'
-		ORDER BY created_at DESC LIMIT 1
-	`, taskUUID)
-	return scanInstance(row)
+	inst, err := activeInstanceByTaskUUIDQuery(s.db, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	return inst, s.populateInstanceLineage(inst)
 }
 
 func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
@@ -968,15 +1055,11 @@ func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	row := s.db.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
-		FROM workflow_instances
-		WHERE task_uuid = ?
-		ORDER BY created_at DESC LIMIT 1
-	`, taskUUID)
-	return scanInstance(row)
+	inst, err := latestInstanceByTaskUUIDQuery(s.db, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	return inst, s.populateInstanceLineage(inst)
 }
 
 func scanInstance(row *sql.Row) (*Instance, error) {
@@ -1271,13 +1354,11 @@ func (s *Service) SyncMeta(taskSelector, actor string) (int, error) {
 }
 
 func (s *Service) instanceByID(id string) (*Instance, error) {
-	row := s.db.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
-		FROM workflow_instances WHERE id = ?
-	`, id)
-	return scanInstance(row)
+	inst, err := instanceByIDQuery(s.db, id)
+	if err != nil {
+		return nil, err
+	}
+	return inst, s.populateInstanceLineage(inst)
 }
 
 func (s *Service) ResolveInstance(taskSelector, instanceID string) (*Instance, error) {
@@ -1615,7 +1696,19 @@ func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error
 		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
 		FROM workflow_instances
 		WHERE task_uuid = ?
-		ORDER BY created_at DESC LIMIT 1
+		ORDER BY CASE WHEN status != 'closed' THEN 0 ELSE 1 END, created_at DESC, id DESC LIMIT 1
+	`, taskUUID)
+	return scanInstance(row)
+}
+
+func activeInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error) {
+	row := q.QueryRow(`
+		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		FROM workflow_instances
+		WHERE task_uuid = ? AND status != 'closed'
+		ORDER BY created_at DESC, id DESC LIMIT 1
 	`, taskUUID)
 	return scanInstance(row)
 }
@@ -1628,6 +1721,65 @@ func instanceByIDQuery(q queryer, instanceID string) (*Instance, error) {
 		FROM workflow_instances WHERE id = ?
 	`, instanceID)
 	return scanInstance(row)
+}
+
+func instanceLineageRef(inst Instance) *InstanceLineageRef {
+	return &InstanceLineageRef{
+		InstanceID:      inst.ID,
+		TemplateID:      inst.TemplateID,
+		TemplateVersion: inst.TemplateVersion,
+		TemplateHash:    inst.TemplateHash,
+		Revision:        inst.Revision,
+		Status:          inst.Status,
+		Phase:           inst.Phase,
+		Outcome:         inst.Outcome,
+	}
+}
+
+func (s *Service) populateInstanceLineage(inst *Instance) error {
+	if inst == nil {
+		return nil
+	}
+	if pred, err := s.lineageRefFromEvent(inst.ID, "workflow.attached", "supersededPredecessor"); err != nil {
+		return err
+	} else if pred != nil {
+		inst.Supersedes = pred
+	}
+	if succ, err := s.lineageRefFromEvent(inst.ID, "workflow.superseded", "successor"); err != nil {
+		return err
+	} else if succ != nil {
+		inst.SupersededBy = succ
+	}
+	return nil
+}
+
+func (s *Service) lineageRefFromEvent(instanceID, eventType, field string) (*InstanceLineageRef, error) {
+	var raw string
+	err := s.db.QueryRow(`
+		SELECT payload_json
+		FROM workflow_events
+		WHERE instance_id = ? AND type = ?
+		ORDER BY seq DESC LIMIT 1
+	`, instanceID, eventType).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, err
+	}
+	refRaw, ok := payload[field]
+	if !ok || len(refRaw) == 0 || string(refRaw) == "null" {
+		return nil, nil
+	}
+	var ref InstanceLineageRef
+	if err := json.Unmarshal(refRaw, &ref); err != nil {
+		return nil, err
+	}
+	return &ref, nil
 }
 
 func showTemplateTx(q queryer, ref string) (*Template, string, error) {

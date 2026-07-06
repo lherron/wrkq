@@ -220,6 +220,9 @@ func classifyRunTerminal(status string) (string, int) {
 func classifyInstanceTerminal(inst *Instance) (string, int) {
 	values := []string{inst.Status, inst.Phase, inst.Outcome}
 	for _, v := range values {
+		if strings.ToLower(strings.TrimSpace(v)) == "superseded" {
+			return WatchClassFailure, 10
+		}
 		if isCancelledToken(v) {
 			return WatchClassCancelled, 11
 		}
