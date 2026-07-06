@@ -25,6 +25,11 @@ func (s *Service) ListObligations(taskSelector string, includeClosed bool) ([]Ob
 	if err != nil {
 		return nil, err
 	}
+	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
+	if err != nil {
+		return nil, err
+	}
+	policy := ResolveWorkflowPolicy(tpl)
 	obl, err := listObligationsForInstance(s.db, inst.ID, includeClosed)
 	if err != nil {
 		return nil, err
@@ -33,12 +38,7 @@ func (s *Service) ListObligations(taskSelector string, includeClosed bool) ([]Ob
 	if err != nil {
 		return nil, err
 	}
-	obl = s.withDelegatedTaskClosureState(obl, includeClosed)
-	obl = withCoordinatorSmokeExecutionState(obl, ev, includeClosed)
-	obl = withObserverCompletionReviewState(obl, ev, includeClosed)
-	obl = append(obl, coordinatorSmokeExecutionObligations(inst, ev, obl, includeClosed)...)
-	obl = append(obl, observerCompletionReviewObligations(inst, ev, obl, includeClosed)...)
-	obl = append(obl, s.delegatedTaskClosureObligations(inst, ev, obl, includeClosed)...)
+	obl = policy.ProjectObligations(s, inst, obl, ev, includeClosed)
 	return obl, nil
 }
 

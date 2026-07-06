@@ -1660,6 +1660,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err != nil {
 			return err
 		}
+		policy := ResolveWorkflowPolicy(tpl)
 		var kindSpec *KindSpec
 		if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
 			kindSpec = &spec
@@ -1673,10 +1674,8 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err != nil {
 			return err
 		}
-		if params.Kind == "operator_resolution" {
-			if err := validateOperatorResolutionReason(params.Summary, facts); err != nil {
-				return err
-			}
+		if err := policy.ValidateEvidence(params, facts); err != nil {
+			return err
 		}
 		var dataArg interface{}
 		var dataRaw json.RawMessage
@@ -1758,27 +1757,9 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err != nil {
 			return err
 		}
-		if params.Kind == "delegated_task_manifest" && dataArg != nil {
-			if err := createDelegatedTaskClosureObligationsTx(tx, inst.ID, id, string(dataRaw)); err != nil {
-				return err
-			}
-		}
-		if params.Kind == "coordinator_runbook" && dataArg != nil {
-			if err := createCoordinatorSmokeExecutionObligationTx(tx, inst.ID, id); err != nil {
-				return err
-			}
-		}
-		if params.Kind == "completion_claim" {
-			if err := createObserverCompletionReviewObligationTx(tx, inst.ID, id); err != nil {
-				return err
-			}
-		}
-		if params.Kind == "observer_completion_review" {
-			_, _ = tx.Exec(`
-				UPDATE workflow_effects
-				SET status = 'delivered', delivered_at = COALESCE(delivered_at, ?), updated_at = ?
-				WHERE instance_id = ? AND kind = 'request_observer_review' AND status IN ('pending','failed','leased')
-			`, now, now, inst.ID)
+		inserted := &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+		if err := policy.OnEvidenceAdded(tx, inst, inserted); err != nil {
+			return err
 		}
 		evidence, err := listEvidenceTx(tx, inst.ID)
 		if err != nil {
@@ -1802,7 +1783,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.PrincipalRef); err != nil {
 			return err
 		}
-		ev = &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+		ev = inserted
 		if params.IdempotencyKey != "" {
 			if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
 				return err

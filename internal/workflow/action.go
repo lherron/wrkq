@@ -1260,6 +1260,7 @@ func firstNonEmptyAction(values ...string) string {
 }
 
 func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template, params AddEvidenceParams) (*Evidence, error) {
+	policy := ResolveWorkflowPolicy(tpl)
 	var kindSpec *KindSpec
 	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
 		kindSpec = &spec
@@ -1271,10 +1272,8 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 	if err != nil {
 		return nil, err
 	}
-	if params.Kind == "operator_resolution" {
-		if err := validateOperatorResolutionReason(params.Summary, facts); err != nil {
-			return nil, err
-		}
+	if err := policy.ValidateEvidence(params, facts); err != nil {
+		return nil, err
 	}
 	var dataArg interface{}
 	var dataRaw json.RawMessage
@@ -1339,27 +1338,15 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 		return nil, err
 	}
 	ev := &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+	if err := policy.OnEvidenceAdded(tx, inst, ev); err != nil {
+		return nil, err
+	}
 	if params.IdempotencyKey != "" {
 		if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
 			return nil, err
 		}
 	}
 	return ev, nil
-}
-
-func validateOperatorResolutionReason(summary string, facts *parsedEvidenceFacts) error {
-	if strings.TrimSpace(summary) != "" {
-		return nil
-	}
-	if facts != nil {
-		if raw, ok := facts.Fields["reason"]; ok {
-			var reason string
-			if err := json.Unmarshal(raw, &reason); err == nil && strings.TrimSpace(reason) != "" {
-				return nil
-			}
-		}
-	}
-	return validationError("summary", "operator_resolution requires a human/operator reason in summary or facts.reason", "non-empty summary or facts.reason", nil, "include the operator reason before resolving operator_required")
 }
 
 func (s *Service) refreshInstanceContextTx(tx *sql.Tx, inst *Instance, actor string) error {
