@@ -138,10 +138,17 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 
 	// stdin `-` expansion (legacy: single "-" reads newline-separated refs).
 	if len(args) == 1 && args[0] == "-" {
+		claims := &stdinClaims{}
+		if err := claims.claim("targets"); err != nil {
+			return err
+		}
+		if isReaderTTY(cmd.InOrStdin()) {
+			return fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+		}
 		scanner := bufio.NewScanner(cmd.InOrStdin())
 		args = nil
 		for scanner.Scan() {
-			line := scanner.Text()
+			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
 				args = append(args, line)
 			}

@@ -239,6 +239,7 @@ func resetHandoffCreateFlags() {
 }
 
 func readHandoffCreateInputs(cmd *cobra.Command) (string, string, *string, *string, error) {
+	claims := &stdinClaims{}
 	title := strings.TrimSpace(handoffCreateTitle)
 	if title == "" {
 		return "", "", nil, nil, fmt.Errorf("title is required (use -t or --title)")
@@ -248,7 +249,7 @@ func readHandoffCreateInputs(cmd *cobra.Command) (string, string, *string, *stri
 	if bodyFile == "" {
 		return "", "", nil, nil, fmt.Errorf("body is required (use --body-file <path|->)")
 	}
-	bodyBytes, err := readHandoffBody(cmd, bodyFile)
+	bodyBytes, err := readHandoffBodyWithClaims(cmd, bodyFile, claims)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -277,11 +278,11 @@ func readHandoffCreateInputs(cmd *cobra.Command) (string, string, *string, *stri
 	return title, body, meta, idemKey, nil
 }
 
-func readHandoffBody(cmd *cobra.Command, bodyFile string) ([]byte, error) {
+func readHandoffBodyWithClaims(cmd *cobra.Command, bodyFile string, claims *stdinClaims) ([]byte, error) {
 	if bodyFile == "-" {
-		data, err := io.ReadAll(cmd.InOrStdin())
+		data, err := readStdinValue("--body-file", cmd.InOrStdin(), claims)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read body from stdin: %w", err)
+			return nil, err
 		}
 		return data, nil
 	}

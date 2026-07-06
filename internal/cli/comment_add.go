@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -57,6 +55,7 @@ func init() {
 func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+	claims := &stdinClaims{}
 
 	// Reset flag values after execution to prevent test contamination
 	defer func() {
@@ -104,27 +103,23 @@ func runCommentAdd(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var body string
 	if commentAddMessage != "" {
 		// Use -m flag
-		body = commentAddMessage
+		body, err = readTextValue(commentAddMessage, "-m/--message", cmd.InOrStdin(), claims)
+		if err != nil {
+			return err
+		}
 	} else if commentAddFile != "" {
 		// Read from file specified by -f flag
-		data, err := os.ReadFile(commentAddFile)
+		data, err := readFileValue(commentAddFile, "--file", cmd.InOrStdin(), claims)
 		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", commentAddFile, err)
+			return err
 		}
 		body = string(data)
 	} else if len(args) == 2 {
 		// Second positional argument
 		source := args[1]
-		if source == "-" {
-			// Read from stdin
-			data, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("failed to read from stdin: %w", err)
-			}
-			body = string(data)
-		} else {
-			// Treat as comment text directly
-			body = source
+		body, err = readTextValue(source, "comment text", cmd.InOrStdin(), claims)
+		if err != nil {
+			return err
 		}
 	} else {
 		return fmt.Errorf("comment body required: use -m, -f, provide comment text, or use stdin with '-'")

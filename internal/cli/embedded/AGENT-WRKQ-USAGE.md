@@ -18,8 +18,17 @@ wrkq search "query" --ndjson            # Full-text search with timestamps
 ```bash
 wrkq set T-00001 --state in_progress    # Start task
 wrkq comment add T-00001 -m "message"   # Add progress
+wrkq comment add T-00001 -m - <<'EOF'   # Add progress from stdin
+multi-line message
+EOF
 wrkq set T-00001 --state completed      # Complete task
 ```
+
+## Stdin Conventions
+`-` reads stdin for text flags/body slots (`-d -`, `--specification -`, `-m -`, `--body-file -`).
+`@file` reads file content for text flags (`-m @notes.md`).
+Use one stdin consumer per command. Dash-stdin on a terminal errors; pipe input or use a heredoc.
+Destructive commands with piped selector input may need `--yes` because prompts read stdin.
 
 ## States
 `idea` | `draft` | `open` | `in_progress` | `completed` | `blocked` | `cancelled` | `archived` | `deleted`

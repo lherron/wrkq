@@ -8,6 +8,9 @@
 2. **During work on a task**: Add progress comments for significant milestones
    wrkq comment add T-00001 -m "Implemented core logic in cmd/apply.go"
    wrkq comment add T-00001 -m "Added test coverage, 3 edge cases found"
+   wrkq comment add T-00001 -m - <<'EOF'
+   Multi-line progress note from stdin.
+   EOF
 
 3. **Before completing a task**: Add final summary comment
    wrkq comment add T-00001 -m "Completed. Added apply cmd with 3-way merge support. Updated docs. All tests passing."
@@ -50,6 +53,12 @@ Multi-line markdown description goes here.
 - bullet two
 EOF
 
+## Stdin conventions
+- `-` reads stdin for text flags and body positions, e.g. `-d -`, `--specification -`, `comment add T-00001 -m -`, `handoff create --body-file -`.
+- `@file` reads file content for text flags, e.g. `-m @notes.md`.
+- Use only one stdin consumer per command invocation.
+- Dash-stdin on a terminal errors; pipe input or use a heredoc.
+- Destructive commands with piped selector input may also need `--yes` because confirmation prompts read stdin.
 
 ## Deleting Tasks
 wrkq rm inbox/task-slug
@@ -69,6 +78,9 @@ Run `wrkq set --help` for the full current field surface.
 
 ## Add comment
 wrkq comment add T-00001 -m "Starting implementation at 10:00am"
+wrkq comment add T-00001 -m - <<'EOF'
+Starting implementation at 10:00am
+EOF
 
 ## Task history
 wrkq log T-00001 --oneline

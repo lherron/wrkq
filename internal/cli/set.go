@@ -119,6 +119,7 @@ func init() {
 func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+	claims := &stdinClaims{}
 
 	// Reset the caused-by sentinel after running so the shared rootCmd (used across
 	// tests) never leaks a stale value into a later set invocation.
@@ -129,7 +130,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Check for stdin input (single "-" as task ref)
 	if len(taskRefs) == 1 && taskRefs[0] == "-" {
-		stdinRefs, err := readLinesFromStdin(cmd.InOrStdin())
+		stdinRefs, err := readLinesFromStdin(cmd.InOrStdin(), "task refs", claims)
 		if err != nil {
 			return fmt.Errorf("failed to read from stdin: %w", err)
 		}
@@ -145,7 +146,7 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Build fields map from flags
-	fields, err := buildFieldsFromFlags(app, cmd)
+	fields, err := buildFieldsFromFlags(app, cmd, claims)
 	if err != nil {
 		return err
 	}
@@ -224,7 +225,13 @@ func runSet(app *appctx.App, cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func readLinesFromStdin(r io.Reader) ([]string, error) {
+func readLinesFromStdin(r io.Reader, label string, claims *stdinClaims) ([]string, error) {
+	if err := claims.claim(label); err != nil {
+		return nil, err
+	}
+	if isReaderTTY(r) {
+		return nil, fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+	}
 	var lines []string
 	scanner := bufio.NewScanner(r)
 
@@ -242,7 +249,7 @@ func readLinesFromStdin(r io.Reader) ([]string, error) {
 	return lines, nil
 }
 
-func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]interface{}, error) {
+func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command, claims *stdinClaims) (map[string]interface{}, error) {
 	database := app.DB
 	fields := make(map[string]interface{})
 
@@ -292,7 +299,7 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 	}
 
 	// Handle meta
-	metaSet, metaValue, err := readMetaValue(setMeta, setMetaFile)
+	metaSet, metaValue, err := readMetaValue(setMeta, setMetaFile, cmd.InOrStdin(), claims)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +323,7 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 
 	// Handle description
 	if setDescription != "" {
-		descValue, err := readDescriptionValue(setDescription)
+		descValue, err := readTextValue(setDescription, "--description", cmd.InOrStdin(), claims)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read description: %w", err)
 		}
@@ -324,7 +331,7 @@ func buildFieldsFromFlags(app *appctx.App, cmd *cobra.Command) (map[string]inter
 	}
 	// Handle specification
 	if setSpecification != "" {
-		specValue, err := readDescriptionValue(setSpecification)
+		specValue, err := readTextValue(setSpecification, "--specification", cmd.InOrStdin(), claims)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read specification: %w", err)
 		}

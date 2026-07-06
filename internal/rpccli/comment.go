@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -387,19 +386,24 @@ comment-text is omitted, the body is also read from stdin.`,
 func runCommentAdd(cmd *cobra.Command, args []string, message string) error {
 	task := args[0]
 	var body string
+	claims := &stdinClaims{}
 	if message != "" && len(args) > 1 {
 		return fmt.Errorf("only one comment source allowed: use -m, positional argument, or stdin ('-')")
 	}
 	if message != "" {
-		body = message
+		var err error
+		body, err = readTextValue(message, "-m/--message", cmd.InOrStdin(), claims)
+		if err != nil {
+			return err
+		}
 	} else if len(args) > 1 {
 		var err error
-		body, err = readTextValue(args[1], "comment", cmd.InOrStdin())
+		body, err = readTextValue(args[1], "comment text", cmd.InOrStdin(), claims)
 		if err != nil {
 			return err
 		}
 	} else {
-		b, err := io.ReadAll(cmd.InOrStdin())
+		b, err := readStdinValue("comment body", cmd.InOrStdin(), claims)
 		if err != nil {
 			return err
 		}

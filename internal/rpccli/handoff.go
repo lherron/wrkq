@@ -302,6 +302,7 @@ type handoffCreateOutput struct {
 }
 
 func readHandoffCreateInputs(cmd *cobra.Command, f handoffCreateFlags) (string, string, *string, *string, error) {
+	claims := &stdinClaims{}
 	title := strings.TrimSpace(f.title)
 	if title == "" {
 		return "", "", nil, nil, fmt.Errorf("title is required (use -t or --title)")
@@ -313,9 +314,9 @@ func readHandoffCreateInputs(cmd *cobra.Command, f handoffCreateFlags) (string, 
 	var bodyBytes []byte
 	var err error
 	if bodyFile == "-" {
-		bodyBytes, err = io.ReadAll(cmd.InOrStdin())
+		bodyBytes, err = readStdinValue("--body-file", cmd.InOrStdin(), claims)
 		if err != nil {
-			return "", "", nil, nil, fmt.Errorf("failed to read body from stdin: %w", err)
+			return "", "", nil, nil, err
 		}
 	} else {
 		bodyBytes, err = os.ReadFile(bodyFile)
@@ -924,7 +925,11 @@ func runHandoffAck(cmd *cobra.Command, arg string, f handoffAckFlags) error {
 
 	var note *string
 	if f.noteChanged {
-		trimmed := strings.TrimSpace(f.note)
+		noteValue, nerr := readTextValue(f.note, "--note", cmd.InOrStdin(), &stdinClaims{})
+		if nerr != nil {
+			return writeHandoffError(stderr, mode, 1, "validation_error", idOrUUID, nerr.Error(), nil, handoffAckExample)
+		}
+		trimmed := strings.TrimSpace(noteValue)
 		if trimmed == "" {
 			return writeHandoffError(stderr, mode, 1, "validation_error", idOrUUID, "--note cannot be empty", nil, handoffAckExample)
 		}

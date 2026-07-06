@@ -118,10 +118,17 @@ func runCp(cmd *cobra.Command, args []string, f cpFlags) error {
 
 	// stdin sources (`cp - <dest>`): one selector per non-empty line.
 	if len(sources) == 1 && sources[0] == "-" {
+		claims := &stdinClaims{}
+		if err := claims.claim("sources"); err != nil {
+			return err
+		}
+		if isReaderTTY(cmd.InOrStdin()) {
+			return fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+		}
 		scanner := bufio.NewScanner(cmd.InOrStdin())
 		sources = nil
 		for scanner.Scan() {
-			line := scanner.Text()
+			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
 				sources = append(sources, line)
 			}

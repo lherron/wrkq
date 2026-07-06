@@ -88,10 +88,17 @@ func runRm(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Handle stdin
 	if len(args) == 1 && args[0] == "-" {
+		claims := &stdinClaims{}
+		if err := claims.claim("targets"); err != nil {
+			return err
+		}
+		if isReaderTTY(cmd.InOrStdin()) {
+			return fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+		}
 		scanner := bufio.NewScanner(cmd.InOrStdin())
 		args = nil
 		for scanner.Scan() {
-			line := scanner.Text()
+			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
 				args = append(args, line)
 			}

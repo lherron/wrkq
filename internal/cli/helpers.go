@@ -55,21 +55,31 @@ func ErrorAlreadyReported(err error) bool {
 	return false
 }
 
-// readDescriptionValue reads description from string, file (@file.md), or stdin (-)
-func readDescriptionValue(value string) (string, error) {
-	// Handle stdin
+type stdinClaims struct {
+	claimedBy string
+}
+
+func (c *stdinClaims) claim(label string) error {
+	if c == nil {
+		return nil
+	}
+	if c.claimedBy != "" {
+		return fmt.Errorf("stdin already claimed by %s", c.claimedBy)
+	}
+	c.claimedBy = label
+	return nil
+}
+
+// readTextValue reads free-form text from a literal value, @file, or stdin (-).
+func readTextValue(value, label string, stdin io.Reader, claims *stdinClaims) (string, error) {
 	if value == "-" {
-		data, err := io.ReadAll(os.Stdin)
+		data, err := readStdinValue(label, stdin, claims)
 		if err != nil {
-			return "", fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		if len(data) == 0 {
-			return "", fmt.Errorf("stdin is empty")
+			return "", err
 		}
 		return string(data), nil
 	}
 
-	// Handle file (starts with @)
 	if strings.HasPrefix(value, "@") {
 		filename := strings.TrimPrefix(value, "@")
 		data, err := os.ReadFile(filename)
@@ -82,20 +92,59 @@ func readDescriptionValue(value string) (string, error) {
 		return string(data), nil
 	}
 
-	// Handle string literal
 	return value, nil
 }
 
-func readMetaValue(value string, filename string) (bool, *string, error) {
+func readFileValue(filename, label string, stdin io.Reader, claims *stdinClaims) ([]byte, error) {
+	if filename == "-" {
+		return readStdinValue(label, stdin, claims)
+	}
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s %s: %w", label, filename, err)
+	}
+	return data, nil
+}
+
+func readStdinValue(label string, stdin io.Reader, claims *stdinClaims) ([]byte, error) {
+	if err := claims.claim(label); err != nil {
+		return nil, err
+	}
+	if isReaderTTY(stdin) {
+		return nil, fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+	}
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read from stdin: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("stdin is empty")
+	}
+	return data, nil
+}
+
+func isReaderTTY(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func readMetaValue(value string, filename string, stdin io.Reader, claims *stdinClaims) (bool, *string, error) {
 	if value == "" && filename == "" {
 		return false, nil, nil
 	}
 
 	var raw string
 	if filename != "" {
-		data, err := os.ReadFile(filename)
+		data, err := readFileValue(filename, "--meta-file", stdin, claims)
 		if err != nil {
-			return true, nil, fmt.Errorf("failed to read meta file %s: %w", filename, err)
+			return true, nil, err
 		}
 		if len(data) == 0 {
 			return true, nil, fmt.Errorf("meta file %s is empty", filename)

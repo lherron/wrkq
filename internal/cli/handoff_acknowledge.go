@@ -30,6 +30,7 @@ type handoffAckOutput struct {
 func runHandoffAck(cmd *cobra.Command, args []string) error {
 	defer resetHandoffAckFlags(cmd)
 
+	claims := &stdinClaims{}
 	stdout := cmd.OutOrStdout()
 	stderr := cmd.ErrOrStderr()
 
@@ -50,7 +51,12 @@ func runHandoffAck(cmd *cobra.Command, args []string) error {
 	// blank/whitespace --note value is a validation error.
 	var note *string
 	if cmd.Flags().Changed("note") {
-		trimmed := strings.TrimSpace(handoffAckNote)
+		noteValue, noteErr := readTextValue(handoffAckNote, "--note", cmd.InOrStdin(), claims)
+		if noteErr != nil {
+			return writeHandoffAckError(stderr, mode, 1, "validation_error", idOrUUID,
+				noteErr.Error(), handoffAckExample)
+		}
+		trimmed := strings.TrimSpace(noteValue)
 		if trimmed == "" {
 			return writeHandoffAckError(stderr, mode, 1, "validation_error", idOrUUID,
 				"--note cannot be empty", handoffAckExample)

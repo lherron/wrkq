@@ -88,6 +88,7 @@ func init() {
 func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+	claims := &stdinClaims{}
 
 	// Reset the caused-by global after running so the shared rootCmd (used across
 	// tests) never leaks a stale value into a later touch invocation.
@@ -135,7 +136,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	metaSet, metaValue, err := readMetaValue(touchMeta, touchMetaFile)
+	metaSet, metaValue, err := readMetaValue(touchMeta, touchMetaFile, cmd.InOrStdin(), claims)
 	if err != nil {
 		return err
 	}
@@ -191,7 +192,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var description string
 	if touchDescription != "" {
 		var err error
-		description, err = readDescriptionValue(touchDescription)
+		description, err = readTextValue(touchDescription, "--description", cmd.InOrStdin(), claims)
 		if err != nil {
 			return fmt.Errorf("failed to read description: %w", err)
 		}
@@ -200,7 +201,7 @@ func runTouch(app *appctx.App, cmd *cobra.Command, args []string) error {
 	var specification string
 	if touchSpecification != "" {
 		var err error
-		specification, err = readDescriptionValue(touchSpecification)
+		specification, err = readTextValue(touchSpecification, "--specification", cmd.InOrStdin(), claims)
 		if err != nil {
 			return fmt.Errorf("failed to read specification: %w", err)
 		}

@@ -30,6 +30,7 @@ func newSetCmd() *cobra.Command {
 		Short:   "Update task fields",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			claims := &stdinClaims{}
 			patch := map[string]any{}
 			dryFields := map[string]any{}
 			if state != "" {
@@ -57,7 +58,7 @@ func newSetCmd() *cobra.Command {
 				dryFields["slug"] = string(newSlug)
 			}
 			if description != "" {
-				desc, err := readTextValue(description, "description", cmd.InOrStdin())
+				desc, err := readTextValue(description, "--description", cmd.InOrStdin(), claims)
 				if err != nil {
 					return fmt.Errorf("failed to read description: %w", err)
 				}
@@ -65,7 +66,7 @@ func newSetCmd() *cobra.Command {
 				dryFields["description"] = desc
 			}
 			if specification != "" {
-				spec, err := readTextValue(specification, "specification", cmd.InOrStdin())
+				spec, err := readTextValue(specification, "--specification", cmd.InOrStdin(), claims)
 				if err != nil {
 					return fmt.Errorf("failed to read specification: %w", err)
 				}
@@ -132,7 +133,7 @@ func newSetCmd() *cobra.Command {
 				dryFields["labels"] = labels
 			}
 			if meta != "" || metaFile != "" {
-				_, raw, m, err := readMetaValue(meta, metaFile)
+				_, raw, m, err := readMetaValue(meta, metaFile, cmd.InOrStdin(), claims)
 				if err != nil {
 					return err
 				}
@@ -153,6 +154,7 @@ func newSetCmd() *cobra.Command {
 				dryRun: dryRun, continueOnError: continueOnError, jobs: jobs,
 				ordered:       ordered,
 				parentChanged: parentChanged, parentValue: parentValue, kindChanged: kind != "",
+				stdinClaims: claims,
 			})
 		},
 	}
@@ -196,6 +198,7 @@ type setRunOpts struct {
 	parentChanged   bool
 	parentValue     string
 	kindChanged     bool
+	stdinClaims     *stdinClaims
 }
 
 func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
@@ -210,6 +213,12 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 	}
 
 	if len(args) == 1 && args[0] == "-" {
+		if err := opts.stdinClaims.claim("task refs"); err != nil {
+			return err
+		}
+		if isReaderTTY(cmd.InOrStdin()) {
+			return fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+		}
 		scanner := bufio.NewScanner(cmd.InOrStdin())
 		args = nil
 		for scanner.Scan() {

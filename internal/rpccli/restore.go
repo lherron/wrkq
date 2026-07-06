@@ -77,6 +77,7 @@ type restoreFlags struct {
 }
 
 func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
+	claims := &stdinClaims{}
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
@@ -127,7 +128,11 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 		params["assignee"] = f.assignee
 	}
 	if f.comment != "" {
-		params["comment"] = f.comment
+		comment, cerr := readTextValue(f.comment, "--comment", cmd.InOrStdin(), claims)
+		if cerr != nil {
+			return cerr
+		}
+		params["comment"] = comment
 	}
 	if f.ifMatch != 0 {
 		params["ifMatch"] = f.ifMatch

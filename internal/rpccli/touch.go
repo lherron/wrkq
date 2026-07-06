@@ -80,6 +80,7 @@ type touchOpts struct {
 }
 
 func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
+	claims := &stdinClaims{}
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
@@ -100,19 +101,19 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 	}
 	description := ""
 	if o.description != "" {
-		description, err = readTextValue(o.description, "description", cmd.InOrStdin())
+		description, err = readTextValue(o.description, "--description", cmd.InOrStdin(), claims)
 		if err != nil {
 			return fmt.Errorf("failed to read description: %w", err)
 		}
 	}
 	specification := ""
 	if o.specification != "" {
-		specification, err = readTextValue(o.specification, "specification", cmd.InOrStdin())
+		specification, err = readTextValue(o.specification, "--specification", cmd.InOrStdin(), claims)
 		if err != nil {
 			return fmt.Errorf("failed to read specification: %w", err)
 		}
 	}
-	metaSet, metaRaw, metaValue, err := readMetaValue(o.meta, o.metaFile)
+	metaSet, metaRaw, metaValue, err := readMetaValue(o.meta, o.metaFile, cmd.InOrStdin(), claims)
 	if err != nil {
 		return err
 	}

@@ -65,6 +65,7 @@ func init() {
 func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 	database := app.DB
 	attr := app.Attribution()
+	claims := &stdinClaims{}
 	arg := args[0]
 	arg = applyProjectRootToSelector(app.Config, arg, false)
 	if restoreTo != "" {
@@ -175,6 +176,14 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 	}
 
 	// Restore the task with updates
+	restoreCommentValue := restoreComment
+	if restoreComment != "" {
+		var commentErr error
+		restoreCommentValue, commentErr = readTextValue(restoreComment, "--comment", cmd.InOrStdin(), claims)
+		if commentErr != nil {
+			return commentErr
+		}
+	}
 	opts := restoreTaskOptions{
 		taskUUID:             taskUUID,
 		attr:                 attr,
@@ -186,7 +195,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 		newPriority:          restorePriority,
 		newLabels:            restoreLabels,
 		assigneePrincipalRef: assigneePrincipalRef,
-		comment:              restoreComment,
+		comment:              restoreCommentValue,
 	}
 
 	webhookCtx, err := restoreTaskWithOptions(database, opts)
@@ -209,7 +218,7 @@ func runRestore(app *appctx.App, cmd *cobra.Command, args []string) error {
 			"restored":      true,
 			"state":         targetState,
 			"moved":         newProjectUUID != nil || newSlug != nil,
-			"comment_added": restoreComment != "",
+			"comment_added": restoreCommentValue != "",
 		})
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Restored task: %s\n", taskID)
