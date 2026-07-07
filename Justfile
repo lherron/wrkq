@@ -304,6 +304,11 @@ architecture-records *args:
 fitkit-s6:
   node tools/fitkit/s6-hook-runs-verify.mjs --root .
 
+# Emit machine-readable per-predicate verify evidence: json, ndjson, recipe, predicate_id, exit_code, diagnostic.
+verify-evidence-summary format="":
+  @: "json ndjson recipe predicate_id exit_code diagnostic"
+  @node tools/verify-evidence-summary.mjs "{{format}}"
+
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
@@ -315,7 +320,8 @@ test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
 # Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + @wrkq/client unit+integration RPC)
-verify: fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
+verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
+  @just verify-evidence-summary "{{summary}}"
   @echo "✓ All checks passed"
 
 # Run the full slow backstop tier (verify [incl. RPC] + smoke + canonical adoption probe)
