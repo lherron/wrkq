@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+//go:generate go run ../../cmd/gen-rpccli-surface-manifest --out cli_surface_manifest.json
+
 // mirroredCommand describes a command surface represented by an explicit
 // not-implemented mirror stub. Top-level stubs are expected to remain empty for
 // primary cutover; nested development stubs may still use newStubCmd directly.
