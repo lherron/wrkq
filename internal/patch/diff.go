@@ -305,7 +305,7 @@ func getFieldValue(v interface{}, path []string) (interface{}, bool) {
 	}
 
 	val := reflect.ValueOf(v)
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
 	}
 	if val.Kind() != reflect.Struct {
