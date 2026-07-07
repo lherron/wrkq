@@ -1,0 +1,2860 @@
+{
+  "schema": "wrkq.cli-surface-manifest@1",
+  "root": {
+    "name": "wrkq",
+    "use": "wrkq",
+    "short": "Task management CLI",
+    "hidden": false,
+    "available": true,
+    "persistent_flags": [
+      {
+        "name": "as",
+        "usage": "Alias for --principal-ref; accepts agent:\u003cid\u003e or a full agent ScopeRef",
+        "type": "string",
+        "hidden": false
+      },
+      {
+        "name": "db",
+        "usage": "Path to database file (overrides WRKQ_DB_PATH)",
+        "type": "string",
+        "hidden": false
+      },
+      {
+        "name": "output",
+        "usage": "Output mode: table, human, json, ndjson, porcelain, yaml, tsv, raw",
+        "type": "string",
+        "hidden": false
+      },
+      {
+        "name": "principal-ref",
+        "usage": "Caller principal for write attribution: agent:\u003cid\u003e or full agent ScopeRef",
+        "type": "string",
+        "hidden": false
+      },
+      {
+        "name": "project",
+        "usage": "Project to operate under (overrides WRKQ_PROJECT_ROOT)",
+        "type": "string",
+        "hidden": false
+      }
+    ],
+    "commands": [
+      {
+        "name": "ack",
+        "use": "ack \u003ctask|id\u003e...",
+        "short": "Acknowledge completed tasks",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "force",
+            "usage": "Allow ack on non-completed tasks",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "agent",
+        "use": "agent [prompt] [-- extra hrcchat-turn args]",
+        "short": "Run a chat turn with the seshat agent",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "file",
+            "usage": "Read prompt from file",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "follow",
+            "usage": "Emit bounded progress at the given interval (e.g. 30s)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "format",
+            "usage": "Output format: tree, compact, ndjson, json",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "new",
+            "usage": "Clear context before dispatching (clean slate)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "agent-context",
+        "use": "agent-context",
+        "short": "Print the resolved agent scope and environment context",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "human",
+            "usage": "Force human-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Force JSON output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "scope",
+            "usage": "Override scope (ScopeRef like agent:cody:project:wrkq or handle like cody@wrkq)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "agent-info",
+        "use": "agent-info",
+        "short": "Display condensed wrkq quick reference for agents",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "apply",
+        "use": "apply \u003cPATHSPEC|ID\u003e \u003cFILE|-\u003e",
+        "short": "Update task description/specification from file or stdin",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "dry-run",
+            "usage": "Show what would be changed without applying",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "format",
+            "usage": "Input format: md, yaml, json (auto-detected if not specified)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "if-match",
+            "usage": "Only apply if etag matches (0 = no check)",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "with-metadata",
+            "usage": "Update metadata fields (title, state, priority, due_at) in addition to description/specification",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "attach",
+        "use": "attach",
+        "short": "Manage task attachments",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "get",
+            "use": "get \u003cattachment-id\u003e",
+            "short": "Get an attachment file",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "as",
+                "usage": "Output path (use '-' for stdout)",
+                "type": "string",
+                "default": "-",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "ls",
+            "use": "ls \u003ctask\u003e",
+            "short": "List attachments for a task",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "cursor",
+                "usage": "Pagination cursor",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "limit",
+                "usage": "Maximum number of results",
+                "type": "int",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as NDJSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "put",
+            "use": "put \u003ctask\u003e \u003cfile|-|\u003e",
+            "short": "Attach a file to a task",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "mime",
+                "usage": "MIME type (auto-detected if not specified)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "name",
+                "usage": "Filename (defaults to basename of file)",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "rm",
+            "use": "rm \u003cattachment-id\u003e...",
+            "short": "Remove attachment(s)",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "yes",
+                "usage": "Skip confirmation",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "cat",
+        "use": "cat \u003cpath|id\u003e...",
+        "aliases": [
+          "show"
+        ],
+        "short": "Print one or more tasks",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "exclude-comments",
+            "usage": "Exclude comments from output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "no-frontmatter",
+            "usage": "Print body only without front matter",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "pretty",
+            "usage": "Force the styled task card even when not a TTY",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "check",
+        "use": "check",
+        "short": "Run pre-flight checks on tasks",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "blocked",
+            "use": "blocked \u003ctask\u003e",
+            "short": "Check if a task is blocked by incomplete dependencies",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output blockers as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "quiet",
+                "usage": "Suppress output, exit code only",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "check-inbox",
+        "use": "check-inbox",
+        "short": "List open tasks in the inbox",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Stable machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "comment",
+        "use": "comment",
+        "short": "Manage task comments",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "add",
+            "use": "add \u003ctask\u003e [comment-text]",
+            "short": "Add a comment to a task",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "message",
+                "shorthand": "m",
+                "usage": "Comment text",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "cat",
+            "use": "cat \u003ccomment-id|c:token\u003e...",
+            "short": "Print comment details",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "raw",
+                "usage": "Print raw comment bodies",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "ls",
+            "use": "ls \u003ctask\u003e...",
+            "short": "List comments for task(s)",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "cursor",
+                "usage": "Pagination cursor",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "human",
+                "usage": "Human-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "include-deleted",
+                "usage": "Include soft-deleted comments",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "limit",
+                "usage": "Maximum number of results (0 = no limit)",
+                "type": "int",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as NDJSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "reverse",
+                "usage": "Reverse sort order",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "sort",
+                "usage": "Sort field",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "tsv",
+                "usage": "Output as TSV",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "yaml",
+                "usage": "Output as YAML",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "rm",
+            "use": "rm \u003ccomment-id|c:token\u003e...",
+            "short": "Remove comment(s)",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "dry-run",
+                "usage": "Preview without deleting",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only delete if comment etag matches (0 = skip check)",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "purge",
+                "usage": "Hard delete (remove from database)",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "yes",
+                "usage": "Skip confirmation",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "completion",
+        "use": "completion",
+        "short": "Generate the autocompletion script for the specified shell",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "bash",
+            "use": "bash",
+            "short": "Generate the autocompletion script for bash",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "no-descriptions",
+                "usage": "disable completion descriptions",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "fish",
+            "use": "fish",
+            "short": "Generate the autocompletion script for fish",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "no-descriptions",
+                "usage": "disable completion descriptions",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "powershell",
+            "use": "powershell",
+            "short": "Generate the autocompletion script for powershell",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "no-descriptions",
+                "usage": "disable completion descriptions",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "zsh",
+            "use": "zsh",
+            "short": "Generate the autocompletion script for zsh",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "no-descriptions",
+                "usage": "disable completion descriptions",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "container",
+        "use": "container",
+        "short": "Manage containers",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "cat",
+            "use": "cat \u003cpath|id\u003e",
+            "aliases": [
+              "show"
+            ],
+            "short": "Print container details",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "no-frontmatter",
+                "usage": "Print body only without front matter",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "set",
+            "use": "set \u003ccontainer\u003e",
+            "short": "Update container fields",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "add-webhook-url",
+                "usage": "Add webhook URL to existing list (repeatable)",
+                "type": "stringArray",
+                "default": "[]",
+                "hidden": false
+              },
+              {
+                "name": "all",
+                "usage": "Apply to all containers",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Conditional update (etag)",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "remove-webhook-url",
+                "usage": "Remove webhook URL from existing list (repeatable)",
+                "type": "stringArray",
+                "default": "[]",
+                "hidden": false
+              },
+              {
+                "name": "webhook-url",
+                "usage": "Webhook URL (repeatable)",
+                "type": "stringArray",
+                "default": "[]",
+                "hidden": false
+              },
+              {
+                "name": "webhook-urls",
+                "usage": "Webhook URLs JSON array",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "cp",
+        "use": "cp \u003csource\u003e... \u003cdestination\u003e",
+        "short": "Copy tasks and containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "0",
+            "usage": "NUL-separated output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "1",
+            "usage": "One per line",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "continue-on-error",
+            "usage": "Continue on errors",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "dry-run",
+            "usage": "Show what would be copied",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "if-match",
+            "usage": "Conditional copy based on source etag",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "jobs",
+            "shorthand": "j",
+            "usage": "Parallel workers",
+            "type": "int",
+            "default": "1",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output NDJSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "nullglob",
+            "usage": "Zero matches is not an error",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "overwrite",
+            "usage": "Overwrite existing tasks",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "recursive",
+            "shorthand": "r",
+            "usage": "Copy containers recursively",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "shallow",
+            "usage": "Skip attachments entirely",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "with-attachments",
+            "usage": "Copy attachment files",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip confirmation prompts",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "diff",
+        "use": "diff \u003cA\u003e [B]",
+        "short": "Compare two tasks or task versions",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "unified",
+            "usage": "Lines of unified context",
+            "type": "int",
+            "default": "3",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "find",
+        "use": "find [PATH...]",
+        "short": "Search for tasks and containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "ack-pending",
+            "usage": "Filter for ack-pending tasks (completed/cancelled, not yet acknowledged)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "assigned-project",
+            "usage": "Filter by assignee project ID",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "assignee",
+            "usage": "Filter by assignee principal ref or bare agent slug",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "caused-by",
+            "usage": "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "cursor",
+            "usage": "Pagination cursor",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "due-after",
+            "usage": "Filter tasks due after date (YYYY-MM-DD)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "due-before",
+            "usage": "Filter tasks due before date (YYYY-MM-DD)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "kind",
+            "usage": "Filter by task kind: task, subtask, spike, bug, chore",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "limit",
+            "usage": "Limit number of results",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "parent-task",
+            "usage": "Filter subtasks of a specific parent task (ID or path)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Stable machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "pretty",
+            "usage": "Force human-readable table output even when not a TTY",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "print0",
+            "shorthand": "0",
+            "usage": "NUL-separated output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "requested-by",
+            "usage": "Filter by requester project ID",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "reverse",
+            "usage": "Reverse sort order",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "slug-glob",
+            "usage": "Filter by slug glob pattern (e.g. 'login-*')",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "sort",
+            "usage": "Sort by field: updated_at, created_at, id, path",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "state",
+            "usage": "Filter by state (or 'all' for everything)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "type",
+            "usage": "Filter by type: t (task), p (project/container)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "handoff",
+        "use": "handoff",
+        "short": "Manage agent session handoffs",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "acknowledge",
+            "use": "acknowledge \u003chandoff-id\u003e",
+            "short": "Acknowledge a handoff so it is no longer pending",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "dry-run",
+                "usage": "Inspect the mutation without applying it",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "human",
+                "usage": "Force human-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Reject the acknowledgement when the current etag does not equal this value",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Force JSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "note",
+                "usage": "Optional acknowledgement note describing why the handoff was consumed or is obsolete",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "create",
+            "use": "create",
+            "short": "Create a new pending handoff for the resolved agent/project scope",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "body-file",
+                "usage": "Path to a file containing the markdown body, or '-' to read from stdin (required)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "dry-run",
+                "usage": "Validate inputs and print the prospective handoff without writing it",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "human",
+                "usage": "Force human-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "idempotency-key",
+                "usage": "Idempotency key to safely retry create without producing duplicates",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Force JSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "meta",
+                "usage": "Optional JSON object of additional metadata",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Force NDJSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "profile",
+                "usage": "Named profile to resolve scope/defaults from",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "scope",
+                "usage": "Override scope (ScopeRef like agent:cody:project:wrkq or handle like cody@wrkq)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "title",
+                "shorthand": "t",
+                "usage": "Handoff title (required)",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "get",
+            "use": "get \u003chandoff-id\u003e",
+            "aliases": [
+              "cat"
+            ],
+            "short": "Get a single handoff by ID",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "human",
+                "usage": "Force human-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Force JSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "list",
+            "use": "list",
+            "aliases": [
+              "ls"
+            ],
+            "short": "List handoffs for the resolved agent/project scope",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "cursor",
+                "usage": "Pagination cursor from a previous page",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "human",
+                "usage": "Force human-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Force JSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "limit",
+                "usage": "Maximum number of results (0 = server default)",
+                "type": "int",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Force NDJSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Emit next_cursor=\u003ctoken\u003e on stderr (mirrors 'wrkq comment ls --porcelain')",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "scope",
+                "usage": "Override scope (ScopeRef like agent:cody:project:wrkq or handle like cody@wrkq)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "status",
+                "usage": "Status filter: pending, acknowledged, or all (default: pending)",
+                "type": "string",
+                "default": "pending",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "search",
+            "use": "search \u003cquery\u003e",
+            "short": "Search handoffs by title, body, scope, or status",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "cursor",
+                "usage": "Pagination cursor from a previous page",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "human",
+                "usage": "Force human-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Force JSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "limit",
+                "usage": "Maximum number of results (0 = server default)",
+                "type": "int",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Force NDJSON output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Emit next_cursor=\u003ctoken\u003e on stderr (mirrors 'wrkq handoff list --porcelain')",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "scope",
+                "usage": "Override scope (ScopeRef like agent:cody:project:wrkq or handle like cody@wrkq)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "status",
+                "usage": "Status filter: pending, acknowledged, or all (default: pending)",
+                "type": "string",
+                "default": "pending",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "help",
+        "use": "help [command]",
+        "short": "Help about any command",
+        "hidden": false,
+        "available": false
+      },
+      {
+        "name": "index",
+        "use": "index",
+        "short": "Inspect and rebuild the local search index",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "pause",
+            "use": "pause",
+            "short": "Pause background search indexing",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "rebuild",
+            "use": "rebuild",
+            "short": "Rebuild the local search index",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "foreground",
+                "usage": "Run rebuild in the foreground",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "resume",
+            "use": "resume",
+            "short": "Resume background search indexing",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "status",
+            "use": "status",
+            "short": "Show local search index status",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "update",
+            "use": "update",
+            "short": "Index pending canonical changes",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "vacuum",
+            "use": "vacuum",
+            "short": "Vacuum the local search index",
+            "hidden": false,
+            "available": true
+          }
+        ]
+      },
+      {
+        "name": "log",
+        "use": "log \u003cPATHSPEC|ID\u003e",
+        "short": "Show change history for a task or container",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "cursor",
+            "usage": "Pagination cursor from previous page",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "limit",
+            "usage": "Limit number of events (0 = unlimited)",
+            "type": "int",
+            "default": "50",
+            "hidden": false
+          },
+          {
+            "name": "oneline",
+            "usage": "Compact one-line format",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "patch",
+            "usage": "Show detailed payload changes",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output with cursor on stderr",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "since",
+            "usage": "Show changes since date/time (YYYY-MM-DD or RFC3339)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "until",
+            "usage": "Show changes until date/time (YYYY-MM-DD or RFC3339)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "ls",
+        "use": "ls [path...]",
+        "aliases": [
+          "list"
+        ],
+        "short": "List containers and tasks",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "a",
+            "usage": "Include archived and deleted items",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "cursor",
+            "usage": "Pagination cursor from previous page",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "limit",
+            "usage": "Maximum number of results to return (0 = no limit)",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "nul",
+            "shorthand": "0",
+            "usage": "NUL-separated output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "one",
+            "shorthand": "1",
+            "usage": "One entry per line",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "pretty",
+            "usage": "Force human-readable table output even when not a TTY",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "recursive",
+            "shorthand": "R",
+            "usage": "List recursively",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "reverse",
+            "usage": "Reverse sort order",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "sort",
+            "usage": "Sort by field: slug, updated_at, created_at, id",
+            "type": "string",
+            "default": "slug",
+            "hidden": false
+          },
+          {
+            "name": "type",
+            "usage": "Filter by type (p=project, t=task)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "mkdir",
+        "use": "mkdir \u003cpath\u003e...",
+        "short": "Create one or more containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "kind",
+            "usage": "Container kind: project, directory, feature, area (default: directory)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "parents",
+            "shorthand": "p",
+            "usage": "Create parent containers as needed",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "monitor",
+        "use": "monitor",
+        "short": "Observe task state and events (Monitor-tool surface)",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "wait",
+            "use": "wait [TASK...]",
+            "short": "Block until condition is met, then exit",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "stall-after",
+                "usage": "Exit after this duration with no new events",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "timeout",
+                "usage": "Maximum wait duration (e.g. 30m)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "until",
+                "usage": "Condition: state=\u003cs\u003e[,\u003cs\u003e...] or all-terminal",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "watch",
+            "use": "watch [TASK...]",
+            "short": "Stream task events (Monitor feed)",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "event-type",
+                "usage": "Comma-separated event_type filter",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "format",
+                "usage": "Output format: ndjson or compact",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "last",
+                "usage": "Replay last N events before following",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as NDJSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "raw",
+                "usage": "Raw wrkq watch behavior (whole-log unfiltered tail)",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "scope",
+                "usage": "Filter by scope ref",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "since",
+                "usage": "Start from event ID (overrides high-water default)",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "stall-after",
+                "usage": "Exit after this duration with no new events",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "state-only",
+                "usage": "Only emit lifecycle state-change events",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "timeout",
+                "usage": "Maximum wait duration (e.g. 30m)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "until",
+                "usage": "Condition: state=\u003cs\u003e[,\u003cs\u003e...] or all-terminal",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "mv",
+        "use": "mv \u003csrc\u003e... \u003cdst\u003e",
+        "short": "Move or rename tasks and containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "dry-run",
+            "usage": "Show what would be moved without applying",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "if-match",
+            "usage": "Only move if etag matches",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "nullglob",
+            "usage": "Zero matches is a no-op instead of error",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "overwrite-task",
+            "usage": "Allow overwriting existing tasks",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "type",
+            "usage": "Force type: t (task), p (project/container)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip confirmation prompts",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "projects",
+        "use": "projects",
+        "short": "List all top-level projects",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "a",
+            "usage": "Include archived projects",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "cursor",
+            "usage": "Pagination cursor from previous page",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "limit",
+            "usage": "Maximum number of results to return (0 = no limit)",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "nul",
+            "shorthand": "0",
+            "usage": "NUL-separated output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "one",
+            "shorthand": "1",
+            "usage": "One entry per line",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "relation",
+        "use": "relation",
+        "short": "Manage task relations",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "add",
+            "use": "add \u003cfrom-task\u003e \u003ckind\u003e \u003cto-task\u003e",
+            "short": "Created a relation between tasks",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "ls",
+            "use": "ls \u003ctask\u003e",
+            "short": "List relations for a task",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "rm",
+            "use": "rm \u003cfrom-task\u003e \u003ckind\u003e \u003cto-task\u003e",
+            "short": "Removed a relation between tasks",
+            "hidden": false,
+            "available": true
+          }
+        ]
+      },
+      {
+        "name": "rename-container",
+        "use": "rename-container \u003cpath|id\u003e \u003cnew-slug\u003e",
+        "short": "Rename a container's slug and title",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "dry-run",
+            "usage": "Show what would change without applying",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "if-match",
+            "usage": "Only rename if etag matches",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "title",
+            "usage": "Custom title (defaults to new slug)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "restore",
+        "use": "restore \u003cpath|id|uuid\u003e",
+        "short": "Restore deleted or archived tasks",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "assignee",
+            "usage": "Update assignee on restore",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "comment",
+            "usage": "Add comment explaining restoration",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "description",
+            "usage": "Update description on restore",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "if-match",
+            "usage": "Conditional restore (etag)",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "labels",
+            "usage": "Update labels on restore (JSON array)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "priority",
+            "usage": "Update priority on restore (1-4)",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "state",
+            "usage": "Restore to specific state (default: open)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "title",
+            "usage": "Update title on restore",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "to",
+            "usage": "Restore to different container/slug (path)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "rm",
+        "use": "rm \u003cpath|id\u003e...",
+        "short": "Archive or delete tasks and containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "continue-on-error",
+            "usage": "Continue on errors",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "dry-run",
+            "usage": "Show what would be removed",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "force",
+            "shorthand": "f",
+            "usage": "Force removal",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "jobs",
+            "shorthand": "j",
+            "usage": "Parallel workers",
+            "type": "int",
+            "default": "1",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output NDJSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "nullglob",
+            "usage": "Zero matches is not an error",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "purge",
+            "usage": "Permanently delete (CANNOT BE UNDONE)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "recursive",
+            "shorthand": "r",
+            "usage": "Remove containers recursively",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip confirmation prompts",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "rmdir",
+        "use": "rmdir \u003cpath|id\u003e...",
+        "short": "Remove one or more containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "force",
+            "shorthand": "f",
+            "usage": "Force removal of non-empty containers",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip confirmation prompts",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "rpc",
+        "use": "rpc --stdio",
+        "short": "Serve wrkq/wrkf JSON-RPC over stdio",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "stdio",
+            "usage": "Use stdin/stdout JSON-RPC transport",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "use": "search \u003cquery\u003e [PATH...]",
+        "short": "Search task and comment text",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "assignee",
+            "usage": "Filter by assignee principal ref or bare agent slug",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "candidate-limit",
+            "usage": "Candidate chunks to retrieve before aggregation",
+            "type": "int",
+            "default": "300",
+            "hidden": false
+          },
+          {
+            "name": "explain",
+            "usage": "Include ranking diagnostics in JSON output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "fresh",
+            "usage": "Fail if the search index is stale",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "human",
+            "usage": "Force human-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "kind",
+            "usage": "Filter by task kind",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "limit",
+            "usage": "Maximum number of task results",
+            "type": "int",
+            "default": "20",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Stable machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "pretty",
+            "usage": "Force human-readable output even when not a TTY",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "reverse",
+            "usage": "Reverse sort order",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "sort",
+            "usage": "Sort by relevance, updated_at, or created_at",
+            "type": "string",
+            "default": "relevance",
+            "hidden": false
+          },
+          {
+            "name": "state",
+            "usage": "Filter by state (default open, use all for non-deleted states)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "server",
+        "use": "server",
+        "short": "Manage the wrkq daemon server",
+        "hidden": false,
+        "available": true,
+        "persistent_flags": [
+          {
+            "name": "addr",
+            "usage": "Listen/status address",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "db-path",
+            "usage": "Database path override",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "token",
+            "usage": "Shared token for local auth",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "unix",
+            "usage": "Listen/status Unix socket path",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "unsafe-no-token",
+            "usage": "Allow non-loopback listen without a token (dev only)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ],
+        "commands": [
+          {
+            "name": "health",
+            "use": "health",
+            "short": "Check wrkq daemon server health",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "restart",
+            "use": "restart",
+            "short": "Restart the wrkq daemon server",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "daemon",
+                "usage": "Run as a background process when launchd is not loaded",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "force",
+                "usage": "Escalate to SIGKILL if graceful shutdown times out",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "foreground",
+                "usage": "Run in the foreground when launchd is not loaded",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "timeout-ms",
+                "usage": "Shutdown/startup timeout in milliseconds",
+                "type": "int",
+                "default": "5000",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "serve",
+            "use": "serve",
+            "short": "Run the wrkq daemon server in the foreground",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "start",
+            "use": "start",
+            "short": "Start the wrkq daemon server",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "daemon",
+                "usage": "Run as a background process when launchd is not loaded",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "foreground",
+                "usage": "Run in the foreground when launchd is not loaded",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "timeout-ms",
+                "usage": "Startup timeout in milliseconds",
+                "type": "int",
+                "default": "5000",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "status",
+            "use": "status",
+            "short": "Show wrkq daemon server status",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "stop",
+            "use": "stop",
+            "short": "Stop the wrkq daemon server",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "force",
+                "usage": "Escalate to SIGKILL if graceful shutdown times out",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "timeout-ms",
+                "usage": "Shutdown timeout in milliseconds",
+                "type": "int",
+                "default": "5000",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "set",
+        "use": "set \u003cpath|id\u003e... [flags]",
+        "aliases": [
+          "edit"
+        ],
+        "short": "Update task fields",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "assigned-project",
+            "usage": "Update assignee project ID",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "assignee",
+            "usage": "Update task assignee",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "batch-size",
+            "usage": "Group operations into batches (not yet implemented)",
+            "type": "int",
+            "default": "1",
+            "hidden": false
+          },
+          {
+            "name": "caused-by",
+            "usage": "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "continue-on-error",
+            "usage": "Continue processing on errors",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "description",
+            "shorthand": "d",
+            "usage": "Update task description",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "dry-run",
+            "usage": "Show what would be changed without applying",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "due-at",
+            "usage": "Update task due date",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "if-match",
+            "usage": "Only update if etag matches",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "jobs",
+            "shorthand": "j",
+            "usage": "Number of parallel workers (0 = auto-detect CPU count)",
+            "type": "int",
+            "default": "1",
+            "hidden": false
+          },
+          {
+            "name": "kind",
+            "usage": "Update task kind",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "labels",
+            "usage": "Update task labels (JSON array)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "meta",
+            "usage": "Update task metadata (JSON object or null)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "meta-file",
+            "usage": "Load task metadata from file",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "ordered",
+            "usage": "Preserve input order (disables parallelism)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "parent-id",
+            "usage": "Alias for --parent-task",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "parent-task",
+            "usage": "Set parent task ID or path",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "priority",
+            "usage": "Update task priority (1-4)",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "requested-by",
+            "usage": "Update requester project ID",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "resolution",
+            "usage": "Update task resolution",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "slug",
+            "usage": "Update task slug",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "specification",
+            "usage": "Update task specification",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "start-at",
+            "usage": "Update task start date",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "state",
+            "usage": "Update task state",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "title",
+            "usage": "Update task title",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "stat",
+        "use": "stat \u003cpath|id\u003e...",
+        "short": "Print metadata for tasks or containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "nul",
+            "shorthand": "0",
+            "usage": "NUL-separated output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "touch",
+        "use": "touch \u003cpath\u003e...",
+        "short": "Create one or more tasks",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "assigned-project",
+            "usage": "Assignee project ID",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "assignee",
+            "usage": "Assignee principal ref or bare agent slug",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "caused-by",
+            "usage": "Causal lineage: comma-separated task IDs whose work caused this defect/rework (e.g. T-00012,T-00034)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "description",
+            "shorthand": "d",
+            "usage": "Description for the task (use @file.md for file or - for stdin)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "due-at",
+            "usage": "Initial task due date",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "force-uuid",
+            "usage": "Force specific UUID instead of auto-generating (must be valid UUIDv4)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "kind",
+            "usage": "Task kind: task, subtask, spike, bug, chore (default: task)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "labels",
+            "usage": "Initial task labels (JSON array)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "meta",
+            "usage": "Initial task metadata (JSON object or null)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "meta-file",
+            "usage": "Load task metadata from file (JSON object or null)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "parent-task",
+            "usage": "Parent task ID or path (for subtasks)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "priority",
+            "usage": "Initial task priority (1-4)",
+            "type": "int",
+            "default": "3",
+            "hidden": false
+          },
+          {
+            "name": "requested-by",
+            "usage": "Requester project ID (return-to target)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "resolution",
+            "usage": "Task resolution (done, wont_do, duplicate, needs_info)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "specification",
+            "usage": "Specification for the task (use @file.md for file or - for stdin)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "start-at",
+            "usage": "Initial task start date",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "state",
+            "usage": "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted)",
+            "type": "string",
+            "default": "open",
+            "hidden": false
+          },
+          {
+            "name": "title",
+            "shorthand": "t",
+            "usage": "Title for the task (defaults to slug)",
+            "type": "string",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "tree",
+        "use": "tree [path...]",
+        "short": "Display containers and tasks in a tree structure",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "a",
+            "usage": "Include completed/archived/deleted tasks and empty containers",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "fields",
+            "usage": "Fields to display (comma-separated)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "level",
+            "shorthand": "L",
+            "usage": "Maximum depth to display (0 = unlimited)",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "open",
+            "usage": "Show only open tasks",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "pretty",
+            "usage": "Force human-readable tree output even when not a TTY",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "usage",
+        "use": "usage",
+        "aliases": [
+          "info"
+        ],
+        "short": "Display wrkq usage documentation",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "version",
+        "use": "version",
+        "short": "Print version information",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "watch",
+        "use": "watch [PATH...]",
+        "short": "Stream change events from the event log",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "follow",
+            "shorthand": "f",
+            "usage": "Follow new events (default true)",
+            "type": "bool",
+            "default": "true",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "since",
+            "usage": "Start from event ID (0 = all events)",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "webhook",
+        "use": "webhook",
+        "short": "Manage global webhook subscriptions (apply to all projects)",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "add",
+            "use": "add \u003curl\u003e",
+            "short": "Add a global webhook URL",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "list",
+            "use": "list",
+            "short": "List global webhook URLs",
+            "hidden": false,
+            "available": true
+          },
+          {
+            "name": "rm",
+            "use": "rm \u003curl\u003e",
+            "aliases": [
+              "remove"
+            ],
+            "short": "Remove a global webhook URL",
+            "hidden": false,
+            "available": true
+          }
+        ]
+      },
+      {
+        "name": "whoami",
+        "use": "whoami",
+        "short": "Print the current principal",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      }
+    ]
+  }
+}
