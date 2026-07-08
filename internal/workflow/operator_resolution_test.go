@@ -30,6 +30,10 @@ func TestBuiltinSimpleTaskOperatorResolutionContract(t *testing.T) {
 			if kind.Facts == nil || !containsString(kind.Facts.Required, "resolution") {
 				t.Fatalf("operator_resolution facts = %+v, want required resolution", kind.Facts)
 			}
+			resolutionProp, ok := kind.Facts.Properties["resolution"]
+			if !ok || !containsRawString(resolutionProp.Enum, "close") {
+				t.Fatalf("operator_resolution resolution enum = %v, want close", rawStrings(resolutionProp.Enum))
+			}
 			tr := requireTransition(t, tpl, "operator_resolved")
 			if tr.From.Status != "waiting" || tr.From.Phase != "operator_required" || !containsString(tr.By, "supervisor") {
 				t.Fatalf("operator_resolved transition = %+v", tr)
@@ -39,6 +43,7 @@ func TestBuiltinSimpleTaskOperatorResolutionContract(t *testing.T) {
 			}
 			assertOperatorOutcome(t, tr, "resume_ready", "active", "ready", "open")
 			assertOperatorOutcome(t, tr, "cancelled", "closed", "cancelled", "cancelled")
+			assertOperatorOutcome(t, tr, "closed", "closed", "done", "completed")
 		})
 	}
 }
@@ -121,6 +126,39 @@ func TestOperatorResolvedResumeAndCancelPaths(t *testing.T) {
 	})
 }
 
+func TestOperatorResolvedClosePath(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	impl := driveV2ToOperatorRequired(t, svc, taskUUID)
+	beforeRun, err := svc.ShowRun(impl.Run.RunID)
+	if err != nil {
+		t.Fatalf("ShowRun before: %v", err)
+	}
+
+	ev := addOperatorResolution(t, svc, taskUUID, "close", "operator accepted completed out-of-band work")
+	out := transitionOperatorResolved(t, svc, taskUUID)
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	if inst.Status != "closed" || inst.Phase != "done" {
+		t.Fatalf("state = %+v, want closed/done", inst.State())
+	}
+	if got := readTaskState(t, svc, taskUUID); got != "completed" {
+		t.Fatalf("task state = %q, want completed", got)
+	}
+	afterRun, err := svc.ShowRun(impl.Run.RunID)
+	if err != nil {
+		t.Fatalf("ShowRun after: %v", err)
+	}
+	if *afterRun != *beforeRun {
+		t.Fatalf("prior run changed: before=%+v after=%+v", beforeRun, afterRun)
+	}
+	if out["outcome"] != "closed" || ev.PrincipalRef != "agent:supervisor" || ev.Role != "supervisor" {
+		t.Fatalf("resolution output/evidence = outcome %#v evidence %+v", out["outcome"], ev)
+	}
+}
+
 func TestOperatorResolvedRequiresHumanReason(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
@@ -179,7 +217,7 @@ func TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede(t *testing.T
 	if len(nextAfterSupersede.Actions) != 1 || nextAfterSupersede.Actions[0].Kind != "collect_evidence" {
 		t.Fatalf("superseded next = %+v, want collect_evidence", nextAfterSupersede.Actions)
 	}
-	addOperatorResolution(t, svc, taskUUID, "resume_ready", "operator fixed old wedge")
+	addOperatorResolution(t, svc, taskUUID, "close", "operator accepted completed old wedge")
 	transitionOperatorResolved(t, svc, taskUUID)
 	recovered, err := svc.LatestInstance(taskUUID)
 	if err != nil {
@@ -188,8 +226,11 @@ func TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede(t *testing.T
 	if recovered.ID != wedged.ID {
 		t.Fatalf("instance id changed: before=%s after=%s", wedged.ID, recovered.ID)
 	}
-	if recovered.Status != "active" || recovered.Phase != "ready" {
-		t.Fatalf("recovered state = %+v, want active/ready", recovered.State())
+	if recovered.Status != "closed" || recovered.Phase != "done" {
+		t.Fatalf("recovered state = %+v, want closed/done", recovered.State())
+	}
+	if got := readTaskState(t, svc, taskUUID); got != "completed" {
+		t.Fatalf("task state after recovered close = %q, want completed", got)
 	}
 }
 
@@ -306,6 +347,29 @@ func assertOperatorOutcome(t *testing.T, tr TransitionSpec, id, status, phase, t
 		t.Fatalf("outcome %s missing set_task_state %s: %+v", id, taskState, out.Effects)
 	}
 	t.Fatalf("missing outcome %s", id)
+}
+
+func containsRawString(values []json.RawMessage, want string) bool {
+	for _, value := range values {
+		var got string
+		if err := json.Unmarshal(value, &got); err == nil && got == want {
+			return true
+		}
+	}
+	return false
+}
+
+func rawStrings(values []json.RawMessage) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		var got string
+		if err := json.Unmarshal(value, &got); err == nil {
+			out = append(out, got)
+			continue
+		}
+		out = append(out, string(value))
+	}
+	return out
 }
 
 func installOldBuiltinV2WithoutOperatorResolved(t *testing.T, svc *Service) {
