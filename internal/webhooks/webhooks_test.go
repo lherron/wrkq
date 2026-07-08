@@ -63,6 +63,16 @@ func TestNoProductionContextFreeDispatchCallSites(t *testing.T) {
 	}
 }
 
+func TestOriginCausationRefOmittedWhenAbsent(t *testing.T) {
+	raw, err := json.Marshal(webhooks.Origin{Actor: "agent:test", Via: "cli"})
+	if err != nil {
+		t.Fatalf("marshal origin: %v", err)
+	}
+	if strings.Contains(string(raw), "causation_ref") {
+		t.Fatalf("origin without causation ref must omit field, got %s", raw)
+	}
+}
+
 func setupTestActor(t *testing.T, database *db.DB) string {
 	t.Helper()
 	result, err := database.Exec(`

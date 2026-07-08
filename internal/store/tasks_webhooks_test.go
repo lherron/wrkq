@@ -44,6 +44,8 @@ func setupWebhookTestActor(t *testing.T, database *db.DB) string {
 }
 
 func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
+	t.Setenv("WRKQ_CAUSATION_REF", "  jrun_parent_123  ")
+
 	database := setupWebhookTestDB(t)
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
@@ -144,6 +146,12 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		// not the legacy role:slug derived from the actors table.
 		if got.payload.Origin.Actor != "agent:"+actorUUID || got.payload.Origin.Via != "cli" {
 			t.Fatalf("unexpected origin: %+v", got.payload.Origin)
+		}
+		if got.payload.Origin.RunID != nil {
+			t.Fatalf("origin.run_id must remain untouched, got %q", *got.payload.Origin.RunID)
+		}
+		if got.payload.Origin.CausationRef == nil || *got.payload.Origin.CausationRef != "jrun_parent_123" {
+			t.Fatalf("origin.causation_ref: want jrun_parent_123, got %+v", got.payload.Origin.CausationRef)
 		}
 		if got.payload.ProjectScopeID != "project" || got.payload.ContainerPath != "project" {
 			t.Fatalf("unexpected scope/container: %s / %s", got.payload.ProjectScopeID, got.payload.ContainerPath)
