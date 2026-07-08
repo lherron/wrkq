@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -33,9 +34,10 @@ type BlockerInfo struct {
 
 // Origin describes the source of the mutation that produced the webhook.
 type Origin struct {
-	Actor string  `json:"actor"`
-	RunID *string `json:"run_id"`
-	Via   string  `json:"via"`
+	Actor        string  `json:"actor"`
+	RunID        *string `json:"run_id"`
+	Via          string  `json:"via"`
+	CausationRef *string `json:"causation_ref,omitempty"`
 }
 
 // Transition describes a task state transition. Nil endpoints encode JSON null.
@@ -281,11 +283,20 @@ func resolveOrigin(principalRef string, via string, runID *string) Origin {
 	if via == "" {
 		via = "unknown"
 	}
+	causationRef := readCausationRefFromEnv()
 	principalRef = strings.TrimSpace(principalRef)
 	if principalRef == "" {
-		return Origin{Actor: "system", RunID: runID, Via: via}
+		return Origin{Actor: "system", RunID: runID, Via: via, CausationRef: causationRef}
 	}
-	return Origin{Actor: principalRef, RunID: runID, Via: via}
+	return Origin{Actor: principalRef, RunID: runID, Via: via, CausationRef: causationRef}
+}
+
+func readCausationRefFromEnv() *string {
+	value := strings.TrimSpace(os.Getenv("WRKQ_CAUSATION_REF"))
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // nullStringToPtr converts sql.NullString to *string.

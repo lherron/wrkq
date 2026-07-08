@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -44,6 +45,8 @@ func setupWebhookTestActor(t *testing.T, database *db.DB) string {
 }
 
 func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
+	t.Setenv("WRKQ_CAUSATION_REF", "  jrun_parent_123  ")
+
 	database := setupWebhookTestDB(t)
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
@@ -145,6 +148,12 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 		if got.payload.Origin.Actor != "agent:"+actorUUID || got.payload.Origin.Via != "cli" {
 			t.Fatalf("unexpected origin: %+v", got.payload.Origin)
 		}
+		if got.payload.Origin.RunID != nil {
+			t.Fatalf("origin.run_id must remain untouched, got %q", *got.payload.Origin.RunID)
+		}
+		if got.payload.Origin.CausationRef == nil || *got.payload.Origin.CausationRef != "jrun_parent_123" {
+			t.Fatalf("origin.causation_ref: want jrun_parent_123, got %+v", got.payload.Origin.CausationRef)
+		}
 		if got.payload.ProjectScopeID != "project" || got.payload.ContainerPath != "project" {
 			t.Fatalf("unexpected scope/container: %s / %s", got.payload.ProjectScopeID, got.payload.ContainerPath)
 		}
@@ -164,6 +173,18 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 }
 
 func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
+	previousCausationRef, hadCausationRef := os.LookupEnv("WRKQ_CAUSATION_REF")
+	if err := os.Unsetenv("WRKQ_CAUSATION_REF"); err != nil {
+		t.Fatalf("unset WRKQ_CAUSATION_REF: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadCausationRef {
+			_ = os.Setenv("WRKQ_CAUSATION_REF", previousCausationRef)
+		} else {
+			_ = os.Unsetenv("WRKQ_CAUSATION_REF")
+		}
+	})
+
 	database := setupWebhookTestDB(t)
 	actorUUID := setupWebhookTestActor(t, database)
 	s := New(database)
@@ -215,6 +236,9 @@ func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
 		}
 		if len(payload.Labels) != 2 || payload.Labels[0] != "alpha" || payload.Labels[1] != "beta" {
 			t.Fatalf("unexpected labels: %+v", payload.Labels)
+		}
+		if payload.Origin.CausationRef != nil {
+			t.Fatalf("origin.causation_ref must be absent when WRKQ_CAUSATION_REF is unset, got %+v", payload.Origin.CausationRef)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for webhook")
