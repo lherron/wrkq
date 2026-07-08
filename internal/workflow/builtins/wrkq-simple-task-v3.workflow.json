@@ -178,7 +178,7 @@
         "properties": {
           "resolution": {
             "type": "string",
-            "enum": ["resume_ready", "cancelled"]
+            "enum": ["resume_ready", "cancelled", "close"]
           },
           "reason": { "type": "string" }
         }
@@ -512,6 +512,31 @@
               "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
               "data": {
                 "state": "cancelled"
+              }
+            }
+          ]
+        },
+        {
+          "id": "closed",
+          "when": {
+            "evidenceExists": {
+              "kind": "operator_resolution",
+              "facts": {
+                "resolution": "close"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
               }
             }
           ]
