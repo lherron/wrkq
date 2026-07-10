@@ -9,6 +9,56 @@ import (
 	"testing"
 )
 
+func TestEngineRunnerContractVerifyClaimUsesOpaqueSourceIdentity(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test file")
+	}
+	fixturePath := filepath.Join(filepath.Dir(testFile), "..", "..", "architecture", "contracts", "wrkf-engine-runner-contract.v1.json")
+	data, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read canonical engine-runner contract: %v", err)
+	}
+
+	var contract struct {
+		Fixtures []struct {
+			ID     string         `json:"id"`
+			Engine map[string]any `json:"engine"`
+			Runner map[string]any `json:"runner"`
+		} `json:"fixtures"`
+	}
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatalf("decode canonical engine-runner contract: %v", err)
+	}
+
+	for _, fixture := range contract.Fixtures {
+		if fixture.ID != "action-claim.verify-v4" {
+			continue
+		}
+		candidate, ok := fixture.Engine["candidate"].(map[string]any)
+		if !ok {
+			t.Fatal("verify claim fixture is missing engine candidate")
+		}
+		source, ok := candidate["source"].(map[string]any)
+		if !ok {
+			t.Fatal("verify claim fixture is missing source binding")
+		}
+		wantSource := map[string]any{
+			"sourceRunId":      "run-implement-v4-1",
+			"sourceEvidenceId": "ev-implement-v4-1",
+			"sourceIdentity":   "change-v1:implement-v4-1",
+		}
+		if !reflect.DeepEqual(source, wantSource) {
+			t.Errorf("verify claim source = %#v, want %#v", source, wantSource)
+		}
+		if got := fixture.Runner["sourceIdentity"]; got != "change-v1:implement-v4-1" {
+			t.Errorf("verify claim runner sourceIdentity = %#v", got)
+		}
+		return
+	}
+	t.Fatal("canonical engine-runner contract is missing verify claim")
+}
+
 func TestEngineRunnerContractDirectLandOperatorRequired(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {

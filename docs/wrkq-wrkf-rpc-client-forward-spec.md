@@ -1283,6 +1283,24 @@ interface WrkfInstanceNextParams {
 
 Do not expose `wrkf.task.inspect`, `wrkf.task.timeline`, `wrkf.task.refresh`, or `wrkf.task.syncMeta`.
 
+#### Action discovery and source bindings
+
+`wrkf.action.next` candidates and `wrkf.action.claim` run bindings carry the
+same source shape when an action consumes prior evidence:
+
+```ts
+interface WrkfActionSourceBinding {
+  sourceRunId: string;
+  sourceEvidenceId?: string;
+  sourceIdentity?: string;
+  artifactRef?: string;
+}
+```
+
+`sourceIdentity` is an opaque, lane-computed token. The client and engine pass
+it through and compare it as a string; neither parses or derives meaning from
+it. No commit-derived source-binding field is part of the RPC DTO.
+
 #### Evidence
 
 ```text

@@ -586,7 +586,8 @@ export interface WrkfActionNextParams {
 export interface WrkfActionSourceBinding {
   sourceRunId: string;
   sourceEvidenceId?: string;
-  commitSha?: string;
+  /** Opaque, lane-computed source identity. Consumers must not parse it. */
+  sourceIdentity?: string;
   artifactRef?: string;
 }
 

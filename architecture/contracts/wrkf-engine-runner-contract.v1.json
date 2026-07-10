@@ -86,7 +86,7 @@
           "source": {
             "sourceRunId": "run-implement-v4-1",
             "sourceEvidenceId": "ev-implement-v4-1",
-            "commitSha": "1111111111111111111111111111111111111111"
+            "sourceIdentity": "change-v1:implement-v4-1"
           }
         }
       },
@@ -94,6 +94,7 @@
         "dispatchedAction": "verify",
         "sourceImplementActionRunId": "run-implement-v4-1",
         "sourceEvidenceId": "ev-implement-v4-1",
+        "sourceIdentity": "change-v1:implement-v4-1",
         "verifiesExactSource": true
       }
     },

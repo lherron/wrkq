@@ -590,6 +590,63 @@ describe("wrkq namespace", () => {
 });
 
 describe("wrkf namespace", () => {
+  test("action facade preserves opaque sourceIdentity bindings", async () => {
+    const sourceIdentity = "change-v1:implement-v4-1";
+    const transport = new FakeTransport()
+      .onResult("wrkf.action.next", {
+        candidates: [
+          {
+            instanceId: "wfi_1",
+            task: "T-00001",
+            semanticActionKey: "verify:wfi_1:r1",
+            action: "verify",
+            transition: "verify_complete",
+            role: "verifier",
+            requiredEvidenceKind: "verify_result",
+            expectedStateRevision: 1,
+            expectedState: { status: "active", phase: "implemented" },
+            rank: 1,
+            source: {
+              sourceRunId: "run-implement-1",
+              sourceEvidenceId: "ev-implement-1",
+              sourceIdentity,
+            },
+          },
+        ],
+      })
+      .onResult("wrkf.action.claim", {
+        binding: {
+          run: {
+            id: "run-verify-1",
+            instanceId: "wfi_1",
+            semanticActionKey: "verify:wfi_1:r1",
+            action: "verify",
+            role: "verifier",
+            attempt: 1,
+            status: "running",
+            source: { sourceRunId: "run-implement-1", sourceIdentity },
+            startedAt: "2026-07-10T00:00:00Z",
+          },
+        },
+      });
+    const client = await clientWith(transport);
+
+    const next = await client.wrkf.action.next({ task: "T-00001" });
+    const claim = await client.wrkf.action.claim({
+      task: "T-00001",
+      runnerId: "runner-1",
+      agentRef: "agent:larry",
+      leaseMs: 60_000,
+    });
+
+    expect(next.candidates[0]?.source?.sourceIdentity).toBe(sourceIdentity);
+    expect(claim.binding?.run.source?.sourceIdentity).toBe(sourceIdentity);
+    expect(transport.capturedRequests.map((request) => request.method)).toEqual([
+      "wrkf.action.next",
+      "wrkf.action.claim",
+    ]);
+  });
+
   test("transition.apply sends frame, forwards CAS params, returns typed result", async () => {
     const transport = new FakeTransport().onResult(
       "wrkf.transition.apply",

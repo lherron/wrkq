@@ -6,7 +6,8 @@ scope: wrkf.action and wrkq-simple-task producer fixtures consumed by agent-loop
 predicate: >
   wrkq owns the canonical engine side of the wrkf engine <-> agent-loop runner
   contract fixtures. The canonical fixture artifact pins LaneRef grammar,
-  wrkf.action claim/settle binding shapes, implement/verify/landing evidence
+  wrkf.action claim/settle binding shapes (including opaque sourceIdentity
+  rather than a commit hash), implement/verify/landing evidence
   facts, PR publish/adopt idempotency, landing push/readback law, ceremony
   settle idempotency, and wrkq-simple-task@4 re-entry after
   test_defect/test_fix with prior evidence visible. Downstream consumers may
