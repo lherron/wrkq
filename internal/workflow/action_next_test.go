@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,30 @@ func attachSimpleTaskV2(t *testing.T, svc *Service, taskUUID string) {
 	}
 	if _, err := svc.AttachTask(taskUUID, BuiltinSimpleTaskV2TemplateRef, "agent:t"); err != nil {
 		t.Fatalf("AttachTask(v2): %v", err)
+	}
+}
+
+func attachSimpleTaskV2WithSourceIdentity(t *testing.T, svc *Service, taskUUID string) {
+	t.Helper()
+	doc := builtinV2Doc(t)
+	doc["id"] = "source-identity-v2"
+	implement := doc["evidenceKinds"].(map[string]any)["implement_result"].(map[string]any)
+	implement["facts"].(map[string]any)["properties"].(map[string]any)["change.id"] = map[string]any{"type": "string"}
+	action(doc, "verify")["sourceBinding"].(map[string]any)["bindFields"] = map[string]any{"sourceIdentity": "change.id"}
+
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal source-identity v2 template: %v", err)
+	}
+	tpl, canonical, err := ParseTemplate(data)
+	if err != nil {
+		t.Fatalf("ParseTemplate(source-identity v2): %v", err)
+	}
+	if _, err := svc.installTemplateCanonical(tpl, canonical, Hash(canonical), "agent:t", nil, false); err != nil {
+		t.Fatalf("install source-identity v2 template: %v", err)
+	}
+	if _, err := svc.AttachTask(taskUUID, "source-identity-v2@2", "agent:t"); err != nil {
+		t.Fatalf("AttachTask(source-identity v2): %v", err)
 	}
 }
 
@@ -71,9 +96,9 @@ func TestActionNextV2CandidatesByPhaseAndReadOnly(t *testing.T) {
 
 func TestActionNextVerifyCandidateUsesExactImplementEvidenceSource(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
+	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
 	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
-	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
 	if impl.Evidence == nil {
 		t.Fatalf("implement completion missing evidence")
 	}
@@ -109,6 +134,9 @@ func TestActionNextVerifyCandidateUsesExactImplementEvidenceSource(t *testing.T)
 	}
 	if c.Source.CommitSha != "abc123" {
 		t.Fatalf("commitSha = %q, want abc123", c.Source.CommitSha)
+	}
+	if c.Source.SourceIdentity != "change-v1:abc123" {
+		t.Fatalf("sourceIdentity = %q, want change-v1:abc123", c.Source.SourceIdentity)
 	}
 	if !strings.Contains(c.SemanticActionKey, impl.Run.RunID) || !strings.Contains(c.SemanticActionKey, "abc123") {
 		t.Fatalf("semanticActionKey = %q, want implement run id and commit", c.SemanticActionKey)

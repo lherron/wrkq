@@ -380,8 +380,9 @@ func validateSourceBinding(tpl *Template, label string, binding *SourceBindingSp
 		if sourceSpec, ok := tpl.ExecutableActions[sourceAction]; ok {
 			kind, ok := tpl.EvidenceKinds[sourceSpec.ResultEvidenceKind]
 			for field, fact := range map[string]string{
-				"commitSha":   binding.BindFields.CommitSha,
-				"artifactRef": binding.BindFields.ArtifactRef,
+				"commitSha":      binding.BindFields.CommitSha,
+				"sourceIdentity": binding.BindFields.SourceIdentity,
+				"artifactRef":    binding.BindFields.ArtifactRef,
 			} {
 				fact = strings.TrimSpace(fact)
 				if fact == "" {

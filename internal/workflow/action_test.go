@@ -87,7 +87,7 @@ func TestActionLeaseRecoveryMigrationAddsRunColumns(t *testing.T) {
 		"lease_owner", "lease_token", "lease_expires_at", "heartbeat_at",
 		"semantic_action_key", "attempt", "agent_ref", "scope_ref",
 		"handler_contract", "handler_id", "handler_version", "workspace_ref",
-		"source_run_id", "source_evidence_id", "source_commit_sha", "owner_generation",
+		"source_run_id", "source_evidence_id", "source_commit_sha", "source_identity", "owner_generation",
 	} {
 		if !got[want] {
 			t.Errorf("workflow_runs missing %s column for action lease recovery", want)

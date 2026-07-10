@@ -109,9 +109,9 @@ func TestClaimActionRejectsForeignActiveOwnerAndCapabilityMismatch(t *testing.T)
 
 func TestClaimActionVerifyCarriesExactSourceBinding(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
+	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
 	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
-	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
 	if impl.Evidence == nil {
 		t.Fatalf("implement completion missing evidence")
 	}
@@ -148,13 +148,13 @@ func TestClaimActionVerifyCarriesExactSourceBinding(t *testing.T) {
 	if source == nil {
 		t.Fatalf("verify claim missing source: %+v", claimed.Binding.Run)
 	}
-	if source.SourceRunID != impl.Run.RunID || source.SourceEvidenceID != impl.Evidence.ID || source.CommitSha != "abc123" {
-		t.Fatalf("source = %+v, want run %s evidence %s commit abc123", source, impl.Run.RunID, impl.Evidence.ID)
+	if source.SourceRunID != impl.Run.RunID || source.SourceEvidenceID != impl.Evidence.ID || source.CommitSha != "abc123" || source.SourceIdentity != "change-v1:abc123" {
+		t.Fatalf("source = %+v, want run %s evidence %s commit abc123 identity change-v1:abc123", source, impl.Run.RunID, impl.Evidence.ID)
 	}
 	if strings.Contains(claimed.Binding.Run.SemanticActionKey, "wrong-latest") {
 		t.Fatalf("semantic key used unrelated latest evidence: %q", claimed.Binding.Run.SemanticActionKey)
 	}
-	if got := persistedClaimSource(t, svc, claimed.Binding.Run.ID); got != "run="+impl.Run.RunID+" evidence="+impl.Evidence.ID+" commit=abc123" {
+	if got := persistedClaimSource(t, svc, claimed.Binding.Run.ID); got != "run="+impl.Run.RunID+" evidence="+impl.Evidence.ID+" commit=abc123 identity=change-v1:abc123" {
 		t.Fatalf("persisted source = %q", got)
 	}
 }
@@ -173,12 +173,12 @@ func countActiveSemanticRuns(t *testing.T, svc *Service, instanceID, semanticKey
 
 func persistedClaimSource(t *testing.T, svc *Service, runID string) string {
 	t.Helper()
-	var sourceRunID, sourceEvidenceID, sourceCommit string
+	var sourceRunID, sourceEvidenceID, sourceCommit, sourceIdentity string
 	if err := svc.db.QueryRow(`
-		SELECT COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,'')
+		SELECT COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''), COALESCE(source_identity,'')
 		FROM workflow_runs WHERE id = ?
-	`, runID).Scan(&sourceRunID, &sourceEvidenceID, &sourceCommit); err != nil {
+	`, runID).Scan(&sourceRunID, &sourceEvidenceID, &sourceCommit, &sourceIdentity); err != nil {
 		t.Fatalf("query persisted claim source: %v", err)
 	}
-	return "run=" + sourceRunID + " evidence=" + sourceEvidenceID + " commit=" + sourceCommit
+	return "run=" + sourceRunID + " evidence=" + sourceEvidenceID + " commit=" + sourceCommit + " identity=" + sourceIdentity
 }

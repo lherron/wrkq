@@ -202,6 +202,14 @@ func TestValidateExecutableActionsRejectsMalformedReferences(t *testing.T) {
 			},
 			wantErr: "executable action verify sourceBinding required fact missing.fact is not declared on implement_result",
 		},
+		{
+			name: "source identity bind fact impossible",
+			mutate: func(doc map[string]any) {
+				src := action(doc, "verify")["sourceBinding"].(map[string]any)
+				src["bindFields"] = map[string]any{"sourceIdentity": "missing.fact"}
+			},
+			wantErr: "executable action verify sourceBinding bindFields.sourceIdentity fact missing.fact is not declared on implement_result",
+		},
 	}
 
 	for _, tc := range cases {

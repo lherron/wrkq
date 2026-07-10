@@ -462,24 +462,25 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 			if err != nil {
 				return err
 			}
-			sourceRunID, sourceEvidenceID, sourceCommit := "", "", ""
+			sourceRunID, sourceEvidenceID, sourceCommit, sourceIdentity := "", "", "", ""
 			if candidate.Source != nil {
 				sourceRunID = candidate.Source.SourceRunID
 				sourceEvidenceID = candidate.Source.SourceEvidenceID
 				sourceCommit = candidate.Source.CommitSha
+				sourceIdentity = candidate.Source.SourceIdentity
 			}
 			_, err = tx.Exec(`
 				INSERT INTO workflow_runs (
 					id, instance_id, role, actor, principal_ref, status, started_at,
 					idempotency_key, action, lease_owner, lease_token, lease_expires_at, heartbeat_at,
 					semantic_action_key, attempt, agent_ref, scope_ref, handler_contract,
-					workspace_ref, source_run_id, source_evidence_id, source_commit_sha, owner_generation
+					workspace_ref, source_run_id, source_evidence_id, source_commit_sha, source_identity, owner_generation
 				)
-				VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+				VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 			`, id, candidate.InstanceID, candidate.Role, p.AgentRef, p.AgentRef, nowText, nullIfEmpty(p.IdempotencyKey),
 				candidate.Action, p.RunnerID, token, expiresAt, nowText, candidate.SemanticActionKey, attempt,
 				p.AgentRef, nullIfEmpty(p.ScopeRef), nullIfEmpty(candidate.HandlerContract), nullIfEmpty(firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef)),
-				nullIfEmpty(sourceRunID), nullIfEmpty(sourceEvidenceID), nullIfEmpty(sourceCommit))
+				nullIfEmpty(sourceRunID), nullIfEmpty(sourceEvidenceID), nullIfEmpty(sourceCommit), nullIfEmpty(sourceIdentity))
 			if err != nil {
 				if isRunUniqueConflict(err) {
 					return actionLeaseConflictError(candidate.SemanticActionKey)
@@ -491,7 +492,7 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 				Action: candidate.Action, Role: candidate.Role, Attempt: attempt, Status: "active",
 				AgentRef: p.AgentRef, ScopeRef: p.ScopeRef, HandlerContract: candidate.HandlerContract,
 				WorkspaceRef: firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef), SourceRunID: sourceRunID, SourceEvidenceID: sourceEvidenceID,
-				SourceCommitSha: sourceCommit, StartedAt: nowText, LeaseOwner: p.RunnerID, LeaseToken: token,
+				SourceCommitSha: sourceCommit, SourceIdentity: sourceIdentity, StartedAt: nowText, LeaseOwner: p.RunnerID, LeaseToken: token,
 				LeaseExpiresAt: expiresAt, HeartbeatAt: nowText, OwnerGeneration: 1,
 			}
 		}
@@ -702,6 +703,7 @@ type claimedRun struct {
 	SourceRunID       string
 	SourceEvidenceID  string
 	SourceCommitSha   string
+	SourceIdentity    string
 	StartedAt         string
 	CompletedAt       string
 	TerminalSummary   string
@@ -779,7 +781,7 @@ func activeRunForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (*claim
 		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
 		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
 		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
-		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''),
+		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''), COALESCE(source_identity,''),
 		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0)
 		FROM workflow_runs
@@ -802,7 +804,7 @@ func claimedRunByIDTx(tx *sql.Tx, id string) (*claimedRun, error) {
 		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
 		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
 		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
-		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''),
+		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_commit_sha,''), COALESCE(source_identity,''),
 		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0)
 		FROM workflow_runs
@@ -823,7 +825,7 @@ func scanClaimedRun(scanner runRowScanner) (*claimedRun, error) {
 	err := scanner.Scan(
 		&r.ID, &r.InstanceID, &r.SemanticActionKey, &r.Action, &r.Role, &r.Attempt,
 		&r.Status, &r.AgentRef, &r.ScopeRef, &r.HandlerContract, &r.HandlerID, &r.HandlerVersion,
-		&r.ExternalRunRef, &r.WorkspaceRef, &r.SourceRunID, &r.SourceEvidenceID, &r.SourceCommitSha,
+		&r.ExternalRunRef, &r.WorkspaceRef, &r.SourceRunID, &r.SourceEvidenceID, &r.SourceCommitSha, &r.SourceIdentity,
 		&r.StartedAt, &r.CompletedAt, &r.TerminalSummary, &r.LeaseOwner, &r.LeaseToken,
 		&r.LeaseExpiresAt, &r.HeartbeatAt, &r.OwnerGeneration,
 	)
@@ -989,11 +991,12 @@ func validateClaimReplay(run *claimedRun, candidate ActionCandidate, runnerID st
 
 func claimSourceCompatible(run *claimedRun, source *ActionSourceBinding) bool {
 	if source == nil {
-		return run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceCommitSha == ""
+		return run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceCommitSha == "" && run.SourceIdentity == ""
 	}
 	return run.SourceRunID == source.SourceRunID &&
 		run.SourceEvidenceID == source.SourceEvidenceID &&
-		run.SourceCommitSha == source.CommitSha
+		run.SourceCommitSha == source.CommitSha &&
+		run.SourceIdentity == source.SourceIdentity
 }
 
 func claimedRunBinding(run *claimedRun, inst *Instance, task *taskDoc) *FencedRunBinding {
@@ -1015,13 +1018,14 @@ func claimedRunBinding(run *claimedRun, inst *Instance, task *taskDoc) *FencedRu
 }
 
 func claimedRunSource(run *claimedRun) *ActionSourceBinding {
-	if run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceCommitSha == "" {
+	if run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceCommitSha == "" && run.SourceIdentity == "" {
 		return nil
 	}
 	return &ActionSourceBinding{
 		SourceRunID:      run.SourceRunID,
 		SourceEvidenceID: run.SourceEvidenceID,
 		CommitSha:        run.SourceCommitSha,
+		SourceIdentity:   run.SourceIdentity,
 	}
 }
 

@@ -203,6 +203,7 @@ func resolveActionCandidateSource(q queryer, tpl *Template, ev []Evidence, bindi
 			continue
 		}
 		commit := boundSourceFact(facts, binding, "commitSha", "commit.sha")
+		sourceIdentity := boundSourceFact(facts, binding, "sourceIdentity", "")
 		artifact := boundSourceFact(facts, binding, "artifactRef", "artifact.digest")
 		if artifact == "" {
 			artifact = e.ContentHash
@@ -214,6 +215,7 @@ func resolveActionCandidateSource(q queryer, tpl *Template, ev []Evidence, bindi
 			SourceRunID:      e.RunID,
 			SourceEvidenceID: e.ID,
 			CommitSha:        commit,
+			SourceIdentity:   sourceIdentity,
 			ArtifactRef:      artifact,
 		}, ""
 	}
@@ -229,6 +231,8 @@ func boundSourceFact(facts map[string]interface{}, binding *SourceBindingSpec, f
 		switch field {
 		case "commitSha":
 			path = strings.TrimSpace(binding.BindFields.CommitSha)
+		case "sourceIdentity":
+			path = strings.TrimSpace(binding.BindFields.SourceIdentity)
 		case "artifactRef":
 			path = strings.TrimSpace(binding.BindFields.ArtifactRef)
 		}
