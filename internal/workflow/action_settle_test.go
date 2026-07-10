@@ -469,7 +469,7 @@ func TestSettleActionVerifyRequiresBoundSourceIdentity(t *testing.T) {
 		t.Fatalf("wrong source verify mutated rows: before=%+v after=%+v", before, after)
 	}
 
-	out := settleClaimForTest(t, svc, verify, `{"result":"verified","source.evidence_id":"`+implemented.Evidence.ID+`","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","git.clean":true}`, "verified")
+	out := settleClaimForTest(t, svc, verify, `{"result":"verified","source.evidence_id":"`+implemented.Evidence.ID+`","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","context.id":"context-v1:abc123","git.clean":true}`, "verified")
 	if out.Transition == nil {
 		t.Fatalf("verify settlement missing transition")
 	}
@@ -528,7 +528,7 @@ func TestSettleActionV2BlockerEffectsSetTaskBlocked(t *testing.T) {
 			implemented := settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
 
 			verify := claimActionForTest(t, svc, taskUUID, "verify")
-			facts := `{"result":"` + c.result + `","source.evidence_id":"` + implemented.Evidence.ID + `","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","git.clean":true}`
+			facts := `{"result":"` + c.result + `","source.evidence_id":"` + implemented.Evidence.ID + `","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","context.id":"context-v1:abc123","git.clean":true}`
 			settleClaimForTest(t, svc, verify, facts, c.name)
 			inst, err := svc.LatestInstance(taskUUID)
 			if err != nil {
@@ -750,7 +750,15 @@ func prepareV3AwaitingMerge(t *testing.T, svc *Service, taskUUID string) *Settle
 }
 
 func prVerifiedFacts(sourceEvidenceID, identity, head, bar, prURL string) string {
-	return `{"result":"pr_verified","source.evidence_id":"` + sourceEvidenceID + `","source.commit.sha":"` + head + `","verified.commit.sha":"` + head + `","verified.change.id":"` + identity + `","branch.head.sha":"` + head + `","bar.hash":"` + bar + `","pr.url":"` + prURL + `","git.clean":true}`
+	return prVerifiedFactsAtContext(sourceEvidenceID, identity, head, bar, prURL, "context-v1:default")
+}
+
+func prVerifiedFactsAtContext(sourceEvidenceID, identity, head, bar, prURL, contextID string) string {
+	return prVerifiedFactsForSourceAtContext(sourceEvidenceID, identity, head, head, bar, prURL, contextID)
+}
+
+func prVerifiedFactsForSourceAtContext(sourceEvidenceID, identity, sourceCommit, verifiedHead, bar, prURL, contextID string) string {
+	return `{"result":"pr_verified","source.evidence_id":"` + sourceEvidenceID + `","source.commit.sha":"` + sourceCommit + `","verified.commit.sha":"` + verifiedHead + `","verified.change.id":"` + identity + `","context.id":"` + contextID + `","branch.head.sha":"` + verifiedHead + `","bar.hash":"` + bar + `","pr.url":"` + prURL + `","git.clean":true}`
 }
 
 func validLandingFactsMap(sourceEvidenceID string) map[string]interface{} {

@@ -94,7 +94,7 @@
       "class": "verify",
       "description": "Verification result bound to a specific implementation source.",
       "facts": {
-        "required": ["result"],
+        "required": ["result", "context.id"],
         "properties": {
           "result": {
             "type": "string",
@@ -104,10 +104,21 @@
           "source.commit.sha": { "type": "string" },
           "verified.commit.sha": { "type": "string" },
           "verified.change.id": { "type": "string" },
+          "context.id": { "type": "string" },
           "artifact.digest": { "type": "string" },
           "install.exit": { "type": "integer" },
           "smoke.exit": { "type": "integer" },
           "git.clean": { "type": "boolean" }
+        }
+      }
+    },
+    "context_lineage": {
+      "class": "note",
+      "description": "Append-only record of a lane-computed context move.",
+      "facts": {
+        "required": ["context.id"],
+        "properties": {
+          "context.id": { "type": "string" }
         }
       }
     },

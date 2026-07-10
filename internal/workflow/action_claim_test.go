@@ -304,7 +304,7 @@ func TestClaimActionNewSourceConflictsWithoutOrphaning(t *testing.T) {
 		t.Fatalf("active runs after conflicting source claim = %d, want 1", activeRuns)
 	}
 
-	settleClaimForTest(t, svc, first, fmt.Sprintf(`{"result":"verified","source.evidence_id":%q,"source.commit.sha":"source-one","verified.commit.sha":"source-one","verified.change.id":%q,"git.clean":true}`, implemented.Evidence.ID, first.Binding.Run.Source.SourceIdentity), "verify original source")
+	settleClaimForTest(t, svc, first, fmt.Sprintf(`{"result":"verified","source.evidence_id":%q,"source.commit.sha":"source-one","verified.commit.sha":"source-one","verified.change.id":%q,"context.id":"context-v1:source-one","git.clean":true}`, implemented.Evidence.ID, first.Binding.Run.Source.SourceIdentity), "verify original source")
 }
 
 func countActiveSemanticRuns(t *testing.T, svc *Service, instanceID, semanticKey string) int {

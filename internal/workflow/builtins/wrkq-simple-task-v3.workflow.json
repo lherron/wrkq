@@ -102,7 +102,7 @@
       "class": "verify",
       "description": "Verification result bound to a specific implementation source.",
       "facts": {
-        "required": ["result"],
+        "required": ["result", "context.id"],
         "properties": {
           "result": {
             "type": "string",
@@ -112,6 +112,7 @@
           "source.commit.sha": { "type": "string" },
           "verified.commit.sha": { "type": "string" },
           "verified.change.id": { "type": "string" },
+          "context.id": { "type": "string" },
           "branch.head.sha": { "type": "string" },
           "bar.hash": { "type": "string" },
           "pr.url": { "type": "string" },
@@ -119,6 +120,16 @@
           "install.exit": { "type": "integer" },
           "smoke.exit": { "type": "integer" },
           "git.clean": { "type": "boolean" }
+        }
+      }
+    },
+    "context_lineage": {
+      "class": "note",
+      "description": "Append-only record of a lane-computed context move.",
+      "facts": {
+        "required": ["context.id"],
+        "properties": {
+          "context.id": { "type": "string" }
         }
       }
     },
@@ -619,8 +630,7 @@
             "linkageFact": "source.evidence_id",
             "requiredFacts": ["source.evidence_id", "source.commit.sha", "verified.commit.sha", "verified.change.id", "git.clean"],
             "echoFields": [
-              { "fact": "source.commit.sha", "sourceFact": "commit.sha" },
-              { "fact": "verified.commit.sha", "sourceFact": "commit.sha" }
+              { "fact": "source.commit.sha", "sourceFact": "commit.sha" }
             ],
             "valueConstraints": [
               { "fact": "git.clean", "equals": "true" }
@@ -649,6 +659,13 @@
           "sourceIdentity": "verified.change.id",
           "artifactRef": "bar.hash"
         }
+      },
+      "contextFreshness": {
+        "verdictAction": "verify",
+        "passedFact": "result",
+        "passedValues": ["pr_verified"],
+        "contextFact": "context.id",
+        "lineageKind": "context_lineage"
       },
       "settleValidation": {
         "rules": [

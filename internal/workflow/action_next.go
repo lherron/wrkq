@@ -69,10 +69,26 @@ func (s *Service) actionCandidatesForInstance(q actionCandidateQueryer, inst *In
 	if limit <= 0 || limit > actionListMaxLimit {
 		limit = actionListMaxLimit
 	}
+	stale, err := staleContextFreshnessCandidates(q, inst, task, tpl, ev, ids)
+	if err != nil {
+		return nil, err
+	}
 	candidates := []ActionCandidate{}
 	for idx, actionID := range ids {
 		spec := tpl.ExecutableActions[actionID]
 		if !matchesAnyFilter(actionID, p.Filters.Actions) || !matchesAnyFilter(spec.Role, p.Filters.Roles) {
+			continue
+		}
+		if staleCandidate, isStale := stale[actionID]; isStale {
+			if p.Filters.IncludeBlocked {
+				candidate := staleCandidate.Candidate
+				candidate.Blocked = true
+				candidate.BlockedReason = staleCandidate.Reason
+				candidates = append(candidates, candidate)
+			}
+			continue
+		}
+		if staleReprojectedAction(stale, actionID) {
 			continue
 		}
 		candidate, blockedReason, err := candidateForExecutableAction(q, inst, task, tpl, ev, actionID, spec, idx)
@@ -87,11 +103,88 @@ func (s *Service) actionCandidatesForInstance(q actionCandidateQueryer, inst *In
 			candidate.BlockedReason = blockedReason
 		}
 		candidates = append(candidates, candidate)
-		if len(candidates) >= limit {
-			break
+	}
+	for _, actionID := range staleReprojectedActions(stale) {
+		spec := tpl.ExecutableActions[actionID]
+		if !matchesAnyFilter(actionID, p.Filters.Actions) || !matchesAnyFilter(spec.Role, p.Filters.Roles) {
+			continue
 		}
+		candidate, blockedReason, err := reprojectContextFreshnessCandidate(q, inst, task, tpl, ev, actionID, spec)
+		if err != nil {
+			return nil, err
+		}
+		if blockedReason != "" {
+			if !p.Filters.IncludeBlocked {
+				continue
+			}
+			candidate.Blocked = true
+			candidate.BlockedReason = blockedReason
+		}
+		candidates = append(candidates, candidate)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Rank != candidates[j].Rank {
+			return candidates[i].Rank < candidates[j].Rank
+		}
+		return candidates[i].Action < candidates[j].Action
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
 	}
 	return &ActionNextResult{Candidates: candidates}, nil
+}
+
+type staleContextFreshnessCandidate struct {
+	ReverifyAction string
+	Reason         string
+	Candidate      ActionCandidate
+}
+
+func staleContextFreshnessCandidates(q queryer, inst *Instance, task *taskDoc, tpl *Template, ev []Evidence, actionIDs []string) (map[string]staleContextFreshnessCandidate, error) {
+	stale := map[string]staleContextFreshnessCandidate{}
+	for idx, actionID := range actionIDs {
+		spec := tpl.ExecutableActions[actionID]
+		if spec.ContextFreshness == nil || spec.VerdictsPortableAcrossContextMoves {
+			continue
+		}
+		candidate, blockedReason, err := candidateForExecutableAction(q, inst, task, tpl, ev, actionID, spec, idx)
+		if err != nil {
+			return nil, err
+		}
+		if blockedReason != "" {
+			continue
+		}
+		isStale, reverifyAction, reason, err := contextFreshnessStale(q, tpl, ev, spec.ContextFreshness)
+		if err != nil {
+			return nil, err
+		}
+		if isStale {
+			stale[actionID] = staleContextFreshnessCandidate{ReverifyAction: reverifyAction, Reason: reason, Candidate: candidate}
+		}
+	}
+	return stale, nil
+}
+
+func staleReprojectedAction(stale map[string]staleContextFreshnessCandidate, actionID string) bool {
+	for _, candidate := range stale {
+		if candidate.ReverifyAction == actionID {
+			return true
+		}
+	}
+	return false
+}
+
+func staleReprojectedActions(stale map[string]staleContextFreshnessCandidate) []string {
+	seen := map[string]bool{}
+	for _, candidate := range stale {
+		seen[candidate.ReverifyAction] = true
+	}
+	actions := make([]string, 0, len(seen))
+	for actionID := range seen {
+		actions = append(actions, actionID)
+	}
+	sort.Strings(actions)
+	return actions
 }
 
 func (s *Service) actionNextInstance(p ActionNextParams) (*Instance, error) {
@@ -152,6 +245,79 @@ func candidateForExecutableAction(q queryer, inst *Instance, task *taskDoc, tpl 
 	candidate.SemanticActionKey = semanticActionKey(inst, actionID)
 	candidate.InputHash = actionCandidateInputHash(candidate)
 	return candidate, "", nil
+}
+
+func reprojectContextFreshnessCandidate(q queryer, inst *Instance, task *taskDoc, tpl *Template, ev []Evidence, actionID string, spec ExecutableActionSpec) (ActionCandidate, string, error) {
+	var source *ActionSourceBinding
+	if spec.SourceBinding != nil {
+		var blocked string
+		source, blocked = resolveActionCandidateSource(q, tpl, ev, spec.SourceBinding)
+		if blocked != "" {
+			return actionCandidateBase(inst, task, actionID, spec, nil, actionRank(spec, 0)), blocked, nil
+		}
+	}
+	candidate := actionCandidateBase(inst, task, actionID, spec, source, actionRank(spec, 0))
+	candidate.SemanticActionKey = semanticActionKey(inst, actionID)
+	candidate.InputHash = actionCandidateInputHash(candidate)
+	return candidate, "", nil
+}
+
+func contextFreshnessStale(q queryer, tpl *Template, ev []Evidence, freshness *ContextFreshnessSpec) (bool, string, string, error) {
+	if freshness == nil {
+		return false, "", "", nil
+	}
+	verdictAction := strings.TrimSpace(freshness.VerdictAction)
+	verdictSpec, ok := tpl.ExecutableActions[verdictAction]
+	if !ok {
+		return false, "", "", fmt.Errorf("context freshness verdict action %s is not executable", verdictAction)
+	}
+	passedValues := map[string]bool{}
+	for _, value := range compactStrings(freshness.PassedValues) {
+		passedValues[value] = true
+	}
+	var verdict *Evidence
+	var verdictFacts map[string]interface{}
+	for i := len(ev) - 1; i >= 0; i-- {
+		e := ev[i]
+		if e.Kind != verdictSpec.ResultEvidenceKind || e.RunID == "" {
+			continue
+		}
+		runAction, err := runActionByIDQuery(q, e.RunID)
+		if err != nil || runAction != verdictAction {
+			continue
+		}
+		facts := evidenceFactsMap(e)
+		if !passedValues[stringFact(facts, freshness.PassedFact)] {
+			continue
+		}
+		verdict = &e
+		verdictFacts = facts
+		break
+	}
+	if verdict == nil {
+		return true, verdictAction, "no passed verdict evidence is available for the current context", nil
+	}
+	verdictContext := stringFact(verdictFacts, freshness.ContextFact)
+	if verdictContext == "" {
+		return true, verdictAction, "latest passed verdict lacks its declared context fact", nil
+	}
+	currentContext := verdictContext
+	lineageKind := strings.TrimSpace(freshness.LineageKind)
+	for i := len(ev) - 1; i >= 0; i-- {
+		e := ev[i]
+		if e.Kind != lineageKind {
+			continue
+		}
+		currentContext = stringFact(evidenceFactsMap(e), freshness.ContextFact)
+		if currentContext == "" {
+			return true, verdictAction, "latest context lineage evidence lacks its declared context fact", nil
+		}
+		break
+	}
+	if verdictContext != currentContext {
+		return true, verdictAction, "latest passed verdict context does not match the current lineage context", nil
+	}
+	return false, verdictAction, "", nil
 }
 
 func actionCandidateBase(inst *Instance, task *taskDoc, actionID string, spec ExecutableActionSpec, source *ActionSourceBinding, rank int) ActionCandidate {

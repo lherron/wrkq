@@ -326,10 +326,69 @@ func validateExecutableActions(tpl *Template, stateSet map[string]bool, transiti
 			errs = append(errs, validateSourceBinding(tpl, label, spec.SourceBinding)...)
 		}
 		errs = append(errs, validateSettleValidation(tpl, label, spec)...)
+		errs = append(errs, validateContextFreshness(tpl, label, spec)...)
 		switch strings.TrimSpace(spec.WorkspaceMode) {
 		case "", "none", "read-only", "exclusive":
 		default:
 			errs = append(errs, fmt.Sprintf("%s workspaceMode must be none, read-only, or exclusive", label))
+		}
+	}
+	return errs
+}
+
+func validateContextFreshness(tpl *Template, label string, spec ExecutableActionSpec) []string {
+	freshness := spec.ContextFreshness
+	if freshness == nil {
+		return nil
+	}
+	var errs []string
+	verdictAction := strings.TrimSpace(freshness.VerdictAction)
+	verdictSpec, ok := tpl.ExecutableActions[verdictAction]
+	if verdictAction == "" {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness verdictAction is required", label))
+	} else if !ok {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness references missing verdict action %s", label, verdictAction))
+	}
+	if spec.SourceBinding == nil {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness requires sourceBinding", label))
+	} else if verdictAction != "" && strings.TrimSpace(spec.SourceBinding.Action) != verdictAction {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness verdictAction must match sourceBinding action", label))
+	}
+	passedFact := strings.TrimSpace(freshness.PassedFact)
+	contextFact := strings.TrimSpace(freshness.ContextFact)
+	if passedFact == "" {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness passedFact is required", label))
+	}
+	if contextFact == "" {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness contextFact is required", label))
+	}
+	if len(compactStrings(freshness.PassedValues)) == 0 {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness passedValues is required", label))
+	}
+	if ok {
+		verdictKind, kindOK := tpl.EvidenceKinds[verdictSpec.ResultEvidenceKind]
+		if !kindOK || verdictKind.Facts == nil || verdictKind.Facts.Properties == nil {
+			errs = append(errs, fmt.Sprintf("%s contextFreshness verdict action must declare evidence facts", label))
+		} else {
+			for _, fact := range []string{passedFact, contextFact} {
+				if fact == "" {
+					continue
+				}
+				if _, declared := verdictKind.Facts.Properties[fact]; !declared {
+					errs = append(errs, fmt.Sprintf("%s contextFreshness fact %s is not declared on %s", label, fact, verdictSpec.ResultEvidenceKind))
+				}
+			}
+		}
+	}
+	lineageKindName := strings.TrimSpace(freshness.LineageKind)
+	lineageKind, lineageOK := tpl.EvidenceKinds[lineageKindName]
+	if lineageKindName == "" {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness lineageKind is required", label))
+	} else if !lineageOK || lineageKind.Facts == nil || lineageKind.Facts.Properties == nil {
+		errs = append(errs, fmt.Sprintf("%s contextFreshness lineage kind %s must declare facts", label, lineageKindName))
+	} else if contextFact != "" {
+		if _, declared := lineageKind.Facts.Properties[contextFact]; !declared {
+			errs = append(errs, fmt.Sprintf("%s contextFreshness context fact %s is not declared on %s", label, contextFact, lineageKindName))
 		}
 	}
 	return errs

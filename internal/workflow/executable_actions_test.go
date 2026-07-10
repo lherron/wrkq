@@ -74,6 +74,14 @@ func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
 	if !containsString(verify.SideEffectClasses, "git.push") || !containsString(verify.SideEffectClasses, "github.pr.create") {
 		t.Fatalf("v3 verify sideEffectClasses = %v, want git.push and github.pr.create", verify.SideEffectClasses)
 	}
+	verifyKind := tpl.EvidenceKinds["verify_result"]
+	if verifyKind.Facts == nil || !containsString(verifyKind.Facts.Required, "context.id") || verifyKind.Facts.Properties["context.id"].Type != "string" {
+		t.Fatalf("v3 verify_result must require opaque context.id: %+v", verifyKind.Facts)
+	}
+	if verify.SettleValidation == nil || len(verify.SettleValidation.Rules) != 1 || len(verify.SettleValidation.Rules[0].EchoFields) != 1 ||
+		verify.SettleValidation.Rules[0].EchoFields[0] != (SettleEchoField{Fact: "source.commit.sha", SourceFact: "commit.sha"}) {
+		t.Fatalf("v3 verify echo contract = %+v, want only source.commit.sha citation", verify.SettleValidation)
+	}
 	landing := tpl.ExecutableActions["landing"]
 	if landing.Role != "release_manager" || landing.ResultEvidenceKind != "landing_result" || landing.SourceBinding == nil {
 		t.Fatalf("landing action = %+v", landing)
@@ -82,6 +90,12 @@ func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
 		landing.SourceBinding.BindFields.SourceIdentity != "verified.change.id" ||
 		landing.SourceBinding.BindFields.ArtifactRef != "bar.hash" {
 		t.Fatalf("landing source binding = %+v", landing.SourceBinding)
+	}
+	if landing.ContextFreshness == nil || landing.ContextFreshness.VerdictAction != "verify" ||
+		landing.ContextFreshness.PassedFact != "result" || !containsString(landing.ContextFreshness.PassedValues, "pr_verified") ||
+		landing.ContextFreshness.ContextFact != "context.id" || landing.ContextFreshness.LineageKind != "context_lineage" ||
+		landing.VerdictsPortableAcrossContextMoves {
+		t.Fatalf("landing context freshness = %+v portable=%t", landing.ContextFreshness, landing.VerdictsPortableAcrossContextMoves)
 	}
 	assertV2EffectState(t, tpl, "verify_complete", "verified", "completed")
 	assertNoEffectState(t, tpl, "verify_complete", "pr_verified", "completed")

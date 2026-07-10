@@ -33,21 +33,34 @@ type Template struct {
 }
 
 type ExecutableActionSpec struct {
-	ID                 string                `json:"id,omitempty"`
-	Description        string                `json:"description,omitempty"`
-	From               *State                `json:"from,omitempty"`
-	Role               string                `json:"role"`
-	Transition         string                `json:"transition"`
-	ResultEvidenceKind string                `json:"resultEvidenceKind"`
-	HandlerContract    string                `json:"handlerContract,omitempty"`
-	WorkClass          string                `json:"workClass,omitempty"`
-	RiskClass          string                `json:"riskClass,omitempty"`
-	WorkspaceMode      string                `json:"workspaceMode,omitempty"`
-	SideEffectClasses  []string              `json:"sideEffectClasses,omitempty"`
-	SourceBinding      *SourceBindingSpec    `json:"sourceBinding,omitempty"`
-	SettleValidation   *SettleValidationSpec `json:"settleValidation,omitempty"`
-	Continuation       *ContinuationSpec     `json:"continuation,omitempty"`
-	Rank               int                   `json:"rank,omitempty"`
+	ID                                 string                `json:"id,omitempty"`
+	Description                        string                `json:"description,omitempty"`
+	From                               *State                `json:"from,omitempty"`
+	Role                               string                `json:"role"`
+	Transition                         string                `json:"transition"`
+	ResultEvidenceKind                 string                `json:"resultEvidenceKind"`
+	HandlerContract                    string                `json:"handlerContract,omitempty"`
+	WorkClass                          string                `json:"workClass,omitempty"`
+	RiskClass                          string                `json:"riskClass,omitempty"`
+	WorkspaceMode                      string                `json:"workspaceMode,omitempty"`
+	SideEffectClasses                  []string              `json:"sideEffectClasses,omitempty"`
+	SourceBinding                      *SourceBindingSpec    `json:"sourceBinding,omitempty"`
+	SettleValidation                   *SettleValidationSpec `json:"settleValidation,omitempty"`
+	ContextFreshness                   *ContextFreshnessSpec `json:"contextFreshness,omitempty"`
+	VerdictsPortableAcrossContextMoves bool                  `json:"verdictsPortableAcrossContextMoves,omitempty"`
+	Continuation                       *ContinuationSpec     `json:"continuation,omitempty"`
+	Rank                               int                   `json:"rank,omitempty"`
+}
+
+// ContextFreshnessSpec declares discovery-time freshness for an action that
+// consumes a verdict. The engine compares opaque context facts only; the
+// template defines which verdict is passed and which evidence records moves.
+type ContextFreshnessSpec struct {
+	VerdictAction string   `json:"verdictAction"`
+	PassedFact    string   `json:"passedFact"`
+	PassedValues  []string `json:"passedValues"`
+	ContextFact   string   `json:"contextFact"`
+	LineageKind   string   `json:"lineageKind"`
 }
 
 type SettleValidationSpec struct {
