@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -157,6 +158,153 @@ func TestClaimActionVerifyCarriesExactSourceBinding(t *testing.T) {
 	if got := persistedClaimSource(t, svc, claimed.Binding.Run.ID); got != "run="+impl.Run.RunID+" evidence="+impl.Evidence.ID+" identity=change-v1:abc123" {
 		t.Fatalf("persisted source = %q", got)
 	}
+}
+
+func TestActionOccurrenceAttemptNumberingAfterOperationalFailure(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
+	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
+	startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"source-one","change.id":"change-v1:source-one","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+
+	first := claimActionForTest(t, svc, taskUUID, "verify")
+	if first.Binding.Run.Attempt != 1 {
+		t.Fatalf("first attempt = %d, want 1", first.Binding.Run.Attempt)
+	}
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	wantKey := fmt.Sprintf("verify:%s:r%d", inst.ID, inst.Revision)
+	if first.Binding.Run.SemanticActionKey != wantKey {
+		t.Fatalf("first semantic key = %q, want action occurrence %q", first.Binding.Run.SemanticActionKey, wantKey)
+	}
+	if _, err := svc.SettleAction(SettleActionParams{
+		ActionRunID:     first.Binding.Run.ID,
+		OwnerToken:      first.Binding.Authority.OwnerToken,
+		OwnerGeneration: first.Binding.Authority.OwnerGeneration,
+		Result:          "operational_failed",
+		Evidence: &ActionEvidenceInput{
+			Kind:    "failure_result",
+			Summary: "retryable verification failure",
+			Facts:   `{}`,
+		},
+	}); err != nil {
+		t.Fatalf("settle first verification attempt: %v", err)
+	}
+
+	retry := claimActionForTest(t, svc, taskUUID, "verify")
+	if retry.Binding.Run.SemanticActionKey != first.Binding.Run.SemanticActionKey {
+		t.Fatalf("retry semantic key = %q, want %q", retry.Binding.Run.SemanticActionKey, first.Binding.Run.SemanticActionKey)
+	}
+	if retry.Binding.Run.Attempt != 2 {
+		t.Fatalf("retry attempt = %d, want 2", retry.Binding.Run.Attempt)
+	}
+}
+
+func TestActionOccurrenceIdempotencyHistory(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
+	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
+	implemented := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"source-one","change.id":"change-v1:source-one","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+
+	first := claimActionForTest(t, svc, taskUUID, "verify")
+	if implemented.Evidence == nil || first.Binding.Run.Source == nil || first.Binding.Run.Source.SourceEvidenceID != implemented.Evidence.ID {
+		t.Fatalf("verify source = %+v, want implementation evidence %+v", first.Binding.Run.Source, implemented.Evidence)
+	}
+	replay := claimActionForTest(t, svc, taskUUID, "verify")
+	if replay.Binding.Run.ID != first.Binding.Run.ID {
+		t.Fatalf("idempotent claim run id = %q, want %q", replay.Binding.Run.ID, first.Binding.Run.ID)
+	}
+
+	settle := SettleActionParams{
+		ActionRunID:     replay.Binding.Run.ID,
+		OwnerToken:      replay.Binding.Authority.OwnerToken,
+		OwnerGeneration: replay.Binding.Authority.OwnerGeneration,
+		Result:          "operational_failed",
+		Evidence: &ActionEvidenceInput{
+			Kind:    "failure_result",
+			Summary: "retryable verification failure",
+			Facts:   `{}`,
+		},
+	}
+	if _, err := svc.SettleAction(settle); err != nil {
+		t.Fatalf("settle verification failure: %v", err)
+	}
+	if replayed, err := svc.SettleAction(settle); err != nil {
+		t.Fatalf("idempotent settlement replay: %v", err)
+	} else if replayed.Run.ID != first.Binding.Run.ID {
+		t.Fatalf("idempotent settlement run id = %q, want %q", replayed.Run.ID, first.Binding.Run.ID)
+	}
+	settle.Evidence.Summary = "different failure payload"
+	_, err := svc.SettleAction(settle)
+	requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
+}
+
+func TestClaimActionNewSourceConflictsWithoutOrphaning(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
+	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
+	implemented := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"source-one","change.id":"change-v1:source-one","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	if implemented.Evidence == nil {
+		t.Fatal("implementation evidence is required")
+	}
+	first := claimActionForTest(t, svc, taskUUID, "verify")
+
+	newSource, err := svc.AddEvidence(AddEvidenceParams{
+		TaskSelector: taskUUID,
+		Kind:         "implement_result",
+		Ref:          "manual:new-source",
+		Summary:      "new implementation source",
+		Facts:        `{"result":"done","commit.sha":"source-two","change.id":"change-v1:source-two","git.clean":true,"base.sha":"base001","postcondition":"git_committed_clean","repair.turns":0}`,
+		PrincipalRef: "agent:implement",
+		Role:         "implementer",
+		RunID:        implemented.Run.RunID,
+	})
+	if err != nil {
+		t.Fatalf("add new source evidence: %v", err)
+	}
+
+	next, err := svc.ActionNext(ActionNextParams{Task: taskUUID, Filters: ActionNextFilters{Actions: []string{"verify"}}})
+	if err != nil {
+		t.Fatalf("ActionNext after new source: %v", err)
+	}
+	assertActionCandidates(t, next, "verify")
+	candidate := next.Candidates[0]
+	if candidate.Source == nil || candidate.Source.SourceEvidenceID != newSource.ID || candidate.Source.SourceIdentity != "change-v1:source-two" {
+		t.Fatalf("new source candidate = %+v, want evidence %s identity change-v1:source-two", candidate.Source, newSource.ID)
+	}
+	if candidate.SemanticActionKey != first.Binding.Run.SemanticActionKey {
+		t.Fatalf("new source key = %q, want existing action occurrence key %q", candidate.SemanticActionKey, first.Binding.Run.SemanticActionKey)
+	}
+
+	_, err = svc.ClaimAction(ClaimActionParams{
+		Task:     taskUUID,
+		RunnerID: "runner-verify",
+		AgentRef: "agent:verify",
+		Prefer:   ActionClaimPrefer{Action: "verify"},
+		LeaseMs:  300000,
+	})
+	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
+
+	var status string
+	if err := svc.db.QueryRow(`SELECT status FROM workflow_runs WHERE id = ?`, first.Binding.Run.ID).Scan(&status); err != nil {
+		t.Fatalf("read original active run: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("original run status = %q, want active", status)
+	}
+	if got := countActiveSemanticRuns(t, svc, first.Binding.Run.InstanceID, first.Binding.Run.SemanticActionKey); got != 1 {
+		t.Fatalf("active runs for action occurrence = %d, want 1", got)
+	}
+	var activeRuns int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM workflow_runs WHERE instance_id = ? AND status = 'active'`, first.Binding.Run.InstanceID).Scan(&activeRuns); err != nil {
+		t.Fatalf("count active runs: %v", err)
+	}
+	if activeRuns != 1 {
+		t.Fatalf("active runs after conflicting source claim = %d, want 1", activeRuns)
+	}
+
+	settleClaimForTest(t, svc, first, fmt.Sprintf(`{"result":"verified","source.evidence_id":%q,"source.commit.sha":"source-one","verified.commit.sha":"source-one","verified.change.id":%q,"git.clean":true}`, implemented.Evidence.ID, first.Binding.Run.Source.SourceIdentity), "verify original source")
 }
 
 func countActiveSemanticRuns(t *testing.T, svc *Service, instanceID, semanticKey string) int {

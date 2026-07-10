@@ -149,7 +149,7 @@ func candidateForExecutableAction(q queryer, inst *Instance, task *taskDoc, tpl 
 		}
 	}
 	candidate := actionCandidateBase(inst, task, actionID, spec, source, actionRank(spec, idx))
-	candidate.SemanticActionKey = semanticActionKey(inst, actionID, source)
+	candidate.SemanticActionKey = semanticActionKey(inst, actionID)
 	candidate.InputHash = actionCandidateInputHash(candidate)
 	return candidate, "", nil
 }
@@ -175,7 +175,7 @@ func actionCandidateBase(inst *Instance, task *taskDoc, actionID string, spec Ex
 		SideEffectClasses:     append([]string(nil), spec.SideEffectClasses...),
 		Rank:                  rank,
 	}
-	candidate.SemanticActionKey = semanticActionKey(inst, actionID, source)
+	candidate.SemanticActionKey = semanticActionKey(inst, actionID)
 	if candidate.SemanticActionKey != "" {
 		candidate.InputHash = actionCandidateInputHash(candidate)
 	}
@@ -258,10 +258,10 @@ func runActionByIDQuery(q queryer, runID string) (string, error) {
 	return action, err
 }
 
-func semanticActionKey(inst *Instance, actionID string, source *ActionSourceBinding) string {
-	if source != nil {
-		return fmt.Sprintf("%s:%s:%s:%s", actionID, inst.ID, source.SourceRunID, source.SourceIdentity)
-	}
+// semanticActionKey identifies one action occurrence: an executable action
+// projected for a specific workflow instance revision. Source bindings stay on
+// the run for replay compatibility, but do not partition active-run identity.
+func semanticActionKey(inst *Instance, actionID string) string {
 	return fmt.Sprintf("%s:%s:r%d", actionID, inst.ID, inst.Revision)
 }
 

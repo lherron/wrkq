@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -135,11 +136,9 @@ func TestActionNextVerifyCandidateUsesExactImplementEvidenceSource(t *testing.T)
 	if c.Source.SourceIdentity != "change-v1:opaque-identity" {
 		t.Fatalf("sourceIdentity = %q, want change-v1:opaque-identity", c.Source.SourceIdentity)
 	}
-	if !strings.Contains(c.SemanticActionKey, impl.Run.RunID) || !strings.Contains(c.SemanticActionKey, "change-v1:opaque-identity") {
-		t.Fatalf("semanticActionKey = %q, want implement run id and source identity", c.SemanticActionKey)
-	}
-	if strings.Contains(c.SemanticActionKey, "commit-abc123") {
-		t.Fatalf("semanticActionKey used source commit: %q", c.SemanticActionKey)
+	wantSemanticKey := fmt.Sprintf("verify:%s:r%d", c.InstanceID, c.ExpectedStateRevision)
+	if c.SemanticActionKey != wantSemanticKey {
+		t.Fatalf("semanticActionKey = %q, want action occurrence %q", c.SemanticActionKey, wantSemanticKey)
 	}
 	if strings.Contains(c.SemanticActionKey, "wrong-latest") {
 		t.Fatalf("semanticActionKey used unrelated latest evidence: %q", c.SemanticActionKey)
