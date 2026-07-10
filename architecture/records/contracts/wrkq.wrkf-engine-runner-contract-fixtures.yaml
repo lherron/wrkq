@@ -1,0 +1,43 @@
+id: wrkq.wrkf-engine-runner-contract-fixtures
+kind: contract
+status: active
+owner_project: wrkq
+scope: wrkf.action and wrkq-simple-task producer fixtures consumed by agent-loop runners
+predicate: >
+  wrkq owns the canonical engine side of the wrkf engine <-> agent-loop runner
+  contract fixtures. The canonical fixture artifact pins LaneRef grammar,
+  wrkf.action claim/settle binding shapes, implement/verify/landing evidence
+  facts, PR publish/adopt idempotency, landing push/readback law, ceremony
+  settle idempotency, and wrkq-simple-task@4 re-entry after
+  test_defect/test_fix with prior evidence visible. Downstream consumers may
+  vendor or project a copy, but producer-owned changes to wrkf.action.*,
+  FencedRunBinding, simple-task executable action states, or readback facts
+  must update the wrkq canonical artifact first.
+authority:
+  repo: wrkq
+  surface: wrkf.action.*, FencedRunBinding, wrkq-simple-task executable actions, workflow readback facts
+consumers:
+  - agent-loop wrkq-drain and wrkq-action-runner
+source:
+  - architecture/contracts/wrkf-engine-runner-contract.v1.json
+  - architecture/records/invariants/wrkq.wrkf-action.lease-recovery.yaml
+  - architecture/records/contracts/wrkq.simple-task.v3.batch-landing.yaml
+  - internal/workflow/action.go
+  - internal/workflow/action_next.go
+  - internal/workflow/builtins/wrkq-simple-task-v3.workflow.json
+  - hrcchat#13552
+required_tests:
+  - "bun test loops/wrkq-drain/wrkf-engine-runner-contract.test.ts in agent-loop"
+  - "go test ./internal/workflow for wrkf.action and simple-task producer behavior"
+last_verified:
+  date: 2026-07-09
+  evidence: "T-05821 implementation pass: agent-loop focused fixture consumer test and wrkq architecture-records gate"
+reopen_when:
+  - LaneRef grammar accepted by wrkf/agent-loop generation lanes changes
+  - wrkf.action.next or wrkf.action.claim candidate/binding fields change
+  - FencedRunBinding authority or workspace lease authority changes
+  - implement_result, verify_result, landing_result facts used by simple-task runners change
+  - PR publish/adopt or landing readback idempotency semantics change
+  - wrkq-simple-task@4 test_defect/test_fix re-entry semantics change
+supersedes: []
+superseded_by: null

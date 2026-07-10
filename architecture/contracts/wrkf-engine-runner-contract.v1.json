@@ -1,0 +1,335 @@
+{
+  "version": "wrkf-engine-runner-contract/v1",
+  "ownerProject": "wrkq",
+  "consumerProjects": ["agent-loop"],
+  "fixtures": [
+    {
+      "id": "lane-ref.accepts-lane-prefixed-generated-id",
+      "contractSurface": "LaneRef grammar",
+      "title": "Generated lanes cross the engine/runner boundary as lane:<id> LaneRefs",
+      "engine": {
+        "emittedLaneRef": "lane:gen-prepare-123",
+        "valid": true,
+        "normalizedBy": "agent-scope LaneRef grammar"
+      },
+      "runner": {
+        "acceptedLaneRef": true,
+        "dispatchLaneRef": "lane:gen-prepare-123"
+      }
+    },
+    {
+      "id": "lane-ref.rejects-bare-generated-id",
+      "contractSurface": "LaneRef grammar",
+      "title": "Bare gen-* identifiers are not LaneRefs and must be rejected before dispatch",
+      "engine": {
+        "emittedLaneRef": "gen-prepare-123",
+        "valid": false
+      },
+      "runner": {
+        "acceptedLaneRef": false,
+        "rejectionReason": "LaneRef must be \"main\" or \"lane:<laneId>\""
+      }
+    },
+    {
+      "id": "action-claim.implement-v4",
+      "contractSurface": "wrkf.action.claim",
+      "title": "Implement claims carry v4 simple-task run, authority, and task binding",
+      "engine": {
+        "method": "wrkf.action.claim",
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "candidate": {
+          "action": "implement",
+          "role": "implementer",
+          "semanticActionKey": "implement",
+          "handlerContract": "praesidium.wrkq-simple-task.implement@1",
+          "requiredEvidenceKind": "implement_result",
+          "transition": "implement_complete",
+          "expectedState": { "status": "active", "phase": "ready" }
+        },
+        "binding": {
+          "run": {
+            "id": "run-implement-v4-1",
+            "instanceId": "inst-simple-task-v4",
+            "action": "implement",
+            "role": "implementer",
+            "status": "running"
+          },
+          "authority": {
+            "runnerId": "wrkq-drain",
+            "ownerToken": "<opaque>",
+            "ownerGeneration": 1,
+            "leaseExpiresAt": "2026-07-09T16:00:00Z"
+          }
+        }
+      },
+      "runner": {
+        "dispatchedAction": "implement",
+        "requiredHandlerContract": "praesidium.wrkq-simple-task.implement@1",
+        "settleRequiresOwnerAuthority": true
+      }
+    },
+    {
+      "id": "action-claim.verify-v4",
+      "contractSurface": "wrkf.action.claim",
+      "title": "Verify claims bind to prior implement evidence and the frozen source identity",
+      "engine": {
+        "method": "wrkf.action.claim",
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "candidate": {
+          "action": "verify",
+          "role": "verifier",
+          "semanticActionKey": "verify",
+          "handlerContract": "praesidium.wrkq-simple-task.verify@1",
+          "requiredEvidenceKind": "verify_result",
+          "transition": "verify_complete",
+          "expectedState": { "status": "active", "phase": "implemented" },
+          "source": {
+            "sourceRunId": "run-implement-v4-1",
+            "sourceEvidenceId": "ev-implement-v4-1",
+            "commitSha": "1111111111111111111111111111111111111111"
+          }
+        }
+      },
+      "runner": {
+        "dispatchedAction": "verify",
+        "sourceImplementActionRunId": "run-implement-v4-1",
+        "sourceEvidenceId": "ev-implement-v4-1",
+        "verifiesExactSource": true
+      }
+    },
+    {
+      "id": "action-settle.implement-result-v4",
+      "contractSurface": "wrkf.action.settle",
+      "title": "Implement completion settles implement_result through implement_complete",
+      "engine": {
+        "method": "wrkf.action.settle",
+        "actionRunId": "run-implement-v4-1",
+        "result": "completed",
+        "transition": "implement_complete",
+        "evidence": {
+          "kind": "implement_result",
+          "facts": {
+            "result": "done",
+            "commit.sha": "1111111111111111111111111111111111111111",
+            "frozen_bar.command_hash": "sha256:bar-command",
+            "frozen_bar.content_hash": "sha256:bar-content"
+          }
+        }
+      },
+      "runner": {
+        "terminalStatus": "completed",
+        "recordsFrozenBar": true,
+        "returnsCommitSha": "1111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "id": "action-settle.verify-result-v4",
+      "contractSurface": "wrkf.action.settle",
+      "title": "Inline verify success settles verify_result as verified",
+      "engine": {
+        "method": "wrkf.action.settle",
+        "actionRunId": "run-verify-v4-1",
+        "result": "completed",
+        "transition": "verify_complete",
+        "evidence": {
+          "kind": "verify_result",
+          "facts": {
+            "result": "verified",
+            "source.implement_run_id": "run-implement-v4-1",
+            "source.evidence_id": "ev-implement-v4-1"
+          }
+        }
+      },
+      "runner": {
+        "terminalStatus": "completed",
+        "disposition": "verified",
+        "createPr": false
+      }
+    },
+    {
+      "id": "action-settle.landing-result-v4",
+      "contractSurface": "wrkf.action.settle",
+      "title": "Landing success preserves source PR verification and merged main facts",
+      "engine": {
+        "method": "wrkf.action.settle",
+        "actionRunId": "run-landing-v4-1",
+        "result": "completed",
+        "transition": "landing_complete",
+        "evidence": {
+          "kind": "landing_result",
+          "facts": {
+            "result": "landed",
+            "source.evidence_id": "ev-verify-pr-v4-1",
+            "source.branch_head_sha": "2222222222222222222222222222222222222222",
+            "merged.main.sha": "3333333333333333333333333333333333333333",
+            "frozen_bar.result": "passed"
+          }
+        }
+      },
+      "runner": {
+        "terminalStatus": "completed",
+        "landingPush": "ff-only",
+        "preservesSourcePrVerifiedEvidence": true
+      }
+    },
+    {
+      "id": "simple-task-v4.direct-land-complete-outcomes",
+      "contractSurface": "wrkq-simple-task@4 direct_land_complete",
+      "title": "Leaf direct landing classifies landed, push rejection, and operator-required outcomes",
+      "engine": {
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "transition": "direct_land_complete",
+        "outcomes": [
+          {
+            "id": "landed",
+            "evidence": {
+              "kind": "landing_result",
+              "facts": { "result": "landed", "workflow.lane": "leaf" }
+            },
+            "to": { "status": "closed", "phase": "done" },
+            "taskState": "completed"
+          },
+          {
+            "id": "push_rejected",
+            "evidence": {
+              "kind": "landing_result",
+              "facts": { "result": "push_rejected", "workflow.lane": "leaf" }
+            },
+            "to": { "status": "active", "phase": "gate" }
+          },
+          {
+            "id": "operator_required",
+            "evidence": {
+              "kind": "landing_result",
+              "facts": { "result": "operator_required", "workflow.lane": "leaf" }
+            },
+            "to": { "status": "waiting", "phase": "operator_required" },
+            "taskState": "blocked"
+          }
+        ]
+      },
+      "runner": {
+        "landingResults": ["landed", "push_rejected", "operator_required"],
+        "operatorRequired": {
+          "workflowState": { "status": "waiting", "phase": "operator_required" },
+          "taskState": "blocked",
+          "retriesAutomatically": false
+        }
+      }
+    },
+    {
+      "id": "pr-publish.create-on-fresh-branch",
+      "contractSurface": "PR publish idempotency",
+      "title": "Fresh branch publication creates a PR and records branch-head facts",
+      "engine": {
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "branch": "drain/T-05821-contract-fresh",
+        "branchHeadSha": "4444444444444444444444444444444444444444",
+        "existingPrHeadSha": null
+      },
+      "runner": {
+        "operation": "create",
+        "createPr": true,
+        "prUrl": "https://github.com/example/repo/pull/42",
+        "recordsFacts": ["pr.url", "pr.branch", "pr.head.sha"]
+      }
+    },
+    {
+      "id": "pr-publish.adopt-existing-head",
+      "contractSurface": "PR publish idempotency",
+      "title": "Existing PR with the same head SHA is adopted instead of duplicated",
+      "engine": {
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "branch": "drain/T-05821-contract-adopt",
+        "branchHeadSha": "5555555555555555555555555555555555555555",
+        "existingPrHeadSha": "5555555555555555555555555555555555555555",
+        "existingPrUrl": "https://github.com/example/repo/pull/43"
+      },
+      "runner": {
+        "operation": "adopt",
+        "createPr": false,
+        "adoptedBy": "head_sha",
+        "prUrl": "https://github.com/example/repo/pull/43"
+      }
+    },
+    {
+      "id": "landing-push.ff-only-remote-head-match",
+      "contractSurface": "landing push idempotency",
+      "title": "Landing push requires remote main to match the verified merge base",
+      "engine": {
+        "landingAction": "landing",
+        "sourceBranchHeadSha": "6666666666666666666666666666666666666666",
+        "expectedRemoteMainSha": "7777777777777777777777777777777777777777"
+      },
+      "runner": {
+        "gitPushMode": "ff-only",
+        "refusesRemoteHeadDrift": true,
+        "recordsMergedMainSha": true
+      }
+    },
+    {
+      "id": "ceremony-settle.idempotent-existing-record",
+      "contractSurface": "ceremony settle idempotency",
+      "title": "Repeated ceremony settlement adopts the existing terminal record",
+      "engine": {
+        "actionRunId": "run-ceremony-v4-1",
+        "idempotencyKey": "wrkq-drain:ceremony:T-05821:verify",
+        "existingTerminalResult": "completed"
+      },
+      "runner": {
+        "operation": "adopt_terminal",
+        "dispatchWorkerAgain": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "readback.stage-5-exit-code-law",
+      "contractSurface": "run-state readback",
+      "title": "Drain exit code derives from durable terminal readback, not process-local optimism",
+      "engine": {
+        "stage": 5,
+        "terminalResults": ["completed", "semantic_blocked", "operational_failed", "operator_required"],
+        "readbackSource": "wrkf.action.run"
+      },
+      "runner": {
+        "completedExitCode": 0,
+        "semanticBlockedExitCode": 2,
+        "operationalFailedExitCode": 1,
+        "operatorRequiredExitCode": 1
+      }
+    },
+    {
+      "id": "readback.adopt-existing-pr-by-head",
+      "contractSurface": "run-state readback",
+      "title": "Verify readback adopts an existing PR by branch head SHA",
+      "engine": {
+        "verifyEvidenceKind": "verify_result",
+        "branchHeadSha": "8888888888888888888888888888888888888888",
+        "existingPrHeadSha": "8888888888888888888888888888888888888888"
+      },
+      "runner": {
+        "readbackDisposition": "pr_verified",
+        "adoptedBy": "head_sha",
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "simple-task-v4.reenter-implement-after-test-fix-with-prior-evidence",
+      "contractSurface": "wrkq-simple-task@4 re-entry",
+      "title": "Implement re-enters after test_defect/test_fix with prior evidence still visible",
+      "engine": {
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "beforeAction": "implement",
+        "priorEvidenceKinds": ["implement_result", "verify_result", "test_defect", "test_fix_result"],
+        "roleBindingMode": "fresh_claim_allowed",
+        "expectedState": { "status": "active", "phase": "ready" }
+      },
+      "runner": {
+        "dispatchedAction": "implement",
+        "roleDenied": false,
+        "carriedEvidenceKinds": ["implement_result", "verify_result", "test_defect", "test_fix_result"],
+        "settleTransition": "implement_complete"
+      }
+    }
+  ]
+}
