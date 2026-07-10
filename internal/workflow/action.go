@@ -1776,7 +1776,8 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		now := s.now().UTC().Format(time.RFC3339)
+		nowTime := s.now().UTC()
+		now := nowTime.Format(time.RFC3339)
 		for i := range reaped {
 			reason := strings.TrimSpace(p.Summary)
 			if reason == "" {
@@ -1794,7 +1795,7 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 			if ambiguous {
 				status = "operator_required"
 			}
-			workspaceLeaseRelease, err := releaseReapedWorkspaceLeaseTx(tx, &reaped[i], now)
+			workspaceLeaseRelease, err := releaseReapedWorkspaceLeaseTx(tx, &reaped[i], nowTime)
 			if err != nil {
 				return err
 			}
@@ -2119,7 +2120,7 @@ func reapRequiresOperatorTx(tx *sql.Tx, run *Run) (bool, error) {
 	return len(spec.SideEffectClasses) > 0, nil
 }
 
-func releaseReapedWorkspaceLeaseTx(tx *sql.Tx, run *Run, now string) (string, error) {
+func releaseReapedWorkspaceLeaseTx(tx *sql.Tx, run *Run, now time.Time) (string, error) {
 	var workspaceRef string
 	if err := tx.QueryRow(`SELECT COALESCE(workspace_ref,'') FROM workflow_runs WHERE id = ?`, run.ID).Scan(&workspaceRef); err != nil {
 		return "", err
@@ -2128,16 +2129,18 @@ func releaseReapedWorkspaceLeaseTx(tx *sql.Tx, run *Run, now string) (string, er
 		return "", nil
 	}
 
-	var currentOwner string
-	err := tx.QueryRow(`SELECT COALESCE(lease_owner,'') FROM workflow_workspace_leases WHERE canonical_root = ?`, workspaceRef).Scan(&currentOwner)
+	current, err := workspaceLeaseByRootTx(tx, workspaceRef)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "missing", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	if run.LeaseOwner == "" || currentOwner != run.LeaseOwner {
+	if run.LeaseOwner == "" || current.LeaseOwner != run.LeaseOwner {
 		return "owner_mismatch", nil
+	}
+	if workspaceLeaseActive(current, now) {
+		return "still_active", nil
 	}
 
 	result, err := tx.Exec(`
@@ -2145,7 +2148,7 @@ func releaseReapedWorkspaceLeaseTx(tx *sql.Tx, run *Run, now string) (string, er
 		SET lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
 		    heartbeat_at = NULL, released_at = ?
 		WHERE canonical_root = ? AND lease_owner = ?
-	`, now, workspaceRef, run.LeaseOwner)
+	`, now.Format(time.RFC3339), workspaceRef, run.LeaseOwner)
 	if err != nil {
 		return "", err
 	}
