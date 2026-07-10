@@ -6,6 +6,163 @@ import (
 	"testing"
 )
 
+func attachSimpleTaskV2WithGenericSettleContracts(t *testing.T, svc *Service, taskUUID string) {
+	t.Helper()
+	doc := builtinV2Doc(t)
+	doc["id"] = "generic-settle-v2"
+	implement := doc["evidenceKinds"].(map[string]any)["implement_result"].(map[string]any)
+	implement["facts"].(map[string]any)["properties"].(map[string]any)["change.id"] = map[string]any{"type": "string"}
+	verify := doc["evidenceKinds"].(map[string]any)["verify_result"].(map[string]any)
+	verify["facts"].(map[string]any)["properties"].(map[string]any)["source.evidence_id"] = map[string]any{"type": "string"}
+	verify["facts"].(map[string]any)["properties"].(map[string]any)["verified.change.id"] = map[string]any{"type": "string"}
+	verifyAction := action(doc, "verify")
+	verifyAction["sourceBinding"].(map[string]any)["bindFields"] = map[string]any{"sourceIdentity": "change.id"}
+	verifyAction["settleValidation"] = map[string]any{
+		"rules": []any{map[string]any{
+			"identityFact":  "verified.change.id",
+			"linkageFact":   "source.evidence_id",
+			"requiredFacts": []any{"source.evidence_id", "source.commit.sha", "verified.change.id"},
+			"echoFields": []any{
+				map[string]any{"fact": "source.commit.sha", "sourceFact": "commit.sha"},
+			},
+		}},
+	}
+
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal generic-settle v2 template: %v", err)
+	}
+	tpl, canonical, err := ParseTemplate(data)
+	if err != nil {
+		t.Fatalf("ParseTemplate(generic-settle v2): %v", err)
+	}
+	if _, err := svc.installTemplateCanonical(tpl, canonical, Hash(canonical), "agent:t", nil, false); err != nil {
+		t.Fatalf("install generic-settle v2 template: %v", err)
+	}
+	if _, err := svc.AttachTask(taskUUID, "generic-settle-v2@2", "agent:t"); err != nil {
+		t.Fatalf("AttachTask(generic-settle v2): %v", err)
+	}
+}
+
+func TestSettleActionTemplateIdentityRejectsMismatch(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2WithGenericSettleContracts(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+	implement := claimActionForTest(t, svc, taskUUID, "implement")
+	impl := settleClaimForTest(t, svc, implement, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:expected","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+	verify := claimActionForTest(t, svc, taskUUID, "verify")
+	if verify.Binding.Run.Source == nil || verify.Binding.Run.Source.SourceIdentity != "change-v1:expected" {
+		t.Fatalf("verify source = %+v, want change-v1:expected", verify.Binding.Run.Source)
+	}
+
+	before := actionNextMutationCounts(t, svc)
+	_, err := svc.SettleAction(SettleActionParams{
+		ActionRunID:     verify.Binding.Run.ID,
+		OwnerToken:      verify.Binding.Authority.OwnerToken,
+		OwnerGeneration: verify.Binding.Authority.OwnerGeneration,
+		Result:          "completed",
+		Evidence: &ActionEvidenceInput{
+			Summary: "wrong identity",
+			Facts:   `{"result":"verified","source.commit.sha":"abc123","verified.commit.sha":"abc123","source.evidence_id":"` + impl.Evidence.ID + `","verified.change.id":"change-v1:foreign","git.clean":true}`,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("wrong source identity error = %v, want identity validation", err)
+	}
+	if after := actionNextMutationCounts(t, svc); after != before {
+		t.Fatalf("wrong source identity mutated rows: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestSettleActionTemplateContractsRejectMissingLinkageAndEcho(t *testing.T) {
+	cases := []struct {
+		name               string
+		facts              func(string) string
+		foreignSource      bool
+		replaceClaimSource bool
+		wantError          string
+	}{
+		{
+			name: "missing required fact",
+			facts: func(_ string) string {
+				return `{"result":"verified","source.commit.sha":"abc123","verified.change.id":"change-v1:expected"}`
+			},
+			wantError: "required facts",
+		},
+		{
+			name: "foreign wrong-kind linkage",
+			facts: func(sourceEvidenceID string) string {
+				return `{"result":"verified","source.evidence_id":"` + sourceEvidenceID + `","source.commit.sha":"abc123","verified.change.id":"change-v1:expected"}`
+			},
+			foreignSource: true,
+			wantError:     "linkage",
+		},
+		{
+			name: "wrong kind claimed source",
+			facts: func(sourceEvidenceID string) string {
+				return `{"result":"verified","source.evidence_id":"` + sourceEvidenceID + `","source.commit.sha":"abc123","verified.change.id":"change-v1:expected"}`
+			},
+			foreignSource:      true,
+			replaceClaimSource: true,
+			wantError:          "wrong declared kind",
+		},
+		{
+			name: "echo mismatch",
+			facts: func(sourceEvidenceID string) string {
+				return `{"result":"verified","source.evidence_id":"` + sourceEvidenceID + `","source.commit.sha":"wrong","verified.change.id":"change-v1:expected"}`
+			},
+			wantError: "echo",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, taskUUID := actionFixture(t)
+			attachSimpleTaskV2WithGenericSettleContracts(t, svc, taskUUID)
+			triage := claimActionForTest(t, svc, taskUUID, "triage")
+			settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+			implement := claimActionForTest(t, svc, taskUUID, "implement")
+			impl := settleClaimForTest(t, svc, implement, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:expected","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+			verify := claimActionForTest(t, svc, taskUUID, "verify")
+			sourceEvidenceID := impl.Evidence.ID
+			if tc.foreignSource {
+				foreign, err := svc.AddEvidence(AddEvidenceParams{
+					TaskSelector: taskUUID,
+					Kind:         "triage_result",
+					Summary:      "wrong kind",
+					Facts:        `{"result":"ready"}`,
+					PrincipalRef: "agent:t",
+					Role:         "triager",
+				})
+				if err != nil {
+					t.Fatalf("AddEvidence foreign source: %v", err)
+				}
+				sourceEvidenceID = foreign.ID
+				if tc.replaceClaimSource {
+					if _, err := svc.db.Exec(`UPDATE workflow_runs SET source_evidence_id = ? WHERE id = ?`, foreign.ID, verify.Binding.Run.ID); err != nil {
+						t.Fatalf("replace claim source: %v", err)
+					}
+				}
+			}
+
+			before := actionNextMutationCounts(t, svc)
+			_, err := svc.SettleAction(SettleActionParams{
+				ActionRunID:     verify.Binding.Run.ID,
+				OwnerToken:      verify.Binding.Authority.OwnerToken,
+				OwnerGeneration: verify.Binding.Authority.OwnerGeneration,
+				Result:          "completed",
+				Evidence:        &ActionEvidenceInput{Summary: tc.name, Facts: tc.facts(sourceEvidenceID)},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("SettleAction error = %v, want %q", err, tc.wantError)
+			}
+			if after := actionNextMutationCounts(t, svc); after != before {
+				t.Fatalf("invalid settlement mutated rows: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
 func TestSettleActionCompletedIdempotentAndProjection(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "Shaped spec.", "in_progress")
@@ -123,7 +280,7 @@ func TestSettleActionExpiredSuccessLeavesDowngradeLane(t *testing.T) {
 		WorkspaceToken:      impl.Binding.Workspace.LeaseToken,
 		WorkspaceGeneration: impl.Binding.Workspace.OwnerGeneration,
 		Result:              "completed",
-		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
+		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"a75cfb1","change.id":"change-v1:a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
 	})
 	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
 		t.Fatalf("expired success settle error = %v, want lease conflict", err)
@@ -175,7 +332,7 @@ func TestSettleActionRecoveredInstanceRunsNextAction(t *testing.T) {
 	assertActionCandidates(t, next, "implement")
 
 	recovered := claimActionForTest(t, svc, taskUUID, "implement")
-	out := settleClaimForTest(t, svc, recovered, `{"result":"done","commit.sha":"a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented after recovery")
+	out := settleClaimForTest(t, svc, recovered, `{"result":"done","commit.sha":"a75cfb1","change.id":"change-v1:a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented after recovery")
 	if out.Run.Status != "completed" || out.Transition == nil {
 		t.Fatalf("recovered implement settle = %+v, transition=%+v", out.Run, out.Transition)
 	}
@@ -248,17 +405,17 @@ func TestSettleActionImplementRequiresGitCommittedCleanFacts(t *testing.T) {
 		Result:          "completed",
 		Evidence: &ActionEvidenceInput{
 			Summary: "implemented",
-			Facts:   `{"result":"done","commit.sha":"abc123","git.clean":false,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`,
+			Facts:   `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":false,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "git.clean") {
-		t.Fatalf("dirty implement settlement error = %v, want git.clean validation", err)
+	if err == nil || !strings.Contains(err.Error(), "value constraint") {
+		t.Fatalf("dirty implement settlement error = %v, want declared value validation", err)
 	}
 	if after := actionNextMutationCounts(t, svc); after != before {
 		t.Fatalf("dirty implement mutated rows: before=%+v after=%+v", before, after)
 	}
 
-	out := settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+	out := settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
 	if out.Evidence == nil {
 		t.Fatalf("implement settlement missing evidence")
 	}
@@ -271,13 +428,13 @@ func TestSettleActionImplementRequiresGitCommittedCleanFacts(t *testing.T) {
 	}
 }
 
-func TestSettleActionVerifyRequiresClaimedSourceCommit(t *testing.T) {
+func TestSettleActionVerifyRequiresBoundSourceIdentity(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
 	triage := claimActionForTest(t, svc, taskUUID, "triage")
 	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
 	impl := claimActionForTest(t, svc, taskUUID, "implement")
-	settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+	implemented := settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
 	if _, err := svc.AddEvidence(AddEvidenceParams{
 		TaskSelector: taskUUID,
 		Kind:         "implement_result",
@@ -291,8 +448,8 @@ func TestSettleActionVerifyRequiresClaimedSourceCommit(t *testing.T) {
 	}
 
 	verify := claimActionForTest(t, svc, taskUUID, "verify")
-	if verify.Binding.Run.Source == nil || verify.Binding.Run.Source.CommitSha != "abc123" {
-		t.Fatalf("verify claim source = %+v, want abc123", verify.Binding.Run.Source)
+	if verify.Binding.Run.Source == nil || verify.Binding.Run.Source.SourceIdentity != "change-v1:abc123" {
+		t.Fatalf("verify claim source = %+v, want change-v1:abc123", verify.Binding.Run.Source)
 	}
 	before := actionNextMutationCounts(t, svc)
 	_, err := svc.SettleAction(SettleActionParams{
@@ -302,17 +459,17 @@ func TestSettleActionVerifyRequiresClaimedSourceCommit(t *testing.T) {
 		Result:          "completed",
 		Evidence: &ActionEvidenceInput{
 			Summary: "verified wrong latest",
-			Facts:   `{"result":"verified","source.commit.sha":"wrong-latest","verified.commit.sha":"wrong-latest","git.clean":true}`,
+			Facts:   `{"result":"verified","source.evidence_id":"` + implemented.Evidence.ID + `","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:wrong-latest","git.clean":true}`,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "source commit") {
-		t.Fatalf("wrong source verify error = %v, want source commit validation", err)
+	if err == nil || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("wrong source verify error = %v, want source identity validation", err)
 	}
 	if after := actionNextMutationCounts(t, svc); after != before {
 		t.Fatalf("wrong source verify mutated rows: before=%+v after=%+v", before, after)
 	}
 
-	out := settleClaimForTest(t, svc, verify, `{"result":"verified","source.commit.sha":"abc123","verified.commit.sha":"abc123","git.clean":true}`, "verified")
+	out := settleClaimForTest(t, svc, verify, `{"result":"verified","source.evidence_id":"`+implemented.Evidence.ID+`","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","git.clean":true}`, "verified")
 	if out.Transition == nil {
 		t.Fatalf("verify settlement missing transition")
 	}
@@ -350,16 +507,16 @@ func TestSettleActionV2BlockerEffectsSetTaskBlocked(t *testing.T) {
 	})
 
 	for _, c := range []struct {
-		name  string
-		facts string
+		name   string
+		result string
 	}{
 		{
-			name:  "verify_failed",
-			facts: `{"result":"failed","source.commit.sha":"abc123","verified.commit.sha":"abc123","git.clean":true}`,
+			name:   "verify_failed",
+			result: "failed",
 		},
 		{
-			name:  "verify_blocked",
-			facts: `{"result":"blocked","source.commit.sha":"abc123","verified.commit.sha":"abc123","git.clean":true}`,
+			name:   "verify_blocked",
+			result: "blocked",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -368,10 +525,11 @@ func TestSettleActionV2BlockerEffectsSetTaskBlocked(t *testing.T) {
 			triage := claimActionForTest(t, svc, taskUUID, "triage")
 			settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
 			impl := claimActionForTest(t, svc, taskUUID, "implement")
-			settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+			implemented := settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
 
 			verify := claimActionForTest(t, svc, taskUUID, "verify")
-			settleClaimForTest(t, svc, verify, c.facts, c.name)
+			facts := `{"result":"` + c.result + `","source.evidence_id":"` + implemented.Evidence.ID + `","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","git.clean":true}`
+			settleClaimForTest(t, svc, verify, facts, c.name)
 			inst, err := svc.LatestInstance(taskUUID)
 			if err != nil {
 				t.Fatalf("LatestInstance: %v", err)
@@ -391,7 +549,7 @@ func TestSettleActionV3PRVerifiedAwaitingMergeQueue(t *testing.T) {
 	advanceV3ToImplemented(t, svc, taskUUID, "h0")
 
 	verify := claimActionForTest(t, svc, taskUUID, "verify")
-	out := settleClaimForTest(t, svc, verify, prVerifiedFacts("h0", "bar0", "https://example.test/pr/1"), "pr verified")
+	out := settleClaimForTest(t, svc, verify, prVerifiedFacts(verify.Binding.Run.Source.SourceEvidenceID, verify.Binding.Run.Source.SourceIdentity, "h0", "bar0", "https://example.test/pr/1"), "pr verified")
 	if out.Transition == nil {
 		t.Fatalf("pr_verified settlement missing transition")
 	}
@@ -424,35 +582,35 @@ func TestSettleActionV3LandingGateMatrix(t *testing.T) {
 		{
 			name:        "missing_source_verify_evidence",
 			clearSource: true,
-			wantError:   "source pr_verified evidence",
+			wantError:   "claimed source evidence",
 		},
 		{
 			name: "missing_pr_sha_binding",
 			mutate: func(f map[string]interface{}) {
 				f["source.branch.head.sha"] = "wrong-h0"
 			},
-			wantError: "original branch head",
+			wantError: "source evidence echo",
 		},
 		{
 			name: "failed_bar_rerun",
 			mutate: func(f map[string]interface{}) {
 				f["frozen_bar.result"] = "failed"
 			},
-			wantError: "passed FrozenBar",
+			wantError: "value constraint",
 		},
 		{
 			name: "command_hash_drift",
 			mutate: func(f map[string]interface{}) {
 				f["frozen_bar.command_hash"] = "cmd-drift"
 			},
-			wantError: "commandHash",
+			wantError: "value constraint",
 		},
 		{
 			name: "content_hash_drift",
 			mutate: func(f map[string]interface{}) {
 				f["frozen_bar.content_hash"] = "content-drift"
 			},
-			wantError: "contentHash",
+			wantError: "value constraint",
 		},
 	}
 	for _, tc := range cases {
@@ -581,24 +739,25 @@ func advanceV3ToImplemented(t *testing.T, svc *Service, taskUUID, commit string)
 	triage := claimActionForTest(t, svc, taskUUID, "triage")
 	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
 	impl := claimActionForTest(t, svc, taskUUID, "implement")
-	settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"`+commit+`","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
+	settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"`+commit+`","change.id":"change-v1:`+commit+`","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
 }
 
 func prepareV3AwaitingMerge(t *testing.T, svc *Service, taskUUID string) *SettleActionResult {
 	t.Helper()
 	advanceV3ToImplemented(t, svc, taskUUID, "h0")
 	verify := claimActionForTest(t, svc, taskUUID, "verify")
-	return settleClaimForTest(t, svc, verify, prVerifiedFacts("h0", "bar0", "https://example.test/pr/1"), "pr verified")
+	return settleClaimForTest(t, svc, verify, prVerifiedFacts(verify.Binding.Run.Source.SourceEvidenceID, verify.Binding.Run.Source.SourceIdentity, "h0", "bar0", "https://example.test/pr/1"), "pr verified")
 }
 
-func prVerifiedFacts(head, bar, prURL string) string {
-	return `{"result":"pr_verified","source.commit.sha":"` + head + `","verified.commit.sha":"` + head + `","branch.head.sha":"` + head + `","bar.hash":"` + bar + `","pr.url":"` + prURL + `","git.clean":true}`
+func prVerifiedFacts(sourceEvidenceID, identity, head, bar, prURL string) string {
+	return `{"result":"pr_verified","source.evidence_id":"` + sourceEvidenceID + `","source.commit.sha":"` + head + `","verified.commit.sha":"` + head + `","verified.change.id":"` + identity + `","branch.head.sha":"` + head + `","bar.hash":"` + bar + `","pr.url":"` + prURL + `","git.clean":true}`
 }
 
 func validLandingFactsMap(sourceEvidenceID string) map[string]interface{} {
 	return map[string]interface{}{
 		"result":                           "landed",
-		"source.verify.evidence_id":        sourceEvidenceID,
+		"source.evidence_id":               sourceEvidenceID,
+		"source.change.id":                 "change-v1:h0",
 		"source.branch.head.sha":           "h0",
 		"source.bar.hash":                  "bar0",
 		"source.pr.url":                    "https://example.test/pr/1",

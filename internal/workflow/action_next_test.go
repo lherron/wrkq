@@ -150,7 +150,10 @@ func TestActionNextBlockedVerifyWhenSourceMissing(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
 	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
-	startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done"}`)
+	implemented := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	if _, err := svc.db.Exec(`UPDATE workflow_evidence SET facts_json = ? WHERE id = ?`, `{"result":"done"}`, implemented.Evidence.ID); err != nil {
+		t.Fatalf("remove source facts: %v", err)
+	}
 
 	hidden, err := svc.ActionNext(ActionNextParams{Task: taskUUID})
 	if err != nil {
@@ -173,9 +176,9 @@ func TestActionNextV3LandingCandidateBindsPRVerifiedSource(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV3(t, svc, taskUUID)
 	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
-	startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"h0","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"h0","change.id":"change-v1:h0","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
 	verify := claimActionForTest(t, svc, taskUUID, "verify")
-	verified := settleClaimForTest(t, svc, verify, `{"result":"pr_verified","source.commit.sha":"h0","verified.commit.sha":"h0","branch.head.sha":"h0","bar.hash":"bar0","pr.url":"https://example.test/pr/1","git.clean":true}`, "pr verified")
+	verified := settleClaimForTest(t, svc, verify, prVerifiedFacts(verify.Binding.Run.Source.SourceEvidenceID, verify.Binding.Run.Source.SourceIdentity, "h0", "bar0", "https://example.test/pr/1"), "pr verified")
 
 	result, err := svc.ActionNext(ActionNextParams{
 		Task:    taskUUID,
@@ -189,8 +192,8 @@ func TestActionNextV3LandingCandidateBindsPRVerifiedSource(t *testing.T) {
 	if c.RequiredEvidenceKind != "landing_result" || c.Role != "release_manager" {
 		t.Fatalf("landing candidate = %+v", c)
 	}
-	if c.Source == nil || c.Source.SourceEvidenceID != verified.Evidence.ID || c.Source.CommitSha != "h0" || c.Source.ArtifactRef != "bar0" {
-		t.Fatalf("landing source = %+v, want evidence %s H0 h0 bar0", c.Source, verified.Evidence.ID)
+	if c.Source == nil || c.Source.SourceEvidenceID != verified.Evidence.ID || c.Source.CommitSha != "h0" || c.Source.SourceIdentity != "change-v1:h0" || c.Source.ArtifactRef != "bar0" {
+		t.Fatalf("landing source = %+v, want evidence %s H0 h0 change-v1:h0 bar0", c.Source, verified.Evidence.ID)
 	}
 }
 

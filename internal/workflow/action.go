@@ -604,7 +604,7 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 				return validationError("evidence.kind", "settlement evidence kind must match settlement result kind", expectedEvidenceKind, []string{expectedEvidenceKind}, "use implement/verify result evidence for completed settlements and failure_result for downgrade settlements")
 			}
 			if !downgrade {
-				if err := validateSettleEvidenceFacts(tx, run, kind, p.Evidence); err != nil {
+				if err := validateSettleEvidenceFacts(tx, tpl, actionSpec, run, p.Evidence); err != nil {
 					return err
 				}
 			}
@@ -1108,130 +1108,97 @@ func canonicalJSONForCompare(raw string) string {
 	return string(b)
 }
 
-func validateSettleEvidenceFacts(tx *sql.Tx, run *claimedRun, kind string, evidence *ActionEvidenceInput) error {
+func validateSettleEvidenceFacts(tx *sql.Tx, tpl *Template, actionSpec ExecutableActionSpec, run *claimedRun, evidence *ActionEvidenceInput) error {
 	facts := map[string]interface{}{}
 	if evidence != nil && strings.TrimSpace(evidence.Facts) != "" {
 		if err := json.Unmarshal([]byte(evidence.Facts), &facts); err != nil {
 			return validationError("evidence.facts", "facts must be valid JSON"+jsonLocationSuffix(err), "valid JSON", nil, "fix the JSON syntax in facts")
 		}
 	}
-	if run.Action == "implement" && kind == "implement_result" && stringFact(facts, "result") == "done" {
-		required := []string{"commit.sha", "base.sha", "postcondition", "repair.turns"}
-		if missing := missingRequiredFacts(facts, required); len(missing) > 0 {
-			return validationError("evidence.facts", "implement success is missing git_committed_clean facts", "commit-bound implement facts", missing, "include commit.sha, base.sha, postcondition, git.clean, and repair.turns")
-		}
-		if stringFact(facts, "postcondition") != "git_committed_clean" {
-			return validationError("evidence.facts.postcondition", "implement success must assert git_committed_clean", "git_committed_clean", []string{"git_committed_clean"}, "run the handler git postcondition before settling")
-		}
-		if !boolFact(facts, "git.clean") {
-			return validationError("evidence.facts.git.clean", "implement success requires git.clean=true", "true", []string{"true"}, "settle operator_required instead of completed when the worktree is dirty")
-		}
+	if actionSpec.SettleValidation == nil {
+		return nil
 	}
-	if run.Action == "verify" && kind == "verify_result" {
-		expectedCommit, expectedArtifact, err := sourceIdentityForRunTx(tx, run)
-		if err != nil {
-			return err
+	var source *Evidence
+	for _, rule := range actionSpec.SettleValidation.Rules {
+		if !settleValidationRuleMatches(facts, rule.WhenFacts) {
+			continue
 		}
-		if expectedCommit != "" {
-			if stringFact(facts, "source.commit.sha") != expectedCommit || stringFact(facts, "verified.commit.sha") != expectedCommit {
-				return validationError("evidence.facts", "verify settlement must match the claimed source commit", expectedCommit, []string{expectedCommit}, "verify the exact implementation commit from the claim source binding")
+		if missing := missingRequiredFacts(facts, rule.RequiredFacts); len(missing) > 0 {
+			return validationError("evidence.facts", "settlement is missing template-declared required facts", "declared settlement facts", missing, "supply every fact declared by the action settlement contract")
+		}
+		if rule.IdentityFact != "" {
+			if strings.TrimSpace(run.SourceIdentity) == "" {
+				return validationError("source", "settlement requires a bound source identity", "bound source identity", nil, "claim a candidate with a source identity")
 			}
-			return nil
-		}
-		if expectedArtifact != "" {
-			sourceArtifact := firstNonEmptyAction(stringFact(facts, "source.artifact.digest"), stringFact(facts, "source.artifact.ref"))
-			verifiedArtifact := firstNonEmptyAction(stringFact(facts, "verified.artifact.digest"), stringFact(facts, "verified.artifact.ref"))
-			if sourceArtifact != expectedArtifact || verifiedArtifact != expectedArtifact {
-				return validationError("evidence.facts", "verify settlement must match the claimed source artifact", expectedArtifact, []string{expectedArtifact}, "verify the exact implementation artifact from the claim source binding")
+			if actual := stringFact(facts, rule.IdentityFact); actual != run.SourceIdentity {
+				return validationError("evidence.facts."+rule.IdentityFact, "settlement identity does not match the bound source identity", run.SourceIdentity, []string{actual}, "copy the lane-computed source identity into the declared settlement fact")
 			}
-			return nil
 		}
-		return validationError("source", "verify run is missing a stored source commit or artifact identity", "source identity", nil, "claim the verify candidate produced by action.next")
-	}
-	if run.Action == "landing" && kind == "landing_result" {
-		if strings.TrimSpace(run.SourceEvidenceID) == "" {
-			return validationError("source", "landing run is missing source pr_verified evidence", "source pr_verified evidence", nil, "claim the landing candidate produced by action.next")
+		if rule.LinkageFact != "" || len(rule.EchoFields) > 0 {
+			if source == nil {
+				var err error
+				source, err = sourceEvidenceForSettleValidation(tx, tpl, actionSpec, run)
+				if err != nil {
+					return err
+				}
+			}
+			if rule.LinkageFact != "" && stringFact(facts, rule.LinkageFact) != source.ID {
+				return validationError("evidence.facts."+rule.LinkageFact, "settlement linkage does not cite the consumed source evidence", source.ID, []string{stringFact(facts, rule.LinkageFact)}, "copy the source evidence id from the claim binding")
+			}
+			if len(rule.EchoFields) > 0 {
+				sourceFacts := evidenceFactsMap(*source)
+				for _, echo := range rule.EchoFields {
+					if actual, expected := stringFact(facts, echo.Fact), stringFact(sourceFacts, echo.SourceFact); actual != expected {
+						return validationError("evidence.facts."+echo.Fact, "settlement fact does not match the declared source evidence echo", expected, []string{actual}, "copy the declared source evidence fact verbatim")
+					}
+				}
+			}
 		}
-		source, err := evidenceByIDTx(tx, run.SourceEvidenceID)
-		if err != nil {
-			return err
-		}
-		if source.InstanceID != run.InstanceID || source.Kind != "verify_result" {
-			return validationError("source", "landing source must be verify_result evidence on the same instance", "same-instance verify_result", []string{run.SourceEvidenceID}, "claim the landing candidate produced by action.next")
-		}
-		sourceFacts := evidenceFactsMap(*source)
-		if stringFact(sourceFacts, "result") != "pr_verified" {
-			return validationError("source", "landing source verify_result must be pr_verified", "pr_verified", []string{stringFact(sourceFacts, "result")}, "land only from batch pr_verified evidence")
-		}
-		if stringFact(facts, "source.verify.evidence_id") != run.SourceEvidenceID {
-			return validationError("evidence.facts.source.verify.evidence_id", "landing_result must link the claimed source verify evidence", run.SourceEvidenceID, []string{run.SourceEvidenceID}, "copy the source evidence id from the landing claim")
-		}
-		sourceHead := stringFact(sourceFacts, "branch.head.sha")
-		if strings.TrimSpace(run.SourceCommitSha) != "" && sourceHead != run.SourceCommitSha {
-			return validationError("source", "landing claim source head does not match source pr_verified evidence", run.SourceCommitSha, []string{sourceHead}, "reclaim the landing action from current pr_verified evidence")
-		}
-		if stringFact(facts, "source.branch.head.sha") != sourceHead {
-			return validationError("evidence.facts.source.branch.head.sha", "landing_result must preserve original branch head H0", sourceHead, []string{sourceHead}, "copy branch.head.sha from the pr_verified evidence")
-		}
-		sourceBar := stringFact(sourceFacts, "bar.hash")
-		if stringFact(facts, "source.bar.hash") != sourceBar {
-			return validationError("evidence.facts.source.bar.hash", "landing_result must preserve original bar hash", sourceBar, []string{sourceBar}, "copy bar.hash from the pr_verified evidence")
-		}
-		sourcePR := stringFact(sourceFacts, "pr.url")
-		if stringFact(facts, "source.pr.url") != sourcePR || stringFact(facts, "pr.url") != sourcePR {
-			return validationError("evidence.facts.pr.url", "landing_result PR URL must match pr_verified evidence", sourcePR, []string{sourcePR}, "copy pr.url from the pr_verified evidence")
-		}
-		if stringFact(facts, "result") != "landed" {
-			return nil
-		}
-		if missing := missingRequiredFacts(facts, []string{"rebased.head.sha", "merged.main.sha", "rebase.range"}); len(missing) > 0 {
-			return validationError("evidence.facts", "landed result is missing rebase or merged-main evidence", "landing chain facts", missing, "include rebased.head.sha, merged.main.sha, and rebase.range before closing")
-		}
-		if stringFact(facts, "frozen_bar.result") != "passed" {
-			return validationError("evidence.facts.frozen_bar.result", "landed result requires a passed FrozenBar rerun", "passed", []string{stringFact(facts, "frozen_bar.result")}, "route reverify_required or operator_required instead of landed")
-		}
-		if stringFact(facts, "frozen_bar.command_hash") == "" || stringFact(facts, "frozen_bar.command_hash") != stringFact(facts, "frozen_bar.expected_command_hash") {
-			return validationError("evidence.facts.frozen_bar.command_hash", "landed result requires unchanged FrozenBar commandHash", stringFact(facts, "frozen_bar.expected_command_hash"), []string{stringFact(facts, "frozen_bar.command_hash")}, "rerun the exact frozen bar.command or route reverify_required")
-		}
-		if stringFact(facts, "frozen_bar.content_hash") == "" || stringFact(facts, "frozen_bar.content_hash") != stringFact(facts, "frozen_bar.expected_content_hash") {
-			return validationError("evidence.facts.frozen_bar.content_hash", "landed result requires unchanged FrozenBar contentHash", stringFact(facts, "frozen_bar.expected_content_hash"), []string{stringFact(facts, "frozen_bar.content_hash")}, "route reverify_required when the bar content changes")
-		}
-		if boolFact(facts, "bar.changed") {
-			return validationError("evidence.facts.bar.changed", "landed result requires barChanged()==false at the rebased tree", "false", []string{"true"}, "route reverify_required when the frozen bar changes")
+		for _, constraint := range rule.ValueConstraints {
+			expected := constraint.Equals
+			if constraint.EqualsFact != "" {
+				expected = stringFact(facts, constraint.EqualsFact)
+			}
+			if actual := stringFact(facts, constraint.Fact); actual != expected {
+				return validationError("evidence.facts."+constraint.Fact, "settlement fact does not satisfy the declared value constraint", expected, []string{actual}, "supply the template-declared value")
+			}
 		}
 	}
 	return nil
 }
 
-func boolFact(facts map[string]interface{}, key string) bool {
-	v, ok := facts[key]
-	if !ok {
-		return false
+func settleValidationRuleMatches(facts map[string]interface{}, when map[string]string) bool {
+	for fact, expected := range when {
+		if stringFact(facts, fact) != expected {
+			return false
+		}
 	}
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return strings.EqualFold(strings.TrimSpace(t), "true")
-	default:
-		return false
-	}
+	return true
 }
 
-func sourceIdentityForRunTx(tx *sql.Tx, run *claimedRun) (string, string, error) {
-	if strings.TrimSpace(run.SourceCommitSha) != "" {
-		return strings.TrimSpace(run.SourceCommitSha), "", nil
-	}
+func sourceEvidenceForSettleValidation(tx *sql.Tx, tpl *Template, actionSpec ExecutableActionSpec, run *claimedRun) (*Evidence, error) {
 	if strings.TrimSpace(run.SourceEvidenceID) == "" {
-		return "", "", nil
+		return nil, validationError("source", "settlement requires claimed source evidence", "source evidence", nil, "claim a candidate with a source evidence binding")
 	}
-	ev, err := evidenceByIDTx(tx, run.SourceEvidenceID)
+	source, err := evidenceByIDTx(tx, run.SourceEvidenceID)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
-	facts := evidenceFactsMap(*ev)
-	artifact := firstNonEmptyAction(stringFact(facts, "artifact.digest"), ev.ContentHash)
-	return "", artifact, nil
+	if source.InstanceID != run.InstanceID {
+		return nil, validationError("source", "claimed source evidence belongs to a different workflow instance", "same-instance source evidence", []string{source.ID}, "claim a candidate from the current workflow instance")
+	}
+	if actionSpec.SourceBinding == nil {
+		return nil, validationError("source", "settlement contract requires a declared source binding", "source binding", nil, "declare the action source binding in the template")
+	}
+	sourceAction := strings.TrimSpace(actionSpec.SourceBinding.Action)
+	sourceSpec, ok := tpl.ExecutableActions[sourceAction]
+	if !ok {
+		return nil, validationError("source", "settlement source binding references an undeclared action", "declared source action", []string{sourceAction}, "fix the template source binding")
+	}
+	if source.Kind != sourceSpec.ResultEvidenceKind {
+		return nil, validationError("source", "claimed source evidence has the wrong declared kind", sourceSpec.ResultEvidenceKind, []string{source.Kind}, "claim a candidate from the declared source action")
+	}
+	return source, nil
 }
 
 func evidenceByIDTx(tx *sql.Tx, id string) (*Evidence, error) {
@@ -1596,26 +1563,29 @@ func (s *Service) CompleteAction(p CompleteActionParams) (*ActionCompleteResult,
 	if err != nil {
 		return nil, err
 	}
+	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
+	if err != nil {
+		return nil, err
+	}
+	actionSpec, hasActionSpec := tpl.ExecutableActions[run.Action]
 
 	result := &ActionCompleteResult{}
 	if p.Evidence != nil {
 		defaultKind := actionDefaultEvidenceKind(run.Action)
-		if tpl, _, tplErr := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion); tplErr == nil {
-			if spec, ok := tpl.ExecutableActions[run.Action]; ok && strings.TrimSpace(spec.ResultEvidenceKind) != "" {
-				defaultKind = strings.TrimSpace(spec.ResultEvidenceKind)
-			}
+		if hasActionSpec && strings.TrimSpace(actionSpec.ResultEvidenceKind) != "" {
+			defaultKind = strings.TrimSpace(actionSpec.ResultEvidenceKind)
 		}
 		kind := strings.TrimSpace(p.Evidence.Kind)
 		if kind == "" {
 			kind = defaultKind
 		}
-		if run.Action == "landing" && kind == "landing_result" {
+		if hasActionSpec && kind == strings.TrimSpace(actionSpec.ResultEvidenceKind) {
 			if err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 				claimed, err := claimedRunByIDTx(tx, run.ID)
 				if err != nil {
 					return err
 				}
-				return validateSettleEvidenceFacts(tx, claimed, kind, p.Evidence)
+				return validateSettleEvidenceFacts(tx, tpl, actionSpec, claimed, p.Evidence)
 			}); err != nil {
 				return nil, err
 			}

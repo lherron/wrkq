@@ -78,6 +78,7 @@
             "enum": ["done", "blocked", "operator_required"]
           },
           "commit.sha": { "type": "string" },
+          "change.id": { "type": "string" },
           "artifact.digest": { "type": "string" },
           "git.clean": { "type": "boolean" },
           "base.sha": { "type": "string" },
@@ -99,8 +100,10 @@
             "type": "string",
             "enum": ["verified", "failed", "blocked", "operator_required"]
           },
+          "source.evidence_id": { "type": "string" },
           "source.commit.sha": { "type": "string" },
           "verified.commit.sha": { "type": "string" },
+          "verified.change.id": { "type": "string" },
           "artifact.digest": { "type": "string" },
           "install.exit": { "type": "integer" },
           "smoke.exit": { "type": "integer" },
@@ -450,6 +453,18 @@
       "handlerContract": "praesidium.wrkq-simple-task.implement@1",
       "workspaceMode": "exclusive",
       "sideEffectClasses": ["worktree.write", "git.commit"],
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": { "result": "done" },
+            "requiredFacts": ["commit.sha", "change.id", "git.clean", "base.sha", "postcondition", "repair.turns"],
+            "valueConstraints": [
+              { "fact": "postcondition", "equals": "git_committed_clean" },
+              { "fact": "git.clean", "equals": "true" }
+            ]
+          }
+        ]
+      },
       "continuation": {
         "next": "verify",
         "attentionScope": "workspace",
@@ -471,7 +486,26 @@
       "sourceBinding": {
         "kind": "previous_action",
         "action": "implement",
-        "requiredFacts": ["commit.sha"]
+        "requiredFacts": ["commit.sha", "change.id"],
+        "bindFields": {
+          "sourceIdentity": "change.id"
+        }
+      },
+      "settleValidation": {
+        "rules": [
+          {
+            "identityFact": "verified.change.id",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": ["source.evidence_id", "source.commit.sha", "verified.commit.sha", "verified.change.id", "git.clean"],
+            "echoFields": [
+              { "fact": "source.commit.sha", "sourceFact": "commit.sha" },
+              { "fact": "verified.commit.sha", "sourceFact": "commit.sha" }
+            ],
+            "valueConstraints": [
+              { "fact": "git.clean", "equals": "true" }
+            ]
+          }
+        ]
       },
       "rank": 30
     }

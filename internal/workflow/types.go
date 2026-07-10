@@ -33,20 +33,45 @@ type Template struct {
 }
 
 type ExecutableActionSpec struct {
-	ID                 string             `json:"id,omitempty"`
-	Description        string             `json:"description,omitempty"`
-	From               *State             `json:"from,omitempty"`
-	Role               string             `json:"role"`
-	Transition         string             `json:"transition"`
-	ResultEvidenceKind string             `json:"resultEvidenceKind"`
-	HandlerContract    string             `json:"handlerContract,omitempty"`
-	WorkClass          string             `json:"workClass,omitempty"`
-	RiskClass          string             `json:"riskClass,omitempty"`
-	WorkspaceMode      string             `json:"workspaceMode,omitempty"`
-	SideEffectClasses  []string           `json:"sideEffectClasses,omitempty"`
-	SourceBinding      *SourceBindingSpec `json:"sourceBinding,omitempty"`
-	Continuation       *ContinuationSpec  `json:"continuation,omitempty"`
-	Rank               int                `json:"rank,omitempty"`
+	ID                 string                `json:"id,omitempty"`
+	Description        string                `json:"description,omitempty"`
+	From               *State                `json:"from,omitempty"`
+	Role               string                `json:"role"`
+	Transition         string                `json:"transition"`
+	ResultEvidenceKind string                `json:"resultEvidenceKind"`
+	HandlerContract    string                `json:"handlerContract,omitempty"`
+	WorkClass          string                `json:"workClass,omitempty"`
+	RiskClass          string                `json:"riskClass,omitempty"`
+	WorkspaceMode      string                `json:"workspaceMode,omitempty"`
+	SideEffectClasses  []string              `json:"sideEffectClasses,omitempty"`
+	SourceBinding      *SourceBindingSpec    `json:"sourceBinding,omitempty"`
+	SettleValidation   *SettleValidationSpec `json:"settleValidation,omitempty"`
+	Continuation       *ContinuationSpec     `json:"continuation,omitempty"`
+	Rank               int                   `json:"rank,omitempty"`
+}
+
+type SettleValidationSpec struct {
+	Rules []SettleValidationRule `json:"rules,omitempty"`
+}
+
+type SettleValidationRule struct {
+	WhenFacts        map[string]string       `json:"whenFacts,omitempty"`
+	IdentityFact     string                  `json:"identityFact,omitempty"`
+	LinkageFact      string                  `json:"linkageFact,omitempty"`
+	RequiredFacts    []string                `json:"requiredFacts,omitempty"`
+	EchoFields       []SettleEchoField       `json:"echoFields,omitempty"`
+	ValueConstraints []SettleValueConstraint `json:"valueConstraints,omitempty"`
+}
+
+type SettleEchoField struct {
+	Fact       string `json:"fact"`
+	SourceFact string `json:"sourceFact"`
+}
+
+type SettleValueConstraint struct {
+	Fact       string `json:"fact"`
+	Equals     string `json:"equals,omitempty"`
+	EqualsFact string `json:"equalsFact,omitempty"`
 }
 
 type SourceBindingSpec struct {

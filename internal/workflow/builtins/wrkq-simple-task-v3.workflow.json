@@ -86,6 +86,7 @@
             "enum": ["done", "blocked", "operator_required"]
           },
           "commit.sha": { "type": "string" },
+          "change.id": { "type": "string" },
           "artifact.digest": { "type": "string" },
           "git.clean": { "type": "boolean" },
           "base.sha": { "type": "string" },
@@ -107,8 +108,10 @@
             "type": "string",
             "enum": ["verified", "pr_verified", "failed", "blocked", "operator_required"]
           },
+          "source.evidence_id": { "type": "string" },
           "source.commit.sha": { "type": "string" },
           "verified.commit.sha": { "type": "string" },
+          "verified.change.id": { "type": "string" },
           "branch.head.sha": { "type": "string" },
           "bar.hash": { "type": "string" },
           "pr.url": { "type": "string" },
@@ -125,7 +128,8 @@
       "facts": {
         "required": [
           "result",
-          "source.verify.evidence_id",
+          "source.evidence_id",
+          "source.change.id",
           "source.branch.head.sha",
           "source.bar.hash",
           "source.pr.url",
@@ -145,6 +149,8 @@
             "type": "string",
             "enum": ["landed", "reverify_required", "operator_required"]
           },
+          "source.evidence_id": { "type": "string" },
+          "source.change.id": { "type": "string" },
           "source.verify.evidence_id": { "type": "string" },
           "source.branch.head.sha": { "type": "string" },
           "source.bar.hash": { "type": "string" },
@@ -568,6 +574,18 @@
       "handlerContract": "praesidium.wrkq-simple-task.implement@1",
       "workspaceMode": "exclusive",
       "sideEffectClasses": ["worktree.write", "git.commit"],
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": { "result": "done" },
+            "requiredFacts": ["commit.sha", "change.id", "git.clean", "base.sha", "postcondition", "repair.turns"],
+            "valueConstraints": [
+              { "fact": "postcondition", "equals": "git_committed_clean" },
+              { "fact": "git.clean", "equals": "true" }
+            ]
+          }
+        ]
+      },
       "continuation": {
         "next": "verify",
         "attentionScope": "workspace",
@@ -589,7 +607,26 @@
       "sourceBinding": {
         "kind": "previous_action",
         "action": "implement",
-        "requiredFacts": ["commit.sha"]
+        "requiredFacts": ["commit.sha", "change.id"],
+        "bindFields": {
+          "sourceIdentity": "change.id"
+        }
+      },
+      "settleValidation": {
+        "rules": [
+          {
+            "identityFact": "verified.change.id",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": ["source.evidence_id", "source.commit.sha", "verified.commit.sha", "verified.change.id", "git.clean"],
+            "echoFields": [
+              { "fact": "source.commit.sha", "sourceFact": "commit.sha" },
+              { "fact": "verified.commit.sha", "sourceFact": "commit.sha" }
+            ],
+            "valueConstraints": [
+              { "fact": "git.clean", "equals": "true" }
+            ]
+          }
+        ]
       },
       "rank": 30
     },
@@ -607,11 +644,34 @@
       "sourceBinding": {
         "kind": "previous_action",
         "action": "verify",
-        "requiredFacts": ["result", "branch.head.sha", "bar.hash", "pr.url"],
+        "requiredFacts": ["result", "verified.change.id", "branch.head.sha", "bar.hash", "pr.url"],
         "bindFields": {
           "commitSha": "branch.head.sha",
+          "sourceIdentity": "verified.change.id",
           "artifactRef": "bar.hash"
         }
+      },
+      "settleValidation": {
+        "rules": [
+          {
+            "identityFact": "source.change.id",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": ["source.evidence_id", "source.change.id", "source.branch.head.sha", "source.bar.hash", "source.pr.url", "rebased.head.sha", "merged.main.sha", "pr.url", "rebase.range", "frozen_bar.result", "frozen_bar.command_hash", "frozen_bar.expected_command_hash", "frozen_bar.content_hash", "frozen_bar.expected_content_hash", "bar.changed"],
+            "echoFields": [
+              { "fact": "source.change.id", "sourceFact": "verified.change.id" },
+              { "fact": "source.branch.head.sha", "sourceFact": "branch.head.sha" },
+              { "fact": "source.bar.hash", "sourceFact": "bar.hash" },
+              { "fact": "source.pr.url", "sourceFact": "pr.url" },
+              { "fact": "pr.url", "sourceFact": "pr.url" }
+            ],
+            "valueConstraints": [
+              { "fact": "frozen_bar.result", "equals": "passed" },
+              { "fact": "frozen_bar.command_hash", "equalsFact": "frozen_bar.expected_command_hash" },
+              { "fact": "frozen_bar.content_hash", "equalsFact": "frozen_bar.expected_content_hash" },
+              { "fact": "bar.changed", "equals": "false" }
+            ]
+          }
+        ]
       },
       "rank": 40
     }

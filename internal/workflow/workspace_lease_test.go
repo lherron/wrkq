@@ -108,7 +108,7 @@ func TestWorkspaceBoundActionSettleRequiresCurrentWorkspaceToken(t *testing.T) {
 		WorkspaceToken:      "wrong",
 		WorkspaceGeneration: impl.Binding.Workspace.OwnerGeneration,
 		Result:              "completed",
-		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
+		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
 	})
 	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
 		t.Fatalf("wrong workspace settle error = %v, want lease conflict", err)
@@ -126,7 +126,7 @@ func TestWorkspaceBoundActionSettleRequiresCurrentWorkspaceToken(t *testing.T) {
 		WorkspaceToken:      impl.Binding.Workspace.LeaseToken,
 		WorkspaceGeneration: impl.Binding.Workspace.OwnerGeneration,
 		Result:              "completed",
-		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
+		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
 	})
 	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
 		t.Fatalf("stale workspace settle error = %v, want lease conflict", err)

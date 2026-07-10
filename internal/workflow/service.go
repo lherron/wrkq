@@ -325,10 +325,82 @@ func validateExecutableActions(tpl *Template, stateSet map[string]bool, transiti
 		} else if spec.SourceBinding != nil {
 			errs = append(errs, validateSourceBinding(tpl, label, spec.SourceBinding)...)
 		}
+		errs = append(errs, validateSettleValidation(tpl, label, spec)...)
 		switch strings.TrimSpace(spec.WorkspaceMode) {
 		case "", "none", "read-only", "exclusive":
 		default:
 			errs = append(errs, fmt.Sprintf("%s workspaceMode must be none, read-only, or exclusive", label))
+		}
+	}
+	return errs
+}
+
+func validateSettleValidation(tpl *Template, label string, spec ExecutableActionSpec) []string {
+	if spec.SettleValidation == nil {
+		return nil
+	}
+	var errs []string
+	resultKind, ok := tpl.EvidenceKinds[spec.ResultEvidenceKind]
+	if !ok || resultKind.Facts == nil || resultKind.Facts.Properties == nil {
+		return []string{fmt.Sprintf("%s settlement validation requires declared result evidence facts", label)}
+	}
+	declaresResultFact := func(fact string) bool {
+		_, ok := resultKind.Facts.Properties[fact]
+		return ok
+	}
+	var sourceKind *KindSpec
+	if spec.SourceBinding != nil {
+		sourceAction := strings.TrimSpace(spec.SourceBinding.Action)
+		if sourceSpec, ok := tpl.ExecutableActions[sourceAction]; ok {
+			if kind, ok := tpl.EvidenceKinds[sourceSpec.ResultEvidenceKind]; ok {
+				sourceKind = &kind
+			}
+		}
+	}
+	for i, rule := range spec.SettleValidation.Rules {
+		ruleLabel := fmt.Sprintf("%s settleValidation.rules[%d]", label, i)
+		for fact := range rule.WhenFacts {
+			if !declaresResultFact(fact) {
+				errs = append(errs, fmt.Sprintf("%s whenFacts fact %s is not declared on %s", ruleLabel, fact, spec.ResultEvidenceKind))
+			}
+		}
+		for _, fact := range append(append([]string{}, rule.RequiredFacts...), rule.IdentityFact, rule.LinkageFact) {
+			fact = strings.TrimSpace(fact)
+			if fact == "" {
+				continue
+			}
+			if !declaresResultFact(fact) {
+				errs = append(errs, fmt.Sprintf("%s fact %s is not declared on %s", ruleLabel, fact, spec.ResultEvidenceKind))
+			}
+		}
+		if (rule.IdentityFact != "" || rule.LinkageFact != "" || len(rule.EchoFields) > 0) && spec.SourceBinding == nil {
+			errs = append(errs, fmt.Sprintf("%s source-derived checks require sourceBinding", ruleLabel))
+		}
+		for j, echo := range rule.EchoFields {
+			echoLabel := fmt.Sprintf("%s echoFields[%d]", ruleLabel, j)
+			if !declaresResultFact(strings.TrimSpace(echo.Fact)) {
+				errs = append(errs, fmt.Sprintf("%s fact %s is not declared on %s", echoLabel, echo.Fact, spec.ResultEvidenceKind))
+			}
+			if sourceKind == nil || sourceKind.Facts == nil || sourceKind.Facts.Properties == nil {
+				errs = append(errs, fmt.Sprintf("%s source fact %s is not declared by the source action", echoLabel, echo.SourceFact))
+			} else if _, ok := sourceKind.Facts.Properties[strings.TrimSpace(echo.SourceFact)]; !ok {
+				errs = append(errs, fmt.Sprintf("%s source fact %s is not declared by the source action", echoLabel, echo.SourceFact))
+			}
+		}
+		for j, constraint := range rule.ValueConstraints {
+			constraintLabel := fmt.Sprintf("%s valueConstraints[%d]", ruleLabel, j)
+			if !declaresResultFact(strings.TrimSpace(constraint.Fact)) {
+				errs = append(errs, fmt.Sprintf("%s fact %s is not declared on %s", constraintLabel, constraint.Fact, spec.ResultEvidenceKind))
+			}
+			if constraint.Equals == "" && constraint.EqualsFact == "" {
+				errs = append(errs, fmt.Sprintf("%s requires equals or equalsFact", constraintLabel))
+			}
+			if constraint.Equals != "" && constraint.EqualsFact != "" {
+				errs = append(errs, fmt.Sprintf("%s must not set both equals and equalsFact", constraintLabel))
+			}
+			if constraint.EqualsFact != "" && !declaresResultFact(strings.TrimSpace(constraint.EqualsFact)) {
+				errs = append(errs, fmt.Sprintf("%s equalsFact %s is not declared on %s", constraintLabel, constraint.EqualsFact, spec.ResultEvidenceKind))
+			}
 		}
 	}
 	return errs

@@ -27,6 +27,9 @@ func TestBuiltinSimpleTaskV2ExecutableActionsValidate(t *testing.T) {
 	if got := tpl.ExecutableActions["verify"].SourceBinding.Action; got != "implement" {
 		t.Fatalf("verify source action = %q, want implement", got)
 	}
+	if got := tpl.ExecutableActions["verify"].SourceBinding.BindFields.SourceIdentity; got != "change.id" {
+		t.Fatalf("verify source identity binding = %q, want change.id", got)
+	}
 	assertV2EffectState(t, tpl, "triage_complete", "ready", "open")
 	assertV2EffectState(t, tpl, "implement_complete", "blocked", "blocked")
 	assertV2EffectState(t, tpl, "verify_complete", "verified", "completed")
@@ -77,6 +80,7 @@ func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
 	}
 	if landing.SourceBinding.Action != "verify" || landing.SourceBinding.BindFields == nil ||
 		landing.SourceBinding.BindFields.CommitSha != "branch.head.sha" ||
+		landing.SourceBinding.BindFields.SourceIdentity != "verified.change.id" ||
 		landing.SourceBinding.BindFields.ArtifactRef != "bar.hash" {
 		t.Fatalf("landing source binding = %+v", landing.SourceBinding)
 	}
@@ -209,6 +213,15 @@ func TestValidateExecutableActionsRejectsMalformedReferences(t *testing.T) {
 				src["bindFields"] = map[string]any{"sourceIdentity": "missing.fact"}
 			},
 			wantErr: "executable action verify sourceBinding bindFields.sourceIdentity fact missing.fact is not declared on implement_result",
+		},
+		{
+			name: "settlement validation fact impossible",
+			mutate: func(doc map[string]any) {
+				action(doc, "verify")["settleValidation"] = map[string]any{
+					"rules": []any{map[string]any{"identityFact": "missing.fact"}},
+				}
+			},
+			wantErr: "executable action verify settleValidation.rules[0] fact missing.fact is not declared on verify_result",
 		},
 	}
 
