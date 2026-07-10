@@ -173,6 +173,51 @@
       }
     },
     {
+      "id": "simple-task-v4.direct-land-complete-outcomes",
+      "contractSurface": "wrkq-simple-task@4 direct_land_complete",
+      "title": "Leaf direct landing classifies landed, push rejection, and operator-required outcomes",
+      "engine": {
+        "workflow": { "id": "wrkq-simple-task", "version": "4" },
+        "transition": "direct_land_complete",
+        "outcomes": [
+          {
+            "id": "landed",
+            "evidence": {
+              "kind": "landing_result",
+              "facts": { "result": "landed", "workflow.lane": "leaf" }
+            },
+            "to": { "status": "closed", "phase": "done" },
+            "taskState": "completed"
+          },
+          {
+            "id": "push_rejected",
+            "evidence": {
+              "kind": "landing_result",
+              "facts": { "result": "push_rejected", "workflow.lane": "leaf" }
+            },
+            "to": { "status": "active", "phase": "gate" }
+          },
+          {
+            "id": "operator_required",
+            "evidence": {
+              "kind": "landing_result",
+              "facts": { "result": "operator_required", "workflow.lane": "leaf" }
+            },
+            "to": { "status": "waiting", "phase": "operator_required" },
+            "taskState": "blocked"
+          }
+        ]
+      },
+      "runner": {
+        "landingResults": ["landed", "push_rejected", "operator_required"],
+        "operatorRequired": {
+          "workflowState": { "status": "waiting", "phase": "operator_required" },
+          "taskState": "blocked",
+          "retriesAutomatically": false
+        }
+      }
+    },
+    {
       "id": "pr-publish.create-on-fresh-branch",
       "contractSurface": "PR publish idempotency",
       "title": "Fresh branch publication creates a PR and records branch-head facts",
