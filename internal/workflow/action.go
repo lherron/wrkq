@@ -3,6 +3,7 @@ package workflow
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -1793,7 +1794,11 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 			if ambiguous {
 				status = "operator_required"
 			}
-			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.PrincipalRef), now); err != nil {
+			workspaceLeaseRelease, err := releaseReapedWorkspaceLeaseTx(tx, &reaped[i], now)
+			if err != nil {
+				return err
+			}
+			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.PrincipalRef), now, workspaceLeaseRelease); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`UPDATE workflow_runs SET status = ?, completed_at = ?, terminal_result = ?, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL WHERE id = ? AND status = 'active'`, status, now, reason, reaped[i].ID); err != nil {
@@ -2114,7 +2119,47 @@ func reapRequiresOperatorTx(tx *sql.Tx, run *Run) (bool, error) {
 	return len(spec.SideEffectClasses) > 0, nil
 }
 
-func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now string) error {
+func releaseReapedWorkspaceLeaseTx(tx *sql.Tx, run *Run, now string) (string, error) {
+	var workspaceRef string
+	if err := tx.QueryRow(`SELECT COALESCE(workspace_ref,'') FROM workflow_runs WHERE id = ?`, run.ID).Scan(&workspaceRef); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(workspaceRef) == "" {
+		return "", nil
+	}
+
+	var currentOwner string
+	err := tx.QueryRow(`SELECT COALESCE(lease_owner,'') FROM workflow_workspace_leases WHERE canonical_root = ?`, workspaceRef).Scan(&currentOwner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "missing", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if run.LeaseOwner == "" || currentOwner != run.LeaseOwner {
+		return "owner_mismatch", nil
+	}
+
+	result, err := tx.Exec(`
+		UPDATE workflow_workspace_leases
+		SET lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
+		    heartbeat_at = NULL, released_at = ?
+		WHERE canonical_root = ? AND lease_owner = ?
+	`, now, workspaceRef, run.LeaseOwner)
+	if err != nil {
+		return "", err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if updated != 1 {
+		return "owner_mismatch", nil
+	}
+	return "released", nil
+}
+
+func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now, workspaceLeaseRelease string) error {
 	key := "wrkf-action:" + run.ID + ":reap-failure"
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM workflow_evidence_idempotency WHERE instance_id = ? AND idempotency_key = ?`, run.InstanceID, key).Scan(&count); err != nil {
@@ -2138,6 +2183,12 @@ func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now string
 		"leaseExpiresAt": run.LeaseExpiresAt,
 		"heartbeatAt":    run.HeartbeatAt,
 		"reason":         reason,
+	}
+	if run.ExternalRunRef != "" {
+		data["externalRunRef"] = run.ExternalRunRef
+	}
+	if workspaceLeaseRelease != "" {
+		data["workspaceLeaseRelease"] = workspaceLeaseRelease
 	}
 	dataJSON, _ := json.Marshal(data)
 	var taskEtag, taskHash string

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +182,68 @@ func TestWorkspaceBoundActionReapOperatorRequiredEvidence(t *testing.T) {
 	ev := settledFailureEvidenceForRun(t, svc, impl.Binding.Run.ID)
 	if ev == nil || ev.Kind != "failure_result" || !strings.Contains(ev.Summary, "action lease expired") {
 		t.Fatalf("reap evidence = %+v, want failure_result action lease evidence", ev)
+	}
+	lease, err := svc.ShowWorkspace(ShowWorkspaceParams{WorkspaceRoot: root})
+	if err != nil {
+		t.Fatalf("ShowWorkspace: %v", err)
+	}
+	if lease.LeaseOwner != "" || lease.LeaseExpiresAt != "" || lease.ReleasedAt == "" {
+		t.Fatalf("reap did not release matching workspace lease: %+v", lease)
+	}
+	var facts map[string]interface{}
+	if err := json.Unmarshal(ev.Data, &facts); err != nil {
+		t.Fatalf("unmarshal reap evidence facts: %v", err)
+	}
+	if got := facts["workspaceLeaseRelease"]; got != "released" {
+		t.Fatalf("workspaceLeaseRelease = %#v, want released", got)
+	}
+}
+
+func TestWorkspaceBoundActionReapPreservesNewerWorkspaceOwner(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+	root := t.TempDir()
+	impl, err := svc.ClaimAction(ClaimActionParams{
+		Task:          taskUUID,
+		RunnerID:      "runner-dead",
+		AgentRef:      "agent:impl",
+		Prefer:        ActionClaimPrefer{Action: "implement"},
+		LeaseMs:       300000,
+		WorkspaceRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("ClaimAction implement with workspace: %v", err)
+	}
+	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
+	expireWorkspaceLeaseForTest(t, svc, root)
+	newer, err := svc.ClaimWorkspace(ClaimWorkspaceParams{WorkspaceRoot: root, OwnerID: "runner-new", LeaseMs: 300000})
+	if err != nil {
+		t.Fatalf("ClaimWorkspace newer owner: %v", err)
+	}
+
+	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z"})
+	if err != nil {
+		t.Fatalf("ReapActions: %v", err)
+	}
+	if len(reaped.Items) != 1 || reaped.Items[0].Status != "operator_required" {
+		t.Fatalf("workspace-bound reap = %+v, want operator_required", reaped.Items)
+	}
+	lease, err := svc.ShowWorkspace(ShowWorkspaceParams{WorkspaceRoot: root})
+	if err != nil {
+		t.Fatalf("ShowWorkspace: %v", err)
+	}
+	if lease.LeaseOwner != newer.LeaseOwner || lease.OwnerGeneration != newer.OwnerGeneration || lease.LeaseExpiresAt == "" {
+		t.Fatalf("reap clobbered newer workspace lease: got=%+v newer=%+v", lease, newer)
+	}
+	ev := settledFailureEvidenceForRun(t, svc, impl.Binding.Run.ID)
+	var facts map[string]interface{}
+	if err := json.Unmarshal(ev.Data, &facts); err != nil {
+		t.Fatalf("unmarshal reap evidence facts: %v", err)
+	}
+	if got := facts["workspaceLeaseRelease"]; got != "owner_mismatch" {
+		t.Fatalf("workspaceLeaseRelease = %#v, want owner_mismatch", got)
 	}
 }
 
