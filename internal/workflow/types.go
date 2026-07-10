@@ -84,7 +84,6 @@ type SourceBindingSpec struct {
 type SourceBindFields struct {
 	SourceRunID      string `json:"sourceRunId,omitempty"`
 	SourceEvidenceID string `json:"sourceEvidenceId,omitempty"`
-	CommitSha        string `json:"commitSha,omitempty"`
 	SourceIdentity   string `json:"sourceIdentity,omitempty"`
 	ArtifactRef      string `json:"artifactRef,omitempty"`
 }
@@ -601,7 +600,6 @@ type ActionCandidate struct {
 type ActionSourceBinding struct {
 	SourceRunID      string `json:"sourceRunId"`
 	SourceEvidenceID string `json:"sourceEvidenceId,omitempty"`
-	CommitSha        string `json:"commitSha,omitempty"`
 	SourceIdentity   string `json:"sourceIdentity,omitempty"`
 	ArtifactRef      string `json:"artifactRef,omitempty"`
 }

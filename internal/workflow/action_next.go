@@ -202,19 +202,17 @@ func resolveActionCandidateSource(q queryer, tpl *Template, ev []Evidence, bindi
 		if missing := missingRequiredFacts(facts, required); len(missing) > 0 {
 			continue
 		}
-		commit := boundSourceFact(facts, binding, "commitSha", "commit.sha")
 		sourceIdentity := boundSourceFact(facts, binding, "sourceIdentity", "")
 		artifact := boundSourceFact(facts, binding, "artifactRef", "artifact.digest")
 		if artifact == "" {
 			artifact = e.ContentHash
 		}
-		if commit == "" && artifact == "" {
-			return nil, fmt.Sprintf("source evidence %s lacks commit.sha or artifact.digest", e.ID)
+		if sourceIdentity == "" {
+			return nil, fmt.Sprintf("source evidence %s lacks source identity", e.ID)
 		}
 		return &ActionSourceBinding{
 			SourceRunID:      e.RunID,
 			SourceEvidenceID: e.ID,
-			CommitSha:        commit,
 			SourceIdentity:   sourceIdentity,
 			ArtifactRef:      artifact,
 		}, ""
@@ -229,8 +227,6 @@ func boundSourceFact(facts map[string]interface{}, binding *SourceBindingSpec, f
 	path := ""
 	if binding != nil && binding.BindFields != nil {
 		switch field {
-		case "commitSha":
-			path = strings.TrimSpace(binding.BindFields.CommitSha)
 		case "sourceIdentity":
 			path = strings.TrimSpace(binding.BindFields.SourceIdentity)
 		case "artifactRef":
@@ -264,11 +260,7 @@ func runActionByIDQuery(q queryer, runID string) (string, error) {
 
 func semanticActionKey(inst *Instance, actionID string, source *ActionSourceBinding) string {
 	if source != nil {
-		identity := source.CommitSha
-		if identity == "" {
-			identity = source.ArtifactRef
-		}
-		return fmt.Sprintf("%s:%s:%s:%s", actionID, inst.ID, source.SourceRunID, identity)
+		return fmt.Sprintf("%s:%s:%s:%s", actionID, inst.ID, source.SourceRunID, source.SourceIdentity)
 	}
 	return fmt.Sprintf("%s:%s:r%d", actionID, inst.ID, inst.Revision)
 }

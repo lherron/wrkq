@@ -619,7 +619,7 @@ func TestSettleActionV3LandingGateMatrix(t *testing.T) {
 			verify := prepareV3AwaitingMerge(t, svc, taskUUID)
 			landing := claimActionForTest(t, svc, taskUUID, "landing")
 			if tc.clearSource {
-				if _, err := svc.db.Exec(`UPDATE workflow_runs SET source_evidence_id = NULL, source_commit_sha = NULL WHERE id = ?`, landing.Binding.Run.ID); err != nil {
+				if _, err := svc.db.Exec(`UPDATE workflow_runs SET source_evidence_id = NULL WHERE id = ?`, landing.Binding.Run.ID); err != nil {
 					t.Fatalf("clear landing source: %v", err)
 				}
 			}

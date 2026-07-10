@@ -79,7 +79,6 @@ func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
 		t.Fatalf("landing action = %+v", landing)
 	}
 	if landing.SourceBinding.Action != "verify" || landing.SourceBinding.BindFields == nil ||
-		landing.SourceBinding.BindFields.CommitSha != "branch.head.sha" ||
 		landing.SourceBinding.BindFields.SourceIdentity != "verified.change.id" ||
 		landing.SourceBinding.BindFields.ArtifactRef != "bar.hash" {
 		t.Fatalf("landing source binding = %+v", landing.SourceBinding)

@@ -646,7 +646,6 @@
         "action": "verify",
         "requiredFacts": ["result", "verified.change.id", "branch.head.sha", "bar.hash", "pr.url"],
         "bindFields": {
-          "commitSha": "branch.head.sha",
           "sourceIdentity": "verified.change.id",
           "artifactRef": "bar.hash"
         }

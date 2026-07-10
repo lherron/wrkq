@@ -98,7 +98,7 @@ func TestActionNextVerifyCandidateUsesExactImplementEvidenceSource(t *testing.T)
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
 	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
-	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"commit-abc123","change.id":"change-v1:opaque-identity","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
 	if impl.Evidence == nil {
 		t.Fatalf("implement completion missing evidence")
 	}
@@ -132,14 +132,14 @@ func TestActionNextVerifyCandidateUsesExactImplementEvidenceSource(t *testing.T)
 	if c.Source.SourceEvidenceID != impl.Evidence.ID {
 		t.Fatalf("sourceEvidenceId = %q, want %q", c.Source.SourceEvidenceID, impl.Evidence.ID)
 	}
-	if c.Source.CommitSha != "abc123" {
-		t.Fatalf("commitSha = %q, want abc123", c.Source.CommitSha)
+	if c.Source.SourceIdentity != "change-v1:opaque-identity" {
+		t.Fatalf("sourceIdentity = %q, want change-v1:opaque-identity", c.Source.SourceIdentity)
 	}
-	if c.Source.SourceIdentity != "change-v1:abc123" {
-		t.Fatalf("sourceIdentity = %q, want change-v1:abc123", c.Source.SourceIdentity)
+	if !strings.Contains(c.SemanticActionKey, impl.Run.RunID) || !strings.Contains(c.SemanticActionKey, "change-v1:opaque-identity") {
+		t.Fatalf("semanticActionKey = %q, want implement run id and source identity", c.SemanticActionKey)
 	}
-	if !strings.Contains(c.SemanticActionKey, impl.Run.RunID) || !strings.Contains(c.SemanticActionKey, "abc123") {
-		t.Fatalf("semanticActionKey = %q, want implement run id and commit", c.SemanticActionKey)
+	if strings.Contains(c.SemanticActionKey, "commit-abc123") {
+		t.Fatalf("semanticActionKey used source commit: %q", c.SemanticActionKey)
 	}
 	if strings.Contains(c.SemanticActionKey, "wrong-latest") {
 		t.Fatalf("semanticActionKey used unrelated latest evidence: %q", c.SemanticActionKey)
@@ -192,8 +192,8 @@ func TestActionNextV3LandingCandidateBindsPRVerifiedSource(t *testing.T) {
 	if c.RequiredEvidenceKind != "landing_result" || c.Role != "release_manager" {
 		t.Fatalf("landing candidate = %+v", c)
 	}
-	if c.Source == nil || c.Source.SourceEvidenceID != verified.Evidence.ID || c.Source.CommitSha != "h0" || c.Source.SourceIdentity != "change-v1:h0" || c.Source.ArtifactRef != "bar0" {
-		t.Fatalf("landing source = %+v, want evidence %s H0 h0 change-v1:h0 bar0", c.Source, verified.Evidence.ID)
+	if c.Source == nil || c.Source.SourceEvidenceID != verified.Evidence.ID || c.Source.SourceIdentity != "change-v1:h0" || c.Source.ArtifactRef != "bar0" {
+		t.Fatalf("landing source = %+v, want evidence %s change-v1:h0 bar0", c.Source, verified.Evidence.ID)
 	}
 }
 
