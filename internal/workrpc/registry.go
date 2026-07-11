@@ -195,6 +195,8 @@ var methodCatalog = []string{
 	"wrkf.evidence.list",
 	"wrkf.evidence.show",
 	"wrkf.evidence.suggest",
+	"wrkf.ledger.append",
+	"wrkf.ledger.list",
 	"wrkf.event.query",
 	"wrkf.role.list",
 	"wrkf.role.bind",
@@ -292,6 +294,8 @@ var dtoCatalog = []string{
 	"WrkfEventQueryResult",
 	"WrkfTransitionEvent",
 	"WrkfEvidence",
+	"WrkfLedgerEntry",
+	"WrkfLedgerListResult",
 	"WrkfObligation",
 	"WrkfEffect",
 	"WrkfRun",
@@ -562,6 +566,13 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.evidence.suggest", apiHandler(func(ctx context.Context, p taskTransitionParams) (any, error) {
 		return api.EvidenceSuggest(ctx, p.TaskSelector, p.Transition)
+	}))
+	s.Register("wrkf.ledger.append", apiHandler(func(ctx context.Context, p wrkfapi.LedgerAppendParams) (any, error) {
+		p.WrittenBy = opts.DefaultActor
+		return api.LedgerAppend(ctx, p)
+	}))
+	s.Register("wrkf.ledger.list", apiHandler(func(ctx context.Context, p wrkfapi.LedgerListParams) (any, error) {
+		return api.LedgerList(ctx, p)
 	}))
 	s.Register("wrkf.event.query", apiHandler(func(ctx context.Context, p wrkfapi.EventQueryParams) (any, error) {
 		return api.EventQuery(ctx, p)

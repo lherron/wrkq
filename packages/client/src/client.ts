@@ -188,6 +188,10 @@ class WorkClientImpl implements WorkClient {
       show: (p) => this.call("wrkf.evidence.show", p),
       suggest: (p) => this.call("wrkf.evidence.suggest", p),
     },
+    ledger: {
+      append: (p) => this.call("wrkf.ledger.append", p),
+      list: (p) => this.call("wrkf.ledger.list", p),
+    },
     event: {
       query: (p) => this.call("wrkf.event.query", p ?? {}),
     },

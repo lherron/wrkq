@@ -117,6 +117,7 @@ wrkf.workflow.validate   wrkf.workflow.show   wrkf.workflow.list   wrkf.workflow
 wrkf.task.attach   wrkf.task.inspect   wrkf.task.timeline   wrkf.task.refresh   wrkf.task.syncMeta
 wrkf.next
 wrkf.evidence.add   wrkf.evidence.list   wrkf.evidence.show   wrkf.evidence.suggest
+wrkf.ledger.append  wrkf.ledger.list
 wrkf.obligation.list   wrkf.obligation.show   wrkf.obligation.satisfy   wrkf.obligation.waive   wrkf.obligation.cancel
 wrkf.check.preflight   wrkf.check.run   wrkf.check.show   wrkf.check.list
 wrkf.hook.list   wrkf.hook.show   wrkf.hook.run
@@ -147,11 +148,14 @@ wrkf.workflow.install   wrkf.task.attach   wrkf.task.refresh   wrkf.task.syncMet
 wrkf.evidence.add
 wrkf.obligation.satisfy   wrkf.obligation.waive   wrkf.obligation.cancel
 wrkf.check.run   wrkf.hook.run
+wrkf.ledger.append
 ```
 
 **P1b / P2a — transition (hardened):** `wrkf.transition.apply`
 **P1c / P2b — run (hardened):** `wrkf.run.start   wrkf.run.bindExternal   wrkf.run.finish   wrkf.run.fail`
 **P1d / P2c — effect (hardened):** `wrkf.effect.claim   wrkf.effect.ack   wrkf.effect.fail   wrkf.effect.retry   wrkf.effect.deliver`
+
+**Ledger:** `wrkf.ledger.append` records an immutable, instance-scoped forensic event. It resolves the task to its latest instance (including a settled instance), stamps `seq`, `ts`, and `writtenBy` from the configured canonical `agent:<id>` caller, and accepts open workflow-specific `kind` values plus a free-form JSON body. `wrkf.ledger.list` replays a task in `(instanceId, seq)` order or projects entries about one principal in frozen `(ts, instanceId, seq)` cursor order. There are no ledger mutation methods.
 
 ---
 

@@ -1455,6 +1455,8 @@ wrkf.evidence.add     [required]
 wrkf.evidence.list
 wrkf.evidence.show
 wrkf.evidence.suggest
+wrkf.ledger.append    [required]
+wrkf.ledger.list
 ```
 
 ```ts
@@ -1472,6 +1474,19 @@ interface WrkfEvidenceAddParams {
   idempotencyKey?: string;
 }
 ```
+
+#### Ledger
+
+```
+wrkf.ledger.append    [required]
+wrkf.ledger.list
+```
+
+`ledger.append` accepts `{ taskId, kind, aboutPrincipalRef, body? }`. The server stamps
+`seq`, `ts`, and `writtenBy` from its resolved canonical caller; `writtenBy` is not an
+input field. `ledger.list` accepts `{ taskId?, aboutPrincipalRef?, kind?, since?, until?,
+limit?, cursor? }`. Task replay is `(instanceId, seq)` ascending. Cross-instance projections
+use the opaque cursor for `(ts, instanceId, seq)` ascending and require `aboutPrincipalRef`.
 
 `runId` must be persisted to the evidence row and returned in the evidence DTO.
 
