@@ -118,7 +118,7 @@ func TestWrkfActionSettleWorkspaceFenceRPC(t *testing.T) {
 			"workspaceToken": "wrong", "workspaceGeneration": workspace["ownerGeneration"],
 			"result": "completed",
 			"evidence": map[string]any{"summary": "bad", "facts": map[string]any{
-				"result": "done", "commit.sha": "abc123", "git.clean": true,
+				"result": "done", "commit.sha": "abc123", "change.id": "change-v1:abc123", "git.clean": true,
 				"base.sha": "base000", "postcondition": "git_committed_clean", "repair.turns": 0,
 			}},
 		}),
@@ -133,7 +133,7 @@ func TestWrkfActionSettleWorkspaceFenceRPC(t *testing.T) {
 			"workspaceToken": workspace["leaseToken"], "workspaceGeneration": workspace["ownerGeneration"],
 			"result": "completed",
 			"evidence": map[string]any{"summary": "implemented", "facts": map[string]any{
-				"result": "done", "commit.sha": "abc123", "git.clean": true,
+				"result": "done", "commit.sha": "abc123", "change.id": "change-v1:abc123", "git.clean": true,
 				"base.sha": "base000", "postcondition": "git_committed_clean", "repair.turns": 0,
 			}},
 		}),

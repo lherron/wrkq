@@ -19,7 +19,7 @@ package workrpc_test
 
 import (
 	"database/sql"
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 
@@ -187,6 +187,7 @@ func TestWrkfActionNextV2CandidatesAndSourceBinding(t *testing.T) {
 				"facts": map[string]any{
 					"result":        "done",
 					"commit.sha":    "abc123",
+					"change.id":     "change-v1:abc123",
 					"git.clean":     true,
 					"base.sha":      "base000",
 					"postcondition": "git_committed_clean",
@@ -207,12 +208,19 @@ func TestWrkfActionNextV2CandidatesAndSourceBinding(t *testing.T) {
 		t.Fatalf("verify candidate = %#v", verifyCandidate)
 	}
 	source, _ := verifyCandidate["source"].(map[string]any)
-	if source == nil || source["sourceRunId"] != implRun || source["commitSha"] != "abc123" {
-		t.Fatalf("verify source = %#v, want run %s commit abc123", source, implRun)
+	// Post-§2.3: the source binding surfaces the lane-computed change identity
+	// (bindFields.sourceIdentity = change.id), not the dropped commitSha authority.
+	if source == nil || source["sourceRunId"] != implRun || source["sourceIdentity"] != "change-v1:abc123" {
+		t.Fatalf("verify source = %#v, want run %s identity change-v1:abc123", source, implRun)
 	}
+	// semanticActionKey identifies the action occurrence by instance revision and
+	// no longer embeds the source run/commit (see semanticActionKey in action_next.go).
+	instanceID, _ := verifyCandidate["instanceId"].(string)
+	rev, _ := verifyCandidate["expectedStateRevision"].(float64)
+	wantKey := fmt.Sprintf("verify:%s:r%d", instanceID, int64(rev))
 	key, _ := verifyCandidate["semanticActionKey"].(string)
-	if !strings.Contains(key, implRun) || !strings.Contains(key, "abc123") {
-		t.Fatalf("semanticActionKey = %q, want run id and commit", key)
+	if key != wantKey {
+		t.Fatalf("semanticActionKey = %q, want action occurrence %q", key, wantKey)
 	}
 }
 
@@ -306,6 +314,7 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	actRPCSettle(t, dbPath, impl, map[string]any{
 		"result":        "done",
 		"commit.sha":    "abc123",
+		"change.id":     "change-v1:abc123",
 		"git.clean":     true,
 		"base.sha":      "base000",
 		"postcondition": "git_committed_clean",
@@ -322,9 +331,13 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	verify := actRPCClaim(t, dbPath, taskID, "verify")
 	run, _ := verify["run"].(map[string]any)
 	source, _ := run["source"].(map[string]any)
-	if source == nil || source["commitSha"] != "abc123" {
-		t.Fatalf("verify claim source = %#v, want abc123", source)
+	// Post-§2.3: the claimed verify source is bound by change identity, not commitSha.
+	if source == nil || source["sourceIdentity"] != "change-v1:abc123" {
+		t.Fatalf("verify claim source = %#v, want identity change-v1:abc123", source)
 	}
+	srcEvID, _ := source["sourceEvidenceId"].(string)
+	// The wrong-source verify settle supplies every template-declared fact but echoes
+	// a mismatched source commit; the settle contract's echo check must still reject it.
 	wrong := p3Run(t, dbPath,
 		mkRPC("bad-verify", "wrkf.action.settle", map[string]any{
 			"runId":           run["id"],
@@ -335,8 +348,11 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 				"summary": "verified wrong latest",
 				"facts": map[string]any{
 					"result":              "verified",
+					"context.id":          "context-v1:abc123",
+					"source.evidence_id":  srcEvID,
 					"source.commit.sha":   "wrong-latest",
 					"verified.commit.sha": "wrong-latest",
+					"verified.change.id":  "change-v1:abc123",
 					"git.clean":           true,
 				},
 			},
@@ -347,8 +363,11 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	}
 	final := actRPCSettle(t, dbPath, verify, map[string]any{
 		"result":              "verified",
+		"context.id":          "context-v1:abc123",
+		"source.evidence_id":  srcEvID,
 		"source.commit.sha":   "abc123",
 		"verified.commit.sha": "abc123",
+		"verified.change.id":  "change-v1:abc123",
 		"git.clean":           true,
 	}, "verified")
 	tr, _ := final["transition"].(map[string]any)
