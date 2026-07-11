@@ -15,6 +15,8 @@
     {"method": "wrkf.evidence.list"},
     {"method": "wrkf.evidence.show"},
     {"method": "wrkf.evidence.suggest"},
+    {"method": "wrkf.ledger.append"},
+    {"method": "wrkf.ledger.list"},
     {"method": "wrkf.hook.list"},
     {"method": "wrkf.hook.run"},
     {"method": "wrkf.hook.show"},

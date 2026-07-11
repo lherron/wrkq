@@ -94,17 +94,17 @@ func dummyRegistration() surfaceguard.Registration {
 
 // ─── Test 1: baseline match — no violations ────────────────────────────────────
 
-// TestCheck_BaselineMatch_NoViolations seeds registrations from the committed 42-method
+// TestCheck_BaselineMatch_NoViolations seeds registrations from the committed 44-method
 // baseline and calls Check. All methods are grandfathered → zero violations expected.
 func TestCheck_BaselineMatch_NoViolations(t *testing.T) {
-	// Build the full 42-method baseline from the fixture file.
+	// Build the full 44-method baseline from the fixture file.
 	baselinePath := filepath.Join("testdata", "baseline", "baseline_full.json")
 	baseline, err := surfaceguard.LoadBaseline(baselinePath)
 	if err != nil {
 		t.Fatalf("LoadBaseline: %v", err)
 	}
-	if len(baseline.Methods) != 42 {
-		t.Fatalf("expected 42 baseline methods, got %d", len(baseline.Methods))
+	if len(baseline.Methods) != 44 {
+		t.Fatalf("expected 44 baseline methods, got %d", len(baseline.Methods))
 	}
 
 	// Build registrations that exactly match the baseline.

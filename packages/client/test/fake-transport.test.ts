@@ -732,6 +732,40 @@ describe("wrkf namespace", () => {
     expect(ev.contentHash).toBe("sha256:abc");
   });
 
+  test("ledger facade exposes append + list without mutation verbs", async () => {
+    const entry = {
+      seq: 1,
+      uuid: "deadc0de-0000-4000-8000-000000000001",
+      instanceId: "wfi_live_instance",
+      taskId: "T-00001",
+      ts: "2026-07-11T12:00:00Z",
+      kind: "runner_start",
+      aboutPrincipalRef: "agent:cody",
+      writtenBy: "agent:smokey",
+      body: { refs: { logs: { narration: "/tmp/narration.log" } } },
+    };
+    const transport = new FakeTransport()
+      .onResult("wrkf.ledger.append", entry)
+      .onResult("wrkf.ledger.list", { entries: [entry] });
+    const client = await clientWith(transport);
+
+    const appended = await client.wrkf.ledger.append({
+      taskId: "T-00001",
+      kind: "runner_start",
+      aboutPrincipalRef: "agent:cody",
+      body: { refs: { logs: { narration: "/tmp/narration.log" } } },
+    });
+    const listed = await client.wrkf.ledger.list({ taskId: "T-00001" });
+
+    expect(appended.instanceId).toBe("wfi_live_instance");
+    expect(listed.entries[0]!.writtenBy).toBe("agent:smokey");
+    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
+      "wrkf.ledger.append",
+      "wrkf.ledger.list",
+    ]);
+    expect(transport.capturedRequests[0]!.params).not.toHaveProperty("writtenBy");
+  });
+
   test("role facade forwards list, bind, unbind, and set", async () => {
     const binding = {
       instanceId: "wfi_1",

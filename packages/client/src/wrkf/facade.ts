@@ -59,6 +59,10 @@ import type {
   WrkfInstanceNextParams,
   WrkfInstanceShowParams,
   WrkfInstallResult,
+  LedgerAppendInput,
+  LedgerEntry,
+  LedgerListFilter,
+  LedgerListResult,
   WrkfNextResult,
   WrkfObligation,
   WrkfObligationCancelParams,
@@ -114,6 +118,11 @@ export interface WrkfEvidenceFacade {
   list(params: WrkfEvidenceListParams): Promise<WrkfEvidence[]>;
   show(params: WrkfEvidenceShowParams): Promise<WrkfEvidence>;
   suggest(params: WrkfEvidenceSuggestParams): Promise<WrkfSuggestResult>;
+}
+
+export interface WrkfLedgerFacade {
+  append(input: LedgerAppendInput): Promise<LedgerEntry>;
+  list(filter: LedgerListFilter): Promise<LedgerListResult>;
 }
 
 export interface WrkfRoleFacade {
@@ -197,6 +206,7 @@ export interface WrkfFacade {
   readonly workflow: WrkfWorkflowFacade;
   readonly instance: WrkfInstanceFacade;
   readonly evidence: WrkfEvidenceFacade;
+  readonly ledger: WrkfLedgerFacade;
   readonly event: WrkfEventFacade;
   readonly role: WrkfRoleFacade;
   readonly obligation: WrkfObligationFacade;

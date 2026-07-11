@@ -262,6 +262,30 @@ func (api *API) ListEvidence(ctx context.Context, taskSelector string) ([]workfl
 	return api.EvidenceList(ctx, taskSelector)
 }
 
+// LedgerAppend records an immutable instance-scoped forensic event. The
+// transport resolves and stamps WrittenBy; it is never accepted from callers.
+func (api *API) LedgerAppend(ctx context.Context, params LedgerAppendParams) (*LedgerEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	entry, err := api.service.AppendLedger(params)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return entry, nil
+}
+
+func (api *API) LedgerList(ctx context.Context, params LedgerListParams) (LedgerListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return LedgerListResult{}, err
+	}
+	entries, err := api.service.ListLedger(params)
+	if err != nil {
+		return LedgerListResult{}, normalizeError(err)
+	}
+	return entries, nil
+}
+
 func (api *API) EvidenceShow(ctx context.Context, id string) (*workflow.Evidence, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
