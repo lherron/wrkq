@@ -1,0 +1,78 @@
+id: wrkq.contract.wrkf-ledger
+kind: contract
+status: active
+owner_project: wrkq
+scope: immutable wrkf instance-ledger storage, JSON-RPC methods, and @wrkq/client ./wrkf binding
+predicate: >
+  wrkf owns one append-only forensic ledger per workflow instance through
+  `wrkf.ledger.append` and `wrkf.ledger.list`. Append's defined
+  caller-controlled fields are taskId, open kind, aboutPrincipalRef, and an
+  optional free-form JSON-object body. The engine resolves the task's latest
+  instance including a closed instance,
+  allocates a unique contiguous per-instance seq and RFC3339Nano timestamp,
+  and stamps writtenBy from an explicit canonical `agent:<id>` caller.
+  writtenBy is never caller input, and anonymous, legacy `system:wrkf`, human,
+  and scoped refs are not admitted as writers. Engine-internal producers must
+  acquire the same canonical agent principal before append.
+
+  Returned entries carry exactly seq, uuid, instanceId (`wfi_*`, not UUID),
+  taskId, ts, kind, aboutPrincipalRef, writtenBy, and body. Storage enforces
+  `UNIQUE(instance_id, seq)` and rejects UPDATE/DELETE with table triggers; no
+  mutation verb exists in RPC, CLI, or the TypeScript facade. Task replay is
+  ordered by `(instanceId, seq)` ascending. Cross-instance projection is
+  ordered and cursor-paginated by `(ts, instanceId, seq)` ascending, including
+  equal-timestamp pages without gaps or duplicates.
+
+  Kinds remain open and `body.refs` is a documented, TypeScript-typed platform
+  vocabulary, not a server validation boundary; workflow correlators ride the
+  free-form body. Ledger entries are machine-readable transcriptions, never
+  authority for workflow gating. The untyped hard-purge edge and unvalidated
+  refs drift are accepted under `wrkq.wrkf-ledger.purge-path-undefined` and
+  `wrkq.wrkf-ledger.refs-vocabulary-drift`.
+authority:
+  repo: wrkq
+  surface: ledger_entry SQLite table + wrkf JSON-RPC + @wrkq/client ./wrkf
+consumers:
+  - "@wrkq/client ./wrkf"
+  - "agent-loop T-06188 leaf-drain and eject-handler transcription"
+source:
+  - internal/db/migrations/000040_workflow_ledger.sql
+  - internal/workflow/instance_ledger.go
+  - internal/wrkfapi/api.go
+  - internal/workrpc/registry.go
+  - packages/client/src/wrkf/types.ts
+  - packages/client/src/wrkf/facade.ts
+  - packages/client/src/client.ts
+  - internal/workflow/instance_ledger_test.go
+  - internal/workrpc/wrkfledger_acceptance_test.go
+  - packages/client/test/fake-transport.test.ts
+  - docs/wrkq-wrkf-rpc.md
+  - architecture/records/risks/wrkq.wrkf-ledger.purge-path-undefined.yaml
+  - architecture/records/risks/wrkq.wrkf-ledger.refs-vocabulary-drift.yaml
+  - hrcchat#14088
+required_tests:
+  - TestLedgerAppendIsAppendOnlyAndStampsInstanceAttribution
+  - TestLedgerAppendAdmissionAndSettledInstance
+  - TestLedgerConcurrentAppendProducesContiguousSequence
+  - TestLedgerProjectionPaginatesEqualTimestampWithoutGaps
+  - TestWrkfLedgerAppendAndListOverRealRPC
+  - bun test packages/client/test/fake-transport.test.ts
+  - installed wrkf ledger list --task T-06189 --json plus raw SQLite UPDATE/DELETE smoke
+last_verified:
+  date: 2026-07-11
+  evidence: >
+    Daedalus verified installed wrkf v0.1.0-76-g207c76b replaying T-06189 seq
+    1-7; go test ./internal/workflow -run TestLedger and go test
+    ./internal/workrpc -run TestWrkfLedger green; packages/client fake-transport
+    suite 34/34 green; supervisor-smoke.log records live canonical-writer
+    rejection and storage-trigger UPDATE/DELETE rejection.
+reopen_when:
+  - ledger append/list method names, request fields, result fields, or TypeScript facade shape changes
+  - writer identity admission or engine-stamped writtenBy semantics change
+  - latest-instance settlement admissibility or instance/task identity semantics change
+  - per-instance seq allocation, storage immutability, replay order, or cursor tuple changes
+  - body.refs becomes runtime-validated or ceases to be an advisory platform vocabulary
+  - any engine or workflow begins consulting ledger entries as gating authority
+  - either linked accepted risk is retired or its mitigation changes
+supersedes: []
+superseded_by: null

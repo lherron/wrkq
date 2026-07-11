@@ -13,3 +13,21 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **mitigation:** Treat same-version built-in supersede as an accepted operational recovery mechanism, not hash-pinned immutability. It is intentionally relied on to recover pre-existing wedged wrkq-simple-task@2/@3 operator_required instances after the operator_resolved lane is installed; historical event/run records remain append-only and are not rewritten.
 - **review_trigger:** built-in workflow definitions stop using same-version supersede for recovery; old-instance divergence is observed
 - **expiry:** none
+
+## wrkq.wrkf-ledger.purge-path-undefined
+
+- **severity:** low
+- **accepted_by:** Lance (2026-07-11)
+- **blast_radius:** An explicit hard purge of a task whose workflow instance has ledger rows has no stable domain-level contract. The parent FK requests cascade while the ledger DELETE trigger rejects row deletion, so the path may fail at the storage boundary or expose an untyped error; ordinary archive, settlement, append, and replay are unaffected.
+- **mitigation:** Operating doctrine is archive-not-purge. No ledger delete verb exists, and the current trigger makes ledger preservation the safe failure. If a real retention or erasure workflow needs hard purge, reopen this risk and design an explicit, typed disposition rather than weakening append-only implicitly.
+- **review_trigger:** a hard purge is attempted against a task with ledger rows; an operator or automated workflow requires deterministic ledger-bearing task purge; retention, privacy, or erasure requirements apply to ledger bodies; the ledger foreign key or no-delete trigger changes
+- **expiry:** none
+
+## wrkq.wrkf-ledger.refs-vocabulary-drift
+
+- **severity:** low
+- **accepted_by:** Lance (2026-07-11)
+- **blast_radius:** Producers may place unknown, malformed, or workflow-specific keys under body.refs because the server validates only that body is a JSON object. Consumers relying on the documented platform vocabulary may miss or misinterpret those references, reducing forensic join quality; ledger data remains stored and cannot affect workflow gates because it is transcription, not authority.
+- **mitigation:** Keep the platform refs vocabulary explicit in @wrkq/client types and producer documentation, enforce the platform/workflow layering boundary through review, and make consumers ignore unknown refs while retaining the free-form body. Forensic write availability intentionally outranks strict refs rejection so a malformed escalation receipt is preserved rather than lost.
+- **review_trigger:** refs drift or a workflow-specific key under refs is observed in live data; a consumer requires strict refs completeness or schema validation; ledger data is proposed as gating authority rather than transcription; malformed refs cause a failed RCA or incorrect automated projection
+- **expiry:** none

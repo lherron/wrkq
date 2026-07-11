@@ -1,0 +1,34 @@
+id: wrkq.wrkf-ledger.purge-path-undefined
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-07-11
+severity: low
+blast_radius: >
+  An explicit hard purge of a task whose workflow instance has ledger rows has
+  no stable domain-level contract. The parent FK requests cascade while the
+  ledger DELETE trigger rejects row deletion, so the path may fail at the
+  storage boundary or expose an untyped error; ordinary archive, settlement,
+  append, and replay are unaffected.
+mitigation: >
+  Operating doctrine is archive-not-purge. No ledger delete verb exists, and
+  the current trigger makes ledger preservation the safe failure. If a real
+  retention or erasure workflow needs hard purge, reopen this risk and design
+  an explicit, typed disposition rather than weakening append-only implicitly.
+expiry: null
+review_trigger:
+  - a hard purge is attempted against a task with ledger rows
+  - an operator or automated workflow requires deterministic ledger-bearing task purge
+  - retention, privacy, or erasure requirements apply to ledger bodies
+  - the ledger foreign key or no-delete trigger changes
+reopen_when:
+  - task purge becomes part of the supported ledger lifecycle
+  - archive-not-purge operating doctrine changes
+source:
+  - internal/db/migrations/000040_workflow_ledger.sql
+  - internal/wrkqapi/tasks.go
+  - hrcchat#14081
+  - hrcchat#14083
+supersedes: []
+superseded_by: null

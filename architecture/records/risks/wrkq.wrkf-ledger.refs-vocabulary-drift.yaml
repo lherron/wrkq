@@ -1,0 +1,37 @@
+id: wrkq.wrkf-ledger.refs-vocabulary-drift
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-07-11
+severity: low
+blast_radius: >
+  Producers may place unknown, malformed, or workflow-specific keys under
+  body.refs because the server validates only that body is a JSON object.
+  Consumers relying on the documented platform vocabulary may miss or
+  misinterpret those references, reducing forensic join quality; ledger data
+  remains stored and cannot affect workflow gates because it is transcription,
+  not authority.
+mitigation: >
+  Keep the platform refs vocabulary explicit in @wrkq/client types and producer
+  documentation, enforce the platform/workflow layering boundary through review,
+  and make consumers ignore unknown refs while retaining the free-form body.
+  Forensic write availability intentionally outranks strict refs rejection so a
+  malformed escalation receipt is preserved rather than lost.
+expiry: null
+review_trigger:
+  - refs drift or a workflow-specific key under refs is observed in live data
+  - a consumer requires strict refs completeness or schema validation
+  - ledger data is proposed as gating authority rather than transcription
+  - malformed refs cause a failed RCA or incorrect automated projection
+reopen_when:
+  - server-side refs validation is proposed
+  - the LedgerRefs vocabulary or layering boundary changes
+source:
+  - internal/workflow/instance_ledger.go
+  - packages/client/src/wrkf/types.ts
+  - docs/wrkq-wrkf-rpc.md
+  - hrcchat#14081
+  - hrcchat#14083
+supersedes: []
+superseded_by: null
