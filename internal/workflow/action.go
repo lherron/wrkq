@@ -1778,6 +1778,7 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 		}
 		nowTime := s.now().UTC()
 		now := nowTime.Format(time.RFC3339)
+		nowLedger := nowTime.Format(time.RFC3339Nano)
 		for i := range reaped {
 			reason := strings.TrimSpace(p.Summary)
 			if reason == "" {
@@ -1799,10 +1800,19 @@ func (s *Service) ReapActions(p ReapActionsParams) (*ReapActionsResult, error) {
 			if err != nil {
 				return err
 			}
-			if err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.PrincipalRef), now, workspaceLeaseRelease); err != nil {
+			evidenceID, err := insertReapFailureEvidenceTx(tx, &reaped[i], reason, strings.TrimSpace(p.PrincipalRef), now, workspaceLeaseRelease)
+			if err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`UPDATE workflow_runs SET status = ?, completed_at = ?, terminal_result = ?, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL WHERE id = ? AND status = 'active'`, status, now, reason, reaped[i].ID); err != nil {
+				return err
+			}
+			// Transcribe the engine-initiated terminalization into the instance
+			// ledger in this SAME tx (T-06214): a reaped run has no live runner to
+			// write runner_exit, so without this the ledger cannot answer "what
+			// terminalized this run and why". kind=reap is the contract-seeded
+			// engine vocabulary; classification mirrors the reap routing outcome.
+			if err := appendReapLedgerTx(tx, nowLedger, &reaped[i], status, reason, evidenceID, workspaceLeaseRelease, strings.TrimSpace(p.PrincipalRef)); err != nil {
 				return err
 			}
 			reaped[i].Status = status
@@ -2162,18 +2172,26 @@ func releaseReapedWorkspaceLeaseTx(tx *sql.Tx, run *Run, now time.Time) (string,
 	return "released", nil
 }
 
-func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now, workspaceLeaseRelease string) error {
+// insertReapFailureEvidenceTx writes the engine reap-failure evidence and
+// returns its id so the caller can cite it from the ledger's refs.evidence. On
+// the idempotent replay (evidence already written for this run) it returns the
+// existing evidence id rather than re-inserting.
+func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now, workspaceLeaseRelease string) (string, error) {
 	key := "wrkf-action:" + run.ID + ":reap-failure"
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM workflow_evidence_idempotency WHERE instance_id = ? AND idempotency_key = ?`, run.InstanceID, key).Scan(&count); err != nil {
-		return err
+		return "", err
 	}
 	if count > 0 {
-		return nil
+		var existingID string
+		if err := tx.QueryRow(`SELECT evidence_id FROM workflow_evidence_idempotency WHERE instance_id = ? AND idempotency_key = ?`, run.InstanceID, key).Scan(&existingID); err != nil {
+			return "", err
+		}
+		return existingID, nil
 	}
 	id, err := nextSeqID(tx, "workflow_evidence_seq", "ev")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if actor == "" {
 		actor = run.PrincipalRef
@@ -2201,10 +2219,69 @@ func insertReapFailureEvidenceTx(tx *sql.Tx, run *Run, reason, actor, now, works
 		VALUES (?, ?, 'failure_result', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, run.InstanceID, "wrkf-action:"+run.ID+":reap", reason, string(dataJSON), string(sourceJSON), nullIfEmpty(actor), nullIfEmpty(actor), nullIfEmpty(run.Role), run.ID, nullIfEmpty(taskEtag), nullIfEmpty(taskHash), now)
 	if err != nil {
-		return err
+		return "", err
 	}
 	ev := &Evidence{ID: id, InstanceID: run.InstanceID, Kind: "failure_result", Ref: "wrkf-action:" + run.ID + ":reap", Summary: reason, Data: dataJSON, Source: sourceJSON, PrincipalRef: actor, Role: run.Role, RunID: run.ID, TaskEtagAtProduction: taskEtag, TaskHashAtProduction: taskHash, ProducedAt: now}
-	return storeEvidenceResult(tx, run.InstanceID, key, key, ev)
+	if err := storeEvidenceResult(tx, run.InstanceID, key, key, ev); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// appendReapLedgerTx transcribes an engine reap into the instance ledger in the
+// caller's transaction (T-06214). writtenBy is the caller-resolved principal
+// (the daemon sweep passes agent:wrkqd at its callsite; CLI/RPC reaps pass their
+// own resolved principal) — it is deliberately not hardcoded here. about is the
+// reaped run's bound principal; a genuinely unbound run falls back to
+// agent:wrkqd with its identity carried in the body.
+func appendReapLedgerTx(tx *sql.Tx, now string, run *Run, settleStatus, reason, evidenceID, workspaceLeaseRelease, writtenBy string) error {
+	classification := "operational_failed"
+	if settleStatus == "operator_required" {
+		classification = "operator_required"
+	}
+	about := strings.TrimSpace(run.PrincipalRef)
+	if !isCanonicalLedgerWriter(about) {
+		about = "agent:wrkqd"
+	}
+	var taskID string
+	if err := tx.QueryRow(`SELECT t.id FROM workflow_instances wi JOIN tasks t ON t.uuid = wi.task_uuid WHERE wi.id = ?`, run.InstanceID).Scan(&taskID); err != nil {
+		return err
+	}
+	runBody := map[string]any{
+		"id":             run.ID,
+		"action":         run.Action,
+		"role":           run.Role,
+		"leaseOwner":     run.LeaseOwner,
+		"leaseExpiresAt": run.LeaseExpiresAt,
+		"heartbeatAt":    run.HeartbeatAt,
+	}
+	if run.ExternalRunRef != "" {
+		runBody["externalRunRef"] = run.ExternalRunRef
+	}
+	if run.PrincipalRef != "" {
+		runBody["principalRef"] = run.PrincipalRef
+	}
+	body := map[string]any{
+		"classification": classification,
+		"reason":         reason,
+		"refs":           map[string]any{"evidence": []string{evidenceID}},
+		"run":            runBody,
+	}
+	if workspaceLeaseRelease != "" {
+		body["workspaceLeaseRelease"] = workspaceLeaseRelease
+	}
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	_, err = appendLedgerTx(tx, now, run.InstanceID, AppendLedgerParams{
+		TaskID:            taskID,
+		Kind:              "reap",
+		AboutPrincipalRef: about,
+		WrittenBy:         writtenBy,
+		Body:              bodyJSON,
+	})
+	return err
 }
 
 func (s *Service) runEvidence(runID string) ([]string, []string, error) {

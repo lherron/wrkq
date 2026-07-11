@@ -689,7 +689,7 @@ func TestActionReapV2RecoveryDistinguishesSideEffectAmbiguity(t *testing.T) {
 	attachSimpleTaskV2(t, svc, taskUUID)
 	triage := claimActionForTest(t, svc, taskUUID, "triage")
 	expireActionRunForTest(t, svc, triage.Binding.Run.ID)
-	reapedTriage, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "triage", ExpiredBefore: "2026-01-01T00:00:00Z"})
+	reapedTriage, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "triage", ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"})
 	if err != nil {
 		t.Fatalf("ReapActions triage: %v", err)
 	}
@@ -707,7 +707,7 @@ func TestActionReapV2RecoveryDistinguishesSideEffectAmbiguity(t *testing.T) {
 	impl := claimActionForTest(t, svc, taskUUID, "implement")
 	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
 	beforeEvents := countTable(t, svc, "workflow_events")
-	reapedImpl, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z"})
+	reapedImpl, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"})
 	if err != nil {
 		t.Fatalf("ReapActions implement: %v", err)
 	}

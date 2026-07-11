@@ -634,8 +634,8 @@ func TestWrkfActionLeaseHeartbeatReapAndTokenGuards(t *testing.T) {
 	)
 	legacyRunID := actRunID(t, p2ResultOrFail(t, legacyStartFrames[1], "legacy action.start"), "legacy start")
 	legacyFrames := p3Run(t, dbPath,
-		mkRPC("reapNoCutoff", "wrkf.action.reap", map[string]any{"task": legacyTaskID, "action": "triage", "expiredBefore": future}),
-		mkRPC("reapWithCutoff", "wrkf.action.reap", map[string]any{"task": legacyTaskID, "action": "triage", "expiredBefore": future, "legacyActiveBefore": future}),
+		mkRPC("reapNoCutoff", "wrkf.action.reap", map[string]any{"task": legacyTaskID, "action": "triage", "expiredBefore": future, "principal_ref": actActor}),
+		mkRPC("reapWithCutoff", "wrkf.action.reap", map[string]any{"task": legacyTaskID, "action": "triage", "expiredBefore": future, "legacyActiveBefore": future, "principal_ref": actActor}),
 	)
 	noCutoff := p2ResultOrFail(t, legacyFrames[1], "legacy action.reap without cutoff")
 	noCutoffItems, _ := noCutoff["items"].([]any)

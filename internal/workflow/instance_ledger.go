@@ -139,6 +139,44 @@ func (s *Service) AppendLedger(p AppendLedgerParams) (*LedgerEntry, error) {
 	return nil, fmt.Errorf("append ledger entry: contention did not resolve: %w", err)
 }
 
+// appendLedgerTx transcribes one immutable ledger entry inside the caller's
+// existing transaction, against an explicitly-resolved instance. Engine settles
+// that already own a BEGIN IMMEDIATE tx (e.g. the reap sweep) transcribe forensic
+// entries this way so the ledger row and the settle commit or fail together
+// (T-06214 same-tx doctrine): writer and mirror share one SQLite transaction, so
+// there is no cross-process mirror boundary and the best-effort append doctrine
+// (which protects real work from MIRROR outages) does not apply — atomicity wins,
+// leaving no terminalized-but-unrecorded window. The enclosing IMMEDIATE tx
+// already serializes writers, so no MAX(seq) busy-retry loop is needed here. The
+// caller owns instance resolution (for a reap, the reaped run's own instance —
+// not latest-by-task) and supplies the RFC3339Nano timestamp.
+func appendLedgerTx(tx *sql.Tx, now, instanceID string, p AppendLedgerParams) (*LedgerEntry, error) {
+	if len(p.Body) == 0 {
+		p.Body = json.RawMessage(`{}`)
+	}
+	if err := validateLedgerAppend(p); err != nil {
+		return nil, err
+	}
+	entry := &LedgerEntry{
+		UUID:              uuid.NewString(),
+		InstanceID:        instanceID,
+		TaskID:            strings.TrimSpace(p.TaskID),
+		Kind:              strings.TrimSpace(p.Kind),
+		AboutPrincipalRef: strings.TrimSpace(p.AboutPrincipalRef),
+		WrittenBy:         strings.TrimSpace(p.WrittenBy),
+		Body:              append(json.RawMessage(nil), p.Body...),
+		TS:                now,
+	}
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM ledger_entry WHERE instance_id = ?`, instanceID).Scan(&entry.Seq); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`INSERT INTO ledger_entry (uuid, instance_id, task_id, seq, ts, kind, about_principal_ref, written_by, body_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, entry.UUID, entry.InstanceID, entry.TaskID, entry.Seq, entry.TS, entry.Kind, entry.AboutPrincipalRef, entry.WrittenBy, string(entry.Body)); err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
 func (s *Service) ListLedger(p ListLedgerParams) (LedgerListResult, error) {
 	if strings.TrimSpace(p.TaskID) == "" && strings.TrimSpace(p.AboutPrincipalRef) == "" {
 		return LedgerListResult{}, validationError("filter", "taskId or aboutPrincipalRef is required", "taskId or aboutPrincipalRef", nil, "supply --task or --principal")

@@ -29,6 +29,18 @@ predicate: >
   authority for workflow gating. The untyped hard-purge edge and unvalidated
   refs drift are accepted under `wrkq.wrkf-ledger.purge-path-undefined` and
   `wrkq.wrkf-ledger.refs-vocabulary-drift`.
+
+  The engine reap sweep is the first engine-internal producer (T-06214): when a
+  run's lease expires and no live runner survives to write `runner_exit`, the
+  reap settle transcribes a `kind=reap` entry in the SAME settle transaction —
+  `body.classification` mirrors the reap routing outcome
+  (`operational_failed` | `operator_required`), `body.reason` carries the reap
+  reason, and `body.refs.evidence` cites the engine reap-failure evidence. The
+  daemon sweep passes the canonical `agent:wrkqd` principal at its callsite so
+  the append stamps `written_by=agent:wrkqd`; `about` is the reaped run's bound
+  principal. Same-tx (not best-effort) because writer and mirror share one
+  SQLite transaction: a failed append fails the settle, leaving no
+  terminalized-but-unrecorded window.
 authority:
   repo: wrkq
   surface: ledger_entry SQLite table + wrkf JSON-RPC + @wrkq/client ./wrkf
@@ -38,6 +50,10 @@ consumers:
 source:
   - internal/db/migrations/000040_workflow_ledger.sql
   - internal/workflow/instance_ledger.go
+  - internal/workflow/action.go
+  - internal/cli/daemon.go
+  - internal/workflow/action_reap_ledger_test.go
+  - test/smoke-wrkf-reap-sweep.sh
   - internal/wrkfapi/api.go
   - internal/workrpc/registry.go
   - packages/client/src/wrkf/types.ts

@@ -109,7 +109,7 @@ func TestActionReapFailureEvidenceIncludesExternalRunRef(t *testing.T) {
 		t.Fatalf("StartAction: %v", err)
 	}
 	expireActionRunForTest(t, svc, run.RunID)
-	if _, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "triage", ExpiredBefore: "2026-01-01T00:00:00Z"}); err != nil {
+	if _, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "triage", ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"}); err != nil {
 		t.Fatalf("ReapActions: %v", err)
 	}
 	ev := settledFailureEvidenceForRun(t, svc, run.RunID)

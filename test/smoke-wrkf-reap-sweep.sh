@@ -190,6 +190,30 @@ done
 [[ -n "$TERMINAL_STATUS" ]] || fail "scheduled sweep did not settle run within 90 seconds"
 record "auto_settle run=$INITIAL_RUN_ID status=$TERMINAL_STATUS source=scheduled_sweep"
 
+# T-06214: the scheduled sweep must have transcribed the engine reap into the
+# instance ledger in the same settle transaction — written_by agent:wrkqd, with
+# classification + refs.evidence a blind reader can act on.
+LEDGER_JSON="$(wrkf_cmd ledger list --task "$TASK_ID" --kind reap)"
+python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+run_id, terminal = sys.argv[1:]
+entries = data.get("entries", [])
+assert len(entries) == 1, "want exactly one reap ledger entry, got %r" % (entries,)
+e = entries[0]
+assert e.get("kind") == "reap", e
+assert e.get("writtenBy") == "agent:wrkqd", "writtenBy=%r, want agent:wrkqd" % (e.get("writtenBy"),)
+body = e.get("body", {})
+want_class = {"failed": "operational_failed", "operator_required": "operator_required"}[terminal]
+assert body.get("classification") == want_class, "classification=%r, want %s" % (body.get("classification"), want_class)
+assert body.get("reason"), "missing reason: %r" % (body,)
+ev = body.get("refs", {}).get("evidence", [])
+assert ev and all(ev), "refs.evidence empty: %r" % (body,)
+assert body.get("run", {}).get("id") == run_id, "run.id=%r, want %s" % (body.get("run", {}).get("id"), run_id)
+' "$INITIAL_RUN_ID" "$TERMINAL_STATUS" <<<"$LEDGER_JSON"
+LEDGER_EVIDENCE="$(json_path "entries.0.body.refs.evidence.0" <<<"$LEDGER_JSON")"
+record "reap_ledger_transcribed run=$INITIAL_RUN_ID kind=reap written_by=agent:wrkqd classification_status=$TERMINAL_STATUS refs_evidence=$LEDGER_EVIDENCE"
+
 NEXT_TRIAGE_JSON="$(wrkf_cmd action next --instance-id "$INSTANCE_ID")"
 assert_legal_candidate "$NEXT_TRIAGE_JSON" "$INSTANCE_ID" "triage"
 TRIAGE_KEY="$(json_path "candidates.0.semanticActionKey" <<<"$NEXT_TRIAGE_JSON")"

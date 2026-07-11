@@ -160,7 +160,15 @@ func startActionReapSweep(parent context.Context, reaper actionReaper, interval 
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
-				if _, err := reaper.ReapActions(workflow.ReapActionsParams{ExpiredBefore: now.UTC().Format(time.RFC3339)}); err != nil {
+				// The daemon sweep is the engine-internal reap writer: it must
+				// carry a canonical agent principal so the same-tx ledger
+				// transcription (T-06214) stamps written_by=agent:wrkqd. Without
+				// this the reaped run's terminalization would append no ledger
+				// entry (anonymous writers reject by design).
+				if _, err := reaper.ReapActions(workflow.ReapActionsParams{
+					ExpiredBefore: now.UTC().Format(time.RFC3339),
+					PrincipalRef:  "agent:wrkqd",
+				}); err != nil {
 					fmt.Fprintf(os.Stderr, "action reap sweep failed: %v\n", err)
 				}
 			}

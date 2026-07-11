@@ -232,7 +232,7 @@ func reapAndClaimAdmissibleCandidate(t *testing.T, svc *Service, taskUUID string
 
 	// Claim-over-expired semantics means this 4b proof is about ordinary action
 	// discovery, not whether workspace-lease release happened on this reap tick.
-	reaped, err := svc.ReapActions(ReapActionsParams{InstanceID: inst.ID, Action: wantAction, ExpiredBefore: "2026-01-01T00:00:00Z"})
+	reaped, err := svc.ReapActions(ReapActionsParams{InstanceID: inst.ID, Action: wantAction, ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"})
 	if err != nil {
 		t.Fatalf("ReapActions: %v", err)
 	}

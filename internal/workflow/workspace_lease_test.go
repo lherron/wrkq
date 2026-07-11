@@ -173,7 +173,7 @@ func TestWorkspaceBoundActionReapOperatorRequiredEvidence(t *testing.T) {
 	}
 	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
 	expireWorkspaceLeaseForTest(t, svc, root)
-	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z"})
+	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"})
 	if err != nil {
 		t.Fatalf("ReapActions: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestWorkspaceBoundActionReapPreservesNewerWorkspaceOwner(t *testing.T) {
 		t.Fatalf("ClaimWorkspace newer owner: %v", err)
 	}
 
-	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z"})
+	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"})
 	if err != nil {
 		t.Fatalf("ReapActions: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestWorkspaceBoundActionReapPreservesLiveSameOwnerReclaim(t *testing.T) {
 		t.Fatalf("live same-owner re-claim did not advance workspace generation: old=%+v live=%+v", oldRun.Binding.Workspace, liveRun.Binding.Workspace)
 	}
 
-	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskA, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z"})
+	reaped, err := svc.ReapActions(ReapActionsParams{Task: taskA, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z", PrincipalRef: "agent:wrkqd"})
 	if err != nil {
 		t.Fatalf("ReapActions: %v", err)
 	}
