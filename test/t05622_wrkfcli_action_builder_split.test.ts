@@ -46,7 +46,6 @@ describe("T-05622 wrkf action command builder split", () => {
       "actionSettleCmd",
       "actionFailCmd",
       "actionHeartbeatCmd",
-      "actionReapCmd",
       "actionShowCmd",
       "actionListCmd",
     ]) {
@@ -63,7 +62,6 @@ describe("T-05622 wrkf action command builder split", () => {
       "actionEvidenceOptions",
       "actionTransitionOptions",
       "actionSettleOptions",
-      "actionReapOptions",
       "actionListOptions",
     ]) {
       expect(

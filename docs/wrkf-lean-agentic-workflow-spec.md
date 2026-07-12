@@ -641,7 +641,7 @@ interface HeartbeatActionParams {
 }
 ```
 
-Heartbeat must CAS on current owner token and generation. A heartbeat racing with reap or ownership transfer must have exactly one winner.
+Heartbeat must CAS on current owner token and generation. A heartbeat racing with ownership transfer must have exactly one winner.
 
 ### 5.4 `wrkf.action.bindExternal`
 
@@ -675,42 +675,11 @@ interface SettleActionResult {
 
 Settlement must be idempotent by run and terminal payload. Repeated identical terminal settlement returns the original result. Conflicting terminal settlement returns an idempotency/terminal conflict error.
 
-### 5.6 `wrkf.action.reap`
+### 5.6 Lease expiry
 
-Recover expired active run attempts.
-
-```ts
-interface ReapActionsParams {
-  runnerId?: string
-  olderThanMs?: number
-  dryRun?: boolean
-  limit?: number
-}
-
-interface ReapActionsResult {
-  items: Array<{
-    runId: string
-    semanticActionKey: string
-    decision:
-      | "cleared_terminal"
-      | "reclaimable"
-      | "operator_required"
-      | "external_still_running"
-      | "external_reconciled"
-    reason: string
-  }>
-}
-```
-
-Reaper rules:
-
-- If a run is terminal but still has ownership metadata, clear ownership.
-- If a run is nonterminal, lease expired, and no irreversible side effect or external runtime is known, make it reclaimable or fail it operationally according to policy.
-- If a run is bound to an external runtime, query the adapter when available.
-- If the adapter proves terminal semantic evidence, settle or reconcile through normal settlement logic.
-- If side effects may have occurred but proof is missing, mark `operator_required`.
-- Reaper must never invent semantic success.
-
+Lease TTL expiry makes the claim contestable and does nothing else. There is no
+expiry-time API or background sweep: the engine does not terminalize the run,
+clear ownership, synthesize evidence, or classify possible side effects.
 ## 6. Default workflow: simple executable task
 
 The built-in simple executable task workflow should be minimal:
@@ -914,7 +883,7 @@ Use `operator_required` when automatic retry or failure would be unsafe:
 - external run may have committed but proof is unavailable;
 - source commit cannot be found;
 - workspace is dirty under unknown owner;
-- reaper cannot determine whether side effects occurred;
+- a successor cannot confirm whether predecessor side effects occurred;
 - verify source binding cannot be trusted.
 
 ### 7.3 Retry

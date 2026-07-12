@@ -240,7 +240,6 @@ class WorkClientImpl implements WorkClient {
       fail: (p) => this.call("wrkf.action.fail", p),
       heartbeat: (p) => this.call("wrkf.action.heartbeat", p),
       renewLease: (p) => this.call("wrkf.action.renewLease", p),
-      reap: (p) => this.call("wrkf.action.reap", p),
       show: (p) => this.call("wrkf.action.show", p),
       list: (p) => this.call("wrkf.action.list", p),
     },

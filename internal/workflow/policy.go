@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"database/sql"
-	"encoding/json"
 	"strings"
 	"sync"
 )
@@ -104,25 +103,7 @@ func (defaultWorkflowPolicy) ProjectObligations(_ *Service, _ *Instance, obligat
 type simpleTaskWorkflowPolicy struct{}
 
 func (simpleTaskWorkflowPolicy) ValidateEvidence(params AddEvidenceParams, facts *parsedEvidenceFacts) error {
-	if params.Kind == "operator_resolution" {
-		return validateOperatorResolutionReason(params.Summary, facts)
-	}
 	return nil
-}
-
-func validateOperatorResolutionReason(summary string, facts *parsedEvidenceFacts) error {
-	if strings.TrimSpace(summary) != "" {
-		return nil
-	}
-	if facts != nil {
-		if raw, ok := facts.Fields["reason"]; ok {
-			var reason string
-			if err := json.Unmarshal(raw, &reason); err == nil && strings.TrimSpace(reason) != "" {
-				return nil
-			}
-		}
-	}
-	return validationError("summary", "operator_resolution requires a human/operator reason in summary or facts.reason", "non-empty summary or facts.reason", nil, "include the operator reason before resolving operator_required")
 }
 
 func (simpleTaskWorkflowPolicy) OnEvidenceAdded(tx *sql.Tx, inst *Instance, ev *Evidence) error {

@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
-	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 )
@@ -43,12 +41,6 @@ type DaemonOptions struct {
 	DBPath        string
 	PIDPath       string
 	UnsafeNoToken bool
-}
-
-const actionReapSweepInterval = time.Minute
-
-type actionReaper interface {
-	ReapActions(workflow.ReapActionsParams) (*workflow.ReapActionsResult, error)
 }
 
 // ServeDaemon starts the wrkqd daemon.
@@ -119,7 +111,7 @@ func ServeDaemon(opts DaemonOptions) error {
 			return fmt.Errorf("failed to listen on unix socket: %w", err)
 		}
 		defer func() { _ = listener.Close() }()
-		return serveHTTPWithReapSweep(httpServer, listener, database)
+		return serveHTTPWithSignals(httpServer, listener)
 	}
 
 	addr := opts.Addr
@@ -136,44 +128,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
-	return serveHTTPWithReapSweep(httpServer, listener, database)
-}
-
-func serveHTTPWithReapSweep(server *http.Server, listener net.Listener, database *db.DB) error {
-	stopSweep := startActionReapSweep(context.Background(), workflow.NewService(database), actionReapSweepInterval)
-	defer stopSweep()
-	return serveHTTPWithSignals(server, listener)
-}
-
-func startActionReapSweep(parent context.Context, reaper actionReaper, interval time.Duration) func() {
-	if interval <= 0 {
-		interval = actionReapSweepInterval
-	}
-	ctx, cancel := context.WithCancel(parent)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case now := <-ticker.C:
-				if _, err := reaper.ReapActions(workflow.ReapActionsParams{ExpiredBefore: now.UTC().Format(time.RFC3339)}); err != nil {
-					fmt.Fprintf(os.Stderr, "action reap sweep failed: %v\n", err)
-				}
-			}
-		}
-	}()
-
-	var stopOnce sync.Once
-	return func() {
-		stopOnce.Do(func() {
-			cancel()
-			<-done
-		})
-	}
+	return serveHTTPWithSignals(httpServer, listener)
 }
 
 func isLoopbackListenAddr(addr string) bool {

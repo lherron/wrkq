@@ -113,16 +113,6 @@ type actionHeartbeatOptions struct {
 	leaseMs    int64
 }
 
-type actionReapOptions struct {
-	task               string
-	actionFilter       string
-	expiredBefore      string
-	legacyActiveBefore string
-	actor              string
-	summary            string
-	limit              int
-}
-
 type actionListOptions struct {
 	includeClosed bool
 	status        string
@@ -141,7 +131,6 @@ func actionCmd() *cobra.Command {
 		actionSettleCmd(),
 		actionFailCmd(),
 		actionHeartbeatCmd(),
-		actionReapCmd(),
 		actionShowCmd(),
 		actionListCmd(),
 	)
@@ -427,37 +416,6 @@ func actionHeartbeatCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.leaseToken, "lease-token", "", "Lease token")
 	cmd.Flags().Int64Var(&opts.leaseMs, "lease-ms", 0, "Lease duration in milliseconds")
-	return cmd
-}
-
-func actionReapCmd() *cobra.Command {
-	opts := actionReapOptions{}
-	cmd := &cobra.Command{
-		Use:  "reap",
-		Args: cobra.NoArgs,
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			out, err := a.service.ReapActions(workflow.ReapActionsParams{
-				Task:               firstNonEmpty(opts.task),
-				Action:             opts.actionFilter,
-				ExpiredBefore:      opts.expiredBefore,
-				LegacyActiveBefore: opts.legacyActiveBefore,
-				Limit:              opts.limit,
-				PrincipalRef:       firstNonEmpty(opts.actor, a.actor),
-				Summary:            opts.summary,
-			})
-			if err != nil {
-				return err
-			}
-			return printAny(cmd, flagJSON, out)
-		}),
-	}
-	cmd.Flags().StringVar(&opts.task, "task", "", "Task selector")
-	cmd.Flags().StringVar(&opts.actionFilter, "action", "", "Filter by action")
-	cmd.Flags().StringVar(&opts.expiredBefore, "expired-before", "", "Reap leased active action runs expiring at or before this RFC3339 time (defaults to now)")
-	cmd.Flags().StringVar(&opts.legacyActiveBefore, "legacy-active-before", "", "Explicit cutoff for legacy unleased active action runs")
-	cmd.Flags().StringVar(&opts.actor, "principal-ref", "", "Principal ref (agent:<id>)")
-	cmd.Flags().StringVar(&opts.summary, "summary", "", "Terminal summary")
-	cmd.Flags().IntVar(&opts.limit, "limit", 0, "Maximum runs to reap")
 	return cmd
 }
 

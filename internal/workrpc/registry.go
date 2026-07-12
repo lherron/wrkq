@@ -229,7 +229,6 @@ var methodCatalog = []string{
 	"wrkf.action.fail",
 	"wrkf.action.heartbeat",
 	"wrkf.action.renewLease",
-	"wrkf.action.reap",
 	"wrkf.action.show",
 	"wrkf.action.list",
 	"wrkf.workspace.claim",
@@ -674,9 +673,6 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.action.renewLease", apiHandler(func(ctx context.Context, p wrkfapi.ActionHeartbeatParams) (any, error) {
 		return api.ActionHeartbeat(ctx, p)
-	}))
-	s.Register("wrkf.action.reap", apiHandler(func(ctx context.Context, p wrkfapi.ActionReapParams) (any, error) {
-		return api.ActionReap(ctx, p)
 	}))
 	s.Register("wrkf.action.show", apiHandler(func(ctx context.Context, p wrkfapi.ActionShowParams) (any, error) {
 		return api.ActionShow(ctx, p)

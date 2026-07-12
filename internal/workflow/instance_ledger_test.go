@@ -49,7 +49,7 @@ func TestLedgerAppendAdmissionAndSettledInstance(t *testing.T) {
 	if _, err := svc.db.Exec(`UPDATE workflow_instances SET status = 'closed', closed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), inst.ID); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"reap", "escalation", "close_scorecard"} {
+	for _, kind := range []string{"audit_note", "escalation", "close_scorecard"} {
 		entry, err := svc.AppendLedger(AppendLedgerParams{TaskID: task, Kind: kind, AboutPrincipalRef: "agent:about", WrittenBy: "agent:cody"})
 		if err != nil {
 			t.Fatalf("settled append %s: %v", kind, err)

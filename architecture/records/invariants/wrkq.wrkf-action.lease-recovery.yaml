@@ -2,23 +2,17 @@ id: wrkq.wrkf-action.lease-recovery
 kind: invariant
 status: active
 owner_project: wrkq
-scope: wrkf.action coordinator-owned recovery
+scope: wrkf.action lease expiry
 predicate: >
   Coordinator-owned wrkf.action runs may opt into durable leases. A leased active
   action run carries one current lease token, non-secret owner/expiry/heartbeat
   audit fields, and rejects heartbeat, complete, fail, or settle attempts unless
-  the caller presents the current unexpired authority. wrkf also owns workspace
-  leases keyed by the canonical resolved physical worktree root: not project
-  slug, not git common-dir. A workspace-bound action stores that canonical root
-  in workflow_runs.workspace_ref and success settlement rejects unless the caller
-  presents both the current action owner token/generation and the current
-  workspace lease token/generation. Expired legacy or side-effect-free action
-  runs are terminalized operationally failed with run-linked failure evidence.
-  Expired v2 claimed runs with possible side effects or external/workspace
-  bindings are terminalized operator_required with run-linked failure evidence;
-  recovery must not invent semantic success. Legacy unleased active actions
-  remain valid blockers unless a caller explicitly supplies a legacyActiveBefore
-  cutoff to the reap path.
+  the caller presents current authority. Lease TTL expiry only makes a claim
+  contestable: no timer, CLI command, RPC method, or service path terminalizes
+  the run, clears its claim fields, stamps operator_required, or synthesizes
+  failure evidence at expiry time. wrkf also owns workspace leases keyed by the
+  canonical resolved physical worktree root. Expiry alone does not release or
+  mutate a workspace lease record.
 authority:
   repo: wrkq
   surface: wrkf.action.* plus wrkf.workspace.* over workflow_runs and workflow_workspace_leases
@@ -26,21 +20,20 @@ source:
   - internal/db/migrations/000034_workflow_action_leases.sql
   - internal/db/migrations/000038_workflow_workspace_leases.sql
   - internal/workflow/action.go
-  - internal/workflow/workspace_lease.go
+  - internal/workflow/workspace_lease_test.go
+  - internal/cli/daemon.go
   - internal/wrkfapi/action.go
   - internal/workrpc/registry.go
+  - internal/workrpc/wrkfworkspace_acceptance_test.go
 required_tests:
-  - go test ./internal/workflow
-  - "go test ./internal/workrpc -run 'Action|WrkfAction'"
+  - TestExpiredWorkspaceBoundActionRemainsActive
+  - TestWrkfActionWorkspaceExpiryDoesNotTerminalizeRPC
 last_verified:
-  date: 2026-07-05
-  evidence: "go test ./internal/workflow -run 'Workspace|ActionReap'; go test ./internal/workrpc -run 'WrkfWorkspace|ActionSettleWorkspace|ActionWorkspaceExpired|Registry' green for canonical workspace claims, dual-token settle fencing, and workspace-bound operator_required recovery"
+  date: 2026-07-12
+  evidence: "go test ./internal/workflow -run TestExpiredWorkspaceBoundActionRemainsActive and go test ./internal/workrpc -run TestWrkfActionWorkspaceExpiryDoesNotTerminalizeRPC green; installed wrkf CLI/RPC smoke confirms reap surfaces are absent"
 reopen_when:
-  - wrkf.action lease token exposure rules change
-  - workspace lease identity stops being the resolved physical worktree root
-  - workspace-bound action settlement stops requiring both current action and workspace generations
-  - action reaping stops terminalizing expired legacy/side-effect-free active runs as failed
-  - v2 claimed runs with possible side effects stop recovering as operator_required
-  - legacy unleased active action blocker semantics change
+  - any expiry-time process mutates or terminalizes an action run
+  - any expiry-time process releases or mutates a workspace lease
+  - an explicit reaping API is introduced
 supersedes: []
 superseded_by: null

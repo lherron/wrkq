@@ -684,55 +684,6 @@ func TestSettleActionV3LandingResultClosesWithEvidenceChain(t *testing.T) {
 	}
 }
 
-func TestActionReapV2RecoveryDistinguishesSideEffectAmbiguity(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
-	triage := claimActionForTest(t, svc, taskUUID, "triage")
-	expireActionRunForTest(t, svc, triage.Binding.Run.ID)
-	reapedTriage, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "triage", ExpiredBefore: "2026-01-01T00:00:00Z"})
-	if err != nil {
-		t.Fatalf("ReapActions triage: %v", err)
-	}
-	if len(reapedTriage.Items) != 1 || reapedTriage.Items[0].Status != "failed" {
-		t.Fatalf("triage reap = %+v, want failed", reapedTriage.Items)
-	}
-
-	// Reset with a fresh task and advance to implementation, whose executable
-	// action declares worktree/git side effects. Reaping must not pretend the
-	// implementation failed semantically or safely succeeded.
-	svc, taskUUID = actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
-	triage = claimActionForTest(t, svc, taskUUID, "triage")
-	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
-	impl := claimActionForTest(t, svc, taskUUID, "implement")
-	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
-	beforeEvents := countTable(t, svc, "workflow_events")
-	reapedImpl, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "implement", ExpiredBefore: "2026-01-01T00:00:00Z"})
-	if err != nil {
-		t.Fatalf("ReapActions implement: %v", err)
-	}
-	if len(reapedImpl.Items) != 1 || reapedImpl.Items[0].Status != "operator_required" {
-		t.Fatalf("implement reap = %+v, want operator_required", reapedImpl.Items)
-	}
-	if got := countTable(t, svc, "workflow_events"); got != beforeEvents {
-		t.Fatalf("reap emitted transition events = %d, want %d", got, beforeEvents)
-	}
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if inst.Phase != "ready" {
-		t.Fatalf("reap changed workflow phase = %q, want ready", inst.Phase)
-	}
-	run, err := svc.ShowRun(impl.Binding.Run.ID)
-	if err != nil {
-		t.Fatalf("ShowRun: %v", err)
-	}
-	if run.LeaseToken != "" || run.LeaseOwner != "" || run.Status != "operator_required" {
-		t.Fatalf("reaped implement run = %+v", run)
-	}
-}
-
 func advanceV3ToImplemented(t *testing.T, svc *Service, taskUUID, commit string) {
 	t.Helper()
 	attachSimpleTaskV3(t, svc, taskUUID)

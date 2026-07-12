@@ -104,8 +104,7 @@ const transition = await client.wrkf.transition.apply({
   transition: "implementation_ready",
   role: "implementer",
   actor: "agent:agent-loop",
-  expectRevision: inspect.instance.revision,   // CAS preconditions
-  contextHash: inspect.instance.contextHash,
+  expectRevision: inspect.instance.revision,   // CAS precondition
 });
 
 const claim = await client.wrkf.effect.claim({ adapter: "wake_role", limit: 5, leaseMs: 60_000 });

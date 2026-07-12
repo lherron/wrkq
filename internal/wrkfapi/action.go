@@ -94,17 +94,6 @@ type ActionHeartbeatParams struct {
 	LeaseMs     int64  `json:"leaseMs,omitempty"`
 }
 
-type ActionReapParams struct {
-	Task               string `json:"task,omitempty"`
-	InstanceID         string `json:"instanceId,omitempty"`
-	Action             string `json:"action,omitempty"`
-	ExpiredBefore      string `json:"expiredBefore,omitempty"`
-	LegacyActiveBefore string `json:"legacyActiveBefore,omitempty"`
-	Limit              int    `json:"limit,omitempty"`
-	PrincipalRef       string `json:"principal_ref,omitempty"`
-	Summary            string `json:"summary,omitempty"`
-}
-
 type ActionShowParams struct {
 	ActionRunID string `json:"actionRunId"`
 }
@@ -341,26 +330,6 @@ func (api *API) ActionHeartbeat(ctx context.Context, params ActionHeartbeatParam
 		return nil, normalizeError(err)
 	}
 	return run, nil
-}
-
-func (api *API) ActionReap(ctx context.Context, params ActionReapParams) (*workflow.ReapActionsResult, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	result, err := api.service.ReapActions(workflow.ReapActionsParams{
-		Task:               params.Task,
-		InstanceID:         params.InstanceID,
-		Action:             params.Action,
-		ExpiredBefore:      params.ExpiredBefore,
-		LegacyActiveBefore: params.LegacyActiveBefore,
-		Limit:              params.Limit,
-		PrincipalRef:       params.PrincipalRef,
-		Summary:            params.Summary,
-	})
-	if err != nil {
-		return nil, normalizeError(err)
-	}
-	return result, nil
 }
 
 func (api *API) ActionShow(ctx context.Context, params ActionShowParams) (*ActionRun, error) {

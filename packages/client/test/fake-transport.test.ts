@@ -61,7 +61,6 @@ const MOCK_TRANSITION_RESULT: WrkfTransitionResult = {
   instanceId: "wfi_abc123",
   state: { status: "active", phase: "done" },
   revision: 1,
-  contextHash: "sha256:deadbeef",
   eventId: "wfe_000002",
   effects: [],
   obligations: [],
@@ -557,7 +556,7 @@ describe("wrkq namespace", () => {
   test("workflow.attach is a wrkq verb", async () => {
     const transport = new FakeTransport().onResult("wrkq.workflow.attach", {
       task: MOCK_TASK,
-      instance: { id: "wfi_x", revision: 0, contextHash: "sha256:c" },
+      instance: { id: "wfi_x", revision: 0 },
       attached: true,
     });
     const client = await clientWith(transport);
@@ -660,7 +659,6 @@ describe("wrkf namespace", () => {
       role: "coordinator",
       principal_ref: "human:local",
       expectRevision: 0,
-      contextHash: "sha256:abc",
       idempotencyKey: "k:plan_ready:0",
       runChecks: false,
       dryRun: false,
@@ -672,7 +670,6 @@ describe("wrkf namespace", () => {
       task: "T-00001",
       transition: "plan_ready",
       expectRevision: 0,
-      contextHash: "sha256:abc",
     });
     expect(result.instanceId).toBe("wfi_abc123");
     expect(result.revision).toBe(1);

@@ -9,26 +9,20 @@ predicate: >
   `operator_resolved`. The transition requires latest direct
   `operator_resolution` evidence, a `note` evidence kind producible by
   `supervisor`, with `facts.resolution` in `resume_ready|cancelled|close` and a
-  human/operator reason in either evidence summary or `facts.reason`.
+  free-form optional summary.
   `resume_ready` moves only to `active/ready` and sets the wrkq task state back
   to `open`; `cancelled` moves to `closed/cancelled` and sets the wrkq task
   state to `cancelled`; `close` moves to `closed/done` and sets the wrkq task
   state to `completed`. It never resumes directly to implemented/done except
   through the terminal-success `close` outcome, and never rewrites prior run
-  terminal states or previous operator_required evidence.
-  On successful resolution, pending/failed supervisor_call and
-  supervisor_escalation effects for the same instance at or before the resolved
-  revision are delivered with receipts linking the operator_resolution evidence
-  id and transition event id. Unexpired leased supervisor effects may be
-  delivered only with an explicit supervisorOverride receipt; unrelated effects
-  are untouched.
+  terminal states or previous operator_required evidence. Resolution does not
+  perform transition-id-specific cleanup of supervisor effects.
 authority:
   repo: wrkq
   surface: internal/workflow built-in template, wrkf evidence/transition/effect surfaces
 consumers:
   - wrkf action runners recovering operator_required instances
   - supervisors resolving out-of-band operator truth
-  - effect adapters observing supervisor_call/supervisor_escalation receipts
 source:
   - internal/workflow/builtins/wrkq-simple-task-v2.workflow.json
   - internal/workflow/builtins/wrkq-simple-task-v3.workflow.json
@@ -43,9 +37,7 @@ required_tests:
   - TestOperatorResolvedNoEvidenceGate
   - TestOperatorResolvedResumeAndCancelPaths
   - TestOperatorResolvedClosePath
-  - TestOperatorResolvedRequiresHumanReason
   - TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede
-  - TestOperatorResolvedSupervisorEffectCleanupReceipts
   - go test ./internal/workflow
 last_verified:
   date: 2026-07-05
@@ -53,11 +45,9 @@ last_verified:
 reopen_when:
   - operator_required has no supervisor operator_resolved transition in @2 or @3
   - operator_resolved can run without operator_resolution evidence
-  - operator_resolution can be recorded without a human/operator reason
   - resume_ready moves anywhere other than active/ready or sets task state other than open
   - cancelled moves anywhere other than closed/cancelled or sets task state other than cancelled
   - close moves anywhere other than closed/done or sets task state other than completed
-  - supervisor_call/supervisor_escalation resolution receipts omit evidence or transition linkage
-  - unrelated effects are delivered during operator resolution
+  - operator_resolved gains transition-id-specific supervisor effect cleanup
 supersedes: []
 superseded_by: null

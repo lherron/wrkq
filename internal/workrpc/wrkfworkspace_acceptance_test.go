@@ -152,14 +152,14 @@ func TestWrkfActionSettleWorkspaceFenceRPC(t *testing.T) {
 	}
 }
 
-func TestWrkfActionWorkspaceExpiredReapOperatorRequiredRPC(t *testing.T) {
+func TestWrkfActionWorkspaceExpiryDoesNotTerminalizeRPC(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
 	taskID := p2SeedTask(t, dbPath,
 		"a5000000-0000-4000-8000-000000000038",
-		"action-workspace-reap", "Action Workspace Reap")
+		"action-workspace-expiry", "Action Workspace Expiry")
 	tplPath := "internal/workflow/builtins/wrkq-simple-task-v2.workflow.json"
 	p3Run(t, dbPath,
 		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
@@ -181,19 +181,11 @@ func TestWrkfActionWorkspaceExpiredReapOperatorRequiredRPC(t *testing.T) {
 	binding := actClaimBinding(t, p2ResultOrFail(t, claimFrames[1], "workspace action claim"), "workspace action claim")
 	run, _ := binding["run"].(map[string]any)
 	time.Sleep(5 * time.Millisecond)
-	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
-	reapFrames := p3Run(t, dbPath,
-		mkRPC("reap", "wrkf.action.reap", map[string]any{
-			"task": taskID, "action": "implement", "expiredBefore": future, "principal_ref": actActor,
-		}),
+	showFrames := p3Run(t, dbPath,
+		mkRPC("show", "wrkf.action.show", map[string]any{"actionRunId": run["id"]}),
 	)
-	reaped := p2ResultOrFail(t, reapFrames[1], "action.reap workspace-bound implement")
-	items, _ := reaped["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("workspace-bound reap items = %#v, want one", reaped["items"])
-	}
-	item, _ := items[0].(map[string]any)
-	if item["runId"] != run["id"] || item["status"] != "operator_required" {
-		t.Fatalf("workspace-bound reap item = %#v, want run %s operator_required", item, run["id"])
+	shown := p2ResultOrFail(t, showFrames[1], "action.show expired workspace-bound implement")
+	if shown["runId"] != run["id"] || shown["status"] != "active" {
+		t.Fatalf("expired workspace-bound run = %#v, want run %s active", shown, run["id"])
 	}
 }

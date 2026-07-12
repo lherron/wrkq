@@ -56,8 +56,8 @@ func actionFixture(t *testing.T) (*Service, string) {
 	return svc, taskUUID
 }
 
-// T-05067: action leases are durable recovery metadata, so a migrated workflow
-// DB must expose the fields the coordinator/reaper can rely on.
+// Action leases are durable claim metadata, so a migrated workflow DB must
+// expose the fields claim and settlement paths rely on.
 func TestActionLeaseRecoveryMigrationAddsRunColumns(t *testing.T) {
 	svc, _ := actionFixture(t)
 
@@ -92,33 +92,6 @@ func TestActionLeaseRecoveryMigrationAddsRunColumns(t *testing.T) {
 		if !got[want] {
 			t.Errorf("workflow_runs missing %s column for action lease recovery", want)
 		}
-	}
-}
-
-func TestActionReapFailureEvidenceIncludesExternalRunRef(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{
-		Task:           taskUUID,
-		Action:         "triage",
-		PrincipalRef:   "agent:t",
-		ExternalRunRef: "hrc:dead-run",
-		LeaseOwner:     "runner-dead",
-		LeaseMs:        300000,
-	})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-	expireActionRunForTest(t, svc, run.RunID)
-	if _, err := svc.ReapActions(ReapActionsParams{Task: taskUUID, Action: "triage", ExpiredBefore: "2026-01-01T00:00:00Z"}); err != nil {
-		t.Fatalf("ReapActions: %v", err)
-	}
-	ev := settledFailureEvidenceForRun(t, svc, run.RunID)
-	var facts map[string]interface{}
-	if err := json.Unmarshal(ev.Data, &facts); err != nil {
-		t.Fatalf("unmarshal reap evidence facts: %v", err)
-	}
-	if got := facts["externalRunRef"]; got != "hrc:dead-run" {
-		t.Fatalf("externalRunRef = %#v, want hrc:dead-run", got)
 	}
 }
 

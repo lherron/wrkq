@@ -69,11 +69,11 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 
 ## wrkq.wrkf-action.lease-recovery
 
-- **scope:** wrkf.action coordinator-owned recovery
-- **predicate:** Coordinator-owned wrkf.action runs may opt into durable leases. A leased active action run carries one current lease token, non-secret owner/expiry/heartbeat audit fields, and rejects heartbeat, complete, fail, or settle attempts unless the caller presents the current unexpired authority. wrkf also owns workspace leases keyed by the canonical resolved physical worktree root: not project slug, not git common-dir. A workspace-bound action stores that canonical root in workflow_runs.workspace_ref and success settlement rejects unless the caller presents both the current action owner token/generation and the current workspace lease token/generation. Expired legacy or side-effect-free action runs are terminalized operationally failed with run-linked failure evidence. Expired v2 claimed runs with possible side effects or external/workspace bindings are terminalized operator_required with run-linked failure evidence; recovery must not invent semantic success. Legacy unleased active actions remain valid blockers unless a caller explicitly supplies a legacyActiveBefore cutoff to the reap path.
-- **source:** `internal/db/migrations/000034_workflow_action_leases.sql`, `internal/db/migrations/000038_workflow_workspace_leases.sql`, `internal/workflow/action.go`, `internal/workflow/workspace_lease.go`, `internal/wrkfapi/action.go`, `internal/workrpc/registry.go`
-- **required_tests:** `go test ./internal/workflow`, `go test ./internal/workrpc -run 'Action|WrkfAction'`
-- **last_verified:** 2026-07-05
+- **scope:** wrkf.action lease expiry
+- **predicate:** Coordinator-owned wrkf.action runs may opt into durable leases. A leased active action run carries one current lease token, non-secret owner/expiry/heartbeat audit fields, and rejects heartbeat, complete, fail, or settle attempts unless the caller presents current authority. Lease TTL expiry only makes a claim contestable: no timer, CLI command, RPC method, or service path terminalizes the run, clears its claim fields, stamps operator_required, or synthesizes failure evidence at expiry time. wrkf also owns workspace leases keyed by the canonical resolved physical worktree root. Expiry alone does not release or mutate a workspace lease record.
+- **source:** `internal/db/migrations/000034_workflow_action_leases.sql`, `internal/db/migrations/000038_workflow_workspace_leases.sql`, `internal/workflow/action.go`, `internal/workflow/workspace_lease_test.go`, `internal/cli/daemon.go`, `internal/wrkfapi/action.go`, `internal/workrpc/registry.go`, `internal/workrpc/wrkfworkspace_acceptance_test.go`
+- **required_tests:** `TestExpiredWorkspaceBoundActionRemainsActive`, `TestWrkfActionWorkspaceExpiryDoesNotTerminalizeRPC`
+- **last_verified:** 2026-07-12
 
 ## wrkq.wrkf-rpc.attachment-byte-transfer
 

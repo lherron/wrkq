@@ -1881,16 +1881,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		result["transition"] = transitionID
 		result["outcome"] = chosen.ID
 		eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
-		resolutionEvidence := latestOperatorResolutionEvidence(ev, chosen.ID)
-		if transitionID == "operator_resolved" && resolutionEvidence != nil {
-			resolvedEffects, err := resolveSupervisorEffectsTx(tx, updated.ID, inst.Revision, eventID, resolutionEvidence.ID, opts.PrincipalRef, opts.Role, now)
-			if err != nil {
-				return err
-			}
-			if len(resolvedEffects) > 0 {
-				result["resolvedSupervisorEffects"] = resolvedEffects
-			}
-		}
 		resultJSON, _ := json.Marshal(result)
 		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload)
 		if err != nil {
@@ -1914,120 +1904,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		}
 	}
 	return result, nil
-}
-
-func latestOperatorResolutionEvidence(ev []Evidence, outcomeID string) *Evidence {
-	for i := len(ev) - 1; i >= 0; i-- {
-		if ev[i].Kind != "operator_resolution" {
-			continue
-		}
-		want, _ := json.Marshal(outcomeID)
-		if ok, _ := evidenceFactsMatch(ev[i], map[string]json.RawMessage{"resolution": want}); outcomeID == "" || ok {
-			return &ev[i]
-		}
-	}
-	return nil
-}
-
-type supervisorEffectCandidate struct {
-	id          string
-	status      string
-	leasedUntil string
-}
-
-func resolveSupervisorEffectsTx(tx *sql.Tx, instanceID string, maxRevision int64, transitionEventID, evidenceID, principalRef, role, now string) ([]Effect, error) {
-	rows, err := tx.Query(`
-		SELECT id, status, COALESCE(leased_until, '')
-		FROM workflow_effects
-		WHERE instance_id = ?
-		  AND revision <= ?
-		  AND kind IN ('supervisor_call', 'supervisor_escalation')
-		  AND status IN ('pending', 'failed', 'leased')
-		ORDER BY COALESCE(sequence, 9223372036854775807), created_at, id
-	`, instanceID, maxRevision)
-	if err != nil {
-		return nil, err
-	}
-	var candidates []supervisorEffectCandidate
-	for rows.Next() {
-		var c supervisorEffectCandidate
-		if err := rows.Scan(&c.id, &c.status, &c.leasedUntil); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		candidates = append(candidates, c)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if len(candidates) == 0 {
-		return nil, nil
-	}
-	for _, c := range candidates {
-		receipt := map[string]interface{}{
-			"kind":                         "operator_resolution.supervisor_effect_cleanup",
-			"operatorResolutionEvidenceId": evidenceID,
-			"transitionEventId":            transitionEventID,
-			"principal_ref":                principalRef,
-			"role":                         role,
-			"previousStatus":               c.status,
-		}
-		parsedNow, _ := time.Parse(time.RFC3339, now)
-		if c.status == "leased" && leaseStillCurrent(c.leasedUntil, parsedNow) {
-			receipt["supervisorOverride"] = true
-			receipt["leasedUntil"] = c.leasedUntil
-		}
-		receiptJSON, _ := json.Marshal(receipt)
-		_, err := tx.Exec(`
-			UPDATE workflow_effects
-			SET status = 'delivered',
-			    delivered_at = ?,
-			    attempts = attempts + 1,
-			    leased_by = NULL,
-			    leased_until = NULL,
-			    lease_token = NULL,
-			    last_error = NULL,
-			    receipt_json = ?,
-			    updated_at = ?
-			WHERE id = ?
-		`, now, string(receiptJSON), now, c.id)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return effectsByIDsTx(tx, effectCandidateIDs(candidates))
-}
-
-func effectCandidateIDs(candidates []supervisorEffectCandidate) []string {
-	ids := make([]string, 0, len(candidates))
-	for _, c := range candidates {
-		ids = append(ids, c.id)
-	}
-	return ids
-}
-
-func effectsByIDsTx(tx *sql.Tx, ids []string) ([]Effect, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
-	args := make([]interface{}, 0, len(ids))
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	rows, err := tx.Query(fmt.Sprintf(`
-		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
-		       created_at, updated_at
-		FROM workflow_effects
-		WHERE id IN (%s)
-		ORDER BY COALESCE(sequence, 9223372036854775807), created_at, id
-	`, placeholders), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return scanEffects(rows)
 }
 
 type instanceRevision struct {

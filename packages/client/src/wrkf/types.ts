@@ -40,7 +40,6 @@ export interface WrkfInstance {
   phase?: string;
   outcome?: string;
   revision: number;
-  contextHash: string;
   taskDocEtag?: string;
   taskDocHash?: string;
   createdAt?: string;
@@ -58,7 +57,6 @@ export type LedgerKind =
   | "resume"
   | "operator_intervention"
   | "escalation"
-  | "reap"
   | "strike"
   | "close_scorecard"
   | (string & {});
@@ -515,8 +513,6 @@ export interface WrkfTransitionApplyParams {
   principal_ref?: string;
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.3. */
   expectRevision?: number;
-  /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.3. */
-  contextHash?: string;
   idempotencyKey?: string;
   runChecks?: boolean;
   dryRun?: boolean;
@@ -527,7 +523,6 @@ export interface WrkfTransitionResult {
   instanceId: string;
   state: WrkfState;
   revision: number;
-  contextHash: string;
   eventId: string;
   effects: WrkfEffect[];
   obligations: WrkfObligation[];
@@ -879,17 +874,6 @@ export interface WrkfActionHeartbeatParams {
   leaseMs?: number;
 }
 
-export interface WrkfActionReapParams {
-  task?: string;
-  instanceId?: string;
-  action?: string;
-  expiredBefore?: string;
-  legacyActiveBefore?: string;
-  limit?: number;
-  principal_ref?: string;
-  summary?: string;
-}
-
 export interface WrkfActionShowParams {
   actionRunId: string;
 }
@@ -905,10 +889,6 @@ export interface WrkfActionListParams {
 }
 
 export interface WrkfActionListResult {
-  items: WrkfActionRun[];
-}
-
-export interface WrkfActionReapResult {
   items: WrkfActionRun[];
 }
 

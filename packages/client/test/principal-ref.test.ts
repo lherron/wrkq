@@ -56,7 +56,6 @@ describe("wrkf principal_ref cutover (T-05372)", () => {
       instanceId: "wfi_1",
       state: { status: "active", phase: "red" },
       revision: 1,
-      contextHash: "sha256:abc",
       eventId: "wfe_1",
       effects: [],
       obligations: [],

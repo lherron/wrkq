@@ -164,8 +164,6 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
     });
     expect(needsPatch.facts?.verdict).toBe("needs_patch");
 
-    const staleHash = (await client.wrkq.workflow.inspect({ task: task.id })).instance.contextHash;
-
     const ready = await client.wrkf.evidence.add({
       task: task.id,
       kind: "implementation",
@@ -179,7 +177,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
     expect(ready.facts?.verdict).toBe("ready");
     expect(ready.runId).toBe(run.id);
 
-    // ── CAS stale error path: apply with stale contextHash → typed WorkRpcError ──
+    // ── CAS stale error path: apply with stale revision → typed WorkRpcError ──
     let casErr: unknown;
     try {
       await client.wrkf.transition.apply({
@@ -187,8 +185,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
         transition: "plan_ready",
         role: "coordinator",
         principal_ref: "agent:agent-loop",
-        expectRevision: 0,
-        contextHash: staleHash,
+        expectRevision: 999999,
       });
     } catch (e) {
       casErr = e;
@@ -205,7 +202,6 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
       role: "coordinator",
       principal_ref: "agent:agent-loop",
       expectRevision: fresh.instance.revision,
-      contextHash: fresh.instance.contextHash,
       idempotencyKey: `itest:transition:${task.id}:plan_ready:${fresh.instance.revision}`,
     });
     expect(transitioned.instanceId).toBe(attached.instance.id);
@@ -465,8 +461,6 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
     });
     expect(needsPatch.facts?.verdict).toBe("needs_patch");
 
-    const staleHash = (await wrkfClient.wrkq.workflow.inspect({ task: task.id })).instance.contextHash;
-
     const ready = await wrkfClient.wrkf.evidence.add({
       task: task.id,
       kind: "implementation",
@@ -480,7 +474,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
     expect(ready.facts?.verdict).toBe("ready");
     expect(ready.runId).toBe(run.id);
 
-    // ── CAS stale error path: stale contextHash → typed WorkRpcError ──
+    // ── CAS stale error path: stale revision → typed WorkRpcError ──
     let casErr: unknown;
     try {
       await wrkfClient.wrkf.transition.apply({
@@ -488,8 +482,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
         transition: "plan_ready",
         role: "coordinator",
         principal_ref: "agent:agent-loop",
-        expectRevision: 0,
-        contextHash: staleHash,
+        expectRevision: 999999,
       });
     } catch (e) {
       casErr = e;
@@ -506,7 +499,6 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
       role: "coordinator",
       principal_ref: "agent:agent-loop",
       expectRevision: fresh.instance.revision,
-      contextHash: fresh.instance.contextHash,
       idempotencyKey: `itest:wrkf-e2e:transition:${task.id}:plan_ready:${fresh.instance.revision}`,
     });
     expect(transitioned.instanceId).toBe(attached.instance.id);

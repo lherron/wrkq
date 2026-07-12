@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -159,34 +158,6 @@ func TestOperatorResolvedClosePath(t *testing.T) {
 	}
 }
 
-func TestOperatorResolvedRequiresHumanReason(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
-	driveV2ToOperatorRequired(t, svc, taskUUID)
-
-	_, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: taskUUID,
-		Kind:         "operator_resolution",
-		Ref:          "operator:test",
-		Facts:        `{"resolution":"resume_ready"}`,
-		PrincipalRef: "agent:supervisor",
-		Role:         "supervisor",
-	})
-	if err == nil || !strings.Contains(err.Error(), "operator_resolution requires") {
-		t.Fatalf("AddEvidence without reason error = %v, want reason validation", err)
-	}
-	if _, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: taskUUID,
-		Kind:         "operator_resolution",
-		Ref:          "operator:test",
-		Facts:        `{"resolution":"resume_ready","reason":"operator fixed it"}`,
-		PrincipalRef: "agent:supervisor",
-		Role:         "supervisor",
-	}); err != nil {
-		t.Fatalf("AddEvidence facts.reason: %v", err)
-	}
-}
-
 func TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	installOldBuiltinV2WithoutOperatorResolved(t, svc)
@@ -231,51 +202,6 @@ func TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede(t *testing.T
 	}
 	if got := readTaskState(t, svc, taskUUID); got != "completed" {
 		t.Fatalf("task state after recovered close = %q, want completed", got)
-	}
-}
-
-func TestOperatorResolvedSupervisorEffectCleanupReceipts(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
-	driveV2ToOperatorRequired(t, svc, taskUUID)
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	pending := insertEffectForTest(t, svc, inst.ID, inst.Revision, "supervisor_call", "pending", "")
-	failed := insertEffectForTest(t, svc, inst.ID, inst.Revision, "supervisor_escalation", "failed", "")
-	leasedUntil := svc.now().UTC().Add(time.Hour).Format(time.RFC3339)
-	leased := insertEffectForTest(t, svc, inst.ID, inst.Revision, "supervisor_call", "leased", leasedUntil)
-	unrelated := insertEffectForTest(t, svc, inst.ID, inst.Revision, "request_observer_review", "pending", "")
-
-	ev := addOperatorResolution(t, svc, taskUUID, "resume_ready", "operator cleared supervisor wedge")
-	out := transitionOperatorResolved(t, svc, taskUUID)
-	eventID, _ := out["eventId"].(string)
-	for _, id := range []string{pending, failed, leased} {
-		eff, err := svc.ShowEffect(id)
-		if err != nil {
-			t.Fatalf("ShowEffect %s: %v", id, err)
-		}
-		if eff.Status != "delivered" || eff.DeliveredAt == "" || len(eff.Receipt) == 0 {
-			t.Fatalf("effect %s = %+v, want delivered with receipt", id, eff)
-		}
-		var receipt map[string]interface{}
-		if err := json.Unmarshal(eff.Receipt, &receipt); err != nil {
-			t.Fatalf("receipt %s: %v", id, err)
-		}
-		if receipt["operatorResolutionEvidenceId"] != ev.ID || receipt["transitionEventId"] != eventID {
-			t.Fatalf("receipt %s = %+v, want evidence %s event %s", id, receipt, ev.ID, eventID)
-		}
-		if id == leased && receipt["supervisorOverride"] != true {
-			t.Fatalf("leased receipt = %+v, want explicit supervisorOverride", receipt)
-		}
-	}
-	untouched, err := svc.ShowEffect(unrelated)
-	if err != nil {
-		t.Fatalf("ShowEffect unrelated: %v", err)
-	}
-	if untouched.Status != "pending" {
-		t.Fatalf("unrelated effect = %+v, want pending", untouched)
 	}
 }
 
@@ -418,35 +344,4 @@ func seedOperatorRequiredWedgeForTest(t *testing.T, svc *Service, instanceID str
 	`, now, instanceID); err != nil {
 		t.Fatalf("seed operator_required wedge: %v", err)
 	}
-}
-
-func insertEffectForTest(t *testing.T, svc *Service, instanceID string, revision int64, kind, status, leasedUntil string) string {
-	t.Helper()
-	var id string
-	if err := withImmediateTx(svc.db, func(tx *sql.Tx) error {
-		var err error
-		id, err = nextSeqID(tx, "workflow_effect_seq", "eff")
-		if err != nil {
-			return err
-		}
-		seq, err := nextEffectSequenceTx(tx, instanceID)
-		if err != nil {
-			return err
-		}
-		payload, _ := json.Marshal(map[string]string{"test": kind})
-		leaseToken := ""
-		leasedBy := ""
-		if status == "leased" {
-			leaseToken = "lease-test-" + id
-			leasedBy = "test-adapter"
-		}
-		_, err = tx.Exec(`
-			INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, leased_by, leased_until, lease_token)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, instanceID, revision, seq, kind, string(payload), status, "test:"+id, "test:"+id, nullIfEmpty(leasedBy), nullIfEmpty(leasedUntil), nullIfEmpty(leaseToken))
-		return err
-	}); err != nil {
-		t.Fatalf("insert effect: %v", err)
-	}
-	return id
 }
