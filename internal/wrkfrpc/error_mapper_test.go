@@ -48,13 +48,6 @@ var errorCodeTable = []struct {
 		retryable: false,
 	},
 	{
-		name:      "WRKF_CONTEXT_MISMATCH",
-		err:       wrkfapi.NewContextMismatchError("wfi_abc123", "sha256:aaa", "sha256:bbb"),
-		rpcCode:   -32010,
-		dataCode:  "WRKF_CONTEXT_MISMATCH",
-		retryable: true,
-	},
-	{
 		name:      "WRKF_TRANSITION_BLOCKED",
 		err:       wrkfapi.NewTransitionBlockedError("wfi_abc123", "plan_ready", nil),
 		rpcCode:   -32011,

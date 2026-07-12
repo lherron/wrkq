@@ -26,7 +26,6 @@ func workflowAttachedWebhookContext(meta workflowEventMetadata, inst Instance, t
 			NextRevision:  int64Ptr(inst.Revision),
 			TaskDocETag:   inst.TaskDocEtag,
 			TaskDocHash:   inst.TaskDocHash,
-			ContextHash:   inst.ContextHash,
 			Payload:       meta.Payload,
 		},
 	}
@@ -67,7 +66,6 @@ func workflowTransitionWebhookContext(meta workflowEventMetadata, updated Instan
 			NextRevision:     int64Ptr(nextRevision),
 			TaskDocETag:      updated.TaskDocEtag,
 			TaskDocHash:      updated.TaskDocHash,
-			ContextHash:      updated.ContextHash,
 			IdempotencyKey:   nonEmptyStringPtr(idempotencyKey),
 			Payload:          meta.Payload,
 		},

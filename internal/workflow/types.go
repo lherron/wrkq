@@ -311,7 +311,6 @@ type Instance struct {
 	Phase           string              `json:"phase,omitempty"`
 	Outcome         string              `json:"outcome,omitempty"`
 	Revision        int64               `json:"revision"`
-	ContextHash     string              `json:"contextHash"`
 	TaskDocEtag     string              `json:"taskDocEtag"`
 	TaskDocHash     string              `json:"taskDocHash"`
 	CreatedAt       string              `json:"createdAt"`
@@ -349,7 +348,6 @@ type Event struct {
 	NextRevision     int64           `json:"nextRevision"`
 	TaskDocEtag      string          `json:"taskDocEtag,omitempty"`
 	TaskDocHash      string          `json:"taskDocHash,omitempty"`
-	ContextHash      string          `json:"contextHash,omitempty"`
 	IdempotencyKey   string          `json:"idempotencyKey,omitempty"`
 	Result           string          `json:"result,omitempty"`
 	RejectionCode    string          `json:"rejectionCode,omitempty"`
@@ -675,7 +673,6 @@ type NextInstance struct {
 	} `json:"template"`
 	State       State  `json:"state"`
 	Revision    int64  `json:"revision"`
-	ContextHash string `json:"contextHash"`
 	TaskDoc     struct {
 		Etag string `json:"etag"`
 		Hash string `json:"hash"`
@@ -736,7 +733,6 @@ type TransitionOptions struct {
 	Role           string
 	ExpectRevision *int64
 	IdempotencyKey string
-	ContextHash    string
 	CheckIDs       []string
 	RunChecks      bool
 	DryRun         bool

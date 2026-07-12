@@ -19,7 +19,6 @@ var domainRPCCode = map[string]int{
 	wrkfapi.CodeNotFound:             -32004,
 	wrkfapi.CodeValidation:           -32602,
 	wrkfapi.CodeStaleRevision:        -32009,
-	wrkfapi.CodeContextMismatch:      -32010,
 	wrkfapi.CodeTransitionBlocked:    -32011,
 	wrkfapi.CodeRoleDenied:           -32012,
 	wrkfapi.CodeIdempotencyMismatch:  -32013,

@@ -17,7 +17,6 @@ type TransitionApplyParams struct {
 	Role           string   `json:"role,omitempty"`
 	PrincipalRef   string   `json:"principal_ref,omitempty"`
 	ExpectRevision *int64   `json:"expectRevision,omitempty"`
-	ContextHash    string   `json:"contextHash,omitempty"`
 	IdempotencyKey string   `json:"idempotencyKey,omitempty"`
 	CheckIDs       []string `json:"checkIds,omitempty"`
 	RunChecks      bool     `json:"runChecks,omitempty"`
@@ -33,7 +32,6 @@ func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParam
 		Role:           params.Role,
 		ExpectRevision: params.ExpectRevision,
 		IdempotencyKey: params.IdempotencyKey,
-		ContextHash:    params.ContextHash,
 		CheckIDs:       params.CheckIDs,
 		RunChecks:      params.RunChecks,
 		DryRun:         params.DryRun,
@@ -67,8 +65,6 @@ func normalizeTransitionError(err error) error {
 		switch coded.Code() {
 		case CodeStaleRevision:
 			return NewStaleRevisionError("", 0, 0)
-		case CodeContextMismatch:
-			return NewContextMismatchError("", "", "")
 		case CodeTransitionBlocked:
 			return NewTransitionBlockedError("", "", nil)
 		case CodeRoleDenied:
@@ -86,7 +82,6 @@ func transitionResultFromAny(out map[string]interface{}) TransitionResult {
 		InstanceID:  stringFromAny(out["instanceId"]),
 		State:       stateFromAny(out["state"]),
 		Revision:    int64FromAny(out["revision"]),
-		ContextHash: stringFromAny(out["contextHash"]),
 		EventID:     stringFromAny(out["eventId"]),
 		Effects:     effectsFromAny(out["effects"]),
 		Obligations: obligationsFromAny(out["obligations"]),

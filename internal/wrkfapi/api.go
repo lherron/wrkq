@@ -702,8 +702,6 @@ func normalizeError(err error) error {
 		switch coded.Code() {
 		case CodeStaleRevision:
 			return NewStaleRevisionError("", 0, 0)
-		case CodeContextMismatch:
-			return NewContextMismatchError("", "", "")
 		case CodeTransitionBlocked:
 			return NewTransitionBlockedError("", "", nil)
 		case CodeRoleDenied:
@@ -735,8 +733,6 @@ func normalizeError(err error) error {
 	switch {
 	case strings.Contains(lower, "revision mismatch"):
 		return NewStaleRevisionError("", 0, 0)
-	case strings.Contains(lower, "context hash mismatch"):
-		return NewContextMismatchError("", "", "")
 	case strings.Contains(lower, "blocked"):
 		return NewTransitionBlockedError("", "", nil)
 	case strings.Contains(lower, "not allowed for transition"):

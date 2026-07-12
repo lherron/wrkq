@@ -60,7 +60,6 @@ type TransitionResult struct {
 	InstanceID  string                `json:"instanceId"`
 	State       workflow.State        `json:"state"`
 	Revision    int64                 `json:"revision"`
-	ContextHash string                `json:"contextHash"`
 	EventID     string                `json:"eventId"`
 	Effects     []workflow.Effect     `json:"effects"`
 	Obligations []workflow.Obligation `json:"obligations"`

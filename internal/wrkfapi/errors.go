@@ -10,7 +10,6 @@ const (
 	CodeNotFound             = "WRKF_NOT_FOUND"
 	CodeValidation           = "WRKF_VALIDATION"
 	CodeStaleRevision        = "WRKF_STALE_REVISION"
-	CodeContextMismatch      = "WRKF_CONTEXT_MISMATCH"
 	CodeTransitionBlocked    = "WRKF_TRANSITION_BLOCKED"
 	CodeRoleDenied           = "WRKF_ROLE_DENIED"
 	CodeIdempotencyMismatch  = "WRKF_IDEMPOTENCY_MISMATCH"
@@ -101,14 +100,6 @@ func NewStaleRevisionError(instanceID string, expected, actual int64) *DomainErr
 		ExpectedRevision int64  `json:"expectedRevision"`
 		ActualRevision   int64  `json:"actualRevision"`
 	}{InstanceID: instanceID, ExpectedRevision: expected, ActualRevision: actual}, nil)
-}
-
-func NewContextMismatchError(instanceID, expected, actual string) *DomainError {
-	return newError(CodeContextMismatch, "workflow context hash mismatch", true, struct {
-		InstanceID string `json:"instanceId,omitempty"`
-		Expected   string `json:"expected,omitempty"`
-		Actual     string `json:"actual,omitempty"`
-	}{InstanceID: instanceID, Expected: expected, Actual: actual}, nil)
 }
 
 func NewTransitionBlockedError(instanceID, transition string, blocksOn []Blocker) *DomainError {

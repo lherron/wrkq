@@ -895,7 +895,7 @@ func checkCmd() *cobra.Command {
 
 func transitionCmd() *cobra.Command {
 	var expectRevision int64
-	var idempotencyKey, contextHash string
+	var idempotencyKey string
 	var runChecks, dryRun bool
 	var checks []string
 	cmd := &cobra.Command{
@@ -908,7 +908,7 @@ func transitionCmd() *cobra.Command {
 			}
 			out, err := a.service.Transition(args[0], args[1], workflow.TransitionOptions{
 				PrincipalRef: a.actor, Role: a.role, ExpectRevision: exp, IdempotencyKey: idempotencyKey,
-				ContextHash: contextHash, CheckIDs: checks, RunChecks: runChecks, DryRun: dryRun,
+				CheckIDs: checks, RunChecks: runChecks, DryRun: dryRun,
 				HookCatalog: a.hookCatalog, TemplateDir: workflow.HookCatalogDir(a.hookPath),
 			})
 			if err != nil {
@@ -919,7 +919,6 @@ func transitionCmd() *cobra.Command {
 	}
 	cmd.Flags().Int64Var(&expectRevision, "expect-revision", 0, "Expected workflow revision")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key")
-	cmd.Flags().StringVar(&contextHash, "context", "", "Expected context hash")
 	cmd.Flags().BoolVar(&runChecks, "run-checks", false, "Run transition checks before committing")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate without committing")
 	cmd.Flags().StringArrayVar(&checks, "check", nil, "Check run id")

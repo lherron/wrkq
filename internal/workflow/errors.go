@@ -8,7 +8,6 @@ import (
 
 const (
 	wrkfCodeStaleRevision        = "WRKF_STALE_REVISION"
-	wrkfCodeContextMismatch      = "WRKF_CONTEXT_MISMATCH"
 	wrkfCodeTransitionBlocked    = "WRKF_TRANSITION_BLOCKED"
 	wrkfCodeRoleDenied           = "WRKF_ROLE_DENIED"
 	wrkfCodeIdempotencyMismatch  = "WRKF_IDEMPOTENCY_MISMATCH"
@@ -136,13 +135,6 @@ func staleRevisionError(instanceID string, expected, actual int64) error {
 	return &wrkfError{
 		code: wrkfCodeStaleRevision,
 		msg:  fmt.Sprintf("workflow revision mismatch: instance %s expected %d, got %d", instanceID, expected, actual),
-	}
-}
-
-func contextMismatchError(instanceID, expected, actual string) error {
-	return &wrkfError{
-		code: wrkfCodeContextMismatch,
-		msg:  fmt.Sprintf("workflow context hash mismatch: instance %s expected %s, got %s", instanceID, expected, actual),
 	}
 }
 

@@ -80,7 +80,6 @@ type WorkflowPayload struct {
 	NextRevision     *int64      `json:"next_revision,omitempty"`
 	TaskDocETag      string      `json:"task_doc_etag,omitempty"`
 	TaskDocHash      string      `json:"task_doc_hash,omitempty"`
-	ContextHash      string      `json:"context_hash,omitempty"`
 	IdempotencyKey   *string     `json:"idempotency_key,omitempty"`
 	Payload          interface{} `json:"payload,omitempty"`
 }

@@ -95,7 +95,6 @@ func ErrorCodeCatalog() []string {
 		wrkfapi.CodeNotFound,
 		wrkfapi.CodeValidation,
 		wrkfapi.CodeStaleRevision,
-		wrkfapi.CodeContextMismatch,
 		wrkfapi.CodeTransitionBlocked,
 		wrkfapi.CodeRoleDenied,
 		wrkfapi.CodeIdempotencyMismatch,

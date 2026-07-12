@@ -810,13 +810,12 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 			closed.ClosedAt = now
 			closed.TaskDocEtag = fmt.Sprint(task.ETag)
 			closed.TaskDocHash = taskHash
-			closed.ContextHash = contextHash(closed.TemplateHash, closed.State(), closed.Revision, closed.TaskDocHash, nil, nil, nil)
 			res, err := tx.Exec(`
 				UPDATE workflow_instances
-				SET status = 'closed', phase = 'superseded', outcome = NULL, revision = ?, context_hash = ?,
+				SET status = 'closed', phase = 'superseded', outcome = NULL, revision = ?,
 				    task_doc_etag = ?, task_doc_hash = ?, updated_at = ?, closed_at = ?
 				WHERE task_uuid = ? AND id = ? AND status != 'closed' AND revision = ?
-			`, closed.Revision, closed.ContextHash, closed.TaskDocEtag, closed.TaskDocHash, closed.UpdatedAt, closed.ClosedAt, taskUUID, current.ID, current.Revision)
+			`, closed.Revision, closed.TaskDocEtag, closed.TaskDocHash, closed.UpdatedAt, closed.ClosedAt, taskUUID, current.ID, current.Revision)
 			if err != nil {
 				return err
 			}
@@ -825,7 +824,7 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 				return err
 			}
 			if affected != 1 {
-				actual, loadErr := instanceRevisionContextTx(tx, current.ID)
+				actual, loadErr := instanceRevisionTx(tx, current.ID)
 				if loadErr != nil {
 					return loadErr
 				}
@@ -848,30 +847,29 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 				"from":        current.State(),
 				"to":          closed.State(),
 			}
-			if _, err := insertEventReturning(tx, current.ID, "workflow.superseded", actor, "", "", current.Revision, closed.Revision, "", task.ETag, taskHash, closed.ContextHash, payload); err != nil {
+			if _, err := insertEventReturning(tx, current.ID, "workflow.superseded", actor, "", "", current.Revision, closed.Revision, "", task.ETag, taskHash, payload); err != nil {
 				return err
 			}
 		}
-		ctxHash := contextHash(templateHash, tpl.Initial, 0, taskHash, nil, nil, nil)
 		_, err = tx.Exec(`
 			INSERT INTO workflow_instances (
 				id, task_uuid, task_ref, project_id, template_id, template_version, template_hash,
-				status, phase, outcome, revision, context_hash, task_doc_etag, task_doc_hash,
+				status, phase, outcome, revision, task_doc_etag, task_doc_hash,
 				created_at, updated_at, closed_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
 		`, instanceID, taskUUID, "wrkq:"+taskID, task.ProjectID, id, version, templateHash,
 			tpl.Initial.Status, nullIfEmpty(tpl.Initial.Phase), nullIfEmpty(tpl.Initial.Outcome),
-			ctxHash, fmt.Sprint(task.ETag), taskHash, now, now, nil)
+			fmt.Sprint(task.ETag), taskHash, now, now, nil)
 		if err != nil {
 			return err
 		}
-		inst = &Instance{ID: instanceID, TaskUUID: taskUUID, TaskRef: "wrkq:" + taskID, ProjectID: task.ProjectID, TemplateID: id, TemplateVersion: version, TemplateHash: templateHash, Status: tpl.Initial.Status, Phase: tpl.Initial.Phase, Outcome: tpl.Initial.Outcome, Revision: 0, ContextHash: ctxHash, TaskDocEtag: fmt.Sprint(task.ETag), TaskDocHash: taskHash, CreatedAt: now, UpdatedAt: now}
+		inst = &Instance{ID: instanceID, TaskUUID: taskUUID, TaskRef: "wrkq:" + taskID, ProjectID: task.ProjectID, TemplateID: id, TemplateVersion: version, TemplateHash: templateHash, Status: tpl.Initial.Status, Phase: tpl.Initial.Phase, Outcome: tpl.Initial.Outcome, Revision: 0, TaskDocEtag: fmt.Sprint(task.ETag), TaskDocHash: taskHash, CreatedAt: now, UpdatedAt: now}
 		attachedPayload := map[string]interface{}{"template": templateRef, "state": tpl.Initial}
 		if predecessor != nil {
 			inst.Supersedes = predecessor
 			attachedPayload["supersededPredecessor"] = predecessor
 		}
-		attachedEvent, err = insertEventReturning(tx, instanceID, "workflow.attached", actor, "", "", 0, 0, "", task.ETag, taskHash, ctxHash, attachedPayload)
+		attachedEvent, err = insertEventReturning(tx, instanceID, "workflow.attached", actor, "", "", 0, 0, "", task.ETag, taskHash, attachedPayload)
 		if err != nil {
 			return err
 		}
@@ -979,40 +977,6 @@ func taskDocHash(t *taskDoc) string {
 	return Hash(b)
 }
 
-func contextHash(templateHash string, state State, revision int64, taskHash string, ev []Evidence, obl []Obligation, eff []Effect) string {
-	doc := map[string]interface{}{"templateHash": templateHash, "state": state, "revision": revision, "taskDocHash": taskHash}
-	if ev != nil {
-		refs := make([]string, 0, len(ev))
-		for _, e := range ev {
-			refs = append(refs, e.ID+":"+e.Kind+":"+e.Ref+":"+Hash(e.Facts))
-		}
-		sort.Strings(refs)
-		doc["evidence"] = refs
-	}
-	if obl != nil {
-		refs := make([]string, 0, len(obl))
-		for _, o := range obl {
-			if o.Status == "open" {
-				refs = append(refs, o.ID+":"+o.Kind+":"+fmt.Sprint(o.Blocking))
-			}
-		}
-		sort.Strings(refs)
-		doc["openObligations"] = refs
-	}
-	if eff != nil {
-		refs := make([]string, 0, len(eff))
-		for _, e := range eff {
-			if e.Status == "pending" || e.Status == "leased" {
-				refs = append(refs, e.ID+":"+e.Kind+":"+e.Status)
-			}
-		}
-		sort.Strings(refs)
-		doc["pendingEffects"] = refs
-	}
-	b, _ := json.Marshal(doc)
-	return Hash(b)
-}
-
 func nullIfEmpty(s string) interface{} {
 	if s == "" {
 		return nil
@@ -1075,11 +1039,11 @@ type workflowEventMetadata struct {
 	Payload       interface{}
 }
 
-func insertEventReturning(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash, ctxHash string, payload interface{}) (workflowEventMetadata, error) {
-	return insertEventWithResult(tx, instanceID, typ, actor, role, runID, observed, next, key, "", "", taskETag, taskHash, ctxHash, payload)
+func insertEventReturning(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {
+	return insertEventWithResult(tx, instanceID, typ, actor, role, runID, observed, next, key, "", "", taskETag, taskHash, payload)
 }
 
-func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) (workflowEventMetadata, error) {
+func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {
 	id, err := nextSeqID(tx, "workflow_event_seq", "wfe")
 	if err != nil {
 		return workflowEventMetadata{}, err
@@ -1092,10 +1056,10 @@ func insertEventWithResult(tx *sql.Tx, instanceID, typ, actor, role, runID strin
 	_, err = tx.Exec(`
 		INSERT INTO workflow_events (
 			id, instance_id, seq, schema_version, type, actor, principal_ref, role, run_id,
-			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
+			observed_revision, next_revision, task_doc_etag, task_doc_hash,
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
-	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, typ, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	if err != nil {
 		return workflowEventMetadata{}, err
 	}
@@ -1144,8 +1108,7 @@ func updateTaskWorkflowMeta(tx *sql.Tx, taskUUID string, inst Instance, actor st
 		"state": map[string]interface{}{
 			"status": inst.Status,
 		},
-		"revision":    inst.Revision,
-		"contextHash": inst.ContextHash,
+		"revision": inst.Revision,
 		"taskDoc": map[string]interface{}{
 			"etag": inst.TaskDocEtag, "hash": inst.TaskDocHash,
 		},
@@ -1195,7 +1158,7 @@ func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
 
 func scanInstance(row *sql.Row) (*Instance, error) {
 	var i Instance
-	if err := row.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.ContextHash, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt); err != nil {
+	if err := row.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("workflow instance not found")
 		}
@@ -1215,7 +1178,7 @@ func (s *Service) Timeline(taskSelector string) ([]Event, error) {
 	}
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, seq, schema_version, type, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''),
-		       COALESCE(observed_revision,0), next_revision, COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,''), COALESCE(context_hash,''),
+		       COALESCE(observed_revision,0), next_revision, COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,''),
 		       COALESCE(idempotency_key,''), COALESCE(result,''), COALESCE(rejection_code,''), payload_json, created_at
 		FROM workflow_events WHERE instance_id = ? ORDER BY seq
 	`, inst.ID)
@@ -1227,7 +1190,7 @@ func (s *Service) Timeline(taskSelector string) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var payload string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Seq, &e.SchemaVersion, &e.Type, &e.PrincipalRef, &e.Role, &e.RunID, &e.ObservedRevision, &e.NextRevision, &e.TaskDocEtag, &e.TaskDocHash, &e.ContextHash, &e.IdempotencyKey, &e.Result, &e.RejectionCode, &payload, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Seq, &e.SchemaVersion, &e.Type, &e.PrincipalRef, &e.Role, &e.RunID, &e.ObservedRevision, &e.NextRevision, &e.TaskDocEtag, &e.TaskDocHash, &e.IdempotencyKey, &e.Result, &e.RejectionCode, &payload, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		e.Payload = json.RawMessage(payload)
@@ -1433,15 +1396,11 @@ func (s *Service) Refresh(taskSelector, actor string) (*Instance, error) {
 		if err != nil {
 			return err
 		}
-		ev, _ := listEvidenceTx(tx, inst.ID)
-		obl, _ := listObligationsTx(tx, inst.ID, false)
-		eff, _ := listEffectsTx(tx, inst.ID, false)
 		inst.TaskDocEtag = fmt.Sprint(task.ETag)
 		inst.TaskDocHash = taskDocHash(task)
-		inst.ContextHash = contextHash(inst.TemplateHash, inst.State(), inst.Revision, inst.TaskDocHash, ev, obl, eff)
 		inst.UpdatedAt = s.now().Format(time.RFC3339)
-		_, err = tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, context_hash = ?, updated_at = ? WHERE id = ?`,
-			inst.TaskDocEtag, inst.TaskDocHash, inst.ContextHash, inst.UpdatedAt, inst.ID)
+		_, err = tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`,
+			inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID)
 		if err != nil {
 			return err
 		}
@@ -1823,7 +1782,7 @@ func walkContainerPathQuery(q queryer, path string) (string, error) {
 func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error) {
 	row := q.QueryRow(`
 		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
 		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
 		FROM workflow_instances
 		WHERE task_uuid = ?
@@ -1835,7 +1794,7 @@ func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error
 func activeInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error) {
 	row := q.QueryRow(`
 		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
 		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
 		FROM workflow_instances
 		WHERE task_uuid = ? AND status != 'closed'
@@ -1847,7 +1806,7 @@ func activeInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error
 func instanceByIDQuery(q queryer, instanceID string) (*Instance, error) {
 	row := q.QueryRow(`
 		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
 		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
 		FROM workflow_instances WHERE id = ?
 	`, instanceID)
@@ -2044,23 +2003,10 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err := policy.OnEvidenceAdded(tx, inst, inserted); err != nil {
 			return err
 		}
-		evidence, err := listEvidenceTx(tx, inst.ID)
-		if err != nil {
-			return err
-		}
-		obligations, err := listObligationsTx(tx, inst.ID, false)
-		if err != nil {
-			return err
-		}
-		effects, err := listEffectsTx(tx, inst.ID, false)
-		if err != nil {
-			return err
-		}
-		inst.ContextHash = contextHash(inst.TemplateHash, inst.State(), inst.Revision, taskDocHash(task), evidence, obligations, effects)
 		inst.TaskDocEtag = fmt.Sprint(task.ETag)
 		inst.TaskDocHash = taskDocHash(task)
 		inst.UpdatedAt = now
-		if _, err := tx.Exec(`UPDATE workflow_instances SET context_hash = ?, task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`, inst.ContextHash, inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`, inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
 			return err
 		}
 		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.PrincipalRef); err != nil {
@@ -2675,7 +2621,6 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 	resp.Instance.Template.Hash = inst.TemplateHash
 	resp.Instance.State = inst.State()
 	resp.Instance.Revision = inst.Revision
-	resp.Instance.ContextHash = inst.ContextHash
 	resp.Instance.TaskDoc.Etag = inst.TaskDocEtag
 	resp.Instance.TaskDoc.Hash = inst.TaskDocHash
 	task, _ := loadTaskDoc(s.db, inst.TaskUUID)
@@ -3237,7 +3182,7 @@ func buildCheckInput(inst *Instance, tr *TransitionSpec, actor, role string, tas
 	}
 	input := map[string]interface{}{
 		"task":          map[string]interface{}{"ref": inst.TaskRef, "uuid": inst.TaskUUID, "etag": taskEtag, "hash": taskHash},
-		"workflow":      map[string]interface{}{"instanceId": inst.ID, "state": inst.State(), "revision": inst.Revision, "contextHash": inst.ContextHash},
+		"workflow":      map[string]interface{}{"instanceId": inst.ID, "state": inst.State(), "revision": inst.Revision},
 		"transition":    map[string]interface{}{"id": tr.ID},
 		"principal_ref": map[string]interface{}{"id": actor},
 		"role":          role,

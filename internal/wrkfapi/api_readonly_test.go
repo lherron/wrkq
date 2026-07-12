@@ -50,7 +50,6 @@ func TestTaskInspect_DTO(t *testing.T) {
 	_ = inst.Phase
 	_ = inst.Outcome
 	_ = inst.Revision
-	_ = inst.ContextHash
 	_ = inst.TaskDocEtag
 	_ = inst.TaskDocHash
 	_ = inst.CreatedAt
@@ -75,7 +74,6 @@ func TestTimeline_DTO(t *testing.T) {
 		_ = ev.Role
 		_ = ev.ObservedRevision
 		_ = ev.NextRevision
-		_ = ev.ContextHash
 		_ = ev.CreatedAt
 	}
 }

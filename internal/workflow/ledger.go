@@ -874,24 +874,6 @@ func listEffectsForInstance(database *db.DB, instanceID string, all bool) ([]Eff
 	return scanEffects(rows)
 }
 
-func listEffectsTx(tx *sql.Tx, instanceID string, all bool) ([]Effect, error) {
-	query := `
-		SELECT id, instance_id, revision, COALESCE(sequence,0), kind, payload_json, status, idempotency_key, COALESCE(semantic_key,''), attempts,
-		       COALESCE(leased_by,''), COALESCE(leased_until,''), COALESCE(delivered_at,''), COALESCE(last_error,''), COALESCE(receipt_json,''),
-		       created_at, updated_at
-		FROM workflow_effects WHERE instance_id = ?`
-	if !all {
-		query += ` AND status IN ('pending','leased','failed','delivered')`
-	}
-	query += ` ORDER BY COALESCE(sequence, 9223372036854775807), created_at, id`
-	rows, err := tx.Query(query, instanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return scanEffects(rows)
-}
-
 func scanEffects(rows *sql.Rows) ([]Effect, error) {
 	var out []Effect
 	for rows.Next() {
@@ -1704,9 +1686,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		if opts.ExpectRevision != nil && *opts.ExpectRevision != inst.Revision {
 			return staleRevisionError(inst.ID, *opts.ExpectRevision, inst.Revision)
 		}
-		if opts.ContextHash != "" && opts.ContextHash != inst.ContextHash {
-			return contextMismatchError(inst.ID, opts.ContextHash, inst.ContextHash)
-		}
 		tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
 		if err != nil {
 			return err
@@ -1796,13 +1775,12 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		}
 		updated.TaskDocEtag = fmt.Sprint(task.ETag)
 		updated.TaskDocHash = taskDocHash(task)
-		updated.ContextHash = contextHash(updated.TemplateHash, updated.State(), updated.Revision, updated.TaskDocHash, nil, nil, nil)
 		res, err := tx.Exec(`
 			UPDATE workflow_instances
-			SET status = ?, phase = ?, outcome = ?, revision = ?, context_hash = ?, task_doc_etag = ?, task_doc_hash = ?,
+			SET status = ?, phase = ?, outcome = ?, revision = ?, task_doc_etag = ?, task_doc_hash = ?,
 			    updated_at = ?, closed_at = ?
 			WHERE id = ? AND revision = ?
-		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.ContextHash, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
+		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
 		if err != nil {
 			return err
 		}
@@ -1811,12 +1789,9 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			return err
 		}
 		if affected != 1 {
-			actual, loadErr := instanceRevisionContextTx(tx, updated.ID)
+			actual, loadErr := instanceRevisionTx(tx, updated.ID)
 			if loadErr != nil {
 				return loadErr
-			}
-			if opts.ContextHash != "" && opts.ContextHash != actual.contextHash {
-				return contextMismatchError(updated.ID, opts.ContextHash, actual.contextHash)
 			}
 			expected := inst.Revision
 			if opts.ExpectRevision != nil {
@@ -1917,7 +1892,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			}
 		}
 		resultJSON, _ := json.Marshal(result)
-		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, eventPayload)
+		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload)
 		if err != nil {
 			return err
 		}
@@ -2055,14 +2030,13 @@ func effectsByIDsTx(tx *sql.Tx, ids []string) ([]Effect, error) {
 	return scanEffects(rows)
 }
 
-type revisionContext struct {
-	revision    int64
-	contextHash string
+type instanceRevision struct {
+	revision int64
 }
 
-func instanceRevisionContextTx(tx *sql.Tx, instanceID string) (revisionContext, error) {
-	var out revisionContext
-	err := tx.QueryRow(`SELECT revision, context_hash FROM workflow_instances WHERE id = ?`, instanceID).Scan(&out.revision, &out.contextHash)
+func instanceRevisionTx(tx *sql.Tx, instanceID string) (instanceRevision, error) {
+	var out instanceRevision
+	err := tx.QueryRow(`SELECT revision FROM workflow_instances WHERE id = ?`, instanceID).Scan(&out.revision)
 	return out, err
 }
 
@@ -2075,13 +2049,12 @@ func transitionRequestHash(taskSelector, instanceID, transitionID string, opts T
 		Role           string   `json:"role,omitempty"`
 		ExpectRevision *int64   `json:"expectRevision,omitempty"`
 		IdempotencyKey string   `json:"idempotencyKey,omitempty"`
-		ContextHash    string   `json:"contextHash,omitempty"`
 		CheckIDs       []string `json:"checkIds,omitempty"`
 		RunChecks      bool     `json:"runChecks,omitempty"`
 		DryRun         bool     `json:"dryRun,omitempty"`
 	}{
 		Task: taskSelector, InstanceID: instanceID, Transition: transitionID, PrincipalRef: opts.PrincipalRef, Role: opts.Role,
-		ExpectRevision: opts.ExpectRevision, IdempotencyKey: opts.IdempotencyKey, ContextHash: opts.ContextHash,
+		ExpectRevision: opts.ExpectRevision, IdempotencyKey: opts.IdempotencyKey,
 		CheckIDs: append([]string(nil), opts.CheckIDs...), RunChecks: opts.RunChecks, DryRun: opts.DryRun,
 	}
 	b, _ := json.Marshal(req)
@@ -2120,7 +2093,6 @@ func transitionResultMap(taskSelector string, updated Instance, eventID string, 
 		"instanceId":  updated.ID,
 		"state":       updated.State(),
 		"revision":    updated.Revision,
-		"contextHash": updated.ContextHash,
 		"eventId":     eventID,
 		"effects":     effects,
 		"obligations": obligations,
@@ -2128,7 +2100,7 @@ func transitionResultMap(taskSelector string, updated Instance, eventID string, 
 	}
 }
 
-func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash, ctxHash string, payload interface{}) (workflowEventMetadata, error) {
+func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
@@ -2137,10 +2109,10 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID 
 	_, err := tx.Exec(`
 		INSERT INTO workflow_events (
 			id, instance_id, seq, schema_version, type, actor, principal_ref, role, run_id,
-			observed_revision, next_revision, task_doc_etag, task_doc_hash, context_hash,
+			observed_revision, next_revision, task_doc_etag, task_doc_hash,
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
-	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, ctxHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	if err != nil {
 		return workflowEventMetadata{}, err
 	}
@@ -2299,7 +2271,7 @@ func (s *Service) StartRunForSelectors(taskSelector, instanceID, role, actor str
 			return err
 		}
 		run = &Run{ID: id, InstanceID: inst.ID, Role: role, PrincipalRef: actor, DeliveryRef: opts.DeliveryRef, Lane: opts.Lane, ExternalRunRef: opts.ExternalRunRef, Action: opts.Action, Status: "active", StartedAt: now, LeaseOwner: opts.LeaseOwner, LeaseToken: opts.LeaseToken, LeaseExpiresAt: opts.LeaseExpiresAt, HeartbeatAt: opts.HeartbeatAt}
-		if _, err := insertEventReturning(tx, inst.ID, "workflow.run_started", actor, role, id, inst.Revision, inst.Revision, opts.IdempotencyKey, taskDocEtagInt(inst), inst.TaskDocHash, inst.ContextHash, runLifecyclePayload(run)); err != nil {
+		if _, err := insertEventReturning(tx, inst.ID, "workflow.run_started", actor, role, id, inst.Revision, inst.Revision, opts.IdempotencyKey, taskDocEtagInt(inst), inst.TaskDocHash, runLifecyclePayload(run)); err != nil {
 			return err
 		}
 		return nil
@@ -2391,7 +2363,7 @@ func (s *Service) FinishRun(id, status, summary string) (*Run, error) {
 		if err != nil {
 			return err
 		}
-		if _, err := insertEventReturning(tx, current.InstanceID, "workflow.run_finished", current.PrincipalRef, current.Role, current.ID, inst.Revision, inst.Revision, "", taskDocEtagInt(inst), inst.TaskDocHash, inst.ContextHash, runLifecyclePayload(current)); err != nil {
+		if _, err := insertEventReturning(tx, current.InstanceID, "workflow.run_finished", current.PrincipalRef, current.Role, current.ID, inst.Revision, inst.Revision, "", taskDocEtagInt(inst), inst.TaskDocHash, runLifecyclePayload(current)); err != nil {
 			return err
 		}
 		run = current

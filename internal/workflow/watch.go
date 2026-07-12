@@ -147,7 +147,7 @@ func (s *Service) WatchEvents(selector string, afterSeq int64, limit int) ([]Eve
 	args = append(args, limit)
 	rows, err := s.db.Query(`
 		SELECT id, instance_id, seq, schema_version, type, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''),
-		       COALESCE(observed_revision,0), next_revision, COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,''), COALESCE(context_hash,''),
+		       COALESCE(observed_revision,0), next_revision, COALESCE(task_doc_etag,''), COALESCE(task_doc_hash,''),
 		       COALESCE(idempotency_key,''), COALESCE(result,''), COALESCE(rejection_code,''), payload_json, created_at
 		FROM workflow_events
 		WHERE `+where+`
@@ -163,7 +163,7 @@ func (s *Service) WatchEvents(selector string, afterSeq int64, limit int) ([]Eve
 	for rows.Next() {
 		var e Event
 		var payload string
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Seq, &e.SchemaVersion, &e.Type, &e.PrincipalRef, &e.Role, &e.RunID, &e.ObservedRevision, &e.NextRevision, &e.TaskDocEtag, &e.TaskDocHash, &e.ContextHash, &e.IdempotencyKey, &e.Result, &e.RejectionCode, &payload, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.InstanceID, &e.Seq, &e.SchemaVersion, &e.Type, &e.PrincipalRef, &e.Role, &e.RunID, &e.ObservedRevision, &e.NextRevision, &e.TaskDocEtag, &e.TaskDocHash, &e.IdempotencyKey, &e.Result, &e.RejectionCode, &payload, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		e.Payload = json.RawMessage(payload)

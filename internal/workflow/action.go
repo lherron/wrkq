@@ -1322,24 +1322,11 @@ func (s *Service) refreshInstanceContextTx(tx *sql.Tx, inst *Instance, actor str
 	if err != nil {
 		return err
 	}
-	ev, err := listEvidenceTx(tx, inst.ID)
-	if err != nil {
-		return err
-	}
-	obl, err := listObligationsTx(tx, inst.ID, false)
-	if err != nil {
-		return err
-	}
-	eff, err := listEffectsTx(tx, inst.ID, false)
-	if err != nil {
-		return err
-	}
 	inst.TaskDocEtag = fmt.Sprint(task.ETag)
 	inst.TaskDocHash = taskDocHash(task)
-	inst.ContextHash = contextHash(inst.TemplateHash, inst.State(), inst.Revision, inst.TaskDocHash, ev, obl, eff)
 	inst.UpdatedAt = s.now().UTC().Format(time.RFC3339)
-	if _, err := tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, context_hash = ?, updated_at = ? WHERE id = ?`,
-		inst.TaskDocEtag, inst.TaskDocHash, inst.ContextHash, inst.UpdatedAt, inst.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`,
+		inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
 		return err
 	}
 	return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor)
@@ -1414,13 +1401,12 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	}
 	updated.TaskDocEtag = fmt.Sprint(task.ETag)
 	updated.TaskDocHash = taskDocHash(task)
-	updated.ContextHash = contextHash(updated.TemplateHash, updated.State(), updated.Revision, updated.TaskDocHash, nil, nil, nil)
 	res, err := tx.Exec(`
 		UPDATE workflow_instances
-		SET status = ?, phase = ?, outcome = ?, revision = ?, context_hash = ?, task_doc_etag = ?, task_doc_hash = ?,
+		SET status = ?, phase = ?, outcome = ?, revision = ?, task_doc_etag = ?, task_doc_hash = ?,
 		    updated_at = ?, closed_at = ?
 		WHERE id = ? AND revision = ?
-	`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.ContextHash, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
+	`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
 	if err != nil {
 		return nil, err
 	}
@@ -1429,7 +1415,7 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 		return nil, err
 	}
 	if affected != 1 {
-		actual, loadErr := instanceRevisionContextTx(tx, updated.ID)
+		actual, loadErr := instanceRevisionTx(tx, updated.ID)
 		if loadErr != nil {
 			return nil, loadErr
 		}
@@ -1517,7 +1503,7 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	result["idempotent"] = false
 	resultJSON, _ := json.Marshal(result)
 	eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
-	if _, err := insertTransitionEventWithID(tx, eventID, updated.ID, actor, role, runID, inst.Revision, updated.Revision, key, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, updated.ContextHash, eventPayload); err != nil {
+	if _, err := insertTransitionEventWithID(tx, eventID, updated.ID, actor, role, runID, inst.Revision, updated.Revision, key, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload); err != nil {
 		return nil, err
 	}
 	if err := updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, actor); err != nil {
@@ -2261,7 +2247,7 @@ func (s *Service) actionListInstances(p ListActionsParams) ([]string, map[string
 	}
 	query := `
 		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision, context_hash,
+		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
 		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
 		FROM workflow_instances WHERE task_uuid = ?`
 	if !p.IncludeClosedInstances {
@@ -2276,7 +2262,7 @@ func (s *Service) actionListInstances(p ListActionsParams) ([]string, map[string
 	var ids []string
 	for rows.Next() {
 		var i Instance
-		if err := rows.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.ContextHash, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt); err != nil {
 			return nil, nil, err
 		}
 		inst := i

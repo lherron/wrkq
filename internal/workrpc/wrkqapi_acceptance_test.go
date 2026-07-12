@@ -1138,9 +1138,9 @@ func TestWrkqWorkflowAttach_ReturnsAttachResult(t *testing.T) {
 	p2AssertStr(t, inst, "templateId")
 	p2AssertStr(t, inst, "templateVersion")
 	p2AssertStr(t, inst, "status")
-	p2AssertStr(t, inst, "contextHash")
 
-	// No DB column leaks in instance.
+	// No DB column leaks in instance; contextHash is purged (revision-only CAS).
+	p2AssertAbsent(t, inst, "contextHash")
 	p2AssertAbsent(t, inst, "template_id")
 	p2AssertAbsent(t, inst, "context_hash")
 	p2AssertAbsent(t, inst, "template_version")
@@ -1246,10 +1246,10 @@ func TestWrkqWorkflowInspect_ReturnsTypedDTO(t *testing.T) {
 	p2AssertStr(t, inst, "id")
 	p2AssertStr(t, inst, "templateId")
 	p2AssertStr(t, inst, "status")
-	p2AssertStr(t, inst, "contextHash")
 	p2AssertStr(t, inst, "createdAt")
 
-	// No snake_case leaks.
+	// No snake_case leaks; contextHash is purged (revision-only CAS).
+	p2AssertAbsent(t, inst, "contextHash")
 	p2AssertAbsent(t, inst, "template_id")
 	p2AssertAbsent(t, inst, "context_hash")
 }
