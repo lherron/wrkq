@@ -48,10 +48,6 @@ func (api *API) WorkflowValidate(ctx context.Context, path string) (workflow.Val
 	return api.service.ValidateTemplateFile(path, api.hookCatalog), nil
 }
 
-func (api *API) ValidateTemplate(ctx context.Context, path string) (workflow.ValidateResult, error) {
-	return api.WorkflowValidate(ctx, path)
-}
-
 func (api *API) WorkflowShow(ctx context.Context, ref string) (WorkflowShowResult, error) {
 	if err := ctx.Err(); err != nil {
 		return WorkflowShowResult{}, err
@@ -61,10 +57,6 @@ func (api *API) WorkflowShow(ctx context.Context, ref string) (WorkflowShowResul
 		return WorkflowShowResult{}, normalizeError(err)
 	}
 	return WorkflowShowResult{Template: *tpl, Hash: hash}, nil
-}
-
-func (api *API) ShowTemplate(ctx context.Context, ref string) (WorkflowShowResult, error) {
-	return api.WorkflowShow(ctx, ref)
 }
 
 func (api *API) WorkflowList(ctx context.Context) (WorkflowListResult, error) {
@@ -101,10 +93,6 @@ func (api *API) WorkflowDiff(ctx context.Context, oldPath, newPath string) (Diff
 	}, nil
 }
 
-func (api *API) Diff(ctx context.Context, oldPath, newPath string) (DiffResult, error) {
-	return api.WorkflowDiff(ctx, oldPath, newPath)
-}
-
 func (api *API) WorkflowInstall(ctx context.Context, path, actor string) (InstallResult, error) {
 	if err := ctx.Err(); err != nil {
 		return InstallResult{}, err
@@ -121,10 +109,6 @@ func (api *API) WorkflowInstall(ctx context.Context, path, actor string) (Instal
 	}, nil
 }
 
-func (api *API) InstallTemplate(ctx context.Context, path, actor string) (InstallResult, error) {
-	return api.WorkflowInstall(ctx, path, actor)
-}
-
 func (api *API) TaskAttach(ctx context.Context, taskSelector, templateRef, actor string, opts ...workflow.AttachTaskOptions) (*workflow.Instance, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -134,10 +118,6 @@ func (api *API) TaskAttach(ctx context.Context, taskSelector, templateRef, actor
 		return nil, normalizeError(err)
 	}
 	return inst, nil
-}
-
-func (api *API) AttachTask(ctx context.Context, taskSelector, templateRef, actor string, opts ...workflow.AttachTaskOptions) (*workflow.Instance, error) {
-	return api.TaskAttach(ctx, taskSelector, templateRef, actor, opts...)
 }
 
 func (api *API) TaskInspect(ctx context.Context, taskSelector string) (*workflow.Instance, error) {
@@ -188,25 +168,6 @@ func (api *API) TaskRefresh(ctx context.Context, taskSelector, actor string) (*w
 	return inst, nil
 }
 
-func (api *API) Refresh(ctx context.Context, taskSelector, actor string) (*workflow.Instance, error) {
-	return api.TaskRefresh(ctx, taskSelector, actor)
-}
-
-func (api *API) TaskSyncMeta(ctx context.Context, taskSelector, actor string) (SyncMetaResult, error) {
-	if err := ctx.Err(); err != nil {
-		return SyncMetaResult{}, err
-	}
-	updated, err := api.service.SyncMeta(taskSelector, actor)
-	if err != nil {
-		return SyncMetaResult{}, normalizeError(err)
-	}
-	return SyncMetaResult{Updated: updated}, nil
-}
-
-func (api *API) SyncMeta(ctx context.Context, taskSelector, actor string) (SyncMetaResult, error) {
-	return api.TaskSyncMeta(ctx, taskSelector, actor)
-}
-
 func (api *API) Next(ctx context.Context, taskSelector, role string) (*workflow.NextActionResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -243,10 +204,6 @@ func (api *API) EvidenceAdd(ctx context.Context, params EvidenceAddParams) (*wor
 	return ev, nil
 }
 
-func (api *API) AddEvidence(ctx context.Context, params EvidenceAddParams) (*workflow.Evidence, error) {
-	return api.EvidenceAdd(ctx, params)
-}
-
 func (api *API) EvidenceList(ctx context.Context, taskSelector string) ([]workflow.Evidence, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -256,10 +213,6 @@ func (api *API) EvidenceList(ctx context.Context, taskSelector string) ([]workfl
 		return nil, normalizeError(err)
 	}
 	return ev, nil
-}
-
-func (api *API) ListEvidence(ctx context.Context, taskSelector string) ([]workflow.Evidence, error) {
-	return api.EvidenceList(ctx, taskSelector)
 }
 
 // LedgerAppend records an immutable instance-scoped forensic event. The
@@ -297,10 +250,6 @@ func (api *API) EvidenceShow(ctx context.Context, id string) (*workflow.Evidence
 	return ev, nil
 }
 
-func (api *API) ShowEvidence(ctx context.Context, id string) (*workflow.Evidence, error) {
-	return api.EvidenceShow(ctx, id)
-}
-
 func (api *API) EvidenceSuggest(ctx context.Context, taskSelector, transition string) (SuggestResult, error) {
 	return api.Suggest(ctx, taskSelector, transition)
 }
@@ -327,10 +276,6 @@ func (api *API) ObligationList(ctx context.Context, taskSelector string, include
 	return obl, nil
 }
 
-func (api *API) ListObligations(ctx context.Context, taskSelector string, includeClosed bool) ([]workflow.Obligation, error) {
-	return api.ObligationList(ctx, taskSelector, includeClosed)
-}
-
 func (api *API) ObligationShow(ctx context.Context, id string) (*workflow.Obligation, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -342,40 +287,20 @@ func (api *API) ObligationShow(ctx context.Context, id string) (*workflow.Obliga
 	return obl, nil
 }
 
-func (api *API) ShowObligation(ctx context.Context, id string) (*workflow.Obligation, error) {
-	return api.ObligationShow(ctx, id)
-}
-
 func (api *API) ObligationSatisfy(ctx context.Context, params ObligationStatusParams) (*workflow.Obligation, error) {
 	return api.setObligationStatus(ctx, params, "satisfied")
-}
-
-func (api *API) SatisfyObligation(ctx context.Context, params ObligationStatusParams) (*workflow.Obligation, error) {
-	return api.ObligationSatisfy(ctx, params)
 }
 
 func (api *API) ObligationWaive(ctx context.Context, params ObligationStatusParams) (*workflow.Obligation, error) {
 	return api.setObligationStatus(ctx, params, "waived")
 }
 
-func (api *API) WaiveObligation(ctx context.Context, params ObligationStatusParams) (*workflow.Obligation, error) {
-	return api.ObligationWaive(ctx, params)
-}
-
 func (api *API) ObligationCancel(ctx context.Context, params ObligationStatusParams) (*workflow.Obligation, error) {
 	return api.setObligationStatus(ctx, params, "cancelled")
 }
 
-func (api *API) CancelObligation(ctx context.Context, params ObligationStatusParams) (*workflow.Obligation, error) {
-	return api.ObligationCancel(ctx, params)
-}
-
 func (api *API) CheckPreflight(ctx context.Context, taskSelector, transition, role string) (*workflow.NextActionResponse, error) {
 	return api.Next(ctx, taskSelector, role)
-}
-
-func (api *API) Preflight(ctx context.Context, taskSelector, transition, role string) (*workflow.NextActionResponse, error) {
-	return api.CheckPreflight(ctx, taskSelector, transition, role)
 }
 
 func (api *API) CheckRun(ctx context.Context, params CheckRunParams) (CheckRunResult, error) {
@@ -389,10 +314,6 @@ func (api *API) CheckRun(ctx context.Context, params CheckRunParams) (CheckRunRe
 	return CheckRunResult{Runs: runs}, nil
 }
 
-func (api *API) RunChecks(ctx context.Context, params CheckRunParams) (CheckRunResult, error) {
-	return api.CheckRun(ctx, params)
-}
-
 func (api *API) CheckShow(ctx context.Context, id string) (*workflow.CheckRun, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -402,10 +323,6 @@ func (api *API) CheckShow(ctx context.Context, id string) (*workflow.CheckRun, e
 		return nil, normalizeError(err)
 	}
 	return run, nil
-}
-
-func (api *API) ShowCheckRun(ctx context.Context, id string) (*workflow.CheckRun, error) {
-	return api.CheckShow(ctx, id)
 }
 
 func (api *API) CheckList(ctx context.Context, taskSelector, transition string) ([]workflow.CheckRun, error) {
@@ -419,10 +336,6 @@ func (api *API) CheckList(ctx context.Context, taskSelector, transition string) 
 	return runs, nil
 }
 
-func (api *API) ListCheckRuns(ctx context.Context, taskSelector, transition string) ([]workflow.CheckRun, error) {
-	return api.CheckList(ctx, taskSelector, transition)
-}
-
 func (api *API) EffectList(ctx context.Context, taskSelector string, all bool) ([]workflow.Effect, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -434,10 +347,6 @@ func (api *API) EffectList(ctx context.Context, taskSelector string, all bool) (
 	return effects, nil
 }
 
-func (api *API) ListEffects(ctx context.Context, taskSelector string, all bool) ([]workflow.Effect, error) {
-	return api.EffectList(ctx, taskSelector, all)
-}
-
 func (api *API) EffectShow(ctx context.Context, id string) (*workflow.Effect, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -447,10 +356,6 @@ func (api *API) EffectShow(ctx context.Context, id string) (*workflow.Effect, er
 		return nil, normalizeError(err)
 	}
 	return effect, nil
-}
-
-func (api *API) ShowEffect(ctx context.Context, id string) (*workflow.Effect, error) {
-	return api.EffectShow(ctx, id)
 }
 
 func (api *API) HookList(ctx context.Context) (HookListResult, error) {
@@ -473,10 +378,6 @@ func (api *API) HookList(ctx context.Context) (HookListResult, error) {
 	return HookListResult{Hooks: hooks}, nil
 }
 
-func (api *API) ListHooks(ctx context.Context) (HookListResult, error) {
-	return api.HookList(ctx)
-}
-
 func (api *API) HookShow(ctx context.Context, id string) (HookShowResult, error) {
 	if err := ctx.Err(); err != nil {
 		return HookShowResult{}, err
@@ -491,10 +392,6 @@ func (api *API) HookShow(ctx context.Context, id string) (HookShowResult, error)
 	return HookShowResult{ID: id, Hook: hook}, nil
 }
 
-func (api *API) ShowHook(ctx context.Context, id string) (HookShowResult, error) {
-	return api.HookShow(ctx, id)
-}
-
 func (api *API) HookRun(ctx context.Context, params HookRunParams) (*workflow.CheckRun, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -504,10 +401,6 @@ func (api *API) HookRun(ctx context.Context, params HookRunParams) (*workflow.Ch
 		return nil, normalizeError(err)
 	}
 	return run, nil
-}
-
-func (api *API) RunHook(ctx context.Context, params HookRunParams) (*workflow.CheckRun, error) {
-	return api.HookRun(ctx, params)
 }
 
 func (api *API) setObligationStatus(ctx context.Context, params ObligationStatusParams, status string) (*workflow.Obligation, error) {

@@ -14,13 +14,10 @@ import (
 // layer owns the actual composition over run/evidence/transition primitives.
 
 type ActionRun = workflow.ActionRun
-type ActionWorkflowRef = workflow.ActionWorkflowRef
 type ActionNextParams = workflow.ActionNextParams
 type ActionNextResult = workflow.ActionNextResult
 type ActionClaimParams = workflow.ClaimActionParams
 type ActionClaimResult = workflow.ClaimActionResult
-type ActionSettleRun = workflow.WorkflowRunAttempt
-
 type ActionEvidenceParams struct {
 	Kind           string          `json:"kind,omitempty"`
 	Ref            string          `json:"ref,omitempty"`

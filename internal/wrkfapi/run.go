@@ -100,10 +100,6 @@ func (api *API) RunShow(ctx context.Context, id string) (Run, error) {
 	return *run, nil
 }
 
-func (api *API) ShowRun(ctx context.Context, id string) (Run, error) {
-	return api.RunShow(ctx, id)
-}
-
 func (api *API) RunList(ctx context.Context, taskSelector string) ([]Run, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -113,8 +109,4 @@ func (api *API) RunList(ctx context.Context, taskSelector string) ([]Run, error)
 		return nil, normalizeError(err)
 	}
 	return runs, nil
-}
-
-func (api *API) ListRuns(ctx context.Context, taskSelector string) ([]Run, error) {
-	return api.RunList(ctx, taskSelector)
 }

@@ -21,13 +21,6 @@ type LedgerListResult = workflow.LedgerListResult
 type EffectClaim = workflow.EffectClaim
 type Run = workflow.Run
 type CheckRun = workflow.CheckRun
-type NextActionResponse = workflow.NextActionResponse
-type ValidateResult = workflow.ValidateResult
-type Template = workflow.Template
-type State = workflow.State
-type EvidenceRequirementSpec = workflow.EvidenceRequirementSpec
-type HookSpec = workflow.HookSpec
-type HookCatalog = workflow.HookCatalog
 
 type TemplateSummary struct {
 	ID          string `json:"id"`
@@ -78,12 +71,6 @@ type DiffResult struct {
 	New      TemplateSummary `json:"new"`
 	SameHash bool            `json:"sameHash"`
 }
-
-type SyncMetaResult struct {
-	Updated int `json:"updated"`
-}
-
-type RoleBinding = workflow.RoleBinding
 
 type RoleListParams struct {
 	TaskSelector string `json:"task,omitempty"`

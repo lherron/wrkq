@@ -44,10 +44,6 @@ func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParam
 	return transitionResultFromAny(out), nil
 }
 
-func (api *API) ApplyTransition(ctx context.Context, params TransitionApplyParams) (TransitionResult, error) {
-	return api.TransitionApply(ctx, params)
-}
-
 type codedError interface {
 	Code() string
 }

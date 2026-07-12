@@ -94,9 +94,6 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.task.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
 		return api.TaskRefresh(ctx, p.TaskSelector, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
-	s.Register("wrkf.task.syncMeta", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		return api.TaskSyncMeta(ctx, p.TaskSelector, defaultString(p.PrincipalRef, opts.DefaultActor))
-	}))
 	s.Register("wrkf.next", apiHandler(func(ctx context.Context, p nextParams) (any, error) {
 		return api.Next(ctx, p.TaskSelector, defaultString(p.Role, opts.DefaultRole))
 	}))

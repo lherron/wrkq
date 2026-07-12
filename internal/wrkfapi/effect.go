@@ -17,10 +17,6 @@ func (api *API) EffectClaim(ctx context.Context, params EffectClaimParams) (*wor
 	return claim, nil
 }
 
-func (api *API) ClaimEffects(ctx context.Context, params EffectClaimParams) (*workflow.EffectClaim, error) {
-	return api.EffectClaim(ctx, params)
-}
-
 func (api *API) EffectAck(ctx context.Context, params EffectAckParams) (*workflow.Effect, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -30,10 +26,6 @@ func (api *API) EffectAck(ctx context.Context, params EffectAckParams) (*workflo
 		return nil, normalizeError(err)
 	}
 	return effect, nil
-}
-
-func (api *API) AckEffect(ctx context.Context, params EffectAckParams) (*workflow.Effect, error) {
-	return api.EffectAck(ctx, params)
 }
 
 func (api *API) EffectFail(ctx context.Context, params EffectFailParams) (*workflow.Effect, error) {
@@ -47,10 +39,6 @@ func (api *API) EffectFail(ctx context.Context, params EffectFailParams) (*workf
 	return effect, nil
 }
 
-func (api *API) FailEffect(ctx context.Context, params EffectFailParams) (*workflow.Effect, error) {
-	return api.EffectFail(ctx, params)
-}
-
 func (api *API) EffectRetry(ctx context.Context, id string) (*workflow.Effect, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -62,10 +50,6 @@ func (api *API) EffectRetry(ctx context.Context, id string) (*workflow.Effect, e
 	return effect, nil
 }
 
-func (api *API) RetryEffect(ctx context.Context, id string) (*workflow.Effect, error) {
-	return api.EffectRetry(ctx, id)
-}
-
 func (api *API) EffectDeliver(ctx context.Context, params EffectDeliverParams) (*workflow.EffectDelivery, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -75,8 +59,4 @@ func (api *API) EffectDeliver(ctx context.Context, params EffectDeliverParams) (
 		return delivery, normalizeError(err)
 	}
 	return delivery, nil
-}
-
-func (api *API) DeliverEffect(ctx context.Context, params EffectDeliverParams) (*workflow.EffectDelivery, error) {
-	return api.EffectDeliver(ctx, params)
 }
