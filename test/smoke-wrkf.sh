@@ -155,16 +155,9 @@ fi
 "$BIN/wrkf" --db "$DB" evidence add T-00001 --kind implementation --ref "git:abc123" --summary "needs patch" --facts '{"verdict":"needs_patch"}' --json | jq -e '.facts.verdict == "needs_patch"' >/dev/null
 "$BIN/wrkf" --db "$DB" evidence suggest T-00001 --transition plan_ready --json | jq -e '.missing[0].satisfied == false and .missing[0].latest.facts.verdict == "needs_patch"' >/dev/null
 "$BIN/wrkf" --db "$DB" next T-00001 --role coordinator --json | jq -e '.blockedTransitions[] | select(.id == "plan_ready") | .blocksOn[] | select(.message | contains("needs_patch"))' >/dev/null
-STALE_CONTEXT="$("$BIN/wrkf" --db "$DB" task inspect T-00001 --json | jq -r '.contextHash')"
-
 "$BIN/wrkf" --db "$DB" --json evidence exec T-00001 --kind implementation --summary "exec proof" --facts '{"verdict":"ready"}' -- printf smoke | jq -e '.kind == "implementation" and .facts.verdict == "ready"' >/dev/null
 "$BIN/wrkf" --db "$DB" evidence list T-00001 --json | jq -e '.evidence | length == 2' >/dev/null
 "$BIN/wrkf" --db "$DB" evidence suggest T-00001 --transition plan_ready --json | jq -e '.missing | length == 0' >/dev/null
-
-if "$BIN/wrkf" --db "$DB" transition T-00001 plan_ready --role coordinator --expect-revision 0 --context "$STALE_CONTEXT" --idempotency-key stale-plan-ready --json >/dev/null 2>&1; then
-  echo "expected stale context transition to fail after newer evidence facts" >&2
-  exit 1
-fi
 
 "$BIN/wrkf" --db "$DB" transition T-00001 plan_ready --role coordinator --expect-revision 0 --idempotency-key plan-ready --json | jq -e '.state.phase == "done" and .revision == 1' >/dev/null
 "$BIN/wrkf" --db "$DB" obligation list T-00001 --json | jq -e '.obligations[0].status == "open"' >/dev/null

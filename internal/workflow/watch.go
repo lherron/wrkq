@@ -11,13 +11,15 @@ const (
 	WatchTargetInstance = "instance"
 	WatchTargetRun      = "run"
 
-	WatchUntilTerminal = "terminal"
-	WatchUntilClosed   = "closed"
-	WatchUntilWaiting  = "waiting"
+	WatchUntilTerminal  = "terminal"
+	WatchUntilClosed    = "closed"
+	WatchUntilWaiting   = "waiting"
+	WatchUntilSuspended = "suspended"
 
 	WatchClassPending   = "pending"
 	WatchClassSuccess   = "success"
 	WatchClassWaiting   = "waiting"
+	WatchClassSuspended = "suspended"
 	WatchClassFailure   = "failure"
 	WatchClassCancelled = "cancelled"
 )
@@ -49,10 +51,10 @@ func NormalizeWatchUntil(until string) (string, error) {
 		return WatchUntilTerminal, nil
 	}
 	switch until {
-	case WatchUntilTerminal, WatchUntilClosed, WatchUntilWaiting:
+	case WatchUntilTerminal, WatchUntilClosed, WatchUntilWaiting, WatchUntilSuspended:
 		return until, nil
 	default:
-		return "", validationError("until", "invalid watch predicate", "closed|waiting|terminal", []string{WatchUntilClosed, WatchUntilWaiting, WatchUntilTerminal}, "set --until to closed, waiting, or terminal")
+		return "", validationError("until", "invalid watch predicate", "closed|suspended|terminal|waiting", []string{WatchUntilClosed, WatchUntilSuspended, WatchUntilTerminal, WatchUntilWaiting}, "set --until to closed, suspended, terminal, or waiting")
 	}
 }
 
@@ -80,8 +82,8 @@ func (s *Service) WatchSnapshot(selector, until string) (*WatchSnapshot, error) 
 
 	switch InferWatchTargetKind(selector) {
 	case WatchTargetRun:
-		if until == WatchUntilWaiting {
-			return nil, validationError("until", "run watches do not support waiting", "terminal|closed", []string{WatchUntilTerminal, WatchUntilClosed}, "watch the workflow instance for --until waiting")
+		if until == WatchUntilWaiting || until == WatchUntilSuspended {
+			return nil, validationError("until", "run watches do not support instance conditions", "terminal|closed", []string{WatchUntilTerminal, WatchUntilClosed}, "watch the workflow instance for --until waiting or --until suspended")
 		}
 		run, err := s.ShowRun(selector)
 		if err != nil {
@@ -178,6 +180,12 @@ func instanceWatchSnapshot(kind, selector, until string, inst *Instance) *WatchS
 		Until:  until, Class: WatchClassPending, Status: inst.Status, Phase: inst.Phase, Outcome: inst.Outcome, Instance: inst,
 	}
 	switch until {
+	case WatchUntilSuspended:
+		out.Met = inst.Suspension != nil
+		if out.Met {
+			out.Class = WatchClassSuspended
+			out.ExitCode = 0
+		}
 	case WatchUntilWaiting:
 		out.Met = inst.Status == "waiting"
 		if out.Met {

@@ -49,7 +49,7 @@ selector. Follow mode emits NDJSON workflow events followed by one summary row.`
 			return runWatch(a, cmd, args[0], flags)
 		}),
 	}
-	cmd.Flags().StringVar(&flags.until, "until", workflow.WatchUntilTerminal, "Predicate to wait for: terminal, closed, or waiting")
+	cmd.Flags().StringVar(&flags.until, "until", workflow.WatchUntilTerminal, "Predicate to wait for: terminal, closed, suspended, or waiting")
 	cmd.Flags().StringVar(&flags.timeout, "timeout", "", "Maximum wait duration (for example 30s, 10m)")
 	cmd.Flags().BoolVar(&flags.follow, "follow", false, "Emit NDJSON workflow events while waiting")
 	cmd.Flags().StringVar(&flags.pollInterval, "poll-interval", defaultWatchPollInterval.String(), "Polling interval")

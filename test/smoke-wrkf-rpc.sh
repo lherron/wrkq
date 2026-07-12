@@ -263,8 +263,6 @@ assert any(
     for block in transition.get("blocksOn", [])
 ), blocked
 
-stale_context = rpc("wrkf.instance.show", {"task": "T-00001"})["contextHash"]
-
 ready = rpc(
     "wrkf.evidence.add",
     {
@@ -285,19 +283,6 @@ assert ev_show["id"] == evidence[0]["id"], ev_show
 
 suggest = rpc("wrkf.evidence.suggest", {"task": "T-00001", "transition": "plan_ready"})
 assert suggest["missing"] == [], suggest
-
-rpc(
-    "wrkf.transition.apply",
-    {
-        "task": "T-00001",
-        "transition": "plan_ready",
-        "role": "coordinator",
-        "expectRevision": 0,
-        "contextHash": stale_context,
-        "idempotencyKey": "stale-plan-ready",
-    },
-    expect_error="WRKF_CONTEXT_MISMATCH",
-)
 
 transition = rpc(
     "wrkf.transition.apply",
@@ -427,7 +412,7 @@ def pbc_step(transition, evidence, want_phase):
             "wrkf.evidence.add",
             {"task": "T-00002", "kind": kind, "ref": ref, "summary": f"pbc {kind}", "facts": facts, "principal_ref": actor},
         )
-    # re-read context before each transition: adding evidence rotates the contextHash
+    # Re-read the instance revision before each transition.
     cur = rpc("wrkf.instance.show", {"task": "T-00002"})
     req = {
         "task": "T-00002",
@@ -435,7 +420,6 @@ def pbc_step(transition, evidence, want_phase):
         "role": PBC_ROLE,
         "principal_ref": PBC_ACTOR,
         "expectRevision": cur["revision"],
-        "contextHash": cur["contextHash"],
         "idempotencyKey": f"pbc:{transition}:{cur['revision']}",
     }
     res = rpc("wrkf.transition.apply", req)

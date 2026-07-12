@@ -1352,8 +1352,9 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 	if eventType == "" {
 		eventType = "workflow.transitioned"
 	}
-	if eventType != "workflow.transitioned" {
-		return EventQueryResult{}, validationError("eventType", "only workflow.transitioned is queryable", "workflow.transitioned", []string{"workflow.transitioned"}, "set eventType to workflow.transitioned")
+	allowedEventTypes := []string{"workflow.suspended", "workflow.suspension_resolved", "workflow.transitioned"}
+	if eventType != "workflow.transitioned" && eventType != "workflow.suspended" && eventType != "workflow.suspension_resolved" {
+		return EventQueryResult{}, validationError("eventType", "event type is not queryable", "workflow.suspended|workflow.suspension_resolved|workflow.transitioned", allowedEventTypes, "set eventType to a queryable workflow event type")
 	}
 
 	limit := params.Limit
@@ -1415,6 +1416,7 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 
 	query := `
 		SELECT e.id, e.instance_id, e.seq, e.type, COALESCE(e.principal_ref, e.actor, ''), COALESCE(e.role,''),
+		       COALESCE(e.observed_revision, 0), e.next_revision,
 		       e.payload_json, e.created_at, wi.task_ref,
 		       t.uuid, t.id, t.slug, t.project_uuid, COALESCE(t.risk_class,''),
 		       COALESCE(p.id,''), COALESCE(p.slug,'')
@@ -1435,20 +1437,21 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 	}
 	defer func() { _ = rows.Close() }()
 
-	items := []TransitionEvent{}
+	items := []QueriedEvent{}
 	for rows.Next() {
-		var item TransitionEvent
+		var item QueriedEvent
 		var payload string
 		if err := rows.Scan(
 			&item.ID, &item.InstanceID, &item.Seq, &item.EventType, &item.PrincipalRef, &item.Role,
-			&payload, &item.TransitionedAt, &item.Task.Ref,
+			&item.BeforeRevision, &item.AfterRevision, &payload, &item.OccurredAt, &item.Task.Ref,
 			&item.Task.UUID, &item.Task.ID, &item.Task.Slug, &item.Task.ProjectUUID, &item.Task.RiskClass,
 			&item.Task.ProjectID, &item.Task.ProjectSlug,
 		); err != nil {
 			return EventQueryResult{}, err
 		}
 		item.Payload = json.RawMessage(payload)
-		applyTransitionPayload(&item)
+		applyQueriedEventPayload(&item)
+		item.MatchingRoleBindings = []RoleBinding{}
 		if boundRole != "" {
 			bindings, err := listRoleBindingsForInstanceRole(s.db, item.InstanceID, boundRole)
 			if err != nil {
@@ -1480,7 +1483,7 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 		result.Items = items[:limit]
 		result.HasMore = true
 		anchor := result.Items[limit-1]
-		next, cerr := cursor.BuildNextCursor([]string{"created_at"}, []any{anchor.TransitionedAt}, anchor.ID)
+		next, cerr := cursor.BuildNextCursor([]string{"created_at"}, []any{anchor.OccurredAt}, anchor.ID)
 		if cerr == nil {
 			result.NextCursor = next
 		}
@@ -1488,15 +1491,19 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 	return result, nil
 }
 
-func applyTransitionPayload(item *TransitionEvent) {
+func applyQueriedEventPayload(item *QueriedEvent) {
 	if item == nil || len(item.Payload) == 0 {
 		return
 	}
 	var payload struct {
-		Transition string `json:"transition"`
-		Outcome    string `json:"outcome"`
-		From       State  `json:"from"`
-		To         State  `json:"to"`
+		Transition     string      `json:"transition"`
+		Outcome        string      `json:"outcome"`
+		From           State       `json:"from"`
+		To             State       `json:"to"`
+		Suspension     *Suspension `json:"suspension"`
+		Disposition    string      `json:"disposition"`
+		BeforeRevision int64       `json:"beforeRevision"`
+		AfterRevision  int64       `json:"afterRevision"`
 	}
 	if err := json.Unmarshal(item.Payload, &payload); err != nil {
 		return
@@ -1507,6 +1514,14 @@ func applyTransitionPayload(item *TransitionEvent) {
 	item.To = payload.To
 	item.FromPhase = payload.From.Phase
 	item.ToPhase = payload.To.Phase
+	item.Suspension = payload.Suspension
+	item.Disposition = payload.Disposition
+	if payload.BeforeRevision != 0 || item.BeforeRevision == 0 {
+		item.BeforeRevision = payload.BeforeRevision
+	}
+	if payload.AfterRevision != 0 {
+		item.AfterRevision = payload.AfterRevision
+	}
 }
 
 func compactStrings(values []string) []string {

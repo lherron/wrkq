@@ -30,6 +30,27 @@ func TestWatchWaitingUsesSemanticInstanceStatus(t *testing.T) {
 	}
 }
 
+func TestWatchSuspendedUsesActiveSuspension(t *testing.T) {
+	svc, taskUUID, _ := setupSuspendOutcomeFixture(t)
+	snap, err := svc.WatchSnapshot(taskUUID, WatchUntilSuspended)
+	if err != nil {
+		t.Fatalf("WatchSnapshot suspended before park: %v", err)
+	}
+	if snap.Met {
+		t.Fatalf("running instance satisfied suspended predicate: %+v", snap)
+	}
+	if _, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:watch", Role: "coordinator"}); err != nil {
+		t.Fatalf("Transition park: %v", err)
+	}
+	snap, err = svc.WatchSnapshot(taskUUID, WatchUntilSuspended)
+	if err != nil {
+		t.Fatalf("WatchSnapshot suspended after park: %v", err)
+	}
+	if !snap.Met || snap.Class != WatchClassSuspended || snap.ExitCode != 0 || snap.Instance == nil || snap.Instance.Suspension == nil {
+		t.Fatalf("suspended snapshot = %+v", snap)
+	}
+}
+
 func TestWatchRunTerminalClassMapping(t *testing.T) {
 	cases := []struct {
 		status string

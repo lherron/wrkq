@@ -21,8 +21,10 @@ const (
 	defaultTimeout     = 500 * time.Millisecond
 	defaultConcurrency = 4
 
-	EventWorkflowAttached     = "workflow_attached"
-	EventWorkflowTransitioned = "workflow_transitioned"
+	EventWorkflowAttached           = "workflow_attached"
+	EventWorkflowTransitioned       = "workflow_transitioned"
+	EventWorkflowSuspended          = "workflow.suspended"
+	EventWorkflowSuspensionResolved = "workflow.suspension_resolved"
 )
 
 // BlockerInfo represents an incomplete blocking task.
@@ -81,6 +83,10 @@ type WorkflowPayload struct {
 	TaskDocETag      string      `json:"task_doc_etag,omitempty"`
 	TaskDocHash      string      `json:"task_doc_hash,omitempty"`
 	IdempotencyKey   *string     `json:"idempotency_key,omitempty"`
+	Suspension       interface{} `json:"suspension"`
+	Disposition      string      `json:"disposition,omitempty"`
+	BeforeRevision   *int64      `json:"before_revision,omitempty"`
+	AfterRevision    *int64      `json:"after_revision,omitempty"`
 	Payload          interface{} `json:"payload,omitempty"`
 }
 

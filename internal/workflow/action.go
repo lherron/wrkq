@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 // action.go — low-ceremony wrkf.action.* surface.
@@ -677,6 +678,19 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 		return nil, err
 	}
 	if out != nil && out.Transition != nil {
+		updated, ok := out.Transition["instance"].(Instance)
+		eventID, _ := out.Transition["eventId"].(string)
+		if ok && updated.Suspension != nil && eventID != "" {
+			meta, metaErr := s.workflowEventMetadataByID(eventID)
+			if metaErr == nil {
+				transitionID, _ := out.Transition["transition"].(string)
+				key := fmt.Sprintf("wrkf-action:%s:settle:transition:%s", out.Run.ID, transitionID)
+				ctx := workflowSuspensionWebhookContext(meta, updated, out.Run.AgentRef, out.Run.Role, out.Run.ID, updated.Revision-1, updated.Revision, key)
+				webhooks.DispatchTaskEvent(s.db, updated.TaskUUID, ctx)
+			}
+		}
+	}
+	if out != nil && out.Transition != nil {
 		transitionID, _ := out.Transition["transition"].(string)
 		transition, deliverErr := s.deliverBuiltinTransitionEffects(out.Transition, transitionID)
 		if deliverErr != nil {
@@ -1046,7 +1060,7 @@ func settledTransitionForRunTx(tx *sql.Tx, runID string) (map[string]interface{}
 	err := tx.QueryRow(`
 		SELECT COALESCE(result_json,'')
 		FROM workflow_events
-		WHERE run_id = ? AND type = 'workflow.transitioned'
+		WHERE run_id = ? AND type IN ('workflow.transitioned', 'workflow.suspended')
 		ORDER BY seq DESC
 		LIMIT 1
 	`, runID).Scan(&raw)
@@ -1510,7 +1524,14 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	result["idempotent"] = false
 	resultJSON, _ := json.Marshal(result)
 	eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
-	if _, err := insertTransitionEventWithID(tx, eventID, updated.ID, actor, role, runID, inst.Revision, updated.Revision, key, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload); err != nil {
+	eventType := "workflow.transitioned"
+	if chosen.Suspend != nil {
+		eventType = "workflow.suspended"
+		eventPayload["suspension"] = updated.Suspension
+		eventPayload["beforeRevision"] = inst.Revision
+		eventPayload["afterRevision"] = updated.Revision
+	}
+	if _, err := insertWorkflowMutationEventWithID(tx, eventType, eventID, updated.ID, actor, role, runID, inst.Revision, updated.Revision, key, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload); err != nil {
 		return nil, err
 	}
 	if chosen.Suspend == nil {

@@ -337,7 +337,7 @@ type Instance struct {
 	// Suspension is the single active suspension on this instance, or nil when
 	// the instance is running. Parking records a suspension; it does not touch
 	// status/phase/outcome — a suspended instance is still "in" its phase.
-	Suspension *Suspension `json:"suspension,omitempty"`
+	Suspension *Suspension `json:"suspension"`
 }
 
 func (i Instance) State() State {
@@ -469,12 +469,15 @@ type EventQueryParams struct {
 }
 
 type EventQueryResult struct {
-	Items      []TransitionEvent `json:"items"`
-	NextCursor string            `json:"nextCursor,omitempty"`
-	HasMore    bool              `json:"hasMore"`
+	Items      []QueriedEvent `json:"items"`
+	NextCursor string         `json:"nextCursor,omitempty"`
+	HasMore    bool           `json:"hasMore"`
 }
 
-type TransitionEvent struct {
+// QueriedEvent is the task-enriched workflow event projection returned by
+// event.query. Transition fields are populated for workflow.transitioned;
+// suspension fields are populated for suspension lifecycle events.
+type QueriedEvent struct {
 	ID                   string          `json:"id"`
 	EventType            string          `json:"eventType"`
 	InstanceID           string          `json:"instanceId"`
@@ -486,9 +489,13 @@ type TransitionEvent struct {
 	To                   State           `json:"to,omitempty"`
 	FromPhase            string          `json:"fromPhase,omitempty"`
 	ToPhase              string          `json:"toPhase,omitempty"`
-	TransitionedAt       string          `json:"transitionedAt"`
+	OccurredAt           string          `json:"occurredAt"`
 	PrincipalRef         string          `json:"principal_ref,omitempty"`
 	Role                 string          `json:"role,omitempty"`
+	Suspension           *Suspension     `json:"suspension,omitempty"`
+	Disposition          string          `json:"disposition,omitempty"`
+	BeforeRevision       int64           `json:"beforeRevision"`
+	AfterRevision        int64           `json:"afterRevision"`
 	MatchingRoleBindings []RoleBinding   `json:"matchingRoleBindings"`
 	RoleBindings         []RoleBinding   `json:"roleBindings,omitempty"`
 	Payload              json.RawMessage `json:"payload,omitempty"`

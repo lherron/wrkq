@@ -288,7 +288,7 @@ var dtoCatalog = []string{
 	"WrkfInstance",
 	"WrkfEvent",
 	"WrkfEventQueryResult",
-	"WrkfTransitionEvent",
+	"WrkfQueriedEvent",
 	"WrkfEvidence",
 	"WrkfLedgerEntry",
 	"WrkfLedgerListResult",

@@ -236,7 +236,6 @@ Every domain error must include:
 | `WRKF_NOT_FOUND` | -32004 | false | workflow template/instance/effect/run/evidence not found |
 | `WRKF_VALIDATION` | -32602 | false | malformed wrkf params, invalid template, bad protocol version |
 | `WRKF_STALE_REVISION` | -32009 | true | transition `expectRevision` mismatch |
-| `WRKF_CONTEXT_MISMATCH` | -32010 | true | transition `contextHash` mismatch |
 | `WRKF_TRANSITION_BLOCKED` | -32011 | false | blockers/guards/obligations/checks prevent transition |
 | `WRKF_ROLE_DENIED` | -32012 | false | role cannot perform transition |
 | `WRKF_IDEMPOTENCY_MISMATCH` | -32013 | false | same idempotency key with different request hash |
@@ -1497,13 +1496,14 @@ wrkf.event.query   [required]
 ```
 
 `wrkf.event.query` is a replayable read-model over durable workflow events. It
-returns one item per `workflow.transitioned` event in stable
+returns one item per admitted workflow event in stable
 `(created_at, id)` order. It is not a SQL-shaped event dump; callers filter
 through typed workflow/task/project/role fields.
 
 ```ts
 interface WrkfEventQueryParams {
-  eventType?: "workflow.transitioned"; // default
+  eventType?: "workflow.transitioned" | "workflow.suspended" |
+    "workflow.suspension_resolved";    // transitioned by default
   project?: string;                    // project uuid, id, or slug
   fromPhase?: string;
   toPhase?: string;
@@ -1518,14 +1518,15 @@ interface WrkfEventQueryParams {
 }
 
 interface WrkfEventQueryResult {
-  items: WrkfTransitionEvent[];
+  items: WrkfQueriedEvent[];
   nextCursor?: string;
   hasMore: boolean;
 }
 
-interface WrkfTransitionEvent {
+interface WrkfQueriedEvent {
   id: string;                          // durable workflow event id
-  eventType: "workflow.transitioned";
+  eventType: "workflow.transitioned" | "workflow.suspended" |
+    "workflow.suspension_resolved";
   instanceId: string;
   seq: number;
   task: {
@@ -1544,9 +1545,13 @@ interface WrkfTransitionEvent {
   to?: WrkfState;
   fromPhase?: string;
   toPhase?: string;
-  transitionedAt: string;
+  occurredAt: string;
   principal_ref?: string;
   role?: string;
+  suspension?: WrkfSuspension;
+  disposition?: "resume" | "close" | "cancel";
+  beforeRevision: number;
+  afterRevision: number;
   matchingRoleBindings: WrkfRoleBinding[];
   roleBindings?: WrkfRoleBinding[];
   payload?: Record<string, unknown>;
@@ -1556,7 +1561,7 @@ interface WrkfTransitionEvent {
 `boundRole` and `matchingRoleBindings` use current `workflow_role_bindings` at
 query time. They are current eligibility, not an event-time snapshot. Legacy
 `task_role_assignments` do not qualify for this contract. Multiple bindings for
-the same role return one transition item with `matchingRoleBindings` sorted
+the same role return one event item with `matchingRoleBindings` sorted
 deterministically; consumers must key downstream delivery by `event.id`.
 
 #### Obligations
@@ -1598,8 +1603,7 @@ interface WrkfTransitionApplyParams {
   transition: string;
   role?: string;
   principal_ref?: string;
-  expectRevision?: number;   // CAS; see §9.3
-  contextHash?: string;      // CAS; see §9.3
+  expectRevision?: number;   // sole CAS token; see §9.3
   idempotencyKey?: string;
   runChecks?: boolean;
   dryRun?: boolean;
@@ -1610,7 +1614,6 @@ interface WrkfTransitionResult {
   instanceId: string;
   state: WrkfState;
   revision: number;
-  contextHash: string;
   eventId: string;
   effects: WrkfEffect[];
   obligations: WrkfObligation[];
@@ -1807,7 +1810,7 @@ deferred if the first implementation is large.
 
 ### 8.3 wrkf transition CAS
 
-`wrkf.transition.apply` enforces `expectRevision` and `contextHash` inside the
+`wrkf.transition.apply` enforces `expectRevision` inside the
 committing transaction (not as a preflight-only check):
 
 ```sql
@@ -1815,7 +1818,7 @@ BEGIN IMMEDIATE
   resolve instance
   check idempotency key + canonical request hash
   check role/guards/blockers/obligations
-  UPDATE workflow_instances ... WHERE id=? AND revision=? AND context_hash=?
+  UPDATE workflow_instances ... WHERE id=? AND revision=?
   verify rows affected = 1
   insert event/effects/obligations
   store committed TransitionResult for idempotency replay

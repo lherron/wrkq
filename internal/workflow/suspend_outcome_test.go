@@ -137,6 +137,30 @@ func TestTransitionSuspendOutcomeRecordsConditionAndPreservesState(t *testing.T)
 	if current.Suspension == nil || current.Suspension.Reason != "operator_required" || current.Suspension.ID == "" || current.Suspension.At == "" || current.Suspension.CauseRef != eventID || eventID == "" {
 		t.Fatalf("suspension = %+v eventId=%q", current.Suspension, eventID)
 	}
+	var eventType, payload string
+	if err := svc.db.QueryRow(`SELECT type, payload_json FROM workflow_events WHERE id = ?`, eventID).Scan(&eventType, &payload); err != nil {
+		t.Fatalf("load suspension event: %v", err)
+	}
+	if eventType != "workflow.suspended" {
+		t.Fatalf("park event type = %q, want workflow.suspended", eventType)
+	}
+	if strings.Contains(payload, `"disposition"`) || !strings.Contains(payload, `"suspension"`) || !strings.Contains(payload, `"beforeRevision":0`) || !strings.Contains(payload, `"afterRevision":1`) {
+		t.Fatalf("workflow.suspended payload = %s", payload)
+	}
+	var fakeTransitions int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM workflow_events WHERE id = ? AND type = 'workflow.transitioned'`, eventID).Scan(&fakeTransitions); err != nil {
+		t.Fatalf("count fake transition events: %v", err)
+	}
+	if fakeTransitions != 0 {
+		t.Fatalf("park emitted %d workflow.transitioned events", fakeTransitions)
+	}
+	queried, err := svc.QueryEvents(EventQueryParams{EventType: "workflow.suspended"})
+	if err != nil {
+		t.Fatalf("QueryEvents workflow.suspended: %v", err)
+	}
+	if len(queried.Items) != 1 || queried.Items[0].Suspension == nil || queried.Items[0].BeforeRevision != attached.Revision || queried.Items[0].AfterRevision != current.Revision {
+		t.Fatalf("queried suspension event = %+v", queried.Items)
+	}
 }
 
 func TestActionSettlementSuspendOutcomeRecordsConditionAndPreservesState(t *testing.T) {
@@ -200,6 +224,13 @@ func TestActionSettlementSuspendOutcomeRecordsConditionAndPreservesState(t *test
 	}
 	if taskETagAfter != taskETagBefore {
 		t.Fatalf("settlement suspend outcome touched task document etag: before=%d after=%d", taskETagBefore, taskETagAfter)
+	}
+	var eventType string
+	if err := svc.db.QueryRow(`SELECT type FROM workflow_events WHERE id = ?`, current.Suspension.CauseRef).Scan(&eventType); err != nil {
+		t.Fatalf("load settlement suspension event: %v", err)
+	}
+	if eventType != "workflow.suspended" {
+		t.Fatalf("settlement park event type = %q, want workflow.suspended", eventType)
 	}
 }
 

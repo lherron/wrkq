@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -188,6 +189,57 @@ func TestWorkflowTransitionDispatchesWebhookAndSkipsIdempotentReplay(t *testing.
 	case payload := <-calls:
 		t.Fatalf("unexpected webhook for idempotent replay: %+v", payload)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestWorkflowSuspensionLifecycleDispatchesCoherentWebhooks(t *testing.T) {
+	calls := make(chan webhooks.Payload, 4)
+	server := webhookCaptureServer(t, calls)
+	defer server.Close()
+
+	webhookURLs, _ := json.Marshal([]interface{}{
+		map[string]interface{}{"url": server.URL + "/hook", "events": []string{"workflow.*"}},
+	})
+	svc, taskUUID, _ := setupWorkflowWebhookFixture(t, string(webhookURLs))
+	templatePath := filepath.Join(t.TempDir(), "suspend-webhook.json")
+	if err := os.WriteFile(templatePath, []byte(suspendOutcomeTemplate), 0o644); err != nil {
+		t.Fatalf("write suspension template: %v", err)
+	}
+	if _, err := svc.InstallTemplate(templatePath, "test-installer", nil); err != nil {
+		t.Fatalf("InstallTemplate: %v", err)
+	}
+	if _, err := svc.AttachTask(taskUUID, "suspend-outcome-test@1", "attach-actor"); err != nil {
+		t.Fatalf("AttachTask: %v", err)
+	}
+	<-calls
+	if _, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:op", Role: "coordinator"}); err != nil {
+		t.Fatalf("Transition park: %v", err)
+	}
+
+	parked := <-calls
+	if parked.Event != webhooks.EventWorkflowSuspended || parked.Workflow == nil || parked.Workflow.Type != "workflow.suspended" || parked.Workflow.Suspension == nil {
+		t.Fatalf("suspension webhook = %+v", parked)
+	}
+	if parked.Workflow.BeforeRevision == nil || *parked.Workflow.BeforeRevision != 0 || parked.Workflow.AfterRevision == nil || *parked.Workflow.AfterRevision != 1 {
+		t.Fatalf("suspension webhook revisions = %+v", parked.Workflow)
+	}
+	inst, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{SuspensionID: inst.Suspension.ID, Disposition: DispositionResume, PrincipalRef: "human:op"}); err != nil {
+		t.Fatalf("ResolveSuspension: %v", err)
+	}
+	resolved := <-calls
+	if resolved.Event != webhooks.EventWorkflowSuspensionResolved || resolved.Workflow == nil || resolved.Workflow.Type != "workflow.suspension_resolved" || resolved.Workflow.Suspension != nil || resolved.Workflow.Disposition != "resume" {
+		t.Fatalf("resolution webhook = %+v", resolved)
+	}
+	resolvedEventPayload, err := json.Marshal(resolved.Workflow.Payload)
+	if err != nil || !strings.Contains(string(resolvedEventPayload), `"suspension"`) {
+		t.Fatalf("resolution webhook event payload does not carry suspension record: %s (err=%v)", resolvedEventPayload, err)
+	}
+	if resolved.Workflow.BeforeRevision == nil || *resolved.Workflow.BeforeRevision != 1 || resolved.Workflow.AfterRevision == nil || *resolved.Workflow.AfterRevision != 2 {
+		t.Fatalf("resolution webhook revisions = %+v", resolved.Workflow)
 	}
 }
 

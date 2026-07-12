@@ -1,6 +1,10 @@
 package workflow
 
-import "github.com/lherron/wrkq/internal/webhooks"
+import (
+	"encoding/json"
+
+	"github.com/lherron/wrkq/internal/webhooks"
+)
 
 func workflowAttachedWebhookContext(meta workflowEventMetadata, inst Instance, templateRef, actor string, state State) webhooks.EventContext {
 	return webhooks.EventContext{
@@ -72,6 +76,35 @@ func workflowTransitionWebhookContext(meta workflowEventMetadata, updated Instan
 	}
 }
 
+func workflowSuspensionWebhookContext(meta workflowEventMetadata, updated Instance, actor, role, runID string, beforeRevision, afterRevision int64, idempotencyKey string) webhooks.EventContext {
+	return webhooks.EventContext{
+		Event: webhooks.EventWorkflowSuspended, EventID: meta.ID, EventSeq: meta.Seq, OccurredAt: meta.CreatedAt, Via: "wrkf",
+		Changed: []string{"workflow.suspension"},
+		Changes: map[string]webhooks.Change{"workflow.suspension": {From: nil, To: updated.Suspension}},
+		Subject: &webhooks.Subject{WorkflowInstanceID: updated.ID},
+		Workflow: &webhooks.WorkflowPayload{
+			SchemaVersion: meta.SchemaVersion, Type: meta.Type, EventID: meta.ID, EventSeq: meta.Seq,
+			InstanceID: updated.ID, PrincipalRef: actor, Role: role, RunID: nonEmptyStringPtr(runID),
+			Suspension: updated.Suspension, BeforeRevision: int64Ptr(beforeRevision), AfterRevision: int64Ptr(afterRevision),
+			IdempotencyKey: nonEmptyStringPtr(idempotencyKey), Payload: meta.Payload,
+		},
+	}
+}
+
+func workflowSuspensionResolvedWebhookContext(meta workflowEventMetadata, updated Instance, suspension Suspension, disposition, actor, role string, beforeRevision, afterRevision int64) webhooks.EventContext {
+	return webhooks.EventContext{
+		Event: webhooks.EventWorkflowSuspensionResolved, EventID: meta.ID, EventSeq: meta.Seq, OccurredAt: meta.CreatedAt, Via: "wrkf",
+		Changed: []string{"workflow.suspension"},
+		Changes: map[string]webhooks.Change{"workflow.suspension": {From: suspension, To: nil}},
+		Subject: &webhooks.Subject{WorkflowInstanceID: updated.ID},
+		Workflow: &webhooks.WorkflowPayload{
+			SchemaVersion: meta.SchemaVersion, Type: meta.Type, EventID: meta.ID, EventSeq: meta.Seq,
+			InstanceID: updated.ID, PrincipalRef: actor, Role: role, Suspension: updated.Suspension, Disposition: disposition,
+			BeforeRevision: int64Ptr(beforeRevision), AfterRevision: int64Ptr(afterRevision), Payload: meta.Payload,
+		},
+	}
+}
+
 func stateSummaryPtr(state State) *string {
 	summary := state.Status
 	if state.Phase != "" {
@@ -92,4 +125,18 @@ func nonEmptyStringPtr(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func (s *Service) workflowEventMetadataByID(id string) (workflowEventMetadata, error) {
+	var meta workflowEventMetadata
+	var payload string
+	err := s.db.QueryRow(`
+		SELECT id, seq, schema_version, type, payload_json, created_at
+		FROM workflow_events WHERE id = ?
+	`, id).Scan(&meta.ID, &meta.Seq, &meta.SchemaVersion, &meta.Type, &payload, &meta.CreatedAt)
+	if err != nil {
+		return workflowEventMetadata{}, err
+	}
+	meta.Payload = json.RawMessage(payload)
+	return meta, nil
 }

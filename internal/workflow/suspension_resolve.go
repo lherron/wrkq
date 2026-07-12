@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 // Suspension resolution dispositions.
@@ -76,6 +78,8 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 	}
 
 	var result map[string]interface{}
+	var webhookCtx *webhooks.EventContext
+	var webhookTaskUUID string
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 		// Gate: the instance is located BY its active suspension id. If no
 		// running instance carries this suspension, the id does not match the
@@ -176,17 +180,21 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 		}
 
 		eventPayload := map[string]interface{}{
-			"suspension":   priorSuspension,
-			"disposition":  disposition,
-			"explanation":  params.Explanation,
-			"fromRevision": inst.Revision,
-			"toRevision":   resolved.Revision,
-			"from":         inst.State(),
-			"to":           resolved.State(),
+			"suspension":     priorSuspension,
+			"disposition":    disposition,
+			"explanation":    params.Explanation,
+			"beforeRevision": inst.Revision,
+			"afterRevision":  resolved.Revision,
+			"from":           inst.State(),
+			"to":             resolved.State(),
 		}
-		if err := insertSuspensionResolvedEventTx(tx, eventID, resolved.ID, params.PrincipalRef, params.Role, inst.Revision, resolved.Revision, eventPayload); err != nil {
+		eventMeta, err := insertSuspensionResolvedEventTx(tx, eventID, resolved.ID, params.PrincipalRef, params.Role, inst.Revision, resolved.Revision, eventPayload)
+		if err != nil {
 			return err
 		}
+		ctx := workflowSuspensionResolvedWebhookContext(eventMeta, resolved, priorSuspension, disposition, params.PrincipalRef, params.Role, inst.Revision, resolved.Revision)
+		webhookCtx = &ctx
+		webhookTaskUUID = resolved.TaskUUID
 
 		result = map[string]interface{}{
 			"task":         resolved.TaskRef,
@@ -212,6 +220,9 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	if webhookCtx != nil && webhookTaskUUID != "" {
+		webhooks.DispatchTaskEvent(s.db, webhookTaskUUID, *webhookCtx)
+	}
 	return result, nil
 }
 
@@ -236,7 +247,7 @@ func instanceBySuspensionIDTx(tx *sql.Tx, suspensionID string) (*Instance, error
 // insertSuspensionResolvedEventTx records the workflow.suspension_resolved event
 // carrying the resolved suspension, the disposition, and the revision delta. The
 // event chains into the instance ledger like every other workflow event.
-func insertSuspensionResolvedEventTx(tx *sql.Tx, id, instanceID, principalRef, role string, observed, next int64, payload interface{}) error {
+func insertSuspensionResolvedEventTx(tx *sql.Tx, id, instanceID, principalRef, role string, observed, next int64, payload interface{}) (workflowEventMetadata, error) {
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
@@ -249,5 +260,12 @@ func insertSuspensionResolvedEventTx(tx *sql.Tx, id, instanceID, principalRef, r
 		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.suspension_resolved', ?, ?, ?, ?, ?, ?, 'committed', ?, ?)
 	`, id, instanceID, seq, emptyToNil(principalRef), emptyToNil(principalRef), emptyToNil(role),
 		observed, next, string(payloadJSON), nullIfEmpty(prevHash), eventHash)
-	return err
+	if err != nil {
+		return workflowEventMetadata{}, err
+	}
+	var createdAt string
+	if err := tx.QueryRow(`SELECT created_at FROM workflow_events WHERE id = ?`, id).Scan(&createdAt); err != nil {
+		return workflowEventMetadata{}, err
+	}
+	return workflowEventMetadata{ID: id, Seq: seq, SchemaVersion: "wrkf.workflow-event.v0", Type: "workflow.suspension_resolved", CreatedAt: createdAt, Payload: payload}, nil
 }

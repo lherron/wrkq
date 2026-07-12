@@ -26,7 +26,16 @@ const watchCLITestTemplate = `{
     { "status": "active", "phase": "ready" },
     { "status": "closed", "outcome": "done" }
   ],
+  "suspension": { "reasons": ["operator_required"] },
   "transitions": [
+    {
+      "id": "park",
+      "from": { "status": "active", "phase": "ready" },
+      "by": ["coordinator"],
+      "outcomes": [
+        { "id": "needs_operator", "when": { "always": true }, "suspend": { "reason": "operator_required" } }
+      ]
+    },
     {
       "id": "complete",
       "from": { "status": "active", "phase": "ready" },
@@ -69,6 +78,27 @@ func TestWatchCLIExitCodeMapping(t *testing.T) {
 	err := <-errCh
 	if code := ExitCodeForError(err); code != 3 {
 		t.Fatalf("post-resolution DB failure exit code=%d, want 3 (err=%v)", code, err)
+	}
+}
+
+func TestWatchSuspendedBlocksUntilRealPark(t *testing.T) {
+	a, taskUUID, _ := watchCLIFixture(t)
+	var out bytes.Buffer
+	cmd := testWatchCmd()
+	cmd.SetOut(&out)
+	done := make(chan error, 1)
+	go func() {
+		done <- runWatch(a, cmd, taskUUID, watchFlags{until: workflow.WatchUntilSuspended, timeout: "2s", pollInterval: "5ms"})
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if _, err := a.service.Transition(taskUUID, "park", workflow.TransitionOptions{PrincipalRef: "agent:watch", Role: "coordinator"}); err != nil {
+		t.Fatalf("Transition park: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("blocking watch: %v", err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte("class=suspended")) {
+		t.Fatalf("watch output = %q, want suspended class", out.String())
 	}
 }
 

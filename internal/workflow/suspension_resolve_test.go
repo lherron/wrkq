@@ -5,6 +5,7 @@ package workflow
 // and the workflow.suspension_resolved event.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -51,6 +52,13 @@ func TestResolveSuspensionResumeClearsAndPreservesPhase(t *testing.T) {
 	if resolved.Suspended() {
 		t.Fatalf("resume left a suspension: %+v", resolved.Suspension)
 	}
+	encoded, err := json.Marshal(resolved)
+	if err != nil {
+		t.Fatalf("marshal resolved instance: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"suspension":null`) {
+		t.Fatalf("resolved instance DTO does not expose null suspension: %s", encoded)
+	}
 	if resolved.Status != suspended.Status || resolved.Phase != suspended.Phase || resolved.Outcome != suspended.Outcome {
 		t.Fatalf("resume changed state: before=%+v after=%+v", suspended.State(), resolved.State())
 	}
@@ -65,6 +73,20 @@ func TestResolveSuspensionResumeClearsAndPreservesPhase(t *testing.T) {
 	// The workflow.suspension_resolved event is on the instance timeline.
 	if !hasSuspensionResolvedEvent(t, svc, resolved.ID, "resume") {
 		t.Fatalf("no workflow.suspension_resolved event recorded for resume")
+	}
+	queried, err := svc.QueryEvents(EventQueryParams{EventType: "workflow.suspension_resolved"})
+	if err != nil {
+		t.Fatalf("QueryEvents workflow.suspension_resolved: %v", err)
+	}
+	if len(queried.Items) != 1 || queried.Items[0].Disposition != "resume" || queried.Items[0].Suspension == nil || queried.Items[0].BeforeRevision != suspended.Revision || queried.Items[0].AfterRevision != resolved.Revision {
+		t.Fatalf("queried resolution event = %+v", queried.Items)
+	}
+	var fakeTransitions int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM workflow_events WHERE instance_id = ? AND seq > 1 AND type = 'workflow.transitioned'`, resolved.ID).Scan(&fakeTransitions); err != nil {
+		t.Fatalf("count fake resolution transitions: %v", err)
+	}
+	if fakeTransitions != 0 {
+		t.Fatalf("park/resolve emitted %d workflow.transitioned events", fakeTransitions)
 	}
 }
 

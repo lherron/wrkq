@@ -86,7 +86,9 @@ const MOCK_EVENT_QUERY_RESULT: WrkfEventQueryResult = {
       outcome: "red_recorded",
       fromPhase: "intake",
       toPhase: "red",
-      transitionedAt: "2026-06-15T14:00:00Z",
+      occurredAt: "2026-06-15T14:00:00Z",
+      beforeRevision: 0,
+      afterRevision: 1,
       principal_ref: "agent:tester",
       role: "tester",
       matchingRoleBindings: [

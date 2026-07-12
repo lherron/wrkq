@@ -55,7 +55,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkfInstance":                 dtoType[wrkfapi.Instance](),
 	"WrkfEvent":                    dtoType[wrkfapi.Event](),
 	"WrkfEventQueryResult":         dtoType[wrkfapi.EventQueryResult](),
-	"WrkfTransitionEvent":          dtoType[wrkfapi.TransitionEvent](),
+	"WrkfQueriedEvent":             dtoType[wrkfapi.QueriedEvent](),
 	"WrkfEvidence":                 dtoType[wrkfapi.Evidence](),
 	"WrkfLedgerEntry":              dtoType[wrkfapi.LedgerEntry](),
 	"WrkfLedgerListResult":         dtoType[wrkfapi.LedgerListResult](),

@@ -1898,12 +1898,22 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		result["transition"] = transitionID
 		result["outcome"] = chosen.ID
 		eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
+		eventType := "workflow.transitioned"
+		if chosen.Suspend != nil {
+			eventType = "workflow.suspended"
+			eventPayload["suspension"] = updated.Suspension
+			eventPayload["beforeRevision"] = inst.Revision
+			eventPayload["afterRevision"] = updated.Revision
+		}
 		resultJSON, _ := json.Marshal(result)
-		eventMeta, err := insertTransitionEventWithID(tx, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload)
+		eventMeta, err := insertWorkflowMutationEventWithID(tx, eventType, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload)
 		if err != nil {
 			return err
 		}
 		ctx := workflowTransitionWebhookContext(eventMeta, updated, opts.PrincipalRef, opts.Role, opts.RunID, transitionID, chosen.ID, inst.Revision, updated.Revision, opts.IdempotencyKey, inst.State(), updated.State())
+		if chosen.Suspend != nil {
+			ctx = workflowSuspensionWebhookContext(eventMeta, updated, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey)
+		}
 		webhookCtx = &ctx
 		webhookTaskUUID = updated.TaskUUID
 		if chosen.Suspend != nil {
@@ -1998,7 +2008,7 @@ func transitionResultMap(taskSelector string, updated Instance, eventID string, 
 	}
 }
 
-func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {
+func insertWorkflowMutationEventWithID(tx *sql.Tx, eventType, id, instanceID, actor, role, runID string, observed, next int64, key, requestHash, resultJSON string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {
 	var seq int64
 	_ = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM workflow_events WHERE instance_id = ?`, instanceID).Scan(&seq)
 	payloadJSON, _ := json.Marshal(payload)
@@ -2009,8 +2019,8 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID 
 			id, instance_id, seq, schema_version, type, actor, principal_ref, role, run_id,
 			observed_revision, next_revision, task_doc_etag, task_doc_hash,
 			idempotency_key, request_hash, result, result_json, payload_json, prev_event_hash, event_hash
-		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', 'workflow.transitioned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
-	`, id, instanceID, seq, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
+		) VALUES (?, ?, ?, 'wrkf.workflow-event.v0', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'committed', ?, ?, ?, ?)
+	`, id, instanceID, seq, eventType, emptyToNil(actor), emptyToNil(actor), emptyToNil(role), emptyToNil(runID), observed, next, fmt.Sprint(taskETag), taskHash, emptyToNil(key), nullIfEmpty(requestHash), nullIfEmpty(resultJSON), string(payloadJSON), nullIfEmpty(prevHash), eventHash)
 	if err != nil {
 		return workflowEventMetadata{}, err
 	}
@@ -2022,7 +2032,7 @@ func insertTransitionEventWithID(tx *sql.Tx, id, instanceID, actor, role, runID 
 		ID:            id,
 		Seq:           seq,
 		SchemaVersion: "wrkf.workflow-event.v0",
-		Type:          "workflow.transitioned",
+		Type:          eventType,
 		CreatedAt:     createdAt,
 		Payload:       payload,
 	}, nil

@@ -26,6 +26,18 @@ export type WrkfState =
       [k: string]: unknown;
     };
 
+export interface WrkfSuspension {
+  id: string;
+  reason: string;
+  at: string;
+  causeRef?: string;
+}
+
+export type WrkfQueryableEventType =
+  | "workflow.transitioned"
+  | "workflow.suspended"
+  | "workflow.suspension_resolved";
+
 // ── Core resources ───────────────────────────────────────────────────────────
 
 export interface WrkfInstance {
@@ -44,6 +56,7 @@ export interface WrkfInstance {
   taskDocHash?: string;
   createdAt?: string;
   updatedAt?: string;
+  suspension: WrkfSuspension | null;
   [k: string]: unknown;
 }
 
@@ -116,6 +129,10 @@ export interface WrkfEvent {
     to?: WrkfState;
     transition?: string;
     outcome?: string;
+    suspension?: WrkfSuspension;
+    disposition?: WrkfSuspensionDisposition;
+    beforeRevision?: number;
+    afterRevision?: number;
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -357,7 +374,7 @@ export interface WrkfRoleSetParams {
 }
 
 export interface WrkfEventQueryParams {
-  eventType?: "workflow.transitioned" | string;
+  eventType?: WrkfQueryableEventType;
   project?: string;
   fromPhase?: string;
   toPhase?: string;
@@ -371,7 +388,7 @@ export interface WrkfEventQueryParams {
   cursor?: string;
 }
 
-export interface WrkfTransitionEventTask {
+export interface WrkfQueriedEventTask {
   uuid: string;
   id: string;
   slug?: string;
@@ -382,21 +399,25 @@ export interface WrkfTransitionEventTask {
   riskClass?: string;
 }
 
-export interface WrkfTransitionEvent {
+export interface WrkfQueriedEvent {
   id: string;
-  eventType: "workflow.transitioned" | string;
+  eventType: WrkfQueryableEventType;
   instanceId: string;
   seq: number;
-  task: WrkfTransitionEventTask;
+  task: WrkfQueriedEventTask;
   transition?: string;
   outcome?: string;
   from?: WrkfState;
   to?: WrkfState;
   fromPhase?: string;
   toPhase?: string;
-  transitionedAt: string;
+  occurredAt: string;
   principal_ref?: string;
   role?: string;
+  suspension?: WrkfSuspension;
+  disposition?: WrkfSuspensionDisposition;
+  beforeRevision: number;
+  afterRevision: number;
   matchingRoleBindings: WrkfRoleBinding[];
   roleBindings?: WrkfRoleBinding[];
   payload?: {
@@ -404,13 +425,17 @@ export interface WrkfTransitionEvent {
     to?: WrkfState;
     transition?: string;
     outcome?: string;
+    suspension?: WrkfSuspension;
+    disposition?: WrkfSuspensionDisposition;
+    beforeRevision?: number;
+    afterRevision?: number;
     [k: string]: unknown;
   };
   [k: string]: unknown;
 }
 
 export interface WrkfEventQueryResult {
-  items: WrkfTransitionEvent[];
+  items: WrkfQueriedEvent[];
   nextCursor?: string;
   hasMore: boolean;
 }
