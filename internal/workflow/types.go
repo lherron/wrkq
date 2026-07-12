@@ -25,6 +25,7 @@ type Template struct {
 	ObligationKinds   map[string]KindSpec             `json:"obligationKinds,omitempty"`
 	Checks            map[string]CheckSpec            `json:"checks,omitempty"`
 	Transitions       []TransitionSpec                `json:"transitions"`
+	Suspension        *SuspensionPolicySpec           `json:"suspension,omitempty"`
 	ExecutableActions map[string]ExecutableActionSpec `json:"executableActions,omitempty"`
 	StateHooks        map[string][]HookRef            `json:"stateHooks,omitempty"`
 	NextActionModel   map[string]json.RawMessage      `json:"nextActionModel,omitempty"`
@@ -230,9 +231,24 @@ type OutcomeCase struct {
 	ID          string                 `json:"id"`
 	Description string                 `json:"description,omitempty"`
 	When        Predicate              `json:"when"`
-	To          State                  `json:"to"`
+	To          *State                 `json:"to,omitempty"`
+	Suspend     *SuspendSpec           `json:"suspend,omitempty"`
 	Effects     []EffectSpec           `json:"effects,omitempty"`
 	Obligations []ObligationCreateSpec `json:"obligations,omitempty"`
+}
+
+// SuspendSpec is the suspension arm of an outcome's tagged union. Exactly one
+// of OutcomeCase.To and OutcomeCase.Suspend must be present.
+type SuspendSpec struct {
+	Reason string `json:"reason"`
+}
+
+// SuspensionPolicySpec declares the template-wide suspension vocabulary and
+// the additional effects applied by each resolution disposition. Resolution
+// mechanics consume Effects; transition outcomes consume Reasons.
+type SuspensionPolicySpec struct {
+	Reasons []string                `json:"reasons"`
+	Effects map[string][]EffectSpec `json:"effects,omitempty"`
 }
 
 type EffectSpec struct {

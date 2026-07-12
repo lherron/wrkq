@@ -31,6 +31,34 @@ type Service struct {
 	now nowFunc
 }
 
+func suspensionID(suspension *Suspension) interface{} {
+	if suspension == nil {
+		return nil
+	}
+	return suspension.ID
+}
+
+func suspensionReason(suspension *Suspension) interface{} {
+	if suspension == nil {
+		return nil
+	}
+	return suspension.Reason
+}
+
+func suspensionAt(suspension *Suspension) interface{} {
+	if suspension == nil {
+		return nil
+	}
+	return suspension.At
+}
+
+func suspensionCauseRef(suspension *Suspension) interface{} {
+	if suspension == nil || suspension.CauseRef == "" {
+		return nil
+	}
+	return suspension.CauseRef
+}
+
 func NewService(database *db.DB) *Service {
 	return &Service{db: database, now: func() time.Time { return time.Now().UTC() }}
 }
@@ -161,6 +189,7 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 		errs = append(errs, "initial state must be listed in states")
 	}
 	transitions := map[string]bool{}
+	suspendOutcomeCount := 0
 	for _, tr := range tpl.Transitions {
 		if tr.ID == "" {
 			errs = append(errs, "transition id is required")
@@ -237,8 +266,22 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			if out.ID == "" {
 				errs = append(errs, fmt.Sprintf("transition %s outcome id is required", tr.ID))
 			}
-			if !stateSet[stateKey(out.To)] {
+			hasTo := out.To != nil
+			hasSuspend := out.Suspend != nil
+			if hasTo == hasSuspend {
+				errs = append(errs, fmt.Sprintf("transition %s outcome %s must declare exactly one of to or suspend", tr.ID, out.ID))
+			}
+			if hasTo && !stateSet[stateKey(*out.To)] {
 				errs = append(errs, fmt.Sprintf("transition %s outcome %s target is not declared", tr.ID, out.ID))
+			}
+			if hasSuspend {
+				suspendOutcomeCount++
+				if tr.From.Status == "closed" {
+					errs = append(errs, fmt.Sprintf("transition %s outcome %s cannot suspend from a closed state", tr.ID, out.ID))
+				}
+				if tpl.Suspension == nil || !containsTrimmedString(tpl.Suspension.Reasons, strings.TrimSpace(out.Suspend.Reason)) {
+					errs = append(errs, fmt.Sprintf("transition %s outcome %s suspend reason %q is not declared in suspension.reasons", tr.ID, out.ID, out.Suspend.Reason))
+				}
 			}
 			if out.When.Otherwise != nil && *out.When.Otherwise && i != len(tr.Outcomes)-1 {
 				errs = append(errs, fmt.Sprintf("transition %s otherwise outcome must be final", tr.ID))
@@ -252,8 +295,59 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			}
 		}
 	}
+	errs = append(errs, validateSuspensionPolicy(tpl.Suspension, suspendOutcomeCount)...)
 	errs = append(errs, validateExecutableActions(tpl, stateSet, transitions)...)
 	return errs
+}
+
+func validateSuspensionPolicy(spec *SuspensionPolicySpec, suspendOutcomeCount int) []string {
+	if spec == nil {
+		return nil
+	}
+	var errs []string
+	if suspendOutcomeCount == 0 {
+		errs = append(errs, "suspension is declared but no outcome uses suspend")
+	}
+	seen := map[string]bool{}
+	for i, raw := range spec.Reasons {
+		reason := strings.TrimSpace(raw)
+		if reason == "" {
+			errs = append(errs, fmt.Sprintf("suspension.reasons[%d] must not be empty", i))
+			continue
+		}
+		if seen[reason] {
+			errs = append(errs, fmt.Sprintf("duplicate suspension reason %q", reason))
+		}
+		seen[reason] = true
+	}
+	if suspendOutcomeCount > 0 && len(seen) == 0 {
+		errs = append(errs, "suspension.reasons must not be empty when an outcome uses suspend")
+	}
+	for disposition, effects := range spec.Effects {
+		switch disposition {
+		case "resume", "close", "cancel":
+		default:
+			errs = append(errs, fmt.Sprintf("suspension.effects contains unknown disposition %q", disposition))
+		}
+		for i, effect := range effects {
+			if strings.TrimSpace(effect.Kind) == "" {
+				errs = append(errs, fmt.Sprintf("suspension.effects.%s[%d] kind is required", disposition, i))
+			}
+		}
+	}
+	return errs
+}
+
+func containsTrimmedString(values []string, want string) bool {
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func validateExecutableActions(tpl *Template, stateSet map[string]bool, transitions map[string]bool) []string {
@@ -1144,69 +1238,30 @@ func (s *Service) activeInstanceByTaskUUID(taskUUID string) (*Instance, error) {
 	return inst, s.populateInstanceLineage(inst)
 }
 
-// Suspend opens the single active suspension on an instance. Parking is a
-// record, not a state change: status/phase/outcome are untouched — the instance
-// stays "in" its phase, just stopped. Suspending an already-suspended instance
-// is rejected (exactly one active suspension, no stack). Revision is not bumped
-// — the suspended-write gate, not a CAS token, is what fences pre-park workers.
-//
-// This is the minimal internal author of a suspension for T-06260. The
-// template DSL suspend outcome (T-06261) and resolveSuspension (T-06262) build
-// on the same record and gate.
-func (s *Service) Suspend(taskSelector, instanceID, reason, causeRef, principalRef string) (*Instance, error) {
-	reason = strings.TrimSpace(reason)
+// applySuspendOutcomeTx authors the single active suspension from a validated
+// template outcome. It deliberately has no public service or CLI counterpart:
+// entering suspension is possible only by taking a normal workflow transition.
+// The caller persists the populated instance in the same transition commit.
+func applySuspendOutcomeTx(tx *sql.Tx, inst *Instance, spec *SuspendSpec, causeRef, at string) error {
+	if spec == nil {
+		return validationError("suspend", "suspend outcome is required", "template-declared suspend outcome", nil, "fix the workflow template")
+	}
+	reason := strings.TrimSpace(spec.Reason)
 	if reason == "" {
-		return nil, validationError("reason", "a suspension reason code is required", "non-empty reason code", nil, "supply --reason")
+		return validationError("reason", "a suspension reason code is required", "template-declared reason code", nil, "fix the workflow template")
 	}
-	var out *Instance
-	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
-		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
-		if err != nil {
-			return err
-		}
-		if inst.Status == "closed" {
-			return validationError("status", fmt.Sprintf("instance %s is closed and cannot be suspended", inst.ID), "running instance", nil, "suspend a live instance")
-		}
-		if inst.Suspension != nil {
-			return alreadySuspendedError(inst)
-		}
-		susID, err := nextSeqID(tx, "workflow_suspension_seq", "sus")
-		if err != nil {
-			return err
-		}
-		now := s.now().UTC().Format(time.RFC3339)
-		// WHERE suspension_id IS NULL makes the one-active-suspension rule
-		// atomic against a concurrent suspend; status/phase/outcome/revision are
-		// deliberately left untouched.
-		res, err := tx.Exec(`
-			UPDATE workflow_instances
-			SET suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?, updated_at = ?
-			WHERE id = ? AND suspension_id IS NULL
-		`, susID, reason, now, nullIfEmpty(strings.TrimSpace(causeRef)), now, inst.ID)
-		if err != nil {
-			return err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			// Lost the race: someone suspended between our read and write.
-			reloaded, loadErr := instanceByIDQuery(tx, inst.ID)
-			if loadErr != nil {
-				return loadErr
-			}
-			return alreadySuspendedError(reloaded)
-		}
-		inst.Suspension = &Suspension{ID: susID, Reason: reason, At: now, CauseRef: strings.TrimSpace(causeRef)}
-		inst.UpdatedAt = now
-		out = inst
-		return nil
-	})
+	if inst.Status == "closed" {
+		return validationError("status", fmt.Sprintf("instance %s is closed and cannot be suspended", inst.ID), "running instance", nil, "fix the workflow template")
+	}
+	if inst.Suspension != nil {
+		return alreadySuspendedError(inst)
+	}
+	suspensionID, err := nextSeqID(tx, "workflow_suspension_seq", "sus")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return out, s.populateInstanceLineage(out)
+	inst.Suspension = &Suspension{ID: suspensionID, Reason: reason, At: at, CauseRef: strings.TrimSpace(causeRef)}
+	return nil
 }
 
 func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
@@ -3085,7 +3140,11 @@ func postconditionBlockers(inst *Instance, tr TransitionSpec, chosen *OutcomeCas
 	if chosen == nil || len(tr.Postconditions) == 0 {
 		return nil
 	}
-	ctx := evalContext{Evidence: ev, Obligations: obl, Checks: checks, Facts: taskFacts(task), Task: task, State: chosen.To}
+	nextState := inst.State()
+	if chosen.To != nil {
+		nextState = *chosen.To
+	}
+	ctx := evalContext{Evidence: ev, Obligations: obl, Checks: checks, Facts: taskFacts(task), Task: task, State: nextState}
 	var blockers []Blocker
 	for i, post := range tr.Postconditions {
 		if !evalPredicate(post, ctx) {

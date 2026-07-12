@@ -1756,7 +1756,10 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		}
 		chosen := decision.Outcome
 		if opts.DryRun {
-			result = map[string]interface{}{"dryRun": true, "transition": transitionID, "outcome": chosen.ID, "state": chosen.To}
+			result = map[string]interface{}{"dryRun": true, "transition": transitionID, "outcome": chosen.ID, "state": *decision.ExpectedState}
+			if chosen.Suspend != nil {
+				result["suspend"] = chosen.Suspend
+			}
 			return nil
 		}
 
@@ -1767,12 +1770,22 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			return suspendedWriteError(inst)
 		}
 
+		eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+		if err != nil {
+			return err
+		}
 		nextRevision := inst.Revision + 1
 		now := s.now().Format(time.RFC3339)
 		updated := *inst
-		updated.Status = chosen.To.Status
-		updated.Phase = chosen.To.Phase
-		updated.Outcome = chosen.To.Outcome
+		if chosen.To != nil {
+			updated.Status = chosen.To.Status
+			updated.Phase = chosen.To.Phase
+			updated.Outcome = chosen.To.Outcome
+		} else {
+			if err := applySuspendOutcomeTx(tx, &updated, chosen.Suspend, eventID, now); err != nil {
+				return err
+			}
+		}
 		updated.Revision = nextRevision
 		updated.UpdatedAt = now
 		if updated.Status == "closed" {
@@ -1785,9 +1798,10 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		res, err := tx.Exec(`
 			UPDATE workflow_instances
 			SET status = ?, phase = ?, outcome = ?, revision = ?, task_doc_etag = ?, task_doc_hash = ?,
-			    updated_at = ?, closed_at = ?
+			    updated_at = ?, closed_at = ?, suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?
 			WHERE id = ? AND revision = ?
-		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
+		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash,
+			updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), suspensionID(updated.Suspension), suspensionReason(updated.Suspension), suspensionAt(updated.Suspension), suspensionCauseRef(updated.Suspension), updated.ID, inst.Revision)
 		if err != nil {
 			return err
 		}
@@ -1878,10 +1892,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 				Status: "pending", IdempotencyKey: key, SemanticKey: semanticKey, CreatedAt: now, UpdatedAt: now,
 			})
 		}
-		eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
-		if err != nil {
-			return err
-		}
 		result = transitionResultMap(taskSelector, updated, eventID, createdEffects, createdObligations)
 		result["task"] = resultTaskSelector
 		result["idempotent"] = false
@@ -1896,6 +1906,11 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		ctx := workflowTransitionWebhookContext(eventMeta, updated, opts.PrincipalRef, opts.Role, opts.RunID, transitionID, chosen.ID, inst.Revision, updated.Revision, opts.IdempotencyKey, inst.State(), updated.State())
 		webhookCtx = &ctx
 		webhookTaskUUID = updated.TaskUUID
+		if chosen.Suspend != nil {
+			// Parking never projects into the task document. The suspension on
+			// the instance is the sole truth, so evidence freshness survives.
+			return nil
+		}
 		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.PrincipalRef)
 	})
 	if err != nil {

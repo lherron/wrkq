@@ -104,7 +104,12 @@ func (s *Service) EvaluateTransitionDecision(input TransitionDecisionInput) (Tra
 		out := &tr.Outcomes[i]
 		if evalPredicate(out.When, ctx) {
 			decision.Outcome = out
-			decision.ExpectedState = &out.To
+			if out.To != nil {
+				decision.ExpectedState = out.To
+			} else {
+				state := input.Instance.State()
+				decision.ExpectedState = &state
+			}
 			break
 		}
 	}
@@ -113,7 +118,7 @@ func (s *Service) EvaluateTransitionDecision(input TransitionDecisionInput) (Tra
 		return decision, nil
 	}
 
-	if decision.Outcome.To.Status == "closed" && input.DependencyQuery != nil {
+	if decision.Outcome.To != nil && decision.Outcome.To.Status == "closed" && input.DependencyQuery != nil {
 		depBlockers, err := taskRelationBlockers(input.DependencyQuery, input.Instance.TaskUUID)
 		if err != nil {
 			return decision, err

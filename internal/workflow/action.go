@@ -1386,12 +1386,22 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 		return nil, suspendedWriteError(inst)
 	}
 
+	eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+	if err != nil {
+		return nil, err
+	}
 	nextRevision := inst.Revision + 1
 	now := s.now().UTC().Format(time.RFC3339)
 	updated := *inst
-	updated.Status = chosen.To.Status
-	updated.Phase = chosen.To.Phase
-	updated.Outcome = chosen.To.Outcome
+	if chosen.To != nil {
+		updated.Status = chosen.To.Status
+		updated.Phase = chosen.To.Phase
+		updated.Outcome = chosen.To.Outcome
+	} else {
+		if err := applySuspendOutcomeTx(tx, &updated, chosen.Suspend, eventID, now); err != nil {
+			return nil, err
+		}
+	}
 	updated.Revision = nextRevision
 	updated.UpdatedAt = now
 	if updated.Status == "closed" {
@@ -1404,9 +1414,10 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	res, err := tx.Exec(`
 		UPDATE workflow_instances
 		SET status = ?, phase = ?, outcome = ?, revision = ?, task_doc_etag = ?, task_doc_hash = ?,
-		    updated_at = ?, closed_at = ?
+		    updated_at = ?, closed_at = ?, suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?
 		WHERE id = ? AND revision = ?
-	`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash, updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), updated.ID, inst.Revision)
+	`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash,
+		updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), suspensionID(updated.Suspension), suspensionReason(updated.Suspension), suspensionAt(updated.Suspension), suspensionCauseRef(updated.Suspension), updated.ID, inst.Revision)
 	if err != nil {
 		return nil, err
 	}
@@ -1493,10 +1504,6 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 			Status: "pending", IdempotencyKey: effectKey, SemanticKey: semanticKey, CreatedAt: now, UpdatedAt: now,
 		})
 	}
-	eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
-	if err != nil {
-		return nil, err
-	}
 	result := transitionResultMap(inst.TaskRef, updated, eventID, createdEffects, createdObligations)
 	result["transition"] = transitionID
 	result["outcome"] = chosen.ID
@@ -1506,8 +1513,10 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	if _, err := insertTransitionEventWithID(tx, eventID, updated.ID, actor, role, runID, inst.Revision, updated.Revision, key, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload); err != nil {
 		return nil, err
 	}
-	if err := updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, actor); err != nil {
-		return nil, err
+	if chosen.Suspend == nil {
+		if err := updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, actor); err != nil {
+			return nil, err
+		}
 	}
 	*inst = updated
 	return result, nil

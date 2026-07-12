@@ -3,44 +3,47 @@ package workflow
 // suspension_test.go — T-06260. Suspension as a first-class condition on a
 // workflow instance, plus the suspended-write gate on both commit paths.
 //
-// Contract (WRKF_SIMPLIFICATION.md §1, §2):
-//   - Suspend records a suspension (id, reason, timestamp, cause pointer) and
-//     changes NOTHING else: status/phase/outcome/revision stay exactly as they
-//     were. A suspended instance is still "in" its phase.
+// Contract (WRKF_SIMPLIFICATION.md §1–§3):
+//   - A template suspend outcome records a suspension (id, reason, timestamp,
+//     cause pointer) without changing status/phase/outcome. The normal
+//     transition still advances revision.
 //   - Exactly one active suspension; a second suspend is rejected.
 //   - The suspended-write gate rejects writes at BOTH commit paths
 //     (TransitionForSelectors and applyActionTransitionTx). Reads, inspection,
 //     and dry-run are unaffected — the gate is the entire fencing story.
 
-import "testing"
+import (
+	"database/sql"
+	"testing"
+)
 
 // TestSuspendRecordsConditionWithoutStateChange proves park is a record, not a
-// state change: the suspension appears; status/phase/outcome/revision are
-// untouched; and the suspension is still visible on a fresh read (reads work).
+// state change: the suspension appears; status/phase/outcome are untouched;
+// the transition advances revision; and fresh reads expose the suspension.
 func TestSuspendRecordsConditionWithoutStateChange(t *testing.T) {
-	svc, taskUUID, _ := setupCASFixture(t)
-
-	before, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance before: %v", err)
-	}
+	svc, taskUUID, before := setupSuspendOutcomeFixture(t)
 	if before.Suspended() {
 		t.Fatalf("fresh instance is suspended: %+v", before.Suspension)
 	}
 
-	suspended, err := svc.Suspend(taskUUID, "", "operator_required", "wfe_000042", "agent:op")
+	result, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:op", Role: "coordinator"})
 	if err != nil {
-		t.Fatalf("Suspend: %v", err)
+		t.Fatalf("Transition park: %v", err)
+	}
+	suspended, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance after park: %v", err)
 	}
 	if !suspended.Suspended() {
 		t.Fatalf("Suspend returned a running instance: %+v", suspended)
 	}
 	sus := suspended.Suspension
-	if sus.ID == "" || sus.Reason != "operator_required" || sus.At == "" || sus.CauseRef != "wfe_000042" {
+	eventID, _ := result["eventId"].(string)
+	if sus.ID == "" || sus.Reason != "operator_required" || sus.At == "" || sus.CauseRef != eventID || eventID == "" {
 		t.Fatalf("suspension record = %+v, want populated id/reason/at/causeRef", sus)
 	}
 	if suspended.Status != before.Status || suspended.Phase != before.Phase ||
-		suspended.Outcome != before.Outcome || suspended.Revision != before.Revision {
+		suspended.Outcome != before.Outcome || suspended.Revision != before.Revision+1 {
 		t.Fatalf("park changed state: before=%+v rev=%d after=%+v rev=%d",
 			before.State(), before.Revision, suspended.State(), suspended.Revision)
 	}
@@ -54,7 +57,7 @@ func TestSuspendRecordsConditionWithoutStateChange(t *testing.T) {
 		t.Fatalf("readback lost suspension: %+v", readback.Suspension)
 	}
 	if readback.Status != before.Status || readback.Phase != before.Phase ||
-		readback.Outcome != before.Outcome || readback.Revision != before.Revision {
+		readback.Outcome != before.Outcome || readback.Revision != before.Revision+1 {
 		t.Fatalf("readback state drifted: %+v rev=%d", readback.State(), readback.Revision)
 	}
 }
@@ -62,31 +65,33 @@ func TestSuspendRecordsConditionWithoutStateChange(t *testing.T) {
 // TestSuspendRejectsEmptyReason guards the template-declared reason code as
 // required input.
 func TestSuspendRejectsEmptyReason(t *testing.T) {
-	svc, taskUUID, _ := setupCASFixture(t)
-	_, err := svc.Suspend(taskUUID, "", "   ", "", "agent:op")
+	svc, _, _ := setupSuspendOutcomeFixture(t)
+	err := withImmediateTx(svc.db, func(tx *sql.Tx) error {
+		return applySuspendOutcomeTx(tx, &Instance{Status: "active"}, &SuspendSpec{Reason: "   "}, "wfe_test", svc.now().Format("2006-01-02T15:04:05Z07:00"))
+	})
 	requireWrkfCode(t, err, wrkfCodeValidation)
 }
 
 // TestSuspendedWriteGateDoor1 proves the gate on TransitionForSelectors: an
-// otherwise-legal transition (revision still matches, since park does not bump
-// it) bounces with WRKF_SUSPENDED, and dry-run inspection still passes.
+// otherwise-legal transition at the post-park revision bounces with
+// WRKF_SUSPENDED, and dry-run inspection still passes.
 func TestSuspendedWriteGateDoor1(t *testing.T) {
-	svc, taskUUID, _ := setupCASFixture(t)
-	if _, err := svc.Suspend(taskUUID, "", "operator_required", "", "agent:op"); err != nil {
-		t.Fatalf("Suspend: %v", err)
+	svc, taskUUID, _ := setupSuspendOutcomeFixture(t)
+	if _, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:op", Role: "coordinator"}); err != nil {
+		t.Fatalf("Transition park: %v", err)
 	}
 
-	rev0 := int64(0)
+	rev1 := int64(1)
 	// Dry-run is a read: it must NOT bounce.
 	if _, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		PrincipalRef: "human:test", Role: "coordinator", ExpectRevision: &rev0, DryRun: true,
+		PrincipalRef: "human:test", Role: "coordinator", ExpectRevision: &rev1, DryRun: true,
 	}); err != nil {
 		t.Fatalf("dry-run transition on suspended instance bounced: %v", err)
 	}
 
 	// The real write bounces at the gate.
 	_, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		PrincipalRef: "human:test", Role: "coordinator", ExpectRevision: &rev0,
+		PrincipalRef: "human:test", Role: "coordinator", ExpectRevision: &rev1,
 	})
 	requireWrkfCode(t, err, wrkfCodeSuspended)
 
@@ -95,7 +100,7 @@ func TestSuspendedWriteGateDoor1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestInstance after bounce: %v", err)
 	}
-	if after.Status != "active" || after.Phase != "ready" || after.Revision != 0 {
+	if after.Status != "active" || after.Phase != "ready" || after.Revision != 1 {
 		t.Fatalf("gate let a write through: %+v rev=%d", after.State(), after.Revision)
 	}
 }
@@ -114,9 +119,7 @@ func TestSuspendedWriteGateDoor2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestInstance before park: %v", err)
 	}
-	if _, err := svc.Suspend(taskUUID, "", "operator_required", "", "agent:op"); err != nil {
-		t.Fatalf("Suspend: %v", err)
-	}
+	parkInstanceForTest(t, svc, taskUUID)
 
 	// The pre-park worker settles after the park — it bounces at the gate.
 	_, err = svc.SettleAction(SettleActionParams{
@@ -146,13 +149,21 @@ func TestSuspendedWriteGateDoor2(t *testing.T) {
 // TestDoubleSuspendRejected proves exactly-one-active-suspension: a second
 // suspend is rejected and the original suspension is untouched.
 func TestDoubleSuspendRejected(t *testing.T) {
-	svc, taskUUID, _ := setupCASFixture(t)
-
-	first, err := svc.Suspend(taskUUID, "", "operator_required", "", "agent:op")
-	if err != nil {
-		t.Fatalf("first Suspend: %v", err)
+	svc, taskUUID, _ := setupSuspendOutcomeFixture(t)
+	if _, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:op", Role: "coordinator"}); err != nil {
+		t.Fatalf("Transition park: %v", err)
 	}
-	_, err = svc.Suspend(taskUUID, "", "needs_input", "", "agent:op")
+	first, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance: %v", err)
+	}
+	err = withImmediateTx(svc.db, func(tx *sql.Tx) error {
+		current, err := resolveInstanceSelectors(tx, taskUUID, "")
+		if err != nil {
+			return err
+		}
+		return applySuspendOutcomeTx(tx, current, &SuspendSpec{Reason: "operator_required"}, "wfe_test", svc.now().Format("2006-01-02T15:04:05Z07:00"))
+	})
 	requireWrkfCode(t, err, wrkfCodeAlreadySuspended)
 
 	after, err := svc.LatestInstance(taskUUID)
@@ -161,5 +172,31 @@ func TestDoubleSuspendRejected(t *testing.T) {
 	}
 	if !after.Suspended() || after.Suspension.ID != first.Suspension.ID || after.Suspension.Reason != "operator_required" {
 		t.Fatalf("double-suspend mutated the active suspension: %+v", after.Suspension)
+	}
+}
+
+// parkInstanceForTest exercises the internal storage primitive directly only
+// where the test needs a worker claim from a template without suspend outcomes.
+// Production suspension entry remains template-transition-only.
+func parkInstanceForTest(t *testing.T, svc *Service, taskUUID string) {
+	t.Helper()
+	err := withImmediateTx(svc.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, taskUUID, "")
+		if err != nil {
+			return err
+		}
+		now := svc.now().UTC().Format("2006-01-02T15:04:05Z07:00")
+		if err := applySuspendOutcomeTx(tx, inst, &SuspendSpec{Reason: "operator_required"}, "wfe_test", now); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`
+			UPDATE workflow_instances
+			SET suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?, updated_at = ?
+			WHERE id = ? AND suspension_id IS NULL
+		`, inst.Suspension.ID, inst.Suspension.Reason, inst.Suspension.At, inst.Suspension.CauseRef, now, inst.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("park instance internally: %v", err)
 	}
 }

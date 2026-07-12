@@ -401,27 +401,7 @@ func taskCmd() *cobra.Command {
 		}),
 	}
 	syncMeta.Flags().Bool("all", false, "Sync all workflow task projections")
-	var suspendReason, suspendCauseRef, suspendInstance string
-	suspend := &cobra.Command{
-		Use:   "suspend TASK --reason CODE",
-		Short: "Open the active suspension on an instance (parks it in place)",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			task := ""
-			if len(args) > 0 {
-				task = args[0]
-			}
-			inst, err := a.service.Suspend(task, suspendInstance, suspendReason, suspendCauseRef, a.actor)
-			if err != nil {
-				return err
-			}
-			return printAny(cmd, flagJSON, inst)
-		}),
-	}
-	suspend.Flags().StringVar(&suspendReason, "reason", "", "Template-declared suspension reason code")
-	suspend.Flags().StringVar(&suspendCauseRef, "cause-ref", "", "Pointer to the causing outcome/event")
-	suspend.Flags().StringVar(&suspendInstance, "instance", "", "Instance id (defaults to the task's active instance)")
-	cmd.AddCommand(attach, inspect, timeline, refresh, syncMeta, suspend)
+	cmd.AddCommand(attach, inspect, timeline, refresh, syncMeta)
 	return cmd
 }
 
