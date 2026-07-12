@@ -24,12 +24,33 @@ const (
 // domain/validation errors. CLI (--json envelope) and wrkfapi/RPC both map
 // from it so the contract stays uniform across surfaces.
 type ErrorDetail struct {
-	Code     string   `json:"code"`
-	Field    string   `json:"field,omitempty"`
-	Message  string   `json:"message"`
-	Expected string   `json:"expected,omitempty"`
-	Allowed  []string `json:"allowed,omitempty"`
-	Fix      string   `json:"fix,omitempty"`
+	Code        string                  `json:"code"`
+	Field       string                  `json:"field,omitempty"`
+	Message     string                  `json:"message"`
+	Expected    string                  `json:"expected,omitempty"`
+	Allowed     []string                `json:"allowed,omitempty"`
+	Fix         string                  `json:"fix,omitempty"`
+	Predecessor *ActionClaimPredecessor `json:"predecessor,omitempty"`
+}
+
+func claimRefusedError(predecessor *ActionClaimPredecessor) error {
+	return &wrkfError{
+		code:        wrkfCodeLeaseConflict,
+		msg:         fmt.Sprintf("claim refused: priorRun must name predecessor %s", predecessor.RunID),
+		field:       "priorRun",
+		expected:    predecessor.RunID,
+		fix:         fmt.Sprintf("review predecessor and retry with priorRun %s", predecessor.RunID),
+		predecessor: predecessor,
+	}
+}
+
+func supersededSettleError(runID, successorRunID string) error {
+	return &wrkfError{
+		code:     wrkfCodeLeaseConflict,
+		msg:      fmt.Sprintf("late settle refused: action run %s was superseded by %s", runID, successorRunID),
+		field:    "runId",
+		expected: "current unsuperseded run",
+	}
 }
 
 // DetailedError is implemented by wrkf errors that carry an ErrorDetail.
@@ -49,12 +70,13 @@ func AsErrorDetail(err error) (ErrorDetail, bool) {
 }
 
 type wrkfError struct {
-	code     string
-	msg      string
-	field    string
-	expected string
-	allowed  []string
-	fix      string
+	code        string
+	msg         string
+	field       string
+	expected    string
+	allowed     []string
+	fix         string
+	predecessor *ActionClaimPredecessor
 }
 
 func (e *wrkfError) Error() string {
@@ -75,7 +97,7 @@ func (e *wrkfError) Detail() ErrorDetail {
 	if e == nil {
 		return ErrorDetail{}
 	}
-	return ErrorDetail{Code: e.code, Field: e.field, Message: e.msg, Expected: e.expected, Allowed: e.allowed, Fix: e.fix}
+	return ErrorDetail{Code: e.code, Field: e.field, Message: e.msg, Expected: e.expected, Allowed: e.allowed, Fix: e.fix, Predecessor: e.predecessor}
 }
 
 // validationError builds a structured WRKF_VALIDATION error. The message is

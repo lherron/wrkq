@@ -6,16 +6,17 @@ import (
 	"testing"
 )
 
-func TestClaimActionCreatesFencedRunAndReplaysSameRunner(t *testing.T) {
+func TestClaimActionAcknowledgesNamedPredecessor(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
 
 	first, err := svc.ClaimAction(ClaimActionParams{
-		Task:     taskUUID,
-		RunnerID: "runner-a",
-		AgentRef: "agent:cody",
-		ScopeRef: "cody@wrkq:T-claim",
-		LeaseMs:  300000,
+		Task:             taskUUID,
+		RunnerID:         "runner-a",
+		AgentRef:         "agent:cody",
+		ScopeRef:         "cody@wrkq:T-claim",
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
 	if err != nil {
 		t.Fatalf("ClaimAction first: %v", err)
@@ -36,30 +37,94 @@ func TestClaimActionCreatesFencedRunAndReplaysSameRunner(t *testing.T) {
 		t.Fatalf("run agent/scope = %+v", first.Binding.Run)
 	}
 
-	replay, err := svc.ClaimAction(ClaimActionParams{
-		Task:     taskUUID,
-		RunnerID: "runner-a",
-		AgentRef: "agent:cody",
-		ScopeRef: "cody@wrkq:T-claim",
-		LeaseMs:  300000,
+	priorRun := first.Binding.Run.ID
+	successor, err := svc.ClaimAction(ClaimActionParams{
+		Task:             taskUUID,
+		RunnerID:         "runner-a",
+		AgentRef:         "agent:cody",
+		ScopeRef:         "cody@wrkq:T-claim",
+		LeaseMs:          300000,
+		PriorRun:         &priorRun,
+		PriorRunProvided: true,
 	})
 	if err != nil {
-		t.Fatalf("ClaimAction replay: %v", err)
+		t.Fatalf("ClaimAction successor: %v", err)
 	}
-	if replay.Binding == nil {
-		t.Fatalf("ClaimAction replay returned nil binding")
+	if successor.Binding == nil {
+		t.Fatalf("ClaimAction successor returned nil binding")
 	}
-	if replay.Binding.Run.ID != first.Binding.Run.ID {
-		t.Fatalf("replay run id = %q, want %q", replay.Binding.Run.ID, first.Binding.Run.ID)
+	if successor.Binding.Run.ID == first.Binding.Run.ID || successor.Binding.Run.PredecessorRunID != first.Binding.Run.ID {
+		t.Fatalf("successor lineage = %+v, want predecessor %q", successor.Binding.Run, first.Binding.Run.ID)
 	}
-	if replay.Binding.Authority.OwnerGeneration != 2 {
-		t.Fatalf("replay generation = %d, want 2", replay.Binding.Authority.OwnerGeneration)
-	}
-	if replay.Binding.Authority.OwnerToken == first.Binding.Authority.OwnerToken {
-		t.Fatalf("replay should rotate owner token")
+	if successor.Binding.Authority.OwnerGeneration != 1 {
+		t.Fatalf("successor generation = %d, want 1", successor.Binding.Authority.OwnerGeneration)
 	}
 	if got := countActiveSemanticRuns(t, svc, first.Binding.Run.InstanceID, first.Binding.Run.SemanticActionKey); got != 1 {
 		t.Fatalf("active semantic runs = %d, want 1", got)
+	}
+	var predecessorStatus, predecessorToken, supersededBy string
+	if err := svc.db.QueryRow(`SELECT status, COALESCE(lease_token,''), COALESCE(superseded_by_run_id,'') FROM workflow_runs WHERE id = ?`, first.Binding.Run.ID).Scan(&predecessorStatus, &predecessorToken, &supersededBy); err != nil {
+		t.Fatalf("read predecessor after succession: %v", err)
+	}
+	if predecessorStatus != "superseded" || predecessorToken != "" || supersededBy != successor.Binding.Run.ID {
+		t.Fatalf("predecessor after succession = status %q token %q successor %q", predecessorStatus, predecessorToken, supersededBy)
+	}
+	var successionEvents int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM ledger_entry WHERE instance_id = ? AND kind = 'workflow.action.succession' AND json_extract(body_json, '$.predecessorRunId') = ? AND json_extract(body_json, '$.successorRunId') = ?`, first.Binding.Run.InstanceID, first.Binding.Run.ID, successor.Binding.Run.ID).Scan(&successionEvents); err != nil {
+		t.Fatalf("read succession ledger: %v", err)
+	}
+	if successionEvents != 1 {
+		t.Fatalf("succession ledger entries = %d, want 1", successionEvents)
+	}
+	_, err = svc.SettleAction(SettleActionParams{
+		ActionRunID: first.Binding.Run.ID, OwnerToken: first.Binding.Authority.OwnerToken,
+		OwnerGeneration: first.Binding.Authority.OwnerGeneration, Result: "completed",
+	})
+	if err == nil || !strings.Contains(err.Error(), "superseded by "+successor.Binding.Run.ID) {
+		t.Fatalf("late predecessor settle error = %v, want superseded successor", err)
+	}
+}
+
+func TestClaimActionRefusalCarriesFullPredecessorRecord(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+
+	first, err := svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-implement", AgentRef: "agent:implement",
+		Prefer: ActionClaimPrefer{Action: "implement"}, LeaseMs: 300000,
+		WorkspaceRoot: "/worktrees/implement", PriorRunProvided: true,
+	})
+	if err != nil {
+		t.Fatalf("first implement claim: %v", err)
+	}
+	if _, err := svc.BindActionExternal(BindActionExternalParams{ActionRunID: first.Binding.Run.ID, ExternalRunRef: "hrc:run-live"}); err != nil {
+		t.Fatalf("bind predecessor external run: %v", err)
+	}
+	if _, err := svc.db.Exec(`INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, source_json, actor, role, run_id, produced_at) VALUES ('ev-predecessor', ?, 'implement_result', 'wrkf-action:predecessor', 'partial work', '{}', 'agent:implement', 'implementer', ?, '2026-07-12T12:00:00Z')`, first.Binding.Run.InstanceID, first.Binding.Run.ID); err != nil {
+		t.Fatalf("seed predecessor evidence: %v", err)
+	}
+
+	wrong := "run-not-the-predecessor"
+	_, err = svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-successor", AgentRef: "agent:successor",
+		Prefer: ActionClaimPrefer{Action: "implement"}, LeaseMs: 300000,
+		PriorRun: &wrong, PriorRunProvided: true,
+	})
+	detail, ok := AsErrorDetail(err)
+	if !ok || detail.Predecessor == nil {
+		t.Fatalf("claim refusal detail = %+v err=%v, want predecessor", detail, err)
+	}
+	pred := detail.Predecessor
+	if pred.RunID != first.Binding.Run.ID || pred.Owner != "runner-implement" || pred.ClaimedAt == "" || pred.HeartbeatAt == "" || pred.ExpiresAt == "" || pred.SettleStatus != "active" {
+		t.Fatalf("predecessor identity/timestamps/status = %+v", pred)
+	}
+	if len(pred.SideEffectClasses) != 2 || pred.ExternalRunRef != "hrc:run-live" || pred.WorkspaceRef != "/worktrees/implement" {
+		t.Fatalf("predecessor declared facts = %+v", pred)
+	}
+	if len(pred.EvidenceWritten) != 1 || pred.EvidenceWritten[0].ID != "ev-predecessor" {
+		t.Fatalf("predecessor evidence = %+v", pred.EvidenceWritten)
 	}
 }
 
@@ -68,10 +133,11 @@ func TestClaimActionRejectsForeignActiveOwnerAndCapabilityMismatch(t *testing.T)
 	attachSimpleTaskV2(t, svc, taskUUID)
 
 	first, err := svc.ClaimAction(ClaimActionParams{
-		Task:     taskUUID,
-		RunnerID: "runner-a",
-		AgentRef: "agent:cody",
-		LeaseMs:  300000,
+		Task:             taskUUID,
+		RunnerID:         "runner-a",
+		AgentRef:         "agent:cody",
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
 	if err != nil {
 		t.Fatalf("ClaimAction first: %v", err)
@@ -86,8 +152,8 @@ func TestClaimActionRejectsForeignActiveOwnerAndCapabilityMismatch(t *testing.T)
 		AgentRef: "agent:larry",
 		LeaseMs:  300000,
 	})
-	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
-		t.Fatalf("foreign active owner error = %v, want lease conflict", err)
+	if err == nil || !strings.Contains(err.Error(), "claim refused") {
+		t.Fatalf("unnamed predecessor error = %v, want claim refused", err)
 	}
 
 	_, err = svc.ClaimAction(ClaimActionParams{
@@ -98,7 +164,8 @@ func TestClaimActionRejectsForeignActiveOwnerAndCapabilityMismatch(t *testing.T)
 		Capabilities: []RunnerCapability{{
 			Actions: []string{"verify"},
 		}},
-		LeaseMs: 300000,
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "capabilities") {
 		t.Fatalf("capability mismatch error = %v, want capabilities error", err)
@@ -137,7 +204,8 @@ func TestClaimActionVerifyCarriesExactSourceBinding(t *testing.T) {
 			Actions:         []string{"verify"},
 			HandlerContract: "praesidium.wrkq-simple-task.verify@1",
 		}},
-		LeaseMs: 300000,
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
 	if err != nil {
 		t.Fatalf("ClaimAction verify: %v", err)
@@ -191,6 +259,14 @@ func TestActionOccurrenceAttemptNumberingAfterOperationalFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("settle first verification attempt: %v", err)
 	}
+	_, err = svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-review", AgentRef: "agent:review",
+		Prefer: ActionClaimPrefer{Action: "verify"}, LeaseMs: 300000, PriorRunProvided: true,
+	})
+	detail, ok := AsErrorDetail(err)
+	if !ok || detail.Predecessor == nil || detail.Predecessor.Owner == "" || detail.Predecessor.HeartbeatAt == "" || detail.Predecessor.ExpiresAt == "" || detail.Predecessor.SettleStatus != "operational_failed" {
+		t.Fatalf("settled predecessor review record = %+v err=%v", detail.Predecessor, err)
+	}
 
 	retry := claimActionForTest(t, svc, taskUUID, "verify")
 	if retry.Binding.Run.SemanticActionKey != first.Binding.Run.SemanticActionKey {
@@ -198,6 +274,16 @@ func TestActionOccurrenceAttemptNumberingAfterOperationalFailure(t *testing.T) {
 	}
 	if retry.Binding.Run.Attempt != 2 {
 		t.Fatalf("retry attempt = %d, want 2", retry.Binding.Run.Attempt)
+	}
+	if retry.Binding.Run.PredecessorRunID != first.Binding.Run.ID {
+		t.Fatalf("retry predecessor = %q, want cleanly settled run %q", retry.Binding.Run.PredecessorRunID, first.Binding.Run.ID)
+	}
+	var settledPredecessorStatus string
+	if err := svc.db.QueryRow(`SELECT status FROM workflow_runs WHERE id = ?`, first.Binding.Run.ID).Scan(&settledPredecessorStatus); err != nil {
+		t.Fatalf("read settled predecessor: %v", err)
+	}
+	if settledPredecessorStatus != "superseded" {
+		t.Fatalf("settled predecessor status = %q, want superseded", settledPredecessorStatus)
 	}
 }
 
@@ -212,8 +298,8 @@ func TestActionOccurrenceIdempotencyHistory(t *testing.T) {
 		t.Fatalf("verify source = %+v, want implementation evidence %+v", first.Binding.Run.Source, implemented.Evidence)
 	}
 	replay := claimActionForTest(t, svc, taskUUID, "verify")
-	if replay.Binding.Run.ID != first.Binding.Run.ID {
-		t.Fatalf("idempotent claim run id = %q, want %q", replay.Binding.Run.ID, first.Binding.Run.ID)
+	if replay.Binding.Run.ID == first.Binding.Run.ID || replay.Binding.Run.PredecessorRunID != first.Binding.Run.ID {
+		t.Fatalf("acknowledged successor = %+v, want predecessor %q", replay.Binding.Run, first.Binding.Run.ID)
 	}
 
 	settle := SettleActionParams{
@@ -232,8 +318,8 @@ func TestActionOccurrenceIdempotencyHistory(t *testing.T) {
 	}
 	if replayed, err := svc.SettleAction(settle); err != nil {
 		t.Fatalf("idempotent settlement replay: %v", err)
-	} else if replayed.Run.ID != first.Binding.Run.ID {
-		t.Fatalf("idempotent settlement run id = %q, want %q", replayed.Run.ID, first.Binding.Run.ID)
+	} else if replayed.Run.ID != replay.Binding.Run.ID {
+		t.Fatalf("idempotent settlement run id = %q, want %q", replayed.Run.ID, replay.Binding.Run.ID)
 	}
 	settle.Evidence.Summary = "different failure payload"
 	_, err := svc.SettleAction(settle)
@@ -278,11 +364,12 @@ func TestClaimActionNewSourceConflictsWithoutOrphaning(t *testing.T) {
 	}
 
 	_, err = svc.ClaimAction(ClaimActionParams{
-		Task:     taskUUID,
-		RunnerID: "runner-verify",
-		AgentRef: "agent:verify",
-		Prefer:   ActionClaimPrefer{Action: "verify"},
-		LeaseMs:  300000,
+		Task:             taskUUID,
+		RunnerID:         "runner-verify",
+		AgentRef:         "agent:verify",
+		Prefer:           ActionClaimPrefer{Action: "verify"},
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
 	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
 

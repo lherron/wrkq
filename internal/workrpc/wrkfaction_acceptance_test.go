@@ -223,7 +223,7 @@ func TestWrkfActionNextV2CandidatesAndSourceBinding(t *testing.T) {
 	}
 }
 
-func TestWrkfActionClaimV2FencedRunAndReplay(t *testing.T) {
+func TestWrkfActionClaimV2FencedRunAndSuccession(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
@@ -244,25 +244,39 @@ func TestWrkfActionClaimV2FencedRunAndReplay(t *testing.T) {
 			"evidence":    map[string]any{"summary": "triaged", "facts": map[string]any{"result": "ready"}},
 		}),
 		mkRPC("claim-1", "wrkf.action.claim", map[string]any{
-			"task": taskID, "runnerId": "runner-a", "agentRef": "agent:cody", "scopeRef": "cody@wrkq:T-05386", "leaseMs": float64(300000),
-		}),
-		mkRPC("claim-2", "wrkf.action.claim", map[string]any{
-			"task": taskID, "runnerId": "runner-a", "agentRef": "agent:cody", "scopeRef": "cody@wrkq:T-05386", "leaseMs": float64(300000),
+			"task": taskID, "runnerId": "runner-a", "agentRef": "agent:cody", "scopeRef": "cody@wrkq:T-05386", "leaseMs": float64(300000), "priorRun": nil,
 		}),
 	)
 	p2ResultOrFail(t, readyFrames[1], "complete triage")
 	claim1 := p2ResultOrFail(t, readyFrames[2], "claim implement")
-	claim2 := p2ResultOrFail(t, readyFrames[3], "claim implement replay")
 
 	binding1 := actClaimBinding(t, claim1, "claim implement")
-	binding2 := actClaimBinding(t, claim2, "claim implement replay")
 	run1, _ := binding1["run"].(map[string]any)
+	refusedFrames := p3Run(t, dbPath, mkRPC("claim-refused", "wrkf.action.claim", map[string]any{
+		"task": taskID, "runnerId": "runner-b", "agentRef": "agent:larry", "leaseMs": float64(300000),
+	}))
+	errObj, _ := refusedFrames[1]["error"].(map[string]any)
+	errData, _ := errObj["data"].(map[string]any)
+	predecessor, _ := errData["predecessor"].(map[string]any)
+	if errData["code"] != "WRKF_LEASE_CONFLICT" || predecessor["runId"] != run1["id"] || predecessor["owner"] != "runner-a" {
+		t.Fatalf("claim refusal payload = %#v, want full named predecessor", errObj)
+	}
+	for _, field := range []string{"claimedAt", "heartbeatAt", "expiresAt", "settleStatus", "sideEffectClasses", "evidenceWritten"} {
+		if _, ok := predecessor[field]; !ok {
+			t.Fatalf("claim refusal predecessor missing %s: %#v", field, predecessor)
+		}
+	}
+	successorFrames := p3Run(t, dbPath, mkRPC("claim-2", "wrkf.action.claim", map[string]any{
+		"task": taskID, "runnerId": "runner-a", "agentRef": "agent:cody", "scopeRef": "cody@wrkq:T-05386", "leaseMs": float64(300000), "priorRun": run1["id"],
+	}))
+	claim2 := p2ResultOrFail(t, successorFrames[1], "claim implement successor")
+	binding2 := actClaimBinding(t, claim2, "claim implement successor")
 	run2, _ := binding2["run"].(map[string]any)
 	if run1["action"] != "implement" || run1["role"] != "implementer" {
 		t.Fatalf("claimed run = %#v, want implement/implementer", run1)
 	}
-	if run1["id"] == "" || run2["id"] != run1["id"] {
-		t.Fatalf("claim replay run id mismatch: first=%#v replay=%#v", run1, run2)
+	if run1["id"] == "" || run2["id"] == run1["id"] || run2["predecessorRunId"] != run1["id"] {
+		t.Fatalf("claim succession mismatch: predecessor=%#v successor=%#v", run1, run2)
 	}
 	if run1["semanticActionKey"] == "" {
 		t.Fatalf("claimed run missing semanticActionKey: %#v", run1)
@@ -272,11 +286,11 @@ func TestWrkfActionClaimV2FencedRunAndReplay(t *testing.T) {
 	if auth1["ownerToken"] == "" || auth1["runnerId"] != "runner-a" {
 		t.Fatalf("authority = %#v, want runner-a token", auth1)
 	}
-	if auth2["ownerGeneration"] != float64(2) {
-		t.Fatalf("replay ownerGeneration = %#v, want 2", auth2["ownerGeneration"])
+	if auth2["ownerGeneration"] != float64(1) {
+		t.Fatalf("successor ownerGeneration = %#v, want 1", auth2["ownerGeneration"])
 	}
 	if auth2["ownerToken"] == auth1["ownerToken"] {
-		t.Fatalf("replay should rotate owner token")
+		t.Fatalf("successor should have a distinct owner token")
 	}
 
 	showFrames := p3Run(t, dbPath,
@@ -436,9 +450,19 @@ func actRPCClaim(t *testing.T, dbPath, taskID, action string) map[string]any {
 	frames := p3Run(t, dbPath,
 		mkRPC("claim-"+action, "wrkf.action.claim", map[string]any{
 			"task": taskID, "prefer": map[string]any{"action": action},
-			"runnerId": "runner-" + action, "agentRef": "agent:" + action, "leaseMs": float64(300000),
+			"runnerId": "runner-" + action, "agentRef": "agent:" + action, "leaseMs": float64(300000), "priorRun": nil,
 		}),
 	)
+	if errObj, ok := frames[1]["error"].(map[string]any); ok {
+		data, _ := errObj["data"].(map[string]any)
+		predecessor, _ := data["predecessor"].(map[string]any)
+		if priorRun, _ := predecessor["runId"].(string); priorRun != "" {
+			frames = p3Run(t, dbPath, mkRPC("claim-"+action+"-successor", "wrkf.action.claim", map[string]any{
+				"task": taskID, "prefer": map[string]any{"action": action},
+				"runnerId": "runner-" + action, "agentRef": "agent:" + action, "leaseMs": float64(300000), "priorRun": priorRun,
+			}))
+		}
+	}
 	binding := actClaimBinding(t, p2ResultOrFail(t, frames[1], "claim "+action), "claim "+action)
 	run, _ := binding["run"].(map[string]any)
 	auth, _ := binding["authority"].(map[string]any)

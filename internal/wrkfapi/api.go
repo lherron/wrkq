@@ -709,6 +709,9 @@ func normalizeError(err error) error {
 		case CodeIdempotencyMismatch:
 			return NewIdempotencyMismatchError("")
 		case CodeLeaseConflict:
+			if detail, ok := workflow.AsErrorDetail(err); ok {
+				return NewDetailError(detail, true)
+			}
 			if strings.Contains(err.Error(), "action lease conflict") {
 				return newError(CodeLeaseConflict, err.Error(), true, nil, err)
 			}

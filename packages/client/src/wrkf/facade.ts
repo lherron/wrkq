@@ -165,6 +165,7 @@ export interface WrkfRunFacade {
 
 export interface WrkfActionFacade {
   next(params: WrkfActionNextParams): Promise<WrkfActionNextResult>;
+  /** Claim with an explicit predecessor CAS acknowledgment (`null` for the first claim). */
   claim(params: WrkfActionClaimParams): Promise<WrkfActionClaimResult>;
   settle(params: WrkfActionSettleParams): Promise<WrkfActionSettleResult>;
   start(params: WrkfActionStartParams): Promise<WrkfActionRun>;

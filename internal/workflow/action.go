@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // action.go — low-ceremony wrkf.action.* surface.
@@ -126,16 +128,33 @@ type HeartbeatActionParams struct {
 }
 
 type ClaimActionParams struct {
-	Task           string             `json:"task,omitempty"`
-	InstanceID     string             `json:"instanceId,omitempty"`
-	Prefer         ActionClaimPrefer  `json:"prefer,omitempty"`
-	RunnerID       string             `json:"runnerId"`
-	AgentRef       string             `json:"agentRef"`
-	ScopeRef       string             `json:"scopeRef,omitempty"`
-	Capabilities   []RunnerCapability `json:"capabilities,omitempty"`
-	LeaseMs        int64              `json:"leaseMs"`
-	WorkspaceRoot  string             `json:"workspaceRoot,omitempty"`
-	IdempotencyKey string             `json:"idempotencyKey,omitempty"`
+	Task             string             `json:"task,omitempty"`
+	InstanceID       string             `json:"instanceId,omitempty"`
+	Prefer           ActionClaimPrefer  `json:"prefer,omitempty"`
+	RunnerID         string             `json:"runnerId"`
+	AgentRef         string             `json:"agentRef"`
+	ScopeRef         string             `json:"scopeRef,omitempty"`
+	Capabilities     []RunnerCapability `json:"capabilities,omitempty"`
+	LeaseMs          int64              `json:"leaseMs"`
+	WorkspaceRoot    string             `json:"workspaceRoot,omitempty"`
+	IdempotencyKey   string             `json:"idempotencyKey,omitempty"`
+	PriorRun         *string            `json:"priorRun"`
+	PriorRunProvided bool               `json:"-"`
+}
+
+func (p *ClaimActionParams) UnmarshalJSON(data []byte) error {
+	type plain ClaimActionParams
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*p = ClaimActionParams(decoded)
+	_, p.PriorRunProvided = fields["priorRun"]
+	return nil
 }
 
 type ActionClaimPrefer struct {
@@ -156,6 +175,28 @@ type RunnerCapability struct {
 
 type ClaimActionResult struct {
 	Binding *FencedRunBinding `json:"binding,omitempty"`
+}
+
+type ActionClaimEvidenceRecord struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	Ref        string `json:"ref"`
+	Summary    string `json:"summary,omitempty"`
+	ProducedAt string `json:"producedAt"`
+}
+
+type ActionClaimPredecessor struct {
+	RunID             string                      `json:"runId"`
+	Owner             string                      `json:"owner,omitempty"`
+	ClaimedAt         string                      `json:"claimedAt"`
+	HeartbeatAt       string                      `json:"heartbeatAt,omitempty"`
+	ExpiresAt         string                      `json:"expiresAt,omitempty"`
+	SettleStatus      string                      `json:"settleStatus"`
+	TerminalResult    string                      `json:"terminalResult,omitempty"`
+	SideEffectClasses []string                    `json:"sideEffectClasses"`
+	ExternalRunRef    string                      `json:"externalRunRef,omitempty"`
+	WorkspaceRef      string                      `json:"workspaceRef,omitempty"`
+	EvidenceWritten   []ActionClaimEvidenceRecord `json:"evidenceWritten"`
 }
 
 type SettleActionParams struct {
@@ -204,6 +245,7 @@ type WorkflowRunAttempt struct {
 	StartedAt         string               `json:"startedAt"`
 	CompletedAt       string               `json:"completedAt,omitempty"`
 	TerminalSummary   string               `json:"terminalSummary,omitempty"`
+	PredecessorRunID  string               `json:"predecessorRunId,omitempty"`
 }
 
 type ActionTaskBinding struct {
@@ -216,6 +258,8 @@ type ActionRunAuthority struct {
 	RunnerID        string `json:"runnerId"`
 	OwnerToken      string `json:"ownerToken"`
 	OwnerGeneration int64  `json:"ownerGeneration"`
+	ClaimedAt       string `json:"claimedAt"`
+	HeartbeatAt     string `json:"heartbeatAt,omitempty"`
 	LeaseExpiresAt  string `json:"leaseExpiresAt"`
 }
 
@@ -347,6 +391,11 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 	if p.LeaseMs <= 0 {
 		return nil, validationError("leaseMs", "leaseMs must be greater than zero", "positive milliseconds", nil, "supply leaseMs")
 	}
+	if !p.PriorRunProvided {
+		// Existing predecessors are reported below with their full review record.
+		// A first-ever claim must still state the null CAS value explicitly.
+		p.PriorRun = nil
+	}
 	var binding *FencedRunBinding
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 		task := strings.TrimSpace(p.Task)
@@ -385,74 +434,87 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 		if err != nil {
 			return err
 		}
-		run, err := activeRunForSemanticKey(tx, candidate.InstanceID, candidate.SemanticActionKey)
+		predecessor, err := latestRunForSemanticKey(tx, candidate.InstanceID, candidate.SemanticActionKey)
 		if err != nil {
 			return err
 		}
-		if run != nil {
-			if err := validateClaimReplay(run, candidate, p.RunnerID, now); err != nil {
-				return err
-			}
-			ownerGeneration := run.OwnerGeneration + 1
-			_, err := tx.Exec(`
-				UPDATE workflow_runs
-				SET lease_owner = ?, lease_token = ?, lease_expires_at = ?, heartbeat_at = ?,
-				    owner_generation = ?, agent_ref = ?, scope_ref = COALESCE(NULLIF(?, ''), scope_ref)
-				WHERE id = ?
-			`, p.RunnerID, token, expiresAt, nowText, ownerGeneration, p.AgentRef, p.ScopeRef, run.ID)
+		if predecessor != nil {
+			record, err := actionClaimPredecessorTx(tx, predecessor)
 			if err != nil {
 				return err
 			}
-			run.LeaseOwner = p.RunnerID
-			run.LeaseToken = token
-			run.LeaseExpiresAt = expiresAt
-			run.HeartbeatAt = nowText
-			run.OwnerGeneration = ownerGeneration
-			run.AgentRef = p.AgentRef
-			if strings.TrimSpace(p.ScopeRef) != "" {
-				run.ScopeRef = p.ScopeRef
+			if p.PriorRun == nil || strings.TrimSpace(*p.PriorRun) != predecessor.ID {
+				return claimRefusedError(record)
 			}
 		} else {
-			id, err := nextSeqID(tx, "workflow_run_seq", "run")
-			if err != nil {
+			if !p.PriorRunProvided {
+				return validationError("priorRun", "priorRun is required", "run id or null", nil, "send priorRun null for a first-ever claim")
+			}
+			if p.PriorRun != nil {
+				return validationError("priorRun", "priorRun does not identify an existing predecessor", "null", nil, "send priorRun null for a first-ever claim")
+			}
+		}
+		id, err := nextSeqID(tx, "workflow_run_seq", "run")
+		if err != nil {
+			return err
+		}
+		sideEffectJSON, err := json.Marshal(candidate.SideEffectClasses)
+		if err != nil {
+			return err
+		}
+		predecessorID := ""
+		if predecessor != nil {
+			predecessorID = predecessor.ID
+		}
+		sourceRunID, sourceEvidenceID, sourceIdentity := "", "", ""
+		if candidate.Source != nil {
+			sourceRunID = candidate.Source.SourceRunID
+			sourceEvidenceID = candidate.Source.SourceEvidenceID
+			sourceIdentity = candidate.Source.SourceIdentity
+		}
+		if predecessor != nil {
+			if _, err := tx.Exec(`UPDATE workflow_runs SET status = 'superseded', terminal_result = ?, completed_at = ?, lease_token = NULL WHERE id = ?`, "superseded by "+id, nowText, predecessor.ID); err != nil {
 				return err
 			}
-			sourceRunID, sourceEvidenceID, sourceIdentity := "", "", ""
-			if candidate.Source != nil {
-				sourceRunID = candidate.Source.SourceRunID
-				sourceEvidenceID = candidate.Source.SourceEvidenceID
-				sourceIdentity = candidate.Source.SourceIdentity
-			}
-			_, err = tx.Exec(`
+		}
+		_, err = tx.Exec(`
 				INSERT INTO workflow_runs (
 					id, instance_id, role, actor, principal_ref, status, started_at,
 					idempotency_key, action, lease_owner, lease_token, lease_expires_at, heartbeat_at,
 					semantic_action_key, attempt, agent_ref, scope_ref, handler_contract,
 					workspace_ref, source_run_id, source_evidence_id, source_identity, owner_generation
+					, predecessor_run_id, side_effect_classes_json
 				)
-				VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+				VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
 			`, id, candidate.InstanceID, candidate.Role, p.AgentRef, p.AgentRef, nowText, nullIfEmpty(p.IdempotencyKey),
-				candidate.Action, p.RunnerID, token, expiresAt, nowText, candidate.SemanticActionKey, attempt,
-				p.AgentRef, nullIfEmpty(p.ScopeRef), nullIfEmpty(candidate.HandlerContract), nullIfEmpty(firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef)),
-				nullIfEmpty(sourceRunID), nullIfEmpty(sourceEvidenceID), nullIfEmpty(sourceIdentity))
-			if err != nil {
-				if isRunUniqueConflict(err) {
-					return actionLeaseConflictError(candidate.SemanticActionKey)
-				}
-				return err
+			candidate.Action, p.RunnerID, token, expiresAt, nowText, candidate.SemanticActionKey, attempt,
+			p.AgentRef, nullIfEmpty(p.ScopeRef), nullIfEmpty(candidate.HandlerContract), nullIfEmpty(firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef)),
+			nullIfEmpty(sourceRunID), nullIfEmpty(sourceEvidenceID), nullIfEmpty(sourceIdentity), nullIfEmpty(predecessorID), string(sideEffectJSON))
+		if err != nil {
+			if isRunUniqueConflict(err) {
+				return actionLeaseConflictError(candidate.SemanticActionKey)
 			}
-			run = &claimedRun{
-				ID: id, InstanceID: candidate.InstanceID, SemanticActionKey: candidate.SemanticActionKey,
-				Action: candidate.Action, Role: candidate.Role, Attempt: attempt, Status: "active",
-				AgentRef: p.AgentRef, ScopeRef: p.ScopeRef, HandlerContract: candidate.HandlerContract,
-				WorkspaceRef: firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef), SourceRunID: sourceRunID, SourceEvidenceID: sourceEvidenceID,
-				SourceIdentity: sourceIdentity, StartedAt: nowText, LeaseOwner: p.RunnerID, LeaseToken: token,
-				LeaseExpiresAt: expiresAt, HeartbeatAt: nowText, OwnerGeneration: 1,
-			}
+			return err
+		}
+		run := &claimedRun{
+			ID: id, InstanceID: candidate.InstanceID, SemanticActionKey: candidate.SemanticActionKey,
+			Action: candidate.Action, Role: candidate.Role, Attempt: attempt, Status: "active",
+			AgentRef: p.AgentRef, ScopeRef: p.ScopeRef, HandlerContract: candidate.HandlerContract,
+			WorkspaceRef: firstNonEmptyAction(workspaceRoot, candidate.WorkspaceRef), SourceRunID: sourceRunID, SourceEvidenceID: sourceEvidenceID,
+			SourceIdentity: sourceIdentity, StartedAt: nowText, LeaseOwner: p.RunnerID, LeaseToken: token,
+			LeaseExpiresAt: expiresAt, HeartbeatAt: nowText, OwnerGeneration: 1, SideEffectClassesJSON: string(sideEffectJSON), PredecessorRunID: predecessorID,
 		}
 		taskDoc, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {
 			return err
+		}
+		if predecessor != nil {
+			if _, err := tx.Exec(`UPDATE workflow_runs SET superseded_by_run_id = ? WHERE id = ?`, id, predecessor.ID); err != nil {
+				return err
+			}
+			if err := appendActionSuccessionLedgerTx(tx, inst, predecessor, run, taskDoc); err != nil {
+				return err
+			}
 		}
 		binding = claimedRunBinding(run, inst, taskDoc)
 		return nil
@@ -479,6 +541,9 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 			return err
 		}
 		if isTerminalRunStatus(run.Status) {
+			if run.Status == "superseded" && run.SupersededByRunID != "" {
+				return supersededSettleError(run.ID, run.SupersededByRunID)
+			}
 			replayed, err := replaySettledActionTx(tx, run, p)
 			if err != nil {
 				return err
@@ -492,7 +557,7 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 			if err := validateSettleDowngradeAuthority(run, p); err != nil {
 				return err
 			}
-		} else if err := validateSettleOwnership(run, p, now); err != nil {
+		} else if err := validateSettleOwnership(run, p); err != nil {
 			return err
 		}
 		inst, err := instanceByIDQuery(tx, run.InstanceID)
@@ -589,7 +654,7 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 		_, err = tx.Exec(`
 			UPDATE workflow_runs
 			SET status = ?, terminal_result = ?, completed_at = ?,
-			    lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+			    lease_token = NULL
 			WHERE id = ? AND status = 'active'
 		`, resultStatus, summary, completedAt, run.ID)
 		if err != nil {
@@ -598,10 +663,7 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 		run.Status = resultStatus
 		run.TerminalSummary = summary
 		run.CompletedAt = completedAt
-		run.LeaseOwner = ""
 		run.LeaseToken = ""
-		run.LeaseExpiresAt = ""
-		run.HeartbeatAt = ""
 		out = &SettleActionResult{
 			Run:         workflowRunAttemptFromClaimed(run),
 			Evidence:    evidence,
@@ -627,31 +689,34 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 }
 
 type claimedRun struct {
-	ID                string
-	InstanceID        string
-	SemanticActionKey string
-	Action            string
-	Role              string
-	Attempt           int64
-	Status            string
-	AgentRef          string
-	ScopeRef          string
-	HandlerContract   string
-	HandlerID         string
-	HandlerVersion    string
-	ExternalRunRef    string
-	WorkspaceRef      string
-	SourceRunID       string
-	SourceEvidenceID  string
-	SourceIdentity    string
-	StartedAt         string
-	CompletedAt       string
-	TerminalSummary   string
-	LeaseOwner        string
-	LeaseToken        string
-	LeaseExpiresAt    string
-	HeartbeatAt       string
-	OwnerGeneration   int64
+	ID                    string
+	InstanceID            string
+	SemanticActionKey     string
+	Action                string
+	Role                  string
+	Attempt               int64
+	Status                string
+	AgentRef              string
+	ScopeRef              string
+	HandlerContract       string
+	HandlerID             string
+	HandlerVersion        string
+	ExternalRunRef        string
+	WorkspaceRef          string
+	SourceRunID           string
+	SourceEvidenceID      string
+	SourceIdentity        string
+	StartedAt             string
+	CompletedAt           string
+	TerminalSummary       string
+	LeaseOwner            string
+	LeaseToken            string
+	LeaseExpiresAt        string
+	HeartbeatAt           string
+	OwnerGeneration       int64
+	SupersededByRunID     string
+	SideEffectClassesJSON string
+	PredecessorRunID      string
 }
 
 func selectClaimCandidate(candidates []ActionCandidate, prefer ActionClaimPrefer) (ActionCandidate, bool) {
@@ -716,17 +781,18 @@ func nextAttemptForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (int6
 	return attempt, err
 }
 
-func activeRunForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (*claimedRun, error) {
+func latestRunForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (*claimedRun, error) {
 	row := tx.QueryRow(`
 		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
 		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
 		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
 		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_identity,''),
 		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
-		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0)
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0),
+		       COALESCE(superseded_by_run_id,''), COALESCE(side_effect_classes_json,'[]'), COALESCE(predecessor_run_id,'')
 		FROM workflow_runs
-		WHERE instance_id = ? AND semantic_action_key = ? AND status = 'active'
-		ORDER BY started_at, id
+		WHERE instance_id = ? AND semantic_action_key = ?
+		ORDER BY attempt DESC, started_at DESC, id DESC
 		LIMIT 1
 	`, instanceID, semanticKey)
 	run, err := scanClaimedRun(row)
@@ -746,7 +812,8 @@ func claimedRunByIDTx(tx *sql.Tx, id string) (*claimedRun, error) {
 		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
 		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_identity,''),
 		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
-		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0)
+		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0),
+		       COALESCE(superseded_by_run_id,''), COALESCE(side_effect_classes_json,'[]'), COALESCE(predecessor_run_id,'')
 		FROM workflow_runs
 		WHERE id = ?
 	`, id)
@@ -767,7 +834,7 @@ func scanClaimedRun(scanner runRowScanner) (*claimedRun, error) {
 		&r.Status, &r.AgentRef, &r.ScopeRef, &r.HandlerContract, &r.HandlerID, &r.HandlerVersion,
 		&r.ExternalRunRef, &r.WorkspaceRef, &r.SourceRunID, &r.SourceEvidenceID, &r.SourceIdentity,
 		&r.StartedAt, &r.CompletedAt, &r.TerminalSummary, &r.LeaseOwner, &r.LeaseToken,
-		&r.LeaseExpiresAt, &r.HeartbeatAt, &r.OwnerGeneration,
+		&r.LeaseExpiresAt, &r.HeartbeatAt, &r.OwnerGeneration, &r.SupersededByRunID, &r.SideEffectClassesJSON, &r.PredecessorRunID,
 	)
 	if err != nil {
 		return nil, err
@@ -775,7 +842,53 @@ func scanClaimedRun(scanner runRowScanner) (*claimedRun, error) {
 	return &r, nil
 }
 
-func validateSettleOwnership(run *claimedRun, p SettleActionParams, now time.Time) error {
+func actionClaimPredecessorTx(tx *sql.Tx, run *claimedRun) (*ActionClaimPredecessor, error) {
+	record := &ActionClaimPredecessor{
+		RunID: run.ID, Owner: run.LeaseOwner, ClaimedAt: run.StartedAt,
+		HeartbeatAt: run.HeartbeatAt, ExpiresAt: run.LeaseExpiresAt,
+		SettleStatus: run.Status, TerminalResult: run.TerminalSummary,
+		ExternalRunRef: run.ExternalRunRef, WorkspaceRef: run.WorkspaceRef,
+		SideEffectClasses: []string{}, EvidenceWritten: []ActionClaimEvidenceRecord{},
+	}
+	if strings.TrimSpace(run.SideEffectClassesJSON) != "" {
+		if err := json.Unmarshal([]byte(run.SideEffectClassesJSON), &record.SideEffectClasses); err != nil {
+			return nil, fmt.Errorf("decode predecessor side-effect classes: %w", err)
+		}
+	}
+	rows, err := tx.Query(`SELECT id, kind, ref, COALESCE(summary,''), produced_at FROM workflow_evidence WHERE run_id = ? ORDER BY produced_at, id`, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var evidence ActionClaimEvidenceRecord
+		if err := rows.Scan(&evidence.ID, &evidence.Kind, &evidence.Ref, &evidence.Summary, &evidence.ProducedAt); err != nil {
+			return nil, err
+		}
+		record.EvidenceWritten = append(record.EvidenceWritten, evidence)
+	}
+	return record, rows.Err()
+}
+
+func appendActionSuccessionLedgerTx(tx *sql.Tx, inst *Instance, predecessor, successor *claimedRun, task *taskDoc) error {
+	var seq int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM ledger_entry WHERE instance_id = ?`, inst.ID).Scan(&seq); err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]string{
+		"predecessorRunId": predecessor.ID,
+		"successorRunId":   successor.ID,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO ledger_entry (uuid, instance_id, task_id, seq, ts, kind, about_principal_ref, written_by, body_json)
+		VALUES (?, ?, ?, ?, ?, 'workflow.action.succession', ?, ?, ?)`,
+		uuid.NewString(), inst.ID, task.ID, seq, successor.StartedAt, successor.AgentRef, successor.AgentRef, string(body))
+	return err
+}
+
+func validateSettleOwnership(run *claimedRun, p SettleActionParams) error {
 	if run.Status != "active" {
 		return actionLeaseConflictError(run.ID)
 	}
@@ -783,9 +896,6 @@ func validateSettleOwnership(run *claimedRun, p SettleActionParams, now time.Tim
 		return actionLeaseConflictError(run.ID)
 	}
 	if p.OwnerGeneration <= 0 || p.OwnerGeneration != run.OwnerGeneration {
-		return actionLeaseConflictError(run.ID)
-	}
-	if !leaseStillCurrent(run.LeaseExpiresAt, now) {
 		return actionLeaseConflictError(run.ID)
 	}
 	return nil
@@ -838,6 +948,7 @@ func workflowRunAttemptFromClaimed(run *claimedRun) WorkflowRunAttempt {
 		StartedAt:         run.StartedAt,
 		CompletedAt:       run.CompletedAt,
 		TerminalSummary:   run.TerminalSummary,
+		PredecessorRunID:  run.PredecessorRunID,
 	}
 }
 
@@ -877,31 +988,6 @@ func replaySettledActionTx(tx *sql.Tx, run *claimedRun, p SettleActionParams) (*
 	}, nil
 }
 
-func validateClaimReplay(run *claimedRun, candidate ActionCandidate, runnerID string, now time.Time) error {
-	if run.SemanticActionKey != candidate.SemanticActionKey || run.Action != candidate.Action || run.Role != candidate.Role {
-		return actionLeaseConflictError(candidate.SemanticActionKey)
-	}
-	if run.HandlerContract != "" && candidate.HandlerContract != "" && run.HandlerContract != candidate.HandlerContract {
-		return actionLeaseConflictError(candidate.SemanticActionKey)
-	}
-	if !claimSourceCompatible(run, candidate.Source) {
-		return actionLeaseConflictError(candidate.SemanticActionKey)
-	}
-	if run.LeaseOwner != "" && run.LeaseOwner != runnerID && leaseStillCurrent(run.LeaseExpiresAt, now) {
-		return actionLeaseConflictError(run.ID)
-	}
-	return nil
-}
-
-func claimSourceCompatible(run *claimedRun, source *ActionSourceBinding) bool {
-	if source == nil {
-		return run.SourceRunID == "" && run.SourceEvidenceID == "" && run.SourceIdentity == ""
-	}
-	return run.SourceRunID == source.SourceRunID &&
-		run.SourceEvidenceID == source.SourceEvidenceID &&
-		run.SourceIdentity == source.SourceIdentity
-}
-
 func claimedRunBinding(run *claimedRun, inst *Instance, task *taskDoc) *FencedRunBinding {
 	return &FencedRunBinding{
 		Run: workflowRunAttemptFromClaimed(run),
@@ -916,6 +1002,8 @@ func claimedRunBinding(run *claimedRun, inst *Instance, task *taskDoc) *FencedRu
 			OwnerToken:      run.LeaseToken,
 			OwnerGeneration: run.OwnerGeneration,
 			LeaseExpiresAt:  run.LeaseExpiresAt,
+			ClaimedAt:       run.StartedAt,
+			HeartbeatAt:     run.HeartbeatAt,
 		},
 	}
 }
@@ -1832,7 +1920,7 @@ func (s *Service) validateActionSettlement(run *Run, token, op string) error {
 	if run.LeaseToken == "" {
 		return nil
 	}
-	if strings.TrimSpace(token) == "" || strings.TrimSpace(token) != run.LeaseToken || !leaseStillCurrent(run.LeaseExpiresAt, s.now().UTC()) {
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(token) != run.LeaseToken {
 		return actionLeaseConflictError(run.ID)
 	}
 	return nil

@@ -636,10 +636,12 @@ describe("wrkf namespace", () => {
       runnerId: "runner-1",
       agentRef: "agent:larry",
       leaseMs: 60_000,
+      priorRun: null,
     });
 
     expect(next.candidates[0]?.source?.sourceIdentity).toBe(sourceIdentity);
     expect(claim.binding?.run.source?.sourceIdentity).toBe(sourceIdentity);
+    expect(transport.capturedRequests[1]?.params).toMatchObject({ priorRun: null });
     expect(transport.capturedRequests.map((request) => request.method)).toEqual([
       "wrkf.action.next",
       "wrkf.action.claim",
@@ -814,6 +816,40 @@ describe("wrkf namespace", () => {
 });
 
 describe("error mapping", () => {
+  test("action claim refusal exposes the typed predecessor record", async () => {
+    const transport = new FakeTransport().onError("wrkf.action.claim", {
+      code: -32014,
+      message: "claim refused: priorRun must name predecessor run_000001",
+      data: {
+        code: "WRKF_LEASE_CONFLICT",
+        retryable: true,
+        predecessor: {
+          runId: "run_000001",
+          owner: "runner-a",
+          claimedAt: "2026-07-12T12:00:00Z",
+          heartbeatAt: "2026-07-12T12:01:00Z",
+          expiresAt: "2026-07-12T12:02:00Z",
+          settleStatus: "active",
+          sideEffectClasses: ["git.commit"],
+          evidenceWritten: [],
+        },
+      },
+    });
+    const client = await clientWith(transport);
+    let caught: unknown;
+    try {
+      await client.wrkf.action.claim({
+        task: "T-00001", runnerId: "runner-b", agentRef: "agent:larry",
+        leaseMs: 60_000, priorRun: null,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    const error = caught as WorkRpcError;
+    expect(error.data?.predecessor?.runId).toBe("run_000001");
+    expect(error.data?.predecessor?.sideEffectClasses).toEqual(["git.commit"]);
+  });
+
   test("domain error frame surfaces as WorkRpcError with method + requestId", async () => {
     const transport = new FakeTransport().onError("wrkf.transition.apply", {
       code: -32009,

@@ -193,8 +193,8 @@ func TestSettleActionCompletedIdempotentAndProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShowRun: %v", err)
 	}
-	if shown.LeaseToken != "" || shown.LeaseOwner != "" {
-		t.Fatalf("settlement did not clear ownership: %+v", shown)
+	if shown.LeaseToken != "" || shown.LeaseOwner != claim.Binding.Authority.RunnerID || shown.LeaseExpiresAt == "" || shown.HeartbeatAt == "" {
+		t.Fatalf("settlement did not revoke token while preserving claim audit fields: %+v", shown)
 	}
 
 	beforeEvidence := countTable(t, svc, "workflow_evidence")
@@ -251,63 +251,56 @@ func TestSettleActionRejectsWrongOwnershipWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestSettleActionExpiredSuccessLeavesDowngradeLane(t *testing.T) {
+func TestLateSettleWithoutSuccessorIsAccepted(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	attachSimpleTaskV2(t, svc, taskUUID)
 	triage := claimActionForTest(t, svc, taskUUID, "triage")
 	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
 
 	impl, err := svc.ClaimAction(ClaimActionParams{
-		Task:     taskUUID,
-		RunnerID: "runner-impl",
-		AgentRef: "agent:impl",
-		Prefer:   ActionClaimPrefer{Action: "implement"},
-		LeaseMs:  300000,
+		Task:             taskUUID,
+		RunnerID:         "runner-impl",
+		AgentRef:         "agent:impl",
+		Prefer:           ActionClaimPrefer{Action: "implement"},
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
 	if err != nil {
 		t.Fatalf("ClaimAction implement: %v", err)
 	}
 	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
+	var afterExpiry string
+	if err := svc.db.QueryRow(`SELECT json_object('status',status,'token',lease_token,'owner',lease_owner,'expires',lease_expires_at,'heartbeat',heartbeat_at,'completed',completed_at,'terminal',terminal_result) FROM workflow_runs WHERE id = ?`, impl.Binding.Run.ID).Scan(&afterExpiry); err != nil {
+		t.Fatalf("snapshot after expiry: %v", err)
+	}
+	if _, err := svc.ShowAction(impl.Binding.Run.ID); err != nil {
+		t.Fatalf("read expired action: %v", err)
+	}
+	var beforeSettle string
+	if err := svc.db.QueryRow(`SELECT json_object('status',status,'token',lease_token,'owner',lease_owner,'expires',lease_expires_at,'heartbeat',heartbeat_at,'completed',completed_at,'terminal',terminal_result) FROM workflow_runs WHERE id = ?`, impl.Binding.Run.ID).Scan(&beforeSettle); err != nil {
+		t.Fatalf("snapshot before late settle: %v", err)
+	}
+	if beforeSettle != afterExpiry {
+		t.Fatalf("expiry/read mutated action run: after expiry %s before settle %s", afterExpiry, beforeSettle)
+	}
 
 	beforeEvents := countTable(t, svc, "workflow_events")
-	_, err = svc.SettleAction(SettleActionParams{
+	out, err := svc.SettleAction(SettleActionParams{
 		ActionRunID:     impl.Binding.Run.ID,
 		OwnerToken:      impl.Binding.Authority.OwnerToken,
 		OwnerGeneration: impl.Binding.Authority.OwnerGeneration,
 		Result:          "completed",
 		Evidence:        &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"a75cfb1","change.id":"change-v1:a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
 	})
-	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
-		t.Fatalf("expired success settle error = %v, want lease conflict", err)
-	}
-
-	out, err := svc.SettleAction(SettleActionParams{
-		ActionRunID:     impl.Binding.Run.ID,
-		OwnerToken:      impl.Binding.Authority.OwnerToken,
-		OwnerGeneration: impl.Binding.Authority.OwnerGeneration,
-		Result:          "operator_required",
-		Evidence: &ActionEvidenceInput{
-			Summary: "completed settle was refused after lease expiry; commit a75cfb1 requires resumed verification",
-			Facts:   `{"reason":"completed settle refused after lease expiry","commit.sha":"a75cfb1"}`,
-		},
-	})
 	if err != nil {
-		t.Fatalf("downgrade settle after refused success: %v", err)
+		t.Fatalf("late settle without successor: %v", err)
 	}
-	if out.Run.Status != "operator_required" || out.Evidence == nil || out.Evidence.Kind != "failure_result" {
-		t.Fatalf("downgrade output = %+v evidence=%+v, want operator_required failure_result", out.Run, out.Evidence)
+	if out.Run.Status != "completed" || out.Evidence == nil {
+		t.Fatalf("late settle output = %+v evidence=%+v, want completed with evidence", out.Run, out.Evidence)
 	}
-	if out.Transition != nil || len(out.Effects) != 0 || len(out.Obligations) != 0 {
-		t.Fatalf("downgrade settlement applied transition side effects: %+v", out)
+	if got := countTable(t, svc, "workflow_events"); got <= beforeEvents {
+		t.Fatalf("late settle transition events = %d, want more than %d", got, beforeEvents)
 	}
-	if got := countTable(t, svc, "workflow_events"); got != beforeEvents {
-		t.Fatalf("downgrade emitted transition events = %d, want %d", got, beforeEvents)
-	}
-	next, err := svc.ActionNext(ActionNextParams{Task: taskUUID})
-	if err != nil {
-		t.Fatalf("ActionNext after downgrade: %v", err)
-	}
-	assertActionCandidates(t, next, "implement")
 }
 
 func TestSettleActionRecoveredInstanceRunsNextAction(t *testing.T) {
@@ -740,12 +733,21 @@ func mustJSON(t *testing.T, v interface{}) string {
 func claimActionForTest(t *testing.T, svc *Service, taskUUID, action string) *ClaimActionResult {
 	t.Helper()
 	out, err := svc.ClaimAction(ClaimActionParams{
-		Task:     taskUUID,
-		RunnerID: "runner-" + action,
-		AgentRef: "agent:" + action,
-		Prefer:   ActionClaimPrefer{Action: action},
-		LeaseMs:  300000,
+		Task:             taskUUID,
+		RunnerID:         "runner-" + action,
+		AgentRef:         "agent:" + action,
+		Prefer:           ActionClaimPrefer{Action: action},
+		LeaseMs:          300000,
+		PriorRunProvided: true,
 	})
+	if detail, ok := AsErrorDetail(err); ok && detail.Predecessor != nil {
+		priorRun := detail.Predecessor.RunID
+		out, err = svc.ClaimAction(ClaimActionParams{
+			Task: taskUUID, RunnerID: "runner-" + action, AgentRef: "agent:" + action,
+			Prefer: ActionClaimPrefer{Action: action}, LeaseMs: 300000,
+			PriorRun: &priorRun, PriorRunProvided: true,
+		})
+	}
 	if err != nil {
 		t.Fatalf("ClaimAction %s: %v", action, err)
 	}

@@ -40,6 +40,7 @@ type actionClaimOptions struct {
 	scopeRef          string
 	leaseMs           int64
 	workspaceRoot     string
+	priorRun          string
 }
 
 type actionBindOptions struct {
@@ -227,6 +228,10 @@ func actionClaimCmd() *cobra.Command {
 			if claimLeaseMs <= 0 {
 				claimLeaseMs = 300000
 			}
+			var priorRun *string
+			if value := strings.TrimSpace(opts.priorRun); value != "" && value != "null" {
+				priorRun = &value
+			}
 			result, err := a.service.ClaimAction(workflow.ClaimActionParams{
 				Task:       task,
 				InstanceID: opts.instanceID,
@@ -234,11 +239,13 @@ func actionClaimCmd() *cobra.Command {
 					SemanticActionKey: opts.semanticActionKey,
 					Action:            opts.actionFilter,
 				},
-				RunnerID:      opts.runnerID,
-				AgentRef:      firstNonEmpty(opts.actor, a.actor),
-				ScopeRef:      opts.scopeRef,
-				LeaseMs:       claimLeaseMs,
-				WorkspaceRoot: opts.workspaceRoot,
+				RunnerID:         opts.runnerID,
+				AgentRef:         firstNonEmpty(opts.actor, a.actor),
+				ScopeRef:         opts.scopeRef,
+				LeaseMs:          claimLeaseMs,
+				WorkspaceRoot:    opts.workspaceRoot,
+				PriorRun:         priorRun,
+				PriorRunProvided: true,
 			})
 			if err != nil {
 				return err
@@ -254,6 +261,7 @@ func actionClaimCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.scopeRef, "scope-ref", "", "Runtime scope ref")
 	cmd.Flags().Int64Var(&opts.leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
 	cmd.Flags().StringVar(&opts.workspaceRoot, "workspace-root", "", "Opaque physical worktree ref recorded on the run record (never interpreted by the engine)")
+	cmd.Flags().StringVar(&opts.priorRun, "prior-run", "null", "Acknowledged predecessor run id, or null for a first-ever claim")
 	return cmd
 }
 

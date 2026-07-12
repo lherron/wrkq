@@ -70,9 +70,9 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 ## wrkq.wrkf-action.lease-recovery
 
 - **scope:** wrkf.action lease expiry
-- **predicate:** Coordinator-owned wrkf.action runs may opt into durable leases. A leased active action run carries one current lease token, non-secret owner/expiry/heartbeat audit fields, and rejects heartbeat, complete, fail, or settle attempts unless the caller presents current authority. Lease TTL expiry only makes a claim contestable: no timer, CLI command, RPC method, or service path terminalizes the run, clears its claim fields, stamps operator_required, or synthesizes failure evidence at expiry time. wrkf also owns workspace leases keyed by the canonical resolved physical worktree root. Expiry alone does not release or mutate a workspace lease record.
-- **source:** `internal/db/migrations/000034_workflow_action_leases.sql`, `internal/db/migrations/000038_workflow_workspace_leases.sql`, `internal/workflow/action.go`, `internal/workflow/workspace_lease_test.go`, `internal/cli/daemon.go`, `internal/wrkfapi/action.go`, `internal/workrpc/registry.go`, `internal/workrpc/wrkfworkspace_acceptance_test.go`
-- **required_tests:** `TestExpiredWorkspaceBoundActionRemainsActive`, `TestWrkfActionWorkspaceExpiryDoesNotTerminalizeRPC`
+- **predicate:** Coordinator-owned wrkf.action runs may opt into durable leases. A leased active action run carries one current lease token and non-secret owner/expiry/heartbeat audit fields. Lease TTL expiry only makes a claim contestable: no timer, CLI command, RPC method, or service path mutates the run at expiry. Settlement with current token authority remains valid after expiry. A successor must acknowledge the latest predecessor by run id; that claim atomically terminalizes the predecessor as superseded, revokes its token, links the successor, and appends a succession ledger event. Only supersession, never wall-clock expiry, refuses a late settle.
+- **source:** `internal/db/migrations/000034_workflow_action_leases.sql`, `internal/db/migrations/000043_workflow_action_succession.sql`, `internal/workflow/action.go`, `internal/workflow/action_claim_test.go`, `internal/workflow/action_settle_test.go`, `internal/cli/daemon.go`, `internal/wrkfapi/action.go`, `internal/workrpc/registry.go`, `internal/workrpc/wrkfaction_acceptance_test.go`
+- **required_tests:** `TestClaimActionAcknowledgesNamedPredecessor`, `TestLateSettleWithoutSuccessorIsAccepted`
 - **last_verified:** 2026-07-12
 
 ## wrkq.wrkf-rpc.attachment-byte-transfer

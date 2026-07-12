@@ -703,6 +703,8 @@ export interface WrkfActionClaimParams {
   leaseMs: number;
   workspaceRoot?: string;
   idempotencyKey?: string;
+  /** Latest acknowledged predecessor, or null for a first-ever claim. */
+  priorRun: string | null;
 }
 
 export interface WrkfWorkflowRunAttempt {
@@ -724,6 +726,7 @@ export interface WrkfWorkflowRunAttempt {
   startedAt: string;
   completedAt?: string;
   terminalSummary?: string;
+  predecessorRunId?: string;
   [k: string]: unknown;
 }
 
@@ -738,6 +741,30 @@ export interface WrkfActionRunAuthority {
   ownerToken: string;
   ownerGeneration: number;
   leaseExpiresAt: string;
+  claimedAt: string;
+  heartbeatAt?: string;
+}
+
+export interface WrkfActionClaimEvidenceRecord {
+  id: string;
+  kind: string;
+  ref: string;
+  summary?: string;
+  producedAt: string;
+}
+
+export interface WrkfActionClaimPredecessor {
+  runId: string;
+  owner?: string;
+  claimedAt: string;
+  heartbeatAt?: string;
+  expiresAt?: string;
+  settleStatus: string;
+  terminalResult?: string;
+  sideEffectClasses: string[];
+  externalRunRef?: string;
+  workspaceRef?: string;
+  evidenceWritten: WrkfActionClaimEvidenceRecord[];
 }
 
 export interface WrkfFencedRunBinding {
