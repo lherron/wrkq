@@ -6,8 +6,8 @@ package workflow
 // Contract (WRKF_SIMPLIFICATION.md §4): resolveSuspension(suspensionId,
 // disposition) runs in one transaction —
 //   1. Load the instance whose ACTIVE suspension carries the presented id. The
-//      matching suspension id is the ONLY gate (Lance ruling, 2026-07-12): no
-//      role checks, no evidence validation, no per-reason policy.
+//      matching suspension id is the ONLY gate: no role checks, no evidence
+//      validation, no per-reason policy.
 //   2. Apply the disposition's template-declared effects.
 //   3. Clear the suspension, bump the revision, emit workflow.suspension_resolved.
 //

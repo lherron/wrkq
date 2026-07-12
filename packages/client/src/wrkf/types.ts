@@ -534,10 +534,9 @@ export interface WrkfTransitionResult {
 export type WrkfSuspensionDisposition = "resume" | "close" | "cancel";
 
 /**
- * `wrkf.suspension.resolve` input. The matching `suspensionId` is the ONLY gate
- * (Lance ruling, 2026-07-12): no role checks, no evidence validation.
- * `explanation` is recorded free text; `expectRevision` is the ordinary CAS
- * precondition (docs/wrkq-wrkf-rpc.md §8.3).
+ * `wrkf.suspension.resolve` input. The matching `suspensionId` is the ONLY gate:
+ * no role checks, no evidence validation. `explanation` is recorded free text;
+ * `expectRevision` is the ordinary CAS precondition (docs/wrkq-wrkf-rpc.md §8.3).
  */
 export interface WrkfSuspensionResolveParams {
   suspensionId: string;
