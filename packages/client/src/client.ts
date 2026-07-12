@@ -243,12 +243,6 @@ class WorkClientImpl implements WorkClient {
       show: (p) => this.call("wrkf.action.show", p),
       list: (p) => this.call("wrkf.action.list", p),
     },
-    workspace: {
-      claim: (p) => this.call("wrkf.workspace.claim", p),
-      heartbeat: (p) => this.call("wrkf.workspace.heartbeat", p),
-      release: (p) => this.call("wrkf.workspace.release", p),
-      show: (p) => this.call("wrkf.workspace.show", p),
-    },
     effect: {
       list: (p) => this.call("wrkf.effect.list", p),
       show: (p) => this.call("wrkf.effect.show", p),

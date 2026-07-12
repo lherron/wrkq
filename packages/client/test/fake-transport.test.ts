@@ -811,46 +811,6 @@ describe("wrkf namespace", () => {
     expect(claim.effects[0]!.id).toBe("eff_1");
   });
 
-  test("workspace facade forwards claim, heartbeat, release, and show", async () => {
-    const lease = {
-      canonicalRoot: "/repo/worktree",
-      leaseOwner: "runner-a",
-      leaseToken: "lease_workspace",
-      ownerGeneration: 1,
-      leaseExpiresAt: "2026-07-05T15:00:00Z",
-    };
-    const transport = new FakeTransport()
-      .onResult("wrkf.workspace.claim", lease)
-      .onResult("wrkf.workspace.heartbeat", lease)
-      .onResult("wrkf.workspace.release", { ...lease, leaseToken: undefined })
-      .onResult("wrkf.workspace.show", { ...lease, leaseToken: undefined });
-    const client = await clientWith(transport);
-
-    await client.wrkf.workspace.claim({
-      workspaceRoot: "/repo/worktree",
-      ownerId: "runner-a",
-      leaseMs: 300000,
-    });
-    await client.wrkf.workspace.heartbeat({
-      workspaceRoot: "/repo/worktree",
-      leaseToken: "lease_workspace",
-      ownerGeneration: 1,
-      leaseMs: 300000,
-    });
-    await client.wrkf.workspace.release({
-      workspaceRoot: "/repo/worktree",
-      leaseToken: "lease_workspace",
-      ownerGeneration: 1,
-    });
-    await client.wrkf.workspace.show({ workspaceRoot: "/repo/worktree" });
-
-    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
-      "wrkf.workspace.claim",
-      "wrkf.workspace.heartbeat",
-      "wrkf.workspace.release",
-      "wrkf.workspace.show",
-    ]);
-  });
 });
 
 describe("error mapping", () => {

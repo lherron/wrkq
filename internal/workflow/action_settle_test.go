@@ -257,30 +257,25 @@ func TestSettleActionExpiredSuccessLeavesDowngradeLane(t *testing.T) {
 	triage := claimActionForTest(t, svc, taskUUID, "triage")
 	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
 
-	root := t.TempDir()
 	impl, err := svc.ClaimAction(ClaimActionParams{
-		Task:          taskUUID,
-		RunnerID:      "runner-impl",
-		AgentRef:      "agent:impl",
-		Prefer:        ActionClaimPrefer{Action: "implement"},
-		LeaseMs:       300000,
-		WorkspaceRoot: root,
+		Task:     taskUUID,
+		RunnerID: "runner-impl",
+		AgentRef: "agent:impl",
+		Prefer:   ActionClaimPrefer{Action: "implement"},
+		LeaseMs:  300000,
 	})
 	if err != nil {
 		t.Fatalf("ClaimAction implement: %v", err)
 	}
 	expireActionRunForTest(t, svc, impl.Binding.Run.ID)
-	expireWorkspaceLeaseForTest(t, svc, root)
 
 	beforeEvents := countTable(t, svc, "workflow_events")
 	_, err = svc.SettleAction(SettleActionParams{
-		ActionRunID:         impl.Binding.Run.ID,
-		OwnerToken:          impl.Binding.Authority.OwnerToken,
-		OwnerGeneration:     impl.Binding.Authority.OwnerGeneration,
-		WorkspaceToken:      impl.Binding.Workspace.LeaseToken,
-		WorkspaceGeneration: impl.Binding.Workspace.OwnerGeneration,
-		Result:              "completed",
-		Evidence:            &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"a75cfb1","change.id":"change-v1:a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
+		ActionRunID:     impl.Binding.Run.ID,
+		OwnerToken:      impl.Binding.Authority.OwnerToken,
+		OwnerGeneration: impl.Binding.Authority.OwnerGeneration,
+		Result:          "completed",
+		Evidence:        &ActionEvidenceInput{Summary: "implemented", Facts: `{"result":"done","commit.sha":"a75cfb1","change.id":"change-v1:a75cfb1","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`},
 	})
 	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
 		t.Fatalf("expired success settle error = %v, want lease conflict", err)

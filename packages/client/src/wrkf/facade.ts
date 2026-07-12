@@ -83,11 +83,6 @@ import type {
   WrkfSuggestResult,
   WrkfTransitionApplyParams,
   WrkfTransitionResult,
-  WrkfWorkspaceClaimParams,
-  WrkfWorkspaceHeartbeatParams,
-  WrkfWorkspaceLease,
-  WrkfWorkspaceReleaseParams,
-  WrkfWorkspaceShowParams,
   WrkfWorkflowDiffParams,
   WrkfWorkflowInstallParams,
   WrkfWorkflowListParams,
@@ -182,13 +177,6 @@ export interface WrkfActionFacade {
   list(params: WrkfActionListParams): Promise<WrkfActionListResult>;
 }
 
-export interface WrkfWorkspaceFacade {
-  claim(params: WrkfWorkspaceClaimParams): Promise<WrkfWorkspaceLease>;
-  heartbeat(params: WrkfWorkspaceHeartbeatParams): Promise<WrkfWorkspaceLease>;
-  release(params: WrkfWorkspaceReleaseParams): Promise<WrkfWorkspaceLease>;
-  show(params: WrkfWorkspaceShowParams): Promise<WrkfWorkspaceLease>;
-}
-
 export interface WrkfEffectFacade {
   list(params: WrkfEffectListParams): Promise<WrkfEffect[]>;
   show(params: WrkfEffectShowParams): Promise<WrkfEffect>;
@@ -212,6 +200,5 @@ export interface WrkfFacade {
   readonly transition: WrkfTransitionFacade;
   readonly run: WrkfRunFacade;
   readonly action: WrkfActionFacade;
-  readonly workspace: WrkfWorkspaceFacade;
   readonly effect: WrkfEffectFacade;
 }

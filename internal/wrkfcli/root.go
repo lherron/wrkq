@@ -69,7 +69,6 @@ func init() {
 	rootCmd.AddCommand(runCmd())
 	rootCmd.AddCommand(watchCmd())
 	rootCmd.AddCommand(actionCmd())
-	rootCmd.AddCommand(workspaceCmd())
 	rootCmd.AddCommand(nextCmd())
 	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(transitionCmd())
@@ -1027,89 +1026,6 @@ func runCmd() *cobra.Command {
 		}),
 	}
 	cmd.AddCommand(start, bind, finish, fail, show, list)
-	return cmd
-}
-
-func workspaceCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "workspace", Short: "Claim and fence physical worktree workspace leases"}
-	var (
-		ownerID         string
-		leaseToken      string
-		leaseMs         int64
-		ownerGeneration int64
-	)
-	claim := &cobra.Command{
-		Use:  "claim ROOT --owner-id OWNER",
-		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			if leaseMs <= 0 {
-				leaseMs = 300000
-			}
-			lease, err := a.service.ClaimWorkspace(workflow.ClaimWorkspaceParams{
-				WorkspaceRoot: args[0],
-				OwnerID:       firstNonEmpty(ownerID, a.actor),
-				LeaseMs:       leaseMs,
-			})
-			if err != nil {
-				return err
-			}
-			return printAny(cmd, flagJSON, lease)
-		}),
-	}
-	claim.Flags().StringVar(&ownerID, "owner-id", "", "Workspace lease owner")
-	claim.Flags().Int64Var(&leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
-
-	heartbeat := &cobra.Command{
-		Use:     "heartbeat ROOT --lease-token TOKEN --owner-generation N",
-		Aliases: []string{"renew-lease"},
-		Args:    cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			lease, err := a.service.HeartbeatWorkspace(workflow.HeartbeatWorkspaceParams{
-				WorkspaceRoot:   args[0],
-				LeaseToken:      leaseToken,
-				OwnerGeneration: ownerGeneration,
-				LeaseMs:         leaseMs,
-			})
-			if err != nil {
-				return err
-			}
-			return printAny(cmd, flagJSON, lease)
-		}),
-	}
-	heartbeat.Flags().StringVar(&leaseToken, "lease-token", "", "Current workspace lease token")
-	heartbeat.Flags().Int64Var(&ownerGeneration, "owner-generation", 0, "Current workspace lease generation")
-	heartbeat.Flags().Int64Var(&leaseMs, "lease-ms", 0, "Lease duration in milliseconds")
-
-	release := &cobra.Command{
-		Use:  "release ROOT --lease-token TOKEN --owner-generation N",
-		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			lease, err := a.service.ReleaseWorkspace(workflow.ReleaseWorkspaceParams{
-				WorkspaceRoot:   args[0],
-				LeaseToken:      leaseToken,
-				OwnerGeneration: ownerGeneration,
-			})
-			if err != nil {
-				return err
-			}
-			return printAny(cmd, flagJSON, lease)
-		}),
-	}
-	release.Flags().StringVar(&leaseToken, "lease-token", "", "Current workspace lease token")
-	release.Flags().Int64Var(&ownerGeneration, "owner-generation", 0, "Current workspace lease generation")
-
-	show := &cobra.Command{
-		Use:  "show ROOT",
-		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			lease, err := a.service.ShowWorkspace(workflow.ShowWorkspaceParams{WorkspaceRoot: args[0]})
-			if err != nil {
-				return err
-			}
-			return printAny(cmd, flagJSON, lease)
-		}),
-	}
-	cmd.AddCommand(claim, heartbeat, release, show)
 	return cmd
 }
 

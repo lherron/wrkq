@@ -40,7 +40,6 @@ type actionClaimOptions struct {
 	scopeRef          string
 	leaseMs           int64
 	workspaceRoot     string
-	workspaceLeaseMs  int64
 }
 
 type actionBindOptions struct {
@@ -92,14 +91,12 @@ type actionCompleteOptions struct {
 }
 
 type actionSettleOptions struct {
-	result              string
-	ownerToken          string
-	ownerGeneration     int64
-	workspaceToken      string
-	workspaceGeneration int64
-	evidence            actionEvidenceOptions
-	terminalSummary     string
-	transition          actionTransitionOptions
+	result          string
+	ownerToken      string
+	ownerGeneration int64
+	evidence        actionEvidenceOptions
+	terminalSummary string
+	transition      actionTransitionOptions
 }
 
 type actionFailOptions struct {
@@ -237,12 +234,11 @@ func actionClaimCmd() *cobra.Command {
 					SemanticActionKey: opts.semanticActionKey,
 					Action:            opts.actionFilter,
 				},
-				RunnerID:         opts.runnerID,
-				AgentRef:         firstNonEmpty(opts.actor, a.actor),
-				ScopeRef:         opts.scopeRef,
-				LeaseMs:          claimLeaseMs,
-				WorkspaceRoot:    opts.workspaceRoot,
-				WorkspaceLeaseMs: opts.workspaceLeaseMs,
+				RunnerID:      opts.runnerID,
+				AgentRef:      firstNonEmpty(opts.actor, a.actor),
+				ScopeRef:      opts.scopeRef,
+				LeaseMs:       claimLeaseMs,
+				WorkspaceRoot: opts.workspaceRoot,
 			})
 			if err != nil {
 				return err
@@ -257,8 +253,7 @@ func actionClaimCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.actor, "agent-ref", "", "Agent ref (agent:<id>)")
 	cmd.Flags().StringVar(&opts.scopeRef, "scope-ref", "", "Runtime scope ref")
 	cmd.Flags().Int64Var(&opts.leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
-	cmd.Flags().StringVar(&opts.workspaceRoot, "workspace-root", "", "Canonicalized physical worktree root to lease with the action")
-	cmd.Flags().Int64Var(&opts.workspaceLeaseMs, "workspace-lease-ms", 0, "Workspace lease duration in milliseconds (defaults to --lease-ms)")
+	cmd.Flags().StringVar(&opts.workspaceRoot, "workspace-root", "", "Opaque physical worktree ref recorded on the run record (never interpreted by the engine)")
 	return cmd
 }
 
@@ -332,16 +327,14 @@ func actionSettleCmd() *cobra.Command {
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
 			mode, transitionID := opts.transition.transitionSelection()
 			out, err := a.service.SettleAction(workflow.SettleActionParams{
-				ActionRunID:         args[0],
-				OwnerToken:          opts.ownerToken,
-				OwnerGeneration:     opts.ownerGeneration,
-				WorkspaceToken:      opts.workspaceToken,
-				WorkspaceGeneration: opts.workspaceGeneration,
-				Result:              opts.result,
-				Evidence:            opts.evidence.evidenceInput(),
-				TransitionMode:      mode,
-				TransitionID:        transitionID,
-				TerminalSummary:     opts.terminalSummary,
+				ActionRunID:     args[0],
+				OwnerToken:      opts.ownerToken,
+				OwnerGeneration: opts.ownerGeneration,
+				Result:          opts.result,
+				Evidence:        opts.evidence.evidenceInput(),
+				TransitionMode:  mode,
+				TransitionID:    transitionID,
+				TerminalSummary: opts.terminalSummary,
 			})
 			if err != nil {
 				return err
@@ -352,8 +345,6 @@ func actionSettleCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.result, "result", "completed", "Terminal settlement result")
 	cmd.Flags().StringVar(&opts.ownerToken, "owner-token", "", "Current owner token from action.claim")
 	cmd.Flags().Int64Var(&opts.ownerGeneration, "owner-generation", 0, "Current owner generation from action.claim")
-	cmd.Flags().StringVar(&opts.workspaceToken, "workspace-token", "", "Current workspace token from action.claim workspace authority")
-	cmd.Flags().Int64Var(&opts.workspaceGeneration, "workspace-generation", 0, "Current workspace generation from action.claim workspace authority")
 	cmd.Flags().StringVar(&opts.evidence.kind, "kind", "", "Evidence kind (defaults to executable action result kind)")
 	cmd.Flags().StringVar(&opts.evidence.ref, "ref", "", "Evidence ref")
 	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Evidence summary")

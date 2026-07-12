@@ -231,10 +231,6 @@ var methodCatalog = []string{
 	"wrkf.action.renewLease",
 	"wrkf.action.show",
 	"wrkf.action.list",
-	"wrkf.workspace.claim",
-	"wrkf.workspace.heartbeat",
-	"wrkf.workspace.release",
-	"wrkf.workspace.show",
 	"wrkf.effect.list",
 	"wrkf.effect.show",
 	"wrkf.effect.claim",
@@ -306,11 +302,6 @@ var dtoCatalog = []string{
 	"WrkfDiffResult",
 	"WrkfSuggestResult",
 	"WrkfEffectClaimResult",
-	"WrkfWorkspaceLease",
-	"WrkfWorkspaceClaimParams",
-	"WrkfWorkspaceHeartbeatParams",
-	"WrkfWorkspaceReleaseParams",
-	"WrkfWorkspaceShowParams",
 }
 
 func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
@@ -679,18 +670,6 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.action.list", apiHandler(func(ctx context.Context, p wrkfapi.ActionListParams) (any, error) {
 		return api.ActionList(ctx, p)
-	}))
-	s.Register("wrkf.workspace.claim", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceClaimParams) (any, error) {
-		return api.WorkspaceClaim(ctx, p)
-	}))
-	s.Register("wrkf.workspace.heartbeat", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceHeartbeatParams) (any, error) {
-		return api.WorkspaceHeartbeat(ctx, p)
-	}))
-	s.Register("wrkf.workspace.release", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceReleaseParams) (any, error) {
-		return api.WorkspaceRelease(ctx, p)
-	}))
-	s.Register("wrkf.workspace.show", apiHandler(func(ctx context.Context, p wrkfapi.WorkspaceShowParams) (any, error) {
-		return api.WorkspaceShow(ctx, p)
 	}))
 	s.Register("wrkf.effect.list", apiHandler(func(ctx context.Context, p effectListParams) (any, error) {
 		return api.EffectList(ctx, p.TaskSelector, p.All)

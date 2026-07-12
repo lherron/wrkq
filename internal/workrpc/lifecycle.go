@@ -15,7 +15,6 @@ type Capabilities struct {
 	Wrkq               bool `json:"wrkq"`
 	Wrkf               bool `json:"wrkf"`
 	EffectClaimLease   bool `json:"effectClaimLease"`
-	WorkspaceLease     bool `json:"workspaceLease"`
 	RunExternalBinding bool `json:"runExternalBinding"`
 }
 
@@ -25,7 +24,6 @@ func defaultCapabilities() Capabilities {
 		Wrkq:               true,
 		Wrkf:               true,
 		EffectClaimLease:   true,
-		WorkspaceLease:     true,
 		RunExternalBinding: true,
 	}
 }
