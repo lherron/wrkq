@@ -642,6 +642,20 @@ func transitionFromMatches(inst Instance, tr TransitionSpec) bool {
 	return false
 }
 
+// transitionFromRequirement renders a human-readable description of a
+// transition's source-state constraint (From plus any FromAny) for blocked
+// candidate messages.
+func transitionFromRequirement(tr TransitionSpec) string {
+	keys := make([]string, 0, len(tr.FromAny)+1)
+	if len(tr.FromAny) == 0 || stateKey(tr.From) != stateKey(State{}) {
+		keys = append(keys, stateKey(tr.From))
+	}
+	for i := range tr.FromAny {
+		keys = append(keys, stateKey(tr.FromAny[i]))
+	}
+	return strings.Join(keys, " | ")
+}
+
 func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map[string]interface{}, error) {
 	tpl, canonical, hash, err := LoadTemplateFile(path)
 	if err != nil {

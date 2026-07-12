@@ -246,3 +246,36 @@ func TestTransitionFromAnyClosedStateGuard(t *testing.T) {
 		t.Fatalf("explicit closed from should match a closed instance")
 	}
 }
+
+// TestExecutableActionFromAnyClosedGuard covers the candidate-legality surface:
+// an executable action bound to a fromAny (blank-From) transition must NOT be
+// offered from a closed instance — the same closed-state guard enforced
+// everywhere else must hold here too.
+func TestExecutableActionFromAnyClosedGuard(t *testing.T) {
+	tpl := &Template{
+		Transitions: []TransitionSpec{{
+			ID:      "op",
+			FromAny: []State{{Status: "active", Phase: "ready"}},
+			By:      []string{"supervisor"},
+		}},
+	}
+	spec := ExecutableActionSpec{Transition: "op", Role: "supervisor"} // spec.From nil → transition source applies
+
+	offered := Instance{ID: "wfi_x", TaskRef: "wrkq:T-1", Status: "active", Phase: "ready"}
+	_, block, err := candidateForExecutableAction(nil, &offered, nil, tpl, nil, "op", spec, 0)
+	if err != nil {
+		t.Fatalf("candidate (active/ready): %v", err)
+	}
+	if block != "" {
+		t.Fatalf("action should be offered from active/ready, blocked: %s", block)
+	}
+
+	closed := Instance{ID: "wfi_x", TaskRef: "wrkq:T-1", Status: "closed", Phase: "done"}
+	_, block, err = candidateForExecutableAction(nil, &closed, nil, tpl, nil, "op", spec, 0)
+	if err != nil {
+		t.Fatalf("candidate (closed): %v", err)
+	}
+	if block == "" {
+		t.Fatalf("fromAny action must NOT be offered from a closed instance (reopen guard)")
+	}
+}
