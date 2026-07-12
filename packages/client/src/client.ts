@@ -222,6 +222,9 @@ class WorkClientImpl implements WorkClient {
     transition: {
       apply: (p) => this.call("wrkf.transition.apply", p),
     },
+    suspension: {
+      resolve: (p) => this.call("wrkf.suspension.resolve", p),
+    },
     run: {
       start: (p) => this.call("wrkf.run.start", p),
       bindExternal: (p) => this.call("wrkf.run.bindExternal", p),

@@ -81,6 +81,8 @@ import type {
   WrkfRunShowParams,
   WrkfRunStartParams,
   WrkfSuggestResult,
+  WrkfSuspensionResolveParams,
+  WrkfSuspensionResolveResult,
   WrkfTransitionApplyParams,
   WrkfTransitionResult,
   WrkfWorkflowDiffParams,
@@ -154,6 +156,11 @@ export interface WrkfTransitionFacade {
   apply(params: WrkfTransitionApplyParams): Promise<WrkfTransitionResult>;
 }
 
+export interface WrkfSuspensionFacade {
+  /** Atomically resolve an instance's active suspension by its id (the only gate). */
+  resolve(params: WrkfSuspensionResolveParams): Promise<WrkfSuspensionResolveResult>;
+}
+
 export interface WrkfRunFacade {
   start(params: WrkfRunStartParams): Promise<WrkfRun>;
   bindExternal(params: WrkfRunBindExternalParams): Promise<WrkfRun>;
@@ -199,6 +206,7 @@ export interface WrkfFacade {
   readonly check: WrkfCheckFacade;
   readonly hook: WrkfHookFacade;
   readonly transition: WrkfTransitionFacade;
+  readonly suspension: WrkfSuspensionFacade;
   readonly run: WrkfRunFacade;
   readonly action: WrkfActionFacade;
   readonly effect: WrkfEffectFacade;

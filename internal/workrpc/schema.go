@@ -64,6 +64,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkfRun":                      dtoType[wrkfapi.Run](),
 	"WrkfCheckRun":                 dtoType[wrkfapi.CheckRun](),
 	"WrkfTransitionResult":         dtoType[wrkfapi.TransitionResult](),
+	"WrkfSuspensionResolveResult":  dtoType[wrkfapi.SuspensionResolveResult](),
 	"WrkfWorkflowTemplateSummary":  dtoType[wrkfapi.TemplateSummary](),
 	"WrkfWorkflowListResult":       dtoType[wrkfapi.WorkflowListResult](),
 	"WrkfWorkflowShowResult":       dtoType[wrkfapi.WorkflowShowResult](),

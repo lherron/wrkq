@@ -678,6 +678,63 @@ describe("wrkf namespace", () => {
     expect(Array.isArray(result.effects)).toBe(true);
   });
 
+  test("suspension.resolve sends frame, forwards id gate + CAS, returns typed result", async () => {
+    const transport = new FakeTransport().onResult("wrkf.suspension.resolve", {
+      task: "T-00001",
+      instanceId: "wfi_abc123",
+      suspensionId: "sus_000001",
+      disposition: "resume",
+      state: { status: "active", phase: "ready" },
+      revision: 2,
+      eventId: "wfe_000003",
+      effects: [{ id: "eff_1", status: "pending", kind: "resume_notice" }],
+    });
+    const client = await clientWith(transport);
+
+    const result = await client.wrkf.suspension.resolve({
+      suspensionId: "sus_000001",
+      disposition: "resume",
+      explanation: "operator cleared the park",
+      expectRevision: 1,
+      role: "coordinator",
+      principal_ref: "human:local",
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkf.suspension.resolve");
+    expect(frame.params).toMatchObject({
+      suspensionId: "sus_000001",
+      disposition: "resume",
+      explanation: "operator cleared the park",
+      expectRevision: 1,
+    });
+    expect(result.suspensionId).toBe("sus_000001");
+    expect(result.disposition).toBe("resume");
+    expect(result.revision).toBe(2);
+    expect(result.eventId).toBe("wfe_000003");
+    expect(result.effects[0]!.id).toBe("eff_1");
+  });
+
+  test("suspension.resolve surfaces WRKF_SUSPENSION_NOT_FOUND as a typed wrkf error", async () => {
+    const transport = new FakeTransport().onError("wrkf.suspension.resolve", {
+      code: -32025,
+      message: "no active suspension matches id sus_999",
+      data: { code: "WRKF_SUSPENSION_NOT_FOUND", retryable: false },
+    });
+    const client = await clientWith(transport);
+
+    let caught: unknown;
+    try {
+      await client.wrkf.suspension.resolve({ suspensionId: "sus_999", disposition: "close" });
+    } catch (e) {
+      caught = e;
+    }
+    const err = caught as WorkRpcError;
+    expect(isWrkfError(err)).toBe(true);
+    expect(err.domainCode).toBe("WRKF_SUSPENSION_NOT_FOUND");
+    expect(err.method).toBe("wrkf.suspension.resolve");
+  });
+
   test("event.query sends replay filters and returns a typed page", async () => {
     const transport = new FakeTransport().onResult("wrkf.event.query", MOCK_EVENT_QUERY_RESULT);
     const client = await clientWith(transport);

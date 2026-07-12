@@ -105,6 +105,7 @@ func ErrorCodeCatalog() []string {
 		wrkfapi.CodeKindRoleDenied,
 		wrkfapi.CodeLinkageUnresolved,
 		wrkfapi.CodeLinkageStale,
+		wrkfapi.CodeSuspensionNotFound,
 		CodeWorkRPCInternal,
 	}
 	sort.Strings(codes)
@@ -214,6 +215,7 @@ var methodCatalog = []string{
 	"wrkf.hook.show",
 	"wrkf.hook.run",
 	"wrkf.transition.apply",
+	"wrkf.suspension.resolve",
 	"wrkf.run.start",
 	"wrkf.run.bindExternal",
 	"wrkf.run.finish",
@@ -295,6 +297,7 @@ var dtoCatalog = []string{
 	"WrkfRun",
 	"WrkfCheckRun",
 	"WrkfTransitionResult",
+	"WrkfSuspensionResolveResult", // wrkf.suspension.resolve output (cleared suspension + new state/effects)
 	"WrkfWorkflowTemplateSummary",
 	"WrkfWorkflowListResult",
 	"WrkfWorkflowShowResult",
@@ -616,6 +619,11 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.TransitionApply(ctx, p)
+	}))
+	s.Register("wrkf.suspension.resolve", apiHandler(func(ctx context.Context, p wrkfapi.SuspensionResolveParams) (any, error) {
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
+		p.Role = defaultString(p.Role, opts.DefaultRole)
+		return api.SuspensionResolve(ctx, p)
 	}))
 	s.Register("wrkf.run.start", apiHandler(func(ctx context.Context, p wrkfapi.RunStartParams) (any, error) {
 		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)

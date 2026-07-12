@@ -20,6 +20,7 @@ const (
 	wrkfCodeLinkageStale         = "WRKF_LINKAGE_STALE"
 	wrkfCodeSuspended            = "WRKF_SUSPENDED"
 	wrkfCodeAlreadySuspended     = "WRKF_ALREADY_SUSPENDED"
+	wrkfCodeSuspensionNotFound   = "WRKF_SUSPENSION_NOT_FOUND"
 )
 
 // ErrorDetail is the single machine-parseable error shape carried by wrkf
@@ -166,6 +167,20 @@ func suspendedWriteError(inst *Instance) error {
 		field:    "suspension",
 		expected: "running instance (no active suspension)",
 		fix:      "resolve the active suspension before writing to this instance",
+	}
+}
+
+// noActiveSuspensionError is the id-gate rejection for resolveSuspension: the
+// presented suspension id names no active suspension (wrong id, or already
+// resolved). The matching suspension id is the only gate, so this is the only
+// way resolution is refused.
+func noActiveSuspensionError(suspensionID string) error {
+	return &wrkfError{
+		code:     wrkfCodeSuspensionNotFound,
+		msg:      fmt.Sprintf("no active suspension matches id %s", suspensionID),
+		field:    "suspensionId",
+		expected: "the id of the instance's active suspension",
+		fix:      "inspect the instance for its current active suspension id and retry",
 	}
 }
 

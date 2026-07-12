@@ -72,6 +72,7 @@ func init() {
 	rootCmd.AddCommand(nextCmd())
 	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(transitionCmd())
+	rootCmd.AddCommand(suspensionCmd())
 	rootCmd.AddCommand(evidenceCmd())
 	rootCmd.AddCommand(ledgerCmd())
 	rootCmd.AddCommand(obligationCmd())
@@ -921,6 +922,40 @@ func transitionCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&runChecks, "run-checks", false, "Run transition checks before committing")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate without committing")
 	cmd.Flags().StringArrayVar(&checks, "check", nil, "Check run id")
+	return cmd
+}
+
+func suspensionCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "suspension", Short: "Resolve an instance's active suspension"}
+	var disposition, explanation string
+	var expectRevision int64
+	resolve := &cobra.Command{
+		Use:   "resolve SUSPENSION_ID --disposition resume|close|cancel",
+		Short: "Atomically resolve the active suspension named by SUSPENSION_ID",
+		Args:  cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			var exp *int64
+			if cmd.Flags().Changed("expect-revision") {
+				exp = &expectRevision
+			}
+			out, err := a.service.ResolveSuspension(workflow.ResolveSuspensionParams{
+				SuspensionID:   args[0],
+				Disposition:    disposition,
+				Explanation:    explanation,
+				ExpectRevision: exp,
+				PrincipalRef:   a.actor,
+				Role:           a.role,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, out)
+		}),
+	}
+	resolve.Flags().StringVar(&disposition, "disposition", "", "Resolution disposition: resume, close, or cancel")
+	resolve.Flags().StringVar(&explanation, "explanation", "", "Operator explanation (recorded free text, never validated)")
+	resolve.Flags().Int64Var(&expectRevision, "expect-revision", 0, "Expected workflow revision (CAS precondition)")
+	cmd.AddCommand(resolve)
 	return cmd
 }
 

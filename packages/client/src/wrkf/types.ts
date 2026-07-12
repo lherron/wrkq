@@ -528,6 +528,38 @@ export interface WrkfTransitionResult {
   obligations: WrkfObligation[];
 }
 
+// ── Suspension resolution ────────────────────────────────────────────────────
+
+/** Dispositions accepted by `wrkf.suspension.resolve`. */
+export type WrkfSuspensionDisposition = "resume" | "close" | "cancel";
+
+/**
+ * `wrkf.suspension.resolve` input. The matching `suspensionId` is the ONLY gate
+ * (Lance ruling, 2026-07-12): no role checks, no evidence validation.
+ * `explanation` is recorded free text; `expectRevision` is the ordinary CAS
+ * precondition (docs/wrkq-wrkf-rpc.md §8.3).
+ */
+export interface WrkfSuspensionResolveParams {
+  suspensionId: string;
+  disposition: WrkfSuspensionDisposition;
+  explanation?: string;
+  expectRevision?: number;
+  role?: string;
+  principal_ref?: string;
+}
+
+export interface WrkfSuspensionResolveResult {
+  task?: string;
+  instanceId: string;
+  suspensionId: string;
+  disposition: WrkfSuspensionDisposition;
+  state: WrkfState;
+  revision: number;
+  eventId: string;
+  effects: WrkfEffect[];
+  instance?: WrkfInstance;
+}
+
 // ── Runs ─────────────────────────────────────────────────────────────────────
 
 export interface WrkfRunStartParams {
