@@ -19,6 +19,7 @@ const (
 	wrkfCodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"
 	wrkfCodeLinkageUnresolved    = "WRKF_LINKAGE_UNRESOLVED"
 	wrkfCodeLinkageStale         = "WRKF_LINKAGE_STALE"
+	wrkfCodeActiveRunGuard       = "WRKF_ACTIVE_RUN"
 )
 
 // ErrorDetail is the single machine-parseable error shape carried by wrkf
@@ -179,6 +180,20 @@ func actionLeaseConflictError(actionRunID string) error {
 	return &wrkfError{
 		code: wrkfCodeLeaseConflict,
 		msg:  fmt.Sprintf("action lease conflict: action run %s", actionRunID),
+	}
+}
+
+// activeRunGuardError refuses an operator-class transition (requiresNoActiveRun)
+// while the instance holds an open action run. The action run is the lease: the
+// operator must reap or let the seat settle before terminalizing/moving the
+// instance.
+func activeRunGuardError(instanceID, transitionID string, runIDs []string) error {
+	return &wrkfError{
+		code:     wrkfCodeActiveRunGuard,
+		msg:      fmt.Sprintf("transition %s refused: instance %s has an active action run (%s); reap or let the seat settle first", transitionID, instanceID, strings.Join(runIDs, ",")),
+		field:    "transition",
+		expected: "no active action run on the instance",
+		fix:      "reap the active run (wrkf action reap) or wait for the seat to settle before resolving",
 	}
 }
 

@@ -170,7 +170,19 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			errs = append(errs, fmt.Sprintf("duplicate transition %s", tr.ID))
 		}
 		transitions[tr.ID] = true
-		if !stateSet[stateKey(tr.From)] {
+		if len(tr.FromAny) > 0 {
+			// Multi-source: the source set is defined by FromAny. A blank From is
+			// allowed (source set comes entirely from FromAny); a non-blank From
+			// still contributes and must be declared.
+			if stateKey(tr.From) != stateKey(State{}) && !stateSet[stateKey(tr.From)] {
+				errs = append(errs, fmt.Sprintf("transition %s from state is not declared", tr.ID))
+			}
+			for i, st := range tr.FromAny {
+				if !stateSet[stateKey(st)] {
+					errs = append(errs, fmt.Sprintf("transition %s fromAny[%d] state is not declared", tr.ID, i))
+				}
+			}
+		} else if !stateSet[stateKey(tr.From)] {
 			errs = append(errs, fmt.Sprintf("transition %s from state is not declared", tr.ID))
 		}
 		if len(tr.By) == 0 {
@@ -598,6 +610,36 @@ func stateMatches(inst Instance, st State) bool {
 		return false
 	}
 	return true
+}
+
+// stateMatchesGuarded is stateMatches with a closed-state safety guard: a
+// wildcard/blank-status from-state never implicitly matches a CLOSED instance.
+// Only a from-state that names status "closed" explicitly matches a closed
+// instance, so a blank/wildcard operator transition cannot reopen closed work.
+func stateMatchesGuarded(inst Instance, st State) bool {
+	if inst.Status == "closed" && st.Status != "closed" {
+		return false
+	}
+	return stateMatches(inst, st)
+}
+
+// transitionFromMatches reports whether the instance satisfies a transition's
+// source-state constraint: the single From state OR any FromAny entry, each
+// evaluated with the closed-state guard. When FromAny is present, a zero-value
+// From is NOT a catch-all wildcard — the source set is defined by FromAny (plus
+// any explicit non-blank From); otherwise a blank From is the wildcard.
+func transitionFromMatches(inst Instance, tr TransitionSpec) bool {
+	if len(tr.FromAny) == 0 || stateKey(tr.From) != stateKey(State{}) {
+		if stateMatchesGuarded(inst, tr.From) {
+			return true
+		}
+	}
+	for i := range tr.FromAny {
+		if stateMatchesGuarded(inst, tr.FromAny[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map[string]interface{}, error) {
@@ -2783,7 +2825,7 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 		})
 	}
 	for _, tr := range tpl.Transitions {
-		if !stateMatches(*inst, tr.From) {
+		if !transitionFromMatches(*inst, tr) {
 			continue
 		}
 		owners, ownerBlockers := s.transitionOwners(inst, tpl, tr, role)
