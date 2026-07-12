@@ -17,7 +17,6 @@ const (
 	CodeEffectNotDeliverable = "WRKF_EFFECT_NOT_DELIVERABLE"
 	CodeEffectDeliveryFailed = "WRKF_EFFECT_DELIVERY_FAILED"
 	CodeHookFailed           = "WRKF_HOOK_FAILED"
-	CodeDBMigrationRequired  = "WRKF_DB_MIGRATION_REQUIRED"
 	CodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"
 	CodeLinkageUnresolved    = "WRKF_LINKAGE_UNRESOLVED"
 	CodeLinkageStale         = "WRKF_LINKAGE_STALE"
@@ -147,13 +146,6 @@ func NewHookFailedError(hookID, msg string, retryable bool) *DomainError {
 	return newError(CodeHookFailed, msg, retryable, struct {
 		HookID string `json:"hookId,omitempty"`
 	}{HookID: hookID}, nil)
-}
-
-func NewDBMigrationRequiredError(have, want int) *DomainError {
-	return newError(CodeDBMigrationRequired, "database migration required", false, struct {
-		Have int `json:"have"`
-		Want int `json:"want"`
-	}{Have: have, Want: want}, nil)
 }
 
 // NewDetailError wraps a structured workflow.ErrorDetail as a DomainError,

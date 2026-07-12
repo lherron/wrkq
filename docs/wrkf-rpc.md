@@ -85,7 +85,6 @@ JSON-RPC `error` object. `data.code` is the stable contract; `message` is human-
 | `WRKF_LEASE_CONFLICT` | -32014 | true | ack/fail with wrong/expired lease token |
 | `WRKF_EFFECT_NOT_DELIVERABLE` | -32015 | false | effect not in a deliverable state |
 | `WRKF_HOOK_FAILED` | -32016 | context-dependent; value supplied in `data.retryable` | hook/check execution failed |
-| `WRKF_DB_MIGRATION_REQUIRED` | -32017 | false | DB schema behind required migration |
 | `WRKF_KIND_ROLE_DENIED` | -32018 | false | evidence kind is not producible by the supplied role (template `producibleBy` conformance — supplied-role only, **not** an authenticated-principal boundary) |
 | `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | a declared evidence `data` linkage ref did not resolve to a live evidence id on the same instance (template `linkageRefs`) |
 | `WRKF_LINKAGE_STALE` | -32020 | false | a `linkageRefs` entry with `latest:true` points at a superseded (non-current) evidence of the expected kind; `data.fix` names the current id |
@@ -103,7 +102,7 @@ Typed Go errors (`internal/wrkfapi/errors.go`) MUST exist and carry these codes 
 **Canonical Go error surface (frozen — all reds + impl agree on exactly this):**
 - A `wrkfapi.Error` type implementing `interface { error; Code() string; Retryable() bool }`, unwrappable via `errors.As`. `Code()` returns the `WRKF_*` string; `Retryable()` returns the boolean. (Tests may match a narrower local `interface { Code() string }` — that is a subset and is fine.)
 - Constructors (one per code), so call sites never hand-build errors:
-  `NewNotFoundError(ref, kind)`, `NewValidationError(msg string, data any)`, `NewStaleRevisionError(instanceID string, expected, actual int64)`, `NewContextMismatchError(instanceID, expected, actual string)`, `NewTransitionBlockedError(instanceID, transition string, blocksOn []Blocker)`, `NewRoleDeniedError(instanceID, transition, role string)`, `NewIdempotencyMismatchError(key string)`, `NewLeaseConflictError(effectID, token string)`, `NewEffectNotDeliverableError(effectID, status string)`, `NewDBMigrationRequiredError(have, want int)`, `NewInternalError(err error)`.
+  `NewNotFoundError(ref, kind)`, `NewValidationError(msg string, data any)`, `NewStaleRevisionError(instanceID string, expected, actual int64)`, `NewContextMismatchError(instanceID, expected, actual string)`, `NewTransitionBlockedError(instanceID, transition string, blocksOn []Blocker)`, `NewRoleDeniedError(instanceID, transition, role string)`, `NewIdempotencyMismatchError(key string)`, `NewLeaseConflictError(effectID, token string)`, `NewEffectNotDeliverableError(effectID, status string)`, `NewInternalError(err error)`.
 - `wrkfrpc.MapError(err error) *RPCError` (P3): maps a `wrkfapi.Error` to the JSON-RPC error (numeric `code` + `data.code` + boolean `data.retryable`). A plain non-`wrkfapi.Error` maps to `WRKF_INTERNAL` (-32603).
 
 ---

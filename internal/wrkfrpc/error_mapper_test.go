@@ -83,13 +83,6 @@ var errorCodeTable = []struct {
 		retryable: false,
 	},
 	{
-		name:      "WRKF_DB_MIGRATION_REQUIRED",
-		err:       wrkfapi.NewDBMigrationRequiredError(14, 15),
-		rpcCode:   -32017,
-		dataCode:  "WRKF_DB_MIGRATION_REQUIRED",
-		retryable: false,
-	},
-	{
 		name:      "WRKF_INTERNAL",
 		err:       wrkfapi.NewInternalError(errors.New("unexpected nil pointer")),
 		rpcCode:   -32603,

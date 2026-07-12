@@ -242,7 +242,6 @@ Every domain error must include:
 | `WRKF_LEASE_CONFLICT` | -32014 | true | effect ack/fail with wrong or expired lease |
 | `WRKF_EFFECT_NOT_DELIVERABLE` | -32015 | false | effect cannot be delivered in current state |
 | `WRKF_HOOK_FAILED` | -32016 | context-dependent | hook/check execution failed |
-| `WRKF_DB_MIGRATION_REQUIRED` | -32017 | false | workflow schema behind required migration |
 | `WRKF_KIND_ROLE_DENIED` | -32018 | false | supplied role cannot produce evidence kind |
 | `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | declared evidence linkage did not resolve |
 | `WRKF_LINKAGE_STALE` | -32020 | false | latest linkage points at superseded evidence |

@@ -101,7 +101,6 @@ func ErrorCodeCatalog() []string {
 		wrkfapi.CodeLeaseConflict,
 		wrkfapi.CodeEffectNotDeliverable,
 		wrkfapi.CodeHookFailed,
-		wrkfapi.CodeDBMigrationRequired,
 		wrkfapi.CodeKindRoleDenied,
 		wrkfapi.CodeLinkageUnresolved,
 		wrkfapi.CodeLinkageStale,
