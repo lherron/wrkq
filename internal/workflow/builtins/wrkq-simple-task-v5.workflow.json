@@ -1,0 +1,1129 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "wrkq-simple-task",
+  "version": "5",
+  "kind": "agent_first_workflow",
+  "description": "One-room red/green/verify task lifecycle with coordinator test review, tester-owned test fixes, and lane-guarded leaf/trunk landing tails. Operator parks are v5 suspensions: the instance stays in its phase; resolution is resolveSuspension (resume/close/cancel).",
+  "initial": {
+    "status": "active",
+    "phase": "test"
+  },
+  "roles": {
+    "coordinator": {
+      "description": "Reviews red tests, adjudicates final gate verdicts, and classifies landing failures."
+    },
+    "implementer": {
+      "description": "Implements against tester-authored tests without editing test files."
+    },
+    "observer": {
+      "description": "Drives the installed surface and reports observed behavior."
+    },
+    "system": {
+      "description": "Internal workflow projection and mechanics authority."
+    },
+    "tester": {
+      "description": "Authors red tests first and owns any test-fix follow-up."
+    }
+  },
+  "suspension": {
+    "reasons": [
+      "operator_required"
+    ],
+    "effects": {
+      "close": [
+        {
+          "kind": "set_task_state",
+          "role": "system",
+          "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+          "data": {
+            "state": "completed"
+          }
+        }
+      ],
+      "cancel": [
+        {
+          "kind": "set_task_state",
+          "role": "system",
+          "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
+          "data": {
+            "state": "cancelled"
+          }
+        }
+      ]
+    }
+  },
+  "states": [
+    {
+      "status": "active",
+      "phase": "test",
+      "description": "Tester is authoring or repairing task-scoped tests."
+    },
+    {
+      "status": "active",
+      "phase": "test_review",
+      "description": "Coordinator reviews test coverage/scope and reruns the red bar."
+    },
+    {
+      "status": "active",
+      "phase": "implement",
+      "description": "Implementer is making the tester-authored bar pass."
+    },
+    {
+      "status": "active",
+      "phase": "test_fix",
+      "description": "Tester fixes or defends a reported test defect, then resumes implementation."
+    },
+    {
+      "status": "active",
+      "phase": "verify",
+      "description": "Observer drives the installed surface and records observed behavior."
+    },
+    {
+      "status": "active",
+      "phase": "gate",
+      "description": "Coordinator reviews the commit range and issues the final verdict."
+    },
+    {
+      "status": "active",
+      "phase": "land",
+      "description": "Leaf lane direct landing is in progress."
+    },
+    {
+      "status": "waiting",
+      "phase": "awaiting_merge",
+      "description": "Trunk lane proof is awaiting PR landing."
+    },
+    {
+      "status": "closed",
+      "phase": "done",
+      "description": "Terminal success."
+    },
+    {
+      "status": "closed",
+      "phase": "cancelled",
+      "description": "Terminal cancellation (reached via the cancel resolution disposition)."
+    }
+  ],
+  "evidenceKinds": {
+    "gate_result": {
+      "description": "Coordinator range-gate verdict.",
+      "class": "verify",
+      "facts": {
+        "required": [
+          "result",
+          "range.head.sha",
+          "workflow.lane"
+        ],
+        "properties": {
+          "findings.forwarded": {
+            "type": "boolean"
+          },
+          "offending.sha": {
+            "type": "string"
+          },
+          "range.head.sha": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "violation"
+            ]
+          },
+          "workflow.lane": {
+            "type": "string",
+            "enum": [
+              "leaf",
+              "trunk"
+            ]
+          }
+        }
+      }
+    },
+    "implement_result": {
+      "description": "Implementer settlement with commit-bound proof or cited defect evidence.",
+      "class": "note",
+      "facts": {
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "commit.sha": {
+            "type": "string"
+          },
+          "defect.evidence.ref": {
+            "type": "string"
+          },
+          "dispatch.base.sha": {
+            "type": "string"
+          },
+          "git.clean": {
+            "type": "boolean"
+          },
+          "pre_dispatch.collision.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "pre_dispatch.snapshot.artifact": {
+            "type": "string"
+          },
+          "pre_dispatch.tracked_dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "done",
+              "no_product_change",
+              "test_defect",
+              "blocked",
+              "operator_required"
+            ]
+          },
+          "test_glob.clean": {
+            "type": "boolean"
+          },
+          "source_identity": {
+            "type": "string"
+          },
+          "tracked.delta.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "tracked.dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          }
+        }
+      }
+    },
+    "landing_result": {
+      "description": "Mechanics landing result for the lane-selected tail.",
+      "class": "verify",
+      "facts": {
+        "required": [
+          "result",
+          "workflow.lane"
+        ],
+        "properties": {
+          "hook.output.artifact": {
+            "type": "string"
+          },
+          "local.head.sha": {
+            "type": "string"
+          },
+          "remote.head.sha": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "landed",
+              "push_rejected",
+              "operator_required"
+            ]
+          },
+          "workflow.lane": {
+            "type": "string",
+            "enum": [
+              "leaf",
+              "trunk"
+            ]
+          },
+          "source_identity": {
+            "type": "string"
+          },
+          "source.evidence_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "test_fix_result": {
+      "description": "Tester settlement after fixing or defending a reported test defect.",
+      "class": "note",
+      "facts": {
+        "required": [
+          "result",
+          "rationale"
+        ],
+        "properties": {
+          "commit.sha": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "done",
+              "operator_required"
+            ]
+          },
+          "pre_dispatch.collision.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "pre_dispatch.snapshot.artifact": {
+            "type": "string"
+          },
+          "pre_dispatch.tracked_dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "test_glob.only": {
+            "type": "boolean"
+          },
+          "tracked.dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          }
+        }
+      }
+    },
+    "test_result": {
+      "description": "Tester red-bar result.",
+      "class": "note",
+      "facts": {
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "commit.sha": {
+            "type": "string"
+          },
+          "git.clean": {
+            "type": "boolean"
+          },
+          "red.output.in_head_commit": {
+            "type": "boolean"
+          },
+          "pre_dispatch.collision.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "pre_dispatch.snapshot.artifact": {
+            "type": "string"
+          },
+          "pre_dispatch.tracked_dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "done",
+              "blocked",
+              "operator_required"
+            ]
+          },
+          "tracked.dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          }
+        }
+      }
+    },
+    "test_review_result": {
+      "description": "Coordinator red-test review verdict.",
+      "class": "verify",
+      "facts": {
+        "required": [
+          "result",
+          "tester.head.sha"
+        ],
+        "properties": {
+          "coverage.scope.only": {
+            "type": "boolean"
+          },
+          "findings.forwarded": {
+            "type": "boolean"
+          },
+          "red.rerun.result": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "passed"
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail"
+            ]
+          },
+          "tester.head.sha": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "verify_result": {
+      "description": "Observer verification result bound to the exact implementation tip.",
+      "class": "verify",
+      "facts": {
+        "required": [
+          "result",
+          "verified.head.sha",
+          "context.id"
+        ],
+        "properties": {
+          "drove.observed": {
+            "type": "string"
+          },
+          "evidence.forwarded": {
+            "type": "boolean"
+          },
+          "git.clean": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "failed",
+              "blocked",
+              "other"
+            ]
+          },
+          "verified.head.sha": {
+            "type": "string"
+          },
+          "source_identity": {
+            "type": "string"
+          },
+          "source.evidence_id": {
+            "type": "string"
+          },
+          "tracked.dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "context.id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "context_lineage": {
+      "description": "Append-only lineage record of a verification-context move (opaque context.id).",
+      "class": "note",
+      "facts": {
+        "required": [
+          "context.id"
+        ],
+        "properties": {
+          "context.id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "transitions": [
+    {
+      "id": "test_complete",
+      "description": "Tester produced red-test evidence, or parked for the operator on a blocker.",
+      "from": {
+        "status": "active",
+        "phase": "test"
+      },
+      "by": [
+        "tester"
+      ],
+      "outcomes": [
+        {
+          "id": "done",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_result",
+              "facts": {
+                "result": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "test_review"
+          }
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_result",
+              "facts": {
+                "result": "operator_required"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "test_review_complete",
+      "description": "Coordinator accepts the red tests or rewinds findings to tester.",
+      "from": {
+        "status": "active",
+        "phase": "test_review"
+      },
+      "by": [
+        "coordinator"
+      ],
+      "outcomes": [
+        {
+          "id": "pass",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_review_result",
+              "facts": {
+                "result": "pass"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implement"
+          }
+        },
+        {
+          "id": "fail",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_review_result",
+              "facts": {
+                "result": "fail"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "test"
+          }
+        }
+      ]
+    },
+    {
+      "id": "implement_complete",
+      "description": "Implementation produced commit-bound evidence, a test-defect report, or parked for the operator.",
+      "from": {
+        "status": "active",
+        "phase": "implement"
+      },
+      "by": [
+        "implementer"
+      ],
+      "outcomes": [
+        {
+          "id": "done",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "verify"
+          }
+        },
+        {
+          "id": "no_product_change",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "no_product_change"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "verify"
+          }
+        },
+        {
+          "id": "test_defect",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "test_defect"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "test_fix"
+          }
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "test_fix"
+          }
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "operator_required"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "test_fix_complete",
+      "description": "Tester fixed or defended the reported test defect and implementation resumes.",
+      "from": {
+        "status": "active",
+        "phase": "test_fix"
+      },
+      "by": [
+        "tester"
+      ],
+      "outcomes": [
+        {
+          "id": "done",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_fix_result",
+              "facts": {
+                "result": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implement"
+          }
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "test_fix_result",
+              "facts": {
+                "result": "operator_required"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "verify_complete",
+      "description": "Observer pass advances to gate; failures rewind to implementation; anything else parks for the operator.",
+      "from": {
+        "status": "active",
+        "phase": "verify"
+      },
+      "by": [
+        "observer"
+      ],
+      "outcomes": [
+        {
+          "id": "pass",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "pass"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "gate"
+          }
+        },
+        {
+          "id": "failed",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "failed"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implement"
+          }
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "verify_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        },
+        {
+          "id": "other",
+          "when": {
+            "otherwise": true
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gate_complete",
+      "description": "Coordinator gate verdict selects a lane-guarded landing tail or rewinds to implementation.",
+      "from": {
+        "status": "active",
+        "phase": "gate"
+      },
+      "by": [
+        "coordinator"
+      ],
+      "outcomes": [
+        {
+          "id": "pass_leaf",
+          "when": {
+            "evidenceExists": {
+              "kind": "gate_result",
+              "facts": {
+                "result": "pass",
+                "workflow.lane": "leaf"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "land"
+          }
+        },
+        {
+          "id": "pass_trunk",
+          "when": {
+            "evidenceExists": {
+              "kind": "gate_result",
+              "facts": {
+                "result": "pass",
+                "workflow.lane": "trunk"
+              }
+            }
+          },
+          "to": {
+            "status": "waiting",
+            "phase": "awaiting_merge"
+          }
+        },
+        {
+          "id": "fail",
+          "when": {
+            "evidenceExists": {
+              "kind": "gate_result",
+              "facts": {
+                "result": "fail"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implement"
+          }
+        },
+        {
+          "id": "violation",
+          "when": {
+            "evidenceExists": {
+              "kind": "gate_result",
+              "facts": {
+                "result": "violation"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "direct_land_complete",
+      "description": "Leaf direct landing completed, returned to gate for push-failure classification, or parked for the operator.",
+      "from": {
+        "status": "active",
+        "phase": "land"
+      },
+      "by": [
+        "system"
+      ],
+      "outcomes": [
+        {
+          "id": "landed",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "landed",
+                "workflow.lane": "leaf"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
+        },
+        {
+          "id": "push_rejected",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "push_rejected",
+                "workflow.lane": "leaf"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "gate"
+          }
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "operator_required",
+                "workflow.lane": "leaf"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pr_landing_complete",
+      "description": "Trunk PR landing completed for the awaiting-merge tail, or parked for the operator when the PR cannot land.",
+      "from": {
+        "status": "waiting",
+        "phase": "awaiting_merge"
+      },
+      "by": [
+        "system"
+      ],
+      "outcomes": [
+        {
+          "id": "landed",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "landed",
+                "workflow.lane": "trunk"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "operator_required",
+                "workflow.lane": "trunk"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    }
+  ],
+  "executableActions": {
+    "gate": {
+      "from": {
+        "status": "active",
+        "phase": "gate"
+      },
+      "role": "coordinator",
+      "transition": "gate_complete",
+      "resultEvidenceKind": "gate_result",
+      "handlerContract": "praesidium.wrkq-simple-task.gate@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "test",
+        "git.read"
+      ],
+      "rank": 50
+    },
+    "implement": {
+      "from": {
+        "status": "active",
+        "phase": "implement"
+      },
+      "role": "implementer",
+      "transition": "implement_complete",
+      "resultEvidenceKind": "implement_result",
+      "handlerContract": "praesidium.wrkq-simple-task.implement@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "worktree.write",
+        "git.commit"
+      ],
+      "continuation": {
+        "next": "verify",
+        "attentionScope": "workspace",
+        "requireExactSource": true
+      },
+      "rank": 30,
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": {
+              "result": "done"
+            },
+            "requiredFacts": [
+              "source_identity"
+            ]
+          },
+          {
+            "whenFacts": {
+              "result": "no_product_change"
+            },
+            "requiredFacts": [
+              "source_identity",
+              "dispatch.base.sha",
+              "tracked.delta.paths"
+            ]
+          }
+        ]
+      }
+    },
+    "landing": {
+      "from": {
+        "status": "active",
+        "phase": "land"
+      },
+      "role": "system",
+      "transition": "direct_land_complete",
+      "resultEvidenceKind": "landing_result",
+      "handlerContract": "praesidium.wrkq-simple-task.direct-land@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "git.push"
+      ],
+      "sourceBinding": {
+        "kind": "previous_action",
+        "action": "verify",
+        "requiredFacts": [
+          "source_identity"
+        ],
+        "bindFields": {
+          "sourceIdentity": "source_identity"
+        }
+      },
+      "rank": 60,
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": {
+              "result": "landed"
+            },
+            "identityFact": "source_identity",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": [
+              "source_identity",
+              "source.evidence_id"
+            ]
+          }
+        ]
+      },
+      "contextFreshness": {
+        "verdictAction": "verify",
+        "passedFact": "result",
+        "passedValues": [
+          "pass"
+        ],
+        "contextFact": "context.id",
+        "lineageKind": "context_lineage"
+      }
+    },
+    "test": {
+      "from": {
+        "status": "active",
+        "phase": "test"
+      },
+      "role": "tester",
+      "transition": "test_complete",
+      "resultEvidenceKind": "test_result",
+      "handlerContract": "praesidium.wrkq-simple-task.test@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "worktree.write",
+        "git.commit",
+        "test"
+      ],
+      "rank": 10
+    },
+    "test_fix": {
+      "from": {
+        "status": "active",
+        "phase": "test_fix"
+      },
+      "role": "tester",
+      "transition": "test_fix_complete",
+      "resultEvidenceKind": "test_fix_result",
+      "handlerContract": "praesidium.wrkq-simple-task.test-fix@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "worktree.write",
+        "git.commit",
+        "test"
+      ],
+      "continuation": {
+        "next": "implement",
+        "attentionScope": "workspace"
+      },
+      "rank": 35
+    },
+    "test_review": {
+      "from": {
+        "status": "active",
+        "phase": "test_review"
+      },
+      "role": "coordinator",
+      "transition": "test_review_complete",
+      "resultEvidenceKind": "test_review_result",
+      "handlerContract": "praesidium.wrkq-simple-task.test-review@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "test",
+        "git.read"
+      ],
+      "rank": 20
+    },
+    "verify": {
+      "from": {
+        "status": "active",
+        "phase": "verify"
+      },
+      "role": "observer",
+      "transition": "verify_complete",
+      "resultEvidenceKind": "verify_result",
+      "handlerContract": "praesidium.wrkq-simple-task.verify@5",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "install",
+        "smoke",
+        "test"
+      ],
+      "sourceBinding": {
+        "kind": "previous_action",
+        "action": "implement",
+        "requiredFacts": [
+          "source_identity"
+        ],
+        "bindFields": {
+          "sourceIdentity": "source_identity"
+        }
+      },
+      "rank": 40,
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": {
+              "result": "pass"
+            },
+            "identityFact": "source_identity",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": [
+              "source_identity",
+              "source.evidence_id",
+              "context.id"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
