@@ -3,6 +3,7 @@ package workflow
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +13,43 @@ type recordingWorkflowPolicy struct {
 	projectCalls     []bool
 	validateErr      error
 	insertObligation bool
+}
+
+func installWorkflowPolicyForTest(templateID, version string, policy WorkflowPolicy) func() {
+	id := strings.TrimSpace(templateID)
+	ver := strings.TrimSpace(version)
+	if policy == nil {
+		policy = defaultWorkflowPolicy{}
+	}
+
+	workflowPolicyRegistry.Lock()
+	defer workflowPolicyRegistry.Unlock()
+	if ver == "" {
+		previous, hadPrevious := workflowPolicyRegistry.fallback[id]
+		workflowPolicyRegistry.fallback[id] = policy
+		return func() {
+			workflowPolicyRegistry.Lock()
+			defer workflowPolicyRegistry.Unlock()
+			if hadPrevious {
+				workflowPolicyRegistry.fallback[id] = previous
+			} else {
+				delete(workflowPolicyRegistry.fallback, id)
+			}
+		}
+	}
+
+	key := workflowPolicyKey{templateID: id, version: ver}
+	previous, hadPrevious := workflowPolicyRegistry.exact[key]
+	workflowPolicyRegistry.exact[key] = policy
+	return func() {
+		workflowPolicyRegistry.Lock()
+		defer workflowPolicyRegistry.Unlock()
+		if hadPrevious {
+			workflowPolicyRegistry.exact[key] = previous
+		} else {
+			delete(workflowPolicyRegistry.exact, key)
+		}
+	}
 }
 
 func (p *recordingWorkflowPolicy) ValidateEvidence(AddEvidenceParams, *parsedEvidenceFacts) error {
@@ -71,10 +109,10 @@ func TestWorkflowPolicyRegistryResolution(t *testing.T) {
 	}
 
 	exact := &recordingWorkflowPolicy{}
-	cleanupExact := registerWorkflowPolicy("policy-test", "1", exact)
+	cleanupExact := installWorkflowPolicyForTest("policy-test", "1", exact)
 	defer cleanupExact()
 	fallback := &recordingWorkflowPolicy{}
-	cleanupFallback := registerWorkflowPolicy("policy-fallback-test", "", fallback)
+	cleanupFallback := installWorkflowPolicyForTest("policy-fallback-test", "", fallback)
 	defer cleanupFallback()
 
 	if got := ResolveWorkflowPolicy(&Template{ID: "policy-test", Version: "1"}); got != exact {
@@ -106,7 +144,7 @@ func TestDefaultWorkflowPolicyNoop(t *testing.T) {
 func TestAddEvidenceDispatchesPolicyValidationSideEffectsAndIdempotency(t *testing.T) {
 	svc, taskUUID := setupDirectEvidenceFixture(t)
 	policy := &recordingWorkflowPolicy{insertObligation: true}
-	cleanup := registerWorkflowPolicy("direct_evidence_test", "1", policy)
+	cleanup := installWorkflowPolicyForTest("direct_evidence_test", "1", policy)
 	defer cleanup()
 
 	first, err := svc.AddEvidence(AddEvidenceParams{
@@ -154,7 +192,7 @@ func TestAddActionEvidenceTxDispatchesPolicyValidation(t *testing.T) {
 	svc, taskUUID := setupDirectEvidenceFixture(t)
 	sentinel := errors.New("policy validation sentinel")
 	policy := &recordingWorkflowPolicy{validateErr: sentinel}
-	cleanup := registerWorkflowPolicy("direct_evidence_test", "1", policy)
+	cleanup := installWorkflowPolicyForTest("direct_evidence_test", "1", policy)
 	defer cleanup()
 
 	inst, err := svc.LatestInstance(taskUUID)
@@ -188,7 +226,7 @@ func TestAddActionEvidenceTxDispatchesPolicyValidation(t *testing.T) {
 func TestListObligationsDispatchesPolicyProjectionAndIncludeClosed(t *testing.T) {
 	svc, taskUUID := setupDirectEvidenceFixture(t)
 	policy := &recordingWorkflowPolicy{}
-	cleanup := registerWorkflowPolicy("direct_evidence_test", "1", policy)
+	cleanup := installWorkflowPolicyForTest("direct_evidence_test", "1", policy)
 	defer cleanup()
 
 	openOnly, err := svc.ListObligations(taskUUID, false)

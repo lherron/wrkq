@@ -51,43 +51,6 @@ func ResolveWorkflowPolicy(tpl *Template) WorkflowPolicy {
 	return defaultWorkflowPolicy{}
 }
 
-func registerWorkflowPolicy(templateID, version string, policy WorkflowPolicy) func() {
-	id := strings.TrimSpace(templateID)
-	ver := strings.TrimSpace(version)
-	if policy == nil {
-		policy = defaultWorkflowPolicy{}
-	}
-
-	workflowPolicyRegistry.Lock()
-	defer workflowPolicyRegistry.Unlock()
-	if ver == "" {
-		previous, hadPrevious := workflowPolicyRegistry.fallback[id]
-		workflowPolicyRegistry.fallback[id] = policy
-		return func() {
-			workflowPolicyRegistry.Lock()
-			defer workflowPolicyRegistry.Unlock()
-			if hadPrevious {
-				workflowPolicyRegistry.fallback[id] = previous
-			} else {
-				delete(workflowPolicyRegistry.fallback, id)
-			}
-		}
-	}
-
-	key := workflowPolicyKey{templateID: id, version: ver}
-	previous, hadPrevious := workflowPolicyRegistry.exact[key]
-	workflowPolicyRegistry.exact[key] = policy
-	return func() {
-		workflowPolicyRegistry.Lock()
-		defer workflowPolicyRegistry.Unlock()
-		if hadPrevious {
-			workflowPolicyRegistry.exact[key] = previous
-		} else {
-			delete(workflowPolicyRegistry.exact, key)
-		}
-	}
-}
-
 func (defaultWorkflowPolicy) ValidateEvidence(AddEvidenceParams, *parsedEvidenceFacts) error {
 	return nil
 }

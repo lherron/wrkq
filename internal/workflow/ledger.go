@@ -2482,21 +2482,3 @@ func (s *Service) DiffTemplateFiles(oldPath, newPath string) (map[string]interfa
 		"sameHash": oldHash == newHash,
 	}, nil
 }
-
-func StateMap(st State) map[string]string {
-	out := map[string]string{"status": st.Status}
-	if st.Phase != "" {
-		out["phase"] = st.Phase
-	}
-	if st.Outcome != "" {
-		out["outcome"] = st.Outcome
-	}
-	return out
-}
-
-func JoinErrors(errs []string) error {
-	if len(errs) == 0 {
-		return nil
-	}
-	return errors.New(strings.Join(errs, "; "))
-}
