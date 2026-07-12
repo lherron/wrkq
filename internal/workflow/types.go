@@ -153,24 +153,37 @@ type FactsContract struct {
 type FactProperty struct {
 	Type      string            `json:"type,omitempty"`
 	Enum      []json.RawMessage `json:"enum,omitempty"`
+	MinLength int               `json:"minLength,omitempty"`
 	MaxLength int               `json:"maxLength,omitempty"`
 	MaxItems  int               `json:"maxItems,omitempty"`
 	ItemsType string            `json:"itemsType,omitempty"`
 }
 
 type TransitionSpec struct {
-	ID               string                `json:"id"`
-	Description      string                `json:"description,omitempty"`
-	From             State                 `json:"from"`
-	By               []string              `json:"by"`
-	Responsibility   *ResponsibilitySpec   `json:"responsibility,omitempty"`
-	Guards           []Predicate           `json:"guards,omitempty"`
-	Requires         []RequirementSpec     `json:"requires,omitempty"`
-	Checks           []string              `json:"checks,omitempty"`
-	Outcomes         []OutcomeCase         `json:"outcomes"`
-	Hooks            map[string][]HookRef  `json:"hooks,omitempty"`
-	Postconditions   []Predicate           `json:"postconditions,omitempty"`
-	SeparationOfDuty *SeparationOfDutySpec `json:"separationOfDuty,omitempty"`
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+	From        State  `json:"from"`
+	// FromAny, when non-empty, matches the instance against ANY of the listed
+	// states (logical OR with From). A blank/status-less entry is a wildcard
+	// that — like a blank From — never implicitly matches a CLOSED instance
+	// unless the entry names status "closed" explicitly. Collapses per-phase
+	// transition enumeration into one row.
+	FromAny []State `json:"fromAny,omitempty"`
+	// RequiresNoActiveRun refuses the transition inside the transition
+	// transaction when the instance has an open (active) action run. Marks
+	// operator-class transitions (e.g. operator_resolved) so an operator cannot
+	// terminalize or move an instance out from under a live seat's run — "the
+	// action run is the lease." Worker settle transitions leave this unset.
+	RequiresNoActiveRun bool                  `json:"requiresNoActiveRun,omitempty"`
+	By                  []string              `json:"by"`
+	Responsibility      *ResponsibilitySpec   `json:"responsibility,omitempty"`
+	Guards              []Predicate           `json:"guards,omitempty"`
+	Requires            []RequirementSpec     `json:"requires,omitempty"`
+	Checks              []string              `json:"checks,omitempty"`
+	Outcomes            []OutcomeCase         `json:"outcomes"`
+	Hooks               map[string][]HookRef  `json:"hooks,omitempty"`
+	Postconditions      []Predicate           `json:"postconditions,omitempty"`
+	SeparationOfDuty    *SeparationOfDutySpec `json:"separationOfDuty,omitempty"`
 }
 
 type SeparationOfDutySpec struct {

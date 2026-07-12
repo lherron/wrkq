@@ -48,7 +48,7 @@ func (s *Service) EvaluateTransitionDecision(input TransitionDecisionInput) (Tra
 		return decision, fmt.Errorf("workflow template is required")
 	}
 	tr := input.Transition
-	if !stateMatches(*input.Instance, tr.From) {
+	if !transitionFromMatches(*input.Instance, tr) {
 		decision.Blockers = []Blocker{{Kind: "state", Ref: tr.ID, Message: fmt.Sprintf("transition %s cannot run from current state", tr.ID)}}
 		return decision, nil
 	}
