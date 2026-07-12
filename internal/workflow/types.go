@@ -318,10 +318,30 @@ type Instance struct {
 	ClosedAt        string              `json:"closedAt,omitempty"`
 	Supersedes      *InstanceLineageRef `json:"supersedes,omitempty"`
 	SupersededBy    *InstanceLineageRef `json:"supersededBy,omitempty"`
+	// Suspension is the single active suspension on this instance, or nil when
+	// the instance is running. Parking records a suspension; it does not touch
+	// status/phase/outcome — a suspended instance is still "in" its phase.
+	Suspension *Suspension `json:"suspension,omitempty"`
 }
 
 func (i Instance) State() State {
 	return State{Status: i.Status, Phase: i.Phase, Outcome: i.Outcome}
+}
+
+// Suspended reports whether the instance currently carries an active suspension.
+func (i Instance) Suspended() bool {
+	return i.Suspension != nil
+}
+
+// Suspension is the first-class condition that parks a workflow instance in
+// place. It is a record, not a state change: a unique id, a template-declared
+// reason code, the timestamp it was opened, and a pointer to the outcome/event
+// that caused it. Exactly one is active at a time; there is no stack.
+type Suspension struct {
+	ID       string `json:"id"`
+	Reason   string `json:"reason"`
+	At       string `json:"at"`
+	CauseRef string `json:"causeRef,omitempty"`
 }
 
 type InstanceLineageRef struct {
@@ -671,9 +691,9 @@ type NextInstance struct {
 		Version string `json:"version"`
 		Hash    string `json:"hash"`
 	} `json:"template"`
-	State       State  `json:"state"`
-	Revision    int64  `json:"revision"`
-	TaskDoc     struct {
+	State    State `json:"state"`
+	Revision int64 `json:"revision"`
+	TaskDoc  struct {
 		Etag string `json:"etag"`
 		Hash string `json:"hash"`
 	} `json:"taskDoc"`

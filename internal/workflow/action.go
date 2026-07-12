@@ -1379,6 +1379,13 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	}
 	chosen := decision.Outcome
 
+	// Suspended-write gate (door 2 of 2). A suspended instance rejects the
+	// write; reads and inspection are unaffected. This is the entire fencing
+	// story — a pre-park worker's settle bounces here.
+	if inst.Suspension != nil {
+		return nil, suspendedWriteError(inst)
+	}
+
 	nextRevision := inst.Revision + 1
 	now := s.now().UTC().Format(time.RFC3339)
 	updated := *inst
@@ -1990,9 +1997,7 @@ func (s *Service) actionListInstances(p ListActionsParams) ([]string, map[string
 		return nil, nil, err
 	}
 	query := `
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		SELECT ` + instanceSelectColumns + `
 		FROM workflow_instances WHERE task_uuid = ?`
 	if !p.IncludeClosedInstances {
 		query += " AND status != 'closed'"
@@ -2005,13 +2010,12 @@ func (s *Service) actionListInstances(p ListActionsParams) ([]string, map[string
 	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
-		var i Instance
-		if err := rows.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt); err != nil {
+		inst, err := scanInstanceRow(rows)
+		if err != nil {
 			return nil, nil, err
 		}
-		inst := i
-		byID[i.ID] = &inst
-		ids = append(ids, i.ID)
+		byID[inst.ID] = inst
+		ids = append(ids, inst.ID)
 	}
 	return ids, byID, rows.Err()
 }

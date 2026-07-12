@@ -1144,6 +1144,71 @@ func (s *Service) activeInstanceByTaskUUID(taskUUID string) (*Instance, error) {
 	return inst, s.populateInstanceLineage(inst)
 }
 
+// Suspend opens the single active suspension on an instance. Parking is a
+// record, not a state change: status/phase/outcome are untouched — the instance
+// stays "in" its phase, just stopped. Suspending an already-suspended instance
+// is rejected (exactly one active suspension, no stack). Revision is not bumped
+// — the suspended-write gate, not a CAS token, is what fences pre-park workers.
+//
+// This is the minimal internal author of a suspension for T-06260. The
+// template DSL suspend outcome (T-06261) and resolveSuspension (T-06262) build
+// on the same record and gate.
+func (s *Service) Suspend(taskSelector, instanceID, reason, causeRef, principalRef string) (*Instance, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, validationError("reason", "a suspension reason code is required", "non-empty reason code", nil, "supply --reason")
+	}
+	var out *Instance
+	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
+		inst, err := resolveInstanceSelectors(tx, taskSelector, instanceID)
+		if err != nil {
+			return err
+		}
+		if inst.Status == "closed" {
+			return validationError("status", fmt.Sprintf("instance %s is closed and cannot be suspended", inst.ID), "running instance", nil, "suspend a live instance")
+		}
+		if inst.Suspension != nil {
+			return alreadySuspendedError(inst)
+		}
+		susID, err := nextSeqID(tx, "workflow_suspension_seq", "sus")
+		if err != nil {
+			return err
+		}
+		now := s.now().UTC().Format(time.RFC3339)
+		// WHERE suspension_id IS NULL makes the one-active-suspension rule
+		// atomic against a concurrent suspend; status/phase/outcome/revision are
+		// deliberately left untouched.
+		res, err := tx.Exec(`
+			UPDATE workflow_instances
+			SET suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?, updated_at = ?
+			WHERE id = ? AND suspension_id IS NULL
+		`, susID, reason, now, nullIfEmpty(strings.TrimSpace(causeRef)), now, inst.ID)
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			// Lost the race: someone suspended between our read and write.
+			reloaded, loadErr := instanceByIDQuery(tx, inst.ID)
+			if loadErr != nil {
+				return loadErr
+			}
+			return alreadySuspendedError(reloaded)
+		}
+		inst.Suspension = &Suspension{ID: susID, Reason: reason, At: now, CauseRef: strings.TrimSpace(causeRef)}
+		inst.UpdatedAt = now
+		out = inst
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, s.populateInstanceLineage(out)
+}
+
 func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
 	taskUUID, _, err := selectors.ResolveTask(s.db, taskSelector)
 	if err != nil {
@@ -1156,15 +1221,43 @@ func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
 	return inst, s.populateInstanceLineage(inst)
 }
 
-func scanInstance(row *sql.Row) (*Instance, error) {
+// instanceSelectColumns is the single source of truth for the instance column
+// projection. Every instance read (row and rows) selects exactly these columns
+// in this order and scans them through scanInstanceRow, so the suspension
+// fields can never drift between read sites.
+const instanceSelectColumns = `id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
+	       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
+	       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,''),
+	       COALESCE(suspension_id,''), COALESCE(suspension_reason,''), COALESCE(suspension_at,''), COALESCE(suspension_cause_ref,'')`
+
+// instanceScanner is satisfied by both *sql.Row and *sql.Rows.
+type instanceScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanInstanceRow scans one instance row (projected via instanceSelectColumns)
+// and reconstitutes its active suspension record when present.
+func scanInstanceRow(sc instanceScanner) (*Instance, error) {
 	var i Instance
-	if err := row.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt); err != nil {
+	var susID, susReason, susAt, susCause string
+	if err := sc.Scan(&i.ID, &i.TaskUUID, &i.TaskRef, &i.ProjectID, &i.TemplateID, &i.TemplateVersion, &i.TemplateHash, &i.Status, &i.Phase, &i.Outcome, &i.Revision, &i.TaskDocEtag, &i.TaskDocHash, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &susID, &susReason, &susAt, &susCause); err != nil {
+		return nil, err
+	}
+	if susID != "" {
+		i.Suspension = &Suspension{ID: susID, Reason: susReason, At: susAt, CauseRef: susCause}
+	}
+	return &i, nil
+}
+
+func scanInstance(row *sql.Row) (*Instance, error) {
+	inst, err := scanInstanceRow(row)
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("workflow instance not found")
 		}
 		return nil, err
 	}
-	return &i, nil
+	return inst, nil
 }
 
 func (s *Service) InspectTask(taskSelector string) (*Instance, error) {
@@ -1781,9 +1874,7 @@ func walkContainerPathQuery(q queryer, path string) (string, error) {
 
 func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error) {
 	row := q.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		SELECT `+instanceSelectColumns+`
 		FROM workflow_instances
 		WHERE task_uuid = ?
 		ORDER BY CASE WHEN status != 'closed' THEN 0 ELSE 1 END, created_at DESC, id DESC LIMIT 1
@@ -1793,9 +1884,7 @@ func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error
 
 func activeInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error) {
 	row := q.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		SELECT `+instanceSelectColumns+`
 		FROM workflow_instances
 		WHERE task_uuid = ? AND status != 'closed'
 		ORDER BY created_at DESC, id DESC LIMIT 1
@@ -1805,9 +1894,7 @@ func activeInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error
 
 func instanceByIDQuery(q queryer, instanceID string) (*Instance, error) {
 	row := q.QueryRow(`
-		SELECT id, task_uuid, task_ref, COALESCE(project_id,''), template_id, template_version, template_hash,
-		       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
-		       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,'')
+		SELECT `+instanceSelectColumns+`
 		FROM workflow_instances WHERE id = ?
 	`, instanceID)
 	return scanInstance(row)

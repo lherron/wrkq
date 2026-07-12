@@ -18,6 +18,8 @@ const (
 	wrkfCodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"
 	wrkfCodeLinkageUnresolved    = "WRKF_LINKAGE_UNRESOLVED"
 	wrkfCodeLinkageStale         = "WRKF_LINKAGE_STALE"
+	wrkfCodeSuspended            = "WRKF_SUSPENDED"
+	wrkfCodeAlreadySuspended     = "WRKF_ALREADY_SUSPENDED"
 )
 
 // ErrorDetail is the single machine-parseable error shape carried by wrkf
@@ -151,6 +153,33 @@ func linkageStaleError(field, ref, resolvesToKind, latestID string) error {
 	fix := fmt.Sprintf("set data%s to %s (the latest %s)", field, latestID, resolvesToKind)
 	expected := fmt.Sprintf("latest %s id (%s)", resolvesToKind, latestID)
 	return &wrkfError{code: wrkfCodeLinkageStale, msg: msg + "; " + fix, field: "data" + field, expected: expected, fix: fix}
+}
+
+// suspendedWriteError is the suspended-write gate rejection. It bounces any
+// write to a suspended instance at the commit point of both transition paths —
+// the entire fencing story for a pre-park worker that settles after the park.
+func suspendedWriteError(inst *Instance) error {
+	sus := inst.Suspension
+	return &wrkfError{
+		code:     wrkfCodeSuspended,
+		msg:      fmt.Sprintf("instance %s is suspended (%s %s); writes are rejected until the suspension is resolved", inst.ID, sus.ID, sus.Reason),
+		field:    "suspension",
+		expected: "running instance (no active suspension)",
+		fix:      "resolve the active suspension before writing to this instance",
+	}
+}
+
+// alreadySuspendedError rejects a second suspension: exactly one is active at a
+// time, there is no stack.
+func alreadySuspendedError(inst *Instance) error {
+	sus := inst.Suspension
+	return &wrkfError{
+		code:     wrkfCodeAlreadySuspended,
+		msg:      fmt.Sprintf("instance %s already has an active suspension (%s %s)", inst.ID, sus.ID, sus.Reason),
+		field:    "suspension",
+		expected: "running instance (no active suspension)",
+		fix:      "resolve the active suspension before opening a new one",
+	}
 }
 
 func staleRevisionError(instanceID string, expected, actual int64) error {
