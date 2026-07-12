@@ -302,6 +302,76 @@ func TestWrkfActionClaimV2FencedRunAndSuccession(t *testing.T) {
 	}
 }
 
+func TestWrkfActionClaimSuspendedRefusalPayload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	taskID := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000099",
+		"action-claim-suspended", "Action Claim Suspended")
+	setup := p3Run(t, dbPath,
+		mkRPC("install", "wrkf.workflow.install", map[string]any{
+			"path": "internal/workflow/builtins/wrkq-simple-task-v5.workflow.json",
+		}),
+		mkRPC("attach", "wrkq.workflow.attach", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@5",
+		}),
+	)
+	p2ResultOrFail(t, setup[1], "install v5")
+	p2ResultOrFail(t, setup[2], "attach v5")
+
+	first := actRPCClaim(t, dbPath, taskID, "test")
+	actRPCSettle(t, dbPath, first, map[string]any{"result": "operator_required"}, "parked")
+	showFrames := p3Run(t, dbPath,
+		mkRPC("show", "wrkf.instance.show", map[string]any{"task": taskID}),
+	)
+	instance := p2ResultOrFail(t, showFrames[1], "show suspended instance")
+	suspension, _ := instance["suspension"].(map[string]any)
+	if suspension == nil || suspension["id"] == "" || suspension["reason"] != "operator_required" || suspension["at"] == "" || suspension["causeRef"] == "" {
+		t.Fatalf("active suspension = %#v, want complete record", suspension)
+	}
+
+	wrong := "run-not-the-predecessor"
+	refusedFrames := p3Run(t, dbPath,
+		mkRPC("claim-refused", "wrkf.action.claim", map[string]any{
+			"task": taskID, "prefer": map[string]any{"action": "test"},
+			"runnerId": "runner-successor", "agentRef": "agent:successor",
+			"leaseMs": float64(300000), "priorRun": wrong,
+		}),
+	)
+	errObj, _ := refusedFrames[1]["error"].(map[string]any)
+	errData, _ := errObj["data"].(map[string]any)
+	gotSuspension, _ := errData["suspension"].(map[string]any)
+	if errData["code"] != "WRKF_SUSPENDED" {
+		t.Fatalf("claim refusal = %#v, want WRKF_SUSPENDED", errObj)
+	}
+	for _, field := range []string{"id", "reason", "at", "causeRef"} {
+		if gotSuspension[field] != suspension[field] {
+			t.Fatalf("claim refusal suspension[%s] = %#v, want %#v", field, gotSuspension[field], suspension[field])
+		}
+	}
+	if _, ok := errData["predecessor"]; ok {
+		t.Fatalf("suspended claim refusal leaked predecessor dossier: %#v", errData)
+	}
+
+	resumeFrames := p3Run(t, dbPath,
+		mkRPC("resume", "wrkf.suspension.resolve", map[string]any{
+			"suspensionId": suspension["id"], "disposition": "resume", "principal_ref": actActor,
+		}),
+		mkRPC("claim-after-resume", "wrkf.action.claim", map[string]any{
+			"task": taskID, "prefer": map[string]any{"action": "test"},
+			"runnerId": "runner-successor", "agentRef": "agent:successor",
+			"leaseMs": float64(300000), "priorRun": nil,
+		}),
+	)
+	p2ResultOrFail(t, resumeFrames[1], "resume suspended instance")
+	claim := p2ResultOrFail(t, resumeFrames[2], "claim after resume")
+	if binding := actClaimBinding(t, claim, "claim after resume"); binding["run"] == nil {
+		t.Fatalf("claim after resume missing run: %#v", claim)
+	}
+}
+
 func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")

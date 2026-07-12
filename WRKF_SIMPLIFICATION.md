@@ -21,7 +21,7 @@ A running instance can gain exactly one suspension: a small record holding a uni
 
 ### 2. One write gate while suspended
 
-At the point where the engine commits a write to an instance — **both** existing commit paths, `TransitionForSelectors` (ledger.go) and `applyActionTransitionTx` (action.go), get the same one-line guard — a suspended instance rejects the write. Reads and inspection work normally. This is the entire enforcement story: a worker who claimed before the park simply bounces when it tries to settle. No token invalidation, no authority model, no admission matrix. Only writes are blocked.
+At each point where the engine writes to an instance — `TransitionForSelectors` (ledger.go), `applyActionTransitionTx` (action.go), and `ClaimAction` before it issues new run authority — the same active-suspension fact rejects the write with `WRKF_SUSPENDED`. Reads and inspection work normally. A worker who claimed before the park bounces when it tries to settle; a new worker cannot create a dead-on-arrival claim while parked. The claim refusal carries only the active suspension record and takes precedence over predecessor succession review. No token invalidation, no authority model, no admission matrix.
 
 ### 3. Template DSL: suspend as an outcome, declared once
 
@@ -93,7 +93,7 @@ The daemon sweep (`cli/daemon.go`), the CLI reap command, the RPC endpoint, `Rea
 - No engine-opened suspensions, no engine-reserved reason codes.
 - No run-authority invalidation beyond supersession-at-claim.
 - No template drift detection, reconciliation, or supersede-under-suspension handling — instances are ephemeral (attach, run the flow, close the task) and templates are static once correct. `templateHash` stays as write-once provenance that nothing checks.
-- No commit-path unification refactor — both doors get the same guard and that's all.
+- No commit-path unification refactor — all three doors get the same guard and that's all.
 - No migrations, no backward compatibility, no dual-mode support.
 - No changes outside the wrkq repo.
 
@@ -101,7 +101,7 @@ The daemon sweep (`cli/daemon.go`), the CLI reap command, the RPC endpoint, `Rea
 
 | # | What | Kind |
 |---|---|---|
-| 1 | Writes to a suspended instance are rejected (one guard, both commit paths) | GATE |
+| 1 | Writes to a suspended instance are rejected (one fact, three doors) | GATE |
 | 2 | `resolveSuspension` must present the matching suspension id | GATE |
 | 3 | `claim` must present the prior run id (`null` for a first claim) | GATE |
 | 4 | Ordinary revision CAS on engine writes | HASH (existing, unchanged) |
@@ -124,5 +124,6 @@ Tracked in the `wrkq` project under `wrkf-v5-suspend/`:
 6. **T-06265** `purge-operator-park-plumbing` — delete the reaper wholesale + policy.go/ledger.go operator-park special-casing.
 7. **T-06266** `claim-succession-contract` — the `priorRun` CAS gate, supersession semantics, late-settle rule, succession event.
 8. **T-06267** `purge-workspace-leases` — delete workspace lease machinery; `workspaceRef` becomes an opaque run fact.
+9. **T-06299** `defect-claim-not-suspension-gated` — extend the suspended-write gate to `action.claim`, before succession evaluation.
 
 Suggested order: the purges (T-06264, T-06265, T-06267) can land first or in parallel with T-06260; T-06261–T-06263 build on T-06260; T-06266 reshapes claim/settle and should coordinate with T-06265 (the reaper deletion) landing before or with it. The `@5` template and the new loop follow outside this scope.

@@ -89,6 +89,7 @@ JSON-RPC `error` object. `data.code` is the stable contract; `message` is human-
 | `WRKF_KIND_ROLE_DENIED` | -32018 | false | evidence kind is not producible by the supplied role (template `producibleBy` conformance — supplied-role only, **not** an authenticated-principal boundary) |
 | `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | a declared evidence `data` linkage ref did not resolve to a live evidence id on the same instance (template `linkageRefs`) |
 | `WRKF_LINKAGE_STALE` | -32020 | false | a `linkageRefs` entry with `latest:true` points at a superseded (non-current) evidence of the expected kind; `data.fix` names the current id |
+| `WRKF_SUSPENDED` | -32026 | false | the instance has an active suspension; `data.suspension` carries its `id`, `reason`, `at`, and optional `causeRef` |
 | `WRKF_INTERNAL` | -32603 | false | unclassified internal error |
 
 `data.retryable` is **always a boolean** on every error instance (no `maybe`/absent). `data.code` is always present for WRKF_* domain errors.

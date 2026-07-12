@@ -30,6 +30,7 @@ var domainRPCCode = map[string]int{
 	wrkfapi.CodeLinkageUnresolved:    -32019,
 	wrkfapi.CodeLinkageStale:         -32020,
 	wrkfapi.CodeSuspensionNotFound:   -32025,
+	wrkfapi.CodeSuspended:            -32026,
 	wrkfapi.CodeInternal:             -32603,
 }
 

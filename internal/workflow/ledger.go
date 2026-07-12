@@ -1763,7 +1763,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			return nil
 		}
 
-		// Suspended-write gate (door 1 of 2). A suspended instance rejects the
+		// Suspended-write gate (door 1 of 3). A suspended instance rejects the
 		// write; reads, inspection, and dry-run are unaffected. This is the
 		// entire fencing story — a pre-park worker's settle bounces here.
 		if inst.Suspension != nil {

@@ -246,6 +246,7 @@ Every domain error must include:
 | `WRKF_KIND_ROLE_DENIED` | -32018 | false | supplied role cannot produce evidence kind |
 | `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | declared evidence linkage did not resolve |
 | `WRKF_LINKAGE_STALE` | -32020 | false | latest linkage points at superseded evidence |
+| `WRKF_SUSPENDED` | -32026 | false | instance has an active suspension; `data.suspension` carries that record |
 | `WORKRPC_INTERNAL` | -32603 | false | unclassified internal error |
 
 Standard JSON-RPC protocol errors (parse error, invalid request, method not

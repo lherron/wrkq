@@ -759,7 +759,7 @@ export interface WrkfActionClaimParams {
   leaseMs: number;
   workspaceRoot?: string;
   idempotencyKey?: string;
-  /** Latest acknowledged predecessor, or null for a first-ever claim. */
+  /** Latest acknowledged predecessor, or null for a first-ever claim. Suspended instances refuse before succession evaluation. */
   priorRun: string | null;
 }
 

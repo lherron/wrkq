@@ -21,6 +21,7 @@ const (
 	CodeKindRoleDenied       = "WRKF_KIND_ROLE_DENIED"
 	CodeLinkageUnresolved    = "WRKF_LINKAGE_UNRESOLVED"
 	CodeLinkageStale         = "WRKF_LINKAGE_STALE"
+	CodeSuspended            = "WRKF_SUSPENDED"
 	CodeSuspensionNotFound   = "WRKF_SUSPENSION_NOT_FOUND"
 	CodeInternal             = "WRKF_INTERNAL"
 )

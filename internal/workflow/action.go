@@ -408,6 +408,11 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 		if err != nil {
 			return err
 		}
+		// Suspended-write gate (door 3 of 3). Refuse before candidate and
+		// predecessor evaluation so suspension wins over succession.
+		if inst.Suspension != nil {
+			return suspendedWriteError(inst)
+		}
 		filters := ActionNextFilters{}
 		if action := strings.TrimSpace(p.Prefer.Action); action != "" {
 			filters.Actions = []string{action}
@@ -1393,7 +1398,7 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	}
 	chosen := decision.Outcome
 
-	// Suspended-write gate (door 2 of 2). A suspended instance rejects the
+	// Suspended-write gate (door 2 of 3). A suspended instance rejects the
 	// write; reads and inspection are unaffected. This is the entire fencing
 	// story — a pre-park worker's settle bounces here.
 	if inst.Suspension != nil {

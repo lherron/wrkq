@@ -1,16 +1,17 @@
 package workflow
 
 // suspension_test.go — T-06260. Suspension as a first-class condition on a
-// workflow instance, plus the suspended-write gate on both commit paths.
+// workflow instance, plus the suspended-write gate on all three write paths.
 //
 // Contract (WRKF_SIMPLIFICATION.md §1–§3):
 //   - A template suspend outcome records a suspension (id, reason, timestamp,
 //     cause pointer) without changing status/phase/outcome. The normal
 //     transition still advances revision.
 //   - Exactly one active suspension; a second suspend is rejected.
-//   - The suspended-write gate rejects writes at BOTH commit paths
-//     (TransitionForSelectors and applyActionTransitionTx). Reads, inspection,
-//     and dry-run are unaffected — the gate is the entire fencing story.
+//   - The suspended-write gate rejects writes at all three doors
+//     (TransitionForSelectors, applyActionTransitionTx, and ClaimAction). Reads,
+//     inspection, and dry-run are unaffected — the gate is the entire fencing
+//     story.
 
 import (
 	"database/sql"
@@ -143,6 +144,99 @@ func TestSuspendedWriteGateDoor2(t *testing.T) {
 	}
 	if !after.Suspended() {
 		t.Fatalf("suspension vanished after bounced settle: %+v", after)
+	}
+}
+
+// TestSuspendedWriteGateDoor3 proves the claim gate rejects a new run before
+// issuing work authority, carries only the active suspension record, and opens
+// normally once that suspension is resolved.
+func TestSuspendedWriteGateDoor3(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	parkInstanceForTest(t, svc, taskUUID)
+
+	parked, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance after park: %v", err)
+	}
+	_, err = svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-a", AgentRef: "agent:cody",
+		Prefer: ActionClaimPrefer{Action: "triage"}, LeaseMs: 300000,
+		PriorRunProvided: true,
+	})
+	requireWrkfCode(t, err, wrkfCodeSuspended)
+	detail, ok := AsErrorDetail(err)
+	if !ok || detail.Suspension == nil {
+		t.Fatalf("claim refusal detail = %+v err=%v, want active suspension", detail, err)
+	}
+	if *detail.Suspension != *parked.Suspension {
+		t.Fatalf("claim refusal suspension = %+v, want %+v", detail.Suspension, parked.Suspension)
+	}
+	if detail.Predecessor != nil {
+		t.Fatalf("claim refusal leaked predecessor dossier: %+v", detail.Predecessor)
+	}
+	var runs int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM workflow_runs WHERE instance_id = ?`, parked.ID).Scan(&runs); err != nil {
+		t.Fatalf("count runs after suspended claim: %v", err)
+	}
+	if runs != 0 {
+		t.Fatalf("runs after suspended claim = %d, want 0", runs)
+	}
+
+	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
+		SuspensionID: parked.Suspension.ID, Disposition: "resume", PrincipalRef: "agent:op",
+	}); err != nil {
+		t.Fatalf("ResolveSuspension resume: %v", err)
+	}
+	claim, err := svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-a", AgentRef: "agent:cody",
+		Prefer: ActionClaimPrefer{Action: "triage"}, LeaseMs: 300000,
+		PriorRunProvided: true,
+	})
+	if err != nil {
+		t.Fatalf("ClaimAction after resume: %v", err)
+	}
+	if claim.Binding == nil || claim.Binding.Run.Action != "triage" {
+		t.Fatalf("claim after resume = %+v, want triage binding", claim)
+	}
+}
+
+// TestSuspendedClaimGatePrecedesExpiredPredecessor proves suspension wins over
+// succession: a contestable predecessor remains untouched and its dossier is
+// not consulted or returned until the suspension is resolved.
+func TestSuspendedClaimGatePrecedesExpiredPredecessor(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	first := claimActionForTest(t, svc, taskUUID, "triage")
+	if _, err := svc.db.Exec(`UPDATE workflow_runs SET lease_expires_at = '2000-01-01T00:00:00Z' WHERE id = ?`, first.Binding.Run.ID); err != nil {
+		t.Fatalf("expire predecessor lease: %v", err)
+	}
+	parkInstanceForTest(t, svc, taskUUID)
+	parked, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance after park: %v", err)
+	}
+
+	wrong := "run-not-the-predecessor"
+	_, err = svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-successor", AgentRef: "agent:successor",
+		Prefer: ActionClaimPrefer{Action: "triage"}, LeaseMs: 300000,
+		PriorRun: &wrong, PriorRunProvided: true,
+	})
+	requireWrkfCode(t, err, wrkfCodeSuspended)
+	detail, ok := AsErrorDetail(err)
+	if !ok || detail.Suspension == nil || detail.Suspension.ID != parked.Suspension.ID {
+		t.Fatalf("precedence refusal detail = %+v err=%v, want suspension %s", detail, err, parked.Suspension.ID)
+	}
+	if detail.Predecessor != nil {
+		t.Fatalf("precedence refusal leaked predecessor dossier: %+v", detail.Predecessor)
+	}
+	var status, supersededBy string
+	if err := svc.db.QueryRow(`SELECT status, COALESCE(superseded_by_run_id, '') FROM workflow_runs WHERE id = ?`, first.Binding.Run.ID).Scan(&status, &supersededBy); err != nil {
+		t.Fatalf("read predecessor after refusal: %v", err)
+	}
+	if status != "active" || supersededBy != "" {
+		t.Fatalf("suspended claim touched predecessor: status=%q supersededBy=%q", status, supersededBy)
 	}
 }
 

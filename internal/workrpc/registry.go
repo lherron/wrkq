@@ -105,6 +105,7 @@ func ErrorCodeCatalog() []string {
 		wrkfapi.CodeKindRoleDenied,
 		wrkfapi.CodeLinkageUnresolved,
 		wrkfapi.CodeLinkageStale,
+		wrkfapi.CodeSuspended,
 		wrkfapi.CodeSuspensionNotFound,
 		CodeWorkRPCInternal,
 	}

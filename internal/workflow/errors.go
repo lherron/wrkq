@@ -33,6 +33,7 @@ type ErrorDetail struct {
 	Expected    string                  `json:"expected,omitempty"`
 	Allowed     []string                `json:"allowed,omitempty"`
 	Fix         string                  `json:"fix,omitempty"`
+	Suspension  *Suspension             `json:"suspension,omitempty"`
 	Predecessor *ActionClaimPredecessor `json:"predecessor,omitempty"`
 }
 
@@ -79,6 +80,7 @@ type wrkfError struct {
 	expected    string
 	allowed     []string
 	fix         string
+	suspension  *Suspension
 	predecessor *ActionClaimPredecessor
 }
 
@@ -100,7 +102,7 @@ func (e *wrkfError) Detail() ErrorDetail {
 	if e == nil {
 		return ErrorDetail{}
 	}
-	return ErrorDetail{Code: e.code, Field: e.field, Message: e.msg, Expected: e.expected, Allowed: e.allowed, Fix: e.fix, Predecessor: e.predecessor}
+	return ErrorDetail{Code: e.code, Field: e.field, Message: e.msg, Expected: e.expected, Allowed: e.allowed, Fix: e.fix, Suspension: e.suspension, Predecessor: e.predecessor}
 }
 
 // validationError builds a structured WRKF_VALIDATION error. The message is
@@ -157,16 +159,17 @@ func linkageStaleError(field, ref, resolvesToKind, latestID string) error {
 }
 
 // suspendedWriteError is the suspended-write gate rejection. It bounces any
-// write to a suspended instance at the commit point of both transition paths —
-// the entire fencing story for a pre-park worker that settles after the park.
+// write to a suspended instance at all three doors: ordinary transitions,
+// action settlement, and action claims.
 func suspendedWriteError(inst *Instance) error {
 	sus := inst.Suspension
 	return &wrkfError{
-		code:     wrkfCodeSuspended,
-		msg:      fmt.Sprintf("instance %s is suspended (%s %s); writes are rejected until the suspension is resolved", inst.ID, sus.ID, sus.Reason),
-		field:    "suspension",
-		expected: "running instance (no active suspension)",
-		fix:      "resolve the active suspension before writing to this instance",
+		code:       wrkfCodeSuspended,
+		msg:        fmt.Sprintf("instance %s is suspended (%s %s); writes are rejected until the suspension is resolved", inst.ID, sus.ID, sus.Reason),
+		field:      "suspension",
+		expected:   "running instance (no active suspension)",
+		fix:        "resolve the active suspension before writing to this instance",
+		suspension: sus,
 	}
 }
 

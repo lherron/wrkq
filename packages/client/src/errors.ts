@@ -17,7 +17,7 @@
  */
 
 import type { JsonRpcError } from "./transport.js";
-import type { WrkfActionClaimPredecessor } from "./wrkf/types.js";
+import type { WrkfActionClaimPredecessor, WrkfSuspension } from "./wrkf/types.js";
 
 export interface WorkRpcErrorData {
   /** Stable machine-readable domain code, e.g. "WRKF_STALE_REVISION". */
@@ -26,6 +26,8 @@ export interface WorkRpcErrorData {
   retryable?: boolean;
   /** Present when wrkf.action.claim refuses an unacknowledged predecessor. */
   predecessor?: WrkfActionClaimPredecessor;
+  /** Present when a write, including wrkf.action.claim, is refused while suspended. */
+  suspension?: WrkfSuspension;
   [k: string]: unknown;
 }
 

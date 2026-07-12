@@ -875,6 +875,42 @@ describe("wrkf namespace", () => {
 });
 
 describe("error mapping", () => {
+  test("action claim suspension refusal exposes only the typed suspension record", async () => {
+    const transport = new FakeTransport().onError("wrkf.action.claim", {
+      code: -32026,
+      message: "instance wfi_1 is suspended (sus_1 operator_required)",
+      data: {
+        code: "WRKF_SUSPENDED",
+        retryable: false,
+        suspension: {
+          id: "sus_1",
+          reason: "operator_required",
+          at: "2026-07-12T22:00:00Z",
+          causeRef: "wfe_1",
+        },
+      },
+    });
+    const client = await clientWith(transport);
+    let caught: unknown;
+    try {
+      await client.wrkf.action.claim({
+        task: "T-00001", runnerId: "runner-b", agentRef: "agent:larry",
+        leaseMs: 60_000, priorRun: null,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    const error = caught as WorkRpcError;
+    expect(error.domainCode).toBe("WRKF_SUSPENDED");
+    expect(error.data?.suspension).toEqual({
+      id: "sus_1",
+      reason: "operator_required",
+      at: "2026-07-12T22:00:00Z",
+      causeRef: "wfe_1",
+    });
+    expect(error.data?.predecessor).toBeUndefined();
+  });
+
   test("action claim refusal exposes the typed predecessor record", async () => {
     const transport = new FakeTransport().onError("wrkf.action.claim", {
       code: -32014,
