@@ -1,7 +1,7 @@
 # wrkq-simple-task@5 — Manual Smoke Plan (wrkf CLI only)
 
 **Ruling:** manual validation is wrkf-CLI-only, against the CANONICAL shared DB, real mode — no throwaway DBs (Lance ruling, supersedes the earlier isolated-DB note). Containment: dedicated `wrkf-v5-smoke` container, `stv5-*` slugs, archive-after-transcript. Coordination stays with mable@wrkq.
-**Template under test:** `internal/workflow/builtins/wrkq-simple-task-v5.workflow.json` — validated at authoring: `valid wrkq-simple-task@5 sha256:90e6fb7581dd38892e8a9b0aa6331e1dbb1fdb6ee3f8c02451be676332eecee2`.
+**Template under test:** `internal/workflow/builtins/wrkq-simple-task-v5.workflow.json` — validated at authoring: `valid wrkq-simple-task@5 sha256:8ca79ccc1b88b127496cd358d8aad9253c59d6a64d95bc7ce1bae17ac16025d6`.
 **CLI surfaces referenced:** `wrkf workflow validate`, `wrkf suspension resolve SUSPENSION_ID --disposition resume|close|cancel`, `wrkf ... claim`, `wrkf watch --until suspended`.
 
 Every case states the assert. A case without its assert observed is a FAIL — no "close enough."
@@ -77,7 +77,7 @@ Setup: scratch DB, install @5, create task, attach instance (initial: active/tes
 
 | # | Case | Assert |
 |---|------|--------|
-| G1 | Leaf lane end-to-end: test → test_review(pass) → implement(done) → verify(pass) → gate(pass_leaf) → land(landed) | closed/done; task completed; all sourceBinding/settleValidation/contextFreshness contracts enforced en route (wrong `source_identity` on verify refused, missing `context.id` refused — spot-check one refusal). |
+| G1 | Leaf lane end-to-end: test → test_review(pass) → implement(done) → verify(pass) → gate(pass_leaf) → land(landed) | closed/done; task completed; all sourceBinding/settleValidation contracts enforced en route (wrong `source_identity` on verify refused — spot-check one refusal). |
 | G2 | Trunk lane: gate(pass_trunk) → awaiting_merge → pr_landing(landed, trunk) | closed/done; task completed. |
 | G3 | **New in v5:** from awaiting_merge, settle `landing_result result=operator_required, lane=trunk` | Instance suspends (replaces @4's operator_resolved_from_awaiting_merge escape). Resolve resume → back in waiting/awaiting_merge exactly. |
 | G4 | verify `other` outcome (settle a verify_result that matches no explicit arm) | Suspends via the `otherwise` arm — @4's block-verify-other gate preserved in suspend form. |

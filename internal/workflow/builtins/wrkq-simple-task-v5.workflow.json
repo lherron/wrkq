@@ -369,8 +369,7 @@
       "facts": {
         "required": [
           "result",
-          "verified.head.sha",
-          "context.id"
+          "verified.head.sha"
         ],
         "properties": {
           "drove.observed": {
@@ -403,23 +402,6 @@
           "tracked.dirty.paths": {
             "type": "array",
             "itemsType": "string"
-          },
-          "context.id": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "context_lineage": {
-      "description": "Append-only lineage record of a verification-context move (opaque context.id).",
-      "class": "note",
-      "facts": {
-        "required": [
-          "context.id"
-        ],
-        "properties": {
-          "context.id": {
-            "type": "string"
           }
         }
       }
@@ -1017,15 +999,6 @@
             ]
           }
         ]
-      },
-      "contextFreshness": {
-        "verdictAction": "verify",
-        "passedFact": "result",
-        "passedValues": [
-          "pass"
-        ],
-        "contextFact": "context.id",
-        "lineageKind": "context_lineage"
       }
     },
     "test": {
@@ -1118,8 +1091,7 @@
             "linkageFact": "source.evidence_id",
             "requiredFacts": [
               "source_identity",
-              "source.evidence_id",
-              "context.id"
+              "source.evidence_id"
             ]
           }
         ]
