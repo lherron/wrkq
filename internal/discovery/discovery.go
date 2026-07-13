@@ -274,7 +274,7 @@ func symbolMatches(topic, name string, doc *ast.CommentGroup) bool {
 }
 
 func findRPCMethods(root, topic string) ([]Hit, error) {
-	file := filepath.Join(root, "internal", "wrkfrpc", "api_registry.go")
+	file := filepath.Join(root, "internal", "workrpc", "registry.go")
 	fset := token.NewFileSet()
 	parsed, err := parser.ParseFile(fset, file, nil, 0)
 	if err != nil {

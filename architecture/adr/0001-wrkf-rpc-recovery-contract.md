@@ -18,7 +18,7 @@ JSON-RPC boundary unchanged.
 
 wrkf RPC errors carry a stable `WRKF_*` code and a boolean `retryable`. The codes and their
 retryability are **canonical in wrkq** ([internal/wrkfapi/errors.go](internal/wrkfapi/errors.go),
-mapped onto JSON-RPC by [internal/wrkfrpc/errors.go](internal/wrkfrpc/errors.go)) and are
+mapped onto JSON-RPC by [internal/workrpc/errors.go](internal/workrpc/errors.go)) and are
 preserved across the wire to clients, which echo `data.code` + retryability
 ([packages/client/src/errors.ts](packages/client/src/errors.ts)).
 
@@ -31,5 +31,5 @@ ADR — is the authority; this ADR records why the contract exists.
 
 - Changing the `WRKF_*` code set, the retryability semantics, or the JSON-RPC error envelope
   reopens the contract record (its `reopen_when`) and requires re-verifying the consumer.
-- The contract is kept honest by `required_tests`: the wrkfrpc codec tests plus the `@wrkq/client`
+- The contract is kept honest by `required_tests`: the workrpc codec and error-mapping tests plus the `@wrkq/client`
   unit + integration suites run under `just verify-rpc`.

@@ -13,15 +13,23 @@ consumers:
   - "@wrkq/client"               # packages/client — owns its own compatibility obligation + tests
 source:
   - internal/wrkfapi/errors.go            # WRKF_NOT_FOUND, WRKF_VALIDATION, WRKF_STALE_REVISION, …
-  - internal/wrkfrpc/errors.go            # maps typed codes onto JSON-RPC
+  - internal/workrpc/errors.go            # maps typed codes onto JSON-RPC
+  - internal/workrpc/error_mapping_contract_test.go
+  - internal/workrpc/codec_contract_test.go
   - packages/client/src/errors.ts         # client preserves data.code + retryability
   - docs/wrkf-rpc.md                      # explanatory projection (companion)
 required_tests:
-  - internal/wrkfrpc/codec_test.go
+  - TestCodec_RequestRoundtrip
+  - TestCodec_ResponseEncoding
+  - TestCodec_ErrorResponseEncoding
+  - TestCodec_MaxFrameSizeRejected
+  - TestErrorMapper_StaleRevision
+  - TestErrorMapper_Table
+  - TestErrorMapper_NonDomainError
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
-  date: 2026-06-22
-  evidence: "just verify-rpc green (client unit + integration vs real wrkf rpc --stdio); Daedalus run hrcchat#9876"
+  date: 2026-07-12
+  evidence: "just verify green (workrpc codec/error mapping + client unit/integration against real stdio RPC)"
 reopen_when:
   - WRKF_* code set changes
   - retryable semantics change

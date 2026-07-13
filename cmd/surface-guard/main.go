@@ -1,6 +1,6 @@
 // Command surface-guard enforces delta-based public-surface coverage for wrkf RPC methods.
 //
-// A new wrkf.* RPC method registered in internal/wrkfrpc/api_registry.go after the committed
+// A new wrkf.* RPC method registered in internal/workrpc/registry.go after the committed
 // baseline (internal/surfaceguard/baseline.json) must point at executable test evidence — the
 // exact method string as a Go string literal in a *_test.go, or on a non-comment line of a
 // test/smoke-*.sh — or carry a local ARCH-EXCEPTION(T-NNNNN): <reason> on the registration.
@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	registryRelPath = "internal/wrkfrpc/api_registry.go"
+	registryRelPath = "internal/workrpc/registry.go"
 	baselineRelPath = "internal/surfaceguard/baseline.json"
 )
 

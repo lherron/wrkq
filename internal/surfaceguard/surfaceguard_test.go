@@ -112,7 +112,7 @@ func TestCheck_BaselineMatch_NoViolations(t *testing.T) {
 	for i, m := range baseline.Methods {
 		registrations[i] = surfaceguard.Registration{
 			Method: m.Method,
-			File:   "internal/wrkfrpc/api_registry.go",
+			File:   "internal/workrpc/registry.go",
 			Line:   30 + i,
 		}
 	}

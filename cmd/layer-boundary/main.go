@@ -58,7 +58,7 @@ func liveConfig() layerguard.Config {
 					module + "/internal/db",
 					module + "/internal/workflow",
 					module + "/internal/wrkfapi",
-					module + "/internal/wrkfrpc",
+					module + "/internal/workrpc",
 					"github.com/spf13/cobra",
 				},
 			},
@@ -68,14 +68,20 @@ func liveConfig() layerguard.Config {
 				Forbidden: []string{
 					module + "/internal/cli",
 					module + "/internal/wrkfcli",
-					module + "/internal/wrkfrpc",
+					module + "/internal/workrpc",
 				},
 			},
 			{
-				ID:        "wrkfrpc-ownership",
+				ID:        "workrpc-ownership",
 				Sources:   []string{module},
-				Forbidden: []string{module + "/internal/wrkfrpc"},
-				Except:    []string{module + "/internal/wrkfcli", module + "/cmd/wrkf"},
+				Forbidden: []string{module + "/internal/workrpc"},
+				Except: []string{
+					module + "/internal/workrpc",
+					module + "/internal/rpccli",
+					module + "/internal/cli",
+					module + "/internal/wrkfcli",
+					module + "/cmd",
+				},
 			},
 		},
 	}

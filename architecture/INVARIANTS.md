@@ -106,6 +106,6 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 
 - **scope:** wrkf RPC stdio transport
 - **predicate:** the wrkf RPC server's stdout carries only well-formed JSON-RPC frames; no handler may write non-protocol bytes to stdout (logs/diagnostics go to stderr).
-- **source:** `internal/wrkfrpc/stdout_purity_test.go`
+- **source:** `internal/workrpc/server_contract_test.go`
 - **required_tests:** `TestStdoutPurity_HandlerMustNotCorruptStream`, `TestStdoutPurity_OnlyRPCFrames_ShutdownNotification`
-- **last_verified:** 2026-06-22
+- **last_verified:** 2026-07-12

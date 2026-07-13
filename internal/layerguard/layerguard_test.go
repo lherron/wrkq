@@ -136,18 +136,18 @@ func TestCheckPackages_TransitiveEdge_WorkflowToCli(t *testing.T) {
 	checkViolationMessage(t, v.Message)
 }
 
-// TestCheckPackages_WrkfrpcOwnership_UnauthorizedFails verifies that an unauthorized
-// package importing wrkfrpc produces a violation.
-func TestCheckPackages_WrkfrpcOwnership_UnauthorizedFails(t *testing.T) {
+// TestCheckPackages_WorkrpcOwnership_UnauthorizedFails verifies that an unauthorized
+// package importing workrpc produces a violation.
+func TestCheckPackages_WorkrpcOwnership_UnauthorizedFails(t *testing.T) {
 	packages := []layerguard.PackageEntry{
-		{ImportPath: "fixture/unauthorized", Dir: "testdata/wrkfrpc-ownership/unauthorized"},
-		{ImportPath: "fixture/wrkfrpc", Dir: "testdata/wrkfrpc-ownership/wrkfrpc"},
+		{ImportPath: "fixture/unauthorized", Dir: "testdata/workrpc-ownership/unauthorized"},
+		{ImportPath: "fixture/workrpc", Dir: "testdata/workrpc-ownership/workrpc"},
 	}
 	cfg := layerguard.Config{
 		Rules: []layerguard.Rule{{
-			ID:        "wrkfrpc-ownership",
+			ID:        "workrpc-ownership",
 			Sources:   []string{"fixture"},
-			Forbidden: []string{"fixture/wrkfrpc"},
+			Forbidden: []string{"fixture/workrpc"},
 			Except:    []string{"fixture/wrkfcli"},
 		}},
 	}
@@ -156,23 +156,23 @@ func TestCheckPackages_WrkfrpcOwnership_UnauthorizedFails(t *testing.T) {
 		t.Fatalf("CheckPackages: %v", err)
 	}
 	if len(result.Violations) != 1 {
-		t.Fatalf("expected 1 violation for unauthorized→wrkfrpc, got %d: %+v", len(result.Violations), result.Violations)
+		t.Fatalf("expected 1 violation for unauthorized→workrpc, got %d: %+v", len(result.Violations), result.Violations)
 	}
 	checkViolationMessage(t, result.Violations[0].Message)
 }
 
-// TestCheckPackages_WrkfrpcOwnership_WrkfcliPasses verifies that the excepted package
-// (wrkfcli) importing wrkfrpc produces no violation.
-func TestCheckPackages_WrkfrpcOwnership_WrkfcliPasses(t *testing.T) {
+// TestCheckPackages_WorkrpcOwnership_WrkfcliPasses verifies that the excepted package
+// (wrkfcli) importing workrpc produces no violation.
+func TestCheckPackages_WorkrpcOwnership_WrkfcliPasses(t *testing.T) {
 	packages := []layerguard.PackageEntry{
-		{ImportPath: "fixture/wrkfcli", Dir: "testdata/wrkfrpc-ownership/wrkfcli"},
-		{ImportPath: "fixture/wrkfrpc", Dir: "testdata/wrkfrpc-ownership/wrkfrpc"},
+		{ImportPath: "fixture/wrkfcli", Dir: "testdata/workrpc-ownership/wrkfcli"},
+		{ImportPath: "fixture/workrpc", Dir: "testdata/workrpc-ownership/workrpc"},
 	}
 	cfg := layerguard.Config{
 		Rules: []layerguard.Rule{{
-			ID:        "wrkfrpc-ownership",
+			ID:        "workrpc-ownership",
 			Sources:   []string{"fixture"},
-			Forbidden: []string{"fixture/wrkfrpc"},
+			Forbidden: []string{"fixture/workrpc"},
 			Except:    []string{"fixture/wrkfcli"},
 		}},
 	}
@@ -181,7 +181,7 @@ func TestCheckPackages_WrkfrpcOwnership_WrkfcliPasses(t *testing.T) {
 		t.Fatalf("CheckPackages: %v", err)
 	}
 	if len(result.Violations) != 0 {
-		t.Errorf("wrkfcli→wrkfrpc must PASS (excepted), got violations: %+v", result.Violations)
+		t.Errorf("wrkfcli→workrpc must PASS (excepted), got violations: %+v", result.Violations)
 	}
 }
 

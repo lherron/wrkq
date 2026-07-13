@@ -6,7 +6,7 @@
 > retryability are owned by the durable architecture contract record
 > [architecture/contracts/wrkf-rpc.yaml](architecture/contracts/wrkf-rpc.yaml)
 > (`wrkq.contract.wrkf-rpc`) — for that slice this document is explanatory/projection and must
-> conform to the record. Implementation phases (wrkfapi, hardening, wrkfrpc, @wrkf/client) must
+> conform to the record. Implementation phases (wrkfapi, hardening, workrpc, @wrkq/client) must
 > conform to this file. Design rationale now lives in git history and tracked wrkq tasks; this
 > file is the maintained contract.
 
@@ -103,7 +103,7 @@ Typed Go errors (`internal/wrkfapi/errors.go`) MUST exist and carry these codes 
 - A `wrkfapi.Error` type implementing `interface { error; Code() string; Retryable() bool }`, unwrappable via `errors.As`. `Code()` returns the `WRKF_*` string; `Retryable()` returns the boolean. (Tests may match a narrower local `interface { Code() string }` — that is a subset and is fine.)
 - Constructors (one per code), so call sites never hand-build errors:
   `NewNotFoundError(ref, kind)`, `NewValidationError(msg string, data any)`, `NewStaleRevisionError(instanceID string, expected, actual int64)`, `NewContextMismatchError(instanceID, expected, actual string)`, `NewTransitionBlockedError(instanceID, transition string, blocksOn []Blocker)`, `NewRoleDeniedError(instanceID, transition, role string)`, `NewIdempotencyMismatchError(key string)`, `NewLeaseConflictError(effectID, token string)`, `NewEffectNotDeliverableError(effectID, status string)`, `NewInternalError(err error)`.
-- `wrkfrpc.MapError(err error) *RPCError` (P3): maps a `wrkfapi.Error` to the JSON-RPC error (numeric `code` + `data.code` + boolean `data.retryable`). A plain non-`wrkfapi.Error` maps to `WRKF_INTERNAL` (-32603).
+- `workrpc.MapError(err error) *RPCError` maps a `wrkfapi.Error` to the JSON-RPC error (numeric `code` + `data.code` + boolean `data.retryable`). A plain non-domain error maps to the unified internal error (-32603).
 
 ---
 
@@ -254,7 +254,7 @@ All new migrations are **additive** (nullable columns + partial unique indexes) 
 ## 8. Acceptance gates
 
 ```
-go test ./internal/workflow ./internal/wrkfapi ./internal/wrkfrpc ./internal/wrkfcli
+go test ./internal/workflow ./internal/wrkfapi ./internal/workrpc ./internal/wrkfcli
 existing wrkf CLI smoke test (test/smoke-wrkf.sh) still green
 new wrkf RPC smoke test (test/smoke-wrkf-rpc.sh)
 TS unit tests (fake transport) + TS integration test (real wrkf rpc --stdio vs temp DB)

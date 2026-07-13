@@ -3,7 +3,7 @@
 Status: authoritative  
 Protocol version: **2026-06-30**  
 Replaces: `docs/wrkf-rpc.md` (version 2026-06-01)  
-Implementation target: `internal/workrpc` (replacing `internal/wrkfrpc`)
+Implementation target: `internal/workrpc`
 
 ---
 
@@ -1924,4 +1924,4 @@ on stdout:
 - The stdlib `fmt.Println` / `log.Println` paths must not reach the protocol
   stream
 
-The test at `internal/wrkfrpc/stdout_purity_test.go` covers this invariant.
+The tests at `internal/workrpc/server_contract_test.go` cover this invariant.

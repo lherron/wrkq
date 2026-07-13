@@ -10,13 +10,13 @@ authority:
   repo: wrkq
   surface: wrkf rpc --stdio
 source:
-  - internal/wrkfrpc/stdout_purity_test.go
+  - internal/workrpc/server_contract_test.go
 required_tests:
   - TestStdoutPurity_HandlerMustNotCorruptStream
   - TestStdoutPurity_OnlyRPCFrames_ShutdownNotification
 last_verified:
-  date: 2026-06-22
-  evidence: "just verify green incl. internal/wrkfrpc tests; Daedalus run hrcchat#9876"
+  date: 2026-07-12
+  evidence: "go test ./internal/workrpc green; migrated stdout-purity tests exercise the unified server"
 reopen_when:
   - a new transport or framing is added
   - any handler is allowed to write to stdout

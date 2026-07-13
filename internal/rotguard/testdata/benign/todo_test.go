@@ -19,7 +19,7 @@ func TestLegacyBinding(t *testing.T) {
 	t.Skip()
 }
 
-// TODO: not yet implemented — waiting on upstream contract from wrkfrpc.
+// TODO: not yet implemented — waiting on the upstream RPC contract.
 func TestUpstreamDependency(t *testing.T) {
 	t.Skip()
 }
