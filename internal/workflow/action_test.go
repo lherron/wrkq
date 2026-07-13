@@ -195,7 +195,7 @@ func TestCompleteAction_EvidenceTransitionFinishReplay(t *testing.T) {
 	if replay.Evidence == nil || replay.Evidence.ID != out.Evidence.ID {
 		t.Errorf("replay evidence id = %v, want %v", replay.Evidence, out.Evidence.ID)
 	}
-	evList, err := svc.ListEvidence(taskUUID)
+	evList, err := svc.ListEvidence(taskUUID, "")
 	if err != nil {
 		t.Fatalf("ListEvidence: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestCompleteAction_PartialReplayRecovers(t *testing.T) {
 		t.Errorf("run status = %q, want completed after retry", out.Run.Status)
 	}
 
-	evList, err := svc.ListEvidence(taskUUID)
+	evList, err := svc.ListEvidence(taskUUID, "")
 	if err != nil {
 		t.Fatalf("ListEvidence: %v", err)
 	}

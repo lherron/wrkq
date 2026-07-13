@@ -550,8 +550,8 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.EvidenceAdd(ctx, p)
 	}))
-	s.Register("wrkf.evidence.list", apiHandler(func(ctx context.Context, p taskParams) (any, error) {
-		return api.EvidenceList(ctx, p.TaskSelector)
+	s.Register("wrkf.evidence.list", apiHandler(func(ctx context.Context, p instanceParams) (any, error) {
+		return api.EvidenceList(ctx, p.TaskSelector, p.InstanceID)
 	}))
 	s.Register("wrkf.evidence.show", apiHandler(func(ctx context.Context, p idParams) (any, error) {
 		return api.EvidenceShow(ctx, p.ID)

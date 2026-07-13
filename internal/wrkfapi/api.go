@@ -204,11 +204,11 @@ func (api *API) EvidenceAdd(ctx context.Context, params EvidenceAddParams) (*wor
 	return ev, nil
 }
 
-func (api *API) EvidenceList(ctx context.Context, taskSelector string) ([]workflow.Evidence, error) {
+func (api *API) EvidenceList(ctx context.Context, taskSelector, instanceID string) ([]workflow.Evidence, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	ev, err := api.service.ListEvidence(taskSelector)
+	ev, err := api.service.ListEvidence(taskSelector, instanceID)
 	if err != nil {
 		return nil, normalizeError(err)
 	}

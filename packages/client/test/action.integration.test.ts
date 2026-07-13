@@ -85,6 +85,12 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     });
     expect(again.runId).toBe(run.runId);
 
+    // ── evidence.list — instance-only selection, evidence-free instance (T-06324) ──
+    const inst = await client.wrkf.instance.show({ task: task.id });
+    const emptyEvidence = await client.wrkf.evidence.list({ instanceId: inst.id });
+    expect(Array.isArray(emptyEvidence)).toBe(true);
+    expect(emptyEvidence.length).toBe(0);
+
     // ── action.bindExternal — hrc:<id> ──
     const bound = await client.wrkf.action.bindExternal({
       actionRunId: run.runId,

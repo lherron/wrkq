@@ -455,7 +455,7 @@ func evidenceCmd() *cobra.Command {
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			ev, err := a.service.ListEvidence(args[0])
+			ev, err := a.service.ListEvidence(args[0], "")
 			if err != nil {
 				return err
 			}

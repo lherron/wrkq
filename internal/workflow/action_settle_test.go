@@ -661,7 +661,7 @@ func TestSettleActionV3LandingResultClosesWithEvidenceChain(t *testing.T) {
 	if got := readTaskState(t, svc, taskUUID); got != "completed" {
 		t.Fatalf("task state after landing = %q, want completed", got)
 	}
-	ev, err := svc.ListEvidence(taskUUID)
+	ev, err := svc.ListEvidence(taskUUID, "")
 	if err != nil {
 		t.Fatalf("ListEvidence: %v", err)
 	}

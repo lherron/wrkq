@@ -2285,8 +2285,8 @@ func declaredEvidenceKinds(tpl *Template) []string {
 	return kinds
 }
 
-func (s *Service) ListEvidence(taskSelector string) ([]Evidence, error) {
-	inst, err := s.LatestInstance(taskSelector)
+func (s *Service) ListEvidence(taskSelector, instanceID string) ([]Evidence, error) {
+	inst, err := s.ResolveInstance(taskSelector, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -2336,7 +2336,7 @@ func (s *Service) ShowEvidence(id string) (*Evidence, error) {
 }
 
 func scanEvidenceRows(rows *sql.Rows) ([]Evidence, error) {
-	var out []Evidence
+	out := []Evidence{}
 	for rows.Next() {
 		var e Evidence
 		var facts, data, source string
@@ -2382,7 +2382,7 @@ func (s *Service) SuggestEvidence(taskSelector, transitionID string) (map[string
 	if err != nil {
 		return nil, err
 	}
-	ev, err := s.ListEvidence(taskSelector)
+	ev, err := s.ListEvidence(taskSelector, "")
 	if err != nil {
 		return nil, err
 	}
@@ -2765,7 +2765,7 @@ func (s *Service) Next(taskSelector, role string) (*NextActionResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	ev, _ := s.ListEvidence(taskSelector)
+	ev, _ := s.ListEvidence(taskSelector, "")
 	obl, _ := s.ListObligations(taskSelector, true)
 	eff, _ := s.ListEffects(taskSelector, false)
 	openObl := filterOpenObligations(obl)

@@ -209,6 +209,45 @@ func TestWrkfEvidenceAdd_RunIDInListDTO(t *testing.T) {
 	}
 }
 
+// TestWrkfEvidenceList_InstanceOnlyEmpty verifies wrkf.evidence.list accepts
+// instance-only selection and returns a JSON array ([]), never null, when the
+// instance has no evidence (T-06324).
+func TestWrkfEvidenceList_InstanceOnlyEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	tplPath := p2WorkflowTemplatePath(t)
+	taskID := p2SeedTask(t, dbPath,
+		"e3100000-0000-4000-8000-000000000042",
+		"ev-instance-only-empty", "Evidence Instance-Only Empty List Task")
+
+	instanceID := p3InstallAndAttach(t, dbPath, tplPath, taskID)
+
+	frames := p3Run(t, dbPath,
+		mkRPC("l1", "wrkf.evidence.list", map[string]any{"instanceId": instanceID}),
+		mkRPC("l2", "wrkf.evidence.list", map[string]any{"task": taskID, "instanceId": instanceID}),
+	)
+	// frames: init(0), list(1), list(2), shutdown(3)
+	for i, label := range []string{"instance-only", "task+instanceId"} {
+		frame := frames[1+i]
+		if errObj, ok := frame["error"]; ok {
+			t.Fatalf("wrkf.evidence.list (%s): unexpected error: %v", label, errObj)
+		}
+		raw, present := frame["result"]
+		if !present || raw == nil {
+			t.Fatalf("wrkf.evidence.list (%s): result must be a JSON array, got null/absent", label)
+		}
+		arr, ok := raw.([]any)
+		if !ok {
+			t.Fatalf("wrkf.evidence.list (%s): result must decode as an array, got %T", label, raw)
+		}
+		if len(arr) != 0 {
+			t.Fatalf("wrkf.evidence.list (%s): expected empty list, got %d items", label, len(arr))
+		}
+	}
+}
+
 // ─── Evidence idempotency (§9.7) ─────────────────────────────────────────────
 
 // TestWrkfEvidenceAdd_Idempotency_Replay verifies that calling wrkf.evidence.add

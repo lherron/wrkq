@@ -229,7 +229,7 @@ func TestImplVerify_InvalidDispositionRejectedBeforeTransition(t *testing.T) {
 		t.Errorf("error %q does not mention impl.disposition", err.Error())
 	}
 	// No evidence was written and the instance did not advance.
-	ev, err := svc.ListEvidence(taskUUID)
+	ev, err := svc.ListEvidence(taskUUID, "")
 	if err != nil {
 		t.Fatalf("ListEvidence: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestImplVerify_ReplayIdempotent(t *testing.T) {
 		t.Errorf("replay outcome mismatch: %q vs %q (want blocked both)", outcomeOf(t, first), outcomeOf(t, second))
 	}
 	// Exactly one implement_result evidence and one set_task_state:blocked effect.
-	ev, _ := svc.ListEvidence(taskUUID)
+	ev, _ := svc.ListEvidence(taskUUID, "")
 	implCount := 0
 	for _, e := range ev {
 		if e.Kind == "implement_result" {
