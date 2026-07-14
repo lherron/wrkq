@@ -874,6 +874,8 @@ wrkq.container.create
 wrkq.container.update         # in-place rename (Tranche B); see below
 wrkq.container.delete
 wrkq.container.deleteRecursive
+wrkq.project.listView         # top-level projects + stored checkout roots
+wrkq.project.setRoot          # dedicated registry mutation; not container.update
 ```
 
 Task creation may take a `path` or `project` selector to resolve the destination container.
@@ -939,6 +941,60 @@ Error mapping is typed (never a raw store leak): empty/absent patch, an unknown
 patch key, or an invalid slug → `WRKQ_VALIDATION`; a slug collision with an
 existing sibling or a stale `expectEtag` → `WRKQ_CONFLICT`; an unresolvable
 `container` selector → `WRKQ_NOT_FOUND`.
+
+##### `wrkq.project.listView` / `wrkq.project.setRoot` (project-root registry)
+
+The project-root registry is a dedicated project family; it does **not** widen
+the narrow `wrkq.container.update` patch. `listView` is the read model used by
+`wrkq projects`, and `setRoot` assigns or clears the nullable checkout root on
+exactly one top-level `kind=project` container.
+
+```ts
+interface WrkqProjectEntry {
+  type: "project";
+  id: string;
+  slug: string;
+  title?: string;
+  path: string;
+  root: string | null;
+}
+
+interface WrkqProjectListViewParams {
+  includeArchived?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+interface WrkqProjectsListView {
+  items: WrkqProjectEntry[];
+  next_cursor?: string; // legacy projects cursor envelope
+}
+
+interface WrkqProjectSetRootParams {
+  project: string;      // project slug / P-* friendly ID / UUID
+  root: string;         // empty clears; otherwise stored verbatim
+  expectEtag?: number;
+  actor?: string;
+}
+// setRoot → WrkqProjectEntry
+```
+
+`wrkq set <project> --root <path>` owns caller-host normalization: an absolute
+path beneath `$HOME` becomes `~/...`, an absolute path outside `$HOME` remains
+absolute, and empty clears. The RPC server stores the supplied string verbatim.
+Readers also return it verbatim; consumers expand `~/...` for the host on which
+they run. A task ID or any non-top-level/non-project container is
+`WRKQ_VALIDATION`.
+
+The published facade shape is:
+
+```ts
+client.wrkq.project.listView(params?)
+client.wrkq.project.setRoot(params)
+```
+
+During decoupled rollout, consumers must tolerate `root` and
+`wrkq.project.setRoot` being absent until the wrkq producer has landed.
 
 ##### `wrkq.search.*` / `wrkq.index.*` (server-owned search + index — Tranche D)
 

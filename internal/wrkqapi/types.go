@@ -612,6 +612,16 @@ type ContainerListParams struct {
 	Cursor          string `json:"cursor,omitempty"`
 }
 
+// ProjectSetRootParams assigns or clears the checkout root registered for one
+// top-level project. Root is stored verbatim; CLI callers normalize local paths
+// to ~/... before crossing the RPC boundary. An empty root clears the field.
+type ProjectSetRootParams struct {
+	Project    string `json:"project"`
+	Root       string `json:"root"`
+	ExpectETag int64  `json:"expectEtag,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
 // ContainerUpdateParams mirrors WrkqContainerUpdateParams. Patch is a raw message
 // so unknown fields can be REJECTED (WRKQ_VALIDATION) rather than silently
 // dropped, and the FIRST patch surface stays narrow: only {slug?, title?}. Any

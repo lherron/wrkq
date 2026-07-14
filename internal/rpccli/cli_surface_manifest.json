@@ -2491,6 +2491,12 @@
             "hidden": false
           },
           {
+            "name": "root",
+            "usage": "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)",
+            "type": "string",
+            "hidden": false
+          },
+          {
             "name": "slug",
             "usage": "Update task slug",
             "type": "string",

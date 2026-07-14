@@ -408,6 +408,55 @@ describe("wrkq namespace", () => {
     expect(updated.etag).toBe(2);
   });
 
+  test("project root registry forwards listView and setRoot with verbatim root strings", async () => {
+    const transport = new FakeTransport()
+      .onResult("wrkq.project.listView", {
+        items: [
+          {
+            type: "project",
+            id: "P-00061",
+            slug: "wrkq",
+            title: "wrkq",
+            path: "wrkq",
+            root: "~/praesidium/wrkq",
+          },
+        ],
+      })
+      .onResult("wrkq.project.setRoot", {
+        type: "project",
+        id: "P-00061",
+        slug: "wrkq",
+        title: "wrkq",
+        path: "wrkq",
+        root: "/Volumes/work/wrkq",
+      });
+    const client = await clientWith(transport);
+
+    const listed = await client.wrkq.project.listView({ includeArchived: true, limit: 10 });
+    const updated = await client.wrkq.project.setRoot({
+      project: "wrkq",
+      root: "/Volumes/work/wrkq",
+      expectEtag: 3,
+      actor: "agent:larry",
+    });
+
+    expect(transport.capturedRequests[0]).toMatchObject({
+      method: "wrkq.project.listView",
+      params: { includeArchived: true, limit: 10 },
+    });
+    expect(transport.capturedRequests[1]).toMatchObject({
+      method: "wrkq.project.setRoot",
+      params: {
+        project: "wrkq",
+        root: "/Volumes/work/wrkq",
+        expectEtag: 3,
+        actor: "agent:larry",
+      },
+    });
+    expect(listed.items[0]?.root).toBe("~/praesidium/wrkq");
+    expect(updated.root).toBe("/Volumes/work/wrkq");
+  });
+
   test("webhook.add forwards wrkq.webhook.add and returns the changed mutation result", async () => {
     const transport = new FakeTransport().onResult("wrkq.webhook.add", {
       changed: true,

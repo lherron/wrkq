@@ -223,7 +223,7 @@ func TestProjectsListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqProjectsListView{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqProjectEntry{}))
 	const want = "WrkqProjectsListView{items,next_cursor,omitempty}\n" +
-		"WrkqProjectEntry{type,id,slug,title,omitempty,path}"
+		"WrkqProjectEntry{type,id,slug,title,omitempty,path,root}"
 	if got != want {
 		t.Errorf("projects list view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}

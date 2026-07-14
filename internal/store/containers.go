@@ -816,14 +816,14 @@ func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
 	var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
 
 	err := cs.store.db.QueryRow(`
-		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
+		SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, root, etag,
 			   created_at, updated_at, archived_at,
 			   created_by_principal_ref, updated_by_principal_ref,
 			   created_by_scope_ref, updated_by_scope_ref
 		FROM containers WHERE uuid = ?
 	`, uuid).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
+		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.Root, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,
@@ -863,7 +863,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 
 	if parentUUID == nil {
 		query = `
-			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
+			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, root, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_principal_ref, updated_by_principal_ref,
 				   created_by_scope_ref, updated_by_scope_ref
@@ -872,7 +872,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 		args = []interface{}{slug}
 	} else {
 		query = `
-			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, etag,
+			SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, webhook_urls, root, etag,
 				   created_at, updated_at, archived_at,
 				   created_by_principal_ref, updated_by_principal_ref,
 				   created_by_scope_ref, updated_by_scope_ref
@@ -883,7 +883,7 @@ func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string)
 
 	err := cs.store.db.QueryRow(query, args...).Scan(
 		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.ETag,
+		&container.ParentUUID, &kind, &container.SectionUUID, &container.SortIndex, &container.WebhookURLs, &container.Root, &container.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,

@@ -368,6 +368,10 @@ Important behavior:
 
 - `touch` creates tasks. Default state is `open`; default priority is `3`.
 - `set` updates task fields and supports bulk operation over refs or stdin.
+  `wrkq set <project> --root <path>` is the dedicated project exception: it
+  registers a checkout root on one top-level project, normalizing paths beneath
+  `$HOME` to `~/...`; `--root ""` clears it. `wrkq projects` returns the stored
+  string verbatim, and consumers are responsible for expanding `~` locally.
 - `apply` updates description/specification from markdown, YAML, JSON, or stdin.
   Metadata in input is ignored unless `--with-metadata` is passed.
 - `cat` prints markdown with YAML front matter and comments on a TTY; when

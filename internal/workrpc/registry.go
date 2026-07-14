@@ -165,6 +165,7 @@ var methodCatalog = []string{
 	"wrkq.container.catView",
 	"wrkq.container.list",
 	"wrkq.project.listView",
+	"wrkq.project.setRoot",
 	"wrkq.webhook.add",
 	"wrkq.webhook.remove",
 	"wrkq.webhook.listView",
@@ -276,7 +277,7 @@ var dtoCatalog = []string{
 	"WrkqContainer",
 	"WrkqContainerListResult",
 	"WrkqProjectsListView", // CLI compatibility projection (projects)
-	"WrkqProjectEntry",     // element of projects listView (legacy projects Project row)
+	"WrkqProjectEntry",     // element of projects listView (includes nullable registered root)
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
@@ -457,6 +458,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.project.listView", apiHandler(func(ctx context.Context, p wrkqapi.ProjectsListViewParams) (any, error) {
 		return wq.ProjectsListView(ctx, p)
+	}))
+	s.Register("wrkq.project.setRoot", apiHandler(func(ctx context.Context, p wrkqapi.ProjectSetRootParams) (any, error) {
+		return wq.ProjectSetRoot(ctx, p)
 	}))
 	s.Register("wrkq.webhook.add", apiHandler(func(ctx context.Context, p wrkqapi.WebhookMutateParams) (any, error) {
 		return wq.WebhookAdd(ctx, p)

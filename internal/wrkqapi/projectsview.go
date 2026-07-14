@@ -16,13 +16,17 @@ type ProjectsListViewParams struct {
 	Cursor          string `json:"cursor,omitempty"`
 }
 
-// WrkqProjectEntry matches the legacy projects Project struct exactly.
+// WrkqProjectEntry extends the projects compatibility row with the nullable
+// checkout root registry field.
 type WrkqProjectEntry struct {
 	Type  string `json:"type"`
 	ID    string `json:"id"`
 	Slug  string `json:"slug"`
 	Title string `json:"title,omitempty"`
 	Path  string `json:"path"`
+	// Root is the stored host-portable checkout root. It is intentionally not
+	// expanded here; consumers expand ~/... for their own host.
+	Root *string `json:"root"`
 }
 
 // WrkqProjectsListView is the server-owned compatibility projection for
@@ -47,7 +51,7 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 	}
 
 	query := `
-		SELECT uuid, id, slug, title
+		SELECT uuid, id, slug, title, root
 		FROM containers
 		WHERE parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 	`
@@ -74,8 +78,8 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 	projects := []WrkqProjectEntry{}
 	for rows.Next() {
 		var uuid, id, slug string
-		var title sql.NullString
-		if err := rows.Scan(&uuid, &id, &slug, &title); err != nil {
+		var title, root sql.NullString
+		if err := rows.Scan(&uuid, &id, &slug, &title, &root); err != nil {
 			return nil, NewInternalError(fmt.Errorf("failed to scan row: %w", err))
 		}
 		titleStr := slug
@@ -88,6 +92,7 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 			Slug:  slug,
 			Title: titleStr,
 			Path:  slug,
+			Root:  nullStringPtr(root),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -101,4 +106,12 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 		view.NextCursor, _ = cursor.BuildNextCursor([]string{"slug"}, []any{last.Slug}, last.ID)
 	}
 	return view, nil
+}
+
+func nullStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	v := value.String
+	return &v
 }

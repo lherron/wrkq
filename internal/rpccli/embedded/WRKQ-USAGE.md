@@ -28,6 +28,7 @@ wrkq mkdir myfeat
 
 ## Use `--project` to change default project:
 wrkq projects --json             # List all available projects
+wrkq set wrkq --root ~/praesidium/wrkq  # Register a project checkout root
 wrkq ls --project agent-spaces inbox          # List tasks in agent-spaces/inbox
 wrkq find --project myproject --state open     # Find open tasks in myproject
 

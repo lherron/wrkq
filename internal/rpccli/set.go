@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,7 @@ import (
 func newSetCmd() *cobra.Command {
 	var description, specification, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
 	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy string
+	var projectRoot string
 	var metaFile string
 	var priority, jobs, batchSize int
 	var ifMatch int64
@@ -30,6 +33,9 @@ func newSetCmd() *cobra.Command {
 		Short:   "Update task fields",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("root") {
+				return runSetProjectRoot(cmd, args, projectRoot, ifMatch, dryRun)
+			}
 			claims := &stdinClaims{}
 			patch := map[string]any{}
 			dryFields := map[string]any{}
@@ -183,8 +189,122 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Update assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Update task resolution")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
+	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
 	return cmd
+}
+
+func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatch int64, dryRun bool) error {
+	for _, name := range []string{
+		"description", "specification", "state", "priority", "title", "slug",
+		"labels", "meta", "meta-file", "due-at", "start-at", "kind",
+		"parent-task", "parent-id", "assignee", "requested-by", "assigned-project",
+		"resolution", "caused-by",
+	} {
+		if cmd.Flags().Changed(name) {
+			return fmt.Errorf("--root cannot be combined with task field --%s", name)
+		}
+	}
+	if len(args) != 1 {
+		return fmt.Errorf("--root requires exactly one project")
+	}
+	project := strings.TrimSpace(args[0])
+	if project == "" || project == "-" {
+		return fmt.Errorf("--root requires a project slug, ID, or UUID")
+	}
+	if parsed := selectors.Parse(project); parsed.Type == selectors.TypeTask || strings.HasPrefix(parsed.Token, "T-") {
+		return fmt.Errorf("--root can only be set on a top-level project; task ID %q is not a project", project)
+	}
+
+	root, err := normalizeRegisteredProjectRoot(rawRoot)
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		return encodeJSONIndent(cmd, map[string]any{
+			"dry_run": true,
+			"project": project,
+			"root":    root,
+		})
+	}
+
+	tr, _, closeFn, err := openMirror(cmd)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
+	params := map[string]any{"project": project, "root": root}
+	if actor != "" {
+		params["actor"] = actor
+	}
+	if ifMatch != 0 {
+		params["expectEtag"] = ifMatch
+	}
+	raw, err := tr.Call(cmd.Context(), "wrkq.project.setRoot", params)
+	if err != nil {
+		if re, ok := err.(*Error); ok {
+			return errors.New(re.Message)
+		}
+		return err
+	}
+	var updated projectEntry
+	if err := json.Unmarshal(raw, &updated); err != nil {
+		return err
+	}
+	if isStdoutTTY(cmd.OutOrStdout()) {
+		if updated.Root == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "Cleared project root for %s\n", updated.Slug)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "Set project root for %s to %s\n", updated.Slug, *updated.Root)
+		}
+		return nil
+	}
+	return encodeJSONIndent(cmd, map[string]any{
+		"total": 1, "succeeded": 1, "failed": 0, "errors": []any{},
+	})
+}
+
+// normalizeRegisteredProjectRoot converts relative paths and paths beneath the
+// caller's HOME into host-portable ~/... strings. Absolute paths outside HOME
+// remain absolute. The server stores this result verbatim.
+func normalizeRegisteredProjectRoot(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve $HOME for --root: %w", err)
+	}
+	var absolute string
+	switch {
+	case value == "~":
+		absolute = home
+	case strings.HasPrefix(value, "~/"):
+		absolute = filepath.Join(home, strings.TrimPrefix(value, "~/"))
+	case strings.HasPrefix(value, "~"):
+		return "", fmt.Errorf("--root supports only the current user's ~ prefix")
+	case filepath.IsAbs(value):
+		absolute = value
+	default:
+		absolute, err = filepath.Abs(value)
+		if err != nil {
+			return "", fmt.Errorf("normalize --root: %w", err)
+		}
+	}
+	absolute = filepath.Clean(absolute)
+	home = filepath.Clean(home)
+	rel, err := filepath.Rel(home, absolute)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if rel == "." {
+			return "~", nil
+		}
+		return "~/" + filepath.ToSlash(rel), nil
+	}
+	return absolute, nil
 }
 
 type setRunOpts struct {

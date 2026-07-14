@@ -1029,6 +1029,7 @@ wrkq.container.show
 wrkq.container.catView  [CLI compatibility projection]
 wrkq.container.list
 wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
+wrkq.project.setRoot    [dedicated top-level project checkout-root mutation]
 wrkq.container.update
 wrkq.container.move
 wrkq.container.webhookSet
@@ -1051,8 +1052,19 @@ wrkq.container.restore
 > `wrkq projects`. It returns only root-child project containers, ignores
 > project-root scoping, filters archived projects unless requested, and paginates
 > by slug using the legacy cursor envelope:
-> `{ items: WrkqProjectEntry[], next_cursor? }`, where each entry is the legacy
-> `{type,id,slug,title,path}` row.
+> `{ items: WrkqProjectEntry[], next_cursor? }`, where each entry is
+> `{type,id,slug,title,path,root}`. `root` is nullable and returned exactly as
+> stored; consumers expand `~/...` for their own host.
+
+> **`wrkq.project.setRoot`** accepts
+> `{project,root,expectEtag?,actor?}` and returns the updated
+> `WrkqProjectEntry`. It is restricted to direct root-child `kind=project`
+> containers; task IDs and nested/non-project containers are
+> `WRKQ_VALIDATION`. Empty `root` clears the nullable field. Otherwise the
+> server stores the supplied string verbatim. The `wrkq set <project> --root`
+> caller normalizes absolute paths beneath its `$HOME` to `~/...`; paths outside
+> `$HOME` remain absolute. This dedicated method does not widen the narrow
+> `wrkq.container.update` patch.
 
 ```ts
 interface WrkqContainerShowParams { path?: string; project?: string }

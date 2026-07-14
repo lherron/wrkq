@@ -10,13 +10,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// projectEntry mirrors legacy runProjects' local Project struct exactly.
+// projectEntry is the projects compatibility row plus the nullable checkout
+// root registry field.
 type projectEntry struct {
 	Type  string `json:"type"`
 	ID    string `json:"id"`
 	Slug  string `json:"slug"`
 	Title string `json:"title,omitempty"`
 	Path  string `json:"path"`
+	// Root is returned exactly as stored. Consumers expand ~/... locally.
+	Root *string `json:"root"`
 }
 
 func newProjectsCmd() *cobra.Command {

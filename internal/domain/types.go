@@ -109,6 +109,7 @@ type Container struct {
 	SectionUUID           *string       `json:"section_uuid,omitempty" db:"section_uuid"`
 	SortIndex             int           `json:"sort_index" db:"sort_index"`
 	WebhookURLs           *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
+	Root                  *string       `json:"root" db:"root"`
 	ETag                  int64         `json:"etag" db:"etag"`
 	CreatedAt             time.Time     `json:"created_at" db:"created_at"`
 	UpdatedAt             time.Time     `json:"updated_at" db:"updated_at"`

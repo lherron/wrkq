@@ -49,6 +49,10 @@ import type {
   WrkqRelationListParams,
   WrkqRelationListResult,
   WrkqRelationRemoveParams,
+  WrkqProjectEntry,
+  WrkqProjectListViewParams,
+  WrkqProjectSetRootParams,
+  WrkqProjectsListView,
   WrkqSearchListView,
   WrkqSearchListViewParams,
   WrkqTask,
@@ -119,6 +123,12 @@ export interface WrkqContainerFacade {
   list(params?: WrkqContainerListParams): Promise<WrkqContainerListResult>;
 }
 
+/** Top-level project discovery and host-portable checkout-root registry. */
+export interface WrkqProjectFacade {
+  listView(params?: WrkqProjectListViewParams): Promise<WrkqProjectsListView>;
+  setRoot(params: WrkqProjectSetRootParams): Promise<WrkqProjectEntry>;
+}
+
 /**
  * Global webhook subscriptions on the singleton root container (DEDICATED family,
  * T-05119). add/remove are PRODUCER mutations; listView is a CLI compatibility
@@ -182,6 +192,7 @@ export interface WrkqFacade {
   readonly attachment: WrkqAttachmentFacade;
   readonly relation: WrkqRelationFacade;
   readonly container: WrkqContainerFacade;
+  readonly project: WrkqProjectFacade;
   readonly webhook: WrkqWebhookFacade;
   readonly workflow: WrkqWorkflowFacade;
   readonly handoff: WrkqHandoffFacade;

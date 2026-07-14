@@ -57,11 +57,12 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 	// This command always lists all top-level projects regardless of WRKQ_PROJECT_ROOT.
 
 	type Project struct {
-		Type  string `json:"type"`
-		ID    string `json:"id"`
-		Slug  string `json:"slug"`
-		Title string `json:"title,omitempty"`
-		Path  string `json:"path"`
+		Type  string  `json:"type"`
+		ID    string  `json:"id"`
+		Slug  string  `json:"slug"`
+		Title string  `json:"title,omitempty"`
+		Path  string  `json:"path"`
+		Root  *string `json:"root"`
 	}
 
 	// Build cursor pagination
@@ -80,7 +81,7 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	// Query all top-level project containers (direct children of the root)
 	query := `
-		SELECT uuid, id, slug, title
+		SELECT uuid, id, slug, title, root
 		FROM containers
 		WHERE parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 	`
@@ -114,8 +115,8 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 
 	for rows.Next() {
 		var uuid, id, slug string
-		var title *string
-		if err := rows.Scan(&uuid, &id, &slug, &title); err != nil {
+		var title, root *string
+		if err := rows.Scan(&uuid, &id, &slug, &title, &root); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -130,6 +131,7 @@ func runProjects(app *appctx.App, cmd *cobra.Command, args []string) error {
 			Slug:  slug,
 			Title: titleStr,
 			Path:  slug,
+			Root:  root,
 		})
 	}
 

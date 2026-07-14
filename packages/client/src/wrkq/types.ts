@@ -365,6 +365,44 @@ export interface WrkqContainerListResult {
   nextCursor?: string;
 }
 
+// ── Project root registry ───────────────────────────────────────────────────
+
+/**
+ * One top-level project row from wrkq.project.listView. `root` is the stored
+ * host-portable string verbatim; callers expand ~/... for the current host.
+ */
+export interface WrkqProjectEntry {
+  type: "project";
+  id: string;
+  slug: string;
+  title?: string;
+  path: string;
+  root: string | null;
+}
+
+export interface WrkqProjectListViewParams {
+  includeArchived?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface WrkqProjectsListView {
+  items: WrkqProjectEntry[];
+  next_cursor?: string;
+}
+
+/**
+ * Assign or clear a top-level project's registered checkout root. The RPC
+ * stores `root` verbatim; CLI callers normalize paths beneath HOME to ~/....
+ */
+export interface WrkqProjectSetRootParams {
+  project: string;
+  /** Empty string clears the registry field. */
+  root: string;
+  expectEtag?: number;
+  actor?: string;
+}
+
 /**
  * Global webhook subscriptions live on the SINGLETON ROOT container and are
  * inherited by every project. This is a DEDICATED family (wrkq.webhook.add /
