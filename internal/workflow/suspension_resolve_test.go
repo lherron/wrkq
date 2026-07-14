@@ -6,6 +6,9 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,6 +18,34 @@ import (
 func parkForResolve(t *testing.T) (*Service, string, *Instance) {
 	t.Helper()
 	svc, taskUUID, _ := setupSuspendOutcomeFixture(t)
+	return parkSuspensionFixture(t, svc, taskUUID)
+}
+
+func parkForResolveWithTemplate(t *testing.T, templateID, document string) (*Service, string, *Instance) {
+	t.Helper()
+	svc, taskUUID, _ := setupCASFixture(t)
+	templatePath := filepath.Join(t.TempDir(), templateID+".json")
+	if err := os.WriteFile(templatePath, []byte(document), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	if _, err := svc.InstallTemplate(templatePath, "test-installer", nil); err != nil {
+		t.Fatalf("InstallTemplate: %v", err)
+	}
+	predecessor, err := svc.LatestInstance(taskUUID)
+	if err != nil {
+		t.Fatalf("LatestInstance predecessor: %v", err)
+	}
+	revision := predecessor.Revision
+	if _, err := svc.AttachTask(taskUUID, templateID+"@1", "test-installer", AttachTaskOptions{
+		Supersede: true, PredecessorInstanceID: predecessor.ID, PredecessorRevision: &revision,
+	}); err != nil {
+		t.Fatalf("AttachTask: %v", err)
+	}
+	return parkSuspensionFixture(t, svc, taskUUID)
+}
+
+func parkSuspensionFixture(t *testing.T, svc *Service, taskUUID string) (*Service, string, *Instance) {
+	t.Helper()
 	if _, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:op", Role: "coordinator"}); err != nil {
 		t.Fatalf("Transition park: %v", err)
 	}
@@ -69,6 +100,9 @@ func TestResolveSuspensionResumeClearsAndPreservesPhase(t *testing.T) {
 	if len(effects) != 1 || effects[0].Kind != "resume_notice" {
 		t.Fatalf("resume effects = %+v, want one resume_notice", effects)
 	}
+	if effects[0].Status != "pending" || effects[0].Attempts != 0 {
+		t.Fatalf("external resume effect = %+v, want pending with zero attempts", effects[0])
+	}
 
 	// The workflow.suspension_resolved event is on the instance timeline.
 	if !hasSuspensionResolvedEvent(t, svc, resolved.ID, "resume") {
@@ -93,48 +127,162 @@ func TestResolveSuspensionResumeClearsAndPreservesPhase(t *testing.T) {
 // TestResolveSuspensionCloseTerminalizes proves close lands the instance in
 // closed/done and applies the close effect.
 func TestResolveSuspensionCloseTerminalizes(t *testing.T) {
-	svc, taskUUID, suspended := parkForResolve(t)
-
-	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: suspended.Suspension.ID,
-		Disposition:  DispositionClose,
-		PrincipalRef: "human:op",
-	}); err != nil {
-		t.Fatalf("ResolveSuspension close: %v", err)
-	}
-	resolved, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after close: %v", err)
-	}
-	if resolved.Suspended() {
-		t.Fatalf("close left a suspension: %+v", resolved.Suspension)
-	}
-	if resolved.Status != "closed" || resolved.Outcome != "done" {
-		t.Fatalf("close state = %+v, want closed/done", resolved.State())
-	}
-	if resolved.Revision != suspended.Revision+1 {
-		t.Fatalf("close revision = %d, want %d", resolved.Revision, suspended.Revision+1)
-	}
+	testResolveSuspensionTerminalizesAndDelivers(t, DispositionClose, "done", "completed")
 }
 
 // TestResolveSuspensionCancelTerminalizes proves cancel lands the instance in
 // closed/cancelled.
 func TestResolveSuspensionCancelTerminalizes(t *testing.T) {
+	testResolveSuspensionTerminalizesAndDelivers(t, DispositionCancel, "cancelled", "cancelled")
+}
+
+func testResolveSuspensionTerminalizesAndDelivers(t *testing.T, disposition, outcome, taskState string) {
+	t.Helper()
 	svc, taskUUID, suspended := parkForResolve(t)
 
-	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
+	out, err := svc.ResolveSuspension(ResolveSuspensionParams{
 		SuspensionID: suspended.Suspension.ID,
-		Disposition:  DispositionCancel,
+		Disposition:  disposition,
 		PrincipalRef: "human:op",
-	}); err != nil {
-		t.Fatalf("ResolveSuspension cancel: %v", err)
+	})
+	if err != nil {
+		t.Fatalf("ResolveSuspension %s: %v", disposition, err)
 	}
 	resolved, err := svc.LatestInstance(taskUUID)
 	if err != nil {
-		t.Fatalf("LatestInstance after cancel: %v", err)
+		t.Fatalf("LatestInstance after %s: %v", disposition, err)
 	}
-	if resolved.Status != "closed" || resolved.Outcome != "cancelled" || resolved.Suspended() {
-		t.Fatalf("cancel state = %+v suspended=%v, want closed/cancelled and cleared", resolved.State(), resolved.Suspended())
+	if resolved.Status != "closed" || resolved.Outcome != outcome || resolved.Suspended() {
+		t.Fatalf("%s state = %+v suspended=%v, want closed/%s and cleared", disposition, resolved.State(), resolved.Suspended(), outcome)
+	}
+	if resolved.Revision != suspended.Revision+1 {
+		t.Fatalf("%s revision = %d, want %d", disposition, resolved.Revision, suspended.Revision+1)
+	}
+
+	effects, ok := out["effects"].([]Effect)
+	if !ok || len(effects) != 1 {
+		t.Fatalf("%s returned effects = %#v, want one effect", disposition, out["effects"])
+	}
+	assertDeliveredTaskStateEffect(t, effects[0])
+	listed, err := svc.ListEffects(taskUUID, true)
+	if err != nil {
+		t.Fatalf("ListEffects after %s: %v", disposition, err)
+	}
+	if len(listed) != 1 || listed[0].SemanticKey == "" || listed[0].ID != effects[0].ID {
+		t.Fatalf("%s listed effects = %+v, want exactly one semantic-keyed effect", disposition, listed)
+	}
+	assertDeliveredTaskStateEffect(t, listed[0])
+
+	var state, updatedBy string
+	if err := svc.db.QueryRow(`SELECT state, COALESCE(updated_by_principal_ref, '') FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &updatedBy); err != nil {
+		t.Fatalf("read task after %s: %v", disposition, err)
+	}
+	if state != taskState || updatedBy != workflowSystemAttribution.PrincipalRef {
+		t.Fatalf("task after %s = state %q updated_by %q, want %q by %q", disposition, state, updatedBy, taskState, workflowSystemAttribution.PrincipalRef)
+	}
+}
+
+func assertDeliveredTaskStateEffect(t *testing.T, effect Effect) {
+	t.Helper()
+	if effect.Kind != "set_task_state" || effect.Status != "delivered" || effect.Attempts != 1 || len(effect.Receipt) == 0 {
+		t.Fatalf("builtin effect = %+v, want delivered set_task_state with one attempt and receipt", effect)
+	}
+	var receipt map[string]interface{}
+	if err := json.Unmarshal(effect.Receipt, &receipt); err != nil {
+		t.Fatalf("decode effect receipt: %v", err)
+	}
+	if receipt["kind"] != "set_task_state.receipt" {
+		t.Fatalf("receipt kind = %#v, want set_task_state.receipt", receipt["kind"])
+	}
+}
+
+func TestResolveSuspensionMixedEffectsDeliversOnlyBuiltin(t *testing.T) {
+	document := strings.Replace(suspendOutcomeTemplate,
+		`"id": "suspend-outcome-test"`,
+		`"id": "suspend-outcome-mixed-test"`, 1)
+	document = strings.Replace(document,
+		`"close": [{ "kind": "set_task_state", "data": { "state": "completed" } }]`,
+		`"close": [
+        { "kind": "set_task_state", "data": { "state": "completed" } },
+        { "kind": "close_notice", "role": "coordinator" }
+      ]`, 1)
+	svc, taskUUID, suspended := parkForResolveWithTemplate(t, "suspend-outcome-mixed-test", document)
+
+	out, err := svc.ResolveSuspension(ResolveSuspensionParams{
+		SuspensionID: suspended.Suspension.ID,
+		Disposition:  DispositionClose,
+		PrincipalRef: "human:op",
+	})
+	if err != nil {
+		t.Fatalf("ResolveSuspension mixed close: %v", err)
+	}
+	effects, ok := out["effects"].([]Effect)
+	if !ok || len(effects) != 2 {
+		t.Fatalf("mixed returned effects = %#v, want two effects", out["effects"])
+	}
+	assertDeliveredTaskStateEffect(t, effects[0])
+	if effects[1].Kind != "close_notice" || effects[1].Status != "pending" || effects[1].Attempts != 0 {
+		t.Fatalf("external close effect = %+v, want pending with zero attempts", effects[1])
+	}
+
+	listed, err := svc.ListEffects(taskUUID, true)
+	if err != nil {
+		t.Fatalf("ListEffects mixed close: %v", err)
+	}
+	if len(listed) != 2 || listed[0].Status != "delivered" || listed[1].Status != "pending" {
+		t.Fatalf("mixed durable effects = %+v, want delivered builtin and pending external", listed)
+	}
+}
+
+func TestResolveSuspensionBuiltinEffectFailureReturnsCommittedPartialResult(t *testing.T) {
+	document := strings.Replace(suspendOutcomeTemplate,
+		`"id": "suspend-outcome-test"`,
+		`"id": "suspend-outcome-invalid-builtin-test"`, 1)
+	document = strings.Replace(document, `"state": "completed"`, `"state": "not-a-task-state"`, 1)
+	svc, taskUUID, suspended := parkForResolveWithTemplate(t, "suspend-outcome-invalid-builtin-test", document)
+
+	result, err := svc.ResolveSuspension(ResolveSuspensionParams{
+		SuspensionID: suspended.Suspension.ID,
+		Disposition:  DispositionClose,
+		PrincipalRef: "human:op",
+	})
+	if got := wrkfCode(err); got != wrkfCodeEffectDeliveryFailed {
+		t.Fatalf("ResolveSuspension error code = %q, want %s (err=%v)", got, wrkfCodeEffectDeliveryFailed, err)
+	}
+	if result == nil {
+		t.Fatal("builtin delivery failure did not return the committed resolution result")
+	}
+	var deliveryErr *transitionEffectDeliveryError
+	if !errors.As(err, &deliveryErr) {
+		t.Fatalf("ResolveSuspension error = %T, want *transitionEffectDeliveryError", err)
+	}
+	if deliveryErr.eventID == "" || deliveryErr.effectID == "" || deliveryErr.kind != "set_task_state" || deliveryErr.status != "failed" {
+		t.Fatalf("typed delivery error context = %+v", deliveryErr)
+	}
+	if eventID, _ := result["eventId"].(string); eventID != deliveryErr.eventID {
+		t.Fatalf("partial result eventId = %q, typed error eventId = %q", eventID, deliveryErr.eventID)
+	}
+
+	resolved, latestErr := svc.LatestInstance(taskUUID)
+	if latestErr != nil {
+		t.Fatalf("LatestInstance after delivery failure: %v", latestErr)
+	}
+	if resolved.Status != "closed" || resolved.Outcome != "done" || resolved.Suspended() {
+		t.Fatalf("delivery failure rolled back resolution: state=%+v suspension=%+v", resolved.State(), resolved.Suspension)
+	}
+	effects, listErr := svc.ListEffects(taskUUID, true)
+	if listErr != nil {
+		t.Fatalf("ListEffects after delivery failure: %v", listErr)
+	}
+	if len(effects) != 1 || effects[0].ID != deliveryErr.effectID || effects[0].Status != "failed" || effects[0].Attempts != 1 || effects[0].LastError == "" {
+		t.Fatalf("recoverable failed effect = %+v, want one failed attempted effect with error", effects)
+	}
+	var taskState string
+	if err := svc.db.QueryRow(`SELECT state FROM tasks WHERE uuid = ?`, taskUUID).Scan(&taskState); err != nil {
+		t.Fatalf("read task after delivery failure: %v", err)
+	}
+	if taskState != "open" {
+		t.Fatalf("invalid builtin payload mutated task state to %q, want open", taskState)
 	}
 }
 

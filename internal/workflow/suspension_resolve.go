@@ -223,6 +223,10 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 	if webhookCtx != nil && webhookTaskUUID != "" {
 		webhooks.DispatchTaskEvent(s.db, webhookTaskUUID, *webhookCtx)
 	}
+	result, err = s.deliverBuiltinTransitionEffects(result, disposition)
+	if err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
