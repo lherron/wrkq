@@ -102,6 +102,44 @@ func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
 	assertV2EffectState(t, tpl, "landing_complete", "landed", "completed")
 }
 
+func TestBuiltinSimpleTaskV5DirectLandingContract(t *testing.T) {
+	data, err := builtinTemplateData(BuiltinSimpleTaskV5TemplateRef)
+	if err != nil {
+		t.Fatalf("builtinTemplateData(v5): %v", err)
+	}
+	tpl, canonical, err := ParseTemplate(data)
+	if err != nil {
+		t.Fatalf("ParseTemplate(v5): %v", err)
+	}
+	if errs := ValidateTemplate(tpl, canonical, nil); len(errs) > 0 {
+		t.Fatalf("ValidateTemplate(v5) errors: %v", errs)
+	}
+	if tpl.ID != "wrkq-simple-task" || tpl.Version != "5" {
+		t.Fatalf("template ref = %s@%s, want wrkq-simple-task@5", tpl.ID, tpl.Version)
+	}
+	for _, state := range tpl.States {
+		if state.Status == "waiting" || state.Phase == "awaiting_merge" {
+			t.Fatalf("v5 retains removed merge-wait state: %+v", state)
+		}
+	}
+	if strings.Contains(string(canonical), "workflow.lane") {
+		t.Fatal("v5 canonical template retains removed workflow.lane fact")
+	}
+	gate := requireTransition(t, tpl, "gate_complete")
+	if len(gate.Outcomes) != 3 || gate.Outcomes[0].ID != "pass" || gate.Outcomes[0].To == nil || gate.Outcomes[0].To.Status != "active" || gate.Outcomes[0].To.Phase != "land" {
+		t.Fatalf("v5 gate outcomes = %+v, want pass directly to active/land plus fail and violation", gate.Outcomes)
+	}
+	passFacts := gate.Outcomes[0].When.EvidenceExists.Facts
+	if len(passFacts) != 1 || string(passFacts["result"]) != `"pass"` {
+		t.Fatalf("v5 gate pass facts = %v, want result=pass only", passFacts)
+	}
+	for _, transition := range tpl.Transitions {
+		if transition.ID == "pr_landing_complete" || transition.From.Status == "waiting" || transition.From.Phase == "awaiting_merge" {
+			t.Fatalf("v5 retains removed merge-attendance transition: %+v", transition)
+		}
+	}
+}
+
 func assertV2EffectState(t *testing.T, tpl *Template, transitionID, outcomeID, wantState string) {
 	t.Helper()
 	for _, tr := range tpl.Transitions {

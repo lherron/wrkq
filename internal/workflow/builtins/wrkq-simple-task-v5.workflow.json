@@ -3,7 +3,7 @@
   "id": "wrkq-simple-task",
   "version": "5",
   "kind": "agent_first_workflow",
-  "description": "One-room red/green/verify task lifecycle with coordinator test review, tester-owned test fixes, and lane-guarded leaf/trunk landing tails. Operator parks are v5 suspensions: the instance stays in its phase; resolution is resolveSuspension (resume/close/cancel).",
+  "description": "One-room red/green/verify task lifecycle with coordinator test review, tester-owned test fixes, and a direct landing tail. Operator parks are v5 suspensions: the instance stays in its phase; resolution is resolveSuspension (resume/close/cancel).",
   "initial": {
     "status": "active",
     "phase": "test"
@@ -86,12 +86,7 @@
     {
       "status": "active",
       "phase": "land",
-      "description": "Leaf lane direct landing is in progress."
-    },
-    {
-      "status": "waiting",
-      "phase": "awaiting_merge",
-      "description": "Trunk lane proof is awaiting PR landing."
+      "description": "Direct landing is in progress."
     },
     {
       "status": "closed",
@@ -111,8 +106,7 @@
       "facts": {
         "required": [
           "result",
-          "range.head.sha",
-          "workflow.lane"
+          "range.head.sha"
         ],
         "properties": {
           "findings.forwarded": {
@@ -130,13 +124,6 @@
               "pass",
               "fail",
               "violation"
-            ]
-          },
-          "workflow.lane": {
-            "type": "string",
-            "enum": [
-              "leaf",
-              "trunk"
             ]
           }
         }
@@ -201,12 +188,11 @@
       }
     },
     "landing_result": {
-      "description": "Mechanics landing result for the lane-selected tail.",
+      "description": "Mechanics landing result for the direct landing tail.",
       "class": "verify",
       "facts": {
         "required": [
-          "result",
-          "workflow.lane"
+          "result"
         ],
         "properties": {
           "hook.output.artifact": {
@@ -224,13 +210,6 @@
               "landed",
               "push_rejected",
               "operator_required"
-            ]
-          },
-          "workflow.lane": {
-            "type": "string",
-            "enum": [
-              "leaf",
-              "trunk"
             ]
           },
           "source_identity": {
@@ -704,7 +683,7 @@
     },
     {
       "id": "gate_complete",
-      "description": "Coordinator gate verdict selects a lane-guarded landing tail or rewinds to implementation.",
+      "description": "Coordinator gate verdict advances to direct landing or rewinds to implementation.",
       "from": {
         "status": "active",
         "phase": "gate"
@@ -714,35 +693,18 @@
       ],
       "outcomes": [
         {
-          "id": "pass_leaf",
+          "id": "pass",
           "when": {
             "evidenceExists": {
               "kind": "gate_result",
               "facts": {
-                "result": "pass",
-                "workflow.lane": "leaf"
+                "result": "pass"
               }
             }
           },
           "to": {
             "status": "active",
             "phase": "land"
-          }
-        },
-        {
-          "id": "pass_trunk",
-          "when": {
-            "evidenceExists": {
-              "kind": "gate_result",
-              "facts": {
-                "result": "pass",
-                "workflow.lane": "trunk"
-              }
-            }
-          },
-          "to": {
-            "status": "waiting",
-            "phase": "awaiting_merge"
           }
         },
         {
@@ -778,7 +740,7 @@
     },
     {
       "id": "direct_land_complete",
-      "description": "Leaf direct landing completed, returned to gate for push-failure classification, or parked for the operator.",
+      "description": "Direct landing completed, returned to gate for push-failure classification, or parked for the operator.",
       "from": {
         "status": "active",
         "phase": "land"
@@ -793,8 +755,7 @@
             "evidenceExists": {
               "kind": "landing_result",
               "facts": {
-                "result": "landed",
-                "workflow.lane": "leaf"
+                "result": "landed"
               }
             }
           },
@@ -819,8 +780,7 @@
             "evidenceExists": {
               "kind": "landing_result",
               "facts": {
-                "result": "push_rejected",
-                "workflow.lane": "leaf"
+                "result": "push_rejected"
               }
             }
           },
@@ -835,62 +795,7 @@
             "evidenceExists": {
               "kind": "landing_result",
               "facts": {
-                "result": "operator_required",
-                "workflow.lane": "leaf"
-              }
-            }
-          },
-          "suspend": {
-            "reason": "operator_required"
-          }
-        }
-      ]
-    },
-    {
-      "id": "pr_landing_complete",
-      "description": "Trunk PR landing completed for the awaiting-merge tail, or parked for the operator when the PR cannot land.",
-      "from": {
-        "status": "waiting",
-        "phase": "awaiting_merge"
-      },
-      "by": [
-        "system"
-      ],
-      "outcomes": [
-        {
-          "id": "landed",
-          "when": {
-            "evidenceExists": {
-              "kind": "landing_result",
-              "facts": {
-                "result": "landed",
-                "workflow.lane": "trunk"
-              }
-            }
-          },
-          "to": {
-            "status": "closed",
-            "phase": "done"
-          },
-          "effects": [
-            {
-              "kind": "set_task_state",
-              "role": "system",
-              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
-              "data": {
-                "state": "completed"
-              }
-            }
-          ]
-        },
-        {
-          "id": "operator_required",
-          "when": {
-            "evidenceExists": {
-              "kind": "landing_result",
-              "facts": {
-                "result": "operator_required",
-                "workflow.lane": "trunk"
+                "result": "operator_required"
               }
             }
           },

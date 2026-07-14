@@ -1,7 +1,7 @@
 # wrkq-simple-task@5 — Manual Smoke Plan (wrkf CLI only)
 
 **Ruling:** manual validation is wrkf-CLI-only, against the CANONICAL shared DB, real mode — no throwaway DBs (Lance ruling, supersedes the earlier isolated-DB note). Containment: dedicated `wrkf-v5-smoke` container, `stv5-*` slugs, archive-after-transcript. Coordination stays with mable@wrkq.
-**Template under test:** `internal/workflow/builtins/wrkq-simple-task-v5.workflow.json` — validated at authoring: `valid wrkq-simple-task@5 sha256:8ca79ccc1b88b127496cd358d8aad9253c59d6a64d95bc7ce1bae17ac16025d6`.
+**Template under test:** `internal/workflow/builtins/wrkq-simple-task-v5.workflow.json` — validated at authoring: `valid wrkq-simple-task@5 sha256:f3f5b553ee6fb130e31ff3ae8258a03d1db646775da6c96fee26a48d70892bbd`.
 **CLI surfaces referenced:** `wrkf workflow validate`, `wrkf suspension resolve SUSPENSION_ID --disposition resume|close|cancel`, `wrkf ... claim`, `wrkf watch --until suspended`.
 
 Every case states the assert. A case without its assert observed is a FAIL — no "close enough."
@@ -73,13 +73,13 @@ Setup: scratch DB, install @5, create task, attach instance (initial: active/tes
 | F6 | After F5: the evicted predecessor attempts to settle | Refused with "superseded by <run>". |
 | F7 | Over a cleanly SETTLED prior attempt (e.g. after a `fail` rewind), claim without naming it | Refused — uniformity: every retry names its predecessor. |
 
-## G. Full lifecycle (green paths + the new arm)
+## G. Full lifecycle (single direct-landing tail)
 
 | # | Case | Assert |
 |---|------|--------|
-| G1 | Leaf lane end-to-end: test → test_review(pass) → implement(done) → verify(pass) → gate(pass_leaf) → land(landed) | closed/done; task completed; all sourceBinding/settleValidation contracts enforced en route (wrong `source_identity` on verify refused — spot-check one refusal). |
-| G2 | Trunk lane: gate(pass_trunk) → awaiting_merge → pr_landing(landed, trunk) | closed/done; task completed. |
-| G3 | **New in v5:** from awaiting_merge, settle `landing_result result=operator_required, lane=trunk` | Instance suspends (replaces @4's operator_resolved_from_awaiting_merge escape). Resolve resume → back in waiting/awaiting_merge exactly. |
+| G1 | End-to-end: test → test_review(pass) → implement(done) → verify(pass) → gate(pass) → land(landed) | closed/done; task completed; no `workflow.lane` fact supplied; all sourceBinding/settleValidation contracts enforced en route (wrong `source_identity` on verify refused — spot-check one refusal). |
+| G2 | Gate `pass` evidence containing only `result=pass` plus the existing range fact | Advances directly to active/land; no trunk or awaiting-merge arm exists. |
+| G3 | From land, settle `landing_result result=operator_required` without a lane fact | Instance suspends in active/land. Resolve resume → back in active/land exactly. |
 | G4 | verify `other` outcome (settle a verify_result that matches no explicit arm) | Suspends via the `otherwise` arm — @4's block-verify-other gate preserved in suspend form. |
 
 ## H. Purge confirmations
