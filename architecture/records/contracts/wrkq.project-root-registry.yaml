@@ -1,0 +1,76 @@
+id: wrkq.project-root-registry
+kind: contract
+status: active
+owner_project: wrkq
+scope: top-level project checkout-root registry across storage, CLI, RPC, and @wrkq/client
+predicate: >
+  A registered checkout root is nullable state owned by each top-level
+  `kind=project` container, and each mutation targets exactly one such project.
+  `wrkq.project.listView` returns the stored value as
+  an explicit `root: string|null` on every project entry, and the dedicated
+  `wrkq.project.setRoot {project, root, expectEtag?, actor?}` mutation assigns
+  or clears it and returns the updated project entry; the narrow
+  `wrkq.container.update` patch does not admit `root`. An empty `root` clears
+  the column. Any non-empty RPC value is stored and returned verbatim, while
+  `wrkq set <project> --root <path>` owns caller-host normalization: relative
+  paths first resolve against the caller's working directory, resolved paths
+  beneath HOME become `~/...`, HOME itself becomes `~`, and paths outside HOME
+  remain absolute. Consumers, never the server, expand `~/...` for their host.
+
+  A task selector or any non-project/non-top-level container is
+  `WRKQ_VALIDATION`. A stale `expectEtag` is `WRKQ_CONFLICT` and atomically
+  preserves root, etag, row attribution, and `container.updated` event history.
+  The `actor` wire key carries the canonical caller principal required by
+  `wrkq.attribution.caller-principal-exact`; omission uses the configured
+  principal default, while invalid legacy/bare identities are `WRKQ_VALIDATION`
+  before any write or event. The producer and
+  `@wrkq/client` publish the same method names, params, nullable read DTO, and
+  result DTO.
+authority:
+  repo: wrkq
+  surface: containers.root, wrkq.project.*, wrkq set --root, and @wrkq/client project facade
+consumers:
+  - wrkq CLI users registering project checkouts
+  - project dispatchers resolving checkout roots on their own host
+  - "@wrkq/client"
+source:
+  - internal/db/migrations/000047_project_root.sql
+  - internal/rpccli/set.go
+  - internal/rpccli/project_root_test.go
+  - internal/store/containers.go
+  - internal/wrkqapi/projectroots.go
+  - internal/wrkqapi/projectsview.go
+  - internal/wrkqapi/types.go
+  - internal/workrpc/registry.go
+  - internal/workrpc/project_root_test.go
+  - packages/client/src/client.ts
+  - packages/client/src/wrkq/facade.ts
+  - packages/client/src/wrkq/types.ts
+  - packages/client/test/fake-transport.test.ts
+  - docs/wrkq-wrkf-rpc-client-forward-spec.md
+  - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
+  - hrcchat#14672
+required_tests:
+  - TestNormalizeRegisteredProjectRoot
+  - TestNormalizeRegisteredProjectRootRejectsOtherUserTilde
+  - TestProjectRootRegistryOverRealRPC
+  - TestProjectRootRegistryMethodIsRegistered
+  - TestProjectRootSetRootStaleCASIsAtomic
+  - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
+  - bun test packages/client/test/fake-transport.test.ts
+  - T-06366 isolated-DB project-root registry smoke
+last_verified:
+  date: 2026-07-14
+  evidence: "T-06366 focused RPC/CLI/client guards and isolated-DB smoke green; Daedalus reran the focused real-RPC contract suite at 97a3a71"
+reopen_when:
+  - registered root state moves off the top-level project container or gains another writer
+  - root is admitted to the generic wrkq.container.update patch
+  - the RPC server normalizes or expands roots instead of storing and returning them verbatim
+  - the CLI stops normalizing relative/HOME-contained paths to host-portable tilde form
+  - empty root no longer clears or listView stops returning explicit null when unset
+  - a non-project or non-top-level container can receive a registered root
+  - stale expectEtag changes root, etag, attribution, or container.updated event history
+  - setRoot bypasses wrkq.attribution.caller-principal-exact
+  - wrkq.project method names, params, result DTOs, or @wrkq/client facade change
+supersedes: []
+superseded_by: null
