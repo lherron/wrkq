@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 type JustRecipe = {
   body: unknown[];
@@ -18,6 +18,15 @@ function dumpedRecipes(): Record<string, JustRecipe> {
 
 function bodyText(recipe: JustRecipe): string {
   return recipe.body.map((line) => JSON.stringify(line)).join("\n");
+}
+
+function dryRun(recipe: string): string {
+  const result = spawnSync("just", ["--dry-run", recipe], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  expect(result.status, result.stderr).toBe(0);
+  return `${result.stdout}${result.stderr}`;
 }
 
 describe("verify evidence summary recipe contract", () => {
@@ -69,6 +78,34 @@ describe("verify evidence summary recipe contract", () => {
         summaryBody,
         `verify-evidence-summary must describe ${token} for per-predicate triage output`,
       ).toContain(token);
+    }
+  });
+
+  test("verify exercises repo-local RPC binaries without installing or publishing", () => {
+    const recipes = dumpedRecipes();
+    const integration = recipes["client-integration"];
+
+    expect(integration, "client-integration must remain part of verify-rpc").toBeDefined();
+    expect(integration.dependencies.map((dependency) => dependency.recipe)).toEqual(["build"]);
+
+    const integrationBody = bodyText(integration);
+    for (const binary of ["WRKQ_BIN", "WRKF_BIN", "WRKQADM_BIN", "WRKQD_BIN"]) {
+      expect(integrationBody, `${binary} must resolve from the repo-local build`).toContain(
+        `${binary}=\\\"$repo_root/bin/`,
+      );
+    }
+
+    const plan = dryRun("verify");
+    for (const forbidden of [
+      "Installing to ~/.local/bin",
+      "mkdir -p ~/.local/bin",
+      "cp bin/wrkq ~/.local/bin",
+      "just client-publish-dev",
+      "publish-local-verdaccio.ts",
+    ]) {
+      expect(plan, `verify plan must not contain deployment action: ${forbidden}`).not.toContain(
+        forbidden,
+      );
     }
   });
 });

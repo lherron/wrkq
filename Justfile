@@ -378,12 +378,20 @@ client-install:
 client-test:
   cd packages/client && bun run typecheck && bun run test:unit
 
-# Run @wrkq/client integration tests against the REAL installed `wrkq`/`wrkf rpc --stdio`
-# Verification must not sync downstream repos; publishing/installing the local client is enough.
-client-integration: (install "no-sync=1")
-  cd packages/client && bun run test:integration
+# Run @wrkq/client integration tests against repo-local binaries and isolated temp DBs.
+# Verification must never mutate the installed CLI or publish the local client package.
+client-integration: build
+  #!/usr/bin/env bash
+  set -euo pipefail
+  repo_root="$PWD"
+  cd packages/client
+  WRKQ_BIN="$repo_root/bin/wrkq" \
+    WRKF_BIN="$repo_root/bin/wrkf" \
+    WRKQADM_BIN="$repo_root/bin/wrkqadm" \
+    WRKQD_BIN="$repo_root/bin/wrkqd" \
+    bun run test:integration
 
-# Full RPC verification: Go build/install unaffected + TS unit + TS integration
+# Full RPC verification: repo-local Go build + TS unit + isolated TS integration
 verify-rpc: client-test client-integration
   @echo "✓ verify-rpc passed (@wrkq/client unit + integration green)"
 
