@@ -466,6 +466,7 @@ export interface WrkqWorkflowAttachParams {
   supersede?: boolean;
   predecessorInstanceId?: string;
   predecessorRevision?: number;
+  attachDiscontinued?: boolean;
   actor?: string;
   idempotencyKey?: string;
 }

@@ -223,6 +223,8 @@ export interface WrkfWorkflowTemplateSummary {
   description?: string;
   installedAt?: string;
   installedBy?: string;
+  discontinuedAt?: string;
+  discontinuedBy?: string;
   [k: string]: unknown;
 }
 
@@ -244,6 +246,8 @@ export interface WrkfWorkflowShowParams {
 export interface WrkfWorkflowShowResult {
   template: Record<string, unknown>;
   hash: string;
+  discontinuedAt?: string;
+  discontinuedBy?: string;
 }
 
 export interface WrkfWorkflowListParams {
@@ -268,6 +272,11 @@ export interface WrkfDiffResult {
 
 export interface WrkfWorkflowInstallParams {
   path: string;
+}
+
+export interface WrkfWorkflowLifecycleParams {
+  ref: string;
+  principal_ref?: string;
 }
 
 export interface WrkfInstallResult {

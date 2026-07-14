@@ -458,6 +458,8 @@ Initialize result:
     "wrkq.task.create",
     "wrkq.workflow.attach",
     "wrkf.workflow.install",
+    "wrkf.workflow.discontinue",
+    "wrkf.workflow.reinstate",
     "wrkf.transition.apply"
   ]
 }
@@ -1097,6 +1099,7 @@ interface WrkqWorkflowAttachParams {
   supersede?: boolean;
   predecessorInstanceId?: string;
   predecessorRevision?: number;
+  attachDiscontinued?: boolean;
   actor?: string;
   idempotencyKey?: string;
 }
@@ -1249,9 +1252,49 @@ wrkf.workflow.show
 wrkf.workflow.list
 wrkf.workflow.diff
 wrkf.workflow.install
+wrkf.workflow.discontinue
+wrkf.workflow.reinstate
 ```
 
 These are template registry operations. They do not attach a workflow to a task.
+
+Template curation is explicit and version-addressed:
+
+```ts
+interface WrkfWorkflowLifecycleParams {
+  ref: string; // exact id@version; bare ids and "latest" are not accepted
+  principal_ref?: string;
+}
+
+interface WrkfWorkflowTemplateSummary {
+  id: string;
+  version: string;
+  hash: string;
+  discontinuedAt?: string;
+  discontinuedBy?: string;
+}
+
+interface WrkfWorkflowShowResult {
+  template: Record<string, unknown>;
+  hash: string;
+  discontinuedAt?: string;
+  discontinuedBy?: string;
+}
+```
+
+`wrkf.workflow.discontinue` and `wrkf.workflow.reinstate` accept
+`WrkfWorkflowLifecycleParams` and return the extended current-row
+`WrkfWorkflowShowResult`. Discontinuation belongs to the registry key
+`id@version`, not to the definition hash: idempotent install, same-version
+built-in supersede, and catalog amendment preserve the marker. Only reinstate
+clears it. No template-registry events are emitted; instance `workflow_events`
+must not be used as a registry audit log.
+
+`wrkq.workflow.attach` refuses a discontinued version unless the caller sets
+`attachDiscontinued: true`. Lookup, marker guard, and instance insert are one
+IMMEDIATE transaction. Existing instances continue operating after their
+template version is discontinued. There is no `wrkf.workflow.attach` or
+`wrkf.task.attach`; attachment authority remains exclusively under `wrkq`.
 
 #### Instance state access
 
@@ -1743,6 +1786,8 @@ wrkf.workflow.show
 wrkf.workflow.list
 wrkf.workflow.diff
 wrkf.workflow.install
+wrkf.workflow.discontinue
+wrkf.workflow.reinstate
 wrkf.evidence.*
 wrkf.obligation.*
 wrkf.check.*

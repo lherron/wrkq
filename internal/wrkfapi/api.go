@@ -52,11 +52,44 @@ func (api *API) WorkflowShow(ctx context.Context, ref string) (WorkflowShowResul
 	if err := ctx.Err(); err != nil {
 		return WorkflowShowResult{}, err
 	}
-	tpl, hash, err := api.service.ShowTemplate(ref)
+	info, err := api.service.ShowTemplateVersion(ref)
 	if err != nil {
 		return WorkflowShowResult{}, normalizeError(err)
 	}
-	return WorkflowShowResult{Template: *tpl, Hash: hash}, nil
+	return WorkflowShowResult{
+		Template:       *info.Template,
+		Hash:           info.Hash,
+		DiscontinuedAt: info.DiscontinuedAt,
+		DiscontinuedBy: info.DiscontinuedBy,
+	}, nil
+}
+
+func (api *API) WorkflowDiscontinue(ctx context.Context, ref, actor string) (WorkflowShowResult, error) {
+	if err := ctx.Err(); err != nil {
+		return WorkflowShowResult{}, err
+	}
+	id, version, err := workflow.ParseTemplateRef(ref)
+	if err != nil {
+		return WorkflowShowResult{}, normalizeError(err)
+	}
+	if err := api.service.DiscontinueTemplate(id, version, actor); err != nil {
+		return WorkflowShowResult{}, normalizeError(err)
+	}
+	return api.WorkflowShow(ctx, ref)
+}
+
+func (api *API) WorkflowReinstate(ctx context.Context, ref string) (WorkflowShowResult, error) {
+	if err := ctx.Err(); err != nil {
+		return WorkflowShowResult{}, err
+	}
+	id, version, err := workflow.ParseTemplateRef(ref)
+	if err != nil {
+		return WorkflowShowResult{}, normalizeError(err)
+	}
+	if err := api.service.ReinstateTemplate(id, version); err != nil {
+		return WorkflowShowResult{}, normalizeError(err)
+	}
+	return api.WorkflowShow(ctx, ref)
 }
 
 func (api *API) WorkflowList(ctx context.Context) (WorkflowListResult, error) {
@@ -427,13 +460,15 @@ func templateSummaryFromAny(v any) TemplateSummary {
 		return TemplateSummary{ID: x.ID, Version: x.Version, Kind: x.Kind, Description: x.Description}
 	case map[string]any:
 		return TemplateSummary{
-			ID:          stringFromAny(x["id"]),
-			Version:     stringFromAny(x["version"]),
-			Hash:        stringFromAny(x["hash"]),
-			Kind:        stringFromAny(x["kind"]),
-			Description: stringFromAny(x["description"]),
-			InstalledAt: stringFromAny(x["installedAt"]),
-			InstalledBy: stringFromAny(x["installedBy"]),
+			ID:             stringFromAny(x["id"]),
+			Version:        stringFromAny(x["version"]),
+			Hash:           stringFromAny(x["hash"]),
+			Kind:           stringFromAny(x["kind"]),
+			Description:    stringFromAny(x["description"]),
+			InstalledAt:    stringFromAny(x["installedAt"]),
+			InstalledBy:    stringFromAny(x["installedBy"]),
+			DiscontinuedAt: stringFromAny(x["discontinuedAt"]),
+			DiscontinuedBy: stringFromAny(x["discontinuedBy"]),
 		}
 	}
 	return TemplateSummary{}

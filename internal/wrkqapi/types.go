@@ -268,6 +268,7 @@ type WorkflowAttachParams struct {
 	Supersede             bool   `json:"supersede,omitempty"`
 	PredecessorInstanceID string `json:"predecessorInstanceId,omitempty"`
 	PredecessorRevision   *int64 `json:"predecessorRevision,omitempty"`
+	AttachDiscontinued    bool   `json:"attachDiscontinued,omitempty"`
 	Actor                 string `json:"actor,omitempty"`
 	IdempotencyKey        string `json:"idempotencyKey,omitempty"`
 }

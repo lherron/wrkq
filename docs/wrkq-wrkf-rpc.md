@@ -1326,6 +1326,7 @@ interface WrkqWorkflowAttachParams {
   supersede?: boolean;   // explicit live-generation replacement opt-in
   predecessorInstanceId?: string; // required with supersede
   predecessorRevision?: number;   // required with supersede
+  attachDiscontinued?: boolean;   // explicit discontinued-version override
   actor?: string;
   idempotencyKey?: string;
 }
@@ -1417,9 +1418,24 @@ wrkf.workflow.show
 wrkf.workflow.list
 wrkf.workflow.diff
 wrkf.workflow.install   [required]
+wrkf.workflow.discontinue
+wrkf.workflow.reinstate
 ```
 
 These are template registry operations. They do not attach a workflow to a task.
+
+`wrkf.workflow.discontinue` and `wrkf.workflow.reinstate` take
+`{ ref: "id@version", principal_ref?: string }` and return the current
+`WrkfWorkflowShowResult { template, hash, discontinuedAt?, discontinuedBy? }`.
+`WrkfWorkflowTemplateSummary` carries the same optional marker fields.
+Discontinuation belongs to the exact registry key `id@version`, not its hash:
+idempotent install, same-version built-in supersede, and catalog amendment
+preserve the marker; only reinstate clears it. No registry event is emitted.
+
+`wrkq.workflow.attach` performs template lookup, discontinued guard, and
+instance insert in one IMMEDIATE transaction. It refuses a marked version
+unless `attachDiscontinued` is true. Existing instances remain operable, and
+attachment authority is not duplicated under `wrkf.*`.
 
 #### Instance state access
 
@@ -1903,6 +1919,8 @@ rpc.initialize
 wrkq.task.create
 wrkq.workflow.attach
 wrkf.workflow.install
+wrkf.workflow.discontinue
+wrkf.workflow.reinstate
 wrkf.transition.apply
 wrkf.instance.show
 wrkf.instance.next

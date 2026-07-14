@@ -562,10 +562,45 @@ describe("wrkq namespace", () => {
       attached: true,
     });
     const client = await clientWith(transport);
-    const res = await client.wrkq.workflow.attach({ task: "T-00001", workflow: "f@1" });
+    const res = await client.wrkq.workflow.attach({
+      task: "T-00001",
+      workflow: "f@1",
+      attachDiscontinued: true,
+    });
     expect(transport.capturedRequests[0]!.method).toBe("wrkq.workflow.attach");
+    expect(transport.capturedRequests[0]!.params).toMatchObject({ attachDiscontinued: true });
     expect(res.attached).toBe(true);
     expect(res.instance.id).toBe("wfi_x");
+  });
+
+  test("workflow template lifecycle methods preserve typed current-row results", async () => {
+    const row = {
+      template: { id: "f", version: "1" },
+      hash: "sha256:abc",
+      discontinuedAt: "2026-07-14T12:00:00Z",
+      discontinuedBy: "agent:curator",
+    };
+    const transport = new FakeTransport()
+      .onResult("wrkf.workflow.discontinue", row)
+      .onResult("wrkf.workflow.reinstate", { template: row.template, hash: row.hash });
+    const client = await clientWith(transport);
+
+    const discontinued = await client.wrkf.workflow.discontinue({
+      ref: "f@1",
+      principal_ref: "agent:curator",
+    });
+    const reinstated = await client.wrkf.workflow.reinstate({ ref: "f@1" });
+
+    expect(transport.capturedRequests.map((request) => request.method)).toEqual([
+      "wrkf.workflow.discontinue",
+      "wrkf.workflow.reinstate",
+    ]);
+    expect(transport.capturedRequests[0]!.params).toEqual({
+      ref: "f@1",
+      principal_ref: "agent:curator",
+    });
+    expect(discontinued.discontinuedBy).toBe("agent:curator");
+    expect(reinstated.discontinuedAt).toBeUndefined();
   });
 
   test("T-05381 removes the legacy actor admin facade", async () => {

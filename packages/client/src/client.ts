@@ -177,6 +177,8 @@ class WorkClientImpl implements WorkClient {
       list: (p) => this.call("wrkf.workflow.list", p ?? {}),
       diff: (p) => this.call("wrkf.workflow.diff", p),
       install: (p) => this.call("wrkf.workflow.install", p),
+      discontinue: (p) => this.call("wrkf.workflow.discontinue", p),
+      reinstate: (p) => this.call("wrkf.workflow.reinstate", p),
     },
     instance: {
       show: (p) => this.call("wrkf.instance.show", p),

@@ -23,13 +23,15 @@ type Run = workflow.Run
 type CheckRun = workflow.CheckRun
 
 type TemplateSummary struct {
-	ID          string `json:"id"`
-	Version     string `json:"version"`
-	Hash        string `json:"hash"`
-	Kind        string `json:"kind,omitempty"`
-	Description string `json:"description,omitempty"`
-	InstalledAt string `json:"installedAt,omitempty"`
-	InstalledBy string `json:"installedBy,omitempty"`
+	ID             string `json:"id"`
+	Version        string `json:"version"`
+	Hash           string `json:"hash"`
+	Kind           string `json:"kind,omitempty"`
+	Description    string `json:"description,omitempty"`
+	InstalledAt    string `json:"installedAt,omitempty"`
+	InstalledBy    string `json:"installedBy,omitempty"`
+	DiscontinuedAt string `json:"discontinuedAt,omitempty"`
+	DiscontinuedBy string `json:"discontinuedBy,omitempty"`
 }
 
 type WorkflowListResult struct {
@@ -37,8 +39,10 @@ type WorkflowListResult struct {
 }
 
 type WorkflowShowResult struct {
-	Template workflow.Template `json:"template"`
-	Hash     string            `json:"hash"`
+	Template       workflow.Template `json:"template"`
+	Hash           string            `json:"hash"`
+	DiscontinuedAt string            `json:"discontinuedAt,omitempty"`
+	DiscontinuedBy string            `json:"discontinuedBy,omitempty"`
 }
 
 type InstallResult struct {

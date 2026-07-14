@@ -45,6 +45,7 @@ func (a *API) WorkflowAttach(ctx context.Context, p WorkflowAttachParams) (*Wrkq
 		Supersede:             p.Supersede,
 		PredecessorInstanceID: p.PredecessorInstanceID,
 		PredecessorRevision:   p.PredecessorRevision,
+		AttachDiscontinued:    p.AttachDiscontinued,
 	})
 	if err != nil {
 		return nil, err

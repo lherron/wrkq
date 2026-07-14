@@ -87,6 +87,7 @@ import type {
   WrkfTransitionResult,
   WrkfWorkflowDiffParams,
   WrkfWorkflowInstallParams,
+  WrkfWorkflowLifecycleParams,
   WrkfWorkflowListParams,
   WrkfWorkflowListResult,
   WrkfWorkflowShowParams,
@@ -101,6 +102,8 @@ export interface WrkfWorkflowFacade {
   list(params?: WrkfWorkflowListParams): Promise<WrkfWorkflowListResult>;
   diff(params: WrkfWorkflowDiffParams): Promise<WrkfDiffResult>;
   install(params: WrkfWorkflowInstallParams): Promise<WrkfInstallResult>;
+  discontinue(params: WrkfWorkflowLifecycleParams): Promise<WrkfWorkflowShowResult>;
+  reinstate(params: WrkfWorkflowLifecycleParams): Promise<WrkfWorkflowShowResult>;
 }
 
 export interface WrkfInstanceFacade {

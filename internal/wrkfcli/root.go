@@ -284,14 +284,21 @@ func workflowCmd() *cobra.Command {
 		Use:  "show ID@VERSION",
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			tpl, hash, err := a.service.ShowTemplate(args[0])
+			info, err := a.service.ShowTemplateVersion(args[0])
 			if err != nil {
 				return err
 			}
 			if flagJSON {
-				return printJSON(cmd, tpl)
+				return printJSON(cmd, info)
 			}
-			cmd.Printf("%s@%s %s\n", tpl.ID, tpl.Version, hash)
+			marker := ""
+			if info.DiscontinuedAt != "" {
+				marker = fmt.Sprintf(" DISCONTINUED at %s", info.DiscontinuedAt)
+				if info.DiscontinuedBy != "" {
+					marker += " by " + info.DiscontinuedBy
+				}
+			}
+			cmd.Printf("%s@%s %s%s\n", info.Template.ID, info.Template.Version, info.Hash, marker)
 			return nil
 		}),
 	}
@@ -303,9 +310,25 @@ func workflowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"templates": templates})
+			if flagJSON {
+				return printJSON(cmd, map[string]interface{}{"templates": templates})
+			}
+			for _, template := range templates {
+				marker := ""
+				if _, discontinued := template["discontinuedAt"]; discontinued {
+					marker = " DISCONTINUED"
+				}
+				cmd.Printf("%s@%s %s%s\n", template["id"], template["version"], template["hash"], marker)
+			}
+			return nil
 		}),
 	}
+	discontinue := templateLifecycleCommand("discontinue", func(svc *workflow.Service, id, version, actor string) error {
+		return svc.DiscontinueTemplate(id, version, actor)
+	})
+	reinstate := templateLifecycleCommand("reinstate", func(svc *workflow.Service, id, version, actor string) error {
+		return svc.ReinstateTemplate(id, version)
+	})
 	diff := &cobra.Command{
 		Use:  "diff OLD NEW",
 		Args: cobra.ExactArgs(2),
@@ -317,8 +340,33 @@ func workflowCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, out)
 		}),
 	}
-	cmd.AddCommand(validate, install, show, list, diff)
+	cmd.AddCommand(validate, install, show, list, diff, discontinue, reinstate)
 	return cmd
+}
+
+func templateLifecycleCommand(verb string, mutate func(*workflow.Service, string, string, string) error) *cobra.Command {
+	return &cobra.Command{
+		Use:  verb + " ID@VERSION",
+		Args: cobra.ExactArgs(1),
+		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+			id, version, err := workflow.ParseTemplateRef(args[0])
+			if err != nil {
+				return err
+			}
+			if err := mutate(a.service, id, version, a.actor); err != nil {
+				return err
+			}
+			info, err := a.service.ShowTemplateVersion(args[0])
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return printJSON(cmd, info)
+			}
+			cmd.Printf("%s %s\n", verb, args[0])
+			return nil
+		}),
+	}
 }
 
 func taskCmd() *cobra.Command {
@@ -327,6 +375,7 @@ func taskCmd() *cobra.Command {
 	var supersede bool
 	var predecessorInstance string
 	var predecessorRevision int64
+	var attachDiscontinued bool
 	attach := &cobra.Command{
 		Use:  "attach TASK --workflow ID@VERSION",
 		Args: cobra.ExactArgs(1),
@@ -342,6 +391,7 @@ func taskCmd() *cobra.Command {
 				Supersede:             supersede,
 				PredecessorInstanceID: predecessorInstance,
 				PredecessorRevision:   revision,
+				AttachDiscontinued:    attachDiscontinued,
 			})
 			if err != nil {
 				return err
@@ -353,6 +403,7 @@ func taskCmd() *cobra.Command {
 	attach.Flags().BoolVar(&supersede, "supersede", false, "Supersede the current live workflow instance")
 	attach.Flags().StringVar(&predecessorInstance, "predecessor-instance", "", "Expected current workflow instance id for --supersede")
 	attach.Flags().Int64Var(&predecessorRevision, "predecessor-revision", 0, "Expected current workflow revision for --supersede")
+	attach.Flags().BoolVar(&attachDiscontinued, "attach-discontinued", false, "Deliberately attach a discontinued template version")
 	inspect := &cobra.Command{
 		Use:  "inspect TASK",
 		Args: cobra.ExactArgs(1),

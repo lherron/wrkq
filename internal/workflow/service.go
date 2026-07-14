@@ -816,7 +816,13 @@ func (s *Service) installTemplateCanonical(tpl *Template, canonical []byte, hash
 }
 
 func (s *Service) ListTemplates() ([]map[string]interface{}, error) {
-	rows, err := s.db.Query(`SELECT id, version, hash, installed_at, COALESCE(installed_by_principal_ref, installed_by) FROM workflow_templates ORDER BY id, version`)
+	rows, err := s.db.Query(`
+		SELECT id, version, hash, installed_at,
+		       COALESCE(installed_by_principal_ref, installed_by),
+		       discontinued_at, discontinued_by
+		FROM workflow_templates
+		ORDER BY id, version
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -824,33 +830,131 @@ func (s *Service) ListTemplates() ([]map[string]interface{}, error) {
 	var out []map[string]interface{}
 	for rows.Next() {
 		var id, version, hash, installedAt string
-		var installedBy sql.NullString
-		if err := rows.Scan(&id, &version, &hash, &installedAt, &installedBy); err != nil {
+		var installedBy, discontinuedAt, discontinuedBy sql.NullString
+		if err := rows.Scan(&id, &version, &hash, &installedAt, &installedBy, &discontinuedAt, &discontinuedBy); err != nil {
 			return nil, err
 		}
 		row := map[string]interface{}{"id": id, "version": version, "hash": hash, "installedAt": installedAt}
 		if installedBy.Valid {
 			row["installedBy"] = installedBy.String
 		}
+		if discontinuedAt.Valid {
+			row["discontinuedAt"] = discontinuedAt.String
+		}
+		if discontinuedBy.Valid {
+			row["discontinuedBy"] = discontinuedBy.String
+		}
 		out = append(out, row)
 	}
 	return out, rows.Err()
 }
 
-func (s *Service) ShowTemplate(ref string) (*Template, string, error) {
+// TemplateVersionInfo combines an immutable workflow definition with the
+// operator-managed metadata for that installed version.
+type TemplateVersionInfo struct {
+	Template       *Template `json:"template"`
+	Hash           string    `json:"hash"`
+	DiscontinuedAt string    `json:"discontinuedAt,omitempty"`
+	DiscontinuedBy string    `json:"discontinuedBy,omitempty"`
+}
+
+func (s *Service) ShowTemplateVersion(ref string) (*TemplateVersionInfo, error) {
 	id, version, err := parseTemplateRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	var definition, hash string
+	var discontinuedAt, discontinuedBy sql.NullString
+	if err := s.db.QueryRow(`
+		SELECT definition_json, hash, discontinued_at, discontinued_by
+		FROM workflow_templates
+		WHERE id = ? AND version = ?
+	`, id, version).Scan(&definition, &hash, &discontinuedAt, &discontinuedBy); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("template not found: %s", ref)
+		}
+		return nil, err
+	}
+	tpl, _, err := ParseTemplate([]byte(definition))
+	if err != nil {
+		return nil, err
+	}
+	return &TemplateVersionInfo{
+		Template:       tpl,
+		Hash:           hash,
+		DiscontinuedAt: discontinuedAt.String,
+		DiscontinuedBy: discontinuedBy.String,
+	}, nil
+}
+
+func (s *Service) ShowTemplate(ref string) (*Template, string, error) {
+	info, err := s.ShowTemplateVersion(ref)
 	if err != nil {
 		return nil, "", err
 	}
-	var definition, hash string
-	if err := s.db.QueryRow(`SELECT definition_json, hash FROM workflow_templates WHERE id = ? AND version = ?`, id, version).Scan(&definition, &hash); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, "", fmt.Errorf("template not found: %s", ref)
+	return info.Template, info.Hash, nil
+}
+
+func (s *Service) DiscontinueTemplate(id, version, actor string) error {
+	return withImmediateTx(s.db, func(tx *sql.Tx) error {
+		now := s.now().Format(time.RFC3339)
+		result, err := tx.Exec(`
+			UPDATE workflow_templates
+			SET discontinued_at = ?, discontinued_by = ?
+			WHERE id = ? AND version = ? AND discontinued_at IS NULL
+		`, now, emptyToNil(actor), id, version)
+		if err != nil {
+			return err
 		}
-		return nil, "", err
-	}
-	tpl, _, err := ParseTemplate([]byte(definition))
-	return tpl, hash, err
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 1 {
+			return nil
+		}
+		var discontinuedAt string
+		var discontinuedBy sql.NullString
+		if err := tx.QueryRow(`SELECT discontinued_at, discontinued_by FROM workflow_templates WHERE id = ? AND version = ?`, id, version).Scan(&discontinuedAt, &discontinuedBy); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("template not found: %s@%s", id, version)
+			}
+			return err
+		}
+		state := fmt.Sprintf("template %s@%s is already discontinued at %s", id, version, discontinuedAt)
+		if discontinuedBy.Valid {
+			state += " by " + discontinuedBy.String
+		}
+		return validationError("workflow", state, "non-discontinued template version", nil, "reinstate the template version before discontinuing it again")
+	})
+}
+
+func (s *Service) ReinstateTemplate(id, version string) error {
+	return withImmediateTx(s.db, func(tx *sql.Tx) error {
+		result, err := tx.Exec(`
+			UPDATE workflow_templates
+			SET discontinued_at = NULL, discontinued_by = NULL
+			WHERE id = ? AND version = ? AND discontinued_at IS NOT NULL
+		`, id, version)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 1 {
+			return nil
+		}
+		var exists int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM workflow_templates WHERE id = ? AND version = ?`, id, version).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return fmt.Errorf("template not found: %s@%s", id, version)
+		}
+		return validationError("workflow", fmt.Sprintf("template %s@%s is already non-discontinued", id, version), "discontinued template version", nil, "discontinue the template version before reinstating it")
+	})
 }
 
 func (s *Service) storedHookCatalog(templateID, version string) (*HookCatalog, error) {
@@ -876,6 +980,12 @@ func parseTemplateRef(ref string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+// ParseTemplateRef validates and splits the explicit id@version registry
+// address used by operator-facing template commands.
+func ParseTemplateRef(ref string) (string, string, error) {
+	return parseTemplateRef(ref)
+}
+
 func emptyToNil(s string) interface{} {
 	if s == "" {
 		return nil
@@ -887,6 +997,7 @@ type AttachTaskOptions struct {
 	Supersede             bool
 	PredecessorInstanceID string
 	PredecessorRevision   *int64
+	AttachDiscontinued    bool
 }
 
 func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...AttachTaskOptions) (*Instance, error) {
@@ -916,22 +1027,37 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 	if err != nil {
 		return nil, err
 	}
-	var definition, templateHash string
-	if err := s.db.QueryRow(`SELECT definition_json, hash FROM workflow_templates WHERE id = ? AND version = ?`, id, version).Scan(&definition, &templateHash); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("template not found: %s", templateRef)
-		}
-		return nil, err
-	}
-	tpl, _, err := ParseTemplate([]byte(definition))
-	if err != nil {
-		return nil, err
-	}
-
 	var inst *Instance
 	var attachedEvent workflowEventMetadata
 	var dispatchAttachedWebhook bool
+	var initial State
 	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		var definition, templateHash string
+		var discontinuedAt sql.NullString
+		if err := tx.QueryRow(`
+			SELECT definition_json, hash, discontinued_at
+			FROM workflow_templates
+			WHERE id = ? AND version = ?
+		`, id, version).Scan(&definition, &templateHash, &discontinuedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("template not found: %s", templateRef)
+			}
+			return err
+		}
+		if discontinuedAt.Valid && !options.AttachDiscontinued {
+			return validationError(
+				"workflow",
+				fmt.Sprintf("template %s was discontinued at %s", templateRef, discontinuedAt.String),
+				"non-discontinued template version",
+				nil,
+				"pass --attach-discontinued to deliberately attach this template version",
+			)
+		}
+		tpl, _, err := ParseTemplate([]byte(definition))
+		if err != nil {
+			return err
+		}
+		initial = tpl.Initial
 		task, err := loadTaskDoc(tx, taskUUID)
 		if err != nil {
 			return err
@@ -1030,7 +1156,7 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 		return nil, err
 	}
 	if dispatchAttachedWebhook && inst != nil {
-		webhooks.DispatchTaskEvent(s.db, inst.TaskUUID, workflowAttachedWebhookContext(attachedEvent, *inst, templateRef, actor, tpl.Initial))
+		webhooks.DispatchTaskEvent(s.db, inst.TaskUUID, workflowAttachedWebhookContext(attachedEvent, *inst, templateRef, actor, initial))
 	}
 	return inst, nil
 }

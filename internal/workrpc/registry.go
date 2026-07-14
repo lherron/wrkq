@@ -189,6 +189,8 @@ var methodCatalog = []string{
 	"wrkf.workflow.list",
 	"wrkf.workflow.diff",
 	"wrkf.workflow.install",
+	"wrkf.workflow.discontinue",
+	"wrkf.workflow.reinstate",
 	"wrkf.instance.show",
 	"wrkf.instance.next",
 	"wrkf.evidence.add",
@@ -539,6 +541,12 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.workflow.install", apiHandler(func(ctx context.Context, p installParams) (any, error) {
 		return api.WorkflowInstall(ctx, p.Path, defaultString(p.PrincipalRef, opts.DefaultActor))
 	}))
+	s.Register("wrkf.workflow.discontinue", apiHandler(func(ctx context.Context, p templateLifecycleParams) (any, error) {
+		return api.WorkflowDiscontinue(ctx, p.Ref, defaultString(p.PrincipalRef, opts.DefaultActor))
+	}))
+	s.Register("wrkf.workflow.reinstate", apiHandler(func(ctx context.Context, p templateLifecycleParams) (any, error) {
+		return api.WorkflowReinstate(ctx, p.Ref)
+	}))
 	s.Register("wrkf.instance.show", apiHandler(func(ctx context.Context, p instanceParams) (any, error) {
 		return api.InstanceShow(ctx, p.TaskSelector, p.InstanceID)
 	}))
@@ -792,6 +800,11 @@ type workflowPathParams struct {
 
 type refParams struct {
 	Ref string `json:"ref"`
+}
+
+type templateLifecycleParams struct {
+	Ref          string `json:"ref"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 
 type diffParams struct {
