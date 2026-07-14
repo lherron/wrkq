@@ -5,7 +5,12 @@ owner_project: wrkq
 scope: wrkf JSON-RPC wire + error-recovery contract
 predicate: >
   wrkf RPC errors carry a stable WRKF_* code and a boolean retryable; codes and
-  retryability are canonical here and preserved across the JSON-RPC boundary to clients.
+  retryability are canonical here and preserved across the JSON-RPC boundary to
+  clients. The template-lifecycle producer additions are likewise frozen across
+  the server catalog, named DTOs, schema hash, and `@wrkq/client`:
+  `wrkf.workflow.discontinue|reinstate` accept `{ref, principal_ref?}` and return
+  the extended `WorkflowShowResult`, while `attachDiscontinued` belongs only to
+  `wrkq.workflow.attach`.
 authority:
   repo: wrkq
   surface: wrkf JSON-RPC (stdio)
@@ -16,8 +21,20 @@ source:
   - internal/workrpc/errors.go            # maps typed codes onto JSON-RPC
   - internal/workrpc/error_mapping_contract_test.go
   - internal/workrpc/codec_contract_test.go
+  - internal/workrpc/registry.go
+  - internal/workrpc/workflow_discontinued_acceptance_test.go
+  - internal/wrkfapi/api.go
+  - internal/wrkfapi/types.go
   - packages/client/src/errors.ts         # client preserves data.code + retryability
+  - packages/client/src/client.ts
+  - packages/client/src/wrkf/facade.ts
+  - packages/client/src/wrkf/types.ts
+  - packages/client/src/wrkq/types.ts
+  - packages/client/test/workflow-template-discontinue-contract.test.ts
   - docs/wrkf-rpc.md                      # explanatory projection (companion)
+  - docs/wrkq-wrkf-rpc.md
+  - docs/wrkq-wrkf-rpc-client-forward-spec.md
+  - architecture/records/contracts/wrkq.workflow.template-discontinuation.yaml
 required_tests:
   - TestCodec_RequestRoundtrip
   - TestCodec_ResponseEncoding
@@ -26,13 +43,18 @@ required_tests:
   - TestErrorMapper_StaleRevision
   - TestErrorMapper_Table
   - TestErrorMapper_NonDomainError
+  - TestWorkflowDiscontinueRPCAndAttachOverrideContract
+  - TestWorkflowDiscontinueMethodsAreInRegistry
+  - "bun test packages/client/test/workflow-template-discontinue-contract.test.ts"
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
-  date: 2026-07-12
-  evidence: "just verify green (workrpc codec/error mapping + client unit/integration against real stdio RPC)"
+  date: 2026-07-14
+  evidence: "T-06357 focused workrpc/client contract guards green; Daedalus architecture-records and just verify rerun"
 reopen_when:
   - WRKF_* code set changes
   - retryable semantics change
   - JSON-RPC error envelope changes
+  - wrkf.workflow.discontinue or wrkf.workflow.reinstate names, params, or result DTO change
+  - attachDiscontinued moves off wrkq.workflow.attach or stops crossing @wrkq/client
 supersedes: []
 superseded_by: null

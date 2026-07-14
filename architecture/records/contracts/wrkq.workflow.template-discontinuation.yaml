@@ -1,0 +1,67 @@
+id: wrkq.workflow.template-discontinuation
+kind: contract
+status: active
+owner_project: wrkq
+scope: workflow template-version curation and future task attachment
+predicate: >
+  Workflow template discontinuation is explicit current-state curation keyed by
+  the installed `id@version`, never by definition hash and never by inferred
+  currency. Discontinue sets `discontinued_at` plus `discontinued_by`; reinstate
+  alone clears them. Installing another version, replaying an idempotent install,
+  and same-version definition/hash or hook-catalog amendment preserve the marker.
+  `AttachTask` reads the marker and refuses a discontinued version unless the
+  caller explicitly opts into `AttachDiscontinued`; template lookup, guard, and
+  instance insertion share one IMMEDIATE transaction so discontinue and attach
+  have a single observable order. Existing instances remain operable, and
+  curation emits no instance `workflow_events`. Registry mutations are
+  `wrkf.workflow.discontinue|reinstate {ref, principal_ref?}` returning the
+  extended `WorkflowShowResult`; the override is `attachDiscontinued` solely on
+  `wrkq.workflow.attach`, including `@wrkq/client`.
+authority:
+  repo: wrkq
+  surface: workflow_templates lifecycle state, wrkf.workflow.*, and wrkq.workflow.attach
+consumers:
+  - workflow template curators
+  - coordinators attaching workflows to tasks
+  - "@wrkq/client"
+source:
+  - internal/db/migrations/000046_workflow_template_discontinued.sql
+  - internal/workflow/service.go
+  - internal/workflow/template_discontinued_test.go
+  - internal/wrkfapi/api.go
+  - internal/wrkfapi/types.go
+  - internal/workrpc/registry.go
+  - internal/workrpc/workflow_discontinued_acceptance_test.go
+  - internal/wrkqapi/types.go
+  - internal/wrkqapi/workflow.go
+  - internal/wrkfcli/root.go
+  - packages/client/src/client.ts
+  - packages/client/src/wrkf/facade.ts
+  - packages/client/src/wrkf/types.ts
+  - packages/client/src/wrkq/types.ts
+  - packages/client/test/workflow-template-discontinue-contract.test.ts
+  - docs/wrkq-wrkf-rpc.md
+  - docs/wrkq-wrkf-rpc-client-forward-spec.md
+  - hrcchat#14596
+required_tests:
+  - TestTemplateDiscontinueGuardOverrideReinstateAndReadback
+  - TestTemplateDiscontinueMigrationColumns
+  - TestTemplateDiscontinueSerializesWithAttachAcrossConnections
+  - TestSameVersionSupersedePreservesDiscontinuedMarkerAndExistingInstance
+  - TestWorkflowDiscontinueRPCAndAttachOverrideContract
+  - TestWorkflowDiscontinueMethodsAreInRegistry
+  - bun test packages/client/test/workflow-template-discontinue-contract.test.ts
+  - T-06357 isolated real-binary discontinue/refuse/override/reinstate smoke
+last_verified:
+  date: 2026-07-14
+  evidence: "T-06357 focused Go/RPC/client guards and isolated real-binary smoke green; Daedalus architecture-records and just verify rerun"
+reopen_when:
+  - template lookup or discontinued guard moves outside the IMMEDIATE attach transaction
+  - attach accepts a discontinued version without explicit AttachDiscontinued
+  - install, same-version hash supersede, or hook-catalog amendment changes the marker
+  - discontinuation changes existing-instance execution or writes instance workflow_events
+  - install auto-discontinues another version or bare/latest template resolution is introduced
+  - wrkf.workflow lifecycle names, params, result fields, or sole attach-producer ownership change
+  - durable template-curation history becomes a requirement
+supersedes: []
+superseded_by: null
