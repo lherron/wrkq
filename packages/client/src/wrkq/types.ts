@@ -399,7 +399,9 @@ export interface WrkqProjectSetRootParams {
   project: string;
   /** Empty string clears the registry field. */
   root: string;
+  /** Optional CAS; stale values fail without changing root, etag, attribution, or events. */
   expectEtag?: number;
+  /** Canonical caller principal (`agent:<id>` or full agent ScopeRef); bare legacy identities are invalid. */
   actor?: string;
 }
 

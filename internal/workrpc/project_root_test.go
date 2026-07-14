@@ -1,11 +1,48 @@
 package workrpc_test
 
 import (
+	"database/sql"
+	"reflect"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/workrpc"
 )
+
+type projectRootState struct {
+	Root                   *string
+	ETag                   int64
+	UpdatedByPrincipalRef  string
+	ContainerUpdatedEvents int
+}
+
+func readProjectRootState(t *testing.T, dbPath, projectUUID string) projectRootState {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+
+	var state projectRootState
+	var updatedBy sql.NullString
+	if err := database.QueryRow(`
+		SELECT root, etag, updated_by_principal_ref
+		FROM containers WHERE uuid = ?`, projectUUID).
+		Scan(&state.Root, &state.ETag, &updatedBy); err != nil {
+		t.Fatal(err)
+	}
+	if updatedBy.Valid {
+		state.UpdatedByPrincipalRef = updatedBy.String
+	}
+	if err := database.QueryRow(`
+		SELECT COUNT(*) FROM event_log
+		WHERE event_type = 'container.updated' AND resource_uuid = ?`, projectUUID).
+		Scan(&state.ContainerUpdatedEvents); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
 
 func TestProjectRootRegistryOverRealRPC(t *testing.T) {
 	if testing.Short() {
@@ -82,5 +119,79 @@ func TestProjectRootRegistryMethodIsRegistered(t *testing.T) {
 		if !registered[method] {
 			t.Errorf("registry missing %s", method)
 		}
+	}
+}
+
+func TestProjectRootSetRootStaleCASIsAtomic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	projectUUID := "63000000-6366-4000-8000-000000000003"
+	g1SeedProject(t, dbPath, "registry-cas", projectUUID)
+
+	seedFrames := p2Run(t, dbPath,
+		mkRPC("seed", "wrkq.project.setRoot", map[string]any{
+			"project": "registry-cas", "root": "~/before", "actor": "agent:cas-author",
+		}),
+	)
+	p2ResultOrFail(t, seedFrames[1], "project.setRoot CAS seed")
+	before := readProjectRootState(t, dbPath, projectUUID)
+	if before.Root == nil || *before.Root != "~/before" {
+		t.Fatalf("CAS seed root = %#v, want ~/before", before.Root)
+	}
+
+	frames := p2Run(t, dbPath,
+		mkRPC("stale", "wrkq.project.setRoot", map[string]any{
+			"project": "registry-cas", "root": "~/stale", "actor": "agent:stale-author",
+			"expectEtag": before.ETag - 1,
+		}),
+	)
+	if code := p2ErrCode(frames[1]); code != "WRKQ_CONFLICT" {
+		t.Fatalf("stale setRoot code = %q, want WRKQ_CONFLICT; frame=%#v", code, frames[1])
+	}
+	after := readProjectRootState(t, dbPath, projectUUID)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("stale setRoot mutated state:\n before=%#v\n  after=%#v", before, after)
+	}
+}
+
+func TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	projectUUID := "63000000-6366-4000-8000-000000000004"
+	g1SeedProject(t, dbPath, "registry-attribution", projectUUID)
+
+	frames := p2Run(t, dbPath,
+		mkRPC("valid", "wrkq.project.setRoot", map[string]any{
+			"project": "registry-attribution", "root": "~/attributed", "actor": "agent:registry-author",
+		}),
+	)
+	p2ResultOrFail(t, frames[1], "project.setRoot canonical attribution")
+	beforeInvalid := readProjectRootState(t, dbPath, projectUUID)
+	if beforeInvalid.Root == nil || *beforeInvalid.Root != "~/attributed" {
+		t.Fatalf("attributed root = %#v, want ~/attributed", beforeInvalid.Root)
+	}
+	if beforeInvalid.UpdatedByPrincipalRef != "agent:registry-author" {
+		t.Fatalf("row updated_by_principal_ref = %q, want agent:registry-author", beforeInvalid.UpdatedByPrincipalRef)
+	}
+	_, _, eventPrincipal := g1LatestEvent(t, dbPath, "container.updated", projectUUID)
+	if eventPrincipal != "agent:registry-author" {
+		t.Fatalf("event principal_ref = %q, want agent:registry-author", eventPrincipal)
+	}
+
+	invalidFrames := p2Run(t, dbPath,
+		mkRPC("invalid", "wrkq.project.setRoot", map[string]any{
+			"project": "registry-attribution", "root": "~/invalid", "actor": "legacy-bare-actor",
+		}),
+	)
+	if code := p2ErrCode(invalidFrames[1]); code != "WRKQ_VALIDATION" {
+		t.Fatalf("invalid identity setRoot code = %q, want WRKQ_VALIDATION; frame=%#v", code, invalidFrames[1])
+	}
+	afterInvalid := readProjectRootState(t, dbPath, projectUUID)
+	if !reflect.DeepEqual(afterInvalid, beforeInvalid) {
+		t.Fatalf("invalid identity setRoot mutated state:\n before=%#v\n  after=%#v", beforeInvalid, afterInvalid)
 	}
 }

@@ -947,7 +947,9 @@ existing sibling or a stale `expectEtag` → `WRKQ_CONFLICT`; an unresolvable
 The project-root registry is a dedicated project family; it does **not** widen
 the narrow `wrkq.container.update` patch. `listView` is the read model used by
 `wrkq projects`, and `setRoot` assigns or clears the nullable checkout root on
-exactly one top-level `kind=project` container.
+exactly one top-level `kind=project` container. `wrkq.project.listView` predates
+this change: adding its `root` field is the read-surface delta, while
+`wrkq.project.setRoot` is the sole new producer method.
 
 ```ts
 interface WrkqProjectEntry {
@@ -973,8 +975,8 @@ interface WrkqProjectsListView {
 interface WrkqProjectSetRootParams {
   project: string;      // project slug / P-* friendly ID / UUID
   root: string;         // empty clears; otherwise stored verbatim
-  expectEtag?: number;
-  actor?: string;
+  expectEtag?: number;  // stale → WRKQ_CONFLICT with no write/event/attribution change
+  actor?: string;       // canonical caller principal (agent:<id> or full agent ScopeRef); empty uses configured default
 }
 // setRoot → WrkqProjectEntry
 ```
@@ -985,6 +987,15 @@ absolute, and empty clears. The RPC server stores the supplied string verbatim.
 Readers also return it verbatim; consumers expand `~/...` for the host on which
 they run. A task ID or any non-top-level/non-project container is
 `WRKQ_VALIDATION`.
+
+`expectEtag` is an optional compare-and-swap guard. A stale value returns
+`WRKQ_CONFLICT` and leaves the registered root, container etag, row attribution,
+and `container.updated` event history unchanged. The wire key remains `actor`,
+but it carries caller-principal attribution: explicit values must be canonical
+`agent:<id>` identities or full agent ScopeRefs (stored as their durable
+`agent:<id>` principal), while omission uses the server's configured principal
+default. Bare legacy identities, `system:*` sentinels, actor UUIDs, and malformed
+ScopeRefs return `WRKQ_VALIDATION` before any write or event.
 
 The published facade shape is:
 
