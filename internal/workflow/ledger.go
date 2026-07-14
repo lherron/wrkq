@@ -1656,6 +1656,26 @@ func (s *Service) Transition(taskSelector, transitionID string, opts TransitionO
 	return s.TransitionForSelectors(taskSelector, "", transitionID, opts)
 }
 
+// activeActionRunIDsTx returns the ids of open (active) action runs on the
+// instance. An open action run is the seat's lease; an operator-class
+// transition (requiresNoActiveRun) refuses while one is live.
+func activeActionRunIDsTx(tx *sql.Tx, instanceID string) ([]string, error) {
+	rows, err := tx.Query(`SELECT id FROM workflow_runs WHERE instance_id = ? AND status = 'active' ORDER BY started_at`, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID string, opts TransitionOptions) (TransitionResult, error) {
 	if err := s.EnsureBuiltinTemplateForSelectors(taskSelector, instanceID, opts.PrincipalRef); err != nil {
 		return nil, err
@@ -1693,6 +1713,21 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		tr, err := findTransition(tpl, transitionID)
 		if err != nil {
 			return err
+		}
+		// Operator-class lease guard: an operator transition marked
+		// requiresNoActiveRun must refuse inside this transaction while the
+		// instance holds an open action run — the action run is the seat's
+		// lease. Enforced here (not client-side preflight) so it cannot race a
+		// concurrent claim; returning refuses and rolls the tx back, leaving the
+		// instance revision and task state unchanged. Applies to dry-run too.
+		if tr.RequiresNoActiveRun {
+			activeRuns, err := activeActionRunIDsTx(tx, inst.ID)
+			if err != nil {
+				return err
+			}
+			if len(activeRuns) > 0 {
+				return activeRunGuardError(inst.ID, transitionID, activeRuns)
+			}
 		}
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {

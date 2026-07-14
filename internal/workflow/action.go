@@ -1896,7 +1896,7 @@ func (s *Service) defaultTransitionFor(inst *Instance, role string) (string, err
 	}
 	var matches []string
 	for _, tr := range tpl.Transitions {
-		if stateMatches(*inst, tr.From) && roleAllowed(role, tr.By) {
+		if transitionFromMatches(*inst, tr) && roleAllowed(role, tr.By) {
 			matches = append(matches, tr.ID)
 		}
 	}

@@ -164,8 +164,17 @@ func validateFactsContract(prefix string, contract *FactsContract) []string {
 				errs = append(errs, fmt.Sprintf("%s has invalid itemsType %q", propPrefix, prop.ItemsType))
 			}
 		}
+		if prop.MinLength < 0 {
+			errs = append(errs, fmt.Sprintf("%s minLength must be non-negative", propPrefix))
+		}
+		if prop.MinLength > 0 && prop.Type != "string" {
+			errs = append(errs, fmt.Sprintf("%s minLength is only valid for string properties", propPrefix))
+		}
 		if prop.MaxLength < 0 {
 			errs = append(errs, fmt.Sprintf("%s maxLength must be non-negative", propPrefix))
+		}
+		if prop.MaxLength > 0 && prop.MinLength > prop.MaxLength {
+			errs = append(errs, fmt.Sprintf("%s minLength must not exceed maxLength", propPrefix))
 		}
 		if prop.MaxItems < 0 {
 			errs = append(errs, fmt.Sprintf("%s maxItems must be non-negative", propPrefix))
@@ -368,9 +377,13 @@ func validateFactPropertyValue(prop FactProperty, value interface{}, raw json.Ra
 	if !factTypeMatches(prop.Type, value) {
 		return fmt.Errorf("must be %s", prop.Type)
 	}
-	if prop.Type == "string" && prop.MaxLength > 0 {
+	if prop.Type == "string" && (prop.MinLength > 0 || prop.MaxLength > 0) {
 		s := value.(string)
-		if utf8.RuneCountInString(s) > prop.MaxLength {
+		n := utf8.RuneCountInString(s)
+		if prop.MinLength > 0 && n < prop.MinLength {
+			return fmt.Errorf("must be at least %d characters", prop.MinLength)
+		}
+		if prop.MaxLength > 0 && n > prop.MaxLength {
 			return fmt.Errorf("must be at most %d characters", prop.MaxLength)
 		}
 	}

@@ -21,6 +21,7 @@ const (
 	wrkfCodeSuspended            = "WRKF_SUSPENDED"
 	wrkfCodeAlreadySuspended     = "WRKF_ALREADY_SUSPENDED"
 	wrkfCodeSuspensionNotFound   = "WRKF_SUSPENSION_NOT_FOUND"
+	wrkfCodeActiveRunGuard       = "WRKF_ACTIVE_RUN"
 )
 
 // ErrorDetail is the single machine-parseable error shape carried by wrkf
@@ -240,6 +241,20 @@ func actionLeaseConflictError(actionRunID string) error {
 	return &wrkfError{
 		code: wrkfCodeLeaseConflict,
 		msg:  fmt.Sprintf("action lease conflict: action run %s", actionRunID),
+	}
+}
+
+// activeRunGuardError refuses an operator-class transition (requiresNoActiveRun)
+// while the instance holds an open action run. The action run is the lease: the
+// current seat must settle, or an expired claim must be explicitly succeeded
+// and its successor settled, before terminalizing/moving the instance.
+func activeRunGuardError(instanceID, transitionID string, runIDs []string) error {
+	return &wrkfError{
+		code:     wrkfCodeActiveRunGuard,
+		msg:      fmt.Sprintf("transition %s refused: instance %s has an active action run (%s); settle the current seat or settle an acknowledged successor first", transitionID, instanceID, strings.Join(runIDs, ",")),
+		field:    "transition",
+		expected: "no active action run on the instance",
+		fix:      "settle the active run with `wrkf action settle`; if its lease expired, inspect it, claim a successor with `wrkf action claim --prior-run <run-id>`, then settle the successor before resolving",
 	}
 }
 
