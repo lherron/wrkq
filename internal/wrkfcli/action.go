@@ -217,7 +217,20 @@ func actionNextCmd() *cobra.Command {
 func actionClaimCmd() *cobra.Command {
 	opts := actionClaimOptions{}
 	cmd := &cobra.Command{
-		Use:  "claim [TASK]",
+		Use: "claim [TASK]",
+		Long: `Claim the next executable action and return its fenced run binding.
+
+The success response includes the values needed by settle:
+  binding.run.id
+  binding.authority.ownerToken
+  binding.authority.ownerGeneration
+
+With --json, a predecessor conflict is returned as:
+  error.message
+  error.fix
+  error.predecessor.runId
+
+Follow error.fix and retry with --prior-run when predecessor review is required.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
 			task := ""
@@ -330,7 +343,18 @@ func actionCompleteCmd() *cobra.Command {
 func actionSettleCmd() *cobra.Command {
 	opts := actionSettleOptions{}
 	cmd := &cobra.Command{
-		Use:  "settle ACTION_RUN --result RESULT --owner-token TOKEN --owner-generation N",
+		Use: "settle ACTION_RUN --result RESULT --owner-token TOKEN --owner-generation N",
+		Long: `Settle a claimed action run with its current fenced authority.
+
+The success response shape is:
+  run.id
+  evidence (optional)
+  transition (optional)
+  effects (optional)
+  obligations (optional)
+
+Use binding.run.id, binding.authority.ownerToken, and
+binding.authority.ownerGeneration from the claim response.`,
 		Args: cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
 			mode, transitionID := opts.transition.transitionSelection()
@@ -398,7 +422,18 @@ func actionFailCmd() *cobra.Command {
 func actionHeartbeatCmd() *cobra.Command {
 	opts := actionHeartbeatOptions{}
 	cmd := &cobra.Command{
-		Use:     "heartbeat ACTION_RUN --lease-token TOKEN",
+		Use: "heartbeat ACTION_RUN --lease-token TOKEN",
+		Long: `Extend an active action lease and return the updated action run.
+
+The success response includes:
+  actionRunId
+  runId
+  leaseToken
+  leaseExpiresAt
+  heartbeatAt
+
+Use binding.run.id and binding.authority.ownerToken from the claim response as
+ACTION_RUN and --lease-token.`,
 		Aliases: []string{"renew-lease"},
 		Args:    cobra.ExactArgs(1),
 		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
