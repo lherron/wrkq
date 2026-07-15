@@ -136,7 +136,7 @@ FLOW
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" workflow validate "$TMPDIR/workflow.json" --json | jq -e '.valid == true' >/dev/null
 "$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" workflow install "$TMPDIR/workflow.json" --json | jq -e '.id == "smoke_flow" and .version == "1"' >/dev/null
 "$BIN/wrkf" --db "$DB" workflow list --json | jq -e '.templates | length == 1' >/dev/null
-"$BIN/wrkf" --db "$DB" workflow show smoke_flow@1 --json | jq -e '.id == "smoke_flow"' >/dev/null
+"$BIN/wrkf" --db "$DB" workflow show smoke_flow@1 --json | jq -e '.template.id == "smoke_flow"' >/dev/null
 
 "$BIN/wrkf" --db "$DB" --principal-ref agent:local-human task attach T-00001 --workflow smoke_flow@1 --json | jq -e '.phase == "plan" and .revision == 0' >/dev/null
 "$BIN/wrkf" --db "$DB" task inspect T-00001 --json | jq -e '.templateId == "smoke_flow"' >/dev/null

@@ -51,7 +51,7 @@ TEMPLATE="$ROOT/wrkf/templates/wrkq-code-change.workflow.json"
   | jq -e '[.templates[] | select(.id == "wrkq-code-change")] | length == 1' >/dev/null
 
 "$BIN/wrkf" --db "$DB" workflow show wrkq-code-change@1 --json \
-  | jq -e '.id == "wrkq-code-change"' >/dev/null
+  | jq -e '.template.id == "wrkq-code-change"' >/dev/null
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # § assertion 2: producibleBy negatives — wrong role must fail for each kind
