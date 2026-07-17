@@ -47,9 +47,11 @@ type SearchConfig struct {
 }
 
 // Load loads configuration from multiple sources with precedence:
-// 1. Environment variables
-// 2. ./.env.local (dotenv) - walks up parent directories to find it
-// 3. ~/.config/wrkq/config.yaml (YAML)
+//  1. Environment variables
+//  2. ./.env.local (dotenv) - walks up parent directories to find it
+//  3. $PRAESIDIUM_HOME/.env.local (or ~/praesidium/.env.local) as a
+//     cwd-independent platform fallback
+//  4. ~/.config/wrkq/config.yaml (YAML)
 func Load() (*Config, error) {
 	cfg := &Config{
 		AttachmentsMaxMB: 50,
@@ -262,22 +264,25 @@ func getEnvOrFile(envVar, fileVar string) string {
 	return ""
 }
 
-// findEnvLocal searches for .env.local starting from cwd and walking up
-// parent directories. Stops at the user's home directory.
+// findEnvLocal searches for .env.local starting from cwd and walking up parent
+// directories. If that cwd-relative walk finds nothing, it falls back to the
+// configured praesidium root so an installed CLI can find the platform database
+// from an unrelated working directory.
 // Returns the path to .env.local if found, empty string otherwise.
 func findEnvLocal() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		// If we can't get home dir, just check cwd
+		// If we can't get home dir, check cwd before trying an explicitly
+		// configured PRAESIDIUM_HOME.
 		if _, err := os.Stat(".env.local"); err == nil {
 			return ".env.local"
 		}
-		return ""
+		return findPlatformEnvLocal("")
 	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		return ""
+		return findPlatformEnvLocal(homeDir)
 	}
 
 	// Clean paths for reliable comparison
@@ -306,6 +311,22 @@ func findEnvLocal() string {
 		dir = parent
 	}
 
+	return findPlatformEnvLocal(homeDir)
+}
+
+func findPlatformEnvLocal(homeDir string) string {
+	root := strings.TrimSpace(os.Getenv("PRAESIDIUM_HOME"))
+	if root == "" && homeDir != "" {
+		root = filepath.Join(homeDir, "praesidium")
+	}
+	if root == "" {
+		return ""
+	}
+
+	envPath := filepath.Join(root, ".env.local")
+	if info, err := os.Stat(envPath); err == nil && !info.IsDir() {
+		return envPath
+	}
 	return ""
 }
 

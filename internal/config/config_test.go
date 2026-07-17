@@ -127,6 +127,8 @@ func TestFindEnvLocal_ClosestWins(t *testing.T) {
 func TestFindEnvLocal_NotFound(t *testing.T) {
 	// Create temp directory with no .env.local
 	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("PRAESIDIUM_HOME", filepath.Join(tmpDir, "missing-platform"))
 
 	// Change to temp dir
 	oldCwd, _ := os.Getwd()

@@ -132,8 +132,10 @@ wrkq ls myproject --type t --sort updated_at --reverse --limit 5
 Configuration is loaded from (in precedence order):
 1. CLI flags
 2. Environment variables (`WRKQ_DB_PATH`, `WRKQ_ACTOR`)
-3. `.env.local` in current directory
-4. `~/.config/wrkq/config.yaml`
+3. Nearest `.env.local`, walking upward from the current directory
+4. `$PRAESIDIUM_HOME/.env.local` (or `~/praesidium/.env.local`) as a
+   cwd-independent platform fallback
+5. `~/.config/wrkq/config.yaml`
 
 ## License
 

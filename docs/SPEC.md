@@ -79,8 +79,10 @@ Configuration precedence:
 1. CLI flags, such as `--db`, `--as`, and `--project`.
 2. Environment variables.
 3. Nearest `./.env.local`, walking upward to the user's home directory.
-4. `~/.config/wrkq/config.yaml`.
-5. Built-in defaults.
+4. Platform `.env.local` at `$PRAESIDIUM_HOME/.env.local`, or
+   `~/praesidium/.env.local` when `PRAESIDIUM_HOME` is unset.
+5. `~/.config/wrkq/config.yaml`.
+6. Built-in defaults.
 
 Key variables:
 

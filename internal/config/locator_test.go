@@ -111,6 +111,63 @@ func TestLoadProjectLocalDBDefaultStillWorks(t *testing.T) {
 	}
 }
 
+func TestLoadHomePlatformDBDefaultFromUnrelatedDirectory(t *testing.T) {
+	home := t.TempDir()
+	platformRoot := filepath.Join(home, "praesidium")
+	if err := os.MkdirAll(platformRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(platformRoot, "var", "db", "wrkq.db")
+	if err := os.WriteFile(
+		filepath.Join(platformRoot, ".env.local"),
+		[]byte("WRKQ_DB_PATH="+dbPath+"\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelated := t.TempDir()
+	for _, key := range []string{"WRKQ_DB", "WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE"} {
+		unsetEnv(t, key)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PRAESIDIUM_HOME", "")
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(unrelated); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DBPath != dbPath {
+		t.Fatalf("DBPath=%q want platform default %q", cfg.DBPath, dbPath)
+	}
+	if cfg.DBLocator != dbPath {
+		t.Fatalf("DBLocator=%q want platform default %q", cfg.DBLocator, dbPath)
+	}
+}
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	old, existed := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(key, old)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+}
+
 func isolateLoadConfig(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -121,6 +178,7 @@ func isolateLoadConfig(t *testing.T) string {
 		"WRKQ_ATTACH_DIR",
 		"WRKQ_PROJECT_ROOT",
 		"ASP_PROJECT",
+		"PRAESIDIUM_HOME",
 	} {
 		t.Setenv(key, "")
 	}

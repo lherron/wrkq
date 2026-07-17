@@ -3,6 +3,7 @@ package rpccli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,5 +58,37 @@ func TestMissingDBPathFailsWithoutHomeFallback(t *testing.T) {
 	homeDB := filepath.Join(home, ".local", "share", "wrkq", "wrkq.db")
 	if _, err := os.Stat(homeDB); !os.IsNotExist(err) {
 		t.Fatalf("home fallback DB should not be created, stat err=%v", err)
+	}
+}
+
+func TestConfiguredPlatformDBWorksFromUnrelatedCWD(t *testing.T) {
+	dbPath, taskID := migratedDBWithTask(t)
+	bin := buildWrkq(t)
+	home := t.TempDir()
+	platformRoot := filepath.Join(home, "configured-platform")
+	if err := os.MkdirAll(platformRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(platformRoot, ".env.local"),
+		[]byte("WRKQ_DB_PATH="+dbPath+"\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "cat", taskID, "--output", "raw")
+	cmd.Dir = t.TempDir()
+	cmd.Env = []string{
+		"HOME=" + home,
+		"PATH=" + os.Getenv("PATH"),
+		"PRAESIDIUM_HOME=" + platformRoot,
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("wrkq cat from unrelated cwd: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "id: "+taskID) || !strings.Contains(string(out), "rpccli smoke") {
+		t.Fatalf("wrkq cat output did not contain configured task:\n%s", out)
 	}
 }
