@@ -330,10 +330,10 @@ func actionCompleteCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.evidence.kind, "kind", "", "Evidence kind (defaults to <action>_result)")
 	cmd.Flags().StringVar(&opts.evidence.ref, "ref", "", "Evidence ref")
-	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Evidence summary")
-	cmd.Flags().StringVar(&opts.evidence.facts, "facts", "", "Evidence facts JSON object")
-	cmd.Flags().StringVar(&opts.evidence.data, "data", "", "Evidence data JSON")
-	cmd.Flags().StringVar(&opts.runSummary, "run-summary", "", "Run terminal summary")
+	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Evidence summary (- reads stdin)")
+	cmd.Flags().StringVar(&opts.evidence.facts, "facts", "", "Evidence facts JSON object (- reads stdin)")
+	cmd.Flags().StringVar(&opts.evidence.data, "data", "", "Evidence data JSON (- reads stdin)")
+	cmd.Flags().StringVar(&opts.runSummary, "run-summary", "", "Run terminal summary (- reads stdin)")
 	cmd.Flags().StringVar(&opts.leaseToken, "lease-token", "", "Lease token for leased action runs")
 	cmd.Flags().StringVar(&opts.transition.transition, "transition", "", "Explicit transition id (default: auto-resolve)")
 	cmd.Flags().BoolVar(&opts.transition.noTransition, "no-transition", false, "Skip the transition; finish the run only")
@@ -379,10 +379,10 @@ binding.authority.ownerGeneration from the claim response.`,
 	cmd.Flags().Int64Var(&opts.ownerGeneration, "owner-generation", 0, "Current owner generation from action.claim")
 	cmd.Flags().StringVar(&opts.evidence.kind, "kind", "", "Evidence kind (defaults to executable action result kind)")
 	cmd.Flags().StringVar(&opts.evidence.ref, "ref", "", "Evidence ref")
-	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Evidence summary")
-	cmd.Flags().StringVar(&opts.evidence.facts, "facts", "", "Evidence facts JSON object")
-	cmd.Flags().StringVar(&opts.evidence.data, "data", "", "Evidence data JSON")
-	cmd.Flags().StringVar(&opts.terminalSummary, "terminal-summary", "", "Run terminal summary")
+	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Evidence summary (- reads stdin)")
+	cmd.Flags().StringVar(&opts.evidence.facts, "facts", "", "Evidence facts JSON object (- reads stdin)")
+	cmd.Flags().StringVar(&opts.evidence.data, "data", "", "Evidence data JSON (- reads stdin)")
+	cmd.Flags().StringVar(&opts.terminalSummary, "terminal-summary", "", "Run terminal summary (- reads stdin)")
 	cmd.Flags().StringVar(&opts.transition.transition, "transition", "", "Explicit transition id (default: executable action transition)")
 	cmd.Flags().BoolVar(&opts.transition.noTransition, "no-transition", false, "Skip the workflow transition; terminalize the run only")
 	return cmd
@@ -409,13 +409,13 @@ func actionFailCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, run)
 		}),
 	}
-	cmd.Flags().StringVar(&opts.runSummary, "run-summary", "", "Failure summary")
+	cmd.Flags().StringVar(&opts.runSummary, "run-summary", "", "Failure summary (- reads stdin)")
 	cmd.Flags().StringVar(&opts.leaseToken, "lease-token", "", "Lease token for leased action runs")
 	cmd.Flags().StringVar(&opts.evidence.kind, "kind", "", "Failure evidence kind (defaults to failure_result)")
 	cmd.Flags().StringVar(&opts.evidence.ref, "ref", "", "Failure evidence ref")
-	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Failure evidence summary")
-	cmd.Flags().StringVar(&opts.evidence.facts, "facts", "", "Failure evidence facts JSON object")
-	cmd.Flags().StringVar(&opts.evidence.data, "data", "", "Failure evidence data JSON")
+	cmd.Flags().StringVar(&opts.evidence.summary, "summary", "", "Failure evidence summary (- reads stdin)")
+	cmd.Flags().StringVar(&opts.evidence.facts, "facts", "", "Failure evidence facts JSON object (- reads stdin)")
+	cmd.Flags().StringVar(&opts.evidence.data, "data", "", "Failure evidence data JSON (- reads stdin)")
 	return cmd
 }
 

@@ -85,6 +85,9 @@ func init() {
 
 func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
+		if err := resolveStdinTextFlags(cmd); err != nil {
+			return err
+		}
 		hookPath, err := workflow.ResolveHookCatalogPath(flagHookCatalog)
 		if err != nil {
 			return fmt.Errorf("failed to resolve hook catalog: %w", err)
@@ -499,9 +502,9 @@ func evidenceCmd() *cobra.Command {
 	}
 	add.Flags().StringVar(&kind, "kind", "", "Evidence kind")
 	add.Flags().StringVar(&ref, "ref", "", "Evidence reference")
-	add.Flags().StringVar(&summary, "summary", "", "Evidence summary")
-	add.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object")
-	add.Flags().StringVar(&data, "data", "", "Evidence JSON data")
+	add.Flags().StringVar(&summary, "summary", "", "Evidence summary (- reads stdin)")
+	add.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object (- reads stdin)")
+	add.Flags().StringVar(&data, "data", "", "Evidence JSON data (- reads stdin)")
 	list := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
@@ -602,8 +605,8 @@ func evidenceCmd() *cobra.Command {
 		}),
 	}
 	execCmd.Flags().StringVar(&kind, "kind", "", "Evidence kind")
-	execCmd.Flags().StringVar(&summary, "summary", "", "Evidence summary")
-	execCmd.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object")
+	execCmd.Flags().StringVar(&summary, "summary", "", "Evidence summary (- reads stdin)")
+	execCmd.Flags().StringVar(&facts, "facts", "", "Evidence routing facts JSON object (- reads stdin)")
 	cmd.AddCommand(add, list, show, suggest, schema, execCmd)
 	return cmd
 }
@@ -750,7 +753,7 @@ func obligationCmd() *cobra.Command {
 			}),
 		}
 		c.Flags().StringVar(&evidenceID, "evidence", "", "Evidence id")
-		c.Flags().StringVar(&reason, "reason", "", "Reason")
+		c.Flags().StringVar(&reason, "reason", "", "Reason (- reads stdin)")
 		return c
 	}
 	cmd.AddCommand(list, show, statusCmd("satisfy", "satisfied"), statusCmd("waive", "waived"), statusCmd("cancel", "cancelled"))
@@ -863,7 +866,7 @@ func effectCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, eff)
 		}),
 	}
-	fail.Flags().StringVar(&reason, "reason", "", "Failure reason")
+	fail.Flags().StringVar(&reason, "reason", "", "Failure reason (- reads stdin)")
 	fail.Flags().StringVar(&leaseToken, "lease-token", "", "Lease token")
 	fail.Flags().BoolVar(&force, "force", false, "Bypass lease token check")
 	retry := &cobra.Command{
@@ -1004,7 +1007,7 @@ func suspensionCmd() *cobra.Command {
 		}),
 	}
 	resolve.Flags().StringVar(&disposition, "disposition", "", "Resolution disposition: resume, close, or cancel")
-	resolve.Flags().StringVar(&explanation, "explanation", "", "Operator explanation (recorded free text, never validated)")
+	resolve.Flags().StringVar(&explanation, "explanation", "", "Operator explanation (recorded free text, never validated; - reads stdin)")
 	resolve.Flags().Int64Var(&expectRevision, "expect-revision", 0, "Expected workflow revision (CAS precondition)")
 	cmd.AddCommand(resolve)
 	return cmd
@@ -1075,7 +1078,7 @@ func runCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, run)
 		}),
 	}
-	finish.Flags().StringVar(&summary, "summary", "", "Terminal summary")
+	finish.Flags().StringVar(&summary, "summary", "", "Terminal summary (- reads stdin)")
 	fail := &cobra.Command{
 		Use:  "fail RUN",
 		Args: cobra.ExactArgs(1),
@@ -1088,7 +1091,7 @@ func runCmd() *cobra.Command {
 		}),
 	}
 	fail.Flags().String("kind", "", "Failure kind")
-	fail.Flags().StringVar(&summary, "summary", "", "Terminal summary")
+	fail.Flags().StringVar(&summary, "summary", "", "Terminal summary (- reads stdin)")
 	show := &cobra.Command{
 		Use:  "show RUN",
 		Args: cobra.ExactArgs(1),
@@ -1304,7 +1307,7 @@ func supervisorCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, eff)
 		}),
 	}
-	call.Flags().StringVar(&reason, "reason", "", "Reason")
+	call.Flags().StringVar(&reason, "reason", "", "Reason (- reads stdin)")
 	action := &cobra.Command{
 		Use:  "action TASK ACTION",
 		Args: cobra.MinimumNArgs(2),
@@ -1341,7 +1344,7 @@ func supervisorCmd() *cobra.Command {
 			}
 		}),
 	}
-	action.Flags().StringVar(&reason, "reason", "", "Reason")
+	action.Flags().StringVar(&reason, "reason", "", "Reason (- reads stdin)")
 	action.Flags().String("role", "", "Role")
 	action.Flags().String("from-check", "", "Check run")
 	action.Flags().String("target", "", "Target")
