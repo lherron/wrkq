@@ -13,6 +13,7 @@ const BuiltinSimpleTaskTemplateRef = "wrkq-simple-task@1"
 const BuiltinSimpleTaskV2TemplateRef = "wrkq-simple-task@2"
 const BuiltinSimpleTaskV3TemplateRef = "wrkq-simple-task@3"
 const BuiltinSimpleTaskV5TemplateRef = "wrkq-simple-task@5"
+const BuiltinRoom2BoxTemplateRef = "room-2box@1"
 
 //go:embed builtins/wrkq-simple-task.workflow.json
 var builtinSimpleTaskJSON []byte
@@ -25,6 +26,9 @@ var builtinSimpleTaskV3JSON []byte
 
 //go:embed builtins/wrkq-simple-task-v5.workflow.json
 var builtinSimpleTaskV5JSON []byte
+
+//go:embed builtins/room-2box.workflow.json
+var builtinRoom2BoxJSON []byte
 
 // EnsureBuiltinTemplate installs the embedded built-in workflow identified by
 // templateRef if it is not already installed. Installation is idempotent: a
@@ -59,6 +63,8 @@ func builtinTemplateData(templateRef string) ([]byte, error) {
 		return builtinSimpleTaskV3JSON, nil
 	case BuiltinSimpleTaskV5TemplateRef:
 		return builtinSimpleTaskV5JSON, nil
+	case BuiltinRoom2BoxTemplateRef:
+		return builtinRoom2BoxJSON, nil
 	default:
 		return nil, fmt.Errorf("unknown built-in workflow: %s", templateRef)
 	}
