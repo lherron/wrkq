@@ -1,0 +1,506 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "room-2box",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "description": "Two-seat room for simple fixes: implementer writes the fix and its regression test, coordinator reviews and verifies, direct landing tail. Operator parks are suspensions: the instance stays in its phase; resolution is resolveSuspension (resume/close/cancel).",
+  "initial": {
+    "status": "active",
+    "phase": "implement"
+  },
+  "roles": {
+    "coordinator": {
+      "description": "Reviews the commit range, verifies the change, and classifies landing failures. Never authors product or test changes."
+    },
+    "implementer": {
+      "description": "Writes the fix and its regression test against the task specification."
+    },
+    "system": {
+      "description": "Internal workflow projection and mechanics authority."
+    }
+  },
+  "suspension": {
+    "reasons": [
+      "operator_required"
+    ],
+    "effects": {
+      "close": [
+        {
+          "kind": "set_task_state",
+          "role": "system",
+          "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+          "data": {
+            "state": "completed"
+          }
+        }
+      ],
+      "cancel": [
+        {
+          "kind": "set_task_state",
+          "role": "system",
+          "semanticKey": "task-state:{taskUuid}:{revision}:cancelled",
+          "data": {
+            "state": "cancelled"
+          }
+        }
+      ]
+    }
+  },
+  "states": [
+    {
+      "status": "active",
+      "phase": "implement",
+      "description": "Implementer is writing the fix and its regression test."
+    },
+    {
+      "status": "active",
+      "phase": "review",
+      "description": "Coordinator reviews the commit range and verifies the change."
+    },
+    {
+      "status": "active",
+      "phase": "land",
+      "description": "Direct landing is in progress."
+    },
+    {
+      "status": "closed",
+      "phase": "done",
+      "description": "Terminal success."
+    },
+    {
+      "status": "closed",
+      "phase": "cancelled",
+      "description": "Terminal cancellation (reached via the cancel resolution disposition)."
+    }
+  ],
+  "evidenceKinds": {
+    "implement_result": {
+      "description": "Implementer settlement with commit-bound proof covering the fix and its regression test.",
+      "class": "note",
+      "facts": {
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "commit.sha": {
+            "type": "string"
+          },
+          "dispatch.base.sha": {
+            "type": "string"
+          },
+          "git.clean": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "done",
+              "no_product_change",
+              "blocked",
+              "operator_required"
+            ]
+          },
+          "source_identity": {
+            "type": "string"
+          },
+          "tracked.delta.paths": {
+            "type": "array",
+            "itemsType": "string"
+          },
+          "tracked.dirty.paths": {
+            "type": "array",
+            "itemsType": "string"
+          }
+        }
+      }
+    },
+    "review_result": {
+      "description": "Coordinator review verdict bound to the exact implementation tip it reviewed.",
+      "class": "verify",
+      "facts": {
+        "required": [
+          "result",
+          "reviewed.head.sha"
+        ],
+        "properties": {
+          "findings.forwarded": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "violation"
+            ]
+          },
+          "reviewed.head.sha": {
+            "type": "string"
+          },
+          "source_identity": {
+            "type": "string"
+          },
+          "source.evidence_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "landing_result": {
+      "description": "Mechanics landing result for the direct landing tail.",
+      "class": "verify",
+      "facts": {
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "hook.output.artifact": {
+            "type": "string"
+          },
+          "local.head.sha": {
+            "type": "string"
+          },
+          "remote.head.sha": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "landed",
+              "push_rejected",
+              "operator_required"
+            ]
+          },
+          "source_identity": {
+            "type": "string"
+          },
+          "source.evidence_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "transitions": [
+    {
+      "id": "implement_complete",
+      "description": "Implementer produced commit-bound fix-and-test evidence, or parked for the operator.",
+      "from": {
+        "status": "active",
+        "phase": "implement"
+      },
+      "by": [
+        "implementer"
+      ],
+      "outcomes": [
+        {
+          "id": "done",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "done"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "review"
+          }
+        },
+        {
+          "id": "no_product_change",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "no_product_change"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "review"
+          }
+        },
+        {
+          "id": "blocked",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "blocked"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "implement_result",
+              "facts": {
+                "result": "operator_required"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "review_complete",
+      "description": "Coordinator review verdict advances to direct landing, rewinds to implementation with findings, or parks a violation for the operator.",
+      "from": {
+        "status": "active",
+        "phase": "review"
+      },
+      "by": [
+        "coordinator"
+      ],
+      "outcomes": [
+        {
+          "id": "pass",
+          "when": {
+            "evidenceExists": {
+              "kind": "review_result",
+              "facts": {
+                "result": "pass"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "land"
+          }
+        },
+        {
+          "id": "fail",
+          "when": {
+            "evidenceExists": {
+              "kind": "review_result",
+              "facts": {
+                "result": "fail"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "implement"
+          }
+        },
+        {
+          "id": "violation",
+          "when": {
+            "evidenceExists": {
+              "kind": "review_result",
+              "facts": {
+                "result": "violation"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "direct_land_complete",
+      "description": "Direct landing completed, returned to review for push-failure classification, or parked for the operator.",
+      "from": {
+        "status": "active",
+        "phase": "land"
+      },
+      "by": [
+        "system"
+      ],
+      "outcomes": [
+        {
+          "id": "landed",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "landed"
+              }
+            }
+          },
+          "to": {
+            "status": "closed",
+            "phase": "done"
+          },
+          "effects": [
+            {
+              "kind": "set_task_state",
+              "role": "system",
+              "semanticKey": "task-state:{taskUuid}:{revision}:completed",
+              "data": {
+                "state": "completed"
+              }
+            }
+          ]
+        },
+        {
+          "id": "push_rejected",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "push_rejected"
+              }
+            }
+          },
+          "to": {
+            "status": "active",
+            "phase": "review"
+          }
+        },
+        {
+          "id": "operator_required",
+          "when": {
+            "evidenceExists": {
+              "kind": "landing_result",
+              "facts": {
+                "result": "operator_required"
+              }
+            }
+          },
+          "suspend": {
+            "reason": "operator_required"
+          }
+        }
+      ]
+    }
+  ],
+  "executableActions": {
+    "implement": {
+      "from": {
+        "status": "active",
+        "phase": "implement"
+      },
+      "role": "implementer",
+      "transition": "implement_complete",
+      "resultEvidenceKind": "implement_result",
+      "handlerContract": "praesidium.room-2box.implement@1",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "worktree.write",
+        "git.commit",
+        "test"
+      ],
+      "rank": 10,
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": {
+              "result": "done"
+            },
+            "requiredFacts": [
+              "source_identity"
+            ]
+          },
+          {
+            "whenFacts": {
+              "result": "no_product_change"
+            },
+            "requiredFacts": [
+              "source_identity",
+              "dispatch.base.sha",
+              "tracked.delta.paths"
+            ]
+          }
+        ]
+      }
+    },
+    "review": {
+      "from": {
+        "status": "active",
+        "phase": "review"
+      },
+      "role": "coordinator",
+      "transition": "review_complete",
+      "resultEvidenceKind": "review_result",
+      "handlerContract": "praesidium.room-2box.review@1",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "test",
+        "git.read",
+        "install",
+        "smoke"
+      ],
+      "sourceBinding": {
+        "kind": "previous_action",
+        "action": "implement",
+        "requiredFacts": [
+          "source_identity"
+        ],
+        "bindFields": {
+          "sourceIdentity": "source_identity"
+        }
+      },
+      "rank": 20,
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": {
+              "result": "pass"
+            },
+            "identityFact": "source_identity",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": [
+              "source_identity",
+              "source.evidence_id",
+              "reviewed.head.sha"
+            ]
+          }
+        ]
+      }
+    },
+    "landing": {
+      "from": {
+        "status": "active",
+        "phase": "land"
+      },
+      "role": "system",
+      "transition": "direct_land_complete",
+      "resultEvidenceKind": "landing_result",
+      "handlerContract": "praesidium.room-2box.direct-land@1",
+      "workspaceMode": "exclusive",
+      "sideEffectClasses": [
+        "git.push"
+      ],
+      "sourceBinding": {
+        "kind": "previous_action",
+        "action": "implement",
+        "requiredFacts": [
+          "source_identity"
+        ],
+        "bindFields": {
+          "sourceIdentity": "source_identity"
+        }
+      },
+      "rank": 30,
+      "settleValidation": {
+        "rules": [
+          {
+            "whenFacts": {
+              "result": "landed"
+            },
+            "identityFact": "source_identity",
+            "linkageFact": "source.evidence_id",
+            "requiredFacts": [
+              "source_identity",
+              "source.evidence_id"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
