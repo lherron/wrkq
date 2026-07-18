@@ -1027,6 +1027,14 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 	if err != nil {
 		return nil, err
 	}
+	// Built-in refs are ensure-installed on demand so attach works on a fresh
+	// DB without a prior manual install, matching wrkf.action.start. Ensure
+	// never clears discontinued_at, so the discontinued guard below still holds.
+	if _, builtinErr := builtinTemplateData(templateRef); builtinErr == nil {
+		if _, _, err := s.EnsureBuiltinTemplate(templateRef, actor); err != nil {
+			return nil, err
+		}
+	}
 	var inst *Instance
 	var attachedEvent workflowEventMetadata
 	var dispatchAttachedWebhook bool

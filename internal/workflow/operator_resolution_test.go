@@ -160,10 +160,13 @@ func TestOperatorResolvedClosePath(t *testing.T) {
 
 func TestOperatorResolvedExistingWedgeRecoversAfterBuiltinSupersede(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	installOldBuiltinV2WithoutOperatorResolved(t, svc)
+	// Attach first (attach ensure-installs the current embed), then downgrade
+	// the stored definition to the old pre-operator_resolved v2 so the wedge is
+	// seeded against the old-binary state the recovery path must handle.
 	if _, err := svc.AttachTask(taskUUID, BuiltinSimpleTaskV2TemplateRef, "agent:t"); err != nil {
 		t.Fatalf("AttachTask old v2: %v", err)
 	}
+	installOldBuiltinV2WithoutOperatorResolved(t, svc)
 	wedged, err := svc.LatestInstance(taskUUID)
 	if err != nil {
 		t.Fatalf("LatestInstance wedged: %v", err)
