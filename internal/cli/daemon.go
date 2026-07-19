@@ -25,6 +25,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -41,6 +42,12 @@ type DaemonOptions struct {
 	DBPath        string
 	PIDPath       string
 	UnsafeNoToken bool
+	// NodeTokens maps bearer tokens to logical nodeIds inline
+	// (`nodeId=token,nodeId=token`); NodeTokensFile reads the same grammar
+	// from disk. Either one enables per-node identity, which supersedes the
+	// shared Token.
+	NodeTokens     string
+	NodeTokensFile string
 }
 
 // ServeDaemon starts the wrkqd daemon.
@@ -48,6 +55,11 @@ func ServeDaemon(opts DaemonOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	nodes, err := loadNodeRegistry(opts)
+	if err != nil {
+		return err
 	}
 
 	if opts.DBPath != "" {
@@ -90,6 +102,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		db:       database,
 		cfg:      cfg,
 		token:    opts.Token,
+		nodes:    nodes,
 		workrpc:  rpcServer,
 		rpcToken: opts.Token,
 	}
@@ -118,7 +131,7 @@ func ServeDaemon(opts DaemonOptions) error {
 	if addr == "" {
 		addr = "127.0.0.1:7171"
 	}
-	if opts.Unix == "" && opts.Token == "" && !opts.UnsafeNoToken && !isLoopbackListenAddr(addr) {
+	if opts.Unix == "" && opts.Token == "" && !nodes.Enabled() && !opts.UnsafeNoToken && !isLoopbackListenAddr(addr) {
 		return fmt.Errorf("refusing to bind wrkqd on non-loopback address %s without --token; pass --unsafe-no-token for explicit dev-only override", addr)
 	}
 	httpServer.Addr = addr
@@ -192,6 +205,7 @@ type daemonServer struct {
 	db       *db.DB
 	cfg      *config.Config
 	token    string
+	nodes    *nodeauth.Registry
 	workrpc  *workrpc.Server
 	rpcToken string
 }
@@ -265,18 +279,52 @@ func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
 
 func (s *daemonServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" {
-			token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if token == "" {
-				token = r.Header.Get("X-Wrkqd-Token")
+		// Per-node identity supersedes the shared token: every request must
+		// carry a token that resolves to exactly one server-side nodeId.
+		if s.nodes.Enabled() {
+			node, ok := s.nodes.Resolve(requestToken(r))
+			if !ok {
+				s.writeError(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
+				return
 			}
-			if token != s.token {
+			next(w, r.WithContext(nodeauth.WithNode(r.Context(), node)))
+			return
+		}
+
+		if s.token != "" {
+			if requestToken(r) != s.token {
 				s.writeError(w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
 				return
 			}
 		}
 
 		next(w, r)
+	}
+}
+
+func requestToken(r *http.Request) string {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token == "" {
+		token = r.Header.Get("X-Wrkqd-Token")
+	}
+	return token
+}
+
+// loadNodeRegistry builds the per-node token registry from whichever source
+// the operator configured. Configuring both an inline spec and a file is a
+// config error rather than a silent precedence rule.
+func loadNodeRegistry(opts DaemonOptions) (*nodeauth.Registry, error) {
+	spec := strings.TrimSpace(opts.NodeTokens)
+	file := strings.TrimSpace(opts.NodeTokensFile)
+	switch {
+	case spec != "" && file != "":
+		return nil, fmt.Errorf("configure node tokens inline or by file, not both")
+	case file != "":
+		return nodeauth.LoadFile(file)
+	case spec != "":
+		return nodeauth.ParseSpec(spec)
+	default:
+		return nil, nil
 	}
 }
 
@@ -374,10 +422,16 @@ func (s *daemonServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+	payload := map[string]interface{}{
 		"ok":   true,
 		"time": time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	// The nodeId the caller authenticated as, so an operator can prove the
+	// identity boundary live without trusting anything the caller sent.
+	if node, ok := nodeauth.FromContext(r.Context()); ok {
+		payload["node"] = node
+	}
+	s.writeJSON(w, http.StatusOK, payload)
 }
 
 type containersTreeRequest struct {

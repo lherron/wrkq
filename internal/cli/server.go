@@ -52,6 +52,9 @@ var (
 	serverUnsafeNoToken bool
 	serverTimeoutMS     int
 	serverForce         bool
+
+	serverNodeTokens     string
+	serverNodeTokensFile string
 )
 
 var serverCmd = &cobra.Command{
@@ -104,6 +107,8 @@ func init() {
 	serverCmd.PersistentFlags().StringVar(&serverToken, "token", os.Getenv("WRKQD_TOKEN"), "Shared token for local auth")
 	serverCmd.PersistentFlags().StringVar(&serverDBPath, "db-path", "", "Database path override")
 	serverCmd.PersistentFlags().BoolVar(&serverUnsafeNoToken, "unsafe-no-token", false, "Allow non-loopback listen without a token (dev only)")
+	serverCmd.PersistentFlags().StringVar(&serverNodeTokens, "node-tokens", os.Getenv("WRKQD_NODE_TOKENS"), "Per-node bearer tokens (nodeId=token,nodeId=token); supersedes --token")
+	serverCmd.PersistentFlags().StringVar(&serverNodeTokensFile, "node-tokens-file", os.Getenv("WRKQD_NODE_TOKENS_FILE"), "File of per-node bearer tokens, one nodeId=token per line")
 
 	serverStartCmd.Flags().BoolVar(&serverForeground, "foreground", false, "Run in the foreground when launchd is not loaded")
 	serverStartCmd.Flags().BoolVar(&serverDaemon, "daemon", false, "Run as a background process when launchd is not loaded")
@@ -262,12 +267,14 @@ func writeServerLifecycleJSON(cmd *cobra.Command, action, mode string, status se
 
 func serveWrkqServer() error {
 	return ServeDaemon(DaemonOptions{
-		Addr:          resolvedServerAddr(),
-		Unix:          serverUnixPath,
-		Token:         serverToken,
-		DBPath:        serverDBPath,
-		PIDPath:       wrkqServerPIDPath(),
-		UnsafeNoToken: serverUnsafeNoToken,
+		Addr:           resolvedServerAddr(),
+		Unix:           serverUnixPath,
+		Token:          serverToken,
+		DBPath:         serverDBPath,
+		PIDPath:        wrkqServerPIDPath(),
+		UnsafeNoToken:  serverUnsafeNoToken,
+		NodeTokens:     serverNodeTokens,
+		NodeTokensFile: serverNodeTokensFile,
 	})
 }
 
@@ -445,6 +452,9 @@ func daemonizeWrkqServer(timeout time.Duration) error {
 	if serverUnsafeNoToken {
 		args = append(args, "--unsafe-no-token")
 	}
+	if serverNodeTokensFile != "" {
+		args = append(args, "--node-tokens-file", serverNodeTokensFile)
+	}
 	if serverDBPath != "" {
 		args = append(args, "--db-path", serverDBPath)
 	}
@@ -461,6 +471,11 @@ func daemonizeWrkqServer(timeout time.Duration) error {
 
 	cmd := exec.Command(exe, args...)
 	cmd.Env = os.Environ()
+	// Inline node tokens travel by env, never argv: argv is world-readable
+	// through ps.
+	if serverNodeTokens != "" {
+		cmd.Env = append(cmd.Env, "WRKQD_NODE_TOKENS="+serverNodeTokens)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
