@@ -16,9 +16,14 @@ predicate: >
   contract exposed by `wrkq rpc --stdio`; it is not the legacy wrkqd REST surface,
   not a sync peer, and not a second semantic API. Remote clients must complete
   transport authentication plus `rpc.initialize` before business calls and verify
-  protocol version, protocol schema hash, method/capability surface, and migration
-  compatibility. Network/auth/handshake failures are transport errors and must not
-  be reported as SQLite contention such as `WRKQ_DB_BUSY`.
+  protocol version, protocol schema hash, and required method/capability surface.
+  Migration readiness is server-owned: a production workrpc entrypoint must refuse
+  exposure while any migration embedded in its running binary is pending. A
+  successful authenticated `rpc.initialize` may rely on that server-side readiness
+  gate. `database.migrationHash` is diagnostic identity only; remote clients must not
+  compare migration filenames or infer compatibility from that hash. Network/auth/
+  handshake failures are transport errors and must not be reported as SQLite
+  contention such as `WRKQ_DB_BUSY`.
 
   When remote calls require logical-node provenance, wrkqd derives nodeId only from
   a bearer token mapped server-side to one valid, non-reserved federation nodeId;
@@ -47,7 +52,7 @@ predicate: >
 authority:
   repo: wrkq
   surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
-enforced_by: "PROPOSED: locator/workrpc transport, per-node authentication, and the live max3→mini cutover are established; activation remains blocked until the remote client validates protocol schema hash, required capability/method surface, and migration compatibility before business calls, and the local verify gate is isolated from the production remote locator"
+enforced_by: "PROPOSED: locator/workrpc transport, per-node authentication, server-side migration readiness, and the live max3→mini cutover are established; activation remains blocked until the remote client validates protocol schema hash and required capability/method surface before business calls, a production-entrypoint negative proves pending migrations prevent RPC exposure, and the local verify gate is isolated from the production remote locator"
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser, transport selection, or wrkqd/nodeauth authentication call site"
 source:
   - docs/rpc-cli-cutover-plan.md
@@ -68,7 +73,7 @@ required_tests:
   - internal/cli/daemon_nodeauth_test.go
 last_verified:
   date: 2026-07-19
-  evidence: "T-06598 plus Daedalus's independent live F-1 max3→mini probes verify locator, remote reads, per-node auth/refusals/spoof resistance, multi-cwd convergence, and production token-file deployment (T-06599 C-11027/C-11029; hrcchat #15556). Source review found rpccli initialization still validates only protocol version plus wrkq.task.show; required schema-hash, capability-surface, and migration-compatibility checks remain unimplemented. Plain just verify also fails because repo-local WRKQ_DB=rpc://mini leaks into local-command tests; the same gate passes only with WRKQ_DB/WRKQD_TOKEN_FILE sanitized. The record stays proposed."
+  evidence: "T-06598 plus Daedalus's independent live F-1 max3→mini probes verify locator, remote reads, per-node auth/refusals/spoof resistance, multi-cwd convergence, and production token-file deployment (T-06599 C-11027/C-11029; hrcchat #15556). Source review for T-06644 found rpccli initialization still needs protocol-schema-hash and required-surface checks. It also established that migration identity is not a client compatibility predicate: MigrationHash includes every applied filename plus current pending filenames, while daemon.go and bootstrap.Open call RequiresMigrationError before exposing workrpc. A production-entrypoint pending-migration negative remains required (hrcchat #15562). Plain just verify also fails because repo-local WRKQ_DB=rpc://mini leaks into local-command tests; the same gate passes only with WRKQ_DB/WRKQD_TOKEN_FILE sanitized. The record stays proposed."
 reopen_when:
   - a new locator scheme is added
   - WRKQ_DB_PATH or admin/daemon DB flags are allowed to carry remote endpoints
