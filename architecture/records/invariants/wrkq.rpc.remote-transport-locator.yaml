@@ -47,8 +47,8 @@ predicate: >
 authority:
   repo: wrkq
   surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
-enforced_by: "PROPOSED pending F-1 max3/mini activation evidence; locator/workrpc transport and server-side per-node authentication are implemented, but this record does not activate until the live re-home proves the complete boundary"
-exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser or transport selection call site"
+enforced_by: "PROPOSED: locator/workrpc transport, per-node authentication, and the live max3→mini cutover are established; activation remains blocked until the remote client validates protocol schema hash, required capability/method surface, and migration compatibility before business calls, and the local verify gate is isolated from the production remote locator"
+exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser, transport selection, or wrkqd/nodeauth authentication call site"
 source:
   - docs/rpc-cli-cutover-plan.md
   - internal/config/config.go
@@ -68,7 +68,7 @@ required_tests:
   - internal/cli/daemon_nodeauth_test.go
 last_verified:
   date: 2026-07-19
-  evidence: "T-06598 / 3c56e36 establishes and tests the wrkqd per-node identity boundary; activation remains pending the live F-1 max3/mini cutover evidence from T-06599."
+  evidence: "T-06598 plus Daedalus's independent live F-1 max3→mini probes verify locator, remote reads, per-node auth/refusals/spoof resistance, multi-cwd convergence, and production token-file deployment (T-06599 C-11027/C-11029; hrcchat #15556). Source review found rpccli initialization still validates only protocol version plus wrkq.task.show; required schema-hash, capability-surface, and migration-compatibility checks remain unimplemented. Plain just verify also fails because repo-local WRKQ_DB=rpc://mini leaks into local-command tests; the same gate passes only with WRKQ_DB/WRKQD_TOKEN_FILE sanitized. The record stays proposed."
 reopen_when:
   - a new locator scheme is added
   - WRKQ_DB_PATH or admin/daemon DB flags are allowed to carry remote endpoints
