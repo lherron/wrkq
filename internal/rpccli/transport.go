@@ -141,26 +141,68 @@ func (c *conn) writeFrame(id json.RawMessage, method string, params any) error {
 	return nil
 }
 
-// initialize performs the rpc.initialize handshake and validates enough of the
-// result to catch a mis-wired server (wrong protocol version or a server that
-// does not expose the wrkq method surface). Caller must hold c.mu.
+// initialize performs the rpc.initialize handshake and validates the result
+// before any business request is dispatched. Caller must hold c.mu.
 func (c *conn) initialize() error {
 	res, err := c.request("rpc.initialize", map[string]string{"protocolVersion": workrpc.ProtocolVersion})
 	if err != nil {
 		return fmt.Errorf("rpc.initialize: %w", err)
 	}
-	var init struct {
-		ProtocolVersion string   `json:"protocolVersion"`
-		Methods         []string `json:"methods"`
-	}
+	return validateInitializeResult(res)
+}
+
+// requiredMethods are the methods a server must expose for this client to be
+// talking to the wrkq surface at all. Kept minimal on purpose: this is a
+// wiring check, not a feature inventory. The full contract is pinned by
+// protocolSchemaHash, which already covers the whole method catalog.
+var requiredMethods = []string{"wrkq.task.show"}
+
+// initializeResult is the client's view of the rpc.initialize response. It
+// mirrors workrpc's server-side result; fields the client does not act on are
+// omitted.
+type initializeResult struct {
+	ProtocolVersion    string `json:"protocolVersion"`
+	ProtocolSchemaHash string `json:"protocolSchemaHash"`
+	Database           struct {
+		MigrationHash string `json:"migrationHash"`
+	} `json:"database"`
+	Capabilities struct {
+		Wrkq bool `json:"wrkq"`
+	} `json:"capabilities"`
+	Methods []string `json:"methods"`
+}
+
+// validateInitializeResult refuses an incompatible remote BEFORE any business
+// request goes out. A same-version but otherwise skewed daemon must not reach
+// dispatch (wrkq.rpc.remote-transport-locator).
+//
+// Every refusal here is a transport error: it is returned from the handshake,
+// before a single business call, so it can never be mistaken for SQLite
+// contention (WRKQ_DB_BUSY) on the canonical host.
+func validateInitializeResult(res json.RawMessage) error {
+	var init initializeResult
 	if err := json.Unmarshal(res, &init); err != nil {
 		return fmt.Errorf("decode initialize result: %w", err)
 	}
 	if init.ProtocolVersion != workrpc.ProtocolVersion {
 		return fmt.Errorf("rpc protocol mismatch: server %q, client %q", init.ProtocolVersion, workrpc.ProtocolVersion)
 	}
-	if !containsMethod(init.Methods, "wrkq.task.show") {
-		return errors.New("rpc server does not expose the wrkq method surface (wrong wiring)")
+	// The schema hash covers the method catalog, error-code catalog, and DTO
+	// shapes. A matching protocolVersion with a diverged hash is exactly the
+	// same-version-but-incompatible daemon this check exists to reject.
+	if want := workrpc.ProtocolSchemaHash(); init.ProtocolSchemaHash != want {
+		if init.ProtocolSchemaHash == "" {
+			return fmt.Errorf("rpc server reported no protocolSchemaHash; client requires %s", want)
+		}
+		return fmt.Errorf("rpc protocol schema mismatch: server %s, client %s", init.ProtocolSchemaHash, want)
+	}
+	for _, method := range requiredMethods {
+		if !containsMethod(init.Methods, method) {
+			return fmt.Errorf("rpc server does not expose required method %q (wrong wiring)", method)
+		}
+	}
+	if !init.Capabilities.Wrkq {
+		return errors.New("rpc server does not advertise the wrkq capability")
 	}
 	return nil
 }
@@ -305,20 +347,7 @@ func (t *remoteTransport) initialize() error {
 	if err != nil {
 		return fmt.Errorf("rpc.initialize: %w", err)
 	}
-	var init struct {
-		ProtocolVersion string   `json:"protocolVersion"`
-		Methods         []string `json:"methods"`
-	}
-	if err := json.Unmarshal(res, &init); err != nil {
-		return fmt.Errorf("decode initialize result: %w", err)
-	}
-	if init.ProtocolVersion != workrpc.ProtocolVersion {
-		return fmt.Errorf("rpc protocol mismatch: server %q, client %q", init.ProtocolVersion, workrpc.ProtocolVersion)
-	}
-	if !containsMethod(init.Methods, "wrkq.task.show") {
-		return errors.New("rpc server does not expose the wrkq method surface (wrong wiring)")
-	}
-	return nil
+	return validateInitializeResult(res)
 }
 
 func (t *remoteTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
