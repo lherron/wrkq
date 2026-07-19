@@ -2,7 +2,7 @@ id: wrkq.rpc.remote-transport-locator
 kind: invariant
 status: proposed
 owner_project: wrkq
-scope: wrkq CLI database locator and remote workrpc transport
+scope: wrkq CLI database locator, remote workrpc transport, and transport-derived logical-node identity
 predicate: >
   Day-to-day `wrkq` commands select their durability endpoint through a database
   locator, not always a filesystem path. `WRKQ_DB` and the production `wrkq --db`
@@ -20,6 +20,23 @@ predicate: >
   compatibility. Network/auth/handshake failures are transport errors and must not
   be reported as SQLite contention such as `WRKQ_DB_BUSY`.
 
+  When remote calls require logical-node provenance, wrkqd derives nodeId only from
+  a bearer token mapped server-side to one valid, non-reserved federation nodeId;
+  caller-supplied node labels and peer IP are never identity. Each token maps to
+  exactly one node, while one node MAY hold several distinct tokens so rotation does
+  not require an authentication gap. Missing and unknown tokens are authentication
+  refusals, and a token repeated anywhere in the mapping is a configuration error.
+  Once a per-node mapping is configured it supersedes the legacy shared token; the
+  shared-token compatibility mode exists only while per-node identity is disabled
+  and cannot supply node provenance to methods that require it. The authenticated
+  nodeId must remain attached to the server-side request context so node-attributed
+  writes such as `claimed_node` can derive it without accepting request data.
+
+  The node-token set is configured explicitly through `--node-tokens` or
+  `--node-tokens-file` (and their WRKQD env equivalents), never inferred from
+  topology. Bearer values must not appear in errors, logs, or a detached server's
+  process arguments; the file form is the production secret-management surface.
+
   In remote mode the canonical host owns the SQLite database, migrations, etags/CAS,
   attribution writes, event log, search/index sidecar and embedder, attachment store,
   and monitor/watch bounded read models. The caller host owns project-root argument
@@ -30,18 +47,28 @@ predicate: >
 authority:
   repo: wrkq
   surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
-enforced_by: "PROPOSED for the post-local-cutover remote wrkqd transport; activate after locator parsing, auth, workrpc-over-wrkqd transport, and max3/mini e2e validation land"
+enforced_by: "PROPOSED pending F-1 max3/mini activation evidence; locator/workrpc transport and server-side per-node authentication are implemented, but this record does not activate until the live re-home proves the complete boundary"
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser or transport selection call site"
 source:
   - docs/rpc-cli-cutover-plan.md
   - internal/config/config.go
   - internal/rpccli/transport.go
   - internal/rpccli/server.go
+  - internal/nodeauth/nodeauth.go
+  - internal/nodeauth/nodeauth_test.go
   - internal/workrpc/lifecycle.go
   - internal/workrpc/registry.go
   - internal/workrpc/bootstrap/bootstrap.go
   - internal/cli/daemon.go
+  - internal/cli/daemon_nodeauth_test.go
+  - internal/cli/server.go
   - cmd/wrkqd/main.go
+required_tests:
+  - internal/nodeauth/nodeauth_test.go
+  - internal/cli/daemon_nodeauth_test.go
+last_verified:
+  date: 2026-07-19
+  evidence: "T-06598 / 3c56e36 establishes and tests the wrkqd per-node identity boundary; activation remains pending the live F-1 max3/mini cutover evidence from T-06599."
 reopen_when:
   - a new locator scheme is added
   - WRKQ_DB_PATH or admin/daemon DB flags are allowed to carry remote endpoints
@@ -49,5 +76,9 @@ reopen_when:
   - remote clients open local SQLite/search/attachment stores for durable wrkq behavior
   - monitor/watch moves from bounded polling to server push or long-lived streams
   - authentication requirements for non-loopback wrkqd change
+  - a remote method accepts caller-supplied node provenance or derives it from peer IP
+  - per-node configuration permits one token to authenticate as more than one node
+  - shared-token compatibility can authorize a method that requires logical-node provenance
+  - bearer-token transport or disclosure rules change
 supersedes: []
 superseded_by: null
