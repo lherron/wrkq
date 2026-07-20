@@ -10,6 +10,14 @@ import (
 )
 
 func TestCLISurfaceManifestMatchesCobraTree(t *testing.T) {
+	// The checked-in artifact records canonical flag defaults, not values from a
+	// developer's daemon environment. Earlier package tests execute commands that
+	// call config.Load, whose dotenv loader can populate these variables for the
+	// rest of the test process.
+	for _, key := range []string{"WRKQD_ADDR", "WRKQD_UNIX", "WRKQD_TOKEN"} {
+		t.Setenv(key, "")
+	}
+
 	generated, err := BuildCLISurfaceManifestJSON("wrkq")
 	if err != nil {
 		t.Fatalf("generate CLI surface manifest: %v", err)
