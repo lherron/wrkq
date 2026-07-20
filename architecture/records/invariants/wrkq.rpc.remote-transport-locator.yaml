@@ -1,6 +1,6 @@
 id: wrkq.rpc.remote-transport-locator
 kind: invariant
-status: proposed
+status: active
 owner_project: wrkq
 scope: wrkq CLI database locator, remote workrpc transport, and transport-derived logical-node identity
 predicate: >
@@ -52,12 +52,19 @@ predicate: >
 authority:
   repo: wrkq
   surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
-enforced_by: "PROPOSED: locator/workrpc transport, per-node authentication, server-side migration readiness, and the live max3→mini cutover are established; activation remains blocked until the remote client validates protocol schema hash and required capability/method surface before business calls, a production-entrypoint negative proves pending migrations prevent RPC exposure, and the local verify gate is isolated from the production remote locator"
+enforced_by: >
+  Locator parsing and workrpc transport selection; rpccli initialize validation of
+  protocol version, schema hash, and required method/capability surface before
+  business dispatch; daemon and bootstrap migration-readiness refusal before RPC
+  exposure; nodeauth token-to-node resolution, shared-token supersession, and
+  request-context attachment; the live max3→mini cutover; and the wrkq.verify-gate
+  local handoff control.
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser, transport selection, or wrkqd/nodeauth authentication call site"
 source:
   - docs/rpc-cli-cutover-plan.md
   - internal/config/config.go
   - internal/rpccli/transport.go
+  - internal/rpccli/remote_initialize_negative_test.go
   - internal/rpccli/server.go
   - internal/nodeauth/nodeauth.go
   - internal/nodeauth/nodeauth_test.go
@@ -65,15 +72,28 @@ source:
   - internal/workrpc/registry.go
   - internal/workrpc/bootstrap/bootstrap.go
   - internal/cli/daemon.go
+  - internal/cli/daemon_migration_gate_test.go
   - internal/cli/daemon_nodeauth_test.go
   - internal/cli/server.go
   - cmd/wrkqd/main.go
 required_tests:
   - internal/nodeauth/nodeauth_test.go
   - internal/cli/daemon_nodeauth_test.go
+  - internal/cli/daemon_migration_gate_test.go
+  - internal/rpccli/remote_initialize_negative_test.go
+  - just verify
 last_verified:
-  date: 2026-07-19
-  evidence: "T-06598 plus Daedalus's independent live F-1 max3→mini probes verify locator, remote reads, per-node auth/refusals/spoof resistance, multi-cwd convergence, and production token-file deployment (T-06599 C-11027/C-11029; hrcchat #15556). Source review for T-06644 found rpccli initialization still needs protocol-schema-hash and required-surface checks. It also established that migration identity is not a client compatibility predicate: MigrationHash includes every applied filename plus current pending filenames, while daemon.go and bootstrap.Open call RequiresMigrationError before exposing workrpc. A production-entrypoint pending-migration negative remains required (hrcchat #15562). Plain just verify also fails because repo-local WRKQ_DB=rpc://mini leaks into local-command tests; the same gate passes only with WRKQ_DB/WRKQD_TOKEN_FILE sanitized. The record stays proposed."
+  date: 2026-07-20
+  evidence: >
+    Activated after T-06598/T-06599 established the live max3→mini locator and
+    server-derived node identity boundary (C-11027/C-11029); T-06644 added
+    pre-dispatch schema-hash and required-surface refusal plus server-owned
+    migration-readiness negatives; T-06645 isolated local-command tests from the
+    production locator; and T-06658 removed dotenv-driven manifest-test order
+    dependence. Daedalus independently reverified live token resolution, legacy and
+    missing-token refusal, spoof resistance, the focused identity/handshake/migration
+    suites, the full rpccli package, and the green local verify gate on branch
+    fix/T-06658-verify-gate.
 reopen_when:
   - a new locator scheme is added
   - WRKQ_DB_PATH or admin/daemon DB flags are allowed to carry remote endpoints
