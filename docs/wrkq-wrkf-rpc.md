@@ -256,6 +256,12 @@ Standard JSON-RPC protocol errors (parse error, invalid request, method not
 found) may omit `data.code`. Clients must classify those as protocol errors,
 not domain errors.
 
+The remote stdio bridge also reports upstream HTTP and transport failures as
+protocol-level errors with no `data.code`. Its safe diagnostic data includes
+`kind` (`authentication`, `authorization`, `http`, `transport`, or `protocol`),
+`retryable`, and `httpStatus` when an HTTP response was received. Credentials
+and upstream response bodies are never copied into the error envelope.
+
 Structured validation data shape:
 
 ```json

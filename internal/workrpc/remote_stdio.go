@@ -10,6 +10,48 @@ import (
 	"net/http"
 )
 
+type remoteForwardError struct {
+	kind       string
+	httpStatus int
+	retryable  bool
+}
+
+func (e *remoteForwardError) Error() string {
+	if e == nil {
+		return "remote workrpc request failed"
+	}
+	switch e.kind {
+	case "authentication":
+		return fmt.Sprintf("remote workrpc authentication failed (HTTP %d)", e.httpStatus)
+	case "authorization":
+		return fmt.Sprintf("remote workrpc authorization failed (HTTP %d)", e.httpStatus)
+	case "http":
+		return fmt.Sprintf("remote workrpc HTTP %d", e.httpStatus)
+	case "protocol":
+		return "remote workrpc protocol failure"
+	default:
+		return "remote workrpc transport failure"
+	}
+}
+
+func mapRemoteForwardError(err error) *RPCError {
+	var remoteErr *remoteForwardError
+	if !errors.As(err, &remoteErr) {
+		return protocolError(codeInternal, "remote workrpc request failed", map[string]any{
+			"kind":      "internal",
+			"retryable": false,
+		})
+	}
+	data := map[string]any{
+		"kind":      remoteErr.kind,
+		"retryable": remoteErr.retryable,
+	}
+	if remoteErr.httpStatus != 0 {
+		data["httpStatus"] = remoteErr.httpStatus
+	}
+	return protocolError(codeInternal, remoteErr.Error(), data)
+}
+
 // ServeRemoteStdio serves the stdio JSON-RPC protocol by forwarding request
 // frames to a remote wrkqd /v1/rpc endpoint. It preserves caller IDs and forwards
 // rpc.initialize to the canonical server; it does not synthesize protocol
@@ -66,7 +108,7 @@ func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint
 			resp = Response{
 				JSONRPC: "2.0",
 				ID:      req.ID,
-				Error:   MapError(err),
+				Error:   mapRemoteForwardError(err),
 			}
 		}
 		if err := writer.WriteResponse(resp); err != nil {
@@ -90,12 +132,26 @@ func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token str
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Response{}, fmt.Errorf("remote workrpc request %s: %w", frame.Method, err)
+		return Response{}, &remoteForwardError{kind: "transport", retryable: true}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		kind := "http"
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			kind = "authentication"
+		case http.StatusForbidden:
+			kind = "authorization"
+		}
+		return Response{}, &remoteForwardError{
+			kind:       kind,
+			httpStatus: resp.StatusCode,
+			retryable:  resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError,
+		}
+	}
 	var rpcResp Response
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
-		return Response{}, fmt.Errorf("decode remote workrpc response %s: %w", frame.Method, err)
+		return Response{}, &remoteForwardError{kind: "protocol", retryable: false}
 	}
 	if rpcResp.JSONRPC == "" {
 		rpcResp.JSONRPC = "2.0"

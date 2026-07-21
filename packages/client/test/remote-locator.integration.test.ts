@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { createClient, type WorkClient } from "../src/client";
+import { WorkRpcError } from "../src/errors";
 
 const WRKQ = process.env.WRKQ_BIN ?? "wrkq";
 const WRKQD = process.env.WRKQD_BIN ?? "wrkqd";
@@ -125,10 +126,49 @@ describe("@wrkq/client remote locator through stdio subprocess", () => {
       const shown = await client.wrkq.task.show({ task: task.id });
       expect(shown.title).toBe("remote locator client task");
 
+      let notFound: unknown;
+      try {
+        await client.wrkq.task.show({ task: "T-99999" });
+      } catch (error) {
+        notFound = error;
+      }
+      expect(notFound).toBeInstanceOf(WorkRpcError);
+      expect((notFound as WorkRpcError).domainCode).toBe("WRKQ_NOT_FOUND");
+
       const workflows = await client.wrkf.workflow.list();
       expect(Array.isArray(workflows.templates)).toBe(true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  test("bad remote credentials reject with an explicit protocol-level authentication error", async () => {
+    const badToken = `invalid-secret-${process.pid}`;
+    let caught: unknown;
+    try {
+      await createClient({
+        command: WRKQ,
+        dbPath: `rpc://127.0.0.1:${port}`,
+        actor: "agent:local-human",
+        env: {
+          ...process.env,
+          WRKQD_TOKEN: badToken,
+          WRKQD_TOKEN_FILE: undefined,
+          ASP_PROJECT: "",
+          WRKQ_PROJECT: "",
+        },
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(WorkRpcError);
+    const error = caught as WorkRpcError;
+    expect(error.rpcCode).toBe(-32603);
+    expect(error.domainCode).toBeUndefined();
+    expect(error.message).toContain("authentication failed (HTTP 401)");
+    expect(error.data?.kind).toBe("authentication");
+    expect(error.data?.httpStatus).toBe(401);
+    expect(error.message).not.toContain(badToken);
   });
 });

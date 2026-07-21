@@ -102,3 +102,49 @@ func TestServeRemoteStdioForwardsInitializeReadAndDomainError(t *testing.T) {
 		t.Fatalf("remote server was shut down by proxied shutdown: ok=%v resp=%#v", ok, remoteStillAvailable)
 	}
 }
+
+func TestServeRemoteStdioPreservesRemoteAuthenticationFailure(t *testing.T) {
+	const secret = "must-not-appear"
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
+	}))
+	defer httpServer.Close()
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"2026-06-30"}}`,
+		`{"jsonrpc":"2.0","method":"rpc.exit"}`,
+		"",
+	}, "\n")
+	var out bytes.Buffer
+	if err := workrpc.ServeRemoteStdio(t.Context(), strings.NewReader(input), &out, strings.TrimPrefix(httpServer.URL, "http://"), secret); err != nil {
+		t.Fatalf("ServeRemoteStdio: %v", err)
+	}
+
+	var resp workrpc.Response
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &resp); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, out.String())
+	}
+	if string(resp.ID) != `"init"` || resp.Error == nil {
+		t.Fatalf("authentication failure did not preserve request id/error: %#v", resp)
+	}
+	if resp.Error.Code != -32603 || !strings.Contains(resp.Error.Message, "authentication failed (HTTP 401)") {
+		t.Fatalf("unexpected authentication error: %#v", resp.Error)
+	}
+	var data struct {
+		Kind       string `json:"kind"`
+		HTTPStatus int    `json:"httpStatus"`
+		Retryable  bool   `json:"retryable"`
+		Code       string `json:"code"`
+	}
+	if err := json.Unmarshal(resp.Error.Data, &data); err != nil {
+		t.Fatalf("decode error data: %v", err)
+	}
+	if data.Kind != "authentication" || data.HTTPStatus != http.StatusUnauthorized || data.Retryable || data.Code != "" {
+		t.Fatalf("unexpected authentication error data: %+v", data)
+	}
+	if strings.Contains(out.String(), secret) {
+		t.Fatal("authentication error leaked credential")
+	}
+}
