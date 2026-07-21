@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/workflow"
+	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/spf13/cobra"
 )
 
@@ -181,12 +182,12 @@ func actionNextCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "next [TASK]",
 		Args: cobra.MaximumNArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			task := ""
 			if len(args) > 0 {
 				task = args[0]
 			}
-			result, err := a.service.ActionNext(workflow.ActionNextParams{
+			result, err := rpcCall[wrkfapi.ActionNextResult](cmd, a, "wrkf.action.next", workflow.ActionNextParams{
 				Task:       task,
 				InstanceID: opts.instanceID,
 				Filters: workflow.ActionNextFilters{
@@ -457,8 +458,8 @@ func actionShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:  "show ACTION_RUN",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			run, err := a.service.ShowAction(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := rpcCall[wrkfapi.ActionRun](cmd, a, "wrkf.action.show", wrkfapi.ActionShowParams{ActionRunID: args[0]})
 			if err != nil {
 				return err
 			}
@@ -472,8 +473,8 @@ func actionListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			runs, err := a.service.ListActions(workflow.ListActionsParams{
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkfapi.ActionListResult](cmd, a, "wrkf.action.list", wrkfapi.ActionListParams{
 				Task:                   args[0],
 				IncludeClosedInstances: opts.includeClosed,
 				Status:                 opts.status,
@@ -483,7 +484,7 @@ func actionListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"items": runs})
+			return printAny(cmd, flagJSON, map[string]interface{}{"items": result.Items})
 		}),
 	}
 	cmd.Flags().BoolVar(&opts.includeClosed, "include-closed-instances", false, "Include runs from closed workflow instances")

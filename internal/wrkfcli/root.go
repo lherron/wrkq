@@ -18,6 +18,7 @@ import (
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc"
+	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/lherron/wrkq/internal/wrkqapi"
 	"github.com/spf13/cobra"
@@ -32,6 +33,7 @@ type app struct {
 	json        bool
 	hookCatalog *workflow.HookCatalog
 	hookPath    string
+	transport   workrpcclient.Transport
 }
 
 var rootCmd = &cobra.Command{
@@ -286,8 +288,8 @@ func workflowCmd() *cobra.Command {
 	show := &cobra.Command{
 		Use:  "show ID@VERSION",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			info, err := a.service.ShowTemplateVersion(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			info, err := rpcCall[wrkfapi.WorkflowShowResult](cmd, a, "wrkf.workflow.show", map[string]any{"ref": args[0]})
 			if err != nil {
 				return err
 			}
@@ -308,10 +310,26 @@ func workflowCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list",
 		Args: cobra.NoArgs,
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			templates, err := a.service.ListTemplates()
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkfapi.WorkflowListResult](cmd, a, "wrkf.workflow.list", map[string]any{})
 			if err != nil {
 				return err
+			}
+			var templates []map[string]interface{}
+			for _, template := range result.Templates {
+				row := map[string]interface{}{
+					"id": template.ID, "version": template.Version, "hash": template.Hash, "installedAt": template.InstalledAt,
+				}
+				if template.InstalledBy != "" {
+					row["installedBy"] = template.InstalledBy
+				}
+				if template.DiscontinuedAt != "" {
+					row["discontinuedAt"] = template.DiscontinuedAt
+				}
+				if template.DiscontinuedBy != "" {
+					row["discontinuedBy"] = template.DiscontinuedBy
+				}
+				templates = append(templates, row)
 			}
 			if flagJSON {
 				return printJSON(cmd, map[string]interface{}{"templates": templates})
@@ -410,23 +428,23 @@ func taskCmd() *cobra.Command {
 	inspect := &cobra.Command{
 		Use:  "inspect TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			inst, err := a.service.InspectTask(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkqapi.WrkqWorkflowInspectResult](cmd, a, "wrkq.workflow.inspect", map[string]any{"task": args[0]})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, inst)
+			return printAny(cmd, flagJSON, result.Instance)
 		}),
 	}
 	timeline := &cobra.Command{
 		Use:  "timeline TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			events, err := a.service.Timeline(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkqapi.WrkqWorkflowTimelineResult](cmd, a, "wrkq.workflow.timeline", map[string]any{"task": args[0]})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"events": events})
+			return printAny(cmd, flagJSON, map[string]interface{}{"events": result.Events})
 		}),
 	}
 	refresh := &cobra.Command{
@@ -464,8 +482,8 @@ func nextCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:  "next TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			resp, err := a.service.Next(args[0], a.role)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			resp, err := rpcCall[workflow.NextActionResponse](cmd, a, "wrkf.instance.next", map[string]any{"task": args[0], "role": a.role})
 			if err != nil {
 				return err
 			}
@@ -508,8 +526,8 @@ func evidenceCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			ev, err := a.service.ListEvidence(args[0], "")
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			ev, err := rpcCall[[]workflow.Evidence](cmd, a, "wrkf.evidence.list", map[string]any{"task": args[0]})
 			if err != nil {
 				return err
 			}
@@ -519,8 +537,8 @@ func evidenceCmd() *cobra.Command {
 	show := &cobra.Command{
 		Use:  "show EVIDENCE",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			ev, err := a.service.ShowEvidence(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			ev, err := rpcCall[workflow.Evidence](cmd, a, "wrkf.evidence.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -530,15 +548,17 @@ func evidenceCmd() *cobra.Command {
 	suggest := &cobra.Command{
 		Use:  "suggest TASK --transition TRANSITION",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if transition == "" {
 				return fmt.Errorf("--transition is required")
 			}
-			out, err := a.service.SuggestEvidence(args[0], transition)
+			out, err := rpcCall[wrkfapi.SuggestResult](cmd, a, "wrkf.evidence.suggest", map[string]any{"task": args[0], "transition": transition})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, out)
+			return printAny(cmd, flagJSON, map[string]interface{}{
+				"transition": out.Transition, "required": out.Required, "missing": out.Missing, "checks": out.Checks, "warnings": out.Warnings,
+			})
 		}),
 	}
 	suggest.Flags().StringVar(&transition, "transition", "", "Transition id")
@@ -648,8 +668,8 @@ func ledgerCmd() *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:  "list",
 		Args: cobra.NoArgs,
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			result, err := a.service.ListLedger(workflow.ListLedgerParams{
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkfapi.LedgerListResult](cmd, a, "wrkf.ledger.list", workflow.ListLedgerParams{
 				TaskID: listTask, AboutPrincipalRef: listPrincipal, Kind: listKind, Since: listSince, Until: listUntil, Limit: listLimit, Cursor: listCursor,
 			})
 			if err != nil {
@@ -719,8 +739,8 @@ func obligationCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			obl, err := a.service.ListObligations(args[0], all)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			obl, err := rpcCall[[]workflow.Obligation](cmd, a, "wrkf.obligation.list", map[string]any{"task": args[0], "all": all})
 			if err != nil {
 				return err
 			}
@@ -731,8 +751,8 @@ func obligationCmd() *cobra.Command {
 	show := &cobra.Command{
 		Use:  "show OBLIGATION",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			obl, err := a.service.ShowObligation(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			obl, err := rpcCall[workflow.Obligation](cmd, a, "wrkf.obligation.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -765,8 +785,8 @@ func effectCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			effects, err := a.service.ListEffects(args[0], true)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			effects, err := rpcCall[[]workflow.Effect](cmd, a, "wrkf.effect.list", map[string]any{"task": args[0], "all": true})
 			if err != nil {
 				return err
 			}
@@ -776,8 +796,8 @@ func effectCmd() *cobra.Command {
 	show := &cobra.Command{
 		Use:  "show EFFECT",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := a.service.ShowEffect(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -889,8 +909,8 @@ func checkCmd() *cobra.Command {
 		Use:   "check TASK TRANSITION",
 		Short: "Run workflow checks",
 		Args:  cobra.ExactArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			resp, err := a.service.Next(args[0], a.role)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			resp, err := rpcCall[workflow.NextActionResponse](cmd, a, "wrkf.check.preflight", map[string]any{"task": args[0], "transition": args[1], "role": a.role})
 			if err != nil {
 				return err
 			}
@@ -911,8 +931,8 @@ func checkCmd() *cobra.Command {
 	show := &cobra.Command{
 		Use:  "show CHECK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			cr, err := a.service.ShowCheckRun(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			cr, err := rpcCall[workflow.CheckRun](cmd, a, "wrkf.check.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -923,8 +943,8 @@ func checkCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			checks, err := a.service.ListCheckRuns(args[0], listTransition)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			checks, err := rpcCall[[]workflow.CheckRun](cmd, a, "wrkf.check.list", map[string]any{"task": args[0], "transition": listTransition})
 			if err != nil {
 				return err
 			}
@@ -935,8 +955,8 @@ func checkCmd() *cobra.Command {
 	preflight := &cobra.Command{
 		Use:  "preflight TASK TRANSITION",
 		Args: cobra.ExactArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			resp, err := a.service.Next(args[0], a.role)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			resp, err := rpcCall[workflow.NextActionResponse](cmd, a, "wrkf.check.preflight", map[string]any{"task": args[0], "transition": args[1], "role": a.role})
 			if err != nil {
 				return err
 			}
@@ -1095,8 +1115,8 @@ func runCmd() *cobra.Command {
 	show := &cobra.Command{
 		Use:  "show RUN",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			run, err := a.service.ShowRun(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -1106,8 +1126,8 @@ func runCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			runs, err := a.service.ListRuns(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			runs, err := rpcCall[[]wrkfapi.Run](cmd, a, "wrkf.run.list", map[string]any{"task": args[0]})
 			if err != nil {
 				return err
 			}
