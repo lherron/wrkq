@@ -1,8 +1,8 @@
 # wrkf Remote-Transport Client Migration Spec
 
-- **Status:** DRAFT — under daedalus drafting consult (2026-07-21)
+- **Status:** RATIFIED-AS-AMENDED (2026-07-21) — daedalus drafting consult #15699, mable disposition #15700 under Lance-delegated ratification authority. Build dispatch awaits Lance go.
 - **Owner:** mable (campaign T-06754..T-06762, container `wrkq/wrkf-rpc-client`)
-- **Ruling authority:** Lance authorized the campaign and the legacy-CLI decomm (2026-07-21); daedalus consult on the design decisions below; build holds until joint review.
+- **Ruling authority:** Lance authorized the campaign and the legacy-CLI decomm (2026-07-21) and delegated spec ratification to mable. Standing Lance rulings folded in: the campaign's test surface is frozen (no dedicated proof-harness bars beyond ordinary slot unit coverage); daedalus surface economy (new-invariant proposal deferred to post-S7 evidence).
 - **Companion contracts:** `docs/wrkq-wrkf-rpc.md` (machine contract), `docs/wrkq-wrkf-rpc-client-forward-spec.md` (TS client), `architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml` (remote transport invariant)
 
 ## 1. Motivation
@@ -20,7 +20,9 @@ This spec migrates the wrkf CLI to the same transport seam wrkq uses, adds the s
 
 ## 3. D1 — Transport seam: share rpccli's, do not fork
 
-**Decision (recommended):** extract the `Transport` interface plus the Remote and InProcess implementations from `internal/rpccli` into a shared internal package (working name `internal/rpctransport`), consumed by both rpccli and wrkfcli. wrkfcli constructs it with `RegistryOptions{Entrypoint: "wrkf"}`.
+**Decision (ratified):** extract the `Transport` interface plus the Remote/InProcess/Subprocess implementations from `internal/rpccli` into **`internal/workrpc/client`** — it is workrpc protocol machinery and that location fits the existing layerguard `workrpc-ownership` exception. Move only protocol/client machinery (`Transport`, `Error`, conn, transports, initialize validation); Cobra/presentation stays outside. wrkfcli constructs it with `RegistryOptions{Entrypoint: "wrkf"}` for the local InProcess registry label; a remote wrkqd is the unified registry and is never required to report entrypoint wrkf.
+
+**Initialize client profile:** the handshake is parameterized per client. Today it hardcodes `capabilities.wrkq` + `wrkq.task.show` as the probe (`internal/rpccli/transport.go:154-172`); the wrkf profile requires `capabilities.wrkf` + a minimal wrkf method instead.
 
 - Locator/config semantics are byte-identical to wrkq: `WRKQ_DB=rpc://mini` → endpoint `mini:7171`, `cfg.RemoteEndpoint` set, `cfg.DBPath` cleared. The pathOnly rejection in wrkfcli is removed; `wrkqadm`/`wrkq server` keep pathOnly.
 - Token precedence, auth-error fidelity (commit 82ea18d), and the token-file-over-dotenv rule (commit b691b7a) come along for free by sharing code.
@@ -44,6 +46,8 @@ This spec migrates the wrkf CLI to the same transport seam wrkq uses, adds the s
 | `wrkf supervisor action create-obligation` | `wrkf.obligation.create` | `service.CreateObligation` (`ledger.go:821`) |
 | `wrkf watch` | `wrkf.watch.snapshot` + `wrkf.watch.events` (D4) | `service.WatchSnapshot` / `WatchEvents` |
 
+Domain rulings (ratified): `wrkf.supervisor.*` is correct — these create supervisor effects against an instance/task; `wrkf.run.*` denotes execution attempts and would be a false ownership claim. `wrkq.workflow.syncMeta` enforces the boundary in implementation as well as naming: the handler is owned in the wrkq API/register region, not behind wrkfapi.
+
 Every new method carries the full contract obligation set (standing ruling): registry + catalog entry, handler, `docs/wrkq-wrkf-rpc.md` update, protocolSchemaHash regeneration, `@wrkq/client` facade + types + unit coverage, forward-spec update. Idempotent mutators use the shared JSON canonicalizer — no ad-hoc marshaling.
 
 ## 6. D4 — Watch surface: bounded polling, client-side loop
@@ -52,38 +56,53 @@ Every new method carries the full contract obligation set (standing ruling): reg
 
 - `wrkf.watch.snapshot` — durable-predicate snapshot for a selector set (same params the service call takes today).
 - `wrkf.watch.events` — cursor-bounded event page (`afterCursor`, `limit`), no long-poll, no server-side wait.
-- The poll LOOP stays in the CLI client; interval/`--until` predicate evaluation is client-side. The server never holds a request open.
+- **Cursor identity (daedalus refinement):** the events cursor binds to resolved target identity plus seq (`instanceId`/`runId`, `seq`), never bare seq — a task selector can resolve to a successor instance whose seq restarts, and a bare carried cursor would suppress its early events. Snapshot and events remain independent and race-tolerant.
+- The poll LOOP stays in the CLI client; interval/`--until` predicate evaluation is client-side. The server never holds a request open. Preserves active invariant `wrkq.wrkf-rpc.bounded-polling-streaming`: server owns one snapshot/page and a hard cap; client owns interval, timeout, terminal line, exit.
 
 ## 7. D5 — Template ops: content-bearing params
 
 `wrkf.workflow.install/validate/diff` handlers currently read a **path on the daemon's disk** (`internal/wrkfapi/api.go:129, 44, 114`) — unusable for non-colocated callers.
 
-**Decision (recommended):** add content-bearing request shapes — client reads the file, sends the template body (and for `diff`, both bodies) in params; size-bounded (proposed cap 1 MiB per body, matching typical template sizes with wide margin). The path-based variant is removed at S8 decomm, not kept as a second semantics. `workflow validate`/`diff` (currently no-DB local) route through RPC in remote mode for engine-version-consistent validation; in local mode InProcess makes this equivalent.
+**Decision (ratified):** content-bearing request shapes — client reads the file, sends the template body (and for `diff`, both bodies) in params. The path-based variant is **deleted with this change** (not deferred to S8): local InProcess uses the same content DTO, so a colocated path fast path buys only split semantics. Caps: **1 MiB per decoded template body, 2 MiB aggregate for diff**, server-authoritative with client preflight. A diagnostic `sourceName` may accompany the body but is never interpreted as a daemon path. `workflow validate`/`diff` route through RPC in remote mode for engine-version-consistent validation; in local mode InProcess makes this equivalent.
+
+**Envelope bound (daedalus find):** wrkqd's HTTP endpoint currently decodes an unbounded body (`internal/cli/daemon.go:348-355`); the existing 8 MiB workrpc envelope cap applies only in the stdio codec. Apply `http.MaxBytesReader` to `/v1/rpc` before JSON decode.
 
 ## 8. D6 — Hook execution locus (the real design question)
 
 `wrkf.check.run`, `wrkf.hook.run`, `wrkf.effect.deliver`, and `wrkf.transition.apply --run-checks` execute hooks via the **daemon-configured** `hookCatalog`/`templateDir` (`api.go:339, 428, 432`; `effect.go:53`). The caller's `--hook-catalog` flag is not transmitted.
 
-**Decision (recommended):** daemon-side execution is canonical. Rationale: hooks are workflow law; the canonical host owns durability and law enforcement (remote-transport invariant's canonical-host-owns-durability split); a client-supplied catalog over RPC would let any caller substitute law. Consequences:
+**Decision (ratified, daedalus-amended): daemon-selected law, isolated execution.** Daemon-side authority is upheld — hooks are workflow law; the canonical host owns durability and law enforcement; a client-supplied catalog over RPC would let any caller substitute law. Two binding conditions shape the implementation:
 
-- The daemon's hook catalog + template dir become deployed configuration on the canonical node (mini) — part of the coordinated-landing checklist (§10).
-- `--hook-catalog` on these verbs is honored in **local (InProcess) mode only**; in remote mode it is an error ("hook catalog is canonical-node configuration").
-- `wrkf hook list/show` return the **daemon's** catalog in remote mode (source-of-truth semantics); local mode reads the local catalog as today.
-- `wrkf evidence exec` is the sanctioned client-side pattern and keeps its shape: execute the command locally via os/exec, record the result via `wrkf.evidence.add`.
-- **Known limitation to ratify:** hooks that need caller-host workspace state (repo files on max3) cannot run daemon-side. Audit says current catalog hooks are template/DB-scoped; if a workspace-scoped hook class emerges later, it gets the evidence-exec pattern (client executes, records outcome) as a separate, explicit verb — not a silent catalog override.
+**Condition 1 — pinned catalog identity** (invariant: a template-bound hook definition cannot be silently substituted by caller input or daemon filesystem discovery):
+
+- Remote `--hook-catalog` hard-refuses ("hook catalog is canonical-node configuration"); local (InProcess) mode may honor it as today.
+- wrkqd hook configuration is an **explicit deployed path/bundle**. The daemon never consults `ResolveHookCatalogPath("")` autodiscovery (which searches cwd and every `~/praesidium/*` checkout, `internal/workflow/service.go:3763-3817`).
+- Execution for check/run/effect/transition selects the HookSpec from the template version's **stored `hook_catalog_json`**. v1 single-bundle deployments compare the stored `hook_catalog_hash` against the configured catalog and **fail closed on mismatch**. The daemon bundle supplies the executable root.
+- `wrkf hook list/show` expose the daemon's active catalog in remote mode but never redefine already-installed template law.
+- The workspace-scoped class is **live, not hypothetical**: `.wrkq/wrkf-agent-tasker/hook-catalog.json` invokes `scripts/*` with `cwd=template_dir` and its effect handler invokes `hrcchat`. That catalog + executable bundle (scripts, `jq`, `hrcchat`) must actually be deployed to mini — an explicit item on the §10 landing checklist. A future caller-workspace-data hook class gets an explicit prepare/execute/record verb; never a catalog override.
+- `wrkf evidence exec` remains the sanctioned client-side pattern: execute locally via os/exec, record via `wrkf.evidence.add`.
+
+**Condition 2 — execution isolated from the canonical control plane** (invariant: external execution cannot monopolize RPC availability, hold the SQLite writer lock, or commit after the client received a transport timeout). Current hazards: `workrpc.Server.mu` covers the entire handler (`internal/workrpc/server.go:86-134`), `stdoutRedirectMu` covers it again, `transition --run-checks` executes hooks inside the IMMEDIATE transaction (`internal/workflow/ledger.go:1745-1755`), and catalog timeouts (600s) exceed wrkqd's 30s HTTP write timeout. Ratified shape:
+
+- Hook execution moves **outside** the global dispatch/stdout critical sections; no hook executes inside a writer transaction.
+- CLI `transition --run-checks` decomposes into daemon `check.run` followed by `transition.apply` with the persisted check IDs; the existing input-hash revalidation in `checkCommitBlockers` makes the race fail closed.
+- **Timeout ceiling (mable amendment, Lance scope-economy ruling):** in place of polled-operation machinery, the server enforces that a hook's execution timeout fits within the route's response deadline; catalog entries exceeding the bound are refused for remote execution with an explicit error. No mutation may continue ambiguously past a client's transport deadline.
+
+Both conditions' behaviors receive ordinary unit coverage within their implementing slots; per Lance ruling 2026-07-21 no dedicated proof-harness acceptance bars are added.
 
 ## 9. D7 — Command migration tranches (slots S1-S3, S5)
 
 - S1: seam only (§3). S2: read commands → adapters. S3: mutation commands → adapters (deferring `--run-checks`/`effect deliver` to S5 per D6). S5: template + hook families per D5/D6.
 - Every migrated command: byte-identical local output vs pre-migration (golden tests), plus an `rpc://mini` smoke.
 - `wrkf task attach/refresh/inspect/timeline` route to `wrkq.workflow.*` (task-side, D2).
-- Guards (S6): importguard on wrkf command paths (no store/db/workflow imports outside sanctioned local-execution carve-outs: evidence exec, watch loop), entrypoint-equivalence extension, golden-parity suite as CI guard.
+- Guards (S6): importguard on wrkf command paths permits the shared `internal/workrpc/client` package and forbids direct bootstrap/db/workflow imports (sanctioned local-execution carve-outs: evidence exec, watch loop); entrypoint-equivalence extension; golden-parity suite as CI guard.
+- Condition-2 server work (mutex narrowing, `transition --run-checks` decomposition, timeout ceiling) is its own slot (S5b) so S5 stays a client/template migration slot.
 
 ## 10. D8 — Version skew & coordinated landing
 
 New methods change `protocolSchemaHash`; `rpc.initialize` hard-fails on skew (by design). Doctrine:
 
-1. Server-side method additions land first and are deployed to mini's wrkqd (coordinated landing; operator-gated).
+1. Server-side method additions land first and are deployed to mini's wrkqd (coordinated landing; operator-gated). The landing checklist includes the hook catalog + executable bundle (agent-tasker `scripts/*`, `jq`, `hrcchat`) on mini — an open risk daedalus flagged that S7 proves or dissolves.
 2. Client tranches that depend on new methods land only after mini's daemon reports the new hash.
 3. The skew failure mode is itself a test case in S7 (mismatched hash must fail closed with a faithful error, not fall back to local).
 4. Standing migration hazard applies: smoke on isolated DBs; `just install` against live surfaces only inside the coordinated landing window.
@@ -105,10 +124,11 @@ Supersedes the internal/cli compat-freeze. After S7 passes on the real topology:
 3. One wrkf-task-loop canary room (T-06744) passes pre-read on max3 — H-00277 resume-gate step 1 — graded from durable readback.
 4. Guards green; legacy surfaces deleted (S8); `docs/wrkq-wrkf-rpc.md`, forward-spec, and `@wrkq/client` contract-green for all new methods.
 
-## 13. Open questions for consult
+## 13. Consult record (closed 2026-07-21)
 
-- **Q1 (D1):** shared `internal/rpctransport` extraction — package boundary/naming counsel; any layerguard implications.
-- **Q2 (D5):** content-bearing template params — size cap value; should the path variant survive for colocated admin use or die at decomm (recommended: die)?
-- **Q3 (D6):** daemon-side hook execution as canonical — ratify or counter. This is the one decision with real second-order effects (catalog becomes node config; workspace-scoped hooks need a future pattern).
-- **Q4 (D4):** watch as two bounded-poll methods vs extending `wrkf.event.query` — recommended: dedicated methods, since event.query lacks durable-predicate snapshot semantics.
-- **Q5 (D3):** `wrkf.supervisor.*` as a new domain under wrkf.* — any objection to the domain name vs folding into `wrkf.run.*`?
+Daedalus drafting consult #15699; mable disposition #15700 under Lance-delegated ratification authority. Q1/Q2/Q4/Q5 approved with refinements (folded into §3, §5, §6, §7 above); Q3 amended to daemon-selected law + isolated execution (§8). Dispositions of note, with authority:
+
+- Daedalus required tests 1-2: **amended away** — behaviors get ordinary unit coverage in their implementing slots; no dedicated proof-harness bars (Lance ruling: campaign test surface frozen).
+- Q3-C2 polled-operation alternative: **rejected** in favor of the server-enforced timeout ceiling (Lance scope-economy ruling; invariant preserved).
+- Proposed new hook-execution invariant: **deferred** until S7 live evidence on mini; existing-record source/enforcement-path updates land mechanically with S8.
+- Open risk (unverified mini hook bundle): acknowledged; resolved by S7.
