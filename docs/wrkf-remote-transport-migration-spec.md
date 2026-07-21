@@ -100,6 +100,8 @@ Both conditions' behaviors receive ordinary unit coverage within their implement
 
 ## 10. D8 — Version skew & coordinated landing
 
+**Dev topology (Lance 2026-07-21):** development runs on mini, colocated with the canonical wrkqd/DB, so dev agents have live canonical-DB access. Local testing still uses isolated DB copies; the live daemon changes only via coordinated landing. Cross-node acceptance (S7) runs from max3 — that separation is the proof.
+
 New methods change `protocolSchemaHash`; `rpc.initialize` hard-fails on skew (by design). Doctrine:
 
 1. Server-side method additions land first and are deployed to mini's wrkqd (coordinated landing; operator-gated). The landing checklist includes the hook catalog + executable bundle (agent-tasker `scripts/*`, `jq`, `hrcchat`) on mini — an open risk daedalus flagged that S7 proves or dissolves.
