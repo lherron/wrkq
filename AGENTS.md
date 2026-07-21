@@ -27,6 +27,13 @@ The wrkq/wrkqadm split exists so agents get a focused, safe API while admins ret
 
 `just --list` for the full menu. Common: `just build`, `just test`, `just verify` (lint+test), `just install` (canonical install to `~/.local/bin` — Lance's validation flow), `just smoke` (build + wrkqd + wrkf smokes), `just db-migrate-local`, `just db-reset` (destructive, prompts).
 
+Main-checkout `just install` also publishes one timestamped immutable
+`@wrkq/client` snapshot to the current node's Verdaccio and, unless
+`no-sync=1` is passed, synchronizes local downstream consumers. Fleet consumer
+nodes must receive that exact package version in their own loopback registry;
+do not rerun a timestamp-generating producer install merely to seed another
+node.
+
 If a project lacks `just install`, add it.
 
 ## Deterministic local validation
@@ -57,11 +64,42 @@ go list -mod=vendor ./... >/dev/null
 
 ## Config precedence
 
-CLI flags → env vars → `./.env.local` → `~/.config/wrkq/config.yaml`.
+CLI flags → environment variables → nearest `./.env.local` → platform
+`~/praesidium/.env.local` → `~/.config/wrkq/config.yaml` → built-in defaults.
 
-Key vars: `WRKQ_DB_PATH`, `WRKQ_ATTACH_DIR`, `WRKQ_LOG_LEVEL`, `WRKQ_OUTPUT`, `WRKQ_PAGER`, `WRKQ_ACTOR` (slug), `WRKQ_ACTOR_ID` (friendly ID like `A-00001`).
+Key authority and transport inputs:
 
-Secrets: env vars or `_FILE` variants. Never commit SQLite files or attachment contents.
+- `WRKQ_DB` selects a local SQLite path or `rpc://host[:port]`; remote locators
+  default to port `7171`.
+- `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` are local-path compatibility inputs and
+  reject `rpc://` values.
+- `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` authenticate remote calls. An explicitly
+  supplied token file wins over a dotenv-loaded token.
+- `WRKQ_CLAIM_TOKEN` / `WRKQ_CLAIM_GENERATION` carry the active task claim into
+  a runtime and are forwarded by holder-guarded completion.
+- `WRKQ_PRINCIPAL_REF` supplies mutation attribution; legacy `WRKQ_ACTOR` and
+  `WRKQ_ACTOR_ID` are not caller authority.
+- `WRKQ_ATTACH_DIR`, `WRKQ_OUTPUT`, and `WRKQ_PROJECT_ROOT` retain their normal
+  storage/output/project roles.
+
+Secrets belong in environment variables or `_FILE` inputs. Never commit
+tokens, SQLite files, or attachment contents. Bun autoloads `.env.local` before
+application code; Bun operator bridges that require explicit transport
+authority should start with `bun --env-file=/dev/null` so ambient dotenv values
+cannot replace the intended locator or credential.
+
+## Federated Task Claims
+
+`wrkqd --node-tokens` / `--node-tokens-file` maps each bearer credential to one
+authenticated logical `nodeId`. The daemon derives `claimed_node` from that
+credential; clients must never infer or assert node identity from hostname or
+IP address.
+
+`wrkq claim <task>` establishes one holder and generation. `--take-over`
+supersedes the current holder and monotonically bumps the generation. Claimed
+runtimes receive the opaque claim token and generation, and completion is
+accepted only from the current holder. Preserve remote HTTP/auth errors (for
+example HTTP 401) rather than collapsing them into task-not-found.
 
 ## Exit codes
 
