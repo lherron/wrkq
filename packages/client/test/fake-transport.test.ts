@@ -220,6 +220,58 @@ describe("wrkq namespace", () => {
     });
   });
 
+  test("task claim authority methods preserve the exact fencing tuple", async () => {
+    const claim = {
+      task: "T-00001",
+      claimedBy: "agent:cody",
+      claimedScope: "agent:cody:project:wrkq:task:T-00001",
+      claimedNode: "max3",
+      claimedAt: "2026-07-20T00:00:00Z",
+      claimGeneration: 4,
+      claimToken: "secret-once",
+    };
+    const transport = new FakeTransport()
+      .onResult("wrkq.task.claim", claim)
+      .onResult("wrkq.task.claimValidate", { ...claim, claimToken: undefined })
+      .onResult("wrkq.task.release", { ...claim, claimToken: undefined });
+    const client = await clientWith(transport);
+    const scope = "agent:cody:project:wrkq:task:T-00001";
+
+    await client.wrkq.task.claim({
+      task: "T-00001",
+      principalRef: "agent:cody",
+      scope,
+      takeOver: true,
+    });
+    await client.wrkq.task.claimValidate({
+      task: "T-00001",
+      principalRef: "agent:cody",
+      scope,
+      claimGeneration: 4,
+      claimToken: "secret-once",
+    });
+    await client.wrkq.task.release({
+      task: "T-00001",
+      principalRef: "agent:cody",
+      scope,
+      claimGeneration: 4,
+      claimToken: "secret-once",
+    });
+
+    expect(transport.capturedRequests.map((frame) => frame.method)).toEqual([
+      "wrkq.task.claim",
+      "wrkq.task.claimValidate",
+      "wrkq.task.release",
+    ]);
+    expect(transport.capturedRequests[1]!.params).toEqual({
+      task: "T-00001",
+      principalRef: "agent:cody",
+      scope,
+      claimGeneration: 4,
+      claimToken: "secret-once",
+    });
+  });
+
   test("task.move forwards targetPath and root expectEtag CAS precondition", async () => {
     const transport = new FakeTransport().onResult("wrkq.task.move", {
       ...MOCK_TASK,

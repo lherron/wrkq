@@ -29,6 +29,8 @@ type FindListViewParams struct {
 	DueAfter             string   `json:"dueAfter,omitempty"`
 	Kind                 string   `json:"kind,omitempty"`
 	Assignee             string   `json:"assignee,omitempty"`
+	ClaimedBy            string   `json:"claimedBy,omitempty"`
+	ClaimedNode          string   `json:"claimedNode,omitempty"`
 	ParentTask           string   `json:"parentTask,omitempty"`
 	RequestedByProjectID string   `json:"requestedBy,omitempty"`
 	AssignedProjectID    string   `json:"assignedProject,omitempty"`
@@ -56,6 +58,11 @@ type WrkqFindEntry struct {
 	Kind                 *string  `json:"kind,omitempty"`
 	Assignee             *string  `json:"assignee,omitempty"`
 	AssigneePrincipalRef *string  `json:"assignee_principal_ref,omitempty"`
+	ClaimedBy            *string  `json:"claimed_by,omitempty"`
+	ClaimedScope         *string  `json:"claimed_scope,omitempty"`
+	ClaimedNode          *string  `json:"claimed_node,omitempty"`
+	ClaimedAt            *string  `json:"claimed_at,omitempty"`
+	ClaimGeneration      int64    `json:"claim_generation,omitempty"`
 	ParentTaskID         *string  `json:"parent_task_id,omitempty"`
 	RequestedByProjectID *string  `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID    *string  `json:"assigned_project_id,omitempty"`
@@ -132,6 +139,8 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		dueAfter:             p.DueAfter,
 		kind:                 p.Kind,
 		assigneePrincipalRef: assigneePrincipalRef,
+		claimedBy:            p.ClaimedBy,
+		claimedNode:          p.ClaimedNode,
 		parentTaskUUID:       parentTaskUUID,
 		requestedByProjectID: p.RequestedByProjectID,
 		assignedProjectID:    p.AssignedProjectID,
@@ -169,6 +178,8 @@ type findQueryOptions struct {
 	dueAfter             string
 	kind                 string
 	assigneePrincipalRef string
+	claimedBy            string
+	claimedNode          string
 	parentTaskUUID       string
 	requestedByProjectID string
 	assignedProjectID    string
@@ -185,6 +196,12 @@ func (a *API) executeFindQuery(ctx context.Context, opts findQueryOptions) ([]Wr
 
 	searchTasks := opts.typeFilter == "" || opts.typeFilter == "t"
 	searchContainers := opts.typeFilter == "" || opts.typeFilter == "p"
+	// Claim predicates describe task holdership. Unlike legacy metadata filters,
+	// they have no container interpretation, so an untyped claim query is a task
+	// query rather than a mixed result set padded with every matching container.
+	if opts.claimedBy != "" || opts.claimedNode != "" {
+		searchContainers = false
+	}
 	searchBoth := searchTasks && searchContainers
 
 	var hasMore bool
@@ -244,7 +261,9 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 
 	query := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
-		       t.assignee_principal_ref, t.parent_task_uuid, t.requested_by_project_id,
+		       t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref,
+		       t.claimed_node, t.claimed_at, t.claim_generation,
+		       t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
 		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at
 		FROM tasks t
@@ -269,6 +288,14 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	if opts.assigneePrincipalRef != "" {
 		query += " AND t.assignee_principal_ref = ?"
 		args = append(args, opts.assigneePrincipalRef)
+	}
+	if opts.claimedBy != "" {
+		query += " AND t.claimed_by_principal_ref = ?"
+		args = append(args, opts.claimedBy)
+	}
+	if opts.claimedNode != "" {
+		query += " AND t.claimed_node = ?"
+		args = append(args, opts.claimedNode)
 	}
 	if opts.parentTaskUUID != "" {
 		query += " AND t.parent_task_uuid = ?"
@@ -368,12 +395,15 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	for rows.Next() {
 		var r WrkqFindEntry
 		var specification string
-		var state, kind, assigneePrincipalRef, parentTaskUUID, dueAt sql.NullString
+		var state, kind, assigneePrincipalRef, claimedBy, claimedScope, claimedNode, claimedAt sql.NullString
+		var claimGeneration int64
+		var parentTaskUUID, dueAt sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var priority sql.NullInt64
 
 		if err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
-			&assigneePrincipalRef, &parentTaskUUID, &requestedBy, &assignedProject,
+			&assigneePrincipalRef, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
+			&parentTaskUUID, &requestedBy, &assignedProject,
 			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, false, NewInternalError(err)
 		}
@@ -395,6 +425,13 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 			display := attribution.PrincipalHandle(assigneePrincipalRef.String)
 			r.Assignee = &display
 		}
+		if claimedBy.Valid {
+			r.ClaimedBy = &claimedBy.String
+			r.ClaimedScope = &claimedScope.String
+			r.ClaimedNode = &claimedNode.String
+			r.ClaimedAt = &claimedAt.String
+		}
+		r.ClaimGeneration = claimGeneration
 		if parentTaskUUID.Valid {
 			var parentID string
 			if perr := a.db.QueryRowContext(ctx, "SELECT id FROM tasks WHERE uuid = ?", parentTaskUUID.String).Scan(&parentID); perr == nil {

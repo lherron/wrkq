@@ -18,6 +18,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -328,6 +329,14 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		where = append(where, "t.assignee_principal_ref = ?")
 		args = append(args, p.Assignee)
 	}
+	if strings.TrimSpace(p.ClaimedBy) != "" {
+		where = append(where, "t.claimed_by_principal_ref = ?")
+		args = append(args, p.ClaimedBy)
+	}
+	if strings.TrimSpace(p.ClaimedNode) != "" {
+		where = append(where, "t.claimed_node = ?")
+		args = append(args, p.ClaimedNode)
+	}
 
 	limit := p.Limit
 	if limit <= 0 {
@@ -354,7 +363,8 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	}
 	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", " +
 		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
-		"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
+		"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
+		"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
 		"COALESCE(cp.path || '/' || t.slug, t.slug), " +
 		"CAST(LENGTH(TRIM(COALESCE(t.description,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_description, " +
 		"CAST(LENGTH(TRIM(COALESCE(t.specification,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_specification " +
@@ -548,7 +558,27 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	if aerr != nil {
 		return nil, aerr
 	}
-	_, err = a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, fields, currentEtag, "rpc")
+	var claimPrecondition func(*sql.Tx) error
+	if state, ok := fields["state"].(string); ok && state == string(domain.StateCompleted) {
+		claimPrecondition = func(tx *sql.Tx) error {
+			row, qerr := loadTaskClaimRow(tx, uuid)
+			if qerr != nil {
+				return qerr
+			}
+			if !row.claimedBy.Valid {
+				return nil
+			}
+			nodeID, nodeOK := nodeauth.FromContext(ctx)
+			if !nodeOK {
+				return NewNodeIdentityError()
+			}
+			if !claimMatches(row, attr.PrincipalRef, p.ClaimScope, nodeID, p.ClaimGeneration, p.ClaimToken) {
+				return NewClaimSupersededError(claimHolderData(row))
+			}
+			return nil
+		}
+	}
+	_, err = a.store.Tasks.UpdateFieldsWithViaAttributionAndPrecondition(attr, uuid, fields, currentEtag, "rpc", claimPrecondition)
 	if err != nil {
 		var mismatch *domain.ETagMismatchError
 		if errors.As(err, &mismatch) {
@@ -1309,7 +1339,8 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
 		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
-			"t.assignee_principal_ref, t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
+			"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
+			"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
 			"COALESCE(cp.path || '/' || t.slug, t.slug), "+
 			"CAST(LENGTH(TRIM(COALESCE(t.description,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_description, "+
 			"CAST(LENGTH(TRIM(COALESCE(t.specification,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_specification "+
@@ -1348,14 +1379,17 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		etag                                                                        int64
 		createdAt, updatedAt                                                        string
 		startAt, dueAt, completedAt, archivedAt, deletedAt, acknowledgedAt          sql.NullString
-		assignee, createdByPrincipal, updatedByPrincipal                            sql.NullString
+		assignee, claimedBy, claimedScope, claimedNode, claimedAt                   sql.NullString
+		createdByPrincipal, updatedByPrincipal                                      sql.NullString
+		claimGeneration                                                             int64
 		riskClass, path                                                             string
 		hasDescription, hasSpecification                                            int
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &state, &priority, &kind, &description, &specification,
 		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
-		&assignee, &createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification,
+		&assignee, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
+		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification,
 	); err != nil {
 		return nil, "", err
 	}
@@ -1386,6 +1420,11 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		DeletedAt:             toRFC3339(deletedAt.String),
 		AcknowledgedAt:        toRFC3339(acknowledgedAt.String),
 		AssigneePrincipalRef:  assignee.String,
+		ClaimedBy:             claimedBy.String,
+		ClaimedScope:          claimedScope.String,
+		ClaimedNode:           claimedNode.String,
+		ClaimedAt:             toRFC3339(claimedAt.String),
+		ClaimGeneration:       claimGeneration,
 		CreatedByPrincipalRef: createdByPrincipal.String,
 		UpdatedByPrincipalRef: updatedByPrincipal.String,
 		createdAtRaw:          createdAt,
@@ -1409,6 +1448,10 @@ func inClause(values []string) (string, []any) {
 func mapStoreError(err error, selector string) error {
 	if err == nil {
 		return nil
+	}
+	var domainErr Error
+	if errors.As(err, &domainErr) {
+		return domainErr
 	}
 	var mismatch *domain.ETagMismatchError
 	if errors.As(err, &mismatch) {

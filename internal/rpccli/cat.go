@@ -242,6 +242,11 @@ type catTask struct {
 	ParentTaskUUID        *string         `json:"parent_task_uuid,omitempty"`
 	AssigneeSlug          *string         `json:"assignee,omitempty"`
 	AssigneePrincipalRef  *string         `json:"assignee_principal_ref,omitempty"`
+	ClaimedBy             *string         `json:"claimed_by,omitempty"`
+	ClaimedScope          *string         `json:"claimed_scope,omitempty"`
+	ClaimedNode           *string         `json:"claimed_node,omitempty"`
+	ClaimedAt             *string         `json:"claimed_at,omitempty"`
+	ClaimGeneration       int64           `json:"claim_generation,omitempty"`
 	StartAt               *string         `json:"start_at,omitempty"`
 	DueAt                 *string         `json:"due_at,omitempty"`
 	Labels                *string         `json:"labels,omitempty"`
@@ -325,6 +330,19 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			}
 			if t.AssigneePrincipalRef != nil {
 				fmt.Fprintf(w, "assignee_principal_ref: %s\n", *t.AssigneePrincipalRef)
+			}
+			if t.ClaimedBy != nil {
+				fmt.Fprintf(w, "claimed_by: %s\n", *t.ClaimedBy)
+				if t.ClaimedScope != nil {
+					fmt.Fprintf(w, "claimed_scope: %s\n", *t.ClaimedScope)
+				}
+				if t.ClaimedNode != nil {
+					fmt.Fprintf(w, "claimed_node: %s\n", *t.ClaimedNode)
+				}
+				if t.ClaimedAt != nil {
+					fmt.Fprintf(w, "claimed_at: %s\n", *t.ClaimedAt)
+				}
+				fmt.Fprintf(w, "claim_generation: %d\n", t.ClaimGeneration)
 			}
 			if t.StartAt != nil {
 				fmt.Fprintf(w, "start_at: %s\n", *t.StartAt)

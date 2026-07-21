@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
+	"github.com/lherron/wrkq/internal/wrkqapi"
 )
 
 func TestDaemonWorkRPCRouteRequiresAuthAndDispatches(t *testing.T) {
@@ -56,6 +58,87 @@ func TestDaemonWorkRPCRouteRequiresAuthAndDispatches(t *testing.T) {
 	}
 	if len(resp.Result) == 0 {
 		t.Fatal("expected initialize result")
+	}
+}
+
+func TestDaemonClaimDerivesNodeFromBearerIdentity(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	if _, err := database.Exec(`
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, description,
+			created_at, updated_at, created_by_actor_uuid, updated_by_actor_uuid, etag)
+		VALUES ('00000000-0000-0000-0000-000000000099', 'T-00099', 'claim-node', 'Claim node',
+			'00000000-0000-0000-0000-000000000002', 'open', 2, '', datetime('now'), datetime('now'),
+			'00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 1)
+	`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	cfg := &config.Config{DBPath: database.Path(), AttachmentsMaxMB: 50}
+	api, opts, err := bootstrap.Server(database, cfg)
+	if err != nil {
+		t.Fatalf("bootstrap.Server: %v", err)
+	}
+	rpcServer := workrpc.NewServer(nil)
+	workrpc.RegisterAPI(rpcServer, api, opts)
+	nodes, err := nodeauth.ParseSpec("max3=tok-max3,lab=tok-lab")
+	if err != nil {
+		t.Fatalf("ParseSpec: %v", err)
+	}
+	s := &daemonServer{db: database, cfg: cfg, nodes: nodes, token: "shared-must-not-work", workrpc: rpcServer}
+	handler := s.withAuth(s.handleWorkRPC)
+
+	call := func(token, method string, params any) (int, workrpc.Response) {
+		t.Helper()
+		paramsJSON, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal params: %v", err)
+		}
+		body, err := json.Marshal(workrpc.Request{
+			JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: method, Params: paramsJSON,
+		})
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/rpc", bytes.NewReader(body))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		// This is deliberately false. The daemon must ignore it and resolve the
+		// node exclusively from the authenticated bearer.
+		req.Header.Set("X-Wrkq-Node", "lab")
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		var response workrpc.Response
+		_ = json.Unmarshal(rec.Body.Bytes(), &response)
+		return rec.Code, response
+	}
+
+	if status, response := call("tok-max3", "rpc.initialize", map[string]any{"protocolVersion": "2026-06-30"}); status != http.StatusOK || response.Error != nil {
+		t.Fatalf("initialize: status=%d response=%+v", status, response)
+	}
+	status, response := call("tok-max3", "wrkq.task.claim", wrkqapi.TaskClaimParams{
+		Task: "T-00099", PrincipalRef: "agent:cody", Scope: "agent:cody:project:wrkq:task:T-00099",
+	})
+	if status != http.StatusOK || response.Error != nil {
+		t.Fatalf("claim: status=%d response=%+v", status, response)
+	}
+	var claim wrkqapi.WrkqTaskClaim
+	if err := json.Unmarshal(response.Result, &claim); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if claim.ClaimedNode != "max3" {
+		t.Fatalf("claimedNode=%q, want bearer-derived max3", claim.ClaimedNode)
+	}
+	var storedNode string
+	if err := database.QueryRow("SELECT claimed_node FROM tasks WHERE id = 'T-00099'").Scan(&storedNode); err != nil {
+		t.Fatalf("query stored node: %v", err)
+	}
+	if storedNode != "max3" {
+		t.Fatalf("stored claimed_node=%q, want max3", storedNode)
+	}
+	for _, token := range []string{"", "unknown", "shared-must-not-work"} {
+		if status, _ := call(token, "wrkq.task.claim", map[string]any{"task": "T-00099"}); status != http.StatusUnauthorized {
+			t.Fatalf("token %q status=%d, want 401", token, status)
+		}
 	}
 }
 

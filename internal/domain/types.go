@@ -137,6 +137,11 @@ type Task struct {
 	ParentTaskUUID        *string    `json:"parent_task_uuid,omitempty" db:"parent_task_uuid"`
 	AssigneeActorUUID     *string    `json:"assignee_actor_uuid,omitempty" db:"assignee_actor_uuid"`
 	AssigneePrincipalRef  *string    `json:"assignee_principal_ref,omitempty" db:"assignee_principal_ref"`
+	ClaimedByPrincipalRef *string    `json:"claimed_by,omitempty" db:"claimed_by_principal_ref"`
+	ClaimedScopeRef       *string    `json:"claimed_scope,omitempty" db:"claimed_scope_ref"`
+	ClaimedNode           *string    `json:"claimed_node,omitempty" db:"claimed_node"`
+	ClaimedAt             *time.Time `json:"claimed_at,omitempty" db:"claimed_at"`
+	ClaimGeneration       int64      `json:"claim_generation,omitempty" db:"claim_generation"`
 	AcknowledgedAt        *time.Time `json:"acknowledged_at,omitempty" db:"acknowledged_at"`
 	Resolution            *string    `json:"resolution,omitempty" db:"resolution"`
 	SDKSessionID          *string    `json:"-" db:"sdk_session_id"` // Deprecated: kept for backward compat, always null

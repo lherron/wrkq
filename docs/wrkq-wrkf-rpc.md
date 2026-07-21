@@ -233,6 +233,10 @@ Every domain error must include:
 | `WRKQ_PERMISSION_DENIED` | -32022 | false | principal/scope cannot perform wrkq operation |
 | `WRKQ_DB_MIGRATION_REQUIRED` | -32023 | false | DB schema behind required migration |
 | `WRKQ_DB_BUSY` | -32024 | true | SQLite write contention that outlasted `busy_timeout`; `data.reason="sqlite_busy"`. Back off and retry the operation. |
+| `WRKQ_ALREADY_CLAIMED` | -32027 | false | task already has a holder; data names holder, scope, node, and generation |
+| `WRKQ_WRONG_STATE` | -32028 | false | task state is not claimable |
+| `WRKQ_CLAIM_SUPERSEDED` | -32029 | false | supplied claim tuple is stale; data names the current holder |
+| `WRKQ_NODE_IDENTITY_REQUIRED` | -32030 | false | request did not authenticate as one configured node identity |
 | `WRKF_NOT_FOUND` | -32004 | false | workflow template/instance/effect/run/evidence not found |
 | `WRKF_VALIDATION` | -32602 | false | malformed wrkf params, invalid template, bad protocol version |
 | `WRKF_STALE_REVISION` | -32009 | true | transition `expectRevision` mismatch |
@@ -298,11 +302,31 @@ wrkq.monitor.eventsView [CLI compatibility bounded filtered event page — see m
 wrkq.monitor.stateView  [CLI compatibility --until condition snapshot — see monitor/watch note]
 wrkq.task.list        [required]
 wrkq.task.update      [required]
+wrkq.task.claim       [required for cross-node coordinators]
+wrkq.task.claimValidate [required for claim fencing]
+wrkq.task.release     [required for claim lifecycle]
 wrkq.task.acknowledge
 wrkq.task.delete
 wrkq.task.restore
 wrkq.task.copy        [new mutation method — server-owned deep copy; see copy note]
 ```
+
+> **Task claim authority.** `wrkq.task.claim { task, principalRef, scope,
+> takeOver? }` atomically moves a claimable task to `in_progress` and records
+> `{ claimedBy, claimedScope, claimedNode, claimedAt, claimGeneration }`,
+> returning those fields plus a one-time `claimToken`. `claimedNode` is derived
+> only from the authenticated per-node wrkqd bearer mapping; it is never a
+> request parameter. A normal claim refuses with `WRKQ_ALREADY_CLAIMED` and the
+> current holder/node; a non-claimable state refuses with `WRKQ_WRONG_STATE`.
+> `takeOver` always increments the durable generation. `wrkq.task.claimValidate`
+> compares principal, exact task scope, authenticated node, generation, and
+> token; stale authority returns `WRKQ_CLAIM_SUPERSEDED` with the current holder.
+> `wrkq.task.release` clears current holdership but deliberately preserves the
+> monotonic generation; non-force release requires current token authority.
+> The CLI owns takeover/force-release confirmation (`--yes` bypass), while the
+> RPC methods remain explicitly noninteractive. Claims have no TTL or lease.
+> Completion of a claimed task is guarded by the same tuple inside the task
+> update transaction; append-only comments remain unrestricted.
 
 > **`wrkq.task.copy`** is a NEW mutation method (T-05111, daedalus hrcchat#10196)
 > backing `wrkq cp`. It is the server-owned ONE source-task copy envelope: source
@@ -348,15 +372,17 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > **`wrkq.task.findListView`** is a CLI compatibility list read model for
 > `wrkq find`, **not** canonical `wrkq.task.list`. The server owns recursive
 > path-prefix matching (`path = ? OR path LIKE ?||'/%'`, or GLOB for `*` paths),
-> all metadata filters (state/type/kind/slug-glob/assignee/parent-task/
+> all metadata filters (state/type/kind/slug-glob/assignee/claimed-by/claimed-node/parent-task/
 > requested-by/assigned-project/due-before/due-after/ack-pending), assignee
 > normalization + parent-task selector→UUID resolution, cursor.Apply + limit+1 +
 > sort-validation + BuildNextCursor over the filtered set, and the legacy
 > mixed-type in-memory merge-sort:
-> `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, assignee?,
+> `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, assignee?, claimedBy?, claimedNode?,
 > parentTask?, requestedBy?, assignedProject?, causedBy?, ackPending?, sort?,
 > reverse?, limit?, cursor? }` → `{ items: WrkqFindEntry[], next_cursor }`. Rows
-> are legacy-shaped (snake_case `findResult`); each task row carries `caused_by`
+> are legacy-shaped (snake_case `findResult`); each task row carries current
+> `claimed_by`, `claimed_scope`, `claimed_node`, `claimed_at`, and monotonic
+> `claim_generation` (plus `caused_by`)
 > (array of friendly IDs) when non-empty. `causedBy` filters to tasks whose
 > lineage contains that task ID. PINNED PARITY QUIRKS the server
 > reproduces exactly: (1) when NO `--type` is given (searchBoth) the cursor is
@@ -554,6 +580,8 @@ interface WrkqTaskListParams {
   state?: WrkqTaskState | WrkqTaskState[];
   kind?: string | string[];
   assignee?: string;
+  claimedBy?: string;
+  claimedNode?: string;
   labels?: string[];
   includeDeleted?: boolean;
   limit?: number;
@@ -591,6 +619,43 @@ interface WrkqTaskUpdateParams {
   };
   expectEtag?: number;   // CAS precondition; see §9.1
   idempotencyKey?: string;
+  claimScope?: string;      // current task-scoped sessionRef when completing a claimed task
+  claimGeneration?: number;
+  claimToken?: string;
+}
+
+interface WrkqTaskClaimParams {
+  task: string;
+  principalRef: string;
+  scope: string;          // exact task-scoped agent sessionRef
+  takeOver?: boolean;
+}
+
+interface WrkqTaskClaimValidateParams {
+  task: string;
+  principalRef: string;
+  scope: string;
+  claimGeneration: number;
+  claimToken: string;
+}
+
+interface WrkqTaskReleaseParams {
+  task: string;
+  principalRef: string;
+  scope?: string;
+  claimGeneration?: number;
+  claimToken?: string;
+  force?: boolean;
+}
+
+interface WrkqTaskClaim {
+  task: string;
+  claimedBy: string;
+  claimedScope: string;
+  claimedNode: string;    // authenticated server-side bearer identity
+  claimedAt: string;
+  claimGeneration: number;
+  claimToken?: string;    // returned only when fresh authority is minted
 }
 
 interface WrkqTaskMoveParams {
@@ -626,6 +691,11 @@ interface WrkqTask {
   archivedAt?: string;
   deletedAt?: string;
   acknowledgedAt?: string; // RFC3339; set by wrkq.task.acknowledge
+  claimedBy?: string;
+  claimedScope?: string;
+  claimedNode?: string;
+  claimedAt?: string;
+  claimGeneration?: number;
   createdByPrincipalRef?: string;
   updatedByPrincipalRef?: string;
 }

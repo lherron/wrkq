@@ -10,9 +10,11 @@ import (
 )
 
 // TestRPCCLITreeParity is the standing guardrail for the RPC-backed mirror: the
-// production `wrkq` top-level command surface (paths + aliases) and the mirror's
-// must not drift. It lives in package cli so it can read the unexported rootCmd,
-// and imports rpccli for the mirror tree (rpccli never imports cli — Core Rule).
+// retired legacy `wrkq` top-level command surface (paths + aliases) and the
+// production RPC tree must not drift, except for explicitly cataloged RPC-native
+// verbs that have no legacy implementation. It lives in package cli so it can
+// read the unexported rootCmd, and imports rpccli for the production tree
+// (rpccli never imports cli — Core Rule).
 //
 // Behavior parity is NOT asserted here; per the migration plan the mirror's
 // commands are not-started stubs except the `cat` seam smoke. Those gaps are
@@ -32,7 +34,7 @@ func TestRPCCLITreeParity(t *testing.T) {
 		}
 	}
 	for name := range mirror {
-		if _, ok := prod[name]; !ok {
+		if _, ok := prod[name]; !ok && !rpcNativeCommands[name] {
 			t.Errorf("mirror has command %q absent from the production surface", name)
 		}
 	}
@@ -47,6 +49,14 @@ func TestRPCCLITreeParity(t *testing.T) {
 	sort.Strings(gaps)
 	t.Logf("rpccli not-started commands (%d): %s", len(gaps), strings.Join(gaps, " "))
 	t.Logf("rpccli implemented (parity): ack, stat; cat (--json partial, via wrkq.task.catView)")
+}
+
+// rpcNativeCommands are approved post-cutover verbs. They are implemented only
+// against the canonical remote workrpc authority and must not be backported to
+// the retired direct-SQLite CLI.
+var rpcNativeCommands = map[string]bool{
+	"claim":   true,
+	"release": true,
 }
 
 // topLevelSurface maps command name -> sorted aliases for a root command,

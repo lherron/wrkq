@@ -91,6 +91,7 @@ Key variables:
 | `WRKQ_DB` | Primary database locator for production `wrkq`: local SQLite path or `rpc://host[:port]` workrpc endpoint. |
 | `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Local SQLite database path compatibility inputs; reject `rpc://` values. |
 | `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` | Bearer token used by remote `WRKQ_DB=rpc://...` calls and wrkqd HTTP auth. |
+| `WRKQ_CLAIM_TOKEN` / `WRKQ_CLAIM_GENERATION` | Current task-claim authority injected into a claimed runtime; `wrkq set --state completed` forwards it with the active task scope. |
 | `WRKQ_ATTACH_DIR` | Attachment byte storage root. |
 | `WRKQ_PRINCIPAL_REF` | Mutation principal input: `agent:<id>` or full agent ScopeRef, reduced to `agent:<id>`. |
 | `WRKQ_ACTOR_ID` | Legacy actor/display-cache input; ignored for wrkq-core caller attribution. |
@@ -211,6 +212,25 @@ Valid `risk_class` values:
 Valid task role assignment roles:
 
 `triager`, `owner`, `implementer`, `tester`, `reviewer`, `release_manager`
+
+#### Task claim authority
+
+`wrkq claim <task> --as agent:<id> --scope <task-sessionRef>` atomically claims
+an `open`, `in_progress`, or `blocked` task at its canonical wrkqd home. Success
+sets the task to `in_progress`, records the holder principal, exact task scope,
+server-authenticated node, timestamp, and a monotonically increasing generation,
+and returns a one-time claim token. The node is derived exclusively from the
+per-node bearer token; callers cannot supply or spoof it.
+
+Normal contention returns `already_claimed` with the current holder and node.
+`--take-over` explicitly replaces that holder and increments the generation;
+the CLI owns confirmation and `--yes`, while the RPC remains noninteractive.
+Completing a claimed task requires the exact current principal/scope/node/token/
+generation tuple in the same transaction as the state mutation. Older holders
+receive `claim_superseded`, but may still append diagnostic comments. `wrkq
+release` clears holdership without changing task state and without resetting the
+generation. Claims deliberately have no lease or TTL: task liveness belongs to
+HRC and slow-but-live work must never be auto-stolen.
 
 ### Subtasks
 

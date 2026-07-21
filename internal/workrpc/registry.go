@@ -92,6 +92,10 @@ func ErrorCodeCatalog() []string {
 		CodeWRKQConflict,
 		CodeWRKQPermissionDenied,
 		CodeWRKQMigrationRequired,
+		wrkqapi.CodeAlreadyClaimed,
+		wrkqapi.CodeWrongState,
+		wrkqapi.CodeClaimSuperseded,
+		wrkqapi.CodeNodeIdentity,
 		wrkfapi.CodeNotFound,
 		wrkfapi.CodeValidation,
 		wrkfapi.CodeStaleRevision,
@@ -132,6 +136,9 @@ var methodCatalog = []string{
 	"wrkq.task.inboxView",
 	"wrkq.task.copy",
 	"wrkq.task.update",
+	"wrkq.task.claim",
+	"wrkq.task.claimValidate",
+	"wrkq.task.release",
 	"wrkq.task.move",
 	"wrkq.task.acknowledge",
 	"wrkq.task.delete",
@@ -247,8 +254,9 @@ var methodCatalog = []string{
 
 var dtoCatalog = []string{
 	"WrkqTask",
-	"WrkqTaskCopyParams",     // wrkq.task.copy request envelope (server-owned deep copy)
-	"WrkqTaskCopyResult",     // wrkq.task.copy per-source outcome (legacy copyResult output shape)
+	"WrkqTaskCopyParams", // wrkq.task.copy request envelope (server-owned deep copy)
+	"WrkqTaskCopyResult", // wrkq.task.copy per-source outcome (legacy copyResult output shape)
+	"WrkqTaskClaim",
 	"WrkqTaskCatView",        // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
 	"WrkqContainerCatView",   // CLI compatibility projection (container cat)
 	"WrkqCommentCatView",     // CLI compatibility projection (comment cat)
@@ -359,6 +367,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.task.update", apiHandler(func(ctx context.Context, p wrkqapi.TaskUpdateParams) (any, error) {
 		return wq.TaskUpdate(ctx, p)
+	}))
+	s.Register("wrkq.task.claim", apiHandler(func(ctx context.Context, p wrkqapi.TaskClaimParams) (any, error) {
+		return wq.TaskClaim(ctx, p)
+	}))
+	s.Register("wrkq.task.claimValidate", apiHandler(func(ctx context.Context, p wrkqapi.TaskClaimValidateParams) (any, error) {
+		return wq.TaskClaimValidate(ctx, p)
+	}))
+	s.Register("wrkq.task.release", apiHandler(func(ctx context.Context, p wrkqapi.TaskReleaseParams) (any, error) {
+		return wq.TaskRelease(ctx, p)
 	}))
 	s.Register("wrkq.task.move", apiHandler(func(ctx context.Context, p wrkqapi.TaskMoveParams) (any, error) {
 		return wq.TaskMove(ctx, p)

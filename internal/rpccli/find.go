@@ -27,7 +27,7 @@ func newFindCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, reverse, ackPending, print0 bool
 	var limit int
 	var cursorTok, typeFilter, sort string
-	var slugGlob, state, dueBefore, dueAfter, kind, assignee, parentTask, requestedBy, assignedProject, causedBy string
+	var slugGlob, state, dueBefore, dueAfter, kind, assignee, claimedBy, claimedNode, parentTask, requestedBy, assignedProject, causedBy string
 	cmd := &cobra.Command{
 		Use:   "find [PATH...]",
 		Short: "Search for tasks and containers",
@@ -72,6 +72,12 @@ func newFindCmd() *cobra.Command {
 			}
 			if assignee != "" {
 				params["assignee"] = assignee
+			}
+			if claimedBy != "" {
+				params["claimedBy"] = claimedBy
+			}
+			if claimedNode != "" {
+				params["claimedNode"] = claimedNode
 			}
 			if parentTask != "" {
 				// Legacy applies project-root scoping to the parent-task selector.
@@ -201,6 +207,8 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Filter by assignee principal ref or bare agent slug")
+	cmd.Flags().StringVar(&claimedBy, "claimed-by", "", "Filter by claim holder principal ref")
+	cmd.Flags().StringVar(&claimedNode, "claimed-node", "", "Filter by server-derived claim node")
 	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Filter subtasks of a specific parent task (ID or path)")
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Filter by requester project ID")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Filter by assignee project ID")
@@ -293,6 +301,11 @@ type findResult struct {
 	Kind                 *string  `json:"kind,omitempty"`
 	Assignee             *string  `json:"assignee,omitempty"`
 	AssigneePrincipalRef *string  `json:"assignee_principal_ref,omitempty"`
+	ClaimedBy            *string  `json:"claimed_by,omitempty"`
+	ClaimedScope         *string  `json:"claimed_scope,omitempty"`
+	ClaimedNode          *string  `json:"claimed_node,omitempty"`
+	ClaimedAt            *string  `json:"claimed_at,omitempty"`
+	ClaimGeneration      int64    `json:"claim_generation,omitempty"`
 	ParentTaskID         *string  `json:"parent_task_id,omitempty"`
 	RequestedByProjectID *string  `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID    *string  `json:"assigned_project_id,omitempty"`

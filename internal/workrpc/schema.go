@@ -14,6 +14,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqTaskCopyParams":           dtoType[wrkqapi.TaskCopyParams](),
 	"WrkqTaskCopyResult":           dtoType[wrkqapi.WrkqTaskCopyResult](),
 	"WrkqTaskCatView":              dtoType[wrkqapi.WrkqTaskCatView](),
+	"WrkqTaskClaim":                dtoType[wrkqapi.WrkqTaskClaim](),
 	"WrkqContainerCatView":         dtoType[wrkqapi.WrkqContainerCatView](),
 	"WrkqCommentCatView":           dtoType[wrkqapi.WrkqCommentCatView](),
 	"WrkqCommentListView":          dtoType[wrkqapi.WrkqCommentListView](),

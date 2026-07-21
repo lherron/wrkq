@@ -45,6 +45,11 @@ type WrkqTaskCatView struct {
 	AssigneeSlug          *string           `json:"assignee,omitempty"`
 	AssigneeUUID          *string           `json:"assignee_uuid,omitempty"`
 	AssigneePrincipalRef  *string           `json:"assignee_principal_ref,omitempty"`
+	ClaimedBy             *string           `json:"claimed_by,omitempty"`
+	ClaimedScope          *string           `json:"claimed_scope,omitempty"`
+	ClaimedNode           *string           `json:"claimed_node,omitempty"`
+	ClaimedAt             *string           `json:"claimed_at,omitempty"`
+	ClaimGeneration       int64             `json:"claim_generation,omitempty"`
 	StartAt               *string           `json:"start_at,omitempty"`
 	DueAt                 *string           `json:"due_at,omitempty"`
 	Labels                *string           `json:"labels,omitempty"`
@@ -121,6 +126,8 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		startAt, dueAt, labels, meta, completedAt, archivedAt    *string
 		requestedBy, assignedProject, acknowledgedAt, resolution *string
 		parentTaskUUID, assigneePrincipalRef                     *string
+		claimedBy, claimedScope, claimedNode, claimedAt          *string
+		claimGeneration                                          int64
 		createdAt, updatedAt                                     string
 		etag                                                     int64
 		projectUUID                                              string
@@ -131,6 +138,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 		       state, priority,
 		       kind, parent_task_uuid, assignee_principal_ref,
+		       claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at, claim_generation,
 		       start_at, due_at, labels, meta, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       acknowledged_at, resolution,
@@ -138,6 +146,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
 		&kind, &parentTaskUUID, &assigneePrincipalRef,
+		&claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
@@ -201,6 +210,11 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		ParentTaskUUID:        parentTaskUUID,
 		AssigneeSlug:          assigneeSlug,
 		AssigneePrincipalRef:  assigneePrincipalRef,
+		ClaimedBy:             claimedBy,
+		ClaimedScope:          claimedScope,
+		ClaimedNode:           claimedNode,
+		ClaimedAt:             claimedAt,
+		ClaimGeneration:       claimGeneration,
 		StartAt:               startAt,
 		DueAt:                 dueAt,
 		Labels:                labels,

@@ -52,6 +52,8 @@ export interface WrkqTaskListParams {
   state?: WrkqTaskState | WrkqTaskState[];
   kind?: string | string[];
   assignee?: string;
+  claimedBy?: string;
+  claimedNode?: string;
   labels?: string[];
   includeDeleted?: boolean;
   limit?: number;
@@ -85,6 +87,49 @@ export interface WrkqTaskUpdateParams {
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.1. */
   expectEtag?: number;
   idempotencyKey?: string;
+  /** Required with claimGeneration/claimToken when completing a claimed task. */
+  claimScope?: string;
+  claimGeneration?: number;
+  claimToken?: string;
+}
+
+export interface WrkqTaskClaimParams {
+  task: string;
+  principalRef: string;
+  /** Exact task-scoped agent sessionRef. */
+  scope: string;
+  /** Explicit noninteractive takeover intent; callers own confirmation. */
+  takeOver?: boolean;
+}
+
+export interface WrkqTaskClaimValidateParams {
+  task: string;
+  principalRef: string;
+  scope: string;
+  claimGeneration: number;
+  claimToken: string;
+}
+
+export interface WrkqTaskReleaseParams {
+  task: string;
+  principalRef: string;
+  scope?: string;
+  claimGeneration?: number;
+  claimToken?: string;
+  /** Operator release without holder authority; callers own confirmation. */
+  force?: boolean;
+}
+
+export interface WrkqTaskClaim {
+  task: string;
+  claimedBy: string;
+  claimedScope: string;
+  /** Derived by wrkqd from the authenticated per-node bearer. */
+  claimedNode: string;
+  claimedAt: string;
+  claimGeneration: number;
+  /** Returned only when a claim/takeover mints fresh authority. */
+  claimToken?: string;
 }
 
 export interface WrkqTaskMoveParams {
@@ -196,6 +241,11 @@ export interface WrkqTask {
   deletedAt?: string;
   acknowledgedAt?: string;
   assigneePrincipalRef?: string;
+  claimedBy?: string;
+  claimedScope?: string;
+  claimedNode?: string;
+  claimedAt?: string;
+  claimGeneration?: number;
   createdByPrincipalRef?: string;
   updatedByPrincipalRef?: string;
 }

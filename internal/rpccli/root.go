@@ -100,6 +100,8 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	root.AddCommand(newTouchCmd())
 	root.AddCommand(newMvCmd())
 	root.AddCommand(newSetCmd())
+	root.AddCommand(newClaimCmd())
+	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newCommentCmd())
 	root.AddCommand(newRelationCmd())
 	root.AddCommand(newContainerCmd())

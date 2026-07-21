@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -418,9 +419,23 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 		if opts.ifMatch != 0 {
 			params["expectEtag"] = opts.ifMatch
 		}
+		if state, ok := opts.patch["state"].(string); ok && state == "completed" {
+			if token := strings.TrimSpace(os.Getenv("WRKQ_CLAIM_TOKEN")); token != "" {
+				params["claimToken"] = token
+			}
+			if generation, _ := strconv.ParseInt(strings.TrimSpace(os.Getenv("WRKQ_CLAIM_GENERATION")), 10, 64); generation > 0 {
+				params["claimGeneration"] = generation
+			}
+			if runtimeScope := resolvedRuntimeScope(); runtimeScope != nil && runtimeScope.TaskID != "" {
+				params["claimScope"] = runtimeScope.FullRef()
+			}
+		}
 		_, err := tr.Call(cmd.Context(), "wrkq.task.update", params)
 		if err != nil {
 			if re, ok := err.(*Error); ok {
+				if re.DomainID == "WRKQ_CLAIM_SUPERSEDED" {
+					return formatClaimRPCError(re)
+				}
 				return errors.New(re.Message)
 			}
 			return err

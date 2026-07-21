@@ -57,6 +57,9 @@ import type {
   WrkqSearchListViewParams,
   WrkqTask,
   WrkqTaskAcknowledgeParams,
+  WrkqTaskClaim,
+  WrkqTaskClaimParams,
+  WrkqTaskClaimValidateParams,
   WrkqTaskCopyParams,
   WrkqTaskCopyResult,
   WrkqTaskCreateParams,
@@ -65,6 +68,7 @@ import type {
   WrkqTaskListResult,
   WrkqTaskMoveParams,
   WrkqTaskRestoreParams,
+  WrkqTaskReleaseParams,
   WrkqTaskShowParams,
   WrkqTaskUpdateParams,
   WrkqWebhookListViewParams,
@@ -85,6 +89,9 @@ export interface WrkqTaskFacade {
   show(params: WrkqTaskShowParams): Promise<WrkqTask>;
   list(params?: WrkqTaskListParams): Promise<WrkqTaskListResult>;
   update(params: WrkqTaskUpdateParams): Promise<WrkqTask>;
+  claim(params: WrkqTaskClaimParams): Promise<WrkqTaskClaim>;
+  claimValidate(params: WrkqTaskClaimValidateParams): Promise<WrkqTaskClaim>;
+  release(params: WrkqTaskReleaseParams): Promise<WrkqTaskClaim>;
   move(params: WrkqTaskMoveParams): Promise<WrkqTask>;
   acknowledge(params: WrkqTaskAcknowledgeParams): Promise<WrkqTask>;
   delete(params: WrkqTaskDeleteParams): Promise<WrkqTask>;

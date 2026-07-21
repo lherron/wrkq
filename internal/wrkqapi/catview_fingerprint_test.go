@@ -54,7 +54,7 @@ func TestCatViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(CatViewBlocker{})),
 	}, "\n")
 
-	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
+	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
 		"CatViewComment{id,created_at,body,principal_ref,omitempty}\n" +
 		"CatViewRelation{direction,kind,task_id,task_uuid,task_slug,task_title,created_at,created_by_id}\n" +
 		"CatViewBlocker{id,state}"
@@ -169,7 +169,7 @@ func TestHandoffDTOFingerprint(t *testing.T) {
 // TestFindListViewDTOFingerprint guards the find projection shapes.
 func TestFindListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))
-	const want = "WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,caused_by,omitempty,created_at,updated_at,etag}"
+	const want = "WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,caused_by,omitempty,created_at,updated_at,etag}"
 	if got != want {
 		t.Errorf("find list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}

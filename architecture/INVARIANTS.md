@@ -59,6 +59,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `internal/nodeauth/nodeauth_test.go`, `internal/cli/daemon_nodeauth_test.go`, `internal/cli/daemon_migration_gate_test.go`, `internal/rpccli/remote_initialize_negative_test.go`, `just verify`
 - **last_verified:** 2026-07-20
 
+## wrkq.task-claim.authority
+
+- **scope:** cross-node task holdership, takeover fencing, and claimed-task completion
+- **predicate:** A task claim is one canonical-home SQLite transaction. The server accepts only a verified per-node bearer identity, derives claimed_node from that identity, validates an exact task-scoped agent ScopeRef whose agent matches the caller principal, and atomically records the full holder tuple while setting the task in_progress. The durable claim_generation starts at zero and can only increase; release clears the tuple but never resets generation. Takeover always mints a new token and increments generation. Completion of a claimed task validates principal, exact scope, authenticated node, generation, and token inside the same BEGIN IMMEDIATE transaction as completion. Superseded holders cannot validate or complete but may append comments. Claims have no lease or TTL.
+- **enforced_by:** `migration 000048 tuple/generation triggers; nodeauth request context; TaskClaim, TaskClaimValidate, TaskRelease, and TaskUpdate transactional precondition`
+- **source:** `internal/db/migrations/000048_task_claim_authority.sql`, `internal/nodeauth/nodeauth.go`, `internal/cli/daemon.go`, `internal/cli/daemon_workrpc_test.go`, `internal/wrkqapi/claims.go`, `internal/wrkqapi/claims_test.go`, `internal/wrkqapi/tasks.go`, `internal/store/tasks.go`, `internal/rpccli/claim.go`
+- **required_tests:** `TestDaemonClaimDerivesNodeFromBearerIdentity`, `TestTaskClaimRequiresVerifiedNodeAndAtomicallySelectsOneWinner`, `TestTaskClaimTakeoverFencesOldHolderButAllowsComments`, `TestTaskReleasePreservesGenerationAndFiltersExposeHoldership`
+- **last_verified:** 2026-07-20
+
 ## wrkq.task-hierarchy.cross-project-parents
 
 - **scope:** task parent graph, task residency, and hierarchy-affecting mutations

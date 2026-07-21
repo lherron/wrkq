@@ -20,6 +20,10 @@ const (
 	CodeWRKQPermissionDenied  = "WRKQ_PERMISSION_DENIED"
 	CodeWRKQMigrationRequired = "WRKQ_DB_MIGRATION_REQUIRED"
 	CodeWRKQDBBusy            = "WRKQ_DB_BUSY"
+	CodeWRKQAlreadyClaimed    = "WRKQ_ALREADY_CLAIMED"
+	CodeWRKQWrongState        = "WRKQ_WRONG_STATE"
+	CodeWRKQClaimSuperseded   = "WRKQ_CLAIM_SUPERSEDED"
+	CodeWRKQNodeIdentity      = "WRKQ_NODE_IDENTITY_REQUIRED"
 	CodeWorkRPCInternal       = "WORKRPC_INTERNAL"
 )
 
@@ -30,6 +34,10 @@ var domainRPCCode = map[string]int{
 	CodeWRKQPermissionDenied:         -32022,
 	CodeWRKQMigrationRequired:        -32023,
 	CodeWRKQDBBusy:                   -32024,
+	CodeWRKQAlreadyClaimed:           -32027,
+	CodeWRKQWrongState:               -32028,
+	CodeWRKQClaimSuperseded:          -32029,
+	CodeWRKQNodeIdentity:             -32030,
 	wrkfapi.CodeNotFound:             -32004,
 	wrkfapi.CodeValidation:           -32602,
 	wrkfapi.CodeStaleRevision:        -32009,

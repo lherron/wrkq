@@ -18,6 +18,10 @@ const (
 	CodePermissionDenied = "WRKQ_PERMISSION_DENIED"
 	CodeMigrationReq     = "WRKQ_DB_MIGRATION_REQUIRED"
 	CodeDBBusy           = "WRKQ_DB_BUSY"
+	CodeAlreadyClaimed   = "WRKQ_ALREADY_CLAIMED"
+	CodeWrongState       = "WRKQ_WRONG_STATE"
+	CodeClaimSuperseded  = "WRKQ_CLAIM_SUPERSEDED"
+	CodeNodeIdentity     = "WRKQ_NODE_IDENTITY_REQUIRED"
 	CodeInternal         = "WORKRPC_INTERNAL"
 )
 
@@ -115,6 +119,24 @@ func NewConflictError(msg string, data any) *DomainError {
 		msg = "conflict"
 	}
 	return newError(CodeConflict, msg, true, data, nil)
+}
+
+func NewAlreadyClaimedError(data any) *DomainError {
+	return newError(CodeAlreadyClaimed, "already_claimed", false, data, nil)
+}
+
+func NewWrongStateError(data any) *DomainError {
+	return newError(CodeWrongState, "wrong_state", false, data, nil)
+}
+
+func NewClaimSupersededError(data any) *DomainError {
+	return newError(CodeClaimSuperseded, "claim_superseded", false, data, nil)
+}
+
+func NewNodeIdentityError() *DomainError {
+	return newError(CodeNodeIdentity, "node identity is required for task claims", false, map[string]any{
+		"reason": "missing_verified_node_identity",
+	}, nil)
 }
 
 // NewBusyError reports SQLite write contention that outlasted busy_timeout

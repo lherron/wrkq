@@ -74,6 +74,10 @@ wrkq cat myproject/implement-feature
 # Update task state
 wrkq set T-00001 --state in_progress
 
+# Cross-node work: atomically claim at the canonical wrkqd home
+wrkq claim T-00001 --as agent:cody \
+  --scope agent:cody:project:wrkq:task:T-00001
+
 # Add a comment
 wrkq comment add T-00001 -m "Started implementation"
 

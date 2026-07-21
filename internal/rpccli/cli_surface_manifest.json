@@ -392,6 +392,49 @@
         ]
       },
       {
+        "name": "claim",
+        "use": "claim \u003ctask\u003e",
+        "short": "Atomically claim a task for this session",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Output compact machine-readable JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "scope",
+            "usage": "Task-scoped sessionRef (defaults to the active runtime scope)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "take-over",
+            "usage": "Supersede the current holder and bump generation",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip takeover confirmation",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ]
+      },
+      {
         "name": "comment",
         "use": "comment",
         "short": "Manage task comments",
@@ -914,6 +957,18 @@
           {
             "name": "caused-by",
             "usage": "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "claimed-by",
+            "usage": "Filter by claim holder principal ref",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "claimed-node",
+            "usage": "Filter by server-derived claim node",
             "type": "string",
             "hidden": false
           },
@@ -1859,6 +1914,55 @@
             "short": "Removed a relation between tasks",
             "hidden": false,
             "available": true
+          }
+        ]
+      },
+      {
+        "name": "release",
+        "use": "release \u003ctask\u003e",
+        "short": "Release task holdership without changing task state",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "claim-generation",
+            "usage": "Current claim generation",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          },
+          {
+            "name": "claim-token",
+            "usage": "Claim token returned by wrkq claim",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "force",
+            "usage": "Operator force release without holder token",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "scope",
+            "usage": "Claimed task sessionRef (defaults to active runtime scope)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip force-release confirmation",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
           }
         ]
       },

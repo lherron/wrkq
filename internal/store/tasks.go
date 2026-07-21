@@ -463,6 +463,14 @@ func (ts *TaskStore) UpdateFieldsWithAttribution(attr attribution.Attribution, t
 
 // UpdateFieldsWithViaAttribution updates fields and records the ingress surface.
 func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution, taskUUID string, fields map[string]interface{}, ifMatch int64, via string) (int64, error) {
+	return ts.UpdateFieldsWithViaAttributionAndPrecondition(attr, taskUUID, fields, ifMatch, via, nil)
+}
+
+// UpdateFieldsWithViaAttributionAndPrecondition evaluates precondition inside
+// the same BEGIN IMMEDIATE transaction as the task mutation. It is the fencing
+// seam for authority checks whose truth must not change between validation and
+// write (for example, generation-fenced task-claim completion).
+func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribution.Attribution, taskUUID string, fields map[string]interface{}, ifMatch int64, via string, precondition func(*sql.Tx) error) (int64, error) {
 	if err := requireAttribution(attr); err != nil {
 		return 0, err
 	}
@@ -501,6 +509,15 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 		}
 
 		// Check etag if ifMatch was provided
+		// Authority fences take precedence over optimistic metadata conflicts. If
+		// a takeover changed both generation and etag after the caller's read, the
+		// old holder must receive claim_superseded (with the new holder), not a
+		// generic etag conflict that hides the authority change.
+		if precondition != nil {
+			if err := precondition(tx); err != nil {
+				return err
+			}
+		}
 		if err := checkETag(currentETag, ifMatch); err != nil {
 			return err
 		}

@@ -38,6 +38,11 @@ type WrkqTask struct {
 	DeletedAt             string         `json:"deletedAt,omitempty"`
 	AcknowledgedAt        string         `json:"acknowledgedAt,omitempty"`
 	AssigneePrincipalRef  string         `json:"assigneePrincipalRef,omitempty"`
+	ClaimedBy             string         `json:"claimedBy,omitempty"`
+	ClaimedScope          string         `json:"claimedScope,omitempty"`
+	ClaimedNode           string         `json:"claimedNode,omitempty"`
+	ClaimedAt             string         `json:"claimedAt,omitempty"`
+	ClaimGeneration       int64          `json:"claimGeneration,omitempty"`
 	CreatedByPrincipalRef string         `json:"createdByPrincipalRef,omitempty"`
 	UpdatedByPrincipalRef string         `json:"updatedByPrincipalRef,omitempty"`
 
@@ -155,6 +160,8 @@ type TaskListParams struct {
 	State          flexString `json:"state,omitempty"`
 	Kind           flexString `json:"kind,omitempty"`
 	Assignee       string     `json:"assignee,omitempty"`
+	ClaimedBy      string     `json:"claimedBy,omitempty"`
+	ClaimedNode    string     `json:"claimedNode,omitempty"`
 	Labels         []string   `json:"labels,omitempty"`
 	IncludeDeleted bool       `json:"includeDeleted,omitempty"`
 	Limit          int        `json:"limit,omitempty"`
@@ -178,11 +185,50 @@ type TaskListParams struct {
 // TaskUpdateParams mirrors WrkqTaskUpdateParams. ExpectEtag is a pointer so a
 // supplied value of 0 is distinguishable from "not supplied".
 type TaskUpdateParams struct {
-	Task           string    `json:"task"`
-	Patch          TaskPatch `json:"patch"`
-	ExpectEtag     *int64    `json:"expectEtag,omitempty"`
-	Actor          string    `json:"actor,omitempty"`
-	IdempotencyKey string    `json:"idempotencyKey,omitempty"`
+	Task            string    `json:"task"`
+	Patch           TaskPatch `json:"patch"`
+	ExpectEtag      *int64    `json:"expectEtag,omitempty"`
+	Actor           string    `json:"actor,omitempty"`
+	ClaimScope      string    `json:"claimScope,omitempty"`
+	ClaimToken      string    `json:"claimToken,omitempty"`
+	ClaimGeneration int64     `json:"claimGeneration,omitempty"`
+	IdempotencyKey  string    `json:"idempotencyKey,omitempty"`
+}
+
+// TaskClaimParams atomically establishes or takes over task-crank authority.
+// ClaimedNode is deliberately absent: it is derived from authenticated context.
+type TaskClaimParams struct {
+	Task         string `json:"task"`
+	PrincipalRef string `json:"principalRef"`
+	Scope        string `json:"scope"`
+	TakeOver     bool   `json:"takeOver,omitempty"`
+}
+
+type WrkqTaskClaim struct {
+	Task            string `json:"task"`
+	ClaimedBy       string `json:"claimedBy"`
+	ClaimedScope    string `json:"claimedScope"`
+	ClaimedNode     string `json:"claimedNode"`
+	ClaimedAt       string `json:"claimedAt"`
+	ClaimGeneration int64  `json:"claimGeneration"`
+	ClaimToken      string `json:"claimToken,omitempty"`
+}
+
+type TaskClaimValidateParams struct {
+	Task            string `json:"task"`
+	PrincipalRef    string `json:"principalRef"`
+	Scope           string `json:"scope"`
+	ClaimGeneration int64  `json:"claimGeneration"`
+	ClaimToken      string `json:"claimToken"`
+}
+
+type TaskReleaseParams struct {
+	Task            string `json:"task"`
+	PrincipalRef    string `json:"principalRef"`
+	Scope           string `json:"scope,omitempty"`
+	ClaimGeneration int64  `json:"claimGeneration,omitempty"`
+	ClaimToken      string `json:"claimToken,omitempty"`
+	Force           bool   `json:"force,omitempty"`
 }
 
 // TaskMoveParams mirrors WrkqTaskMoveParams.

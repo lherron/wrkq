@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/wrkfapi"
+	"github.com/lherron/wrkq/internal/wrkqapi"
 )
 
 var errorCodeTable = []struct {
@@ -25,6 +26,10 @@ var errorCodeTable = []struct {
 	{"WRKF_EFFECT_NOT_DELIVERABLE", wrkfapi.NewEffectNotDeliverableError("eff_xyz", "cancelled"), -32015, wrkfapi.CodeEffectNotDeliverable, false},
 	{"WRKF_HOOK_FAILED", wrkfapi.NewHookFailedError("hook_1", "failed", true), -32016, wrkfapi.CodeHookFailed, true},
 	{"WRKF_INTERNAL", wrkfapi.NewInternalError(errors.New("sensitive detail")), -32603, wrkfapi.CodeInternal, false},
+	{"WRKQ_ALREADY_CLAIMED", wrkqapi.NewAlreadyClaimedError(nil), -32027, wrkqapi.CodeAlreadyClaimed, false},
+	{"WRKQ_WRONG_STATE", wrkqapi.NewWrongStateError(nil), -32028, wrkqapi.CodeWrongState, false},
+	{"WRKQ_CLAIM_SUPERSEDED", wrkqapi.NewClaimSupersededError(nil), -32029, wrkqapi.CodeClaimSuperseded, false},
+	{"WRKQ_NODE_IDENTITY_REQUIRED", wrkqapi.NewNodeIdentityError(), -32030, wrkqapi.CodeNodeIdentity, false},
 }
 
 func TestErrorMapper_StaleRevision(t *testing.T) {
