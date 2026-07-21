@@ -142,3 +142,76 @@ func TestFindEnvLocal_NotFound(t *testing.T) {
 		t.Errorf("expected empty string when no .env.local found, got %s", result)
 	}
 }
+
+func TestLoadExplicitTokenFileShieldsInlineTokenFromDotenv(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(tmpDir, ".env.local"),
+		[]byte("WRKQD_TOKEN=stale-dotenv-token\n"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldCwd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
+	oldToken, hadToken := os.LookupEnv("WRKQD_TOKEN")
+	if err := os.Unsetenv("WRKQD_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if hadToken {
+			_ = os.Setenv("WRKQD_TOKEN", oldToken)
+		} else {
+			_ = os.Unsetenv("WRKQD_TOKEN")
+		}
+	}()
+	t.Setenv("WRKQD_TOKEN_FILE", filepath.Join(tmpDir, "node-token"))
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("PRAESIDIUM_HOME", filepath.Join(tmpDir, "missing-platform"))
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if token, exists := os.LookupEnv("WRKQD_TOKEN"); !exists || token != "" {
+		t.Fatalf("expected explicit token file to reserve an empty inline token, got exists=%v value=%q", exists, token)
+	}
+}
+
+func TestLoadExplicitInlineTokenStillOutranksTokenFileAndDotenv(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(tmpDir, ".env.local"),
+		[]byte("WRKQD_TOKEN=stale-dotenv-token\n"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldCwd) }()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WRKQD_TOKEN", "explicit-inline-token")
+	t.Setenv("WRKQD_TOKEN_FILE", filepath.Join(tmpDir, "node-token"))
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("PRAESIDIUM_HOME", filepath.Join(tmpDir, "missing-platform"))
+
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+	if token := os.Getenv("WRKQD_TOKEN"); token != "explicit-inline-token" {
+		t.Fatalf("expected explicit inline token to remain authoritative, got %q", token)
+	}
+}

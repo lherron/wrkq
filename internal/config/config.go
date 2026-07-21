@@ -77,6 +77,17 @@ func Load() (*Config, error) {
 	explicitProjectRoot := os.Getenv("WRKQ_PROJECT_ROOT")
 	aspProject := os.Getenv("ASP_PROJECT")
 
+	// A process-provided token file is an explicit credential source. Keep an
+	// absent inline token absent-from-dotenv by reserving the key with an empty
+	// value before godotenv loads. This preserves an explicitly exported inline
+	// token while preventing a nearby .env.local default from silently
+	// shadowing the safer file reference.
+	if strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")) != "" {
+		if _, inlineTokenExplicit := os.LookupEnv("WRKQD_TOKEN"); !inlineTokenExplicit {
+			_ = os.Setenv("WRKQD_TOKEN", "")
+		}
+	}
+
 	// Load .env.local if it exists (walking up parent directories)
 	if envPath := findEnvLocal(); envPath != "" {
 		_ = godotenv.Load(envPath)
