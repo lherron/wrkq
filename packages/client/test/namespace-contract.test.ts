@@ -30,6 +30,8 @@ describe("public surface (runtime)", () => {
     expect(typeof client.wrkf.event.query).toBe("function");
     expect(typeof client.wrkf.transition.apply).toBe("function");
     expect(typeof client.wrkf.suspension.resolve).toBe("function");
+    const wrkfWithInstance = client.wrkf as unknown as { instance?: { cancel?: unknown } };
+    expect(typeof wrkfWithInstance.instance?.cancel).toBe("function");
     expect(typeof client.wrkf.role.set).toBe("function");
     expect(typeof client.wrkf.effect.claim).toBe("function");
 
