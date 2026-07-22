@@ -100,8 +100,8 @@ test-coverage:
   go test -tags sqlite_fts5 -v -coverprofile=coverage.out ./...
   go tool cover -html=coverage.out -o coverage.html
 
-# Install CLI binaries to ~/.local/bin, publish @wrkq/client, and sync downstream consumers.
-# Pass no-sync=1 to skip syncing downstream consumer repos.
+# Install CLI binaries to ~/.local/bin and, on producer nodes, publish @wrkq/client.
+# Pass no-sync=1 to skip syncing downstream consumer repos on a producer node.
 install no-sync="": build
   #!/usr/bin/env bash
   set -euo pipefail
@@ -129,11 +129,16 @@ install no-sync="": build
   fi
   echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkqadm version', and 'wrkqd --help' to verify"
   echo ""
-  just client-publish-dev
-  if [ -z "{{ no-sync }}" ]; then
-    just sync-downstream
+  node_role="$(bash scripts/resolve-node-role.sh)"
+  if [ "$node_role" = "producer" ]; then
+    just client-publish-dev
+    if [ -z "{{ no-sync }}" ]; then
+      just sync-downstream
+    else
+      echo "[install] skipping downstream sync (no-sync=1)"
+    fi
   else
-    echo "[install] skipping downstream sync (no-sync=1)"
+    echo "[install] consumer node role; skipping client publish and downstream sync"
   fi
 
 # Sync downstream repos that consume @wrkq/client from local Verdaccio.
