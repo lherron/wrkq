@@ -93,6 +93,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **required_tests:** `TestClaimActionAcknowledgesNamedPredecessor`, `TestLateSettleWithoutSuccessorIsAccepted`
 - **last_verified:** 2026-07-12
 
+## wrkq.wrkf-hook.remote-execution
+
+- **scope:** remote wrkf hook, check, and effect execution on the canonical node
+- **predicate:** Remote wrkf external execution is canonical-node controlled and request-bounded. Each installed workflow template version stores the canonical hook-catalog body and hash that define its hook law. At execution, the hook or effect handler is selected from that stored body only after the daemon's explicitly configured catalog has the same hash; the daemon configuration supplies the executable bundle root, never replacement hook definitions. A remote caller cannot select a catalog, and wrkqd never uses workspace or home-directory autodiscovery. `wrkf.check.run`, `wrkf.hook.run`, and `wrkf.effect.deliver` execute child processes outside the global workrpc dispatch/stdout critical sections and outside SQLite writer transactions. The remote hook timeout ceiling is positive and strictly below the daemon response deadline. An entry whose effective timeout exceeds that ceiling is refused before execution and before check persistence or effect claim. Request cancellation terminates the child and no check result or effect acknowledgement may commit afterward. Local InProcess execution may retain caller-selected catalogs and an unbounded-by-route policy; crossing the HTTP boundary activates this invariant.
+- **enforced_by:** `Template-pinned hook catalog identity, DaemonServer explicit catalog loading, remote CLI catalog-override refusal, external-method lock isolation, and the server-owned hook ceiling below the HTTP response timeout.`
+- **source:** `docs/wrkf-remote-transport-migration-spec.md`, `internal/workflow/service.go`, `internal/workflow/ledger.go`, `internal/workflow/hook_catalog_pinning_test.go`, `internal/workflow/hook_isolation_test.go`, `internal/workrpc/bootstrap/bootstrap.go`, `internal/workrpc/bootstrap/hook_catalog_test.go`, `internal/workrpc/server.go`, `internal/workrpc/server_contract_test.go`, `internal/workrpc/limits.go`, `internal/workrpc/limits_test.go`, `internal/wrkfcli/transport.go`, `internal/wrkfcli/transport_test.go`
+- **required_tests:** `TestHookExecutionRequiresConfiguredCatalogToMatchStoredTemplateLaw`, `TestDaemonServerNeverAutodiscoversHookCatalog`, `TestConfiguredTransportRejectsHookCatalogOverrideForRemote`, `TestExternalExecutionDoesNotSerializeUnrelatedRPC`, `TestRunChecksHookDoesNotHoldWriterTransaction`, `TestRunChecksRefusesOversizedRemoteTimeoutBeforeExecution`, `TestRunChecksCancellationStopsBeforePersistence`, `TestRemoteHookTimeoutLeavesResponseHeadroom`
+- **last_verified:** 2026-07-22
+
 ## wrkq.wrkf-rpc.attachment-byte-transfer
 
 - **scope:** attachment content crossing the wrkq/wrkf RPC boundary
