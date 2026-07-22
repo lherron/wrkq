@@ -156,6 +156,7 @@ class WorkClientImpl implements WorkClient {
       inspect: (p) => this.call("wrkq.workflow.inspect", p),
       timeline: (p) => this.call("wrkq.workflow.timeline", p),
       refresh: (p) => this.call("wrkq.workflow.refresh", p),
+      syncMeta: (p) => this.call("wrkq.workflow.syncMeta", p ?? {}),
     },
     handoff: {
       create: (p) => this.call("wrkq.handoff.create", p),
@@ -196,6 +197,7 @@ class WorkClientImpl implements WorkClient {
       list: (p) => this.call("wrkf.evidence.list", p),
       show: (p) => this.call("wrkf.evidence.show", p),
       suggest: (p) => this.call("wrkf.evidence.suggest", p),
+      schema: (p) => this.call("wrkf.evidence.schema", p),
     },
     ledger: {
       append: (p) => this.call("wrkf.ledger.append", p),
@@ -216,6 +218,15 @@ class WorkClientImpl implements WorkClient {
       satisfy: (p) => this.call("wrkf.obligation.satisfy", p),
       waive: (p) => this.call("wrkf.obligation.waive", p),
       cancel: (p) => this.call("wrkf.obligation.cancel", p),
+      create: (p) => this.call("wrkf.obligation.create", p),
+    },
+    supervisor: {
+      call: (p) => this.call("wrkf.supervisor.call", p),
+      escalate: (p) => this.call("wrkf.supervisor.escalate", p),
+    },
+    watch: {
+      snapshot: (p) => this.call("wrkf.watch.snapshot", p),
+      events: (p) => this.call("wrkf.watch.events", p),
     },
     check: {
       preflight: (p) => this.call("wrkf.check.preflight", p),

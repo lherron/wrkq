@@ -180,6 +180,7 @@ var methodCatalog = []string{
 	"wrkq.workflow.inspect",
 	"wrkq.workflow.timeline",
 	"wrkq.workflow.refresh",
+	"wrkq.workflow.syncMeta",
 	"wrkq.handoff.create",
 	"wrkq.handoff.get",
 	"wrkq.handoff.listView",
@@ -205,6 +206,7 @@ var methodCatalog = []string{
 	"wrkf.evidence.list",
 	"wrkf.evidence.show",
 	"wrkf.evidence.suggest",
+	"wrkf.evidence.schema",
 	"wrkf.ledger.append",
 	"wrkf.ledger.list",
 	"wrkf.event.query",
@@ -217,6 +219,7 @@ var methodCatalog = []string{
 	"wrkf.obligation.satisfy",
 	"wrkf.obligation.waive",
 	"wrkf.obligation.cancel",
+	"wrkf.obligation.create",
 	"wrkf.check.preflight",
 	"wrkf.check.run",
 	"wrkf.check.show",
@@ -226,6 +229,10 @@ var methodCatalog = []string{
 	"wrkf.hook.run",
 	"wrkf.transition.apply",
 	"wrkf.suspension.resolve",
+	"wrkf.supervisor.call",
+	"wrkf.supervisor.escalate",
+	"wrkf.watch.snapshot",
+	"wrkf.watch.events",
 	"wrkf.run.start",
 	"wrkf.run.bindExternal",
 	"wrkf.run.finish",
@@ -289,6 +296,7 @@ var dtoCatalog = []string{
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
+	"WrkqWorkflowSyncMetaResult",
 	"WrkqHandoff",             // handoff resource DTO (legacy handoffJSON field order)
 	"WrkqHandoffCreateResult", // wrkq.handoff.create envelope (handoff + idempotentReplay)
 	"WrkqHandoffListResult",   // wrkq.handoff.listView page envelope
@@ -301,6 +309,7 @@ var dtoCatalog = []string{
 	"WrkfEventQueryResult",
 	"WrkfQueriedEvent",
 	"WrkfEvidence",
+	"WrkfEvidenceSchema",
 	"WrkfLedgerEntry",
 	"WrkfLedgerListResult",
 	"WrkfObligation",
@@ -316,6 +325,8 @@ var dtoCatalog = []string{
 	"WrkfDiffResult",
 	"WrkfSuggestResult",
 	"WrkfEffectClaimResult",
+	"WrkfWatchSnapshot",
+	"WrkfWatchEventsResult",
 }
 
 func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
@@ -500,6 +511,10 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
 		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, wrkqDefaultActor))
 	}))
+	s.Register("wrkq.workflow.syncMeta", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowSyncMetaParams) (any, error) {
+		p.Actor = defaultString(p.Actor, wrkqDefaultActor)
+		return wq.WorkflowSyncMeta(ctx, p)
+	}))
 
 	// Handoff family (T-05117). Scope is CALLER-owned (resolved + self-scope
 	// enforced by the mirror); the server receives EXPLICIT effective scope/actor
@@ -588,6 +603,9 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.evidence.suggest", apiHandler(func(ctx context.Context, p taskTransitionParams) (any, error) {
 		return api.EvidenceSuggest(ctx, p.TaskSelector, p.Transition)
 	}))
+	s.Register("wrkf.evidence.schema", apiHandler(func(ctx context.Context, p wrkfapi.EvidenceSchemaParams) (any, error) {
+		return api.EvidenceSchema(ctx, p)
+	}))
 	s.Register("wrkf.ledger.append", apiHandler(func(ctx context.Context, p wrkfapi.LedgerAppendParams) (any, error) {
 		p.WrittenBy = opts.DefaultActor
 		return api.LedgerAppend(ctx, p)
@@ -619,6 +637,9 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.obligation.satisfy", obligationStatusHandler(api.ObligationSatisfy))
 	s.Register("wrkf.obligation.waive", obligationStatusHandler(api.ObligationWaive))
 	s.Register("wrkf.obligation.cancel", obligationStatusHandler(api.ObligationCancel))
+	s.Register("wrkf.obligation.create", apiHandler(func(ctx context.Context, p wrkfapi.ObligationCreateParams) (any, error) {
+		return api.ObligationCreate(ctx, p)
+	}))
 	s.Register("wrkf.check.preflight", apiHandler(func(ctx context.Context, p checkParams) (any, error) {
 		return api.CheckPreflight(ctx, p.TaskSelector, p.Transition, defaultString(p.Role, opts.DefaultRole))
 	}))
@@ -653,6 +674,18 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.SuspensionResolve(ctx, p)
+	}))
+	s.Register("wrkf.supervisor.call", apiHandler(func(ctx context.Context, p wrkfapi.SupervisorParams) (any, error) {
+		return api.SupervisorCall(ctx, p)
+	}))
+	s.Register("wrkf.supervisor.escalate", apiHandler(func(ctx context.Context, p wrkfapi.SupervisorParams) (any, error) {
+		return api.SupervisorEscalate(ctx, p)
+	}))
+	s.Register("wrkf.watch.snapshot", apiHandler(func(ctx context.Context, p wrkfapi.WatchSnapshotParams) (any, error) {
+		return api.WatchSnapshot(ctx, p)
+	}))
+	s.Register("wrkf.watch.events", apiHandler(func(ctx context.Context, p wrkfapi.WatchEventsParams) (any, error) {
+		return api.WatchEvents(ctx, p)
 	}))
 	s.Register("wrkf.run.start", apiHandler(func(ctx context.Context, p wrkfapi.RunStartParams) (any, error) {
 		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)

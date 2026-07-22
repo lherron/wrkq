@@ -456,16 +456,16 @@ func taskCmd() *cobra.Command {
 	syncMeta := &cobra.Command{
 		Use:  "sync-meta [TASK]",
 		Args: cobra.MaximumNArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			task := ""
 			if len(args) > 0 {
 				task = args[0]
 			}
-			count, err := a.service.SyncMeta(task, a.actor)
+			result, err := rpcCall[wrkqapi.WrkqWorkflowSyncMetaResult](cmd, a, "wrkq.workflow.syncMeta", wrkqapi.WorkflowSyncMetaParams{Task: task, Actor: a.actor})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"synced": count})
+			return printAny(cmd, flagJSON, result)
 		}),
 	}
 	syncMeta.Flags().Bool("all", false, "Sync all workflow task projections")
@@ -560,11 +560,11 @@ func evidenceCmd() *cobra.Command {
 	schema := &cobra.Command{
 		Use:  "schema TASK --kind KIND",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if kind == "" {
 				return fmt.Errorf("--kind is required")
 			}
-			out, err := a.service.EvidenceSchema(args[0], kind)
+			out, err := rpcCall[wrkfapi.EvidenceSchema](cmd, a, "wrkf.evidence.schema", wrkfapi.EvidenceSchemaParams{TaskSelector: args[0], Kind: kind})
 			if err != nil {
 				return err
 			}
@@ -1311,8 +1311,8 @@ func supervisorCmd() *cobra.Command {
 	call := &cobra.Command{
 		Use:  "call TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := a.service.SupervisorCall(args[0], reason)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.supervisor.call", wrkfapi.SupervisorParams{TaskSelector: args[0], Reason: reason})
 			if err != nil {
 				return err
 			}
@@ -1326,7 +1326,7 @@ func supervisorCmd() *cobra.Command {
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			switch args[1] {
 			case "escalate":
-				eff, err := a.service.SupervisorEscalate(args[0], reason)
+				eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.supervisor.escalate", wrkfapi.SupervisorParams{TaskSelector: args[0], Reason: reason})
 				if err != nil {
 					return err
 				}
@@ -1348,7 +1348,9 @@ func supervisorCmd() *cobra.Command {
 				if len(args) < 3 {
 					return fmt.Errorf("create-obligation action requires obligation kind")
 				}
-				obl, err := a.service.CreateObligation(args[0], args[2], "supervisor", "", true, reason)
+				obl, err := rpcCall[workflow.Obligation](cmd, a, "wrkf.obligation.create", wrkfapi.ObligationCreateParams{
+					TaskSelector: args[0], Kind: args[2], OwnerRole: "supervisor", Blocking: true, Reason: reason,
+				})
 				if err != nil {
 					return err
 				}

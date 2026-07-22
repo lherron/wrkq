@@ -46,6 +46,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WebhookRow":                   dtoType[wrkqapi.WebhookRow](),
 	"WrkqWorkflowAttachResult":     dtoType[wrkqapi.WrkqWorkflowAttachResult](),
 	"WrkqWorkflowInspectResult":    dtoType[wrkqapi.WrkqWorkflowInspectResult](),
+	"WrkqWorkflowSyncMetaResult":   dtoType[wrkqapi.WrkqWorkflowSyncMetaResult](),
 	"WrkqHandoff":                  dtoType[wrkqapi.WrkqHandoff](),
 	"WrkqHandoffCreateResult":      dtoType[wrkqapi.WrkqHandoffCreateResult](),
 	"WrkqHandoffListResult":        dtoType[wrkqapi.WrkqHandoffListResult](),
@@ -58,6 +59,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkfEventQueryResult":         dtoType[wrkfapi.EventQueryResult](),
 	"WrkfQueriedEvent":             dtoType[wrkfapi.QueriedEvent](),
 	"WrkfEvidence":                 dtoType[wrkfapi.Evidence](),
+	"WrkfEvidenceSchema":           dtoType[wrkfapi.EvidenceSchema](),
 	"WrkfLedgerEntry":              dtoType[wrkfapi.LedgerEntry](),
 	"WrkfLedgerListResult":         dtoType[wrkfapi.LedgerListResult](),
 	"WrkfObligation":               dtoType[wrkfapi.Obligation](),
@@ -73,6 +75,8 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkfDiffResult":               dtoType[wrkfapi.DiffResult](),
 	"WrkfSuggestResult":            dtoType[wrkfapi.SuggestResult](),
 	"WrkfEffectClaimResult":        dtoType[wrkfapi.EffectClaim](),
+	"WrkfWatchSnapshot":            dtoType[wrkfapi.WatchSnapshot](),
+	"WrkfWatchEventsResult":        dtoType[wrkfapi.WatchEventsResult](),
 }
 
 func dtoType[T any]() reflect.Type {

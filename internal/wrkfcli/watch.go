@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/workflow"
+	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +46,7 @@ reach a durable lifecycle predicate. Selectors are inferred by id prefix:
 run_* watches a run, wfi_* watches an instance, and anything else is a task
 selector. Follow mode emits NDJSON workflow events followed by one summary row.`,
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			return runWatch(a, cmd, args[0], flags)
 		}),
 	}
@@ -79,13 +80,14 @@ func runWatch(a *app, cmd *cobra.Command, selector string, flags watchFlags) err
 		deadline = start.Add(timeout)
 	}
 
-	snapshot, err := a.service.WatchSnapshot(selector, until)
+	snapshotValue, err := rpcCall[workflow.WatchSnapshot](cmd, a, "wrkf.watch.snapshot", wrkfapi.WatchSnapshotParams{Selector: selector, Until: until})
 	if err != nil {
 		return exitError(2, err)
 	}
-	lastSeq := int64(0)
+	snapshot := &snapshotValue
+	eventsCursor := ""
 	if flags.follow {
-		if err := emitWatchEvents(cmd, a.service, selector, &lastSeq); err != nil {
+		if err := emitWatchEvents(cmd, a, selector, &eventsCursor); err != nil {
 			return exitError(3, err)
 		}
 	}
@@ -113,14 +115,15 @@ func runWatch(a *app, cmd *cobra.Command, selector string, flags watchFlags) err
 		}
 
 		if flags.follow {
-			if err := emitWatchEvents(cmd, a.service, selector, &lastSeq); err != nil {
+			if err := emitWatchEvents(cmd, a, selector, &eventsCursor); err != nil {
 				return exitError(3, err)
 			}
 		}
-		snapshot, err = a.service.WatchSnapshot(selector, until)
+		snapshotValue, err = rpcCall[workflow.WatchSnapshot](cmd, a, "wrkf.watch.snapshot", wrkfapi.WatchSnapshotParams{Selector: selector, Until: until})
 		if err != nil {
 			return exitError(3, err)
 		}
+		snapshot = &snapshotValue
 		if snapshot.Met {
 			return finishWatch(cmd, flags.follow, watchSummaryFor("met", snapshot, start, false))
 		}
@@ -139,20 +142,20 @@ func parseOptionalDuration(raw, name string) (time.Duration, error) {
 	return d, nil
 }
 
-func emitWatchEvents(cmd *cobra.Command, service *workflow.Service, selector string, lastSeq *int64) error {
-	events, err := service.WatchEvents(selector, *lastSeq, 100)
+func emitWatchEvents(cmd *cobra.Command, a *app, selector string, afterCursor *string) error {
+	result, err := rpcCall[wrkfapi.WatchEventsResult](cmd, a, "wrkf.watch.events", wrkfapi.WatchEventsParams{
+		Selector: selector, AfterCursor: *afterCursor, Limit: 100,
+	})
 	if err != nil {
 		return err
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
-	for _, event := range events {
+	for _, event := range result.Events {
 		if err := enc.Encode(watchEventLine{Type: "event", Event: event}); err != nil {
 			return err
 		}
-		if event.Seq > *lastSeq {
-			*lastSeq = event.Seq
-		}
 	}
+	*afterCursor = result.NextCursor
 	return nil
 }
 

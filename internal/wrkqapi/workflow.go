@@ -123,6 +123,23 @@ func (a *API) WorkflowRefresh(ctx context.Context, taskSelector, actor string) (
 	return &WrkqWorkflowInspectResult{Instance: inst}, nil
 }
 
+// WorkflowSyncMeta refreshes the task-owned workflow projection without
+// exposing a wrkf.task.* mutation. The handler and implementation live in the
+// wrkq namespace because task metadata is wrkq-owned state.
+func (a *API) WorkflowSyncMeta(ctx context.Context, p WorkflowSyncMetaParams) (*WrkqWorkflowSyncMetaResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.db == nil {
+		return nil, NewInternalError(errWorkflowUnavailable)
+	}
+	count, err := workflow.NewService(a.db).SyncMeta(p.Task, defaultString(p.Actor, a.defaultPrincipalRef))
+	if err != nil {
+		return nil, err
+	}
+	return &WrkqWorkflowSyncMetaResult{Synced: count}, nil
+}
+
 func defaultString(value, fallback string) string {
 	if value != "" {
 		return value

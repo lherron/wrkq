@@ -47,6 +47,8 @@ import type {
   WrkfEventQueryResult,
   WrkfEvidence,
   WrkfEvidenceAddParams,
+  WrkfEvidenceSchema,
+  WrkfEvidenceSchemaParams,
   WrkfEvidenceListParams,
   WrkfEvidenceShowParams,
   WrkfEvidenceSuggestParams,
@@ -64,6 +66,7 @@ import type {
   WrkfNextResult,
   WrkfObligation,
   WrkfObligationCancelParams,
+  WrkfObligationCreateParams,
   WrkfObligationListParams,
   WrkfObligationSatisfyParams,
   WrkfObligationShowParams,
@@ -81,6 +84,7 @@ import type {
   WrkfRunShowParams,
   WrkfRunStartParams,
   WrkfSuggestResult,
+  WrkfSupervisorParams,
   WrkfSuspensionResolveParams,
   WrkfSuspensionResolveResult,
   WrkfTransitionApplyParams,
@@ -94,6 +98,10 @@ import type {
   WrkfWorkflowShowResult,
   WrkfWorkflowValidateParams,
   WrkfWorkflowValidateResult,
+  WrkfWatchEventsParams,
+  WrkfWatchEventsResult,
+  WrkfWatchSnapshot,
+  WrkfWatchSnapshotParams,
 } from "./types.js";
 
 export interface WrkfWorkflowFacade {
@@ -116,6 +124,7 @@ export interface WrkfEvidenceFacade {
   list(params: WrkfEvidenceListParams): Promise<WrkfEvidence[]>;
   show(params: WrkfEvidenceShowParams): Promise<WrkfEvidence>;
   suggest(params: WrkfEvidenceSuggestParams): Promise<WrkfSuggestResult>;
+  schema(params: WrkfEvidenceSchemaParams): Promise<WrkfEvidenceSchema>;
 }
 
 export interface WrkfLedgerFacade {
@@ -140,6 +149,17 @@ export interface WrkfObligationFacade {
   satisfy(params: WrkfObligationSatisfyParams): Promise<WrkfObligation>;
   waive(params: WrkfObligationWaiveParams): Promise<WrkfObligation>;
   cancel(params: WrkfObligationCancelParams): Promise<WrkfObligation>;
+  create(params: WrkfObligationCreateParams): Promise<WrkfObligation>;
+}
+
+export interface WrkfSupervisorFacade {
+  call(params: WrkfSupervisorParams): Promise<WrkfEffect>;
+  escalate(params: WrkfSupervisorParams): Promise<WrkfEffect>;
+}
+
+export interface WrkfWatchFacade {
+  snapshot(params: WrkfWatchSnapshotParams): Promise<WrkfWatchSnapshot>;
+  events(params: WrkfWatchEventsParams): Promise<WrkfWatchEventsResult>;
 }
 
 export interface WrkfCheckFacade {
@@ -206,6 +226,8 @@ export interface WrkfFacade {
   readonly event: WrkfEventFacade;
   readonly role: WrkfRoleFacade;
   readonly obligation: WrkfObligationFacade;
+  readonly supervisor: WrkfSupervisorFacade;
+  readonly watch: WrkfWatchFacade;
   readonly check: WrkfCheckFacade;
   readonly hook: WrkfHookFacade;
   readonly transition: WrkfTransitionFacade;

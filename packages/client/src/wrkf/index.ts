@@ -18,6 +18,8 @@ export type {
   WrkfObligationFacade,
   WrkfRoleFacade,
   WrkfRunFacade,
+  WrkfSupervisorFacade,
   WrkfTransitionFacade,
+  WrkfWatchFacade,
   WrkfWorkflowFacade,
 } from "./facade.js";

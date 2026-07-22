@@ -162,6 +162,15 @@ export interface WrkfEvidence {
   [k: string]: unknown;
 }
 
+export interface WrkfEvidenceSchema {
+  kind: string;
+  description?: string;
+  class?: string;
+  facts?: Record<string, unknown>;
+  producibleBy?: string[];
+  linkageRefs?: Array<Record<string, unknown>>;
+}
+
 export interface WrkfObligation {
   id: string;
   kind?: string;
@@ -342,6 +351,11 @@ export interface WrkfEvidenceSuggestParams {
   transition: string;
 }
 
+export interface WrkfEvidenceSchemaParams {
+  task: string;
+  kind: string;
+}
+
 // ── Role bindings ───────────────────────────────────────────────────────────
 
 export interface WrkfRoleBinding {
@@ -491,6 +505,57 @@ export interface WrkfObligationCancelParams {
   id: string;
   reason?: string;
   idempotencyKey?: string;
+}
+
+export interface WrkfObligationCreateParams {
+  task: string;
+  kind: string;
+  ownerRole?: string;
+  ownerActor?: string;
+  blocking?: boolean;
+  reason?: string;
+}
+
+export interface WrkfSupervisorParams {
+  task: string;
+  reason?: string;
+}
+
+export interface WrkfWatchTarget {
+  kind: "task" | "instance" | "run" | string;
+  selector: string;
+  instanceId?: string;
+  runId?: string;
+  taskRef?: string;
+}
+
+export interface WrkfWatchSnapshotParams {
+  selector: string;
+  until?: "terminal" | "closed" | "waiting" | "suspended" | string;
+}
+
+export interface WrkfWatchSnapshot {
+  target: WrkfWatchTarget;
+  until: string;
+  met: boolean;
+  class: string;
+  exitCode: number;
+  status?: string;
+  phase?: string;
+  outcome?: string;
+  instance?: WrkfInstance;
+  run?: WrkfRun;
+}
+
+export interface WrkfWatchEventsParams {
+  selector: string;
+  afterCursor?: string;
+  limit?: number;
+}
+
+export interface WrkfWatchEventsResult {
+  events: WrkfEvent[];
+  nextCursor: string;
 }
 
 // ── Checks and hooks ─────────────────────────────────────────────────────────

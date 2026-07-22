@@ -80,6 +80,8 @@ import type {
   WrkqWorkflowInspectParams,
   WrkqWorkflowInspectResult,
   WrkqWorkflowRefreshParams,
+  WrkqWorkflowSyncMetaParams,
+  WrkqWorkflowSyncMetaResult,
   WrkqWorkflowTimelineParams,
   WrkqWorkflowTimelineResult,
 } from "./types.js";
@@ -152,6 +154,7 @@ export interface WrkqWorkflowFacade {
   inspect(params: WrkqWorkflowInspectParams): Promise<WrkqWorkflowInspectResult>;
   timeline(params: WrkqWorkflowTimelineParams): Promise<WrkqWorkflowTimelineResult>;
   refresh(params: WrkqWorkflowRefreshParams): Promise<WrkqWorkflowInspectResult>;
+  syncMeta(params?: WrkqWorkflowSyncMetaParams): Promise<WrkqWorkflowSyncMetaResult>;
 }
 
 /** Admin namespace placeholder; legacy actor admin methods were removed in T-05381. */

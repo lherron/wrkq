@@ -167,6 +167,17 @@ describe("wrkq namespace", () => {
     expect(task.assigneePrincipalRef).toBe("agent:larry");
   });
 
+  test("workflow.syncMeta stays in the task-owned wrkq namespace", async () => {
+    const transport = new FakeTransport().onResult("wrkq.workflow.syncMeta", { synced: 3 });
+    const client = await clientWith(transport);
+    const result = await client.wrkq.workflow.syncMeta({ actor: "agent:cody" });
+    expect(transport.capturedRequests[0]).toMatchObject({
+      method: "wrkq.workflow.syncMeta",
+      params: { actor: "agent:cody" },
+    });
+    expect(result.synced).toBe(3);
+  });
+
   test("T-05381 task.create uses principalRef and rejects legacy actor attribution", async () => {
     const transport = new FakeTransport().onResult("wrkq.task.create", MOCK_TASK);
     const client = await clientWith(transport);
@@ -1006,6 +1017,47 @@ describe("wrkf namespace", () => {
     const claim = await client.wrkf.effect.claim({ adapter: "wake_role", limit: 5, leaseMs: 60000 });
     expect(claim.leaseToken).toBe("lease_abc");
     expect(claim.effects[0]!.id).toBe("eff_1");
+  });
+
+  test("gap-method facades forward evidence, obligation, supervisor, and bounded watch calls", async () => {
+    const transport = new FakeTransport()
+      .onResult("wrkf.evidence.schema", { kind: "red_test", class: "test" })
+      .onResult("wrkf.obligation.create", { id: "obl_1", kind: "review", blocking: true })
+      .onResult("wrkf.supervisor.call", { id: "eff_1", kind: "supervisor_call", status: "pending" })
+      .onResult("wrkf.supervisor.escalate", { id: "eff_2", kind: "supervisor_escalation", status: "pending" })
+      .onResult("wrkf.watch.snapshot", {
+        target: { kind: "task", selector: "T-00001", instanceId: "wfi_1" },
+        until: "terminal",
+        met: false,
+        class: "pending",
+        exitCode: 0,
+        status: "active",
+      })
+      .onResult("wrkf.watch.events", {
+        events: [{ id: "wfe_1", seq: 1, type: "workflow.attached" }],
+        nextCursor: "opaque-cursor",
+      });
+    const client = await clientWith(transport);
+
+    const schema = await client.wrkf.evidence.schema({ task: "T-00001", kind: "red_test" });
+    const obligation = await client.wrkf.obligation.create({ task: "T-00001", kind: "review", blocking: true });
+    await client.wrkf.supervisor.call({ task: "T-00001", reason: "attention" });
+    await client.wrkf.supervisor.escalate({ task: "T-00001", reason: "urgent" });
+    const snapshot = await client.wrkf.watch.snapshot({ selector: "T-00001", until: "terminal" });
+    const events = await client.wrkf.watch.events({ selector: "T-00001", afterCursor: "cursor-0", limit: 100 });
+
+    expect(schema.kind).toBe("red_test");
+    expect(obligation.id).toBe("obl_1");
+    expect(snapshot.target.instanceId).toBe("wfi_1");
+    expect(events.nextCursor).toBe("opaque-cursor");
+    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
+      "wrkf.evidence.schema",
+      "wrkf.obligation.create",
+      "wrkf.supervisor.call",
+      "wrkf.supervisor.escalate",
+      "wrkf.watch.snapshot",
+      "wrkf.watch.events",
+    ]);
   });
 
 });

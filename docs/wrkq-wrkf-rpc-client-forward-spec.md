@@ -1147,6 +1147,7 @@ wrkq.workflow.attach
 wrkq.workflow.inspect
 wrkq.workflow.timeline
 wrkq.workflow.refresh
+wrkq.workflow.syncMeta
 ```
 
 Required minimum for agent-loop readiness:
@@ -1192,7 +1193,9 @@ interface WrkqWorkflowTimelineParams {
 
 `wrkq.workflow.refresh` may update wrkf instance context from the current task document. It must not be exposed as `wrkf.task.refresh`.
 
-There must be no public `syncMeta` verb. Projection from workflow state to task fields should happen through `wrkf.transition.apply` or explicit wrkq task updates.
+`wrkq.workflow.syncMeta { task?, actor? }` explicitly refreshes the task-owned
+workflow projection and returns `{ synced }`. It is never exposed as
+`wrkf.task.syncMeta`.
 
 #### Legacy actor admin methods
 
@@ -1418,6 +1421,7 @@ wrkf.evidence.add
 wrkf.evidence.list
 wrkf.evidence.show
 wrkf.evidence.suggest
+wrkf.evidence.schema
 ```
 
 Evidence belongs to workflow state. Evidence add must support run linkage and richer metadata:
@@ -1440,6 +1444,9 @@ interface WrkfEvidenceAddParams {
 
 Required server-side change: persist `runId` to the workflow evidence record. The output DTO already needs to expose `runId`.
 
+`wrkf.evidence.schema { task, kind }` returns the template-declared evidence
+contract.
+
 #### Obligations
 
 ```text
@@ -1448,9 +1455,26 @@ wrkf.obligation.show
 wrkf.obligation.satisfy
 wrkf.obligation.waive
 wrkf.obligation.cancel
+wrkf.obligation.create
 ```
 
 These mutate workflow obligations, not wrkq tasks directly.
+
+#### Supervisor and watch
+
+```text
+wrkf.supervisor.call
+wrkf.supervisor.escalate
+wrkf.watch.snapshot
+wrkf.watch.events
+```
+
+Supervisor calls accept `{ task, reason? }`. Watch is bounded request/response:
+snapshot evaluates one durable predicate, while events returns one capped page
+`{ events, nextCursor }`. The opaque cursor binds resolved target identity
+(`instanceId` and, for run watches, `runId`) plus sequence. The client owns the
+poll loop, interval, timeout, terminal record, and exit code; the server never
+long-polls.
 
 #### Checks and hooks
 
@@ -1841,6 +1865,7 @@ wrkq.workflow.attach
 wrkq.workflow.inspect
 wrkq.workflow.timeline
 wrkq.workflow.refresh
+wrkq.workflow.syncMeta
 wrkf.instance.show
 wrkf.instance.next
 ```

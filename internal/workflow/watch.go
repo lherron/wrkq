@@ -118,33 +118,47 @@ func (s *Service) WatchEvents(selector string, afterSeq int64, limit int) ([]Eve
 		limit = 100
 	}
 
-	var instanceID, runID string
+	var target WatchTarget
 	switch InferWatchTargetKind(selector) {
 	case WatchTargetRun:
 		run, err := s.ShowRun(selector)
 		if err != nil {
 			return nil, err
 		}
-		instanceID, runID = run.InstanceID, run.ID
+		target = WatchTarget{Kind: WatchTargetRun, Selector: selector, InstanceID: run.InstanceID, RunID: run.ID}
 	case WatchTargetInstance:
 		inst, err := s.instanceByID(selector)
 		if err != nil {
 			return nil, err
 		}
-		instanceID = inst.ID
+		target = WatchTarget{Kind: WatchTargetInstance, Selector: selector, InstanceID: inst.ID, TaskRef: inst.TaskRef}
 	default:
 		inst, err := s.LatestInstance(selector)
 		if err != nil {
 			return nil, err
 		}
-		instanceID = inst.ID
+		target = WatchTarget{Kind: WatchTargetTask, Selector: selector, InstanceID: inst.ID, TaskRef: inst.TaskRef}
+	}
+	return s.WatchEventsForTarget(target, afterSeq, limit)
+}
+
+// WatchEventsForTarget reads one bounded page for an already-resolved target.
+// Keeping resolution outside this query lets the RPC watch cursor bind the page
+// to the exact instance/run identity it names, even when a task selector rolls
+// over to a successor instance between client polls.
+func (s *Service) WatchEventsForTarget(target WatchTarget, afterSeq int64, limit int) ([]Event, error) {
+	if strings.TrimSpace(target.InstanceID) == "" {
+		return nil, validationError("target.instanceId", "watch target instance id is required", "resolved workflow instance id", nil, "resolve the watch selector before reading events")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
 	}
 
 	where := "instance_id = ? AND seq > ?"
-	args := []interface{}{instanceID, afterSeq}
-	if runID != "" {
+	args := []interface{}{target.InstanceID, afterSeq}
+	if target.RunID != "" {
 		where += " AND run_id = ?"
-		args = append(args, runID)
+		args = append(args, target.RunID)
 	}
 	args = append(args, limit)
 	rows, err := s.db.Query(`

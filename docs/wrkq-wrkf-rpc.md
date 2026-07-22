@@ -1402,6 +1402,7 @@ wrkq.workflow.attach    [required]
 wrkq.workflow.inspect   [required]
 wrkq.workflow.timeline  [required]
 wrkq.workflow.refresh
+wrkq.workflow.syncMeta
 ```
 
 Workflow attachment is a `wrkq` verb because it mutates the task/workflow
@@ -1428,10 +1429,13 @@ interface WrkqWorkflowAttachResult {
 interface WrkqWorkflowInspectParams { task: string }
 
 interface WrkqWorkflowTimelineParams { task: string }
+
+interface WrkqWorkflowSyncMetaParams { task?: string; actor?: string }
+interface WrkqWorkflowSyncMetaResult { synced: number }
 ```
 
-There is no `wrkq.workflow.syncMeta` method. Projection from workflow state to
-task fields happens through `wrkf.transition.apply` as an internal side effect.
+`wrkq.workflow.syncMeta` is the explicit task-owned projection repair method;
+there is no `wrkf.task.syncMeta` alias.
 
 #### Search + index methods
 
@@ -1558,6 +1562,7 @@ wrkf.evidence.add     [required]
 wrkf.evidence.list
 wrkf.evidence.show
 wrkf.evidence.suggest
+wrkf.evidence.schema
 wrkf.ledger.append    [required]
 wrkf.ledger.list
 ```
@@ -1577,6 +1582,9 @@ interface WrkfEvidenceAddParams {
   idempotencyKey?: string;
 }
 ```
+
+`wrkf.evidence.schema { task, kind }` returns the template-declared
+`WrkfEvidenceSchema` for that evidence kind.
 
 #### Ledger
 
@@ -1676,7 +1684,30 @@ wrkf.obligation.show
 wrkf.obligation.satisfy
 wrkf.obligation.waive
 wrkf.obligation.cancel
+wrkf.obligation.create
 ```
+
+`wrkf.obligation.create` accepts `{ task, kind, ownerRole?, ownerActor?,
+blocking?, reason? }` and returns the created obligation.
+
+#### Supervisor and bounded watch reads
+
+```
+wrkf.supervisor.call
+wrkf.supervisor.escalate
+wrkf.watch.snapshot
+wrkf.watch.events
+```
+
+Supervisor methods accept `{ task, reason? }` and return the pending effect.
+`wrkf.watch.snapshot { selector, until? }` returns one durable predicate
+snapshot. `wrkf.watch.events { selector, afterCursor?, limit? }` returns
+`{ events, nextCursor }`; the server caps pages at 500 and never waits. The
+opaque cursor binds the resolved target kind plus `instanceId`/`runId` and
+sequence. If a task selector advances to a successor instance, the identity
+mismatch resets the page sequence to zero so early successor events are not
+suppressed. Poll interval, timeout, predicate loop, terminal output, and exit
+status remain client-owned.
 
 #### Checks and hooks
 
@@ -1859,9 +1890,11 @@ WrkqAttachment
 WrkqRelation
 WrkqWorkflowAttachResult
 WrkqWorkflowInspectResult
+WrkqWorkflowSyncMetaResult
 WrkfInstance
 WrkfEvent
 WrkfEvidence
+WrkfEvidenceSchema
 WrkfObligation
 WrkfEffect
 WrkfRun
@@ -1874,6 +1907,8 @@ WrkfInstallResult
 WrkfDiffResult
 WrkfSuggestResult
 WrkfEffectClaimResult
+WrkfWatchSnapshot
+WrkfWatchEventsResult
 ```
 
 Raw `Record<string, unknown>` is acceptable for explicit metadata/template/

@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/workflow"
+	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
+	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/spf13/cobra"
 )
 
@@ -193,8 +196,17 @@ func watchCLIFixture(t *testing.T) (*app, string, *db.DB) {
 	if _, err := svc.AttachTask(taskUUID, "watch_cli_test@1", "agent:watch"); err != nil {
 		t.Fatalf("AttachTask: %v", err)
 	}
+	api, opts, err := bootstrap.Server(database, &config.Config{DBPath: database.Path(), DefaultPrincipalRef: "agent:watch", AttachmentsMaxMB: 50})
+	if err != nil {
+		t.Fatalf("bootstrap.Server: %v", err)
+	}
+	transport, err := workrpcclient.NewInProcess(&bootstrap.Handle{API: api, Opts: opts}, workrpcclient.WrkfProfile)
+	if err != nil {
+		t.Fatalf("NewInProcess: %v", err)
+	}
+	t.Cleanup(func() { _ = transport.Close() })
 
-	return &app{service: svc}, taskUUID, database
+	return &app{service: svc, transport: transport}, taskUUID, database
 }
 
 func testWatchCmd() *cobra.Command {

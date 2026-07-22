@@ -324,6 +324,15 @@ type WorkflowTaskParams struct {
 	Task string `json:"task"`
 }
 
+type WorkflowSyncMetaParams struct {
+	Task  string `json:"task,omitempty"`
+	Actor string `json:"actor,omitempty"`
+}
+
+type WrkqWorkflowSyncMetaResult struct {
+	Synced int `json:"synced"`
+}
+
 // ─── Task lifecycle params (acknowledge / delete / restore) ──────────────────
 
 // TaskAcknowledgeParams mirrors WrkqTaskAcknowledgeParams. force allows ack on

@@ -12,6 +12,7 @@ type EventQueryParams = workflow.EventQueryParams
 type EventQueryResult = workflow.EventQueryResult
 type QueriedEvent = workflow.QueriedEvent
 type Evidence = workflow.Evidence
+type EvidenceSchema = workflow.EvidenceSchema
 type Obligation = workflow.Obligation
 type Effect = workflow.Effect
 type LedgerEntry = workflow.LedgerEntry
@@ -21,6 +22,7 @@ type LedgerListResult = workflow.LedgerListResult
 type EffectClaim = workflow.EffectClaim
 type Run = workflow.Run
 type CheckRun = workflow.CheckRun
+type WatchSnapshot = workflow.WatchSnapshot
 
 type TemplateSummary struct {
 	ID             string `json:"id"`
@@ -174,6 +176,41 @@ type ObligationStatusParams struct {
 	Reason       string `json:"reason,omitempty"`
 	PrincipalRef string `json:"principal_ref,omitempty"`
 	Role         string `json:"role,omitempty"`
+}
+
+type ObligationCreateParams struct {
+	TaskSelector string `json:"task"`
+	Kind         string `json:"kind"`
+	OwnerRole    string `json:"ownerRole,omitempty"`
+	OwnerActor   string `json:"ownerActor,omitempty"`
+	Blocking     bool   `json:"blocking,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type SupervisorParams struct {
+	TaskSelector string `json:"task"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type EvidenceSchemaParams struct {
+	TaskSelector string `json:"task"`
+	Kind         string `json:"kind"`
+}
+
+type WatchSnapshotParams struct {
+	Selector string `json:"selector"`
+	Until    string `json:"until,omitempty"`
+}
+
+type WatchEventsParams struct {
+	Selector    string `json:"selector"`
+	AfterCursor string `json:"afterCursor,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+}
+
+type WatchEventsResult struct {
+	Events     []workflow.Event `json:"events"`
+	NextCursor string           `json:"nextCursor"`
 }
 
 type CheckRunParams struct {

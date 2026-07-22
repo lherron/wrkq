@@ -591,6 +591,15 @@ export interface WrkqWorkflowRefreshParams {
   idempotencyKey?: string;
 }
 
+export interface WrkqWorkflowSyncMetaParams {
+  task?: string;
+  actor?: string;
+}
+
+export interface WrkqWorkflowSyncMetaResult {
+  synced: number;
+}
+
 // ── Handoff (T-05117) ────────────────────────────────────────────────────────
 
 /**
