@@ -18,6 +18,7 @@ type Store struct {
 	// Domain-specific stores
 	Tasks      *TaskStore
 	Containers *ContainerStore
+	Comments   *CommentStore
 }
 
 // New creates a new Store wrapping the given database connection.
@@ -25,6 +26,7 @@ func New(database *db.DB) *Store {
 	s := &Store{db: database}
 	s.Tasks = &TaskStore{store: s}
 	s.Containers = &ContainerStore{store: s}
+	s.Comments = &CommentStore{store: s}
 	return s
 }
 

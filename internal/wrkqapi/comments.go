@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 const nsCommentAdd = "wrkq.comment.add"
@@ -57,46 +57,21 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 		return nil, aerr
 	}
 
-	tx, err := a.db.Begin()
-	if err != nil {
-		return nil, NewInternalError(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var nextSeq int
-	if serr := tx.QueryRow(
-		"SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments",
-	).Scan(&nextSeq); serr != nil {
-		return nil, NewInternalError(serr)
-	}
-	if _, serr := tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", nextSeq); serr != nil {
-		return nil, NewInternalError(serr)
-	}
-
-	commentUUID := uuid.New().String()
-	commentID := id.FormatComment(nextSeq)
-
 	var metaStr *string
 	if p.Meta != nil {
 		metaStr = metaString(p.Meta)
 	}
-
-	if _, serr := tx.Exec(`
-		INSERT INTO comments (
-			uuid, id, task_uuid, created_by_principal_ref,
-			created_by_scope_ref, body, meta, etag
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-	`, commentUUID, commentID, taskUUID,
-		attr.PrincipalRef, scopeBind(attr), p.Body, metaStr); serr != nil {
-		return nil, mapStoreError(serr, p.Task)
+	result, err := a.store.Comments.CreateWithAttribution(attr, store.CommentCreateParams{
+		TaskUUID: taskUUID,
+		Body:     p.Body,
+		Meta:     metaStr,
+	})
+	if err != nil {
+		return nil, mapStoreError(err, p.Task)
 	}
+	webhooks.DispatchCommentCreated(a.db, taskUUID, result.EventMeta, attr.PrincipalRef, "rpc")
 
-	if cerr := tx.Commit(); cerr != nil {
-		return nil, NewInternalError(cerr)
-	}
-
-	dto, err := a.loadComment(commentUUID, taskID)
+	dto, err := a.loadComment(result.UUID, taskID)
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,7 @@ const (
 	EventWorkflowTransitioned       = "workflow_transitioned"
 	EventWorkflowSuspended          = "workflow.suspended"
 	EventWorkflowSuspensionResolved = "workflow.suspension_resolved"
+	eventCommentAdded               = "comment_added"
 )
 
 // BlockerInfo represents an incomplete blocking task.
@@ -186,6 +187,17 @@ func DispatchTaskEvent(database *db.DB, taskUUID string, ctx EventContext) {
 		return
 	}
 	DispatchTaskInfoEvent(database, info, ctx)
+}
+
+// DispatchCommentCreated projects the canonical comment.created event into the
+// legacy task-webhook name retained for compatibility consumers.
+func DispatchCommentCreated(database *db.DB, taskUUID string, metadata events.EventMetadata, principalRef, via string) {
+	DispatchTaskEvent(database, taskUUID, EventContext{
+		Metadata:     metadata,
+		Event:        eventCommentAdded,
+		PrincipalRef: principalRef,
+		Via:          via,
+	})
 }
 
 // DispatchTaskInfoEvent dispatches webhooks using pre-fetched task info and event context.

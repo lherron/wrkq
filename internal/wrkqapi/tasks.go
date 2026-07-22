@@ -10,14 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/causedby"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -1083,32 +1081,26 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		return webhooks.EventContext{}, NewInternalError(eerr)
 	}
 
-	// --comment: append a comment (legacy id sequencing via MAX(id)+1 + the
-	// comment_sequences bookkeeping row).
+	var commentResult *store.CommentCreateResult
+	// --comment: append through the canonical store path so its comment.created
+	// event is part of this same restore transaction.
 	if opts.comment != "" {
-		var nextSeq int64
-		if serr := tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) + 1 FROM comments").Scan(&nextSeq); serr != nil {
-			return webhooks.EventContext{}, NewInternalError(serr)
-		}
-		if _, serr := tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", nextSeq); serr != nil {
-			return webhooks.EventContext{}, NewInternalError(serr)
-		}
-		commentUUID := uuid.New().String()
-		commentID := id.FormatComment(int(nextSeq))
-		if _, serr := tx.Exec(`
-			INSERT INTO comments (
-				uuid, id, task_uuid, created_by_principal_ref,
-				created_by_scope_ref, body, etag
-			)
-			VALUES (?, ?, ?, ?, ?, ?, 1)
-		`, commentUUID, commentID, taskUUID,
-			attr.PrincipalRef, scopeBind(attr), opts.comment); serr != nil {
-			return webhooks.EventContext{}, NewInternalError(serr)
+		commentResult, eerr = a.store.Comments.CreateTxWithAttribution(
+			tx,
+			events.NewWriter(a.db.DB),
+			attr,
+			store.CommentCreateParams{TaskUUID: taskUUID, Body: opts.comment},
+		)
+		if eerr != nil {
+			return webhooks.EventContext{}, NewInternalError(eerr)
 		}
 	}
 
 	if cerr := tx.Commit(); cerr != nil {
 		return webhooks.EventContext{}, NewInternalError(cerr)
+	}
+	if commentResult != nil {
+		webhooks.DispatchCommentCreated(a.db, taskUUID, commentResult.EventMeta, attr.PrincipalRef, "rpc")
 	}
 
 	// EventContext mirrors legacy restoreTaskWithOptions: an `updated` event with
