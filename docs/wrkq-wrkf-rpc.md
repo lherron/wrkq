@@ -883,14 +883,17 @@ wrkq.comment.delete
 
 ```ts
 interface WrkqCommentAddParams {
-  task: string;
+  task?: string;                 // exactly one of task or container
+  container?: string;
+  kind?: "blocker" | "decision" | "postmortem" | "digest";
   body: string;
   meta?: Record<string, unknown>;
   idempotencyKey?: string;
 }
 
 interface WrkqCommentListParams {
-  task: string;
+  task?: string;                 // exactly one of task or container
+  container?: string;
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
@@ -899,7 +902,9 @@ interface WrkqCommentListParams {
 interface WrkqComment {
   uuid: string;
   id: string;
-  task: string;
+  task?: string;
+  container?: string;
+  kind?: "blocker" | "decision" | "postmortem" | "digest";
   body: string;
   meta: Record<string, unknown>;
   etag: number;
@@ -916,6 +921,12 @@ interface WrkqCommentDeleteParams {
   actor?: string;
 }
 ```
+
+Comment `kind` is nullable: omission means plain conversation. The complete
+seeded judgment vocabulary is `blocker|decision|postmortem|digest`; unknown
+values are validation errors. Vocabulary extension requires architecture
+consultation and a matching schema migration. Comment bodies are never parsed
+for marker prefixes.
 
 `wrkq.comment.delete` disposes of a comment per the **caller-owned-confirmation**
 invariant: the disposition is the EXPLICIT, caller-supplied `mode` — the server

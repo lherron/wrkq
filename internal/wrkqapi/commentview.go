@@ -3,6 +3,7 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/lherron/wrkq/internal/id"
 )
@@ -32,6 +33,25 @@ type WrkqCommentCatView struct {
 	TaskUUID              string  `json:"task_uuid"`
 	UpdatedAt             *string `json:"updated_at,omitempty"`
 	UUID                  string  `json:"uuid"`
+
+	// kind is an additive typed-comment carrier for CLI rendering. It remains
+	// unexported so the frozen compatibility DTO fingerprint/schema is unchanged;
+	// MarshalJSON emits it only for a typed row, preserving plain-row bytes.
+	kind *string
+}
+
+func (v WrkqCommentCatView) MarshalJSON() ([]byte, error) {
+	type wire WrkqCommentCatView
+	base, err := json.Marshal(wire(v))
+	if err != nil || v.kind == nil {
+		return base, err
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(base, &fields); err != nil {
+		return nil, err
+	}
+	fields["kind"] = *v.kind
+	return json.Marshal(fields)
 }
 
 // CommentCatView projects one comment into the legacy comment-cat shape under a
@@ -66,7 +86,7 @@ func (a *API) CommentCatView(ctx context.Context, p CommentCatViewParams) (*Wrkq
 // used by both comment catView (single) and comment listView (paginated) so
 // their rows are byte-identical.
 const commentCatViewSelect = `
-	SELECT c.uuid, c.id, c.task_uuid, c.body, c.meta, c.etag,
+		SELECT c.uuid, c.id, c.task_uuid, c.kind, c.body, c.meta, c.etag,
 	       c.created_at, c.updated_at, c.deleted_at,
 	       c.created_by_principal_ref, c.created_by_scope_ref,
 	       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
@@ -83,12 +103,12 @@ func scanCommentCatView(s commentRowScanner) (*WrkqCommentCatView, error) {
 	var (
 		commentUUID, commentID, taskUUID, body, createdAt, taskID string
 		etag                                                      int64
-		meta, updatedAt, deletedAt                                sql.NullString
+		kind, meta, updatedAt, deletedAt                          sql.NullString
 		createdByPrincipalRef, createdByScopeRef                  sql.NullString
 		deletedByPrincipalRef, deletedByScopeRef                  sql.NullString
 	)
 	if err := s.Scan(
-		&commentUUID, &commentID, &taskUUID, &body, &meta, &etag,
+		&commentUUID, &commentID, &taskUUID, &kind, &body, &meta, &etag,
 		&createdAt, &updatedAt, &deletedAt,
 		&createdByPrincipalRef, &createdByScopeRef,
 		&deletedByPrincipalRef, &deletedByScopeRef,
@@ -108,6 +128,7 @@ func scanCommentCatView(s commentRowScanner) (*WrkqCommentCatView, error) {
 		m := meta.String
 		v.Meta = &m
 	}
+	v.kind = nsPtr(kind)
 	return v, nil
 }
 

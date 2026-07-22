@@ -260,15 +260,20 @@ export interface WrkqTaskListResult {
 
 // ── Comments ─────────────────────────────────────────────────────────────────
 
+export type WrkqCommentKind = "blocker" | "decision" | "postmortem" | "digest";
+
 export interface WrkqCommentAddParams {
-  task: string;
+  task?: string;
+  container?: string;
+  kind?: WrkqCommentKind;
   body: string;
   meta?: Record<string, unknown>;
   idempotencyKey?: string;
 }
 
 export interface WrkqCommentListParams {
-  task: string;
+  task?: string;
+  container?: string;
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
@@ -285,7 +290,9 @@ export interface WrkqCommentDeleteParams {
 export interface WrkqComment {
   uuid: string;
   id: string;
-  task: string;
+  task?: string;
+  container?: string;
+  kind?: WrkqCommentKind;
   body: string;
   meta: Record<string, unknown>;
   etag: number;

@@ -19,9 +19,11 @@ type CommentStore struct {
 
 // CommentCreateParams contains parameters for creating a comment.
 type CommentCreateParams struct {
-	TaskUUID string
-	Body     string
-	Meta     *string
+	TaskUUID      string
+	ContainerUUID string
+	Kind          *string
+	Body          string
+	Meta          *string
 }
 
 // CommentCreateResult contains the durable comment and event identities.
@@ -35,6 +37,12 @@ type CommentCreateResult struct {
 // CreateWithAttribution creates a comment and its canonical event atomically.
 func (cs *CommentStore) CreateWithAttribution(attr attribution.Attribution, params CommentCreateParams) (*CommentCreateResult, error) {
 	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
+	if (params.TaskUUID == "") == (params.ContainerUUID == "") {
+		return nil, fmt.Errorf("comment must attach to exactly one task or container")
+	}
+	if err := domain.ValidateCommentKind(params.Kind); err != nil {
 		return nil, err
 	}
 
@@ -56,6 +64,12 @@ func (cs *CommentStore) CreateTxWithAttribution(tx *sql.Tx, ew *events.Writer, a
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
+	if (params.TaskUUID == "") == (params.ContainerUUID == "") {
+		return nil, fmt.Errorf("comment must attach to exactly one task or container")
+	}
+	if err := domain.ValidateCommentKind(params.Kind); err != nil {
+		return nil, err
+	}
 
 	var nextSeq int
 	if err := tx.QueryRow(
@@ -72,16 +86,16 @@ func (cs *CommentStore) CreateTxWithAttribution(tx *sql.Tx, ew *events.Writer, a
 	const etag int64 = 1
 	if _, err := tx.Exec(`
 		INSERT INTO comments (
-			uuid, id, task_uuid, created_by_principal_ref,
-			created_by_scope_ref, body, meta, etag
+			uuid, id, task_uuid, container_uuid, kind,
+			created_by_principal_ref, created_by_scope_ref, body, meta, etag
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, commentUUID, commentID, params.TaskUUID, attr.PrincipalRef,
-		scopeSQL(attr), params.Body, params.Meta, etag); err != nil {
+		VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+	`, commentUUID, commentID, params.TaskUUID, params.ContainerUUID, params.Kind,
+		attr.PrincipalRef, scopeSQL(attr), params.Body, params.Meta, etag); err != nil {
 		return nil, fmt.Errorf("failed to create comment: %w", err)
 	}
 
-	payload, err := commentCreatedEventPayload(params.TaskUUID, commentID)
+	payload, err := commentCreatedEventPayload(tx, params, commentID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,12 +121,28 @@ func (cs *CommentStore) CreateTxWithAttribution(tx *sql.Tx, ew *events.Writer, a
 }
 
 // commentCreatedEventPayload is the single construction point for the
-// canonical event payload. Later payload stamps belong here.
-func commentCreatedEventPayload(taskUUID, commentID string) (string, error) {
-	payload, err := json.Marshal(map[string]interface{}{
-		"task_id":    taskUUID,
-		"comment_id": commentID,
-	})
+// canonical event payload and its production-time campaign/container stamps.
+func commentCreatedEventPayload(tx *sql.Tx, params CommentCreateParams, commentID string) (string, error) {
+	payloadFields := map[string]any{"comment_id": commentID}
+	if params.TaskUUID != "" {
+		payloadFields["task_id"] = params.TaskUUID
+		if err := StampTaskCampaignContext(tx, params.TaskUUID, payloadFields); err != nil {
+			return "", err
+		}
+	} else {
+		payloadFields["container_uuid"] = params.ContainerUUID
+		payloadFields["campaign_uuid"] = nil
+		var campaignState sql.NullString
+		if err := tx.QueryRow(
+			"SELECT campaign_state FROM containers WHERE uuid = ?", params.ContainerUUID,
+		).Scan(&campaignState); err != nil {
+			return "", fmt.Errorf("failed to load container campaign context: %w", err)
+		}
+		if campaignState.Valid {
+			payloadFields["campaign_uuid"] = params.ContainerUUID
+		}
+	}
+	payload, err := json.Marshal(payloadFields)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal comment.created payload: %w", err)
 	}

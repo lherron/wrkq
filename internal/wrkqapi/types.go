@@ -63,7 +63,9 @@ type WrkqTaskListResult struct {
 type WrkqComment struct {
 	UUID                  string         `json:"uuid"`
 	ID                    string         `json:"id"`
-	Task                  string         `json:"task"`
+	Task                  string         `json:"task,omitempty"`
+	Container             string         `json:"container,omitempty"`
+	Kind                  string         `json:"kind,omitempty"`
 	Body                  string         `json:"body"`
 	Meta                  map[string]any `json:"meta"`
 	ETag                  int64          `json:"etag"`
@@ -294,7 +296,9 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 
 // CommentAddParams mirrors WrkqCommentAddParams.
 type CommentAddParams struct {
-	Task           string         `json:"task"`
+	Task           string         `json:"task,omitempty"`
+	Container      string         `json:"container,omitempty"`
+	Kind           *string        `json:"kind,omitempty"`
 	Body           string         `json:"body"`
 	Meta           map[string]any `json:"meta,omitempty"`
 	Actor          string         `json:"actor,omitempty"`
@@ -303,7 +307,8 @@ type CommentAddParams struct {
 
 // CommentListParams mirrors WrkqCommentListParams.
 type CommentListParams struct {
-	Task           string `json:"task"`
+	Task           string `json:"task,omitempty"`
+	Container      string `json:"container,omitempty"`
 	IncludeDeleted bool   `json:"includeDeleted,omitempty"`
 	Limit          int    `json:"limit,omitempty"`
 	Cursor         string `json:"cursor,omitempty"`

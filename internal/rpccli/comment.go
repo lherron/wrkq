@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
@@ -69,6 +70,33 @@ func newCommentLsCmd() *cobra.Command {
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.comment.listView", params)
 			if err != nil {
+				if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" && len(args) == 1 {
+					containerParams := map[string]any{"container": scoped[0]}
+					if limit > 0 {
+						containerParams["limit"] = limit
+					}
+					if cursorTok != "" {
+						containerParams["cursor"] = cursorTok
+					}
+					if includeDeleted {
+						containerParams["includeDeleted"] = true
+					}
+					containerRaw, containerErr := tr.Call(cmd.Context(), "wrkq.comment.list", containerParams)
+					if containerErr == nil {
+						items, nextCursor, decodeErr := containerCommentListItems(containerRaw)
+						if decodeErr != nil {
+							return decodeErr
+						}
+						if stable && nextCursor != "" {
+							fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", nextCursor)
+						}
+						return renderCommentLs(cmd, mode, stable, items)
+					}
+					if containerRPCError, ok := containerErr.(*Error); ok {
+						return errors.New(containerRPCError.Message)
+					}
+					return containerErr
+				}
 				if re, ok := err.(*Error); ok {
 					if re.DomainID == "WRKQ_NOT_FOUND" {
 						// Map the failing scoped selector back to the original arg.
@@ -115,6 +143,54 @@ func newCommentLsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sort, "sort", "", "Sort field")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 	return cmd
+}
+
+func containerCommentListItems(raw json.RawMessage) ([]json.RawMessage, string, error) {
+	var response struct {
+		Items []struct {
+			UUID                  string         `json:"uuid"`
+			ID                    string         `json:"id"`
+			Container             string         `json:"container"`
+			Kind                  string         `json:"kind"`
+			Body                  string         `json:"body"`
+			Meta                  map[string]any `json:"meta"`
+			ETag                  int64          `json:"etag"`
+			CreatedAt             string         `json:"createdAt"`
+			UpdatedAt             string         `json:"updatedAt"`
+			DeletedAt             string         `json:"deletedAt"`
+			CreatedByPrincipalRef string         `json:"createdByPrincipalRef"`
+		} `json:"items"`
+		NextCursor string `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, "", err
+	}
+	items := make([]json.RawMessage, 0, len(response.Items))
+	for _, item := range response.Items {
+		projection := map[string]any{
+			"uuid": item.UUID, "id": item.ID, "container_id": item.Container,
+			"body": item.Body, "meta": item.Meta, "etag": item.ETag,
+			"created_at": item.CreatedAt,
+		}
+		if item.Kind != "" {
+			projection["kind"] = item.Kind
+		}
+		if item.UpdatedAt != "" {
+			projection["updated_at"] = item.UpdatedAt
+		}
+		if item.DeletedAt != "" {
+			projection["deleted_at"] = item.DeletedAt
+		}
+		if item.CreatedByPrincipalRef != "" {
+			projection["created_by_principal_ref"] = item.CreatedByPrincipalRef
+		}
+		encoded, err := json.Marshal(projection)
+		if err != nil {
+			return nil, "", err
+		}
+		items = append(items, encoded)
+	}
+	return items, response.NextCursor, nil
 }
 
 // resolveCommentLsMode reproduces legacy resolveOutputMode for `comment ls`
@@ -236,7 +312,7 @@ func renderCommentLs(cmd *cobra.Command, mode string, stable bool, items []json.
 			author = attribution.PrincipalHandle(ref)
 		}
 		rowsData = append(rowsData, []string{
-			str(c["id"]), str(c["task_id"]), author, str(c["created_at"]), bodyPreview,
+			str(c["id"]), commentParentID(c), author, str(c["created_at"]), bodyPreview,
 		})
 	}
 	if mode == "tsv" {
@@ -244,6 +320,13 @@ func renderCommentLs(cmd *cobra.Command, mode string, stable bool, items []json.
 	}
 	// table (or human → table)
 	return render.NewRenderer(out, render.Options{Porcelain: stable}).RenderTable(commentLsTableHeaders, rowsData)
+}
+
+func commentParentID(comment map[string]interface{}) string {
+	if taskID := str(comment["task_id"]); taskID != "" {
+		return taskID
+	}
+	return str(comment["container_id"])
 }
 
 // str renders a map value as legacy's `.(string)` extraction would (legacy panics
@@ -364,27 +447,45 @@ func newCommentCatCmd() *cobra.Command {
 
 func newCommentAddCmd() *cobra.Command {
 	var asJSON bool
-	var message string
+	var message, kind, meta string
 	cmd := &cobra.Command{
-		Use:   "add <task> [comment-text]",
-		Short: "Add a comment to a task",
-		Long: `Add a comment to a task.
+		Use:   "add <task-or-container> [comment-text]",
+		Short: "Add a comment to a task or container",
+		Long: `Add a comment to a task or container.
 
 Comment text can be supplied with -m/--message or as a positional argument.
 Use '-' as the comment-text argument to read the body from stdin. If
 comment-text is omitted, the body is also read from stdin.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCommentAdd(cmd, args, message)
+			return runCommentAdd(cmd, args, message, kind, meta)
 		},
 	}
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Comment text")
+	cmd.Flags().StringVar(&kind, "kind", "", "Judgment kind: blocker, decision, postmortem, or digest")
+	cmd.Flags().StringVar(&meta, "meta", "", "Comment metadata as a JSON object")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
-func runCommentAdd(cmd *cobra.Command, args []string, message string) error {
-	task := args[0]
+func runCommentAdd(cmd *cobra.Command, args []string, message, kind, meta string) error {
+	target := args[0]
+	var kindValue *string
+	if cmd.Flags().Changed("kind") {
+		kindValue = &kind
+		if err := domain.ValidateCommentKind(kindValue); err != nil {
+			return err
+		}
+	}
+	var metaValue map[string]any
+	if cmd.Flags().Changed("meta") {
+		if err := json.Unmarshal([]byte(meta), &metaValue); err != nil || metaValue == nil {
+			if err != nil {
+				return fmt.Errorf("invalid --meta JSON object: %w", err)
+			}
+			return fmt.Errorf("invalid --meta JSON object: expected an object")
+		}
+	}
 	var body string
 	claims := &stdinClaims{}
 	if message != "" && len(args) > 1 {
@@ -420,16 +521,29 @@ func runCommentAdd(cmd *cobra.Command, args []string, message string) error {
 		return err
 	}
 
-	// Legacy: applyProjectRootToSelector(taskRef, false).
-	task = sc.selector(task, false)
-	params := map[string]any{"task": task, "body": body}
+	// Task and container paths share the same caller-owned project-root scoping.
+	target = sc.selector(target, false)
+	params := map[string]any{"task": target, "body": body}
+	if kindValue != nil {
+		params["kind"] = *kindValue
+	}
+	if metaValue != nil {
+		params["meta"] = metaValue
+	}
 	if actor != "" {
 		params["actor"] = actor
 	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.comment.add", params)
+	parentKind := "task"
+	if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
+		delete(params, "task")
+		params["container"] = target
+		raw, err = tr.Call(cmd.Context(), "wrkq.comment.add", params)
+		parentKind = "container"
+	}
 	if err != nil {
-		if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-			return fmt.Errorf("task not found: %s", task)
+		if re, ok := err.(*Error); ok {
+			return errors.New(re.Message)
 		}
 		return err
 	}
@@ -437,6 +551,7 @@ func runCommentAdd(cmd *cobra.Command, args []string, message string) error {
 		ID                    string `json:"id"`
 		UUID                  string `json:"uuid"`
 		Task                  string `json:"task"`
+		Container             string `json:"container"`
 		ETag                  int64  `json:"etag"`
 		CreatedAt             string `json:"createdAt"`
 		CreatedByPrincipalRef string `json:"createdByPrincipalRef"`
@@ -448,10 +563,14 @@ func runCommentAdd(cmd *cobra.Command, args []string, message string) error {
 	output := map[string]interface{}{
 		"id":            dto.ID,
 		"uuid":          dto.UUID,
-		"task_id":       dto.Task,
 		"principal_ref": dto.CreatedByPrincipalRef,
 		"created_at":    dto.CreatedAt,
 		"etag":          dto.ETag,
+	}
+	if parentKind == "container" {
+		output["container_id"] = dto.Container
+	} else {
+		output["task_id"] = dto.Task
 	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
 		return encodeJSONIndent(cmd, output)

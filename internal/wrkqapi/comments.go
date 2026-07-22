@@ -9,13 +9,15 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 const nsCommentAdd = "wrkq.comment.add"
 
-// CommentAdd appends a comment to a task and returns the WrkqComment DTO.
+// CommentAdd appends a comment to exactly one task or container and returns the
+// WrkqComment DTO.
 // Idempotency is honored when an idempotencyKey is supplied (§8.2).
 func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment, error) {
 	if err := ctx.Err(); err != nil {
@@ -27,11 +29,10 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 			"expected": "non-empty string",
 		})
 	}
-	taskUUID, err := a.resolveTaskUUID(p.Task)
-	if err != nil {
-		return nil, err
+	if err := domain.ValidateCommentKind(p.Kind); err != nil {
+		return nil, NewValidationError(err.Error(), map[string]any{"field": "kind"})
 	}
-	taskID, err := a.taskFriendlyID(taskUUID)
+	parent, err := a.resolveCommentParent(p.Task, p.Container)
 	if err != nil {
 		return nil, err
 	}
@@ -62,16 +63,20 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 		metaStr = metaString(p.Meta)
 	}
 	result, err := a.store.Comments.CreateWithAttribution(attr, store.CommentCreateParams{
-		TaskUUID: taskUUID,
-		Body:     p.Body,
-		Meta:     metaStr,
+		TaskUUID:      parent.taskUUID,
+		ContainerUUID: parent.containerUUID,
+		Kind:          p.Kind,
+		Body:          p.Body,
+		Meta:          metaStr,
 	})
 	if err != nil {
-		return nil, mapStoreError(err, p.Task)
+		return nil, mapStoreError(err, parent.selector)
 	}
-	webhooks.DispatchCommentCreated(a.db, taskUUID, result.EventMeta, attr.PrincipalRef, "rpc")
+	if parent.taskUUID != "" {
+		webhooks.DispatchCommentCreated(a.db, parent.taskUUID, result.EventMeta, attr.PrincipalRef, "rpc")
+	}
 
-	dto, err := a.loadComment(result.UUID, taskID)
+	dto, err := a.loadComment(result.UUID, parent.taskID, parent.containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,22 +88,23 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 	return dto, nil
 }
 
-// CommentList returns a paginated list of WrkqComment DTOs for a task.
+// CommentList returns a paginated list of WrkqComment DTOs for one task or
+// container.
 func (a *API) CommentList(ctx context.Context, p CommentListParams) (*WrkqCommentListResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	taskUUID, err := a.resolveTaskUUID(p.Task)
-	if err != nil {
-		return nil, err
-	}
-	taskID, err := a.taskFriendlyID(taskUUID)
+	parent, err := a.resolveCommentParent(p.Task, p.Container)
 	if err != nil {
 		return nil, err
 	}
 
-	where := []string{"task_uuid = ?"}
-	args := []any{taskUUID}
+	parentColumn, parentUUID := "task_uuid", parent.taskUUID
+	if parent.containerUUID != "" {
+		parentColumn, parentUUID = "container_uuid", parent.containerUUID
+	}
+	where := []string{parentColumn + " = ?"}
+	args := []any{parentUUID}
 	if !p.IncludeDeleted {
 		where = append(where, "deleted_at IS NULL")
 	}
@@ -126,7 +132,7 @@ func (a *API) CommentList(ctx context.Context, p CommentListParams) (*WrkqCommen
 		args = append(args, page.Params...)
 	}
 
-	query := "SELECT uuid, id, task_uuid, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref FROM comments"
+	query := "SELECT uuid, id, task_uuid, container_uuid, kind, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref FROM comments"
 	query += " WHERE " + strings.Join(where, " AND ")
 	query += " " + page.OrderByClause
 	if page.LimitClause != "" {
@@ -142,7 +148,7 @@ func (a *API) CommentList(ctx context.Context, p CommentListParams) (*WrkqCommen
 
 	items := []WrkqComment{}
 	for rows.Next() {
-		c, _, scanErr := scanCommentRow(rows, taskID)
+		c, _, scanErr := scanCommentRow(rows, parent.taskID, parent.containerID)
 		if scanErr != nil {
 			return nil, NewInternalError(scanErr)
 		}
@@ -176,6 +182,46 @@ func (a *API) taskFriendlyID(taskUUID string) (string, error) {
 	return taskID, nil
 }
 
+type resolvedCommentParent struct {
+	selector      string
+	taskUUID      string
+	taskID        string
+	containerUUID string
+	containerID   string
+}
+
+func (a *API) resolveCommentParent(taskSelector, containerSelector string) (resolvedCommentParent, error) {
+	if (strings.TrimSpace(taskSelector) == "") == (strings.TrimSpace(containerSelector) == "") {
+		return resolvedCommentParent{}, NewValidationError(
+			"exactly one of task or container is required",
+			map[string]any{"fields": []string{"task", "container"}},
+		)
+	}
+	if taskSelector != "" {
+		taskUUID, err := a.resolveTaskUUID(taskSelector)
+		if err != nil {
+			return resolvedCommentParent{}, err
+		}
+		taskID, err := a.taskFriendlyID(taskUUID)
+		if err != nil {
+			return resolvedCommentParent{}, err
+		}
+		return resolvedCommentParent{selector: taskSelector, taskUUID: taskUUID, taskID: taskID}, nil
+	}
+
+	containerUUID, _, err := selectors.ResolveContainer(a.db, containerSelector)
+	if err != nil {
+		return resolvedCommentParent{}, NewNotFoundError(containerSelector, "container")
+	}
+	var containerID string
+	if err := a.db.QueryRow("SELECT id FROM containers WHERE uuid = ?", containerUUID).Scan(&containerID); err != nil {
+		return resolvedCommentParent{}, NewInternalError(err)
+	}
+	return resolvedCommentParent{
+		selector: containerSelector, containerUUID: containerUUID, containerID: containerID,
+	}, nil
+}
+
 // CommentShow returns the WrkqComment DTO for a comment id or uuid.
 func (a *API) CommentShow(ctx context.Context, p CommentShowParams) (*WrkqComment, error) {
 	if err := ctx.Err(); err != nil {
@@ -192,7 +238,7 @@ func (a *API) CommentShow(ctx context.Context, p CommentShowParams) (*WrkqCommen
 	if err != nil {
 		return nil, err
 	}
-	return a.loadComment(commentUUID, taskID)
+	return a.loadComment(commentUUID, taskID, "")
 }
 
 // CommentDelete disposes of a comment per the caller-owned-confirmation
@@ -242,7 +288,7 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 	}
 
 	// Snapshot the DTO before a purge removes the row.
-	preDTO, err := a.loadComment(commentUUID, taskID)
+	preDTO, err := a.loadComment(commentUUID, taskID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +363,7 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, NewInternalError(cerr)
 	}
 
-	return a.loadComment(commentUUID, taskID)
+	return a.loadComment(commentUUID, taskID, "")
 }
 
 // resolveComment resolves a comment id or uuid to (commentUUID, taskUUID).
@@ -335,12 +381,12 @@ func (a *API) resolveComment(ref string) (commentUUID, taskUUID string, err erro
 	return commentUUID, taskUUID, nil
 }
 
-func (a *API) loadComment(commentUUID, taskID string) (*WrkqComment, error) {
+func (a *API) loadComment(commentUUID, taskID, containerID string) (*WrkqComment, error) {
 	row := a.db.QueryRow(
-		"SELECT uuid, id, task_uuid, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref FROM comments WHERE uuid = ?",
+		"SELECT uuid, id, task_uuid, container_uuid, kind, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref FROM comments WHERE uuid = ?",
 		commentUUID,
 	)
-	c, _, err := scanCommentRow(row, taskID)
+	c, _, err := scanCommentRow(row, taskID, containerID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, NewNotFoundError(commentUUID, "comment")
@@ -351,16 +397,16 @@ func (a *API) loadComment(commentUUID, taskID string) (*WrkqComment, error) {
 }
 
 // scanCommentRow scans a comment row (column order matches the queries above).
-func scanCommentRow(s rowScanner, taskID string) (*WrkqComment, string, error) {
+func scanCommentRow(s rowScanner, taskID, containerID string) (*WrkqComment, string, error) {
 	var (
-		commentUUID, commentID, taskUUID, body string
-		meta                                   sql.NullString
-		etag                                   int64
-		createdAt                              string
-		updatedAt, deletedAt, createdByPrin    sql.NullString
+		commentUUID, commentID, body        string
+		taskUUID, containerUUID, kind, meta sql.NullString
+		etag                                int64
+		createdAt                           string
+		updatedAt, deletedAt, createdByPrin sql.NullString
 	)
 	if err := s.Scan(
-		&commentUUID, &commentID, &taskUUID, &body, &meta, &etag,
+		&commentUUID, &commentID, &taskUUID, &containerUUID, &kind, &body, &meta, &etag,
 		&createdAt, &updatedAt, &deletedAt, &createdByPrin,
 	); err != nil {
 		return nil, "", err
@@ -369,6 +415,8 @@ func scanCommentRow(s rowScanner, taskID string) (*WrkqComment, string, error) {
 		UUID:                  commentUUID,
 		ID:                    commentID,
 		Task:                  taskID,
+		Container:             containerID,
+		Kind:                  kind.String,
 		Body:                  body,
 		Meta:                  parseMeta(meta.String),
 		ETag:                  etag,

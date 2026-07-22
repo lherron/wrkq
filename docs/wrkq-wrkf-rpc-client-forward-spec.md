@@ -796,14 +796,17 @@ wrkq.comment.list
 
 ```ts
 interface WrkqCommentAddParams {
-  task: string;
+  task?: string;                 // exactly one of task or container
+  container?: string;
+  kind?: "blocker" | "decision" | "postmortem" | "digest";
   body: string;
   meta?: Record<string, unknown>;
   idempotencyKey?: string;
 }
 
 interface WrkqCommentListParams {
-  task: string;
+  task?: string;                 // exactly one of task or container
+  container?: string;
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
@@ -812,7 +815,9 @@ interface WrkqCommentListParams {
 interface WrkqComment {
   uuid: string;
   id: string;
-  task: string;
+  task?: string;
+  container?: string;
+  kind?: "blocker" | "decision" | "postmortem" | "digest";
   body: string;
   meta: Record<string, unknown>;
   etag: number;

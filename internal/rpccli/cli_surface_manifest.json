@@ -443,8 +443,8 @@
         "commands": [
           {
             "name": "add",
-            "use": "add \u003ctask\u003e [comment-text]",
-            "short": "Add a comment to a task",
+            "use": "add \u003ctask-or-container\u003e [comment-text]",
+            "short": "Add a comment to a task or container",
             "hidden": false,
             "available": true,
             "flags": [
@@ -456,9 +456,21 @@
                 "hidden": false
               },
               {
+                "name": "kind",
+                "usage": "Judgment kind: blocker, decision, postmortem, or digest",
+                "type": "string",
+                "hidden": false
+              },
+              {
                 "name": "message",
                 "shorthand": "m",
                 "usage": "Comment text",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "meta",
+                "usage": "Comment metadata as a JSON object",
                 "type": "string",
                 "hidden": false
               }
