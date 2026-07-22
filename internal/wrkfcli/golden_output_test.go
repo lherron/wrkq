@@ -31,11 +31,20 @@ func TestLocalOutputGolden(t *testing.T) {
 	t.Cleanup(func() {
 		flagDB, flagJSON, flagHookCatalog = oldDB, oldJSON, oldHook
 	})
+	// Hermetic hook-catalog isolation: an empty WRKF_HOOK_CATALOG env falls
+	// through to ResolveHookCatalogPath's ancestry-walk autodiscovery, which on
+	// agent hosts finds gitignored local room state (.wrkq/wrkf-*/hook-catalog.json)
+	// and drifts this golden. Point at an explicit empty catalog so resolution
+	// short-circuits before any autodiscovery, on every host.
+	emptyCatalog := filepath.Join(t.TempDir(), "empty-hook-catalog.json")
+	if err := os.WriteFile(emptyCatalog, []byte(`{"hooks":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	flagDB = dbPath
 	flagJSON = true
 	flagHookCatalog = ""
 	t.Setenv("WRKF_PRINCIPAL_REF", "agent:golden")
-	t.Setenv("WRKF_HOOK_CATALOG", "")
+	t.Setenv("WRKF_HOOK_CATALOG", emptyCatalog)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ASP_PROJECT", "")
 	t.Setenv("WRKQ_PROJECT", "")
