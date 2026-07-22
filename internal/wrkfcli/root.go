@@ -256,9 +256,15 @@ func workflowCmd() *cobra.Command {
 	validate := &cobra.Command{
 		Use:  "validate TEMPLATE",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(false, func(a *app, cmd *cobra.Command, args []string) error {
-			svc := workflow.NewService(nil)
-			result := svc.ValidateTemplateFile(args[0], a.hookCatalog)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			body, err := readTemplateBody(args[0])
+			if err != nil {
+				return err
+			}
+			result, err := rpcCall[workflow.ValidateResult](cmd, a, "wrkf.workflow.validate", wrkfapi.WorkflowContentParams{Body: body, SourceName: args[0]})
+			if err != nil {
+				return err
+			}
 			if flagJSON {
 				_ = printJSON(cmd, result)
 			} else if result.Valid {
@@ -278,12 +284,18 @@ func workflowCmd() *cobra.Command {
 	install := &cobra.Command{
 		Use:  "install TEMPLATE",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			out, err := a.service.InstallTemplate(args[0], a.actor, a.hookCatalog)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			body, err := readTemplateBody(args[0])
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, out)
+			out, err := rpcCall[wrkfapi.InstallResult](cmd, a, "wrkf.workflow.install", wrkfapi.WorkflowInstallParams{
+				Body: body, SourceName: args[0], PrincipalRef: a.actor,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, map[string]any{"id": out.ID, "version": out.Version, "hash": out.Hash, "installed": out.Installed})
 		}),
 	}
 	show := &cobra.Command{
@@ -350,8 +362,21 @@ func workflowCmd() *cobra.Command {
 	diff := &cobra.Command{
 		Use:  "diff OLD NEW",
 		Args: cobra.ExactArgs(2),
-		RunE: withApp(false, func(a *app, cmd *cobra.Command, args []string) error {
-			out, err := workflow.NewService(nil).DiffTemplateFiles(args[0], args[1])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			oldBody, err := readTemplateBody(args[0])
+			if err != nil {
+				return err
+			}
+			newBody, err := readTemplateBody(args[1])
+			if err != nil {
+				return err
+			}
+			if len(oldBody)+len(newBody) > wrkfapi.MaxTemplateDiffBodyBytes {
+				return fmt.Errorf("template diff bodies exceed %d-byte aggregate limit", wrkfapi.MaxTemplateDiffBodyBytes)
+			}
+			out, err := rpcCall[wrkfapi.DiffResult](cmd, a, "wrkf.workflow.diff", wrkfapi.WorkflowDiffParams{
+				OldBody: oldBody, NewBody: newBody, OldSourceName: args[0], NewSourceName: args[1],
+			})
 			if err != nil {
 				return err
 			}
@@ -360,6 +385,17 @@ func workflowCmd() *cobra.Command {
 	}
 	cmd.AddCommand(validate, install, show, list, diff, discontinue, reinstate)
 	return cmd
+}
+
+func readTemplateBody(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > wrkfapi.MaxTemplateBodyBytes {
+		return "", fmt.Errorf("%s exceeds %d-byte template body limit", path, wrkfapi.MaxTemplateBodyBytes)
+	}
+	return string(data), nil
 }
 
 func templateLifecycleCommand(verb string) *cobra.Command {
@@ -849,12 +885,9 @@ func effectCmd() *cobra.Command {
 	deliver := &cobra.Command{
 		Use:  "deliver EFFECT",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			out, err := a.service.DeliverEffect(args[0], a.actor, a.hookCatalog, workflow.HookCatalogDir(a.hookPath))
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			out, err := rpcCall[workflow.EffectDelivery](cmd, a, "wrkf.effect.deliver", wrkfapi.EffectDeliverParams{EffectID: args[0], Adapter: a.actor})
 			if err != nil {
-				if out != nil {
-					_ = printAny(cmd, flagJSON, out)
-				}
 				return err
 			}
 			return printAny(cmd, flagJSON, out)
@@ -907,12 +940,14 @@ func checkCmd() *cobra.Command {
 	run := &cobra.Command{
 		Use:  "run TASK TRANSITION",
 		Args: cobra.ExactArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			checks, err := a.service.RunChecks(args[0], args[1], a.actor, a.role, a.hookCatalog, workflow.HookCatalogDir(a.hookPath))
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkfapi.CheckRunResult](cmd, a, "wrkf.check.run", wrkfapi.CheckRunParams{
+				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.actor, Role: a.role,
+			})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"checks": checks})
+			return printAny(cmd, flagJSON, map[string]interface{}{"checks": result.Runs})
 		}),
 	}
 	show := &cobra.Command{
@@ -1144,39 +1179,36 @@ func hookCmd() *cobra.Command {
 	list := &cobra.Command{
 		Use:  "list",
 		Args: cobra.NoArgs,
-		RunE: withApp(false, func(a *app, cmd *cobra.Command, args []string) error {
-			var hooks []map[string]interface{}
-			if a.hookCatalog != nil {
-				for id, h := range a.hookCatalog.Hooks {
-					hooks = append(hooks, map[string]interface{}{"id": id, "kind": h.Kind, "argv": h.Argv})
-				}
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkfapi.HookListResult](cmd, a, "wrkf.hook.list", map[string]any{})
+			if err != nil {
+				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"hooks": hooks})
+			return printAny(cmd, flagJSON, result)
 		}),
 	}
 	show := &cobra.Command{
 		Use:  "show HOOK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(false, func(a *app, cmd *cobra.Command, args []string) error {
-			if a.hookCatalog == nil {
-				return fmt.Errorf("hook catalog not configured")
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkfapi.HookShowResult](cmd, a, "wrkf.hook.show", map[string]any{"id": args[0]})
+			if err != nil {
+				return err
 			}
-			h, ok := a.hookCatalog.Hooks[args[0]]
-			if !ok {
-				return fmt.Errorf("hook not found: %s", args[0])
-			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"id": args[0], "hook": h})
+			return printAny(cmd, flagJSON, result)
 		}),
 	}
 	var hookID string
 	run := &cobra.Command{
 		Use:  "run TASK TRANSITION --hook HOOK",
 		Args: cobra.ExactArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if hookID == "" {
 				return fmt.Errorf("--hook is required")
 			}
-			out, err := a.service.RunSingleHook(args[0], args[1], hookID, a.actor, a.role, a.hookCatalog, workflow.HookCatalogDir(a.hookPath))
+			out, err := rpcCall[workflow.CheckRun](cmd, a, "wrkf.hook.run", wrkfapi.HookRunParams{
+				TaskSelector: args[0], Transition: args[1], HookID: hookID, PrincipalRef: a.actor, Role: a.role,
+			})
 			if err != nil {
 				return err
 			}
@@ -1208,6 +1240,9 @@ func rpcCmd() *cobra.Command {
 				}
 			}
 			if cfg.RemoteEndpoint != "" {
+				if flagHookCatalog != "" {
+					return fmt.Errorf("--hook-catalog is local-only; hook catalog is canonical-node configuration in remote mode")
+				}
 				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, wrkqdTokenFromEnv())
 			}
 			return withApp(true, func(a *app, cmd *cobra.Command, args []string) error {

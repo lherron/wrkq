@@ -2,6 +2,7 @@ package wrkfcli
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
@@ -83,13 +84,16 @@ func openConfiguredTransport(cmd *cobra.Command) (workrpcclient.Transport, *conf
 		}
 	}
 	if cfg.RemoteEndpoint != "" {
+		if flagHookCatalog != "" {
+			return nil, nil, nil, fmt.Errorf("--hook-catalog is local-only; hook catalog is canonical-node configuration in remote mode")
+		}
 		tr, err := workrpcclient.NewRemote(cfg.RemoteEndpoint, workrpcclient.TokenFromEnv(), workrpcclient.WrkfProfile)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		return tr, cfg, func() { _ = tr.Close() }, nil
 	}
-	h, err := bootstrap.Open(cfg.DBLocator)
+	h, err := bootstrap.OpenWithHookCatalog(cfg.DBLocator, flagHookCatalog)
 	if err != nil {
 		return nil, nil, nil, err
 	}

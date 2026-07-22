@@ -57,7 +57,7 @@ func p3Run(t *testing.T, dbPath string, reqs ...string) []map[string]any {
 func p3InstallAndAttach(t *testing.T, dbPath, tplPath, taskID string) string {
 	t.Helper()
 	frames := p3Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     taskID,
 			"workflow": "wrkq-code-change@1",
@@ -481,7 +481,7 @@ func TestWrkfRoleBindings_AuthorizeNextAndTransition(t *testing.T) {
 		"role-binding-test", "Role Binding Test")
 
 	setupFrames := p3Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     taskID,
 			"workflow": "wrkq-code-change@1",
@@ -602,7 +602,7 @@ func TestWrkfEventQuery_ReplaysTransitionEventsWithFiltersAndCursor(t *testing.T
 	seedLegacyTesterAssignment(t, dbPath, task4UUID)
 
 	setupFrames := p3Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("u1", "wrkq.task.update", map[string]any{
 			"task":  task1ID,
 			"actor": "agent:smokey",
@@ -981,7 +981,7 @@ func TestWrkfDualSelector_InstanceShow_MismatchReject(t *testing.T) {
 
 	// Install template once, attach both tasks; capture instance IDs.
 	setupFrames := p3Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     task1ID,
 			"workflow": "wrkq-code-change@1",
@@ -1046,7 +1046,7 @@ func TestWrkfDualSelector_EvidenceAdd_MismatchReject(t *testing.T) {
 		"dual-ev-task-2", "Dual Selector Evidence Task 2")
 
 	setupFrames := p3Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     task1ID,
 			"workflow": "wrkq-code-change@1",

@@ -29,7 +29,22 @@ func Server(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.Registry
 	if err != nil {
 		return nil, workrpc.RegistryOptions{}, fmt.Errorf("failed to resolve hook catalog: %w", err)
 	}
-	cat, err := workflow.LoadHookCatalog(hookPath)
+	return serverWithHookPath(database, cfg, hookPath)
+}
+
+// DaemonServer constructs the canonical HTTP daemon registry. Unlike local
+// InProcess/stdio construction, it never performs workspace/home catalog
+// autodiscovery: WRKF_HOOK_CATALOG must name the deployed bundle explicitly.
+func DaemonServer(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.RegistryOptions, error) {
+	return serverWithHookPath(database, cfg, os.Getenv("WRKF_HOOK_CATALOG"))
+}
+
+func serverWithHookPath(database *db.DB, cfg *config.Config, hookPath string) (*wrkfapi.API, workrpc.RegistryOptions, error) {
+	var cat *workflow.HookCatalog
+	var err error
+	if hookPath != "" {
+		cat, err = workflow.LoadHookCatalog(hookPath)
+	}
 	if err != nil {
 		return nil, workrpc.RegistryOptions{}, fmt.Errorf("failed to load hook catalog: %w", err)
 	}
@@ -80,6 +95,20 @@ func (h *Handle) Close() error {
 // this because it has no pre-opened database; the stdio entrypoint uses Server
 // directly with the database it already opened through appctx.
 func Open(dbLocatorOverride string) (*Handle, error) {
+	return open(dbLocatorOverride, "", false)
+}
+
+// OpenWithHookCatalog builds a local InProcess server using the caller-selected
+// local catalog path. Empty retains local autodiscovery semantics.
+func OpenWithHookCatalog(dbLocatorOverride, hookCatalogOverride string) (*Handle, error) {
+	hookPath, err := workflow.ResolveHookCatalogPath(hookCatalogOverride)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve hook catalog: %w", err)
+	}
+	return open(dbLocatorOverride, hookPath, true)
+}
+
+func open(dbLocatorOverride, hookPath string, explicitHookPath bool) (*Handle, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -103,7 +132,13 @@ func Open(dbLocatorOverride string) (*Handle, error) {
 		_ = database.Close()
 		return nil, err
 	}
-	api, opts, err := Server(database, cfg)
+	var api *wrkfapi.API
+	var opts workrpc.RegistryOptions
+	if explicitHookPath {
+		api, opts, err = serverWithHookPath(database, cfg, hookPath)
+	} else {
+		api, opts, err = Server(database, cfg)
+	}
 	if err != nil {
 		_ = database.Close()
 		return nil, err

@@ -110,6 +110,29 @@ type CheckRunResult struct {
 	Runs []workflow.CheckRun `json:"runs"`
 }
 
+const (
+	MaxTemplateBodyBytes     = 1 << 20
+	MaxTemplateDiffBodyBytes = 2 << 20
+)
+
+type WorkflowContentParams struct {
+	Body       string `json:"body"`
+	SourceName string `json:"sourceName,omitempty"`
+}
+
+type WorkflowDiffParams struct {
+	OldBody       string `json:"oldBody"`
+	NewBody       string `json:"newBody"`
+	OldSourceName string `json:"oldSourceName,omitempty"`
+	NewSourceName string `json:"newSourceName,omitempty"`
+}
+
+type WorkflowInstallParams struct {
+	Body         string `json:"body"`
+	SourceName   string `json:"sourceName,omitempty"`
+	PrincipalRef string `json:"principal_ref,omitempty"`
+}
+
 type EffectClaimParams struct {
 	Adapter      string `json:"adapter"`
 	Limit        int    `json:"limit"`

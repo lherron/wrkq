@@ -14,7 +14,7 @@ func TestWorkflowDiscontinueRPCAndAttachOverrideContract(t *testing.T) {
 	taskID := p2SeedTask(t, dbPath, "00000000-2222-4000-8000-000000000046", "discontinued-rpc", "Discontinued RPC")
 	tplPath := p2WorkflowTemplatePath(t)
 	frames := p3Run(t, dbPath,
-		mkRPC("install", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("install", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("discontinue", "wrkf.workflow.discontinue", map[string]any{
 			"ref":           "wrkq-code-change@1",
 			"principal_ref": "agent:curator",

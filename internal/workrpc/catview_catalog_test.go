@@ -181,6 +181,11 @@ func TestCatViewInCatalogs(t *testing.T) {
 			t.Errorf("%s missing from dtoCatalog", d)
 		}
 	}
+	for _, d := range []string{"WrkfWorkflowContentParams", "WrkfWorkflowDiffParams", "WrkfWorkflowInstallParams"} {
+		if !contains(dtoCatalog, d) {
+			t.Errorf("%s missing from dtoCatalog", d)
+		}
+	}
 }
 
 func contains(haystack []string, needle string) bool {

@@ -79,7 +79,10 @@ const inspect = await client.wrkq.workflow.inspect({ task: task.id });
 ## wrkf: evidence / transition / run / effect
 
 ```ts
-await client.wrkf.workflow.install({ path: "./wrkf/templates/code-change.json" });
+await client.wrkf.workflow.install({
+  body: await Bun.file("./wrkf/templates/code-change.json").text(),
+  sourceName: "./wrkf/templates/code-change.json",
+});
 
 const run = await client.wrkf.run.start({
   task: task.id,

@@ -190,6 +190,18 @@ func p2WorkflowTemplatePath(t *testing.T) string {
 	return path
 }
 
+func templateBody(t *testing.T, path string) string {
+	t.Helper()
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot(t), path)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read workflow template %s: %v", path, err)
+	}
+	return string(body)
+}
+
 // p2SeedTask inserts a project container + task directly into dbPath using SQL.
 // Returns the task's wrkq ID (e.g. "T-00001").
 // This is used for workflow tests that need a real persisted task before the
@@ -1100,7 +1112,7 @@ func TestWrkqWorkflowAttach_ReturnsAttachResult(t *testing.T) {
 
 	// Install workflow template and attach.
 	frames := p2Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":           taskID,
 			"workflow":       "wrkq-code-change@1",
@@ -1167,7 +1179,7 @@ func TestWrkqWorkflowAttach_Idempotency_AttachedFalse(t *testing.T) {
 	key := "p2-smokey:attach:" + taskID + ":code-change@1"
 
 	frames := p2Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":           taskID,
 			"workflow":       "wrkq-code-change@1",
@@ -1223,7 +1235,7 @@ func TestWrkqWorkflowInspect_ReturnsTypedDTO(t *testing.T) {
 		"wf-inspect-test", "Workflow Inspect Test Task")
 
 	frames := p2Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     taskID,
 			"workflow": "wrkq-code-change@1",
@@ -1273,7 +1285,7 @@ func TestWrkqWorkflowTimeline_ReturnsItems(t *testing.T) {
 		"wf-timeline-test", "Workflow Timeline Test Task")
 
 	frames := p2Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     taskID,
 			"workflow": "wrkq-code-change@1",
@@ -1313,23 +1325,23 @@ func TestWrkqWorkflowTimeline_TransitionEventPayload(t *testing.T) {
 		"wf-timeline-transition-test", "Workflow Timeline Transition Test Task")
 
 	frames := p2Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     taskID,
 			"workflow": "wrkq-code-change@1",
 		}),
 		mkRPC("e1", "wrkf.evidence.add", map[string]any{
-			"task":  taskID,
-			"kind":  "red_test",
-			"ref":   "test/smokey/p2/timeline-transition-red",
+			"task":          taskID,
+			"kind":          "red_test",
+			"ref":           "test/smokey/p2/timeline-transition-red",
 			"principal_ref": "agent:tester",
-			"role":  "tester",
-			"facts": p3RedFacts(),
+			"role":          "tester",
+			"facts":         p3RedFacts(),
 		}),
 		mkRPC("tr1", "wrkf.transition.apply", map[string]any{
 			"task":           taskID,
 			"transition":     "author_red",
-			"principal_ref":          "agent:tester",
+			"principal_ref":  "agent:tester",
 			"role":           "tester",
 			"expectRevision": float64(0),
 			"idempotencyKey": "timeline-transition-author-red",

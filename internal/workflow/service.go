@@ -68,6 +68,12 @@ func LoadTemplateFile(path string) (*Template, []byte, string, error) {
 	if err != nil {
 		return nil, nil, "", err
 	}
+	return ParseTemplateContent(data)
+}
+
+// ParseTemplateContent parses a caller-supplied template body. RPC callers use
+// this content boundary so paths are never interpreted on the server host.
+func ParseTemplateContent(data []byte) (*Template, []byte, string, error) {
 	tpl, canonical, err := ParseTemplate(data)
 	if err != nil {
 		return nil, nil, "", err
@@ -134,6 +140,17 @@ func canonicalHookCatalog(catalog *HookCatalog) ([]byte, string, error) {
 
 func (s *Service) ValidateTemplateFile(path string, catalog *HookCatalog) ValidateResult {
 	tpl, canonical, hash, err := LoadTemplateFile(path)
+	return validateTemplateResult(tpl, canonical, hash, err, catalog)
+}
+
+// ValidateTemplateContent validates a decoded template body without consulting
+// the daemon filesystem.
+func (s *Service) ValidateTemplateContent(data []byte, catalog *HookCatalog) ValidateResult {
+	tpl, canonical, hash, err := ParseTemplateContent(data)
+	return validateTemplateResult(tpl, canonical, hash, err, catalog)
+}
+
+func validateTemplateResult(tpl *Template, canonical []byte, hash string, err error, catalog *HookCatalog) ValidateResult {
 	if err != nil {
 		return ValidateResult{Valid: false, Errors: []string{err.Error()}}
 	}
@@ -758,6 +775,16 @@ func (s *Service) InstallTemplate(path, actor string, catalog *HookCatalog) (map
 	return s.installTemplateCanonical(tpl, canonical, hash, actor, catalog, false)
 }
 
+// InstallTemplateContent installs a decoded template body without consulting
+// the daemon filesystem.
+func (s *Service) InstallTemplateContent(data []byte, actor string, catalog *HookCatalog) (map[string]interface{}, error) {
+	tpl, canonical, hash, err := ParseTemplateContent(data)
+	if err != nil {
+		return nil, err
+	}
+	return s.installTemplateCanonical(tpl, canonical, hash, actor, catalog, false)
+}
+
 // installTemplateCanonical installs an already-parsed template. It is shared by
 // the file-based InstallTemplate and the embedded built-in installer so both
 // honor the same validation and idempotent-by-hash semantics.
@@ -957,13 +984,27 @@ func (s *Service) ReinstateTemplate(id, version string) error {
 	})
 }
 
-func (s *Service) storedHookCatalog(templateID, version string) (*HookCatalog, error) {
+// pinnedHookCatalog returns the template version's stored hook law only after
+// verifying that the daemon's executable bundle has the same catalog identity.
+// The configured catalog supplies the executable root, never replacement specs.
+func (s *Service) pinnedHookCatalog(templateID, version string, configured *HookCatalog) (*HookCatalog, error) {
 	var raw sql.NullString
-	if err := s.db.QueryRow(`SELECT hook_catalog_json FROM workflow_templates WHERE id = ? AND version = ?`, templateID, version).Scan(&raw); err != nil {
+	var storedHash sql.NullString
+	if err := s.db.QueryRow(`SELECT hook_catalog_json, hook_catalog_hash FROM workflow_templates WHERE id = ? AND version = ?`, templateID, version).Scan(&raw, &storedHash); err != nil {
 		return nil, err
 	}
-	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
-		return nil, nil
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" || !storedHash.Valid || strings.TrimSpace(storedHash.String) == "" {
+		return nil, fmt.Errorf("template %s@%s has no pinned hook catalog", templateID, version)
+	}
+	if configured == nil {
+		return nil, fmt.Errorf("daemon hook catalog is not configured for template %s@%s", templateID, version)
+	}
+	_, configuredHash, err := canonicalHookCatalog(configured)
+	if err != nil {
+		return nil, err
+	}
+	if configuredHash != storedHash.String {
+		return nil, fmt.Errorf("hook catalog hash mismatch for template %s@%s: stored %s, configured %s", templateID, version, storedHash.String, configuredHash)
 	}
 	var catalog HookCatalog
 	if err := json.Unmarshal([]byte(raw.String), &catalog); err != nil {
@@ -3501,15 +3542,16 @@ func (s *Service) RunChecks(taskSelector, transitionID, actor, role string, cata
 }
 
 func (s *Service) RunSingleHook(taskSelector, transitionID, hookID, actor, role string, catalog *HookCatalog, templateDir string) (*CheckRun, error) {
-	if catalog == nil {
-		return nil, fmt.Errorf("hook catalog is required")
-	}
-	if _, ok := catalog.Hooks[hookID]; !ok {
-		return nil, fmt.Errorf("hook not found: %s", hookID)
-	}
 	inst, err := s.LatestInstance(taskSelector)
 	if err != nil {
 		return nil, err
+	}
+	pinned, err := s.pinnedHookCatalog(inst.TemplateID, inst.TemplateVersion, catalog)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := pinned.Hooks[hookID]; !ok {
+		return nil, fmt.Errorf("hook not found: %s", hookID)
 	}
 	tpl, _, err := s.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
 	if err != nil {
@@ -3590,17 +3632,11 @@ func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID strin
 			cr.Summary = "unknown builtin check"
 		}
 	case "hook":
-		if catalog == nil {
-			stored, err := s.storedHookCatalog(inst.TemplateID, inst.TemplateVersion)
-			if err != nil {
-				return nil, err
-			}
-			catalog = stored
+		pinned, err := s.pinnedHookCatalog(inst.TemplateID, inst.TemplateVersion, catalog)
+		if err != nil {
+			return nil, err
 		}
-		if catalog == nil {
-			return nil, fmt.Errorf("hook catalog is required for check %s", checkID)
-		}
-		hook, ok := catalog.Hooks[check.HookID]
+		hook, ok := pinned.Hooks[check.HookID]
 		if !ok {
 			return nil, fmt.Errorf("hook not found: %s", check.HookID)
 		}

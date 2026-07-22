@@ -1328,6 +1328,26 @@ wrkf.workflow.reinstate
 
 These are template registry operations. They do not attach a workflow to a task.
 
+The client sends template content, never a filesystem path for the server to
+open:
+
+```ts
+interface WrkfWorkflowContentParams {
+  body: string;
+  sourceName?: string; // diagnostic label only; never a server path
+}
+interface WrkfWorkflowDiffParams {
+  oldBody: string;
+  newBody: string;
+  oldSourceName?: string;
+  newSourceName?: string;
+}
+interface WrkfWorkflowInstallParams extends WrkfWorkflowContentParams {}
+```
+
+The client preflights the server-authoritative 1 MiB per-body and 2 MiB diff
+aggregate caps. The old `path`/`oldPath`/`newPath` params are deleted.
+
 Template curation is explicit and version-addressed:
 
 ```ts
@@ -1639,7 +1659,10 @@ try {
     idempotencyKey: "agent-loop:create:...",
   });
 
-  await client.wrkf.workflow.install({ path: "./workflow.json" });
+  await client.wrkf.workflow.install({
+    body: await Bun.file("./workflow.json").text(),
+    sourceName: "./workflow.json",
+  });
 
   const attached = await client.wrkq.workflow.attach({
     task: task.id,
@@ -2310,7 +2333,8 @@ const task = await client.wrkq.task.create({
 });
 
 await client.wrkf.workflow.install({
-  path: "./wrkf/templates/code-change.json",
+  body: await Bun.file("./wrkf/templates/code-change.json").text(),
+  sourceName: "./wrkf/templates/code-change.json",
 });
 
 const attached = await client.wrkq.workflow.attach({

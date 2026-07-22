@@ -1516,6 +1516,31 @@ wrkf.workflow.reinstate
 
 These are template registry operations. They do not attach a workflow to a task.
 
+Template create/validation requests are content-bearing; the server never
+interprets a caller path:
+
+```ts
+interface WrkfWorkflowContentParams {
+  body: string;
+  sourceName?: string; // diagnostic label only
+}
+interface WrkfWorkflowDiffParams {
+  oldBody: string;
+  newBody: string;
+  oldSourceName?: string;
+  newSourceName?: string;
+}
+interface WrkfWorkflowInstallParams extends WrkfWorkflowContentParams {
+  principal_ref?: string;
+}
+```
+
+`validate` takes `WrkfWorkflowContentParams`; `install` takes
+`WrkfWorkflowInstallParams`; `diff` takes `WrkfWorkflowDiffParams`. The deleted
+`path`/`oldPath`/`newPath` request variant is not accepted. Each decoded body is
+limited to 1 MiB, diff bodies to 2 MiB aggregate, and HTTP `/v1/rpc` envelopes
+to 8 MiB.
+
 `wrkf.workflow.discontinue` and `wrkf.workflow.reinstate` take
 `{ ref: "id@version", principal_ref?: string }` and return the current
 `WrkfWorkflowShowResult { template, hash, discontinuedAt?, discontinuedBy? }`.
@@ -1528,6 +1553,14 @@ preserve the marker; only reinstate clears it. No registry event is emitted.
 instance insert in one IMMEDIATE transaction. It refuses a marked version
 unless `attachDiscontinued` is true. Existing instances remain operable, and
 attachment authority is not duplicated under `wrkf.*`.
+
+Hook/check/effect execution selects hook specs from the attached template
+version's stored `hook_catalog_json`. A daemon-configured deployed catalog must
+match the stored `hook_catalog_hash` or execution fails closed. The configured
+catalog supplies the executable bundle root; it cannot replace stored law.
+Remote callers cannot pass `--hook-catalog`; `hook list/show` report the
+daemon's active catalog. The HTTP daemon reads only an explicit
+`WRKF_HOOK_CATALOG` path and never performs workspace/home autodiscovery.
 
 #### Instance state access
 

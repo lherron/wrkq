@@ -45,7 +45,7 @@ type Transport interface {
 // Error is the client-facing RPC error. It preserves both the wire error and
 // the parsed domain code used by command packages for exit-code mapping.
 type Error struct {
-	Code      int
+	RPCCode   int
 	Message   string
 	Data      json.RawMessage
 	DomainID  string
@@ -56,11 +56,19 @@ func (e *Error) Error() string {
 	if e.DomainID != "" {
 		return fmt.Sprintf("%s: %s", e.DomainID, e.Message)
 	}
-	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
+	return fmt.Sprintf("rpc error %d: %s", e.RPCCode, e.Message)
+}
+
+// Code exposes the preserved domain identifier to CLI error renderers.
+func (e *Error) Code() string {
+	if e == nil {
+		return ""
+	}
+	return e.DomainID
 }
 
 func errorFromRPC(re *workrpc.RPCError) *Error {
-	out := &Error{Code: re.Code, Message: re.Message, Data: re.Data}
+	out := &Error{RPCCode: re.Code, Message: re.Message, Data: re.Data}
 	if len(re.Data) > 0 {
 		var d struct {
 			Code      string `json:"code"`

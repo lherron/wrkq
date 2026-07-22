@@ -114,6 +114,9 @@ export function buildStdioSpawnSpec(opts: StdioSpawnOptions): StdioSpawnSpec {
     }
   }
   if (isWrkf && opts.role) argv.push("--role", opts.role);
+  if (isWrkf && opts.hookCatalogPath && dbLocator && isRemoteLocator(dbLocator)) {
+    throw new Error("hookCatalogPath is local-only; hook catalog is canonical-node configuration in remote mode");
+  }
   if (isWrkf && opts.hookCatalogPath) argv.push("--hook-catalog", opts.hookCatalogPath);
   argv.push(...(opts.args ?? ["rpc", "--stdio"]));
   return { argv, env };

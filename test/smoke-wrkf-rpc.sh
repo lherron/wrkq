@@ -45,6 +45,18 @@ cat >"$TMPDIR/hooks.json" <<HOOKS
       "maxStdoutBytes": 65536,
       "maxStderrBytes": 65536
     }
+  },
+  "effectHandlers": {
+    "smoke_deliver": {
+      "kind": "effect",
+      "argv": ["/usr/bin/true"],
+      "stdin": "json",
+      "stdout": "text",
+      "timeoutMs": 300000,
+      "cwd": "template_dir",
+      "maxStdoutBytes": 65536,
+      "maxStderrBytes": 65536
+    }
   }
 }
 HOOKS
@@ -108,7 +120,8 @@ cat >"$TMPDIR/workflow.json" <<'FLOW'
             { "kind": "cleanup", "ownerRole": "coordinator", "blocking": true, "reason": "cleanup before close" }
           ],
           "effects": [
-            { "kind": "wake_role", "role": "coordinator", "reason": "ready to finish" }
+            { "kind": "wake_role", "role": "coordinator", "reason": "ready to finish" },
+            { "kind": "smoke_deliver", "role": "coordinator", "reason": "exercise delivery" }
           ]
         }
       ]
@@ -141,6 +154,10 @@ import subprocess
 import sys
 
 bin_wrkf, db_path, hooks_path, workflow_path, pbc_preset = sys.argv[1:6]
+with open(workflow_path, encoding="utf-8") as src:
+    workflow_body = src.read()
+with open(pbc_preset, encoding="utf-8") as src:
+    pbc_body = src.read()
 
 proc = subprocess.Popen(
     [
@@ -201,10 +218,10 @@ assert init["database"]["path"] == db_path, init
 assert init["capabilities"]["effectClaimLease"] is True, init
 assert init["protocolSchemaHash"].startswith("sha256:"), init
 
-valid = rpc("wrkf.workflow.validate", {"path": workflow_path})
+valid = rpc("wrkf.workflow.validate", {"body": workflow_body, "sourceName": workflow_path})
 assert valid["valid"] is True, valid
 
-installed = rpc("wrkf.workflow.install", {"path": workflow_path})
+installed = rpc("wrkf.workflow.install", {"body": workflow_body, "sourceName": workflow_path})
 assert installed["id"] == "smoke_flow" and installed["version"] == "1", installed
 
 listed = rpc("wrkf.workflow.list")
@@ -213,7 +230,7 @@ assert len(listed["templates"]) == 1, listed
 shown = rpc("wrkf.workflow.show", {"ref": "smoke_flow@1"})
 assert shown["template"]["id"] == "smoke_flow", shown
 
-diff = rpc("wrkf.workflow.diff", {"oldPath": workflow_path, "newPath": workflow_path})
+diff = rpc("wrkf.workflow.diff", {"oldBody": workflow_body, "newBody": workflow_body, "oldSourceName": workflow_path, "newSourceName": workflow_path})
 assert diff["sameHash"] is True, diff
 
 attached_result = rpc("wrkq.workflow.attach", {"task": "T-00001", "workflow": "smoke_flow@1"})
@@ -305,8 +322,10 @@ obl_show = rpc("wrkf.obligation.show", {"id": obl})
 assert obl_show["id"] == obl, obl_show
 
 effects = rpc("wrkf.effect.list", {"task": "T-00001", "all": True})
-assert effects[0]["status"] == "pending", effects
-eff = effects[0]["id"]
+assert len(effects) == 2 and all(effect["status"] == "pending" for effect in effects), effects
+by_kind = {effect["kind"]: effect for effect in effects}
+eff = by_kind["wake_role"]["id"]
+deliver_eff = by_kind["smoke_deliver"]["id"]
 
 eff_show = rpc("wrkf.effect.show", {"id": eff})
 assert eff_show["id"] == eff, eff_show
@@ -344,11 +363,15 @@ run = rpc(
         "task": "T-00001",
         "role": "coordinator",
         "principal_ref": "agent:local-human",
+        "deliveryRef": "smoke-delivery",
         "idempotencyKey": "run-1",
     },
 )
 run_id = run["id"]
 assert run["status"] == "active", run
+
+delivered = rpc("wrkf.effect.deliver", {"effectId": deliver_eff, "adapter": "smoke"})
+assert delivered["effect"]["status"] == "delivered" and delivered["exitCode"] == 0, delivered
 
 bound = rpc(
     "wrkf.run.bindExternal",
@@ -396,7 +419,7 @@ assert done["actions"] == [], done
 # ── Real-preset regression gate: drive ./pbc (pbc-progressive-refinement) intake → finalized ──
 # Uses the actual installed preset, not a synthetic template, to prove the RPC surface
 # walks a real multi-state workflow to a terminal state with CAS + evidence at every step.
-pbc_inst = rpc("wrkf.workflow.install", {"path": pbc_preset})
+pbc_inst = rpc("wrkf.workflow.install", {"body": pbc_body, "sourceName": pbc_preset})
 assert pbc_inst["id"] == "pbc-progressive-refinement", pbc_inst
 pbc_ref = f"{pbc_inst['id']}@{pbc_inst['version']}"
 

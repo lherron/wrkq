@@ -41,11 +41,14 @@ func WithTemplateDir(dir string) Option {
 	}
 }
 
-func (api *API) WorkflowValidate(ctx context.Context, path string) (workflow.ValidateResult, error) {
+func (api *API) WorkflowValidate(ctx context.Context, params WorkflowContentParams) (workflow.ValidateResult, error) {
 	if err := ctx.Err(); err != nil {
 		return workflow.ValidateResult{}, err
 	}
-	return api.service.ValidateTemplateFile(path, api.hookCatalog), nil
+	if err := validateTemplateBody(params.Body, params.SourceName); err != nil {
+		return workflow.ValidateResult{}, err
+	}
+	return api.service.ValidateTemplateContent([]byte(params.Body), api.hookCatalog), nil
 }
 
 func (api *API) WorkflowShow(ctx context.Context, ref string) (WorkflowShowResult, error) {
@@ -111,11 +114,20 @@ func (api *API) ListTemplates(ctx context.Context) (WorkflowListResult, error) {
 	return WorkflowListResult{Templates: templates}, nil
 }
 
-func (api *API) WorkflowDiff(ctx context.Context, oldPath, newPath string) (DiffResult, error) {
+func (api *API) WorkflowDiff(ctx context.Context, params WorkflowDiffParams) (DiffResult, error) {
 	if err := ctx.Err(); err != nil {
 		return DiffResult{}, err
 	}
-	out, err := api.service.DiffTemplateFiles(oldPath, newPath)
+	if err := validateTemplateBody(params.OldBody, params.OldSourceName); err != nil {
+		return DiffResult{}, err
+	}
+	if err := validateTemplateBody(params.NewBody, params.NewSourceName); err != nil {
+		return DiffResult{}, err
+	}
+	if len(params.OldBody)+len(params.NewBody) > MaxTemplateDiffBodyBytes {
+		return DiffResult{}, NewValidationError(fmt.Sprintf("template diff bodies exceed %d-byte aggregate limit", MaxTemplateDiffBodyBytes), nil)
+	}
+	out, err := api.service.DiffTemplateContent([]byte(params.OldBody), []byte(params.NewBody))
 	if err != nil {
 		return DiffResult{}, normalizeError(err)
 	}
@@ -126,11 +138,14 @@ func (api *API) WorkflowDiff(ctx context.Context, oldPath, newPath string) (Diff
 	}, nil
 }
 
-func (api *API) WorkflowInstall(ctx context.Context, path, actor string) (InstallResult, error) {
+func (api *API) WorkflowInstall(ctx context.Context, params WorkflowInstallParams) (InstallResult, error) {
 	if err := ctx.Err(); err != nil {
 		return InstallResult{}, err
 	}
-	out, err := api.service.InstallTemplate(path, actor, api.hookCatalog)
+	if err := validateTemplateBody(params.Body, params.SourceName); err != nil {
+		return InstallResult{}, err
+	}
+	out, err := api.service.InstallTemplateContent([]byte(params.Body), params.PrincipalRef, api.hookCatalog)
 	if err != nil {
 		return InstallResult{}, normalizeError(err)
 	}
@@ -140,6 +155,17 @@ func (api *API) WorkflowInstall(ctx context.Context, path, actor string) (Instal
 		Hash:      stringFromAny(out["hash"]),
 		Installed: boolFromAny(out["installed"]),
 	}, nil
+}
+
+func validateTemplateBody(body, sourceName string) error {
+	if len(body) > MaxTemplateBodyBytes {
+		label := "template body"
+		if strings.TrimSpace(sourceName) != "" {
+			label = sourceName
+		}
+		return NewValidationError(fmt.Sprintf("%s exceeds %d-byte template body limit", label, MaxTemplateBodyBytes), nil)
+	}
+	return nil
 }
 
 func (api *API) TaskAttach(ctx context.Context, taskSelector, templateRef, actor string, opts ...workflow.AttachTaskOptions) (*workflow.Instance, error) {
@@ -470,6 +496,18 @@ func templateSummaryFromAny(v any) TemplateSummary {
 			DiscontinuedAt: stringFromAny(x["discontinuedAt"]),
 			DiscontinuedBy: stringFromAny(x["discontinuedBy"]),
 		}
+	case map[string]string:
+		return TemplateSummary{
+			ID:             x["id"],
+			Version:        x["version"],
+			Hash:           x["hash"],
+			Kind:           x["kind"],
+			Description:    x["description"],
+			InstalledAt:    x["installedAt"],
+			InstalledBy:    x["installedBy"],
+			DiscontinuedAt: x["discontinuedAt"],
+			DiscontinuedBy: x["discontinuedBy"],
+		}
 	}
 	return TemplateSummary{}
 }
@@ -690,7 +728,10 @@ func normalizeError(err error) error {
 		strings.Contains(lower, "must ") ||
 		strings.Contains(lower, "missing ") ||
 		strings.Contains(lower, "already installed with different hash") ||
-		strings.Contains(lower, "catalog is required"):
+		strings.Contains(lower, "catalog is required") ||
+		strings.Contains(lower, "hook catalog hash mismatch") ||
+		strings.Contains(lower, "daemon hook catalog is not configured") ||
+		strings.Contains(lower, "has no pinned hook catalog"):
 		return NewValidationError(msg, nil)
 	default:
 		return NewInternalError(err)

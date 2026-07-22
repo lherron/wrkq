@@ -108,7 +108,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
     });
 
     // createClient auto-initialized; assert the handshake side effects via a probe.
-    const installed = await client.wrkf.workflow.install({ path: workflowPath });
+    const installed = await client.wrkf.workflow.install({ body: JSON.stringify(WORKFLOW), sourceName: workflowPath });
     expect(installed.id).toBe("itest_flow");
     expect(installed.installed).toBe(true);
 
@@ -270,7 +270,7 @@ describe("evidence idempotency & canonicalization via @wrkq/client", () => {
       cwd: idemDir,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
     });
-    await idemClient.wrkf.workflow.install({ path: idemWfPath });
+    await idemClient.wrkf.workflow.install({ body: JSON.stringify(WORKFLOW), sourceName: idemWfPath });
     const task = await idemClient.wrkq.task.create({
       title: "idem-canon-task",
       kind: "task",
@@ -405,7 +405,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
     });
 
     // ── wrkf.workflow.install ──
-    const installed = await wrkfClient.wrkf.workflow.install({ path: wrkfWfPath });
+    const installed = await wrkfClient.wrkf.workflow.install({ body: JSON.stringify(WORKFLOW), sourceName: wrkfWfPath });
     expect(installed.id).toBe("itest_flow");
     expect(installed.installed).toBe(true);
 

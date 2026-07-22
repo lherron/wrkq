@@ -240,7 +240,8 @@ export interface WrkfWorkflowTemplateSummary {
 // ── Template registry ────────────────────────────────────────────────────────
 
 export interface WrkfWorkflowValidateParams {
-  path: string;
+  body: string;
+  sourceName?: string;
 }
 
 export interface WrkfWorkflowValidateResult {
@@ -268,8 +269,10 @@ export interface WrkfWorkflowListResult {
 }
 
 export interface WrkfWorkflowDiffParams {
-  oldPath: string;
-  newPath: string;
+  oldBody: string;
+  newBody: string;
+  oldSourceName?: string;
+  newSourceName?: string;
 }
 
 export interface WrkfDiffResult {
@@ -280,7 +283,8 @@ export interface WrkfDiffResult {
 }
 
 export interface WrkfWorkflowInstallParams {
-  path: string;
+  body: string;
+  sourceName?: string;
 }
 
 export interface WrkfWorkflowLifecycleParams {

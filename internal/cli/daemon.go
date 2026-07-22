@@ -91,7 +91,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		}
 		defer func() { _ = os.Remove(opts.PIDPath) }()
 	}
-	api, rpcOpts, err := bootstrap.Server(database, cfg)
+	api, rpcOpts, err := bootstrap.DaemonServer(database, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize workrpc registry: %w", err)
 	}
@@ -350,6 +350,7 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, workrpc.DefaultMaxFrameBytes)
 	var req workrpc.Request
 	if err := s.decodeJSON(r, &req); err != nil {
 		resp := workrpc.Response{

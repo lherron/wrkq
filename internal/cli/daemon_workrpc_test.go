@@ -61,6 +61,33 @@ func TestDaemonWorkRPCRouteRequiresAuthAndDispatches(t *testing.T) {
 	}
 }
 
+func TestDaemonWorkRPCRejectsEnvelopeOverEightMiB(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	cfg := &config.Config{DBPath: database.Path(), AttachmentsMaxMB: 50}
+	api, opts, err := bootstrap.Server(database, cfg)
+	if err != nil {
+		t.Fatalf("bootstrap.Server: %v", err)
+	}
+	rpcServer := workrpc.NewServer(nil)
+	workrpc.RegisterAPI(rpcServer, api, opts)
+	s := &daemonServer{db: database, cfg: cfg, workrpc: rpcServer}
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"rpc.initialize","params":{"padding":"` + strings.Repeat("x", workrpc.DefaultMaxFrameBytes) + `"}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.handleWorkRPC(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var resp workrpc.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatal("expected bounded decode error")
+	}
+}
+
 func TestDaemonClaimDerivesNodeFromBearerIdentity(t *testing.T) {
 	database, _ := setupTestEnv(t)
 	if _, err := database.Exec(`

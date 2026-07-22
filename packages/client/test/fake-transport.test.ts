@@ -738,6 +738,32 @@ describe("wrkq namespace", () => {
 });
 
 describe("wrkf namespace", () => {
+  test("workflow template facades send content only and preflight body limits", async () => {
+    const transport = new FakeTransport()
+      .onResult("wrkf.workflow.validate", { valid: true })
+      .onResult("wrkf.workflow.diff", { old: {}, new: {}, sameHash: true })
+      .onResult("wrkf.workflow.install", { id: "f", version: "1", hash: "sha256:x", installed: true });
+    const client = await clientWith(transport);
+
+    await client.wrkf.workflow.validate({ body: "{}", sourceName: "caller/workflow.json" });
+    await client.wrkf.workflow.diff({ oldBody: "{}", newBody: "{}" });
+    await client.wrkf.workflow.install({ body: "{}", sourceName: "caller/workflow.json" });
+
+    expect(transport.capturedRequests.map((request) => request.method)).toEqual([
+      "wrkf.workflow.validate",
+      "wrkf.workflow.diff",
+      "wrkf.workflow.install",
+    ]);
+    expect(transport.capturedRequests[2]!.params).toEqual({
+      body: "{}",
+      sourceName: "caller/workflow.json",
+    });
+    expect(() => client.wrkf.workflow.install({ body: "x".repeat((1 << 20) + 1) })).toThrow(
+      "1048576-byte template body limit",
+    );
+    expect(transport.capturedRequests).toHaveLength(3);
+  });
+
   test("action facade preserves opaque sourceIdentity bindings", async () => {
     const sourceIdentity = "change-v1:implement-v4-1";
     const transport = new FakeTransport()

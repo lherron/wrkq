@@ -26,6 +26,19 @@ import type { WrkqFacade } from "./wrkq/facade.js";
 import type { WrkfFacade } from "./wrkf/facade.js";
 import type { WrkfActionClaimResult, WrkfActionNextResult } from "./wrkf/types.js";
 
+const MAX_TEMPLATE_BODY_BYTES = 1 << 20;
+const MAX_TEMPLATE_DIFF_BODY_BYTES = 2 << 20;
+
+function templateBodyBytes(body: string): number {
+  return new TextEncoder().encode(body).byteLength;
+}
+
+function assertTemplateBody(body: string, sourceName = "template body"): void {
+  if (templateBodyBytes(body) > MAX_TEMPLATE_BODY_BYTES) {
+    throw new RangeError(`${sourceName} exceeds ${MAX_TEMPLATE_BODY_BYTES}-byte template body limit`);
+  }
+}
+
 export interface WorkClient {
   readonly rpc: {
     initialize(params?: InitializeParams): Promise<InitializeResult>;
@@ -180,11 +193,24 @@ class WorkClientImpl implements WorkClient {
 
   readonly wrkf: WrkfFacade = {
     workflow: {
-      validate: (p) => this.call("wrkf.workflow.validate", p),
+      validate: (p) => {
+        assertTemplateBody(p.body, p.sourceName);
+        return this.call("wrkf.workflow.validate", p);
+      },
       show: (p) => this.call("wrkf.workflow.show", p),
       list: (p) => this.call("wrkf.workflow.list", p ?? {}),
-      diff: (p) => this.call("wrkf.workflow.diff", p),
-      install: (p) => this.call("wrkf.workflow.install", p),
+      diff: (p) => {
+        assertTemplateBody(p.oldBody, p.oldSourceName);
+        assertTemplateBody(p.newBody, p.newSourceName);
+        if (templateBodyBytes(p.oldBody) + templateBodyBytes(p.newBody) > MAX_TEMPLATE_DIFF_BODY_BYTES) {
+          throw new RangeError(`template diff bodies exceed ${MAX_TEMPLATE_DIFF_BODY_BYTES}-byte aggregate limit`);
+        }
+        return this.call("wrkf.workflow.diff", p);
+      },
+      install: (p) => {
+        assertTemplateBody(p.body, p.sourceName);
+        return this.call("wrkf.workflow.install", p);
+      },
       discontinue: (p) => this.call("wrkf.workflow.discontinue", p),
       reinstate: (p) => this.call("wrkf.workflow.reinstate", p),
     },

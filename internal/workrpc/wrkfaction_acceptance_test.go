@@ -312,7 +312,7 @@ func TestWrkfActionClaimSuspendedRefusalPayload(t *testing.T) {
 		"action-claim-suspended", "Action Claim Suspended")
 	setup := p3Run(t, dbPath,
 		mkRPC("install", "wrkf.workflow.install", map[string]any{
-			"path": "internal/workflow/builtins/wrkq-simple-task-v5.workflow.json",
+			"body": templateBody(t, "internal/workflow/builtins/wrkq-simple-task-v5.workflow.json"),
 		}),
 		mkRPC("attach", "wrkq.workflow.attach", map[string]any{
 			"task": taskID, "workflow": "wrkq-simple-task@5",
@@ -382,7 +382,7 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 		"action-settle-v2", "Action Settle V2")
 	tplPath := "internal/workflow/builtins/wrkq-simple-task-v2.workflow.json"
 	attachFrames := p3Run(t, dbPath,
-		mkRPC("i1", "wrkf.workflow.install", map[string]any{"path": tplPath}),
+		mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, tplPath)}),
 		mkRPC("a1", "wrkq.workflow.attach", map[string]any{
 			"task":     taskID,
 			"workflow": "wrkq-simple-task@2",

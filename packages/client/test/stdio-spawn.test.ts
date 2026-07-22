@@ -122,4 +122,14 @@ describe("StdioTransport spawn construction", () => {
     ]);
     expect(spec.argv).not.toContain("--actor");
   });
+
+  test("wrkf remote locator refuses caller hook catalog substitution", () => {
+    expect(() =>
+      buildStdioSpawnSpec({
+        command: "wrkf",
+        dbLocator: "rpc://mini:7171",
+        hookCatalogPath: "/caller/hooks.json",
+      }),
+    ).toThrow("canonical-node configuration");
+  });
 });

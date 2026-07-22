@@ -1129,23 +1129,17 @@ func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templa
 	if current.Kind == "set_task_state" {
 		return s.deliverSetTaskStateEffect(current, adapter)
 	}
-	if catalog == nil {
-		instForCatalog, err := s.instanceByID(current.InstanceID)
-		if err != nil {
-			return nil, err
-		}
-		stored, err := s.storedHookCatalog(instForCatalog.TemplateID, instForCatalog.TemplateVersion)
-		if err != nil {
-			return nil, err
-		}
-		catalog = stored
+	instForCatalog, err := s.instanceByID(current.InstanceID)
+	if err != nil {
+		return nil, err
 	}
-	if catalog == nil {
-		return nil, fmt.Errorf("hook catalog is required for effect delivery")
+	pinned, err := s.pinnedHookCatalog(instForCatalog.TemplateID, instForCatalog.TemplateVersion, catalog)
+	if err != nil {
+		return nil, err
 	}
-	handler, ok := catalog.EffectHandlers[current.Kind]
+	handler, ok := pinned.EffectHandlers[current.Kind]
 	if !ok {
-		if h, hookOK := catalog.Hooks["effect_"+current.Kind]; hookOK {
+		if h, hookOK := pinned.Hooks["effect_"+current.Kind]; hookOK {
 			handler, ok = h, true
 		}
 	}
@@ -2508,6 +2502,24 @@ func (s *Service) DiffTemplateFiles(oldPath, newPath string) (map[string]interfa
 		return nil, err
 	}
 	newTpl, _, newHash, err := LoadTemplateFile(newPath)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"old":      map[string]string{"id": oldTpl.ID, "version": oldTpl.Version, "hash": oldHash},
+		"new":      map[string]string{"id": newTpl.ID, "version": newTpl.Version, "hash": newHash},
+		"sameHash": oldHash == newHash,
+	}, nil
+}
+
+// DiffTemplateContent compares decoded template bodies without consulting the
+// daemon filesystem.
+func (s *Service) DiffTemplateContent(oldBody, newBody []byte) (map[string]interface{}, error) {
+	oldTpl, _, oldHash, err := ParseTemplateContent(oldBody)
+	if err != nil {
+		return nil, err
+	}
+	newTpl, _, newHash, err := ParseTemplateContent(newBody)
 	if err != nil {
 		return nil, err
 	}

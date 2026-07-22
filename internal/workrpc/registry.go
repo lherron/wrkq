@@ -319,6 +319,9 @@ var dtoCatalog = []string{
 	"WrkfTransitionResult",
 	"WrkfSuspensionResolveResult", // wrkf.suspension.resolve output (cleared suspension + new state/effects)
 	"WrkfWorkflowTemplateSummary",
+	"WrkfWorkflowContentParams", // content-only validate request; path variants are forbidden
+	"WrkfWorkflowDiffParams",    // two bounded content bodies
+	"WrkfWorkflowInstallParams", // content-only install request + attribution
 	"WrkfWorkflowListResult",
 	"WrkfWorkflowShowResult",
 	"WrkfInstallResult",
@@ -562,8 +565,8 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 }
 
 func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
-	s.Register("wrkf.workflow.validate", apiHandler(func(ctx context.Context, p workflowPathParams) (any, error) {
-		return api.WorkflowValidate(ctx, p.Path)
+	s.Register("wrkf.workflow.validate", apiHandler(func(ctx context.Context, p wrkfapi.WorkflowContentParams) (any, error) {
+		return api.WorkflowValidate(ctx, p)
 	}))
 	s.Register("wrkf.workflow.show", apiHandler(func(ctx context.Context, p refParams) (any, error) {
 		return api.WorkflowShow(ctx, p.Ref)
@@ -571,11 +574,12 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkf.workflow.list", apiHandler(func(ctx context.Context, _ emptyParams) (any, error) {
 		return api.WorkflowList(ctx)
 	}))
-	s.Register("wrkf.workflow.diff", apiHandler(func(ctx context.Context, p diffParams) (any, error) {
-		return api.WorkflowDiff(ctx, p.OldPath, p.NewPath)
+	s.Register("wrkf.workflow.diff", apiHandler(func(ctx context.Context, p wrkfapi.WorkflowDiffParams) (any, error) {
+		return api.WorkflowDiff(ctx, p)
 	}))
-	s.Register("wrkf.workflow.install", apiHandler(func(ctx context.Context, p installParams) (any, error) {
-		return api.WorkflowInstall(ctx, p.Path, defaultString(p.PrincipalRef, opts.DefaultActor))
+	s.Register("wrkf.workflow.install", apiHandler(func(ctx context.Context, p wrkfapi.WorkflowInstallParams) (any, error) {
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
+		return api.WorkflowInstall(ctx, p)
 	}))
 	s.Register("wrkf.workflow.discontinue", apiHandler(func(ctx context.Context, p templateLifecycleParams) (any, error) {
 		return api.WorkflowDiscontinue(ctx, p.Ref, defaultString(p.PrincipalRef, opts.DefaultActor))
@@ -848,26 +852,12 @@ func defaultString(value, fallback string) string {
 
 type emptyParams struct{}
 
-type workflowPathParams struct {
-	Path string `json:"path"`
-}
-
 type refParams struct {
 	Ref string `json:"ref"`
 }
 
 type templateLifecycleParams struct {
 	Ref          string `json:"ref"`
-	PrincipalRef string `json:"principal_ref,omitempty"`
-}
-
-type diffParams struct {
-	OldPath string `json:"oldPath"`
-	NewPath string `json:"newPath"`
-}
-
-type installParams struct {
-	Path         string `json:"path"`
 	PrincipalRef string `json:"principal_ref,omitempty"`
 }
 

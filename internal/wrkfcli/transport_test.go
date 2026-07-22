@@ -78,3 +78,17 @@ func TestConfiguredTransportWrkfReadParityLocalAndRemote(t *testing.T) {
 		t.Fatalf("workflow.list differs by transport:\nlocal  %s\nremote %s", localResult, remoteResult)
 	}
 }
+
+func TestConfiguredTransportRejectsHookCatalogOverrideForRemote(t *testing.T) {
+	oldDB, oldHook := flagDB, flagHookCatalog
+	t.Cleanup(func() {
+		flagDB = oldDB
+		flagHookCatalog = oldHook
+	})
+	flagDB = "rpc://127.0.0.1:17171"
+	flagHookCatalog = "/caller/workspace/hook-catalog.json"
+	_, _, _, err := openConfiguredTransport(nil)
+	if err == nil || !strings.Contains(err.Error(), "canonical-node configuration") {
+		t.Fatalf("remote hook catalog override error=%v, want hard refusal", err)
+	}
+}

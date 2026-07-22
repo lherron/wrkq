@@ -24,6 +24,13 @@ func healthyInitializeResult(t *testing.T) json.RawMessage {
 	return b
 }
 
+func TestErrorCodePreservesRemoteDomainIdentifier(t *testing.T) {
+	err := errorFromRPC(&workrpc.RPCError{Data: json.RawMessage(`{"code":"WRKF_VALIDATION","retryable":false}`)})
+	if err.Code() != "WRKF_VALIDATION" {
+		t.Fatalf("Code()=%q want WRKF_VALIDATION", err.Code())
+	}
+}
+
 func TestInitializeProfilesProbeTheirOwnSurface(t *testing.T) {
 	base := healthyInitializeResult(t)
 	for _, profile := range []Profile{WrkqProfile, WrkfProfile} {
