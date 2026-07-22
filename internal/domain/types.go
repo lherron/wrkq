@@ -110,6 +110,8 @@ type Container struct {
 	SortIndex             int           `json:"sort_index" db:"sort_index"`
 	WebhookURLs           *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
 	Root                  *string       `json:"root" db:"root"`
+	CampaignState         *string       `json:"campaign_state,omitempty" db:"campaign_state"`
+	Specification         *string       `json:"specification,omitempty" db:"specification"`
 	ETag                  int64         `json:"etag" db:"etag"`
 	CreatedAt             time.Time     `json:"created_at" db:"created_at"`
 	UpdatedAt             time.Time     `json:"updated_at" db:"updated_at"`
@@ -155,6 +157,8 @@ type Task struct {
 	Meta                  *string    `json:"meta,omitempty" db:"meta"`     // JSON object
 	Description           string     `json:"description" db:"description"`
 	Specification         string     `json:"specification" db:"specification"`
+	Outcome               *string    `json:"outcome,omitempty" db:"outcome"`
+	CampaignUUID          *string    `json:"campaign_uuid,omitempty" db:"campaign_uuid"`
 	ETag                  int64      `json:"etag" db:"etag"`
 	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
@@ -249,7 +253,9 @@ type TaskTransition struct {
 type Comment struct {
 	UUID                  string     `json:"uuid" db:"uuid"`
 	ID                    string     `json:"id" db:"id"`
-	TaskUUID              string     `json:"task_uuid" db:"task_uuid"`
+	TaskUUID              *string    `json:"task_uuid,omitempty" db:"task_uuid"`
+	ContainerUUID         *string    `json:"container_uuid,omitempty" db:"container_uuid"`
+	Kind                  *string    `json:"kind,omitempty" db:"kind"`
 	ActorUUID             string     `json:"actor_uuid,omitempty" db:"actor_uuid"`
 	CreatedByPrincipalRef string     `json:"created_by_principal_ref,omitempty" db:"created_by_principal_ref"`
 	CreatedByScopeRef     string     `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
