@@ -60,7 +60,9 @@ Important implementation packages:
 | --- | --- |
 | `cmd/wrkq`, `cmd/wrkqadm`, `cmd/wrkqd`, `cmd/wrkf` | Shipped binary entry points. |
 | `internal/rpccli` | RPC-backed production `wrkq` command adapters and command contract tests. |
-| `internal/cli` | Retired legacy day-to-day command code plus current `wrkqadm` and daemon helpers. |
+| `internal/rpccli` | Production day-to-day `wrkq` command layer over the shared workrpc transport. |
+| `internal/admincli` | Local-path-only `wrkqadm` database lifecycle and administrative commands. |
+| `internal/wrkqd` | Authenticated daemon HTTP/workrpc surface and daemon-owned search indexer. |
 | `internal/config` | Config/env loading and defaults. |
 | `internal/db` | SQLite open, migrations, schema status. |
 | `internal/domain` | Domain structs and validation enums. |
@@ -563,8 +565,8 @@ Canonical markdown that remains:
 | `AGENTS.md` / `CLAUDE.md` | Agent operating instructions; `CLAUDE.md` is a symlink. |
 | `docs/SPEC.md` | Canonical wrkq specification. |
 | `docs/wrkf-rpc.md` | Frozen wrkf JSON-RPC machine contract. |
-| `internal/cli/embedded/WRKQ-USAGE.md` | Embedded full agent usage block. |
-| `internal/cli/embedded/AGENT-WRKQ-USAGE.md` | Embedded compact quick reference. |
+| `internal/rpccli/embedded/WRKQ-USAGE.md` | Embedded full agent usage block. |
+| `internal/rpccli/embedded/AGENT-WRKQ-USAGE.md` | Embedded compact quick reference. |
 | `mcp-server/README.md` | Local package README for the MCP stdio wrapper. |
 | `pbc/templates/` | Workflow artifact templates used by the PBC sample preset. |
 | `vendor/` | Third-party vendored documentation; not a wrkq spec surface. |

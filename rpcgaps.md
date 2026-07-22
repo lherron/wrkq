@@ -1,13 +1,17 @@
 # wrkq CLI to RPC Gap Analysis
 
+> Historical pre-cutover audit. The direct-store `internal/cli` surface it
+> compared was removed by T-06762; production commands live in `internal/rpccli`.
+
 Date: 2026-06-22  
-Scope: primary `wrkq` binary command surface in `internal/cli`, compared against the existing unified JSON-RPC registry in `internal/workrpc`.
+Scope at audit time: the former direct-store `wrkq` command surface, compared
+against the unified JSON-RPC registry in `internal/workrpc`.
 
 This audit is for the proposed RPC-backed `wrkq` CLI mirror. It does not treat `wrkqadm` as part of the cutover target, and it does not re-audit the `wrkf` binary except where `wrkf.*` RPC methods explain existing coverage.
 
 ## Source Basis
 
-- Current `wrkq` command surface: `internal/cli/*.go`
+- Current production `wrkq` command surface: `internal/rpccli/*.go`
 - RPC method registry: `internal/workrpc/registry.go`
 - `wrkq.*` RPC DTOs and params: `internal/wrkqapi/types.go`
 - Authoritative RPC contract: `docs/wrkq-wrkf-rpc.md`

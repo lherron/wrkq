@@ -22,8 +22,8 @@ exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site
 source:
   - internal/db/migrations/000048_task_claim_authority.sql
   - internal/nodeauth/nodeauth.go
-  - internal/cli/daemon.go
-  - internal/cli/daemon_workrpc_test.go
+  - internal/wrkqd/daemon.go
+  - internal/wrkqd/daemon_workrpc_test.go
   - internal/wrkqapi/claims.go
   - internal/wrkqapi/claims_test.go
   - internal/wrkqapi/tasks.go

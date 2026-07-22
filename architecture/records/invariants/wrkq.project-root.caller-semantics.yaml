@@ -4,8 +4,8 @@ status: active
 owner_project: wrkq
 scope: project-root path/selector scoping across CLI surfaces
 predicate: >
-  All path/selector-taking CLI commands (legacy internal/cli AND the RPC-backed
-  mirror internal/rpccli) must transform raw user arguments through the neutral
+  All path/selector-taking production CLI commands in internal/rpccli must
+  transform raw user arguments through the neutral
   internal/projectroot implementation BEFORE constructing RPC params or store
   lookups:
 
@@ -20,24 +20,22 @@ predicate: >
   RPC methods receive ONLY effective selectors/paths. They must NOT inspect
   WRKQ_PROJECT_ROOT, ASP_PROJECT, or --project — project-root scoping is caller
   semantics, not a server read-model concern. There is exactly ONE implementation
-  of this transform; the legacy CLI and rpccli may wrap it but must not fork it.
+  of this transform; rpccli may wrap it but must not fork it.
 authority:
   repo: wrkq
-  surface: CLI caller layer (internal/cli + internal/rpccli) over the JSON-RPC boundary
+  surface: production internal/rpccli caller layer over the JSON-RPC boundary
 enforced_by: internal/projectroot (single source of truth) + rpccli scoper call sites
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site"
 source:
   - internal/projectroot/projectroot.go      # the one transform + ResolveProjectFlag
   - internal/rpccli/scope.go                  # mirror scoper, built in openMirror
-  - internal/cli/project_root.go              # legacy delegates (no fork)
-  - internal/cli/appctx/appctx.go             # --project override delegates to projectroot
 required_tests:
   - internal/projectroot/projectroot_test.go            # TestTransform (pure transform guard)
   - internal/rpccli/parity_test.go                      # production contract pr/* (WRKQ_PROJECT_ROOT, ASP_PROJECT, --project; ls + read selectors + mutations)
-  - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard (rpccli must not import internal/cli)
+  - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard + TestLegacyCLIPackageRemoved
 last_verified:
-  date: 2026-06-22
-  evidence: "go test ./... green; installed-binary smoke under real project-root config byte-matches; Daedalus accept hrcchat#10087"
+  date: 2026-07-21
+  evidence: "T-06762 removed the legacy transform wrappers; rpccli project-root parity and no-regrowth guards plus full verify green."
 reopen_when:
   - a new path/selector-taking mirror command bypasses the scoper
   - the project-root precedence or exemption rules change

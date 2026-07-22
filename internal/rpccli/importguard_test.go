@@ -12,7 +12,7 @@ import (
 // TestCoreRuleImportGuard enforces the migration's Core Rule: rpccli command
 // implementations must obtain durable wrkq behavior ONLY through the JSON-RPC
 // protocol boundary, never by importing store, wrkqapi, direct db/SQL, or
-// internal/cli command handlers. Construction of the server lives behind the
+// admincli/wrkqd adapters. Construction of the server lives behind the
 // neutral internal/workrpc/bootstrap helper, which is allowed.
 func TestCoreRuleImportGuard(t *testing.T) {
 	forbidden := []string{
@@ -20,7 +20,8 @@ func TestCoreRuleImportGuard(t *testing.T) {
 		"github.com/lherron/wrkq/internal/wrkqapi",
 		"github.com/lherron/wrkq/internal/wrkfapi",
 		"github.com/lherron/wrkq/internal/db",
-		"github.com/lherron/wrkq/internal/cli", // includes internal/cli/appctx
+		"github.com/lherron/wrkq/internal/admincli",
+		"github.com/lherron/wrkq/internal/wrkqd",
 		"github.com/mattn/go-sqlite3",
 		// Search/index family (T-05114): the server owns the derived sidecar +
 		// dense embedder. The mirror MUST NOT open the sidecar (internal/search,
@@ -58,11 +59,21 @@ func TestCoreRuleImportGuard(t *testing.T) {
 func TestProductionWrkqEntrypointUsesRPCCLI(t *testing.T) {
 	root := repoRootFromTest(t)
 	src := readTextFile(t, filepath.Join(root, "cmd", "wrkq", "main.go"))
-	if strings.Contains(src, `"github.com/lherron/wrkq/internal/cli"`) {
-		t.Fatal("cmd/wrkq imports internal/cli; production wrkq must use the RPC-backed entrypoint")
+	for _, forbidden := range []string{"internal/admincli", "internal/wrkqd"} {
+		if strings.Contains(src, forbidden) {
+			t.Fatalf("cmd/wrkq imports %s; production wrkq must use only the RPC-backed entrypoint", forbidden)
+		}
 	}
 	if !strings.Contains(src, `"github.com/lherron/wrkq/internal/rpccli"`) {
 		t.Fatal("cmd/wrkq does not import internal/rpccli")
+	}
+}
+
+func TestLegacyCLIPackageRemoved(t *testing.T) {
+	root := repoRootFromTest(t)
+	_, err := os.Stat(filepath.Join(root, "internal", "cli"))
+	if !os.IsNotExist(err) {
+		t.Fatalf("legacy internal/cli command package regrew: err=%v", err)
 	}
 }
 

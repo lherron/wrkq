@@ -1,9 +1,7 @@
 // Package style holds wrkq's shared terminal-presentation primitives: ANSI
 // coloring, the markdown renderer, the styled task card, and the relative-time
-// helpers. It is pure presentation — no DB, store, or API coupling — so both the
-// legacy CLI (internal/cli) and the RPC-backed mirror (internal/rpccli) render
-// through ONE copy. Byte-parity between the two binaries is therefore structural,
-// not something the parity harness has to chase.
+// helpers. It is pure presentation — no DB, store, or API coupling — and the
+// production rpccli renders through this single copy.
 package style
 
 import (

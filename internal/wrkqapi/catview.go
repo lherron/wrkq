@@ -103,7 +103,7 @@ type CatViewBlocker struct {
 // and blockers are internally consistent for that UUID. The snapshot does not
 // cover the selector-resolution step (a concurrent rename/move/delete between
 // resolution and the tx is possible, as with any resolve-then-read). It mirrors
-// internal/cli/cat.go's projection logic exactly.
+// internal/rpccli/cat.go's projection logic exactly.
 func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCatView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -223,7 +223,7 @@ func (a *API) CommentShow(ctx context.Context, p CommentShowParams) (*WrkqCommen
 // CommentDelete disposes of a comment per the caller-owned-confirmation
 // invariant: the disposition is the EXPLICIT, caller-supplied mode (absent/"soft"
 // → reversible soft-delete; "purge" → hard-delete). The server never prompts,
-// inspects a TTY, or reads stdin. Mirrors internal/cli/comment_rm.go semantics
+// inspects a TTY, or reads stdin. Mirrors internal/rpccli/comment_rm.go semantics
 // (soft-delete sets deleted_at + logs comment.deleted; purge DELETEs the row +
 // logs comment.purged). IfMatch (>0) is a machine-checkable etag precondition
 // (mismatch → WRKQ_CONFLICT). For soft-delete it returns the updated DTO; for
@@ -321,7 +321,7 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, NewInternalError(eerr)
 	}
 
-	// Event-log payload MUST byte-match legacy internal/cli/comment_rm.go:
+	// Event-log payload MUST byte-match legacy internal/rpccli/comment_rm.go:
 	// task_id = the task UUID (not the friendly id), comment_id = the FRIENDLY
 	// comment id (not the uuid), deleted_by_principal_ref present, soft_delete:true.
 	// The event ETag is the NEW (post-bump) comment etag.

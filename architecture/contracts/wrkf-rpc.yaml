@@ -17,6 +17,13 @@ predicate: >
   canonical caller attribution, and preserves root, etag, attribution, and
   event history on stale CAS. `@wrkq/client` exposes the matching project
   facade and DTOs, as governed by `wrkq.project-root-registry`.
+  The shared Go client transport preserves the same initialize/schema/auth/error
+  contract for both wrkq and wrkf in local InProcess and remote HTTP modes.
+  Wrkf template operations carry bounded template content rather than daemon-local
+  caller paths; watch uses bounded snapshot/event pages; and the S4 method set
+  (`wrkq.workflow.syncMeta`, `wrkf.evidence.schema`, `wrkf.supervisor.call`,
+  `wrkf.supervisor.escalate`, `wrkf.obligation.create`) remains present in the
+  registry, schema hash, and typed client.
 authority:
   repo: wrkq
   surface: shared wrkq/wrkf JSON-RPC (stdio)
@@ -27,13 +34,19 @@ source:
   - internal/workrpc/errors.go            # maps typed codes onto JSON-RPC
   - internal/workrpc/error_mapping_contract_test.go
   - internal/workrpc/codec_contract_test.go
+  - internal/workrpc/entrypoint_equivalence_test.go
   - internal/workrpc/registry.go
+  - internal/workrpc/client/transport.go
+  - internal/workrpc/client/local.go
   - internal/workrpc/workflow_discontinued_acceptance_test.go
   - internal/workrpc/project_root_test.go
   - internal/wrkqapi/projectroots.go
   - internal/wrkqapi/projectsview.go
   - internal/wrkfapi/api.go
   - internal/wrkfapi/types.go
+  - internal/wrkfapi/gaps.go
+  - internal/wrkfcli/transport.go
+  - internal/wrkfcli/importguard_test.go
   - packages/client/src/errors.ts         # client preserves data.code + retryability
   - packages/client/src/client.ts
   - packages/client/src/wrkq/facade.ts
@@ -61,12 +74,15 @@ required_tests:
   - TestProjectRootRegistryMethodIsRegistered
   - TestProjectRootSetRootStaleCASIsAtomic
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
+  - TestCommandAdapterImportGuard
+  - TestLegacyDirectDBBootstrapCannotRegrow
+  - TestEntrypointEquivalence
   - "bun test packages/client/test/fake-transport.test.ts"
   - "bun test packages/client/test/workflow-template-discontinue-contract.test.ts"
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
-  date: 2026-07-14
-  evidence: "T-06357 lifecycle and T-06366 project-root focused workrpc/client guards green; Daedalus reran the T-06366 focused real-RPC suite at 97a3a71"
+  date: 2026-07-21
+  evidence: "T-06755..T-06761 shared-client migration, registry/DTO additions, template/hook isolation, import/entrypoint/golden guards, typed-client exact-version publish, and authenticated max3→mini installed proof green."
 reopen_when:
   - WRKF_* code set changes
   - retryable semantics change

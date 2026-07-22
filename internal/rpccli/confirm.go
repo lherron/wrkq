@@ -61,7 +61,7 @@ func purgeConfirm(cmd *cobra.Command, skip bool, warning string) error {
 }
 
 // commentRmConfirm is the COMMENT-RM confirmation (legacy
-// internal/cli/comment_rm.go): NO warning block, a single inline prompt line
+// internal/rpccli/comment_rm.go): NO warning block, a single inline prompt line
 // "<Action> comment <id> (task <id>)? [y/N]: " on stderr, accepting EXACTLY "y"
 // or "Y" (case-sensitive — legacy compares response != "y" && response != "Y").
 // Unlike rm-purge this prompts EVEN for soft-delete; skip is the command's --yes
@@ -77,7 +77,7 @@ func commentRmConfirm(cmd *cobra.Command, skip bool, promptLine string) error {
 }
 
 // rmdirForceConfirm is the RMDIR --force confirmation (legacy
-// internal/cli/rmdir.go): the destructive WARNING block + "Are you sure?
+// internal/rpccli/containers.go): the destructive WARNING block + "Are you sure?
 // (yes/no): ", requiring EXACTLY "yes". Prompts ONLY when the container is
 // non-empty (the caller decides whether to invoke this). skip is the command's
 // --yes flag. Distinct accept-token wording from purgeConfirm ("Are you sure?

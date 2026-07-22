@@ -14,7 +14,7 @@ import (
 // ─── Handoff DTO ─────────────────────────────────────────────────────────────
 
 // WrkqHandoff is the stable handoff resource DTO. Its field ORDER + json tags
-// reproduce the legacy `handoffJSON` (internal/cli/handoff_create.go) EXACTLY so
+// reproduce the legacy `handoffJSON` (internal/rpccli/handoff.go) EXACTLY so
 // the mirror can render byte-identical output: snake_case keys, legacy struct
 // order, pointer/omitempty parity. This is the WrkqHandoff fingerprint pinned by
 // TestHandoffDTOFingerprint — any drift is a PROTOCOL CONTRACT change.

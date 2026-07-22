@@ -34,7 +34,7 @@ func newDiffCmd() *cobra.Command {
 }
 
 // diffTaskData holds the legacy-comparable fields projected from wrkq.task.catView.
-// Mirrors internal/cli/diff.go's taskData (the subset diff actually compares plus
+// Mirrors internal/rpccli/diff.go's taskData (the subset diff actually compares plus
 // the id/slug used in human rendering). priority and etag keep their numeric Go
 // types so the JSON encoding of the diff "old"/"new" values is byte-identical to
 // legacy (int for priority, int64 for etag).
@@ -117,7 +117,7 @@ func fetchDiffTask(ctx context.Context, tr Transport, ref, label string) (*diffT
 	return &td, nil
 }
 
-// compareDiffTasks mirrors internal/cli/diff.go compareTasksDetailed exactly:
+// compareDiffTasks mirrors internal/rpccli/diff.go compareTasksDetailed exactly:
 // field order slug, title, description, specification, state, priority, due_at,
 // etag, with nullable due_at coalesced to "".
 func compareDiffTasks(a, b *diffTaskData) *diffResult {

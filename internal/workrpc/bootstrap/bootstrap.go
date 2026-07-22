@@ -3,9 +3,9 @@
 // already-open config/database inputs.
 //
 // It exists so the public stdio entrypoint (`wrkq rpc --stdio`) and the
-// RPC-backed mirror CLI build the server identically and cannot drift. It lives
-// under internal/workrpc (the protocol boundary), NOT under internal/cli, so the
-// mirror CLI can depend on it without importing command handlers.
+// production RPC-backed CLI build the server identically and cannot drift. It
+// lives under internal/workrpc (the protocol boundary), so rpccli can depend on
+// it without importing the daemon adapter.
 package bootstrap
 
 import (

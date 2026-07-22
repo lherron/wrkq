@@ -700,7 +700,7 @@ func (a *API) resolveTaskMoveTarget(taskUUID, targetPath string) (string, string
 }
 
 // TaskAcknowledge records a terminal-state receipt (acknowledged_at). It mirrors
-// internal/cli/ack.go: state must be completed|cancelled unless force is set.
+// internal/rpccli/ack.go: state must be completed|cancelled unless force is set.
 // An already-acknowledged task is a no-op — the current DTO is returned with its
 // stable acknowledgedAt and no new write / etag bump.
 func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*WrkqTask, error) {
@@ -841,7 +841,7 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 // TaskRestore reverses delete/archive: current state must be archived or deleted,
 // the target defaults to open (archived/deleted targets rejected), archived_at /
 // deleted_at / deleted_by are cleared, and subtasks are cascade-restored. Mirrors
-// internal/cli/restore.go.
+// internal/rpccli/restore.go.
 func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -22,7 +22,7 @@ source:
   - internal/workflow/action.go
   - internal/workflow/action_claim_test.go
   - internal/workflow/action_settle_test.go
-  - internal/cli/daemon.go
+  - internal/wrkqd/daemon.go
   - internal/wrkfapi/action.go
   - internal/workrpc/registry.go
   - internal/workrpc/wrkfaction_acceptance_test.go

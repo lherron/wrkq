@@ -45,14 +45,14 @@ predicate: >
 authority:
   repo: wrkq
   surface: tasks table parent graph + wrkq task/container mutation/read-model surfaces
-enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/tasks.go; internal/store/containers.go; internal/cli/tree.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/store/cross_project_parent_test.go; internal/cli/tree_test.go; internal/workrpc/taskmove_test.go"
+enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/tasks.go; internal/store/containers.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/wrkqd/tree_http.go; internal/store/cross_project_parent_test.go; internal/workrpc/taskmove_test.go"
 required_tests:
-  - go test ./internal/store ./internal/wrkqapi ./internal/cli
+  - go test ./internal/store ./internal/wrkqapi ./internal/rpccli ./internal/wrkqd
   - go test ./internal/workrpc -run 'TestWrkqTaskMove_(ResidentSubtreeMove|CrossProjectChild)'
   - just architecture-records
 last_verified:
   date: 2026-06-28
-  evidence: "T-05266 implementation: go test ./internal/store ./internal/wrkqapi ./internal/cli green; go test ./internal/workrpc -run 'TestWrkqTaskMove_(ResidentSubtreeMove|CrossProjectChild)' green; full verify/install/manual smoke captured on task before close."
+  evidence: "T-05266 implementation and T-06762 relocation: store/wrkqapi/rpccli/wrkqd suites green; workrpc cross-project move tests green; full verify/install/manual smoke captured on tasks."
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the hierarchy mutation/read-model call site"
 source:
   - internal/db/migrations/000026_external_principal_attribution.sql
@@ -61,6 +61,7 @@ source:
   - internal/wrkqapi/tasks.go
   - internal/wrkqapi/treeview.go
   - internal/rpccli/tree.go
+  - internal/wrkqd/tree_http.go
   - internal/workrpc/taskmove_test.go
   - docs/SPEC.md
   - docs/wrkq-wrkf-rpc.md

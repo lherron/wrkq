@@ -104,7 +104,7 @@ func (a *API) RelationAdd(ctx context.Context, p RelationAddParams) (*WrkqRelati
 }
 
 // RelationList returns all relations involving a task (outgoing + incoming),
-// each tagged with its direction. Mirrors internal/cli/relation.go.
+// each tagged with its direction. Mirrors internal/rpccli/relation.go.
 func (a *API) RelationList(ctx context.Context, p RelationListParams) (*WrkqRelationListResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

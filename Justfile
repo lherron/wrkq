@@ -91,10 +91,6 @@ find-entry-points topic:
 explain-area path:
   @go run ./cmd/explain-area --root . "{{path}}"
 
-# Scaffold a new Cobra CLI command in internal/cli
-new-command name:
-  scripts/new-cli-command "{{name}}"
-
 # Run the wrkqadm CLI
 wrkqadm-run *args:
   go run ./cmd/wrkqadm {{args}}

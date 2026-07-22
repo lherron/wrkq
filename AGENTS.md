@@ -6,7 +6,7 @@ Guide for agents working on **wrkq** — a filesystem-flavored CLI for projects,
 
 **Use wrkq to track your own work in this repo.** The wrkq database tracks active tasks; agents working here should `wrkq ls`, `wrkq cat`, `wrkq comment add`, and `wrkq set --state` as part of normal flow.
 
-@internal/cli/embedded/WRKQ-USAGE.md
+@internal/rpccli/embedded/WRKQ-USAGE.md
 
 For a deeper command reference, run `wrkq info`.
 
@@ -132,4 +132,4 @@ If you have questions, number them for easier responses.
 - [wrkq change validation](docs/change-validation.md) — when to run verify / verify-full / install+smoke and where the wrkf template fits.
 - [Agent-enablement changelog](docs/enablement-changelog.md) — target-local retro carrier for sensor/workflow changes.
 - [Rule-authoring template](docs/rule-template.md) — author any new build-failing rule deliberately with a 7-field candidate and when-to-use policy.
-- [Embedded agent usage block](internal/cli/embedded/WRKQ-USAGE.md) — task lifecycle and wrkq command quick reference.
+- [Embedded agent usage block](internal/rpccli/embedded/WRKQ-USAGE.md) — task lifecycle and wrkq command quick reference.

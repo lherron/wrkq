@@ -1,6 +1,6 @@
 package rpccli
 
-// exit.go mirrors internal/cli/helpers.go's exit-code error mechanism so the
+// exit.go mirrors internal/rpccli/exit.go's exit-code error mechanism so the
 // mirror binary reproduces the legacy CLI's DISTINCT process exit codes (e.g.
 // handoff's 2/3/4/5/6) and its "structured error already written to stderr"
 // suppression. Commands that own their structured-error rendering (handoff)

@@ -52,7 +52,8 @@ func liveConfig() layerguard.Config {
 				ID:      "domain-layer",
 				Sources: []string{module + "/internal/domain"},
 				Forbidden: []string{
-					module + "/internal/cli",
+					module + "/internal/admincli",
+					module + "/internal/wrkqd",
 					module + "/internal/wrkfcli",
 					module + "/internal/store",
 					module + "/internal/db",
@@ -66,7 +67,8 @@ func liveConfig() layerguard.Config {
 				ID:      "workflow-api-no-adapters",
 				Sources: []string{module + "/internal/workflow", module + "/internal/wrkfapi"},
 				Forbidden: []string{
-					module + "/internal/cli",
+					module + "/internal/admincli",
+					module + "/internal/wrkqd",
 					module + "/internal/wrkfcli",
 					module + "/internal/workrpc",
 				},
@@ -78,7 +80,7 @@ func liveConfig() layerguard.Config {
 				Except: []string{
 					module + "/internal/workrpc",
 					module + "/internal/rpccli",
-					module + "/internal/cli",
+					module + "/internal/wrkqd",
 					module + "/internal/wrkfcli",
 					module + "/cmd",
 				},

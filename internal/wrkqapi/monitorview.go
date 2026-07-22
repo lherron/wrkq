@@ -315,7 +315,7 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 	return view, nil
 }
 
-// ──── server-owned filter (ported from internal/cli/monitor.go) ────────────────
+// ──── server-owned filter (ported from internal/rpccli/monitor.go) ────────────────
 
 // monitorRow is the server-side decoded event used by the filter. It mirrors the
 // fields of the legacy watchEvent the filter inspects.
@@ -391,7 +391,7 @@ func isMonitorStateChangeEvent(event monitorRow) bool {
 	}
 }
 
-// ──── condition evaluator (ported from internal/cli/monitor.go) ────────────────
+// ──── condition evaluator (ported from internal/rpccli/monitor.go) ────────────────
 
 type monitorCondition struct {
 	kind   string

@@ -8,7 +8,7 @@ COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 pkgs=(
-  github.com/lherron/wrkq/internal/cli
+  github.com/lherron/wrkq/internal/admincli
   github.com/lherron/wrkq/internal/rpccli
   github.com/lherron/wrkq/internal/wrkfcli
 )

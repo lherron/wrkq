@@ -13,12 +13,39 @@ import (
 
 var forbiddenAdapterImports = []string{
 	"database/sql",
-	"github.com/lherron/wrkq/internal/cli",
+	"github.com/lherron/wrkq/internal/admincli",
 	"github.com/lherron/wrkq/internal/db",
 	"github.com/lherron/wrkq/internal/store",
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap",
 	"github.com/lherron/wrkq/internal/workflow",
+	"github.com/lherron/wrkq/internal/wrkqd",
 	"github.com/mattn/go-sqlite3",
+}
+
+// TestLegacyDirectDBBootstrapCannotRegrow pins S8: command adapters may not
+// restore the retired withApp/db.Open/workflow.NewService fork or the old
+// remote-locator rejection. Local commands must use InProcess transport.
+func TestLegacyDirectDBBootstrapCannotRegrow(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{"func withApp(", "db.Open(", "workflow.NewService(", "requires a local database path"}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range forbidden {
+			if strings.Contains(string(body), needle) {
+				t.Errorf("%s contains retired direct-DB bootstrap marker %q", name, needle)
+			}
+		}
+	}
 }
 
 // TestCommandAdapterImportGuard freezes the remote migration boundary: durable

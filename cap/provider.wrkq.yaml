@@ -240,7 +240,7 @@ x-source:
     file: internal/workrpc/registry_contract_test.go
   server:
     command: wrkq rpc --stdio
-    file: internal/cli/rpc.go
+    file: internal/rpccli/rpc.go
   method:
     name: wrkq.task.update
     file: internal/workrpc/registry.go

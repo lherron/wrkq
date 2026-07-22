@@ -147,7 +147,7 @@ func TestTaskCopyDTOFingerprint(t *testing.T) {
 
 // TestHandoffDTOFingerprint guards the handoff resource DTO + envelope shapes
 // (T-05117, daedalus hrcchat#10211). WrkqHandoff reproduces the LEGACY handoffJSON
-// field ORDER + tags EXACTLY (internal/cli/handoff_create.go:30-56) so the mirror
+// field ORDER + tags EXACTLY (internal/rpccli/handoff.go:30-56) so the mirror
 // re-marshals it into byte-identical `wrkq handoff` output. Any field/tag drift is
 // a PROTOCOL CONTRACT change: bump this fingerprint, update docs/dtoCatalog, and
 // re-verify handoff parity deliberately.

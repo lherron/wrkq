@@ -4,9 +4,10 @@ status: active
 owner_project: wrkq
 scope: Go package import layering
 predicate: >
-  internal/domain must not (transitively) import internal/cli, internal/wrkfcli,
-  internal/store, internal/db, internal/workflow, or internal/wrkfapi — domain stays
-  independent of adapter/persistence/protocol details.
+  internal/domain must not (transitively) import internal/admincli, internal/wrkqd,
+  internal/wrkfcli, internal/store, internal/db, internal/workflow,
+  internal/wrkfapi, or internal/workrpc — domain stays independent of
+  adapter/persistence/protocol details.
 authority:
   repo: wrkq
   surface: Go import graph
@@ -18,8 +19,8 @@ source:
 required_tests:
   - internal/layerguard/layerguard_test.go
 last_verified:
-  date: 2026-06-22
-  evidence: "just layer-boundary green (part of just verify); Daedalus run hrcchat#9876"
+  date: 2026-07-21
+  evidence: "T-06762 relocated the surviving admin/daemon adapters and updated liveConfig; just layer-boundary and full verify green."
 reopen_when:
   - the domain-layer forbidden set changes
   - a new internal layer is introduced

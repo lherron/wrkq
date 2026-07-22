@@ -46,7 +46,7 @@ func runMkdir(cmd *cobra.Command, args []string, kind string) error {
 	results := make([]map[string]interface{}, 0, len(paths))
 	for _, path := range paths {
 		// Legacy mkdir infers kind: top-level containers must be projects;
-		// nested default to directory (mirrors internal/cli/mkdir.go:98-112).
+		// nested default to directory (mirrors internal/rpccli/containers.go:98-112).
 		segKind, err := mkdirKindFor(path, kind)
 		if err != nil {
 			return err
@@ -234,7 +234,7 @@ func rmdirForcePath(ctx context.Context, cmd *cobra.Command, tr Transport, actor
 }
 
 // rmdirForceWarning renders the legacy rmdir --force destructive WARNING block
-// (internal/cli/rmdir.go) verbatim to stderr before the "Are you sure? (yes/no): "
+// (internal/rpccli/containers.go) verbatim to stderr before the "Are you sure? (yes/no): "
 // prompt line.
 func rmdirForceWarning(containerID, path string, tasks, descendants int64) string {
 	var b strings.Builder

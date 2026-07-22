@@ -119,9 +119,13 @@ func ExplainArea(root, path string) (Area, error) {
 }
 
 func findCobraCommands(root, topic string) ([]Hit, error) {
-	files, err := filepath.Glob(filepath.Join(root, "internal", "cli", "*.go"))
-	if err != nil {
-		return nil, err
+	var files []string
+	for _, commandPackage := range []string{"rpccli", "wrkfcli", "admincli"} {
+		matches, err := filepath.Glob(filepath.Join(root, "internal", commandPackage, "*.go"))
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, matches...)
 	}
 	sort.Strings(files)
 

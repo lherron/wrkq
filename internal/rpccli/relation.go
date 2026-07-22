@@ -72,7 +72,7 @@ func newRelationLsCmd() *cobra.Command {
 				return nil
 			}
 
-			// TTY default: legacy table (internal/cli/relation.go). Columns
+			// TTY default: legacy table (internal/rpccli/relation.go). Columns
 			// Direction/Kind/Task ID/Slug/Title; empty → "No relations found".
 			// porcelain is always false here (porcelain routes to NDJSON above),
 			// so the renderer emits the padded human table, never tab-separated.

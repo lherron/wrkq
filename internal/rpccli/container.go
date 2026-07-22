@@ -13,7 +13,7 @@ import (
 )
 
 // containerCatModel mirrors the legacy `runContainerCat` local `Container` struct
-// (internal/cli/container_cat.go) field-for-field and tag-for-tag. The server-owned
+// (internal/rpccli/container.go) field-for-field and tag-for-tag. The server-owned
 // wrkq.container.catView returns this exact shape; the mirror decodes the raw RPC
 // result into this struct so every render mode (json/ndjson/porcelain/markdown/raw)
 // is produced from the SAME projection, byte-identical to legacy. Field ORDER here

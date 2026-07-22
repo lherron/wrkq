@@ -46,7 +46,7 @@ type WrkqContainerCatView struct {
 // single read transaction then covers the RESOLVED container UUID's projection
 // only (scalars + actor slugs + parent id/path + webhook_urls are internally
 // consistent for that UUID). The snapshot does not cover selector resolution.
-// Mirrors internal/cli/container_cat.go.
+// Mirrors internal/rpccli/container.go.
 func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*WrkqContainerCatView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

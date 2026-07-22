@@ -49,7 +49,7 @@ required_tests:
   - internal/rpccli/parity_test.go                    # production contract search/* + production contract index/* (json/ndjson/stale/path/assignee/sort + status/rebuild/update/vacuum/pause/resume + disabled)
 last_verified:
   date: 2026-06-23
-  evidence: "go test -tags sqlite_fts5 ./internal/rpccli/... ./internal/wrkqapi/ ./internal/workrpc/... ./internal/cli/ green; search/index parity byte-identical with the `none` dense provider; @wrkq/client fake-transport unit green"
+  evidence: "go test -tags sqlite_fts5 ./internal/rpccli/... ./internal/wrkqapi/ ./internal/workrpc/... ./internal/wrkqd/ green; search/index parity byte-identical with the `none` dense provider; @wrkq/client fake-transport unit green"
 reopen_when:
   - the mirror gains a direct sidecar open or an EnsureLlamaReady call (import guard would already fail)
   - EnsureLlamaReady is allowed to reach the caller's launchd/embedder instead of the server host's

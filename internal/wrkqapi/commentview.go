@@ -35,7 +35,7 @@ type WrkqCommentCatView struct {
 }
 
 // CommentCatView projects one comment into the legacy comment-cat shape under a
-// single read (mirrors internal/cli/comment_cat.go).
+// single read (mirrors internal/rpccli/comment.go).
 func (a *API) CommentCatView(ctx context.Context, p CommentCatViewParams) (*WrkqCommentCatView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

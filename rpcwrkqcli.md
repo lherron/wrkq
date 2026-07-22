@@ -1,5 +1,9 @@
 # RPC-backed wrkq CLI Migration Proposal
 
+> Historical proposal. The production cutover is complete; the direct-store
+> command package was removed by T-06762. Current code lives in
+> `internal/rpccli`, `internal/admincli`, and `internal/wrkqd`.
+
 ## Goal
 
 Gradually migrate `wrkq` CLI command implementations to use the existing JSON-RPC interface internally, while preserving the current CLI behavior until parity is proven.
@@ -107,7 +111,8 @@ During the mirror phase:
 
 ## Core Rule
 
-The new RPC-backed CLI must not call `store`, `wrkqapi`, direct SQL, or current `internal/cli` command handlers for business behavior.
+The RPC-backed CLI must not call `store`, `wrkqapi`, direct SQL,
+`internal/admincli`, or `internal/wrkqd` for business behavior.
 
 If a command needs behavior that is not exposed through JSON-RPC, mark it as an RPC gap and add the missing RPC method deliberately. Do not create a local shortcut inside `rpccli`.
 

@@ -35,7 +35,7 @@ func repoRoot(t *testing.T) string {
 }
 
 // TestFindEntryPoints_State asserts that FindEntryPoints(root, "state") returns
-// hits covering the Cobra set/touch commands AND the domain symbol sites
+// hits covering production RPC/admin state commands AND the domain symbol sites
 // ParseState/ValidateState, each with a non-empty File, Line > 0, and non-empty Role.
 func TestFindEntryPoints_State(t *testing.T) {
 	root := repoRoot(t)
@@ -66,8 +66,8 @@ func TestFindEntryPoints_State(t *testing.T) {
 		fileSuffix string
 		desc       string
 	}{
-		{"internal/cli/set.go", "set command (Cobra Use: field)"},
-		{"internal/cli/touch.go", "touch command (Cobra Use: field)"},
+		{"internal/rpccli/restore.go", "restore command"},
+		{"internal/admincli/stateadm.go", "administrative state command"},
 		{"internal/domain/state.go", "ParseState domain symbol"},
 		{"internal/domain/validation.go", "ValidateState domain symbol"},
 	}
@@ -87,7 +87,7 @@ func TestFindEntryPoints_State(t *testing.T) {
 }
 
 // TestExplainArea_Domain asserts that ExplainArea(root, "internal/domain") returns
-// a non-empty Role, at least one dependent package (e.g. internal/cli imports domain),
+// a non-empty Role, at least one dependent package (e.g. internal/wrkqd imports domain),
 // and key exported symbols present (ParseState, ValidateState, State).
 func TestExplainArea_Domain(t *testing.T) {
 	root := repoRoot(t)
@@ -102,19 +102,19 @@ func TestExplainArea_Domain(t *testing.T) {
 
 	// Must have dependents (packages that import internal/domain).
 	if len(area.Dependents) == 0 {
-		t.Error("ExplainArea returned no Dependents for internal/domain; expected at least internal/cli")
+		t.Error("ExplainArea returned no Dependents for internal/domain; expected at least internal/wrkqd")
 	}
 
-	// internal/cli is a well-known dependent.
+	// internal/wrkqd is a well-known dependent.
 	foundCLI := false
 	for _, dep := range area.Dependents {
-		if strings.Contains(dep, "internal/cli") {
+		if strings.Contains(dep, "internal/wrkqd") {
 			foundCLI = true
 			break
 		}
 	}
 	if !foundCLI {
-		t.Errorf("ExplainArea Dependents does not contain internal/cli; got: %v", area.Dependents)
+		t.Errorf("ExplainArea Dependents does not contain internal/wrkqd; got: %v", area.Dependents)
 	}
 
 	// Key exported symbols must be present.

@@ -41,9 +41,6 @@ source:
   - internal/wrkqapi/findlistview.go
   - internal/rpccli/set.go
   - internal/rpccli/find.go
-  - internal/cli/touch.go
-  - internal/cli/set.go
-  - internal/cli/find.go
 required_tests: []
 last_verified: null
 reopen_when:

@@ -17,7 +17,7 @@ var trackedDocs = []string{
 	"docs/wrkf-rpc.md",
 	"docs/change-validation.md",
 	"docs/enablement-changelog.md",
-	"internal/cli/embedded/WRKQ-USAGE.md",
+	"internal/rpccli/embedded/WRKQ-USAGE.md",
 	// architecture/ durable-law surface: keep its router + ADR provenance reachable.
 	// (Generated projections INVARIANTS.md/RISKS.md/index.jsonl are gated by
 	// cmd/architecture-records, not here.)

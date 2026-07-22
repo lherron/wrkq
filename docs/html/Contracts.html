@@ -1045,7 +1045,7 @@ type TaskRelationDTO = { // Directed relation between two task records.
   created_at: string // Relation creation timestamp.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/cat.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/rpccli/cat.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
             
             <article class="contract-object wrkq" id="container-dto">
@@ -1078,7 +1078,7 @@ type ContainerDTO = { // Hierarchical project/subproject container returned by c
   archived_at?: string // Soft archive timestamp when hidden from default views.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/cli/container_cat.go</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/rpccli/container.go</span></div>
             </article>
             
             <article class="contract-object wrkq" id="comment-dto">
@@ -1185,7 +1185,7 @@ type EventDTO = { // Append-only audit event returned by watch and history.
   payload?: string | Record&lt;string, unknown&gt; // Event-specific JSON payload or raw encoded JSON.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/cli/handoff.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/rpccli/handoff.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
           </section>
 
@@ -1211,7 +1211,7 @@ type EventDTO = { // Append-only audit event returned by watch and history.
   truncated: boolean // True when more records are available after this page.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/cli/handoff_list.go</span>, <span class="inline-code">internal/cli/handoff_search.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/rpccli/handoff.go</span>, <span class="inline-code">internal/rpccli/handoff.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
             
             <article class="contract-object ops" id="agent-context-dto">
@@ -1255,7 +1255,7 @@ type ActorDTO = { // Actor row used for attribution and diagnostics.
   role?: string // Optional actor role label.
 }</code></pre>
 </div>
-              <div class="source-note">Source: <span class="inline-code">internal/cli/agent_context.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/rpccli/agent_context.go</span>, <span class="inline-code">docs/SPEC.md</span></div>
             </article>
           </section>
 
@@ -1686,7 +1686,7 @@ type HookSpecDTO = { // Executable hook constraints and IO contract.
               <article class="panel">
                 <span class="badge wrkq">wrkq</span>
                 <h3>Resource and CLI sources</h3>
-                <p class="minor"><span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/cli/watch.go</span>, and <span class="inline-code">docs/SPEC.md</span>.</p>
+                <p class="minor"><span class="inline-code">internal/domain/types.go</span>, <span class="inline-code">internal/store/handoffs.go</span>, <span class="inline-code">internal/rpccli/watch.go</span>, and <span class="inline-code">docs/SPEC.md</span>.</p>
               </article>
               <article class="panel">
                 <span class="badge wrkf">wrkf</span>

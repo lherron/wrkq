@@ -29,7 +29,7 @@ package workrpc_test
 //      tear the watcher down when its SSE client goes away.
 //
 // NOTE on scope: `wrkq monitor watch` surfaces only task.* and comment.* events
-// (see isEventIncluded in internal/cli/monitor.go). container.* events are NOT
+// (see isEventIncluded in internal/rpccli/monitor.go). container.* events are NOT
 // in the typed feed by design — for a recursive container delete the observable
 // invalidation signal is the per-task `task.purged` event for each contained
 // task; the client then refetches the container listing via RPC.

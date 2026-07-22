@@ -35,7 +35,9 @@ func TestNoProductionContextFreeDispatchCallSites(t *testing.T) {
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	searchRoots := []string{
-		filepath.Join(repoRoot, "internal", "cli"),
+		filepath.Join(repoRoot, "internal", "rpccli"),
+		filepath.Join(repoRoot, "internal", "wrkqapi"),
+		filepath.Join(repoRoot, "internal", "wrkqd"),
 		filepath.Join(repoRoot, "internal", "store"),
 	}
 

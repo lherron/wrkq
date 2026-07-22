@@ -37,7 +37,6 @@ const TASK_CONTRACT_FIELD_PATTERNS = [
 ];
 
 const TASK_CONTRACT_PATH_PREFIXES = [
-  "internal/cli/",
   "internal/rpccli/",
   "internal/wrkqapi/",
   "internal/store/",

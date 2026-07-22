@@ -23,12 +23,12 @@ while path-owning admin/daemon surfaces remain path-only.
   `not-started`, `rpc-gap`, or `seam-smoke` rows in the migration matrix.
 - `TestCoreRuleImportGuard` keeps `internal/rpccli` from importing durable
   behavior through `store`, `wrkqapi`, direct `db`, SQL, search sidecars, or
-  `internal/cli`.
+  `internal/admincli` or `internal/wrkqd`.
 - `docs/rpc-cli-migration.md` now reads like a completed implementation matrix,
   not just a gap report, and records bundle as sunset.
-- `internal/cli` cannot be deleted wholesale: it also contains `wrkqadm` and
-  `wrkqd` HTTP daemon code. The cutover target is `cmd/wrkq`, then legacy
-  day-to-day command files inside `internal/cli`.
+- The legacy `internal/cli` package is removed. Surviving `wrkqadm` local
+  lifecycle code lives in `internal/admincli`; the authenticated daemon HTTP/
+  workrpc surface lives in `internal/wrkqd`.
 - Configuration now has `DBLocator`, local `DBPath`, and `RemoteEndpoint`.
   `WRKQ_DB` accepts local paths or `rpc://host[:port]`; path-owning
   compatibility inputs reject `rpc://` before `db.Open`.
@@ -184,7 +184,7 @@ remote production support on it.
    - stop installing the mirror command by default;
    - remove the pre-cutover comparison build target after contract tests replace it.
 5. Add a structural guard:
-   - `cmd/wrkq` must not import `internal/cli`;
+   - `cmd/wrkq` must not import `internal/admincli` or `internal/wrkqd`;
    - retained `internal/rpccli` commands must not import forbidden durable
      packages;
    - production help must not include bundle after the sunset phase.
@@ -230,16 +230,15 @@ Manual installed-binary smoke must use the real installed `wrkq` on PATH, not
 Record the exact installed commands and outputs on the cutover task before
 closing it.
 
-## Phase 5: remove legacy day-to-day CLI code
+## Phase 5: remove legacy day-to-day CLI code (completed by T-06762)
 
 After installed `wrkq` is RPC-backed and smoke-tested:
 
-1. Delete or quarantine legacy `internal/cli` day-to-day command files:
+1. Delete legacy `internal/cli` day-to-day command files:
    task/container/comment/attachment/relation/search/index/handoff/watch/monitor
    command handlers that are no longer called by `cmd/wrkq`.
-2. Keep or move the `wrkqadm` and `wrkqd` pieces:
-   - either leave `internal/cli` as admin/daemon-only;
-   - or split to `internal/admincli` and `internal/wrkqdhttp` in a follow-up.
+2. Move `wrkqadm` pieces to `internal/admincli` and daemon pieces to
+   `internal/wrkqd`.
 3. Convert pre-cutover comparison parity tests into RPC-backed command contract tests:
    - retained commands get golden/semantic tests against `cmd/wrkq`;
    - transport tests stay in `internal/rpccli`;
@@ -442,7 +441,7 @@ Not part of the RPC CLI cutover:
 7. Swap `cmd/wrkq` to `internal/rpccli`.
 8. Stop installing the mirror command.
 9. Run `just verify-full`, `just install`, and installed smokes.
-10. Remove/quarantine legacy day-to-day `internal/cli` code and retire
+10. Remove legacy day-to-day `internal/cli` code and retire
     pre-cutover comparison oracle tests.
 11. Finish T-04317 before remote `wrkqd` transport is called production.
 12. Add `WRKQ_DB=rpc://max3[:port]` locator support and the `wrkqd` remote
@@ -451,6 +450,6 @@ Not part of the RPC CLI cutover:
 14. Refresh DTO docs/contracts (T-05264).
 15. Resume feature work such as caused-by (T-04229) on the RPC-backed surface.
 
-As of 2026-06-29, items 1-10, 12, and 13 are implemented and validated. Item
+As of 2026-07-21, items 1-10, 12, and 13 are implemented and validated. Item
 11 remains the remote-production blocker; item 14 is follow-up documentation
 refresh after the final public contract is accepted.

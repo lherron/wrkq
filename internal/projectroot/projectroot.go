@@ -1,12 +1,12 @@
 // Package projectroot holds the neutral project-root path/selector transform that
-// both the legacy CLI (internal/cli) and the RPC-backed mirror (internal/rpccli)
-// apply to raw user arguments BEFORE they become RPC params or store lookups.
+// the production RPC-backed CLI applies to raw user arguments BEFORE they
+// become RPC params.
 //
 // Project-root scoping is CLI caller semantics, not a server read-model concern:
 // the RPC methods receive already-scoped selectors/paths and never read
 // WRKQ_PROJECT_ROOT / ASP_PROJECT / --project. Keeping the transform here (rather
-// than duplicated in cli and rpccli) is what prevents the two surfaces from
-// drifting — there is exactly one implementation, exercised by one test suite.
+// rather than duplicated across commands keeps one implementation exercised by
+// one test suite.
 package projectroot
 
 import (
@@ -128,8 +128,8 @@ func applyToken(root, token string) string {
 // ResolveProjectFlag resolves a --project selector (path, slug, or ID) to a
 // canonical project path, used to OVERRIDE the configured project root. This is
 // the one piece that needs database access; it stays neutral (depends only on
-// selectors + the db handle), so the mirror can reuse it without importing
-// internal/cli.
+// selectors + the db handle), so rpccli can reuse it without importing an
+// administrative or daemon adapter.
 func ResolveProjectFlag(database *db.DB, projectSelector string) (string, error) {
 	selector := strings.TrimSpace(projectSelector)
 	if selector == "" {

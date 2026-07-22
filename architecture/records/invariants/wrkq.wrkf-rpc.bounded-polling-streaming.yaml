@@ -4,7 +4,8 @@ status: active
 owner_project: wrkq
 scope: monitor + watch live-tailing crossing the wrkq/wrkf RPC boundary
 predicate: >
-  The `wrkq monitor watch|wait` and `wrkq watch` (+ `monitor watch --raw`) live-tailing
+  The `wrkq monitor watch|wait`, `wrkq watch` (+ `monitor watch --raw`), and
+  `wrkf watch` live-tailing
   surfaces cross the client↔server RPC boundary as BOUNDED POLLING read models — there
   is NO server push / subscribe / long-lived stream in RPC v1 (daedalus ruling #10211).
   The SERVER owns ONLY stateless, bounded read models: wrkq.monitor.eventsView returns a
@@ -46,15 +47,18 @@ source:
   - internal/rpccli/monitor.go                  # monitor watch|wait (client: poll loop, timeout/stall clocks, terminal line, exit codes)
   - internal/rpccli/watch.go                    # watch / monitor --raw (client: follow loop, deprecation warning, human/NDJSON render)
   - internal/workrpc/registry.go                # method + DTO catalog registration (both wrkq + wrkf entrypoints via RegisterAPI)
+  - internal/wrkfapi/gaps.go                    # bounded workflow snapshot/event page handlers
+  - internal/wrkfcli/watch.go                   # wrkf client-owned poll loop and terminal predicate
 required_tests:
   - internal/rpccli/parity_test.go              # production contract monitor/*, production contract watch/*
   - internal/rpccli/transport_test.go           # TestTransportEquivalence_InProcVsSubprocess (eventsView/stateView/tailView arms)
   - internal/wrkqapi/monitorview_test.go        # TestMonitorEventsView_* (incl. _LastNGapIndependent: --last N start cursor = MIN(id)-1 over last N existing rows, gap-independent) / TestMonitorStateView_* / TestHistoryTailView_*
   - internal/wrkqapi/catview_fingerprint_test.go # TestMonitorViewDTOFingerprint, TestHistoryTailViewDTOFingerprint
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (eventsView/stateView/tailView + DTOs)
+  - internal/wrkfcli/watch_test.go               # wrkf bounded polling, cursor identity, and terminal behavior
 last_verified:
-  date: 2026-06-30
-  evidence: "T-05381 record update: monitor/history read-model DTOs are principal-only intent; package compile check go test -run TestDoesNotExist ./internal/wrkqapi ./internal/workrpc green."
+  date: 2026-07-21
+  evidence: "T-06757/T-06760 migrated wrkf watch to bounded workrpc snapshot/event pages with import/entrypoint guards; T-06761 exercised the installed remote verb surface from max3 against mini."
 reopen_when:
   - a server push / subscribe / long-lived stream is introduced for monitor or watch
   - the server is given ownership of the timeout/stall clocks or the terminal NDJSON line

@@ -273,7 +273,7 @@ func newCommentCatCmd() *cobra.Command {
 		Short: "Print comment details",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Legacy comment cat output selection (internal/cli/comment_cat.go):
+			// Legacy comment cat output selection (internal/rpccli/comment.go):
 			//   json   := --json OR (non-TTY AND !raw AND !ndjson)
 			//   ndjson := --ndjson
 			//   human  := default TTY (header+body) / --raw (body only), `---`-joined

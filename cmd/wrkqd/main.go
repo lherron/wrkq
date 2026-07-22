@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lherron/wrkq/internal/cli"
+	"github.com/lherron/wrkq/internal/wrkqd"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 	nodeTokensFile := flag.String("node-tokens-file", os.Getenv("WRKQD_NODE_TOKENS_FILE"), "File of per-node bearer tokens, one nodeId=token per line")
 	flag.Parse()
 
-	opts := cli.DaemonOptions{
+	opts := wrkqd.DaemonOptions{
 		Addr:           *addr,
 		Unix:           *unixPath,
 		Token:          *token,
@@ -28,7 +28,7 @@ func main() {
 		NodeTokensFile: *nodeTokensFile,
 	}
 
-	if err := cli.ServeDaemon(opts); err != nil {
+	if err := wrkqd.ServeDaemon(opts); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

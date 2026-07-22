@@ -13,7 +13,7 @@ This spec migrates the wrkf CLI to the same transport seam wrkq uses, adds the s
 
 ## 2. Ground truth (scouted 2026-07-21)
 
-- **Server side already exists.** The unified registry (`internal/workrpc/registry.go`) serves 58 `wrkf.*` methods next to the full `wrkq.*` surface. wrkqd mounts the same registry (`internal/cli/daemon.go:96-99`), so wrkqd on mini serves `wrkf.*` over `/v1/rpc` today. `wrkf rpc --stdio` serves the same catalog (entrypoint equivalence enforced by `internal/workrpc/entrypoint_equivalence_test.go`).
+- **Server side already exists.** The unified registry (`internal/workrpc/registry.go`) serves 58 `wrkf.*` methods next to the full `wrkq.*` surface. wrkqd mounts the same registry (`internal/wrkqd/daemon.go:96-99`), so wrkqd on mini serves `wrkf.*` over `/v1/rpc` today. `wrkf rpc --stdio` serves the same catalog (entrypoint equivalence enforced by `internal/workrpc/entrypoint_equivalence_test.go`).
 - **The gap is client-side only.** wrkf commands run `withApp(needsDB)` → `db.Open` + `workflow.NewService` per command (`internal/wrkfcli/root.go:86-131`); no Transport seam.
 - **The pattern to mirror** is `internal/rpccli`: one `Transport.Call(ctx, method, params)` interface; InProcess / Subprocess / Remote implementations; switch once at construction (`internal/rpccli/transport.go:425-452`); `rpc://host[:port]` locator parsing with default port 7171 in `internal/config` (`config.go:215-243`); bearer/node auth from `WRKQD_TOKEN`/`WRKQD_TOKEN_FILE` (`transport.go:413-423`); mandatory `rpc.initialize` + schema-hash validation before business dispatch; importguard forbidding store/db imports from command paths.
 - **Coverage matrix:** most wrkf commands map 1:1 onto existing methods. Six commands have no covering method (§5). Two families are structurally coupled to the daemon host's filesystem (§6, §7).
@@ -65,7 +65,7 @@ Every new method carries the full contract obligation set (standing ruling): reg
 
 **Decision (ratified):** content-bearing request shapes — client reads the file, sends the template body (and for `diff`, both bodies) in params. The path-based variant is **deleted with this change** (not deferred to S8): local InProcess uses the same content DTO, so a colocated path fast path buys only split semantics. Caps: **1 MiB per decoded template body, 2 MiB aggregate for diff**, server-authoritative with client preflight. A diagnostic `sourceName` may accompany the body but is never interpreted as a daemon path. `workflow validate`/`diff` route through RPC in remote mode for engine-version-consistent validation; in local mode InProcess makes this equivalent.
 
-**Envelope bound (daedalus find):** wrkqd's HTTP endpoint currently decodes an unbounded body (`internal/cli/daemon.go:348-355`); the existing 8 MiB workrpc envelope cap applies only in the stdio codec. Apply `http.MaxBytesReader` to `/v1/rpc` before JSON decode.
+**Envelope bound (daedalus find):** wrkqd's HTTP endpoint currently decodes an unbounded body (`internal/wrkqd/daemon.go:348-355`); the existing 8 MiB workrpc envelope cap applies only in the stdio codec. Apply `http.MaxBytesReader` to `/v1/rpc` before JSON decode.
 
 ## 8. D6 — Hook execution locus (the real design question)
 
@@ -118,7 +118,7 @@ New methods change `protocolSchemaHash`; `rpc.initialize` hard-fails on skew (by
 
 Supersedes the internal/cli compat-freeze. After S7 passes on the real topology:
 
-1. **Inventory first.** `internal/cli` splits into legacy command registrations (delete) and load-bearing plumbing (relocate): `ServeDaemon` + daemon HTTP surface (`internal/cli/daemon.go`), wrkqadm config flows, migration tooling. The deletion PR names every survivor and its new home.
+1. **Inventory first.** `internal/cli` splits into legacy command registrations (delete) and load-bearing plumbing (relocate): `ServeDaemon` + daemon HTTP surface (`internal/wrkqd/daemon.go`), wrkqadm config flows, migration tooling. The deletion PR names every survivor and its new home.
 2. **Caller sweep before deletion** across justfile, scripts, skills (spaces-repo, agent homes), docs, and sibling repos — deletion must be a surface no-op.
 3. wrkf: remove the direct-DB `withApp` path and the rpc:// rejection branch; local mode exists only via InProcess transport.
 4. wrkq: binary remains `rpccli.ExecuteAs("wrkq")` only; legacy registrations deleted.

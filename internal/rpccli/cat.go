@@ -283,7 +283,7 @@ type catBlocker struct {
 }
 
 // writeCatRaw reproduces legacy cat's byte-stable markdown rendering (front matter
-// + description + comments) for each task, mirroring internal/cli/cat.go lines
+// + description + comments) for each task, mirroring internal/rpccli/cat.go lines
 // 461-595. The interactive styled view is intentionally omitted (TTY-only, never
 // byte-tested).
 func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComments bool) error {

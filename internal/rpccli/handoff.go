@@ -235,7 +235,7 @@ func runHandoffCreate(cmd *cobra.Command, f handoffCreateFlags) error {
 	}
 
 	// CALLER-side scope resolution + self-scope enforcement (the server never
-	// reads env). Mirrors internal/cli/handoff_create.go:123-134.
+	// reads env). Mirrors internal/rpccli/handoff.go:123-134.
 	resolved, diags, resolveErr := scope.Resolve(strings.TrimSpace(f.scopeOverride))
 	if resolveErr != nil {
 		return writeHandoffError(stderr, mode, 2, "scope_unresolvable", "", resolveErr.Error(), diags, handoffScopeExample)
@@ -1056,7 +1056,7 @@ func changedStringFlag(cmd *cobra.Command, name string) string {
 
 // classifyHandoffAckError maps RPC errors to the legacy exit codes: 4 not found,
 // 5 already acknowledged, 6 etag mismatch, 1 otherwise. Mirrors
-// internal/cli/handoff_acknowledge.go classifyHandoffAckError.
+// internal/rpccli/handoff.go classifyHandoffAckError.
 func classifyHandoffAckError(cmd *cobra.Command, tr Transport, stderr io.Writer, mode handoffOutputMode, idOrUUID string, err error) error {
 	re, ok := err.(*Error)
 	if !ok {

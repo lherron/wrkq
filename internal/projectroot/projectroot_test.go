@@ -7,7 +7,7 @@ import (
 )
 
 // TestTransform is the single, shared proof of the project-root transform that
-// both the legacy CLI and the RPC-backed mirror apply. Keeping it here (rather
+// all production rpccli commands apply. Keeping it here (rather
 // than duplicated per surface) is what enforces "one implementation, one test" —
 // the invariant daedalus required for path-taking commands.
 func TestTransform(t *testing.T) {

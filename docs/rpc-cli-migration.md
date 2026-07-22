@@ -19,7 +19,8 @@ standing record of retained, local-only, and sunset surfaces.
 
 - **Transport seam** — `internal/rpccli`'s `Transport` interface is the only path
   to durable wrkq behavior. Command adapters never import `store`, `wrkqapi`,
-  `db`/SQL, or `internal/cli`; this is enforced by `TestCoreRuleImportGuard`.
+  `db`/SQL, `internal/admincli`, or `internal/wrkqd`; this is enforced by
+  `TestCoreRuleImportGuard`.
 - **In-process transport** drives the *real* `workrpc.Server.Serve` loop over
   pipes (same codec, `rpc.initialize` gating, dispatch, `MapError`, stdout-purity
   redirection as `wrkq rpc --stdio`).
@@ -28,17 +29,16 @@ standing record of retained, local-only, and sunset surfaces.
   agree. This is the on-ramp for a future `wrkqd` daemon transport.
 - **Neutral construction** — `internal/workrpc/bootstrap` builds the
   `*wrkfapi.API` + `workrpc.RegistryOptions` for both the stdio entrypoint and
-  the mirror, so they cannot drift. `internal/cli/rpc.go` was refactored to use
-  it (no behavior change).
+  production rpccli, so they cannot drift. `internal/rpccli/rpc.go` uses it for
+  the local stdio entrypoint.
 - **Project-root scoping is CLI caller semantics** — the neutral
   `internal/projectroot` package holds the ONE project-root transform
-  (`ApplyToPath`/`ApplyToSelector`/`ApplyToPaths` + `ResolveProjectFlag`). Both
-  the legacy CLI (`internal/cli/project_root.go` + appctx delegate to it) and the
-  mirror's `scoper` (`internal/rpccli/scope.go`, built in `openMirror` from the
+  (`ApplyToPath`/`ApplyToSelector`/`ApplyToPaths` + `ResolveProjectFlag`). The
+  production scoper (`internal/rpccli/scope.go`, built in `openMirror` from the
   bootstrap handle config + `--project` override) apply it to raw path/selector
   args BEFORE any RPC param is sent. RPC methods receive already-scoped selectors
   and never read `WRKQ_PROJECT_ROOT` / `ASP_PROJECT` / `--project`. One
-  implementation, one test suite (`projectroot.TestTransform`); parity proven with
+  implementation, one test suite (`projectroot.TestTransform`); rpccli parity proven with
   a project root set (`production contract pr/*`: ls + cat/stat + touch/set/mv +
   `ASP_PROJECT` + `--project` override) and an installed smoke under real config.
 
@@ -194,7 +194,7 @@ identity/event invariants):
 
 ### `cp` → proposed `wrkq.task.copy`
 
-**Legacy behavior** (`internal/cli/cp.go`): a deep, per-source-task copy into a
+**Retired oracle behavior** (the pre-S8 direct-store `cp` implementation): a deep, per-source-task copy into a
 destination container. For each source task it (1) copies the mutable task fields
 into a NEW task in the destination (or upserts an existing same-slug task when
 `--overwrite`); (2) copies attachment **metadata** rows, and with
