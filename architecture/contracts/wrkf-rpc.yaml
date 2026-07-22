@@ -98,8 +98,8 @@ required_tests:
   - "bun test packages/client/test/workflow-template-discontinue-contract.test.ts"
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
-  date: 2026-07-21
-  evidence: "T-06755..T-06761 shared-client migration, registry/DTO additions, template/hook isolation, import/entrypoint/golden guards, typed-client exact-version publish, and authenticated max3→mini installed proof green."
+  date: 2026-07-22
+  evidence: "T-06755..T-06761 shared-client migration proof plus T-06783 at 33c598a: registry/schema/client guards, workflow/RPC terminalization tests, full just verify, and isolated scratch-prefix installed-binary drive green."
 reopen_when:
   - WRKF_* code set changes
   - retryable semantics change
@@ -108,5 +108,7 @@ reopen_when:
   - attachDiscontinued moves off wrkq.workflow.attach or stops crossing @wrkq/client
   - wrkq.project listView/root DTO or setRoot name, params, CAS, attribution, or result changes
   - the project-root producer/client slice diverges from wrkq.project-root-registry
+  - wrkf.instance.cancel or wrkf.suspension.resolve terminalization names, params, result DTOs, state/revision gates, or token-free summaries change
+  - registry, schema hash, CLI, or @wrkq/client diverges from the instance-terminalization producer surface
 supersedes: []
 superseded_by: null

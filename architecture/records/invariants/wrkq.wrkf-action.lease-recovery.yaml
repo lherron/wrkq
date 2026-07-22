@@ -2,40 +2,64 @@ id: wrkq.wrkf-action.lease-recovery
 kind: invariant
 status: active
 owner_project: wrkq
-scope: wrkf.action lease expiry
+scope: wrkf.action lease authority recovery and explicit revocation
 predicate: >
   Coordinator-owned wrkf.action runs may opt into durable leases. A leased active
   action run carries one current lease token and non-secret owner/expiry/heartbeat
   audit fields. Lease TTL expiry only makes a claim contestable: no timer, CLI
   command, RPC method, or service path mutates the run at expiry. Settlement with
-  current token authority remains valid after expiry. A successor must acknowledge
-  the latest predecessor by run id; that claim atomically terminalizes the
-  predecessor as superseded, revokes its token, links the successor, and appends a
-  succession ledger event. Only supersession, never wall-clock expiry, refuses a
-  late settle.
+  current token authority remains valid after expiry unless that authority is
+  explicitly revoked. Before holder settlement, revocation has exactly two external
+  paths. First, a successor must acknowledge the latest predecessor by run id; that
+  claim atomically terminalizes
+  the predecessor as superseded, revokes its token, links the successor, and appends
+  a succession ledger event. Second, an explicit instance terminalization, either
+  suspension close/cancel under a matching suspension id or active unsuspended
+  instance cancel, atomically
+  terminalizes every active run, clears each token, and records the terminal cause
+  and run-finished event in the same transaction as the instance transition. Resume
+  preserves active-run authority. These paths reuse priorRun, the matching suspension
+  id, and ordinary revision CAS; they introduce no expiry gate or additional bearer.
+  Only acknowledged succession or explicit atomic instance terminalization, never
+  wall-clock expiry alone, refuses a late settle.
 authority:
   repo: wrkq
-  surface: wrkf.action.* over workflow_runs and ledger_entry
+  surface: wrkf.action.* and explicit workflow-instance terminalization over workflow_runs and ledger_entry
 source:
   - internal/db/migrations/000034_workflow_action_leases.sql
   - internal/db/migrations/000043_workflow_action_succession.sql
   - internal/workflow/action.go
   - internal/workflow/action_claim_test.go
   - internal/workflow/action_settle_test.go
+  - internal/workflow/instance_cancel.go
+  - internal/workflow/instance_terminalization.go
+  - internal/workflow/suspension_resolve.go
+  - internal/workflow/terminal_disposition_test.go
   - internal/wrkqd/daemon.go
   - internal/wrkfapi/action.go
   - internal/workrpc/registry.go
+  - internal/workrpc/instance_cancel_acceptance_test.go
   - internal/workrpc/wrkfaction_acceptance_test.go
 required_tests:
   - TestClaimActionAcknowledgesNamedPredecessor
   - TestLateSettleWithoutSuccessorIsAccepted
+  - TestResolveSuspensionResumePreservesActiveRunAuthorityAndHolderSettles
+  - TestResolveSuspensionTerminalDispositionAtomicallyRevokesAllActiveRuns
+  - TestResolveSuspensionTerminalizationFailureRollsBackEveryMutation
+  - TestWrkfInstanceCancelUnsuspendedRevokesRunAndRejectsLateSettle
+  - TestWrkfInstanceCancelStaleRevisionIsAtomicNoOp
+  - TestWrkfInstanceCancelSuspendedRequiresMatchingResolution
 last_verified:
-  date: 2026-07-12
-  evidence: "T-06266 validation: claim succession and late-settle service/RPC tests plus isolated installed-surface smoke"
+  date: 2026-07-22
+  evidence: "T-06266 succession/late-settle proof plus T-06783 at 33c598a: focused workflow/RPC authority tests, full just verify, and isolated scratch-prefix installed-binary drive covering resume, suspension close/cancel, and unsuspended instance cancel"
 reopen_when:
   - any expiry-time process mutates or terminalizes an action run
   - a settle decision consults wall-clock expiry rather than token revocation
   - a successor can claim without naming and reviewing the latest predecessor
   - supersession fails to revoke the predecessor token or append ledger lineage
+  - suspension resume changes any active run authority field
+  - suspension close/cancel or unsuspended instance cancel can commit without atomically terminalizing every active run, clearing its token, and recording its terminal cause
+  - instance cancel bypasses the active-unsuspended state gate or suspension close/cancel bypasses the matching suspension id
+  - explicit instance terminalization adds a new lease-authority credential or wall-clock control point beyond priorRun, matching suspension id, and ordinary revision CAS
 supersedes: []
 superseded_by: null
