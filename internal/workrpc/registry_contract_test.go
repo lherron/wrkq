@@ -42,9 +42,9 @@ var requiredMethods = []string{
 	// wrkf namespace — workflow install, transition, instance, (§6.3).
 	"wrkf.workflow.install",
 	"wrkf.transition.apply",
-		"wrkf.instance.show",
-		"wrkf.instance.next",
-		"wrkf.instance.cancel",
+	"wrkf.instance.show",
+	"wrkf.instance.next",
+	"wrkf.instance.cancel",
 	"wrkf.event.query",
 	"wrkf.role.list",
 	"wrkf.role.bind",

@@ -240,6 +240,34 @@ func TestResolveSuspensionTerminalDispositionAtomicallyRevokesAllActiveRuns(t *t
 	}
 }
 
+func TestResolveSuspensionTerminalizationFailureRollsBackEveryMutation(t *testing.T) {
+	f := setupTerminalDispositionFixture(t)
+	const triggerName = "test_fail_terminal_run_finished"
+	triggerSQL := fmt.Sprintf(`CREATE TRIGGER %s
+		BEFORE INSERT ON workflow_events
+		WHEN NEW.type = 'workflow.run_finished' AND NEW.run_id = '%s'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected terminalization event failure');
+		END`, triggerName, f.extraActiveRun.ID)
+	if _, err := f.svc.db.Exec(triggerSQL); err != nil {
+		t.Fatalf("install terminalization failure trigger: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.svc.db.Exec("DROP TRIGGER IF EXISTS " + triggerName) })
+
+	before := terminalDispositionMutationSnapshot(t, f)
+	revision := f.suspended.Revision
+	_, err := f.svc.ResolveSuspension(ResolveSuspensionParams{
+		SuspensionID: f.suspended.Suspension.ID, Disposition: DispositionCancel,
+		ExpectRevision: &revision, PrincipalRef: "agent:supervisor", Role: "supervisor",
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected terminalization event failure") {
+		t.Fatalf("terminalization failure injection error = %v, want injected event failure", err)
+	}
+	if after := terminalDispositionMutationSnapshot(t, f); after != before {
+		t.Fatalf("failed terminal disposition committed a partial mutation:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
 func TestResolveSuspensionWrongIDAndStaleRevisionPreserveInstanceRunsAndLedger(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -110,9 +110,14 @@ func TestWrkfInstanceCancelUnsuspendedRevokesRunAndRejectsLateSettle(t *testing.
 		_ = database.Close()
 		t.Fatalf("read instance cancel event: %v", err)
 	}
+	var taskState string
+	if err := database.QueryRow(`SELECT state FROM tasks WHERE id = ?`, f.taskID).Scan(&taskState); err != nil {
+		_ = database.Close()
+		t.Fatalf("read task state after instance cancel: %v", err)
+	}
 	_ = database.Close()
-	if status == "active" || token != "" || completedAt == "" || !strings.Contains(cause, "cancel") || !strings.Contains(cause, eventID) || eventType != "workflow.instance_cancelled" {
-		t.Fatalf("cancelled run/event = status %q token %q completed %q cause %q event %q", status, token, completedAt, cause, eventType)
+	if status == "active" || token != "" || completedAt == "" || !strings.Contains(cause, "cancel") || !strings.Contains(cause, eventID) || eventType != "workflow.instance_cancelled" || taskState != "cancelled" {
+		t.Fatalf("cancelled run/event/task = status %q token %q completed %q cause %q event %q task %q", status, token, completedAt, cause, eventType, taskState)
 	}
 
 	late := p3Run(t, f.dbPath, mkRPC("late-settle", "wrkf.action.settle", map[string]any{
