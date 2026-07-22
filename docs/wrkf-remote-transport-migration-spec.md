@@ -96,6 +96,11 @@ Both conditions' behaviors receive ordinary unit coverage within their implement
 - Every migrated command: byte-identical local output vs pre-migration (golden tests), plus an `rpc://mini` smoke.
 - `wrkf task attach/refresh/inspect/timeline` route to `wrkq.workflow.*` (task-side, D2).
 - Guards (S6): importguard on wrkf command paths permits the shared `internal/workrpc/client` package and forbids direct bootstrap/db/workflow imports (sanctioned local-execution carve-outs: evidence exec, watch loop); entrypoint-equivalence extension; golden-parity suite as CI guard.
+- S6 enforcement keeps local registry/database construction inside
+  `internal/workrpc/client`, gives `watch.go` the sole workflow-import carve-out,
+  exercises the guard's direct-store red control, freezes representative local
+  read/validate/mutate/hook output bytes, extends entrypoint equivalence through
+  `workflow.install`, and advances the evidenced surfaceguard baseline.
 - Condition-2 server work (mutex narrowing, `transition --run-checks` decomposition, timeout ceiling) is its own slot (S5b) so S5 stays a client/template migration slot.
 
 ## 10. D8 — Version skew & coordinated landing

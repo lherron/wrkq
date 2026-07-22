@@ -3,8 +3,6 @@ package wrkfcli
 import (
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 func TestActionSettleSummaryReadsStdinVerbatim(t *testing.T) {
@@ -43,25 +41,5 @@ func TestActionSettleRejectsMultipleStdinTextFlags(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stdin already claimed by --summary") {
 		t.Fatalf("error = %q, want first claimant", err)
-	}
-}
-
-func TestWithAppResolvesStdinTextFlagsBeforeCommand(t *testing.T) {
-	var summary string
-	cmd := &cobra.Command{
-		Use: "test",
-		RunE: withApp(false, func(_ *app, _ *cobra.Command, _ []string) error {
-			if summary != "through withApp\n" {
-				t.Fatalf("summary = %q, want stdin text", summary)
-			}
-			return nil
-		}),
-	}
-	cmd.Flags().StringVar(&summary, "summary", "", "")
-	cmd.SetArgs([]string{"--summary", "-"})
-	cmd.SetIn(strings.NewReader("through withApp\n"))
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
 	}
 }

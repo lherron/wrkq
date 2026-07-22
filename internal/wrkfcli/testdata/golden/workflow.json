@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "golden_flow",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "initial": { "status": "active", "phase": "ready" },
+  "roles": { "coordinator": { "description": "Coordinates the golden flow" } },
+  "states": [
+    { "status": "active", "phase": "ready" },
+    { "status": "closed", "outcome": "done" }
+  ],
+  "transitions": [{
+    "id": "complete",
+    "from": { "status": "active", "phase": "ready" },
+    "by": ["coordinator"],
+    "outcomes": [{
+      "id": "done",
+      "when": { "always": true },
+      "to": { "status": "closed", "outcome": "done" }
+    }]
+  }]
+}

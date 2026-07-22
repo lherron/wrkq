@@ -51,7 +51,7 @@ const watchCLITestTemplate = `{
 }`
 
 func TestWatchCLIExitCodeMapping(t *testing.T) {
-	a, taskUUID, database := watchCLIFixture(t)
+	a, taskUUID, database, _ := watchCLIFixture(t)
 
 	for _, tc := range []struct {
 		name  string
@@ -85,7 +85,7 @@ func TestWatchCLIExitCodeMapping(t *testing.T) {
 }
 
 func TestWatchSuspendedBlocksUntilRealPark(t *testing.T) {
-	a, taskUUID, _ := watchCLIFixture(t)
+	a, taskUUID, _, svc := watchCLIFixture(t)
 	var out bytes.Buffer
 	cmd := testWatchCmd()
 	cmd.SetOut(&out)
@@ -94,7 +94,7 @@ func TestWatchSuspendedBlocksUntilRealPark(t *testing.T) {
 		done <- runWatch(a, cmd, taskUUID, watchFlags{until: workflow.WatchUntilSuspended, timeout: "2s", pollInterval: "5ms"})
 	}()
 	time.Sleep(20 * time.Millisecond)
-	if _, err := a.service.Transition(taskUUID, "park", workflow.TransitionOptions{PrincipalRef: "agent:watch", Role: "coordinator"}); err != nil {
+	if _, err := svc.Transition(taskUUID, "park", workflow.TransitionOptions{PrincipalRef: "agent:watch", Role: "coordinator"}); err != nil {
 		t.Fatalf("Transition park: %v", err)
 	}
 	if err := <-done; err != nil {
@@ -106,12 +106,12 @@ func TestWatchSuspendedBlocksUntilRealPark(t *testing.T) {
 }
 
 func TestWatchFollowEmitsEventsAndSingleSummary(t *testing.T) {
-	a, taskUUID, _ := watchCLIFixture(t)
-	run, err := a.service.StartRun(taskUUID, "coordinator", "agent:watch", workflow.StartRunOptions{})
+	a, taskUUID, _, svc := watchCLIFixture(t)
+	run, err := svc.StartRun(taskUUID, "coordinator", "agent:watch", workflow.StartRunOptions{})
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
-	if _, err := a.service.FinishRun(run.ID, "completed", "done"); err != nil {
+	if _, err := svc.FinishRun(run.ID, "completed", "done"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestWatchFollowEmitsEventsAndSingleSummary(t *testing.T) {
 	}
 }
 
-func watchCLIFixture(t *testing.T) (*app, string, *db.DB) {
+func watchCLIFixture(t *testing.T) (*app, string, *db.DB, *workflow.Service) {
 	t.Helper()
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "watch_cli.db"))
@@ -206,7 +206,7 @@ func watchCLIFixture(t *testing.T) (*app, string, *db.DB) {
 	}
 	t.Cleanup(func() { _ = transport.Close() })
 
-	return &app{service: svc, transport: transport}, taskUUID, database
+	return &app{transport: transport}, taskUUID, database, svc
 }
 
 func testWatchCmd() *cobra.Command {

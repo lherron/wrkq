@@ -2,9 +2,9 @@ id: wrkq.rpc.remote-transport-locator
 kind: invariant
 status: active
 owner_project: wrkq
-scope: wrkq CLI database locator, remote workrpc transport, and transport-derived logical-node identity
+scope: wrkq/wrkf CLI database locator, shared remote workrpc transport, and transport-derived logical-node identity
 predicate: >
-  Day-to-day `wrkq` commands select their durability endpoint through a database
+  Day-to-day `wrkq` and `wrkf` commands select their durability endpoint through a database
   locator, not always a filesystem path. `WRKQ_DB` and the production `wrkq --db`
   flag MAY accept either a local SQLite path or a remote wrkq semantic RPC endpoint
   (`rpc://host[:port]`, default port owned by wrkqd). `WRKQ_DB_PATH`,
@@ -53,7 +53,7 @@ authority:
   repo: wrkq
   surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
 enforced_by: >
-  Locator parsing and workrpc transport selection; rpccli initialize validation of
+  Locator parsing and shared workrpc/client transport selection; wrkq/wrkf initialize validation of
   protocol version, schema hash, and required method/capability surface before
   business dispatch; daemon and bootstrap migration-readiness refusal before RPC
   exposure; nodeauth token-to-node resolution, shared-token supersession, and
@@ -63,6 +63,10 @@ exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser, tra
 source:
   - docs/rpc-cli-cutover-plan.md
   - internal/config/config.go
+  - internal/workrpc/client/transport.go
+  - internal/workrpc/client/local.go
+  - internal/wrkfcli/transport.go
+  - internal/wrkfcli/importguard_test.go
   - internal/rpccli/transport.go
   - internal/rpccli/remote_initialize_negative_test.go
   - internal/rpccli/server.go
@@ -81,11 +85,16 @@ required_tests:
   - internal/cli/daemon_nodeauth_test.go
   - internal/cli/daemon_migration_gate_test.go
   - internal/rpccli/remote_initialize_negative_test.go
+  - internal/wrkfcli/importguard_test.go
+  - internal/workrpc/entrypoint_equivalence_test.go
   - just verify
 last_verified:
-  date: 2026-07-20
+  date: 2026-07-21
   evidence: >
-    Activated after T-06598/T-06599 established the live max3→mini locator and
+    T-06755/T-06760 extracted the shared workrpc client, migrated wrkf local and
+    remote construction behind it, added a build-failing wrkf adapter import
+    guard, and extended wrkq/wrkf entrypoint equivalence through a wrkf mutation.
+    Previously activated after T-06598/T-06599 established the live max3→mini locator and
     server-derived node identity boundary (C-11027/C-11029); T-06644 added
     pre-dispatch schema-hash and required-surface refusal plus server-owned
     migration-readiness negatives; T-06645 isolated local-command tests from the

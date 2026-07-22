@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/spf13/cobra"
 )
@@ -93,15 +92,9 @@ func openConfiguredTransport(cmd *cobra.Command) (workrpcclient.Transport, *conf
 		}
 		return tr, cfg, func() { _ = tr.Close() }, nil
 	}
-	h, err := bootstrap.OpenWithHookCatalog(cfg.DBLocator, flagHookCatalog)
+	tr, localCfg, err := workrpcclient.NewConfiguredInProcess(cfg.DBLocator, flagHookCatalog, "wrkf", workrpcclient.WrkfProfile)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	h.Opts.Entrypoint = "wrkf"
-	tr, err := workrpcclient.NewInProcess(h, workrpcclient.WrkfProfile)
-	if err != nil {
-		_ = h.Close()
-		return nil, nil, nil, err
-	}
-	return tr, h.Config, func() { _ = tr.Close() }, nil
+	return tr, localCfg, func() { _ = tr.Close() }, nil
 }

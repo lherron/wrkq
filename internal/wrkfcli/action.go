@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/spf13/cobra"
 )
@@ -184,10 +183,10 @@ func actionNextCmd() *cobra.Command {
 			if len(args) > 0 {
 				task = args[0]
 			}
-			result, err := rpcCall[wrkfapi.ActionNextResult](cmd, a, "wrkf.action.next", workflow.ActionNextParams{
+			result, err := rpcCall[wrkfapi.ActionNextResult](cmd, a, "wrkf.action.next", wrkfapi.ActionNextParams{
 				Task:       task,
 				InstanceID: opts.instanceID,
-				Filters: workflow.ActionNextFilters{
+				Filters: wrkfapi.ActionNextFilters{
 					Actions:        cliFilterList(opts.actionFilter),
 					Roles:          cliFilterList(opts.role),
 					Statuses:       cliFilterList(opts.status),
@@ -243,10 +242,10 @@ Follow error.fix and retry with --prior-run when predecessor review is required.
 			if value := strings.TrimSpace(opts.priorRun); value != "" && value != "null" {
 				priorRun = &value
 			}
-			result, err := rpcCall[wrkfapi.ActionClaimResult](cmd, a, "wrkf.action.claim", workflow.ClaimActionParams{
+			result, err := rpcCall[wrkfapi.ActionClaimResult](cmd, a, "wrkf.action.claim", wrkfapi.ActionClaimParams{
 				Task:       task,
 				InstanceID: opts.instanceID,
-				Prefer: workflow.ActionClaimPrefer{
+				Prefer: wrkfapi.ActionClaimPrefer{
 					SemanticActionKey: opts.semanticActionKey,
 					Action:            opts.actionFilter,
 				},

@@ -23,8 +23,8 @@ func TestEntrypointEquivalence(t *testing.T) {
 	wrkqDB := migratedDB(t)
 	wrkfDB := migratedDB(t)
 
-	wrkqInit, wrkqList, wrkqDomain := runRPCSequence(t, "wrkq", wrkqDB)
-	wrkfInit, wrkfList, wrkfDomain := runRPCSequence(t, "wrkf", wrkfDB)
+	wrkqInit, wrkqList, wrkqInstall, wrkqDomain := runRPCSequence(t, "wrkq", wrkqDB)
+	wrkfInit, wrkfList, wrkfInstall, wrkfDomain := runRPCSequence(t, "wrkf", wrkfDB)
 
 	if wrkqInit["protocolVersion"] != "2026-06-30" || wrkfInit["protocolVersion"] != "2026-06-30" {
 		t.Fatalf("protocolVersion mismatch: wrkq=%v wrkf=%v", wrkqInit["protocolVersion"], wrkfInit["protocolVersion"])
@@ -47,6 +47,9 @@ func TestEntrypointEquivalence(t *testing.T) {
 	if !reflect.DeepEqual(wrkqList, wrkfList) {
 		t.Fatalf("sample success differs\nwrkq=%#v\nwrkf=%#v", wrkqList, wrkfList)
 	}
+	if !reflect.DeepEqual(wrkqInstall, wrkfInstall) {
+		t.Fatalf("wrkf mutation differs\nwrkq=%#v\nwrkf=%#v", wrkqInstall, wrkfInstall)
+	}
 	if !reflect.DeepEqual(wrkqDomain, wrkfDomain) {
 		t.Fatalf("sample domain error differs\nwrkq=%#v\nwrkf=%#v", wrkqDomain, wrkfDomain)
 	}
@@ -58,19 +61,20 @@ func TestEntrypointEquivalence(t *testing.T) {
 	}
 }
 
-func runRPCSequence(t *testing.T, entrypoint, dbPath string) (map[string]any, map[string]any, map[string]any) {
+func runRPCSequence(t *testing.T, entrypoint, dbPath string) (map[string]any, map[string]any, map[string]any, map[string]any) {
 	t.Helper()
 	frames := runRPC(t, entrypoint, dbPath, []string{
 		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"2026-06-30","client":{"name":"test","version":"0.0.1"}}}`,
 		`{"jsonrpc":"2.0","id":"list","method":"wrkf.workflow.list","params":{}}`,
+		`{"jsonrpc":"2.0","id":"install","method":"wrkf.workflow.install","params":{"body":"{\"schemaVersion\":\"wrkf.workflow-template.v0\",\"id\":\"entrypoint_equivalence\",\"version\":\"1\",\"kind\":\"agent_first_workflow\",\"initial\":{\"status\":\"active\",\"phase\":\"ready\"},\"roles\":{\"coordinator\":{}},\"states\":[{\"status\":\"active\",\"phase\":\"ready\"},{\"status\":\"closed\",\"outcome\":\"done\"}],\"transitions\":[{\"id\":\"complete\",\"from\":{\"status\":\"active\",\"phase\":\"ready\"},\"by\":[\"coordinator\"],\"outcomes\":[{\"id\":\"done\",\"when\":{\"always\":true},\"to\":{\"status\":\"closed\",\"outcome\":\"done\"}}]}]}","sourceName":"entrypoint-equivalence.json","principal_ref":"agent:smokey"}}`,
 		`{"jsonrpc":"2.0","id":"domain","method":"wrkq.task.create","params":{}}`,
 		`{"jsonrpc":"2.0","id":"shutdown","method":"rpc.shutdown","params":{}}`,
 		`{"jsonrpc":"2.0","method":"rpc.exit"}`,
 	})
-	if len(frames) != 4 {
-		t.Fatalf("%s: got %d response frames, want 4: %#v", entrypoint, len(frames), frames)
+	if len(frames) != 5 {
+		t.Fatalf("%s: got %d response frames, want 5: %#v", entrypoint, len(frames), frames)
 	}
-	return resultMap(t, frames[0]), resultMap(t, frames[1]), errorShape(t, frames[2])
+	return resultMap(t, frames[0]), resultMap(t, frames[1]), resultMap(t, frames[2]), errorShape(t, frames[3])
 }
 
 func runPreinitValidation(t *testing.T, entrypoint, dbPath string) map[string]any {

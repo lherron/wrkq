@@ -148,7 +148,7 @@ func TestCheckPackages_WorkrpcOwnership_UnauthorizedFails(t *testing.T) {
 			ID:        "workrpc-ownership",
 			Sources:   []string{"fixture"},
 			Forbidden: []string{"fixture/workrpc"},
-			Except:    []string{"fixture/wrkfcli"},
+			Except:    []string{"fixture/workrpc", "fixture/wrkfcli"},
 		}},
 	}
 	result, err := layerguard.CheckPackages(packages, cfg)
@@ -161,11 +161,12 @@ func TestCheckPackages_WorkrpcOwnership_UnauthorizedFails(t *testing.T) {
 	checkViolationMessage(t, result.Violations[0].Message)
 }
 
-// TestCheckPackages_WorkrpcOwnership_WrkfcliPasses verifies that the excepted package
-// (wrkfcli) importing workrpc produces no violation.
+// TestCheckPackages_WorkrpcOwnership_WrkfcliPasses verifies that the excepted
+// wrkfcli adapter may reach workrpc through the relocated shared client seam.
 func TestCheckPackages_WorkrpcOwnership_WrkfcliPasses(t *testing.T) {
 	packages := []layerguard.PackageEntry{
 		{ImportPath: "fixture/wrkfcli", Dir: "testdata/workrpc-ownership/wrkfcli"},
+		{ImportPath: "fixture/workrpc/client", Dir: "testdata/workrpc-ownership/client"},
 		{ImportPath: "fixture/workrpc", Dir: "testdata/workrpc-ownership/workrpc"},
 	}
 	cfg := layerguard.Config{
@@ -173,7 +174,7 @@ func TestCheckPackages_WorkrpcOwnership_WrkfcliPasses(t *testing.T) {
 			ID:        "workrpc-ownership",
 			Sources:   []string{"fixture"},
 			Forbidden: []string{"fixture/workrpc"},
-			Except:    []string{"fixture/wrkfcli"},
+			Except:    []string{"fixture/workrpc", "fixture/wrkfcli"},
 		}},
 	}
 	result, err := layerguard.CheckPackages(packages, cfg)
@@ -181,7 +182,7 @@ func TestCheckPackages_WorkrpcOwnership_WrkfcliPasses(t *testing.T) {
 		t.Fatalf("CheckPackages: %v", err)
 	}
 	if len(result.Violations) != 0 {
-		t.Errorf("wrkfcli→workrpc must PASS (excepted), got violations: %+v", result.Violations)
+		t.Errorf("wrkfcli→workrpc/client→workrpc must PASS (excepted), got violations: %+v", result.Violations)
 	}
 }
 

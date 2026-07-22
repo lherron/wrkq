@@ -2,7 +2,6 @@ package wrkfcli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,10 +13,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/scope"
-	"github.com/lherron/wrkq/internal/workflow"
-	"github.com/lherron/wrkq/internal/workrpc"
 	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/lherron/wrkq/internal/wrkqapi"
@@ -25,16 +21,12 @@ import (
 )
 
 type app struct {
-	db          *db.DB
-	service     *workflow.Service
-	actor       string
-	wrkqActor   string
-	role        string
-	json        bool
-	hookCatalog *workflow.HookCatalog
-	hookPath    string
-	transport   workrpcclient.Transport
-	remote      bool
+	actor     string
+	wrkqActor string
+	role      string
+	json      bool
+	transport workrpcclient.Transport
+	remote    bool
 }
 
 var rootCmd = &cobra.Command{
@@ -86,67 +78,6 @@ func init() {
 	rootCmd.AddCommand(versionCmd())
 }
 
-func withApp(needsDB bool, fn func(*app, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		if err := resolveStdinTextFlags(cmd); err != nil {
-			return err
-		}
-		hookPath, err := workflow.ResolveHookCatalogPath(flagHookCatalog)
-		if err != nil {
-			return fmt.Errorf("failed to resolve hook catalog: %w", err)
-		}
-		actor, wrkqActor, err := actorDefaults(cmd)
-		if err != nil {
-			return err
-		}
-		a := &app{actor: actor, wrkqActor: wrkqActor, role: roleDefault(), json: flagJSON, hookPath: hookPath}
-		cat, err := workflow.LoadHookCatalog(hookPath)
-		if err != nil {
-			return fmt.Errorf("failed to load hook catalog: %w", err)
-		}
-		a.hookCatalog = cat
-		if needsDB {
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-			if flagDB != "" {
-				if err := config.ApplyDBLocator(cfg, flagDB, true); err != nil {
-					return err
-				}
-			}
-			if cfg.RemoteEndpoint != "" {
-				return fmt.Errorf("wrkf requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
-			}
-			if cfg.DBPath == "" {
-				return config.MissingDatabasePathError()
-			}
-			database, err := db.Open(cfg.DBPath)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = database.Close() }()
-			if err := database.RequiresMigrationError(); err != nil {
-				return err
-			}
-			a.db = database
-			a.service = workflow.NewService(database)
-		}
-		runErr := fn(a, cmd, args)
-		if runErr != nil && flagJSON {
-			if errorAlreadyReported(runErr) {
-				return runErr
-			}
-			renderJSONErrorEnvelope(cmd, runErr)
-			if exit, ok := runErr.(cliExitError); ok {
-				return exitErrorReported(exit.code, runErr)
-			}
-			return errReported
-		}
-		return runErr
-	}
-}
-
 // errReported signals that a command error has already been rendered (as a
 // --json envelope on stdout); main.go uses IsReported to avoid printing the
 // text "Error: ..." line to stderr while still exiting non-zero.
@@ -161,9 +92,9 @@ func IsReported(err error) bool {
 // stdout (F1). It prefers the typed workflow ErrorDetail; otherwise it
 // synthesizes a best-effort envelope from any coded error.
 func renderJSONErrorEnvelope(cmd *cobra.Command, err error) {
-	detail, ok := workflow.AsErrorDetail(err)
+	detail, ok := wrkfapi.AsErrorDetail(err)
 	if !ok {
-		detail = workflow.ErrorDetail{Code: codeFromError(err), Message: err.Error()}
+		detail = wrkfapi.ErrorDetail{Code: codeFromError(err), Message: err.Error()}
 	}
 	b, _ := json.MarshalIndent(map[string]any{"error": detail}, "", "  ")
 	fmt.Fprintln(cmd.OutOrStdout(), string(b))
@@ -261,7 +192,7 @@ func workflowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := rpcCall[workflow.ValidateResult](cmd, a, "wrkf.workflow.validate", wrkfapi.WorkflowContentParams{Body: body, SourceName: args[0]})
+			result, err := rpcCall[wrkfapi.ValidateResult](cmd, a, "wrkf.workflow.validate", wrkfapi.WorkflowContentParams{Body: body, SourceName: args[0]})
 			if err != nil {
 				return err
 			}
@@ -514,7 +445,7 @@ func nextCmd() *cobra.Command {
 		Use:  "next TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			resp, err := rpcCall[workflow.NextActionResponse](cmd, a, "wrkf.instance.next", map[string]any{"task": args[0], "role": a.role})
+			resp, err := rpcCall[wrkfapi.NextActionResponse](cmd, a, "wrkf.instance.next", map[string]any{"task": args[0], "role": a.role})
 			if err != nil {
 				return err
 			}
@@ -533,7 +464,7 @@ func evidenceCmd() *cobra.Command {
 			if kind == "" || ref == "" {
 				return fmt.Errorf("--kind and --ref are required")
 			}
-			ev, err := rpcCall[workflow.Evidence](cmd, a, "wrkf.evidence.add", wrkfapi.EvidenceAddParams{
+			ev, err := rpcCall[wrkfapi.Evidence](cmd, a, "wrkf.evidence.add", wrkfapi.EvidenceAddParams{
 				TaskSelector: args[0],
 				Kind:         kind,
 				Ref:          ref,
@@ -558,7 +489,7 @@ func evidenceCmd() *cobra.Command {
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			ev, err := rpcCall[[]workflow.Evidence](cmd, a, "wrkf.evidence.list", map[string]any{"task": args[0]})
+			ev, err := rpcCall[[]wrkfapi.Evidence](cmd, a, "wrkf.evidence.list", map[string]any{"task": args[0]})
 			if err != nil {
 				return err
 			}
@@ -569,7 +500,7 @@ func evidenceCmd() *cobra.Command {
 		Use:  "show EVIDENCE",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			ev, err := rpcCall[workflow.Evidence](cmd, a, "wrkf.evidence.show", map[string]any{"id": args[0]})
+			ev, err := rpcCall[wrkfapi.Evidence](cmd, a, "wrkf.evidence.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -636,7 +567,7 @@ func evidenceCmd() *cobra.Command {
 			}
 			dataJSON, _ := json.Marshal(dataDoc)
 			ref := "command:" + strings.Join(commandArgs, " ")
-			ev, addErr := rpcCall[workflow.Evidence](cmd, a, "wrkf.evidence.add", wrkfapi.EvidenceAddParams{
+			ev, addErr := rpcCall[wrkfapi.Evidence](cmd, a, "wrkf.evidence.add", wrkfapi.EvidenceAddParams{
 				TaskSelector: task,
 				Kind:         kind,
 				Ref:          ref,
@@ -676,7 +607,7 @@ func ledgerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, err := rpcCall[workflow.LedgerEntry](cmd, a, "wrkf.ledger.append", workflow.AppendLedgerParams{
+			entry, err := rpcCall[wrkfapi.LedgerEntry](cmd, a, "wrkf.ledger.append", wrkfapi.LedgerAppendParams{
 				TaskID: appendTask, Kind: appendKind, AboutPrincipalRef: appendAbout, Body: body,
 			})
 			if err != nil {
@@ -685,7 +616,7 @@ func ledgerCmd() *cobra.Command {
 			if flagJSON {
 				return printJSON(cmd, entry)
 			}
-			return printLedger(cmd, []workflow.LedgerEntry{entry}, "", false)
+			return printLedger(cmd, []wrkfapi.LedgerEntry{entry}, "", false)
 		}),
 	}
 	appendCmd.Flags().StringVar(&appendTask, "task", "", "Task selector")
@@ -700,7 +631,7 @@ func ledgerCmd() *cobra.Command {
 		Use:  "list",
 		Args: cobra.NoArgs,
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			result, err := rpcCall[wrkfapi.LedgerListResult](cmd, a, "wrkf.ledger.list", workflow.ListLedgerParams{
+			result, err := rpcCall[wrkfapi.LedgerListResult](cmd, a, "wrkf.ledger.list", wrkfapi.LedgerListParams{
 				TaskID: listTask, AboutPrincipalRef: listPrincipal, Kind: listKind, Since: listSince, Until: listUntil, Limit: listLimit, Cursor: listCursor,
 			})
 			if err != nil {
@@ -736,9 +667,9 @@ func readLedgerBody(cmd *cobra.Command, source string) (json.RawMessage, error) 
 	return json.RawMessage(b), nil
 }
 
-func printLedger(cmd *cobra.Command, entries []workflow.LedgerEntry, nextCursor string, ndjson bool) error {
+func printLedger(cmd *cobra.Command, entries []wrkfapi.LedgerEntry, nextCursor string, ndjson bool) error {
 	if flagJSON {
-		return printJSON(cmd, workflow.LedgerListResult{Entries: entries, NextCursor: nextCursor})
+		return printJSON(cmd, wrkfapi.LedgerListResult{Entries: entries, NextCursor: nextCursor})
 	}
 	if ndjson {
 		for _, entry := range entries {
@@ -771,7 +702,7 @@ func obligationCmd() *cobra.Command {
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			obl, err := rpcCall[[]workflow.Obligation](cmd, a, "wrkf.obligation.list", map[string]any{"task": args[0], "all": all})
+			obl, err := rpcCall[[]wrkfapi.Obligation](cmd, a, "wrkf.obligation.list", map[string]any{"task": args[0], "all": all})
 			if err != nil {
 				return err
 			}
@@ -783,7 +714,7 @@ func obligationCmd() *cobra.Command {
 		Use:  "show OBLIGATION",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			obl, err := rpcCall[workflow.Obligation](cmd, a, "wrkf.obligation.show", map[string]any{"id": args[0]})
+			obl, err := rpcCall[wrkfapi.Obligation](cmd, a, "wrkf.obligation.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -796,7 +727,7 @@ func obligationCmd() *cobra.Command {
 			Use:  use + " TASK OBLIGATION",
 			Args: cobra.ExactArgs(2),
 			RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-				obl, err := rpcCall[workflow.Obligation](cmd, a, "wrkf.obligation."+use, wrkfapi.ObligationStatusParams{
+				obl, err := rpcCall[wrkfapi.Obligation](cmd, a, "wrkf.obligation."+use, wrkfapi.ObligationStatusParams{
 					TaskSelector: args[0], ID: args[1], EvidenceID: evidenceID, Reason: reason, PrincipalRef: a.actor, Role: a.role,
 				})
 				if err != nil {
@@ -819,7 +750,7 @@ func effectCmd() *cobra.Command {
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			effects, err := rpcCall[[]workflow.Effect](cmd, a, "wrkf.effect.list", map[string]any{"task": args[0], "all": true})
+			effects, err := rpcCall[[]wrkfapi.Effect](cmd, a, "wrkf.effect.list", map[string]any{"task": args[0], "all": true})
 			if err != nil {
 				return err
 			}
@@ -830,7 +761,7 @@ func effectCmd() *cobra.Command {
 		Use:  "show EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.show", map[string]any{"id": args[0]})
+			eff, err := rpcCall[wrkfapi.Effect](cmd, a, "wrkf.effect.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -854,7 +785,7 @@ func effectCmd() *cobra.Command {
 			if claimAdapter == "" {
 				claimAdapter = a.actor
 			}
-			claim, err := rpcCall[workflow.EffectClaim](cmd, a, "wrkf.effect.claim", wrkfapi.EffectClaimParams{
+			claim, err := rpcCall[wrkfapi.EffectClaim](cmd, a, "wrkf.effect.claim", wrkfapi.EffectClaimParams{
 				Adapter: claimAdapter, Limit: limit, LeaseMs: leaseMs, TaskSelector: taskSelector, Kind: kind,
 			})
 			if err != nil {
@@ -871,7 +802,7 @@ func effectCmd() *cobra.Command {
 		Use:  "ack EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.ack", wrkfapi.EffectAckParams{
+			eff, err := rpcCall[wrkfapi.Effect](cmd, a, "wrkf.effect.ack", wrkfapi.EffectAckParams{
 				EffectID: args[0], LeaseToken: leaseToken, Force: force,
 			})
 			if err != nil {
@@ -886,7 +817,7 @@ func effectCmd() *cobra.Command {
 		Use:  "deliver EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			out, err := rpcCall[workflow.EffectDelivery](cmd, a, "wrkf.effect.deliver", wrkfapi.EffectDeliverParams{EffectID: args[0], Adapter: a.actor})
+			out, err := rpcCall[wrkfapi.EffectDelivery](cmd, a, "wrkf.effect.deliver", wrkfapi.EffectDeliverParams{EffectID: args[0], Adapter: a.actor})
 			if err != nil {
 				return err
 			}
@@ -897,7 +828,7 @@ func effectCmd() *cobra.Command {
 		Use:  "fail EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.fail", wrkfapi.EffectFailParams{
+			eff, err := rpcCall[wrkfapi.Effect](cmd, a, "wrkf.effect.fail", wrkfapi.EffectFailParams{
 				EffectID: args[0], LeaseToken: leaseToken, Reason: reason, Force: force,
 			})
 			if err != nil {
@@ -913,7 +844,7 @@ func effectCmd() *cobra.Command {
 		Use:  "retry EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.retry", map[string]any{"effectId": args[0]})
+			eff, err := rpcCall[wrkfapi.Effect](cmd, a, "wrkf.effect.retry", map[string]any{"effectId": args[0]})
 			if err != nil {
 				return err
 			}
@@ -930,7 +861,7 @@ func checkCmd() *cobra.Command {
 		Short: "Run workflow checks",
 		Args:  cobra.ExactArgs(2),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			resp, err := rpcCall[workflow.NextActionResponse](cmd, a, "wrkf.check.preflight", map[string]any{"task": args[0], "transition": args[1], "role": a.role})
+			resp, err := rpcCall[wrkfapi.NextActionResponse](cmd, a, "wrkf.check.preflight", map[string]any{"task": args[0], "transition": args[1], "role": a.role})
 			if err != nil {
 				return err
 			}
@@ -954,7 +885,7 @@ func checkCmd() *cobra.Command {
 		Use:  "show CHECK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			cr, err := rpcCall[workflow.CheckRun](cmd, a, "wrkf.check.show", map[string]any{"id": args[0]})
+			cr, err := rpcCall[wrkfapi.CheckRun](cmd, a, "wrkf.check.show", map[string]any{"id": args[0]})
 			if err != nil {
 				return err
 			}
@@ -966,7 +897,7 @@ func checkCmd() *cobra.Command {
 		Use:  "list TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			checks, err := rpcCall[[]workflow.CheckRun](cmd, a, "wrkf.check.list", map[string]any{"task": args[0], "transition": listTransition})
+			checks, err := rpcCall[[]wrkfapi.CheckRun](cmd, a, "wrkf.check.list", map[string]any{"task": args[0], "transition": listTransition})
 			if err != nil {
 				return err
 			}
@@ -978,7 +909,7 @@ func checkCmd() *cobra.Command {
 		Use:  "preflight TASK TRANSITION",
 		Args: cobra.ExactArgs(2),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			resp, err := rpcCall[workflow.NextActionResponse](cmd, a, "wrkf.check.preflight", map[string]any{"task": args[0], "transition": args[1], "role": a.role})
+			resp, err := rpcCall[wrkfapi.NextActionResponse](cmd, a, "wrkf.check.preflight", map[string]any{"task": args[0], "transition": args[1], "role": a.role})
 			if err != nil {
 				return err
 			}
@@ -1225,7 +1156,7 @@ func hookCmd() *cobra.Command {
 			if hookID == "" {
 				return fmt.Errorf("--hook is required")
 			}
-			out, err := rpcCall[workflow.CheckRun](cmd, a, "wrkf.hook.run", wrkfapi.HookRunParams{
+			out, err := rpcCall[wrkfapi.CheckRun](cmd, a, "wrkf.hook.run", wrkfapi.HookRunParams{
 				TaskSelector: args[0], Transition: args[1], HookID: hookID, PrincipalRef: a.actor, Role: a.role,
 			})
 			if err != nil {
@@ -1262,86 +1193,24 @@ func rpcCmd() *cobra.Command {
 				if flagHookCatalog != "" {
 					return fmt.Errorf("--hook-catalog is local-only; hook catalog is canonical-node configuration in remote mode")
 				}
-				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, wrkqdTokenFromEnv())
+				return workrpcclient.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, workrpcclient.TokenFromEnv())
 			}
-			return withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-				if !stdio {
-					return fmt.Errorf("--stdio is required")
-				}
-				api := wrkfapi.New(
-					a.service,
-					wrkfapi.WithHookCatalog(a.hookCatalog),
-					wrkfapi.WithTemplateDir(workflow.HookCatalogDir(a.hookPath)),
-				)
-				// Load the real wrkq config so the wrkf rpc entrypoint serves
-				// attachments with the SAME attach dir / size limit as the wrkq
-				// entrypoint (T-04448 entrypoint equivalence).
-				attachDir := ""
-				attachMaxMB := 0
-				// search host config so the wrkf rpc entrypoint serves the same
-				// server-owned search/index methods as the wrkq entrypoint (T-05114
-				// entrypoint equivalence — the method is registered on BOTH entrypoints).
-				var searchCfg wrkqapi.SearchConfig
-				if cfg, cerr := config.Load(); cerr == nil {
-					attachDir = rpcAttachDir(cfg.AttachDir)
-					attachMaxMB = cfg.AttachmentsMaxMB
-					searchCfg = wrkqapi.SearchConfig{
-						Enabled:          cfg.Search.Enabled,
-						CanonicalDBPath:  a.db.Path(),
-						DBPath:           cfg.Search.DBPath,
-						DenseProvider:    cfg.Search.DenseProvider,
-						DenseBaseURL:     cfg.Search.DenseBaseURL,
-						DenseModel:       cfg.Search.DenseModel,
-						DenseDimension:   cfg.Search.DenseDimension,
-						QueryInstruction: cfg.Search.QueryInstruction,
-						IndexBatchSize:   cfg.Search.IndexBatchSize,
-						CandidateLimit:   cfg.Search.CandidateLimit,
-					}
-				}
-				srv := workrpc.NewServer(os.Stdout)
-				workrpc.RegisterAPI(srv, api, workrpc.RegistryOptions{
-					Database:         a.db,
-					DatabasePath:     a.db.Path(),
-					ServerVersion:    Version,
-					Entrypoint:       "wrkf",
-					DefaultActor:     a.actor,
-					WrkqDefaultActor: a.wrkqActor,
-					UseWrkqDefault:   true,
-					DefaultRole:      a.role,
-					AttachDir:        attachDir,
-					AttachmentsMaxMB: attachMaxMB,
-					Search:           searchCfg,
-				})
-				return srv.Serve(context.Background(), os.Stdin)
-			})(cmd, args)
+			actor, wrkqActor, err := actorDefaults(cmd)
+			if err != nil {
+				return err
+			}
+			return workrpcclient.ServeConfiguredLocalStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.DBLocator, flagHookCatalog, workrpcclient.LocalServerOptions{
+				Entrypoint:       "wrkf",
+				ServerVersion:    Version,
+				DefaultActor:     actor,
+				WrkqDefaultActor: wrkqActor,
+				UseWrkqDefault:   true,
+				DefaultRole:      roleDefault(),
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&stdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")
 	return cmd
-}
-
-func wrkqdTokenFromEnv() string {
-	if token := strings.TrimSpace(os.Getenv("WRKQD_TOKEN")); token != "" {
-		return token
-	}
-	if path := strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")); path != "" {
-		if b, err := os.ReadFile(path); err == nil {
-			return strings.TrimSpace(string(b))
-		}
-	}
-	return ""
-}
-
-// rpcAttachDir resolves the attachment storage directory for the RPC server,
-// returning only an explicitly configured directory. An empty result makes
-// attachment.add report WRKQ_VALIDATION rather than silently writing to an
-// implicit host path. Mirrors internal/workrpc/bootstrap.AttachDir so both
-// entrypoints behave identically.
-func rpcAttachDir(configured string) string {
-	if env := os.Getenv("WRKQ_ATTACH_DIR"); env != "" {
-		return env
-	}
-	return configured
 }
 
 func supervisorCmd() *cobra.Command {
@@ -1366,7 +1235,7 @@ func supervisorCmd() *cobra.Command {
 		Use:  "call TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.supervisor.call", wrkfapi.SupervisorParams{TaskSelector: args[0], Reason: reason})
+			eff, err := rpcCall[wrkfapi.Effect](cmd, a, "wrkf.supervisor.call", wrkfapi.SupervisorParams{TaskSelector: args[0], Reason: reason})
 			if err != nil {
 				return err
 			}
@@ -1380,7 +1249,7 @@ func supervisorCmd() *cobra.Command {
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			switch args[1] {
 			case "escalate":
-				eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.supervisor.escalate", wrkfapi.SupervisorParams{TaskSelector: args[0], Reason: reason})
+				eff, err := rpcCall[wrkfapi.Effect](cmd, a, "wrkf.supervisor.escalate", wrkfapi.SupervisorParams{TaskSelector: args[0], Reason: reason})
 				if err != nil {
 					return err
 				}
@@ -1402,7 +1271,7 @@ func supervisorCmd() *cobra.Command {
 				if len(args) < 3 {
 					return fmt.Errorf("create-obligation action requires obligation kind")
 				}
-				obl, err := rpcCall[workflow.Obligation](cmd, a, "wrkf.obligation.create", wrkfapi.ObligationCreateParams{
+				obl, err := rpcCall[wrkfapi.Obligation](cmd, a, "wrkf.obligation.create", wrkfapi.ObligationCreateParams{
 					TaskSelector: args[0], Kind: args[2], OwnerRole: "supervisor", Blocking: true, Reason: reason,
 				})
 				if err != nil {
