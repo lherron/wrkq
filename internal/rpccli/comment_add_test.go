@@ -87,3 +87,41 @@ func TestCommentAddMessageFlag(t *testing.T) {
 		t.Fatalf("stored body mismatch: %q", stored)
 	}
 }
+
+func TestCommentAddWritesCreatedEvent(t *testing.T) {
+	dbPath, taskID := migratedDBWithTask(t)
+
+	cmd := NewRootCmdFor("wrkq")
+	cmd.SetArgs([]string{
+		"--db", dbPath,
+		"--principal-ref", "agent:test-user",
+		"comment", "add", taskID, "-m", "event-backed comment",
+	})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("comment add failed: %v\noutput:\n%s", err, out.String())
+	}
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	var eventType string
+	err = database.QueryRow(`
+		SELECT e.event_type
+		FROM event_log e
+		JOIN comments c ON c.uuid = e.resource_uuid
+		WHERE c.task_uuid = ? AND c.body = ?
+	`, seedTaskUUID, "event-backed comment").Scan(&eventType)
+	if err != nil {
+		t.Fatalf("query comment event: %v", err)
+	}
+	if eventType != "comment.created" {
+		t.Fatalf("event_type = %q, want comment.created", eventType)
+	}
+}
