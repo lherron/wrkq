@@ -27,7 +27,7 @@ func newFindCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, reverse, ackPending, print0 bool
 	var limit int
 	var cursorTok, typeFilter, sort string
-	var slugGlob, state, dueBefore, dueAfter, kind, assignee, claimedBy, claimedNode, parentTask, requestedBy, assignedProject, causedBy string
+	var slugGlob, state, dueBefore, dueAfter, kind, assignee, claimedBy, claimedNode, parentTask, requestedBy, assignedProject, causedBy, campaign string
 	cmd := &cobra.Command{
 		Use:   "find [PATH...]",
 		Short: "Search for tasks and containers",
@@ -46,7 +46,10 @@ func newFindCmd() *cobra.Command {
 
 			// Legacy: applyProjectRootToPaths(args, defaultToRoot=true). The scoper
 			// reproduces caller semantics; the server never reads project-root.
-			scoped := sc.paths(args, true)
+			var scoped []string
+			if campaign == "" || len(args) > 0 {
+				scoped = sc.paths(args, true)
+			}
 
 			params := map[string]any{}
 			if len(scoped) > 0 {
@@ -106,6 +109,9 @@ func newFindCmd() *cobra.Command {
 			}
 			if reverse {
 				params["reverse"] = true
+			}
+			if campaign != "" {
+				params["campaign"] = campaign
 			}
 
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.findListView", params)
@@ -214,6 +220,7 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Filter by assignee project ID")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)")
 	cmd.Flags().BoolVar(&ackPending, "ack-pending", false, "Filter for ack-pending tasks (completed/cancelled, not yet acknowledged)")
+	cmd.Flags().StringVar(&campaign, "campaign", "", "Find resident and enrolled members of a campaign")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Limit number of results")
 	cmd.Flags().StringVar(&cursorTok, "cursor", "", "Pagination cursor")
 	cmd.Flags().StringVar(&sort, "sort", "", "Sort by field: updated_at, created_at, id, path")
@@ -316,6 +323,7 @@ type findResult struct {
 	CreatedAt            string   `json:"created_at"`
 	UpdatedAt            string   `json:"updated_at"`
 	ETag                 int64    `json:"etag"`
+	Membership           string   `json:"membership,omitempty"`
 }
 
 // decodeFindResults unmarshals the server projection items into the legacy

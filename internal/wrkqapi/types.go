@@ -16,6 +16,7 @@ type WrkqTask struct {
 	Slug                  string         `json:"slug"`
 	Title                 string         `json:"title"`
 	ProjectUUID           string         `json:"projectUuid"`
+	CampaignUUID          string         `json:"campaignUuid,omitempty"`
 	Path                  string         `json:"path"`
 	State                 string         `json:"state"`
 	Priority              int            `json:"priority"`
@@ -260,6 +261,7 @@ type TaskPatch struct {
 	Resolution           *string         `json:"resolution,omitempty"`
 	DueAt                *string         `json:"dueAt,omitempty"`
 	StartAt              *string         `json:"startAt,omitempty"`
+	Campaign             *string         `json:"campaign,omitempty"`
 	// CausedBy replaces the full causal-lineage set. A non-nil pointer to an empty
 	// slice clears it; nil means no change (absent-vs-empty preserved).
 	CausedBy *[]string `json:"causedBy,omitempty"`
@@ -275,7 +277,7 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 		"slug": true, "title": true, "description": true, "specification": true, "state": true,
 		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
 		"assigneePrincipalRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
-		"dueAt": true, "startAt": true, "causedBy": true,
+		"dueAt": true, "startAt": true, "causedBy": true, "campaign": true,
 	}
 	for key := range raw {
 		if !allowed[key] {

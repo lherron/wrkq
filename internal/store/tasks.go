@@ -330,6 +330,9 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		if err != nil {
 			return fmt.Errorf("failed to get task UUID: %w", err)
 		}
+		if err := validateEffectiveMembershipTx(tx, campaignValidation{taskUUIDs: []string{uuid}}); err != nil {
+			return err
+		}
 
 		// Insert causal lineage edges (caused_by) in the same transaction now that
 		// the new task UUID is known.
@@ -600,6 +603,15 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		if err != nil {
 			return fmt.Errorf("failed to update task: %w", err)
 		}
+		_, enrollmentChange := fields["campaign_uuid"]
+		_, projectChange := fields["project_uuid"]
+		if enrollmentChange || projectChange {
+			if err := validateEffectiveMembershipTx(tx, campaignValidation{
+				taskUUIDs: []string{taskUUID}, enrollmentChange: enrollmentChange, move: projectChange,
+			}); err != nil {
+				return err
+			}
+		}
 
 		// Replace the task's caused_by edge set (if a caused_by update was supplied).
 		// Old values are captured first so the event/webhook change summary reports
@@ -673,6 +685,11 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 			eventChanged = append(append([]string{}, fieldNames...), causedByFieldKey)
 			sort.Strings(eventChanged)
 			eventChanges[causedByFieldKey] = webhooks.Change{From: causedByOldIDs, To: newIDs}
+		}
+		if hasStateChange && currentState != newState {
+			if err := StampTaskCampaignContext(tx, taskUUID, payloadFields); err != nil {
+				return err
+			}
 		}
 		changesJSON, err := json.Marshal(payloadFields)
 		if err != nil {
@@ -906,8 +923,26 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 			}
 		}
 		if allAlreadyInTarget {
+			moveUUIDs := make([]string, 0, len(moveSet))
+			for _, mt := range moveSet {
+				moveUUIDs = append(moveUUIDs, mt.uuid)
+			}
+			if err := validateEffectiveMembershipTx(tx, campaignValidation{taskUUIDs: moveUUIDs, move: true}); err != nil {
+				return err
+			}
 			newETag = root.currentETag
 			return nil
+		}
+
+		moveUUIDs := make([]string, 0, len(moveSet))
+		for _, mt := range moveSet {
+			moveUUIDs = append(moveUUIDs, mt.uuid)
+			if _, err := tx.Exec("UPDATE tasks SET project_uuid = ? WHERE uuid = ?", newProjectUUID, mt.uuid); err != nil {
+				return fmt.Errorf("failed to stage task move: %w", err)
+			}
+		}
+		if err := validateEffectiveMembershipTx(tx, campaignValidation{taskUUIDs: moveUUIDs, move: true}); err != nil {
+			return err
 		}
 
 		var newContainerPath string
@@ -915,13 +950,12 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 
 		for _, mt := range moveSet {
 			if _, err := tx.Exec(`
-				UPDATE tasks
-				SET project_uuid = ?,
-					etag = etag + 1,
-					updated_by_principal_ref = ?,
-					updated_by_scope_ref = ?
-				WHERE uuid = ?
-			`, newProjectUUID, attr.PrincipalRef, scopeSQL(attr), mt.uuid); err != nil {
+					UPDATE tasks
+					SET etag = etag + 1,
+						updated_by_principal_ref = ?,
+						updated_by_scope_ref = ?
+					WHERE uuid = ?
+				`, attr.PrincipalRef, scopeSQL(attr), mt.uuid); err != nil {
 				return fmt.Errorf("failed to move task: %w", err)
 			}
 
@@ -1052,8 +1086,10 @@ func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, tas
 			"slug":        slug,
 			"soft_delete": true,
 		}
-		payloadJSON, _ := json.Marshal(payload)
-		payloadStr := string(payloadJSON)
+		payloadStr, err := stampTaskCampaignJSON(tx, taskUUID, payload)
+		if err != nil {
+			return err
+		}
 		newETag := currentETag + 1
 
 		meta, err := ew.LogEventReturning(tx, &domain.Event{
@@ -1177,6 +1213,9 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 		if attachmentCount > 0 {
 			payload["attachment_count"] = attachmentCount
 			payload["bytes_freed"] = totalBytes
+		}
+		if err := StampTaskCampaignContext(tx, taskUUID, payload); err != nil {
+			return err
 		}
 		payloadJSON, _ := json.Marshal(payload)
 		payloadStr := string(payloadJSON)
@@ -1517,7 +1556,10 @@ func cascadeDeleteResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attributi
 		}
 
 		// Log event
-		payload := `{"action":"cascade_deleted","parent_deleted":true}`
+		payload, err := stampTaskCampaignJSON(tx, subtaskUUID, map[string]any{"action": "cascade_deleted", "parent_deleted": true})
+		if err != nil {
+			return err
+		}
 		if err := ew.LogEvent(tx, &domain.Event{
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
@@ -1582,12 +1624,15 @@ func purgeResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attri
 		if err := purgeResidentSubtasks(tx, ew, attr, st.uuid); err != nil {
 			return err
 		}
-		payloadJSON, _ := json.Marshal(map[string]interface{}{
+		payloadMap := map[string]interface{}{
 			"slug":                st.slug,
 			"purged_by":           attr.PrincipalRef,
 			"cascadeRootTaskUuid": parentTaskUUID,
-		})
-		payloadStr := string(payloadJSON)
+		}
+		payloadStr, err := stampTaskCampaignJSON(tx, st.uuid, payloadMap)
+		if err != nil {
+			return err
+		}
 		if err := ew.LogEvent(tx, &domain.Event{
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,

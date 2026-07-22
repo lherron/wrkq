@@ -18,14 +18,15 @@ import (
 // limit+1 / next-cursor truncation over that combined set — exactly as legacy
 // runLs does — so the CLI mirror never re-sorts or re-paginates.
 type LsListViewParams struct {
-	Path          string   `json:"path,omitempty"`
-	Paths         []string `json:"paths,omitempty"`
-	Sort          string   `json:"sort,omitempty"`
-	Reverse       bool     `json:"reverse,omitempty"`
-	Limit         int      `json:"limit,omitempty"`
-	Cursor        string   `json:"cursor,omitempty"`
-	Type          string   `json:"type,omitempty"` // "p" or "t"
-	IncludeHidden bool     `json:"includeHidden,omitempty"`
+	Path                   string   `json:"path,omitempty"`
+	Paths                  []string `json:"paths,omitempty"`
+	Sort                   string   `json:"sort,omitempty"`
+	Reverse                bool     `json:"reverse,omitempty"`
+	Limit                  int      `json:"limit,omitempty"`
+	Cursor                 string   `json:"cursor,omitempty"`
+	Type                   string   `json:"type,omitempty"` // "p" or "t"
+	IncludeHidden          bool     `json:"includeHidden,omitempty"`
+	IncludeCampaignMembers bool     `json:"includeCampaignMembers,omitempty"`
 }
 
 // WrkqLsEntry matches the legacy lsEntry shape exactly (field order + json tags).
@@ -137,6 +138,13 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 				return nil, qerr
 			}
 			entries = append(entries, rows...)
+			if p.IncludeCampaignMembers {
+				campaignRows, qerr := a.lsQueryCampaignEnrollments(ctx, containerUUID, path, p.IncludeHidden, pag)
+				if qerr != nil {
+					return nil, qerr
+				}
+				entries = append(entries, campaignRows...)
+			}
 		}
 		return entries, nil
 	}
@@ -145,6 +153,60 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 		return nil, serr
 	}
 	return append(entries, *single), nil
+}
+
+func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, campaignPath string, includeHidden bool, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+	var campaignState sql.NullString
+	if err := a.db.QueryRowContext(ctx, "SELECT campaign_state FROM containers WHERE uuid = ?", campaignUUID).Scan(&campaignState); err != nil || !campaignState.Valid {
+		return nil, nil
+	}
+	campaignProject := strings.Split(campaignPath, "/")[0]
+	query := `WITH RECURSIVE container_ancestors(task_uuid, uuid, parent_uuid, slug, kind) AS (
+		SELECT t.uuid, c.uuid, c.parent_uuid, c.slug, c.kind
+		  FROM tasks t JOIN containers c ON c.uuid = t.project_uuid
+		UNION ALL
+		SELECT ca.task_uuid, c.uuid, c.parent_uuid, c.slug, c.kind
+		  FROM container_ancestors ca JOIN containers c ON c.uuid = ca.parent_uuid
+	)
+	SELECT t.id, t.slug, t.title, t.created_at, t.updated_at, t.state, t.kind,
+	       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
+	       COALESCE((SELECT slug FROM container_ancestors ca
+	                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), '')
+	  FROM tasks t WHERE t.campaign_uuid = ? AND t.project_uuid != ?`
+	args := []any{campaignUUID, campaignUUID}
+	if !includeHidden {
+		query += ` AND t.state IN ('draft', 'open')`
+	}
+	if pag.WhereClause != "" {
+		query += " AND " + pag.WhereClause
+		args = append(args, pag.Params...)
+	}
+	query += " " + pag.OrderByClause
+	if pag.LimitClause != "" {
+		query += " " + pag.LimitClause
+		args = append(args, *pag.LimitParam)
+	}
+	rows, err := a.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []WrkqLsEntry
+	for rows.Next() {
+		var e WrkqLsEntry
+		var residentProject string
+		if err := rows.Scan(&e.ID, &e.Slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind,
+			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &residentProject); err != nil {
+			return nil, NewInternalError(err)
+		}
+		e.Type = "task"
+		e.Path = e.Slug
+		if residentProject != "" && residentProject != campaignProject {
+			e.Title += " ↗ " + residentProject
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // lsQueryContainers lists child containers under parentExpr (a SQL expression or

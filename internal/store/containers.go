@@ -139,6 +139,9 @@ func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, pa
 		if err != nil {
 			return fmt.Errorf("failed to get container UUID: %w", err)
 		}
+		if err := validateEffectiveMembershipTx(tx, campaignValidation{containers: true}); err != nil {
+			return err
+		}
 
 		// Log event with structured payload
 		payload := map[string]interface{}{
@@ -247,6 +250,11 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 		if err != nil {
 			return fmt.Errorf("failed to update container: %w", err)
 		}
+		if _, ok := fields["campaign_state"]; ok {
+			if err := validateEffectiveMembershipTx(tx, campaignValidation{containers: true}); err != nil {
+				return err
+			}
+		}
 
 		// Log event with structured payload
 		changesJSON, err := json.Marshal(fields)
@@ -327,6 +335,9 @@ func (cs *ContainerStore) MoveWithAttribution(attr attribution.Attribution, cont
 		`, newParentUUID, attr.PrincipalRef, scopeSQL(attr), containerUUID)
 		if err != nil {
 			return fmt.Errorf("failed to move container: %w", err)
+		}
+		if err := validateEffectiveMembershipTx(tx, campaignValidation{containers: true}); err != nil {
+			return err
 		}
 
 		// Log event with structured payload
@@ -604,6 +615,9 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 			if task.AttachmentCount > 0 {
 				payload["attachment_count"] = task.AttachmentCount
 				payload["bytes_freed"] = task.Bytes
+			}
+			if err := StampTaskCampaignContext(tx, task.UUID, payload); err != nil {
+				return err
 			}
 			payloadJSON, _ := json.Marshal(payload)
 			payloadStr := string(payloadJSON)

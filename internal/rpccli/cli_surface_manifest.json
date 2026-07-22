@@ -955,6 +955,12 @@
             "hidden": false
           },
           {
+            "name": "campaign",
+            "usage": "Find resident and enrolled members of a campaign",
+            "type": "string",
+            "hidden": false
+          },
+          {
             "name": "caused-by",
             "usage": "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)",
             "type": "string",
@@ -2482,6 +2488,12 @@
             "usage": "Group operations into batches (not yet implemented)",
             "type": "int",
             "default": "1",
+            "hidden": false
+          },
+          {
+            "name": "campaign",
+            "usage": "Enroll in an active campaign by ID or path (empty string unenrolls)",
+            "type": "string",
             "hidden": false
           },
           {

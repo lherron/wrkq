@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -13,10 +14,11 @@ import (
 // root path. Project-root scoping is the CALLER's responsibility: Path is already
 // scoped before it reaches this method.
 type TreeViewParams struct {
-	Path            string `json:"path,omitempty"`
-	MaxDepth        int    `json:"maxDepth,omitempty"`
-	IncludeArchived bool   `json:"includeArchived,omitempty"`
-	OpenOnly        bool   `json:"openOnly,omitempty"`
+	Path                   string `json:"path,omitempty"`
+	MaxDepth               int    `json:"maxDepth,omitempty"`
+	IncludeArchived        bool   `json:"includeArchived,omitempty"`
+	OpenOnly               bool   `json:"openOnly,omitempty"`
+	IncludeCampaignMembers bool   `json:"includeCampaignMembers,omitempty"`
 }
 
 // WrkqTreeNode is the server-owned COMPATIBILITY projection of one tree node. Its
@@ -91,6 +93,11 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 	if err := a.attachExternalTreeBacklinks(ctx, root, p.IncludeArchived, p.OpenOnly); err != nil {
 		return nil, err
 	}
+	if p.IncludeCampaignMembers {
+		if err := a.attachCampaignEnrollments(ctx, root, p.Path, p.IncludeArchived, p.OpenOnly); err != nil {
+			return nil, err
+		}
+	}
 
 	outputPath := p.Path
 	if outputPath == "" {
@@ -104,6 +111,77 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 		HiddenContainersNotDisplayed: root.hiddenContainerCount,
 		WireRawPath:                  p.Path,
 	}, nil
+}
+
+func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode, path string, includeArchived, openOnly bool) error {
+	if path == "" {
+		return nil
+	}
+	campaignUUID, _, err := selectors.WalkContainerPath(a.db, path)
+	if err != nil {
+		return nil
+	}
+	var state sql.NullString
+	if err := a.db.QueryRowContext(ctx, "SELECT campaign_state FROM containers WHERE uuid = ?", campaignUUID).Scan(&state); err != nil || !state.Valid {
+		return nil
+	}
+	campaignProject := strings.Split(path, "/")[0]
+	for _, child := range root.Children {
+		if child.Type == "task" {
+			child.ExternalPath = "campaign:"
+		}
+	}
+	rows, err := a.db.QueryContext(ctx, `
+		WITH RECURSIVE container_ancestors(task_uuid, uuid, parent_uuid, slug, kind) AS (
+		    SELECT t.uuid, c.uuid, c.parent_uuid, c.slug, c.kind
+		      FROM tasks t JOIN containers c ON c.uuid = t.project_uuid
+		    UNION ALL
+		    SELECT ca.task_uuid, c.uuid, c.parent_uuid, c.slug, c.kind
+		      FROM container_ancestors ca JOIN containers c ON c.uuid = ca.parent_uuid
+		)
+		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.created_at, t.archived_at, t.deleted_at,
+		       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
+		       COALESCE((SELECT slug FROM container_ancestors ca
+		                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), '')
+		  FROM tasks t
+		 WHERE t.campaign_uuid = ? AND t.project_uuid != ?
+		 ORDER BY t.created_at, t.id
+	`, campaignUUID, campaignUUID)
+	if err != nil {
+		return NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var node WrkqTreeNode
+		var archivedAt, deletedAt, requestedBy, assigned, acknowledged, resolution *string
+		var residentProject string
+		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.WireCreatedAt,
+			&archivedAt, &deletedAt, &requestedBy, &assigned, &acknowledged, &resolution, &residentProject); err != nil {
+			return NewInternalError(err)
+		}
+		node.Type = "task"
+		node.RequestedByProjectID, node.AssignedProjectID = requestedBy, assigned
+		node.AcknowledgedAt, node.Resolution = acknowledged, resolution
+		node.IsArchived, node.IsDeleted = archivedAt != nil, deletedAt != nil
+		show := node.State == "draft" || node.State == "open"
+		if includeArchived {
+			show = true
+		} else if node.IsArchived || node.IsDeleted {
+			show = false
+		}
+		if openOnly && node.State != "open" {
+			show = false
+		}
+		if !show {
+			continue
+		}
+		node.ExternalPath = "campaign:"
+		if residentProject != campaignProject {
+			node.ExternalPath += residentProject
+		}
+		root.Children = append(root.Children, &node)
+	}
+	return rows.Err()
 }
 
 // treeTopLevelProjectID returns the friendly ID of the top-level project owning

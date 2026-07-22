@@ -62,6 +62,9 @@ func newTreeCmd() *cobra.Command {
 			if openOnly {
 				params["openOnly"] = true
 			}
+			if mode == "human" {
+				params["includeCampaignMembers"] = true
+			}
 
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.treeView", params)
 			if err != nil {
@@ -421,6 +424,9 @@ func formatTreeHumanNode(node *treeWireNode) string {
 	var parts []string
 	if node.Type == "task" {
 		parts = append(parts, style.Paint(style.ColDim, node.ID))
+		if strings.HasPrefix(node.ExternalPath, "campaign:") {
+			parts = append(parts, node.Slug)
+		}
 		if node.Title != "" && node.Title != node.Slug {
 			parts = append(parts, node.Title)
 		}
@@ -456,6 +462,9 @@ func formatTreeHumanNode(node *treeWireNode) string {
 		} else {
 			parts = append(parts, style.Paint(style.ColDim, "(external)"))
 		}
+	}
+	if project := strings.TrimPrefix(node.ExternalPath, "campaign:"); project != node.ExternalPath && project != "" {
+		parts = append(parts, style.Paint(style.ColDim, "↗ "+project))
 	}
 	return strings.Join(parts, " ")
 }

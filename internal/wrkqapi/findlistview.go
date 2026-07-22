@@ -3,6 +3,7 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -36,6 +37,7 @@ type FindListViewParams struct {
 	AssignedProjectID    string   `json:"assignedProject,omitempty"`
 	CausedBy             string   `json:"causedBy,omitempty"`
 	AckPending           bool     `json:"ackPending,omitempty"`
+	Campaign             string   `json:"campaign,omitempty"`
 	Limit                int      `json:"limit,omitempty"`
 	Cursor               string   `json:"cursor,omitempty"`
 	Sort                 string   `json:"sort,omitempty"`
@@ -73,6 +75,24 @@ type WrkqFindEntry struct {
 	CreatedAt            string   `json:"created_at"`
 	UpdatedAt            string   `json:"updated_at"`
 	ETag                 int64    `json:"etag"`
+	membership           string
+}
+
+func (e WrkqFindEntry) MarshalJSON() ([]byte, error) {
+	type wire WrkqFindEntry
+	if e.membership == "" {
+		return json.Marshal(wire(e))
+	}
+	b, err := json.Marshal(wire(e))
+	if err != nil {
+		return nil, err
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return nil, err
+	}
+	obj["membership"] = e.membership
+	return json.Marshal(obj)
 }
 
 // WrkqFindListView is the server-owned COMPATIBILITY list projection for
@@ -124,6 +144,14 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		}
 		causedByTaskUUID = uuid
 	}
+	var campaignUUID string
+	if p.Campaign != "" {
+		uuid, _, err := selectors.ResolveContainer(a.db, p.Campaign)
+		if err != nil {
+			return nil, NewValidationError(fmt.Sprintf("failed to resolve --campaign: %s", err.Error()), map[string]any{"field": "campaign"})
+		}
+		campaignUUID = uuid
+	}
 
 	sortField, descending, err := normalizeFindSort(p.Sort, p.Reverse, p.Type)
 	if err != nil {
@@ -146,6 +174,7 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		assignedProjectID:    p.AssignedProjectID,
 		causedByTaskUUID:     causedByTaskUUID,
 		ackPending:           p.AckPending,
+		campaignUUID:         campaignUUID,
 		limit:                p.Limit,
 		cursor:               p.Cursor,
 		sortField:            sortField,
@@ -185,6 +214,7 @@ type findQueryOptions struct {
 	assignedProjectID    string
 	causedByTaskUUID     string
 	ackPending           bool
+	campaignUUID         string
 	limit                int
 	cursor               string
 	sortField            string
@@ -200,6 +230,10 @@ func (a *API) executeFindQuery(ctx context.Context, opts findQueryOptions) ([]Wr
 	// they have no container interpretation, so an untyped claim query is a task
 	// query rather than a mixed result set padded with every matching container.
 	if opts.claimedBy != "" || opts.claimedNode != "" {
+		searchContainers = false
+	}
+	if opts.campaignUUID != "" {
+		searchTasks = true
 		searchContainers = false
 	}
 	searchBoth := searchTasks && searchContainers
@@ -265,12 +299,18 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 		       t.claimed_node, t.claimed_at, t.claim_generation,
 		       t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
-		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at
+		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at,
+		       CASE WHEN ? != '' AND t.project_uuid = ? THEN 'resident'
+		            WHEN ? != '' AND t.campaign_uuid = ? THEN 'enrolled' ELSE '' END AS membership
 		FROM tasks t
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
 		WHERE 1=1
 	`
-	args := []any{}
+	args := []any{opts.campaignUUID, opts.campaignUUID, opts.campaignUUID, opts.campaignUUID}
+	if opts.campaignUUID != "" {
+		query += " AND (t.project_uuid = ? OR t.campaign_uuid = ?)"
+		args = append(args, opts.campaignUUID, opts.campaignUUID)
+	}
 
 	switch opts.state {
 	case "all":
@@ -404,7 +444,7 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 		if err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
 			&assigneePrincipalRef, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 			&parentTaskUUID, &requestedBy, &assignedProject,
-			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt, &r.membership); err != nil {
 			return nil, false, NewInternalError(err)
 		}
 

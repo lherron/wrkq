@@ -359,7 +359,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	if p.Summary {
 		bodyColumns = "'' AS description, '' AS specification"
 	}
-	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", " +
+	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", " +
 		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
 		"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
 		"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
@@ -1067,6 +1067,9 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	if opts.newProjectUUID != nil {
 		payloadMap["moved_to"] = *opts.newProjectUUID
 	}
+	if eerr := store.StampTaskCampaignContext(tx, taskUUID, payloadMap); eerr != nil {
+		return webhooks.EventContext{}, NewInternalError(eerr)
+	}
 	payloadJSON, _ := json.Marshal(payloadMap)
 	payload := string(payloadJSON)
 	eventMeta, eerr := events.NewWriter(a.db.DB).LogEventReturning(tx, &domain.Event{
@@ -1303,6 +1306,18 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 	if patch.StartAt != nil {
 		fields["start_at"] = *patch.StartAt
 	}
+	if patch.Campaign != nil {
+		campaign := strings.TrimSpace(*patch.Campaign)
+		if campaign == "" {
+			fields["campaign_uuid"] = nil
+		} else {
+			uuid, _, err := selectors.ResolveContainer(a.db, campaign)
+			if err != nil {
+				return nil, NewNotFoundError(campaign, "campaign")
+			}
+			fields["campaign_uuid"] = uuid
+		}
+	}
 	if patch.CausedBy != nil {
 		refs, cerr := causedby.ResolveTokens(a.db, *patch.CausedBy, "")
 		if cerr != nil {
@@ -1329,7 +1344,7 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 // loadTask reads a task by UUID into a WrkqTask DTO.
 func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
-		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
+		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
 			"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
@@ -1366,6 +1381,7 @@ type rowScanner interface {
 func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 	var (
 		uuid, id, slug, title, projectUUID, state, kind, description, specification string
+		campaignUUID                                                                sql.NullString
 		labels, meta                                                                sql.NullString
 		priority                                                                    int
 		etag                                                                        int64
@@ -1378,7 +1394,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		hasDescription, hasSpecification                                            int
 	)
 	if err := s.Scan(
-		&uuid, &id, &slug, &title, &projectUUID, &state, &priority, &kind, &description, &specification,
+		&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &state, &priority, &kind, &description, &specification,
 		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
 		&assignee, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification,
@@ -1391,6 +1407,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		Slug:                  slug,
 		Title:                 title,
 		ProjectUUID:           projectUUID,
+		CampaignUUID:          campaignUUID.String,
 		Path:                  path,
 		State:                 state,
 		Priority:              priority,

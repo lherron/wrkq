@@ -82,7 +82,9 @@ export interface WrkqTaskUpdateParams {
     riskClass?: WrkqRiskClass;
     assigneePrincipalRef?: string | null;
     dueAt?: string | null;
-    startAt?: string | null;
+		startAt?: string | null;
+		/** Campaign ID/path to enroll; empty string unenrolls. */
+		campaign?: string;
   };
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.1. */
   expectEtag?: number;
@@ -219,7 +221,8 @@ export interface WrkqTask {
   id: string;
   slug: string;
   title: string;
-  projectUuid: string;
+	projectUuid: string;
+	campaignUuid?: string;
   path: string;
   state: WrkqTaskState;
   priority: number;

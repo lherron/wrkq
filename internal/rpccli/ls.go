@@ -99,6 +99,9 @@ func newLsCmd() *cobra.Command {
 			if all {
 				params["includeHidden"] = true
 			}
+			if mode == "table" {
+				params["includeCampaignMembers"] = true
+			}
 
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.lsView", params)
 			if err != nil {

@@ -21,7 +21,7 @@ import (
 // wrkq.task.update.
 func newSetCmd() *cobra.Command {
 	var description, specification, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
-	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy string
+	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy, campaign string
 	var projectRoot string
 	var metaFile string
 	var priority, jobs, batchSize int
@@ -123,6 +123,14 @@ func newSetCmd() *cobra.Command {
 				patch["causedBy"] = toks
 				dryFields["caused_by"] = toks
 			}
+			if cmd.Flags().Changed("campaign") {
+				patch["campaign"] = campaign
+				if campaign == "" {
+					dryFields["campaign_uuid"] = nil
+				} else {
+					dryFields["campaign"] = campaign
+				}
+			}
 			if dueAt != "" {
 				patch["dueAt"] = dueAt
 				dryFields["due_at"] = dueAt
@@ -190,6 +198,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Update assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Update task resolution")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
+	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in an active campaign by ID or path (empty string unenrolls)")
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
 	return cmd
@@ -200,7 +209,7 @@ func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatc
 		"description", "specification", "state", "priority", "title", "slug",
 		"labels", "meta", "meta-file", "due-at", "start-at", "kind",
 		"parent-task", "parent-id", "assignee", "requested-by", "assigned-project",
-		"resolution", "caused-by",
+		"resolution", "caused-by", "campaign",
 	} {
 		if cmd.Flags().Changed(name) {
 			return fmt.Errorf("--root cannot be combined with task field --%s", name)
@@ -459,10 +468,11 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 	} else {
 		result.PrintSummary(cmd.OutOrStdout())
 	}
-	// Legacy set ends with os.Exit(result.ExitCode()); mirror the direct exit so
-	// no extra "Error:" line is printed on partial failure.
-	if code := result.ExitCode(); code != 0 {
-		os.Exit(code)
+	if result.ExitCode() != 0 {
+		if len(result.Errors) == 1 {
+			return result.Errors[0].Error
+		}
+		return fmt.Errorf("%d task updates failed", result.Failed)
 	}
 	return nil
 }
