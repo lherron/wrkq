@@ -364,8 +364,8 @@ smoke: build
   test/smoke-wrkf-adoption-negative.sh
   @echo "✓ Smoke test passed"
 
-# Probe the canonical wrkf adoption signal. This is intentionally standalone;
-# it fails until the real canonical wrkq-code-change adoption run exists.
+# Probe the canonical wrkf adoption signal through the supported wrkf API.
+# The durable canary selector can be overridden with WRKF_ADOPTION_TASK.
 check-wrkf-adoption:
   scripts/check-wrkf-adoption.sh
 

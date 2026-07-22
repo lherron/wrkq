@@ -154,7 +154,7 @@ if "$BIN/wrkf" --db "$DB" --json evidence exec T-00001 --kind implementation --s
 fi
 
 "$BIN/wrkf" --db "$DB" evidence add T-00001 --kind implementation --ref "git:abc123" --summary "needs patch" --facts '{"verdict":"needs_patch"}' --json | jq -e '.facts.verdict == "needs_patch"' >/dev/null
-"$BIN/wrkf" --db "$DB" evidence suggest T-00001 --transition plan_ready --json | jq -e '.missing[0].satisfied == false and .missing[0].latest.facts.verdict == "needs_patch"' >/dev/null
+"$BIN/wrkf" --db "$DB" evidence suggest T-00001 --transition plan_ready --json | jq -e '.missing == ["implementation"] and .required[0].kind == "implementation" and .required[0].facts.verdict == "ready"' >/dev/null
 "$BIN/wrkf" --db "$DB" next T-00001 --role coordinator --json | jq -e '.blockedTransitions[] | select(.id == "plan_ready") | .blocksOn[] | select(.message | contains("needs_patch"))' >/dev/null
 "$BIN/wrkf" --db "$DB" --json evidence exec T-00001 --kind implementation --summary "exec proof" --facts '{"verdict":"ready"}' -- printf smoke | jq -e '.kind == "implementation" and .facts.verdict == "ready"' >/dev/null
 "$BIN/wrkf" --db "$DB" evidence list T-00001 --json | jq -e '.evidence | length == 2' >/dev/null
