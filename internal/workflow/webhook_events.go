@@ -105,6 +105,20 @@ func workflowSuspensionResolvedWebhookContext(meta workflowEventMetadata, update
 	}
 }
 
+func workflowInstanceCancelledWebhookContext(meta workflowEventMetadata, updated Instance, actor, role string, beforeRevision, afterRevision int64) webhooks.EventContext {
+	return webhooks.EventContext{
+		Event: webhooks.EventWorkflowInstanceCancelled, EventID: meta.ID, EventSeq: meta.Seq, OccurredAt: meta.CreatedAt, Via: "wrkf",
+		Changed: []string{"workflow"},
+		Changes: map[string]webhooks.Change{"workflow": {From: nil, To: updated.State()}},
+		Subject: &webhooks.Subject{WorkflowInstanceID: updated.ID},
+		Workflow: &webhooks.WorkflowPayload{
+			SchemaVersion: meta.SchemaVersion, Type: meta.Type, EventID: meta.ID, EventSeq: meta.Seq,
+			InstanceID: updated.ID, PrincipalRef: actor, Role: role, Disposition: DispositionCancel,
+			BeforeRevision: int64Ptr(beforeRevision), AfterRevision: int64Ptr(afterRevision), Payload: meta.Payload,
+		},
+	}
+}
+
 func stateSummaryPtr(state State) *string {
 	summary := state.Status
 	if state.Phase != "" {

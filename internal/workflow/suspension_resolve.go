@@ -103,6 +103,13 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 		now := s.now().Format(time.RFC3339)
 		priorSuspension := *inst.Suspension
 		resolved := *inst
+		terminalizedRuns := []TerminalizedRunSummary{}
+		if target != nil {
+			terminalizedRuns, err = terminalizeActiveRunsTx(tx, inst, disposition, eventID, now)
+			if err != nil {
+				return err
+			}
+		}
 		if target != nil {
 			resolved.Status = target.Status
 			resolved.Phase = target.Phase
@@ -144,49 +151,21 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 			return staleRevisionError(resolved.ID, expected, actual.revision)
 		}
 
-		var effects []EffectSpec
-		if tpl.Suspension != nil {
-			effects = tpl.Suspension.Effects[disposition]
-		}
-		createdEffects := make([]Effect, 0, len(effects))
-		for _, ef := range effects {
-			id, err := nextSeqID(tx, "workflow_effect_seq", "eff")
-			if err != nil {
-				return err
-			}
-			seq, err := nextEffectSequenceTx(tx, resolved.ID)
-			if err != nil {
-				return err
-			}
-			renderedEffect, semanticKey, err := renderEffectSpec(ef, effectRenderContext{
-				instance: resolved, outcomeID: disposition, sequence: seq,
-			})
-			if err != nil {
-				return err
-			}
-			payload, _ := json.Marshal(renderedEffect)
-			key := fmt.Sprintf("%s:%s", resolved.ID, semanticKey)
-			if _, err := tx.Exec(`
-				INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-			`, id, resolved.ID, resolved.Revision, seq, renderedEffect.Kind, string(payload), key, semanticKey, now, now); err != nil {
-				return err
-			}
-			createdEffects = append(createdEffects, Effect{
-				ID: id, InstanceID: resolved.ID, Revision: resolved.Revision, Sequence: seq, Kind: renderedEffect.Kind,
-				Payload: json.RawMessage(payload), Status: "pending", IdempotencyKey: key, SemanticKey: semanticKey,
-				CreatedAt: now, UpdatedAt: now,
-			})
+		createdEffects, err := createDispositionEffectsTx(tx, tpl, resolved, disposition, now)
+		if err != nil {
+			return err
 		}
 
 		eventPayload := map[string]interface{}{
-			"suspension":     priorSuspension,
-			"disposition":    disposition,
-			"explanation":    params.Explanation,
-			"beforeRevision": inst.Revision,
-			"afterRevision":  resolved.Revision,
-			"from":           inst.State(),
-			"to":             resolved.State(),
+			"suspension":           priorSuspension,
+			"disposition":          disposition,
+			"explanation":          params.Explanation,
+			"beforeRevision":       inst.Revision,
+			"afterRevision":        resolved.Revision,
+			"from":                 inst.State(),
+			"to":                   resolved.State(),
+			"terminalizedRunCount": len(terminalizedRuns),
+			"terminalizedRuns":     terminalizedRuns,
 		}
 		eventMeta, err := insertSuspensionResolvedEventTx(tx, eventID, resolved.ID, params.PrincipalRef, params.Role, inst.Revision, resolved.Revision, eventPayload)
 		if err != nil {
@@ -197,15 +176,16 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 		webhookTaskUUID = resolved.TaskUUID
 
 		result = map[string]interface{}{
-			"task":         resolved.TaskRef,
-			"instanceId":   resolved.ID,
-			"suspensionId": priorSuspension.ID,
-			"disposition":  disposition,
-			"state":        resolved.State(),
-			"revision":     resolved.Revision,
-			"eventId":      eventID,
-			"effects":      createdEffects,
-			"instance":     resolved,
+			"task":             resolved.TaskRef,
+			"instanceId":       resolved.ID,
+			"suspensionId":     priorSuspension.ID,
+			"disposition":      disposition,
+			"state":            resolved.State(),
+			"revision":         resolved.Revision,
+			"eventId":          eventID,
+			"effects":          createdEffects,
+			"instance":         resolved,
+			"terminalizedRuns": terminalizedRuns,
 		}
 
 		// resume never touches the task document — the parked task returns

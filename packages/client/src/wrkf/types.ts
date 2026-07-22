@@ -36,7 +36,8 @@ export interface WrkfSuspension {
 export type WrkfQueryableEventType =
   | "workflow.transitioned"
   | "workflow.suspended"
-  | "workflow.suspension_resolved";
+  | "workflow.suspension_resolved"
+  | "workflow.instance_cancelled";
 
 // ── Core resources ───────────────────────────────────────────────────────────
 
@@ -58,6 +59,33 @@ export interface WrkfInstance {
   updatedAt?: string;
   suspension: WrkfSuspension | null;
   [k: string]: unknown;
+}
+
+export interface WrkfTerminalizedRunSummary {
+  runId: string;
+  status: string;
+  completedAt: string;
+  terminalResult: string;
+}
+
+export interface WrkfInstanceCancelParams {
+  task?: string;
+  instanceId?: string;
+  expectRevision?: number;
+  explanation?: string;
+  principal_ref?: string;
+  role?: string;
+}
+
+export interface WrkfInstanceCancelResult {
+  task: string;
+  instanceId: string;
+  state: WrkfState;
+  revision: number;
+  eventId: string;
+  effects: WrkfEffect[];
+  terminalizedRuns: WrkfTerminalizedRunSummary[];
+  instance?: WrkfInstance;
 }
 
 // ── Immutable instance ledger ───────────────────────────────────────────────
@@ -660,6 +688,7 @@ export interface WrkfSuspensionResolveResult {
   revision: number;
   eventId: string;
   effects: WrkfEffect[];
+  terminalizedRuns?: WrkfTerminalizedRunSummary[];
   instance?: WrkfInstance;
 }
 

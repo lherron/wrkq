@@ -109,7 +109,7 @@ The public TypeScript client must use the unified stdio JSON-RPC protocol. The i
 
 ### 2.5 Dual-selector methods must reject mismatch before mutation
 
-Any method that accepts both a `task` selector and an `instanceId` selector (for example `wrkf.instance.show`, `wrkf.instance.next`, `wrkf.evidence.add`, `wrkf.transition.apply`, `wrkf.run.start`) must require at least one selector, and when both are supplied must verify they resolve to the same workflow instance. A mismatch must fail with a validation error before any read-modify-write, event, effect, obligation, or task projection occurs. This check is part of the committing transaction for mutating methods.
+Any method that accepts both a `task` selector and an `instanceId` selector (for example `wrkf.instance.show`, `wrkf.instance.next`, `wrkf.instance.cancel`, `wrkf.evidence.add`, `wrkf.transition.apply`, `wrkf.run.start`) must require at least one selector, and when both are supplied must verify they resolve to the same workflow instance. A mismatch must fail with a validation error before any read-modify-write, event, effect, obligation, or task projection occurs. This check is part of the committing transaction for mutating methods.
 
 ### 2.6 Bun-native package
 
@@ -1393,6 +1393,7 @@ Use `instance`, not `task`, for wrkf-side workflow instance inspection:
 ```text
 wrkf.instance.show
 wrkf.instance.next
+wrkf.instance.cancel
 ```
 
 `wrkf.instance.show` accepts either `instanceId` or `task`:
@@ -1413,6 +1414,50 @@ interface WrkfInstanceNextParams {
   role?: string;
 }
 ```
+
+`wrkf.instance.cancel` is the first-class unsuspended terminalization surface:
+
+```ts
+interface WrkfInstanceCancelParams {
+  instanceId?: string;
+  task?: string;
+  expectRevision?: number;
+  explanation?: string;
+  principal_ref?: string;
+  role?: string;
+}
+
+interface WrkfTerminalizedRunSummary {
+  runId: string;
+  status: string;
+  completedAt: string;
+  terminalResult: string;
+}
+
+interface WrkfInstanceCancelResult {
+  task: string;
+  instanceId: string;
+  state: WrkfState;
+  revision: number;
+  eventId: string;
+  effects: WrkfEffect[];
+  terminalizedRuns: WrkfTerminalizedRunSummary[];
+  instance?: WrkfInstance;
+}
+```
+
+It requires an active unsuspended instance and ordinary revision CAS. The same
+IMMEDIATE transaction cancels the instance, terminalizes all active runs,
+clears their authority tokens, records deterministic terminal causes and
+ordinary run-finished events, creates template cancel effects, emits
+`workflow.instance_cancelled`, and updates task workflow metadata. Suspended
+instances return `WRKF_SUSPENDED` naming the matching suspension id and the
+`wrkf suspension resolve ... --disposition cancel` recovery. Results and events
+never contain bearer tokens.
+
+`wrkf.suspension.resolve(disposition=resume)` only clears the exact suspension
+and preserves run authority byte-for-byte. `close|cancel` use the same atomic
+run fence as instance cancel and return token-free `terminalizedRuns` summaries.
 
 Do not expose `wrkf.task.inspect`, `wrkf.task.timeline`, `wrkf.task.refresh`, or `wrkf.task.syncMeta`.
 
@@ -1901,6 +1946,7 @@ wrkq.workflow.refresh
 wrkq.workflow.syncMeta
 wrkf.instance.show
 wrkf.instance.next
+wrkf.instance.cancel
 ```
 
 Continue to expose:
@@ -2166,7 +2212,7 @@ wrkq.workflow.timeline
 ### P3 — wrkf namespace refactor
 
 1. Move task-scoped attach/inspect/timeline/refresh out of `wrkf.task.*`.
-2. Add `wrkf.instance.show` and `wrkf.instance.next`.
+2. Add `wrkf.instance.show`, `wrkf.instance.next`, and `wrkf.instance.cancel`.
 3. Keep template registry under `wrkf.workflow.*`.
 4. Keep evidence/obligation/check/hook/transition/run/effect under `wrkf.*`.
 5. Remove `syncMeta` from the public RPC surface.
@@ -2312,6 +2358,7 @@ wrkq.task.update
 wrkf.workflow.install
 wrkf.instance.show
 wrkf.instance.next
+wrkf.instance.cancel
 wrkf.evidence.add
 wrkf.transition.apply
 wrkf.run.start

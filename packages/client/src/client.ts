@@ -217,6 +217,7 @@ class WorkClientImpl implements WorkClient {
     instance: {
       show: (p) => this.call("wrkf.instance.show", p),
       next: (p) => this.call("wrkf.instance.next", p),
+      cancel: (p) => this.call("wrkf.instance.cancel", p),
     },
     evidence: {
       add: (p) => this.call("wrkf.evidence.add", p),

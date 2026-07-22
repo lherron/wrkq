@@ -24,6 +24,12 @@ predicate: >
   (`wrkq.workflow.syncMeta`, `wrkf.evidence.schema`, `wrkf.supervisor.call`,
   `wrkf.supervisor.escalate`, `wrkf.obligation.create`) remains present in the
   registry, schema hash, and typed client.
+  Instance terminalization is frozen across the same surfaces:
+  `wrkf.instance.cancel` applies ordinary selector/revision gates to an active
+  unsuspended instance, atomically revokes every active run while closing the
+  instance, and returns token-free terminalized-run summaries. Suspension
+  `resume` preserves active run authority; suspension `close|cancel` use the
+  same atomic terminalization fence.
 authority:
   repo: wrkq
   surface: shared wrkq/wrkf JSON-RPC (stdio)
@@ -40,11 +46,16 @@ source:
   - internal/workrpc/client/local.go
   - internal/workrpc/workflow_discontinued_acceptance_test.go
   - internal/workrpc/project_root_test.go
+  - internal/workrpc/instance_cancel_acceptance_test.go
   - internal/wrkqapi/projectroots.go
   - internal/wrkqapi/projectsview.go
   - internal/wrkfapi/api.go
   - internal/wrkfapi/types.go
   - internal/wrkfapi/gaps.go
+  - internal/wrkfapi/instance_cancel.go
+  - internal/workflow/instance_cancel.go
+  - internal/workflow/instance_terminalization.go
+  - internal/workflow/terminal_disposition_test.go
   - internal/wrkfcli/transport.go
   - internal/wrkfcli/importguard_test.go
   - packages/client/src/errors.ts         # client preserves data.code + retryability
@@ -74,6 +85,12 @@ required_tests:
   - TestProjectRootRegistryMethodIsRegistered
   - TestProjectRootSetRootStaleCASIsAtomic
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
+  - TestWrkfInstanceCancelUnsuspendedRevokesRunAndRejectsLateSettle
+  - TestWrkfInstanceCancelStaleRevisionIsAtomicNoOp
+  - TestWrkfInstanceCancelSuspendedRequiresMatchingResolution
+  - TestResolveSuspensionResumePreservesActiveRunAuthorityAndHolderSettles
+  - TestResolveSuspensionTerminalDispositionAtomicallyRevokesAllActiveRuns
+  - TestResolveSuspensionTerminalizationFailureRollsBackEveryMutation
   - TestCommandAdapterImportGuard
   - TestLegacyDirectDBBootstrapCannotRegrow
   - TestEntrypointEquivalence

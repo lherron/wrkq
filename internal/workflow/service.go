@@ -1583,9 +1583,9 @@ func (s *Service) QueryEvents(params EventQueryParams) (EventQueryResult, error)
 	if eventType == "" {
 		eventType = "workflow.transitioned"
 	}
-	allowedEventTypes := []string{"workflow.suspended", "workflow.suspension_resolved", "workflow.transitioned"}
-	if eventType != "workflow.transitioned" && eventType != "workflow.suspended" && eventType != "workflow.suspension_resolved" {
-		return EventQueryResult{}, validationError("eventType", "event type is not queryable", "workflow.suspended|workflow.suspension_resolved|workflow.transitioned", allowedEventTypes, "set eventType to a queryable workflow event type")
+	allowedEventTypes := []string{"workflow.instance_cancelled", "workflow.suspended", "workflow.suspension_resolved", "workflow.transitioned"}
+	if eventType != "workflow.transitioned" && eventType != "workflow.suspended" && eventType != "workflow.suspension_resolved" && eventType != "workflow.instance_cancelled" {
+		return EventQueryResult{}, validationError("eventType", "event type is not queryable", "workflow.instance_cancelled|workflow.suspended|workflow.suspension_resolved|workflow.transitioned", allowedEventTypes, "set eventType to a queryable workflow event type")
 	}
 
 	limit := params.Limit

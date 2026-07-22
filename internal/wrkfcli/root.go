@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(watchCmd())
 	rootCmd.AddCommand(actionCmd())
 	rootCmd.AddCommand(nextCmd())
+	rootCmd.AddCommand(instanceCmd())
 	rootCmd.AddCommand(checkCmd())
 	rootCmd.AddCommand(transitionCmd())
 	rootCmd.AddCommand(suspensionCmd())
@@ -452,6 +453,36 @@ func nextCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, resp)
 		}),
 	}
+}
+
+func instanceCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "instance", Short: "Inspect and terminalize workflow instances"}
+	var instanceID, explanation string
+	var expectRevision int64
+	cancel := &cobra.Command{
+		Use:   "cancel TASK",
+		Short: "Atomically cancel an active unsuspended instance",
+		Args:  cobra.ExactArgs(1),
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			var expected *int64
+			if cmd.Flags().Changed("expect-revision") {
+				expected = &expectRevision
+			}
+			out, err := rpcCall[wrkfapi.InstanceCancelResult](cmd, a, "wrkf.instance.cancel", wrkfapi.InstanceCancelParams{
+				TaskSelector: args[0], InstanceID: instanceID, ExpectRevision: expected, Explanation: explanation,
+				PrincipalRef: a.actor, Role: a.role,
+			})
+			if err != nil {
+				return err
+			}
+			return printAny(cmd, flagJSON, out)
+		}),
+	}
+	cancel.Flags().StringVar(&instanceID, "instance", "", "Exact workflow instance id")
+	cancel.Flags().Int64Var(&expectRevision, "expect-revision", 0, "Expected workflow revision (CAS precondition)")
+	cancel.Flags().StringVar(&explanation, "explanation", "", "Operator explanation (recorded free text; - reads stdin)")
+	cmd.AddCommand(cancel)
+	return cmd
 }
 
 func evidenceCmd() *cobra.Command {

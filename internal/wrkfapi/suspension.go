@@ -23,15 +23,16 @@ type SuspensionResolveParams struct {
 // the disposition applied, the instance's new state/revision, the resolution
 // event id, and any disposition effects created.
 type SuspensionResolveResult struct {
-	Task         string             `json:"task,omitempty"`
-	InstanceID   string             `json:"instanceId"`
-	SuspensionID string             `json:"suspensionId"`
-	Disposition  string             `json:"disposition"`
-	State        workflow.State     `json:"state"`
-	Revision     int64              `json:"revision"`
-	EventID      string             `json:"eventId"`
-	Effects      []workflow.Effect  `json:"effects"`
-	Instance     *workflow.Instance `json:"instance,omitempty"`
+	Task             string                            `json:"task,omitempty"`
+	InstanceID       string                            `json:"instanceId"`
+	SuspensionID     string                            `json:"suspensionId"`
+	Disposition      string                            `json:"disposition"`
+	State            workflow.State                    `json:"state"`
+	Revision         int64                             `json:"revision"`
+	EventID          string                            `json:"eventId"`
+	Effects          []workflow.Effect                 `json:"effects"`
+	TerminalizedRuns []workflow.TerminalizedRunSummary `json:"terminalizedRuns,omitempty"`
+	Instance         *workflow.Instance                `json:"instance,omitempty"`
 }
 
 // SuspensionResolve resolves the active suspension named by params.SuspensionID
@@ -57,14 +58,15 @@ func (api *API) SuspensionResolve(ctx context.Context, params SuspensionResolveP
 
 func suspensionResolveResultFromAny(out map[string]interface{}) *SuspensionResolveResult {
 	res := &SuspensionResolveResult{
-		Task:         stringFromAny(out["task"]),
-		InstanceID:   stringFromAny(out["instanceId"]),
-		SuspensionID: stringFromAny(out["suspensionId"]),
-		Disposition:  stringFromAny(out["disposition"]),
-		State:        stateFromAny(out["state"]),
-		Revision:     int64FromAny(out["revision"]),
-		EventID:      stringFromAny(out["eventId"]),
-		Effects:      effectsFromAny(out["effects"]),
+		Task:             stringFromAny(out["task"]),
+		InstanceID:       stringFromAny(out["instanceId"]),
+		SuspensionID:     stringFromAny(out["suspensionId"]),
+		Disposition:      stringFromAny(out["disposition"]),
+		State:            stateFromAny(out["state"]),
+		Revision:         int64FromAny(out["revision"]),
+		EventID:          stringFromAny(out["eventId"]),
+		Effects:          effectsFromAny(out["effects"]),
+		TerminalizedRuns: terminalizedRunsFromAny(out["terminalizedRuns"]),
 	}
 	if inst, ok := out["instance"].(workflow.Instance); ok {
 		res.Instance = &inst

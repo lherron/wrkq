@@ -202,6 +202,7 @@ var methodCatalog = []string{
 	"wrkf.workflow.reinstate",
 	"wrkf.instance.show",
 	"wrkf.instance.next",
+	"wrkf.instance.cancel",
 	"wrkf.evidence.add",
 	"wrkf.evidence.list",
 	"wrkf.evidence.show",
@@ -318,6 +319,7 @@ var dtoCatalog = []string{
 	"WrkfCheckRun",
 	"WrkfTransitionResult",
 	"WrkfSuspensionResolveResult", // wrkf.suspension.resolve output (cleared suspension + new state/effects)
+	"WrkfInstanceCancelResult",    // wrkf.instance.cancel output (closed instance + terminalized runs)
 	"WrkfWorkflowTemplateSummary",
 	"WrkfWorkflowContentParams", // content-only validate request; path variants are forbidden
 	"WrkfWorkflowDiffParams",    // two bounded content bodies
@@ -592,6 +594,11 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkf.instance.next", apiHandler(func(ctx context.Context, p instanceNextParams) (any, error) {
 		return api.InstanceNext(ctx, p.TaskSelector, p.InstanceID, defaultString(p.Role, opts.DefaultRole))
+	}))
+	s.Register("wrkf.instance.cancel", apiHandler(func(ctx context.Context, p wrkfapi.InstanceCancelParams) (any, error) {
+		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)
+		p.Role = defaultString(p.Role, opts.DefaultRole)
+		return api.InstanceCancel(ctx, p)
 	}))
 	s.Register("wrkf.evidence.add", apiHandler(func(ctx context.Context, p wrkfapi.EvidenceAddParams) (any, error) {
 		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultActor)

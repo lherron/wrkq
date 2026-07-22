@@ -25,6 +25,7 @@ const (
 	EventWorkflowTransitioned       = "workflow_transitioned"
 	EventWorkflowSuspended          = "workflow.suspended"
 	EventWorkflowSuspensionResolved = "workflow.suspension_resolved"
+	EventWorkflowInstanceCancelled  = "workflow.instance_cancelled"
 	eventCommentAdded               = "comment_added"
 )
 

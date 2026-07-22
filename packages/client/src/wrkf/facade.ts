@@ -56,6 +56,8 @@ import type {
   WrkfHookRunParams,
   WrkfHookShowParams,
   WrkfInstance,
+  WrkfInstanceCancelParams,
+  WrkfInstanceCancelResult,
   WrkfInstanceNextParams,
   WrkfInstanceShowParams,
   WrkfInstallResult,
@@ -117,6 +119,7 @@ export interface WrkfWorkflowFacade {
 export interface WrkfInstanceFacade {
   show(params: WrkfInstanceShowParams): Promise<WrkfInstance>;
   next(params: WrkfInstanceNextParams): Promise<WrkfNextResult>;
+  cancel(params: WrkfInstanceCancelParams): Promise<WrkfInstanceCancelResult>;
 }
 
 export interface WrkfEvidenceFacade {

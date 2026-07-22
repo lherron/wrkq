@@ -169,7 +169,7 @@ func suspendedWriteError(inst *Instance) error {
 		msg:        fmt.Sprintf("instance %s is suspended (%s %s); writes are rejected until the suspension is resolved", inst.ID, sus.ID, sus.Reason),
 		field:      "suspension",
 		expected:   "running instance (no active suspension)",
-		fix:        "resolve the active suspension before writing to this instance",
+		fix:        fmt.Sprintf("resolve the active suspension with `wrkf suspension resolve %s --disposition cancel` before writing to this instance", sus.ID),
 		suspension: sus,
 	}
 }

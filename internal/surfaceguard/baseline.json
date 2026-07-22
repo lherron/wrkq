@@ -33,6 +33,7 @@
     {"method": "wrkf.hook.list"},
     {"method": "wrkf.hook.run"},
     {"method": "wrkf.hook.show"},
+    {"method": "wrkf.instance.cancel"},
     {"method": "wrkf.instance.next"},
     {"method": "wrkf.instance.show"},
     {"method": "wrkf.obligation.cancel"},

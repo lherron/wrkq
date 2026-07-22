@@ -1569,6 +1569,7 @@ Use `instance`, not `task`, for wrkf-side workflow instance inspection:
 ```
 wrkf.instance.show   [required]
 wrkf.instance.next   [required]
+wrkf.instance.cancel [required]
 ```
 
 ```ts
@@ -1583,7 +1584,53 @@ interface WrkfInstanceNextParams {
   task?: string;
   role?: string;
 }
+
+interface WrkfInstanceCancelParams {
+  instanceId?: string;
+  task?: string;
+  expectRevision?: number;
+  explanation?: string;
+  principal_ref?: string;
+  role?: string;
+}
+
+interface WrkfTerminalizedRunSummary {
+  runId: string;
+  status: string;
+  completedAt: string;
+  terminalResult: string; // deterministic cause metadata; never a bearer token
+}
+
+interface WrkfInstanceCancelResult {
+  task: string;
+  instanceId: string;
+  state: WrkfState;
+  revision: number;
+  eventId: string;
+  effects: WrkfEffect[];
+  terminalizedRuns: WrkfTerminalizedRunSummary[];
+  instance?: WrkfInstance;
+}
 ```
+
+`wrkf.instance.cancel` accepts only an active, unsuspended instance. Task and
+instance selectors use the ordinary exact-match rule, and `expectRevision` is
+the ordinary revision CAS. In one IMMEDIATE transaction it closes the instance
+as cancelled, terminalizes every active run with status `cancelled`, clears
+every bearer token, emits one `workflow.run_finished` event per affected run
+plus `workflow.instance_cancelled`, creates template cancel effects, and updates
+task workflow metadata. A suspended instance returns `WRKF_SUSPENDED` with the
+matching suspension id and recovery through `wrkf suspension resolve
+SUSPENSION_ID --disposition cancel`; a closed/non-active instance returns a
+typed state refusal. Builtin effects retain the standard post-commit partial
+result semantics.
+
+`wrkf.suspension.resolve` keeps its matching suspension-id and revision gates.
+`resume` clears only the suspension and preserves every active run authority
+field. `close|cancel` use the same atomic run terminalization fence as instance
+cancel. Its result adds `terminalizedRuns` for terminal dispositions (empty or
+omitted for resume), and its event payload records the terminalized count and
+token-free summaries.
 
 Do **not** expose `wrkf.task.inspect`, `wrkf.task.timeline`, `wrkf.task.refresh`,
 or `wrkf.task.syncMeta`.
@@ -1648,7 +1695,7 @@ through typed workflow/task/project/role fields.
 ```ts
 interface WrkfEventQueryParams {
   eventType?: "workflow.transitioned" | "workflow.suspended" |
-    "workflow.suspension_resolved";    // transitioned by default
+    "workflow.suspension_resolved" | "workflow.instance_cancelled";
   project?: string;                    // project uuid, id, or slug
   fromPhase?: string;
   toPhase?: string;
@@ -1671,7 +1718,7 @@ interface WrkfEventQueryResult {
 interface WrkfQueriedEvent {
   id: string;                          // durable workflow event id
   eventType: "workflow.transitioned" | "workflow.suspended" |
-    "workflow.suspension_resolved";
+    "workflow.suspension_resolved" | "workflow.instance_cancelled";
   instanceId: string;
   seq: number;
   task: {
@@ -2101,6 +2148,7 @@ wrkf.workflow.reinstate
 wrkf.transition.apply
 wrkf.instance.show
 wrkf.instance.next
+wrkf.instance.cancel
 wrkf.event.query
 ```
 
