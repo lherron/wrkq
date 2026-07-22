@@ -9,14 +9,16 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lherron/wrkq/internal/workflow"
 )
 
 type API struct {
-	service     *workflow.Service
-	hookCatalog *workflow.HookCatalog
-	templateDir string
+	service            *workflow.Service
+	hookCatalog        *workflow.HookCatalog
+	templateDir        string
+	hookTimeoutCeiling time.Duration
 }
 
 type Option func(*API)
@@ -38,6 +40,14 @@ func WithHookCatalog(catalog *workflow.HookCatalog) Option {
 func WithTemplateDir(dir string) Option {
 	return func(api *API) {
 		api.templateDir = dir
+	}
+}
+
+// WithHookTimeoutCeiling bounds external hook execution for remote request
+// paths. A zero value preserves the unbounded local/stdio policy.
+func WithHookTimeoutCeiling(ceiling time.Duration) Option {
+	return func(api *API) {
+		api.hookTimeoutCeiling = ceiling
 	}
 }
 
@@ -366,7 +376,9 @@ func (api *API) CheckRun(ctx context.Context, params CheckRunParams) (CheckRunRe
 	if err := ctx.Err(); err != nil {
 		return CheckRunResult{}, err
 	}
-	runs, err := api.service.RunChecks(params.TaskSelector, params.Transition, params.PrincipalRef, params.Role, api.hookCatalog, api.templateDir)
+	runs, err := api.service.RunChecksWithOptions(params.TaskSelector, params.Transition, params.PrincipalRef, params.Role, api.hookCatalog, api.templateDir, workflow.HookExecutionOptions{
+		Context: ctx, TimeoutCeiling: api.hookTimeoutCeiling,
+	})
 	if err != nil {
 		return CheckRunResult{}, normalizeError(err)
 	}
@@ -455,7 +467,9 @@ func (api *API) HookRun(ctx context.Context, params HookRunParams) (*workflow.Ch
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	run, err := api.service.RunSingleHook(params.TaskSelector, params.Transition, params.HookID, params.PrincipalRef, params.Role, api.hookCatalog, api.templateDir)
+	run, err := api.service.RunSingleHookWithOptions(params.TaskSelector, params.Transition, params.HookID, params.PrincipalRef, params.Role, api.hookCatalog, api.templateDir, workflow.HookExecutionOptions{
+		Context: ctx, TimeoutCeiling: api.hookTimeoutCeiling,
+	})
 	if err != nil {
 		return nil, normalizeError(err)
 	}

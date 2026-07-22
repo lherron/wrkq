@@ -85,25 +85,28 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 // transports. HTTP transports can reject notifications before calling this.
 func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if req.Method == "rpc.exit" {
+		s.mu.Unlock()
 		return Response{}, false
 	}
 	if req.Method == "$/cancelRequest" {
+		s.mu.Unlock()
 		return Response{}, true
 	}
 	if req.Method == "rpc.shutdown" {
 		s.shutdown = true
+		s.mu.Unlock()
 		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Result: json.RawMessage(`{}`)}, true
 	}
 	if s.shutdown {
+		s.mu.Unlock()
 		if req.isNotification() {
 			return Response{}, true
 		}
 		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: MapError(NewValidationError("server is shutting down", nil))}, true
 	}
 	if !s.initialized && req.Method != "rpc.initialize" {
+		s.mu.Unlock()
 		if req.isNotification() {
 			return Response{}, true
 		}
@@ -112,13 +115,14 @@ func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool
 		}))}, true
 	}
 	handler, ok := s.handlers[req.Method]
+	s.mu.Unlock()
 	if !ok {
 		if req.isNotification() {
 			return Response{}, true
 		}
 		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: protocolError(codeMethodNotFound, "method not found", nil)}, true
 	}
-	result, err := callStdoutPure(ctx, handler, req.Params)
+	result, err := callStdoutPure(ctx, req.Method, handler, req.Params)
 	if err != nil {
 		if req.isNotification() {
 			return Response{}, true
@@ -126,7 +130,9 @@ func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool
 		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: MapError(err)}, true
 	}
 	if req.Method == "rpc.initialize" {
+		s.mu.Lock()
 		s.initialized = true
+		s.mu.Unlock()
 	}
 	if req.isNotification() {
 		return Response{}, true
@@ -164,7 +170,14 @@ func (s *Server) writeError(id json.RawMessage, rpcErr *RPCError) error {
 
 var stdoutRedirectMu sync.Mutex
 
-func callStdoutPure(ctx context.Context, handler Handler, params json.RawMessage) (json.RawMessage, error) {
+func callStdoutPure(ctx context.Context, method string, handler Handler, params json.RawMessage) (json.RawMessage, error) {
+	// External execution methods capture child-process stdout themselves. They
+	// must not hold the process-global stdout redirect while waiting on the
+	// child, otherwise one slow hook serializes every unrelated RPC request.
+	if executesExternalProcess(method) {
+		return handler.HandleRPC(ctx, params)
+	}
+
 	stdoutRedirectMu.Lock()
 	defer stdoutRedirectMu.Unlock()
 
@@ -175,4 +188,13 @@ func callStdoutPure(ctx context.Context, handler Handler, params json.RawMessage
 	}()
 
 	return handler.HandleRPC(ctx, params)
+}
+
+func executesExternalProcess(method string) bool {
+	switch method {
+	case "wrkf.check.run", "wrkf.hook.run", "wrkf.effect.deliver":
+		return true
+	default:
+		return false
+	}
 }

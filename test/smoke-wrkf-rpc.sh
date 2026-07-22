@@ -3,7 +3,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+DAEMON_PID=""
+cleanup() {
+  if [[ -n "$DAEMON_PID" ]]; then
+    kill "$DAEMON_PID" 2>/dev/null || true
+    wait "$DAEMON_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
 
 DB="$TMPDIR/wrkq.db"
 BIN="$TMPDIR/bin"
@@ -12,6 +20,7 @@ mkdir -p "$BIN"
 go build -tags sqlite_fts5 -o "$BIN/wrkq" "$ROOT/cmd/wrkq"
 go build -tags sqlite_fts5 -o "$BIN/wrkqadm" "$ROOT/cmd/wrkqadm"
 go build -tags sqlite_fts5 -o "$BIN/wrkf" "$ROOT/cmd/wrkf"
+go build -tags sqlite_fts5 -o "$BIN/wrkqd" "$ROOT/cmd/wrkqd"
 
 cd "$TMPDIR"
 export WRKQ_DB_PATH="$DB"
@@ -39,7 +48,7 @@ cat >"$TMPDIR/hooks.json" <<HOOKS
       "argv": ["$TMPDIR/hook.sh"],
       "stdin": "json",
       "stdout": "exit_code",
-      "timeoutMs": 300000,
+      "timeoutMs": 20000,
       "cwd": "template_dir",
       "env": { "allow": ["PATH"] },
       "maxStdoutBytes": 65536,
@@ -52,7 +61,7 @@ cat >"$TMPDIR/hooks.json" <<HOOKS
       "argv": ["/usr/bin/true"],
       "stdin": "json",
       "stdout": "text",
-      "timeoutMs": 300000,
+      "timeoutMs": 20000,
       "cwd": "template_dir",
       "maxStdoutBytes": 65536,
       "maxStderrBytes": 65536
@@ -397,6 +406,18 @@ assert check_show["id"] == check_run["runs"][0]["id"], check_show
 check_list = rpc("wrkf.check.list", {"task": "T-00001", "transition": "finish"})
 assert len(check_list) >= 1, check_list
 
+rpc(
+    "wrkf.transition.apply",
+    {
+        "task": "T-00001",
+        "transition": "finish",
+        "role": "coordinator",
+        "principal_ref": "agent:local-human",
+        "runChecks": True,
+    },
+    expect_error="WRKF_VALIDATION",
+)
+
 closed = rpc(
     "wrkf.transition.apply",
     {
@@ -486,4 +507,70 @@ if code != 0:
     raise AssertionError(f"wrkf rpc exited {code}; stderr={proc.stderr.read()!r}")
 PY
 
-echo "smoke-wrkf-rpc: ok (synthetic lifecycle + real ./pbc preset walk intake->finalized)"
+# Real HTTP transport regression: --run-checks must persist the daemon-side
+# hook result first, then apply the transition with that check id.
+"$BIN/wrkq" --db "$DB" --as agent:local-human touch inbox/remote-run-checks -t "remote run checks" >/dev/null
+cat >"$TMPDIR/remote-workflow.json" <<'REMOTE_FLOW'
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "remote_hook_flow",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "initial": { "status": "active", "phase": "ready" },
+  "roles": { "coordinator": { "description": "Coordinates the remote smoke" } },
+  "states": [
+    { "status": "active", "phase": "ready" },
+    { "status": "closed", "outcome": "completed" }
+  ],
+  "checks": {
+    "finish_check": {
+      "type": "hook",
+      "hookId": "finish_hook",
+      "exitMap": {
+        "0": { "verdict": "pass", "outcome": "passed" },
+        "*": { "verdict": "error", "outcome": "failed" }
+      }
+    }
+  },
+  "transitions": [{
+    "id": "finish",
+    "from": { "status": "active", "phase": "ready" },
+    "by": ["coordinator"],
+    "checks": ["finish_check"],
+    "outcomes": [{
+      "id": "completed",
+      "when": { "checkVerdict": { "check": "finish_check", "is": "pass" } },
+      "to": { "status": "closed", "outcome": "completed" }
+    }]
+  }]
+}
+REMOTE_FLOW
+"$BIN/wrkf" --db "$DB" --hook-catalog "$TMPDIR/hooks.json" --principal-ref agent:local-human workflow install "$TMPDIR/remote-workflow.json" --json >/dev/null
+"$BIN/wrkf" --db "$DB" --principal-ref agent:local-human task attach T-00003 --workflow remote_hook_flow@1 --json >/dev/null
+
+PORT="$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+WRKF_HOOK_CATALOG="$TMPDIR/hooks.json" "$BIN/wrkqd" --db "$DB" --addr "127.0.0.1:$PORT" --token smoke-token >"$TMPDIR/wrkqd.log" 2>&1 &
+DAEMON_PID="$!"
+for _ in $(seq 1 50); do
+  if curl -fsS -H 'Authorization: Bearer smoke-token' "http://127.0.0.1:$PORT/v1/health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+curl -fsS -H 'Authorization: Bearer smoke-token' "http://127.0.0.1:$PORT/v1/health" >/dev/null
+WRKQ_DB="rpc://127.0.0.1:$PORT" WRKQD_TOKEN=smoke-token \
+  "$BIN/wrkf" --principal-ref agent:local-human --role coordinator transition T-00003 finish \
+    --run-checks --expect-revision 0 --idempotency-key remote-finish --json \
+  | jq -e '.state.outcome == "completed" and .revision == 1' >/dev/null
+WRKQ_DB="rpc://127.0.0.1:$PORT" WRKQD_TOKEN=smoke-token \
+  "$BIN/wrkf" check list T-00003 --transition finish --json \
+  | jq -e '.checks | length == 1 and .[0].id != "" and .[0].verdict == "pass"' >/dev/null
+
+echo "smoke-wrkf-rpc: ok (synthetic lifecycle + real ./pbc preset walk + remote --run-checks)"

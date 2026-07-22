@@ -617,7 +617,8 @@ export interface WrkfTransitionApplyParams {
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.3. */
   expectRevision?: number;
   idempotencyKey?: string;
-  runChecks?: boolean;
+  /** Persisted run ids returned by check.run; input hashes are revalidated at commit. */
+  checkIds?: string[];
   dryRun?: boolean;
 }
 

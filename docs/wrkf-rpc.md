@@ -29,7 +29,10 @@ Protocol version string: **`2026-06-01`**.
 - **stdin:** JSON-RPC request/notification frames.
 - **Pretty JSON on stdout: forbidden.**
 - **Max frame size:** bounded (default 8 MiB; over-limit inbound frame → `WRKF_VALIDATION`, connection stays open).
-- All method handlers accept `context.Context` from day one. Cancellation is **best-effort** in v1 (handlers and hook execution are not yet fully context-aware — do NOT advertise strong cancel; `capabilities.cancel` reflects best-effort).
+- All method handlers accept `context.Context`. Cancellation remains
+  **best-effort** for the general surface (`capabilities.cancel` reflects that),
+  but remote hook/check/effect execution is context-aware and prevents
+  post-execution persistence after request cancellation.
 
 ---
 
@@ -188,10 +191,15 @@ New named DTOs to add (replace current `map[string]interface{}` returns). All fi
 ```json
 { "task": "T-00001", "transition": "plan_ready", "role": "coordinator", "principal_ref": "human:local",
   "expectRevision": 0, "contextHash": "sha256:...", "idempotencyKey": "acp:T-00001:plan_ready:0",
-  "runChecks": false, "dryRun": false }
+  "checkIds": ["chk_000001"], "dryRun": false }
 ```
 - `expectRevision` and `contextHash` are CAS preconditions enforced **in the DB write**, not preflight.
 - `idempotencyKey` (optional but recommended). Replay semantics: **same key + same request hash → return the original committed `TransitionResult`** (not current-latest + old event id). Same key + different request hash → `WRKF_IDEMPOTENCY_MISMATCH`.
+- `transition.apply` rejects `runChecks: true`. Clients run `wrkf.check.run`
+  first, pass the persisted ids through `checkIds`, and rely on transactional
+  input-hash revalidation to fail closed if task/evidence/obligation input
+  changed between the calls. No hook runs inside the transition writer
+  transaction.
 
 **`wrkf.run.start` params:**
 ```json

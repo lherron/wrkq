@@ -1756,6 +1756,14 @@ wrkf.hook.run
 
 Hook output must go to stderr or structured RPC result fields. Never raw stdout.
 
+Remote hook/check/effect execution is isolated from the workrpc server state
+lock and the process-wide stdout redirect lock. The daemon refuses a deployed
+hook whose effective timeout exceeds 25 seconds (`timeoutMs` absent/zero means
+the five-minute local default and is therefore also refused remotely). This
+ceiling stays below the daemon's 30-second response deadline. Refusal happens
+before check persistence or effect claiming, and request cancellation stops a
+running hook before any post-execution persistence.
+
 #### Transitions
 
 ```
@@ -1773,7 +1781,7 @@ interface WrkfTransitionApplyParams {
   principal_ref?: string;
   expectRevision?: number;   // sole CAS token; see §9.3
   idempotencyKey?: string;
-  runChecks?: boolean;
+  checkIds?: string[];        // persisted runs returned by wrkf.check.run
   dryRun?: boolean;
 }
 
@@ -1787,6 +1795,15 @@ interface WrkfTransitionResult {
   obligations: WrkfObligation[];
 }
 ```
+
+`wrkf.transition.apply` never executes hooks and rejects `runChecks: true` with
+`WRKF_VALIDATION`. `wrkf transition --run-checks` is client orchestration: it
+first calls `wrkf.check.run`, then passes every returned persisted run id in
+`checkIds` to `wrkf.transition.apply`. The committing transaction recomputes
+each run's input hash against current task/evidence/obligation state, so a
+change between those calls closes as a blocked transition rather than consuming
+a stale verdict. No external process runs while the transition holds the SQLite
+writer transaction.
 
 #### Runs
 

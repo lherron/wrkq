@@ -792,8 +792,6 @@ type TransitionOptions struct {
 	CheckIDs       []string
 	RunChecks      bool
 	DryRun         bool
-	HookCatalog    *HookCatalog
-	TemplateDir    string
 	// RunID, when set, links the resulting workflow.transitioned event to a
 	// wrkf run (used by the wrkf.action.* surface so action history can join
 	// transition events to their action run).

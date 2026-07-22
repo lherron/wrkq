@@ -11,6 +11,7 @@ package bootstrap
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
@@ -29,17 +30,17 @@ func Server(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.Registry
 	if err != nil {
 		return nil, workrpc.RegistryOptions{}, fmt.Errorf("failed to resolve hook catalog: %w", err)
 	}
-	return serverWithHookPath(database, cfg, hookPath)
+	return serverWithHookPath(database, cfg, hookPath, 0)
 }
 
 // DaemonServer constructs the canonical HTTP daemon registry. Unlike local
 // InProcess/stdio construction, it never performs workspace/home catalog
 // autodiscovery: WRKF_HOOK_CATALOG must name the deployed bundle explicitly.
 func DaemonServer(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.RegistryOptions, error) {
-	return serverWithHookPath(database, cfg, os.Getenv("WRKF_HOOK_CATALOG"))
+	return serverWithHookPath(database, cfg, os.Getenv("WRKF_HOOK_CATALOG"), workrpc.RemoteHookTimeoutCeiling)
 }
 
-func serverWithHookPath(database *db.DB, cfg *config.Config, hookPath string) (*wrkfapi.API, workrpc.RegistryOptions, error) {
+func serverWithHookPath(database *db.DB, cfg *config.Config, hookPath string, hookTimeoutCeiling time.Duration) (*wrkfapi.API, workrpc.RegistryOptions, error) {
 	var cat *workflow.HookCatalog
 	var err error
 	if hookPath != "" {
@@ -52,6 +53,7 @@ func serverWithHookPath(database *db.DB, cfg *config.Config, hookPath string) (*
 		workflow.NewService(database),
 		wrkfapi.WithHookCatalog(cat),
 		wrkfapi.WithTemplateDir(workflow.HookCatalogDir(hookPath)),
+		wrkfapi.WithHookTimeoutCeiling(hookTimeoutCeiling),
 	)
 	opts := workrpc.RegistryOptions{
 		Database:         database,
@@ -135,7 +137,7 @@ func open(dbLocatorOverride, hookPath string, explicitHookPath bool) (*Handle, e
 	var api *wrkfapi.API
 	var opts workrpc.RegistryOptions
 	if explicitHookPath {
-		api, opts, err = serverWithHookPath(database, cfg, hookPath)
+		api, opts, err = serverWithHookPath(database, cfg, hookPath, 0)
 	} else {
 		api, opts, err = Server(database, cfg)
 	}

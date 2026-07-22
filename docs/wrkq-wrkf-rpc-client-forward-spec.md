@@ -1510,6 +1510,11 @@ wrkf.hook.run
 
 Hook output must go to stderr or structured RPC result fields, never raw stdout.
 
+Remote hook/check/effect execution is outside the workrpc server state/stdout
+locks. The daemon refuses hook entries whose effective timeout exceeds 25
+seconds before check persistence or effect claiming; its response deadline is
+30 seconds. Request cancellation prevents post-hook persistence.
+
 #### Transitions
 
 ```text
@@ -1528,12 +1533,17 @@ interface WrkfTransitionApplyParams {
   expectRevision?: number;
   contextHash?: string;
   idempotencyKey?: string;
-  runChecks?: boolean;
+  checkIds?: string[];
   dryRun?: boolean;
 }
 ```
 
 At least one of `task` or `instanceId` is required. If both are supplied, they must resolve to the same workflow instance.
+
+`wrkf.transition.apply` rejects `runChecks: true`. The CLI's `--run-checks`
+adapter calls `wrkf.check.run` first and supplies its persisted ids through
+`checkIds`; the transition transaction revalidates their input hashes and never
+runs an external process while holding the writer transaction.
 
 Transition result:
 

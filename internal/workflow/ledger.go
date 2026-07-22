@@ -1119,6 +1119,10 @@ func isEngineOwnedBuiltinEffect(kind string) bool {
 }
 
 func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templateDir string) (*EffectDelivery, error) {
+	return s.DeliverEffectWithOptions(id, adapter, catalog, templateDir, HookExecutionOptions{})
+}
+
+func (s *Service) DeliverEffectWithOptions(id, adapter string, catalog *HookCatalog, templateDir string, execOpts HookExecutionOptions) (*EffectDelivery, error) {
 	current, err := s.ShowEffect(id)
 	if err != nil {
 		return nil, err
@@ -1145,6 +1149,11 @@ func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templa
 	}
 	if !ok {
 		return nil, fmt.Errorf("no effect handler registered for %s", current.Kind)
+	}
+	// Validate the remote execution budget before claiming the effect. A
+	// refused catalog entry must not leave a lease or any other mutation behind.
+	if _, err := effectiveHookTimeout(handler, execOpts.TimeoutCeiling); err != nil {
+		return nil, err
 	}
 
 	claim, err := s.claimEffectByID(id, adapter, 60_000)
@@ -1182,7 +1191,11 @@ func (s *Service) DeliverEffect(id, adapter string, catalog *HookCatalog, templa
 		input["task"] = map[string]interface{}{"id": task.ID, "uuid": task.UUID, "title": task.Title, "state": task.State, "taskRef": "wrkq:" + task.ID}
 	}
 	inputJSON, _ := json.Marshal(input)
-	exit, stdout, stderr, runErr := runHook(handler, templateDir, inputJSON)
+	execCtx := execOpts.context()
+	exit, stdout, stderr, runErr := runHook(execCtx, handler, templateDir, inputJSON, execOpts.TimeoutCeiling)
+	if ctxErr := execCtx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if runErr != nil && exit < 0 {
 		return nil, runErr
 	}
@@ -1671,6 +1684,15 @@ func activeActionRunIDsTx(tx *sql.Tx, instanceID string) ([]string, error) {
 }
 
 func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID string, opts TransitionOptions) (TransitionResult, error) {
+	if opts.RunChecks {
+		return nil, validationError(
+			"runChecks",
+			"transition.apply does not execute checks",
+			"persisted check run ids in checkIds",
+			nil,
+			"call check.run first and pass every returned id in checkIds",
+		)
+	}
 	if err := s.EnsureBuiltinTemplateForSelectors(taskSelector, instanceID, opts.PrincipalRef); err != nil {
 		return nil, err
 	}
@@ -1736,23 +1758,9 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			return err
 		}
 		checks := map[string]CheckRun{}
-		if opts.RunChecks {
-			for _, checkID := range tr.Checks {
-				check, ok := tpl.Checks[checkID]
-				if !ok {
-					return fmt.Errorf("check not found: %s", checkID)
-				}
-				cr, err := s.executeCheck(inst, tr, checkID, check, opts.PrincipalRef, opts.Role, opts.HookCatalog, opts.TemplateDir, false)
-				if err != nil {
-					return err
-				}
-				checks[checkID] = *cr
-			}
-		} else {
-			for _, checkID := range tr.Checks {
-				if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
-					checks[checkID] = latest
-				}
+		for _, checkID := range tr.Checks {
+			if latest, ok := latestCheckFor(s.db, inst.ID, tr.ID, checkID); ok {
+				checks[checkID] = latest
 			}
 		}
 		for _, id := range opts.CheckIDs {

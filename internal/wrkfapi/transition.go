@@ -27,16 +27,16 @@ func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParam
 	if err := ctx.Err(); err != nil {
 		return TransitionResult{}, err
 	}
+	if params.RunChecks {
+		return TransitionResult{}, NewValidationError("runChecks is not accepted by wrkf.transition.apply; call wrkf.check.run and pass returned ids in checkIds", map[string]any{"field": "runChecks"})
+	}
 	out, err := api.service.TransitionForSelectors(params.TaskSelector, params.InstanceID, params.Transition, workflow.TransitionOptions{
 		PrincipalRef:   params.PrincipalRef,
 		Role:           params.Role,
 		ExpectRevision: params.ExpectRevision,
 		IdempotencyKey: params.IdempotencyKey,
 		CheckIDs:       params.CheckIDs,
-		RunChecks:      params.RunChecks,
 		DryRun:         params.DryRun,
-		HookCatalog:    api.hookCatalog,
-		TemplateDir:    api.templateDir,
 	})
 	if err != nil {
 		return TransitionResult{}, normalizeTransitionError(err)

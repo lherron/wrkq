@@ -998,17 +998,14 @@ func transitionCmd() *cobra.Command {
 		Use:  "transition TASK TRANSITION",
 		Args: cobra.ExactArgs(2),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			if runChecks && a.remote {
-				return fmt.Errorf("--run-checks over the transport is not supported until hook isolation lands")
-			}
 			var exp *int64
 			if cmd.Flags().Changed("expect-revision") {
 				exp = &expectRevision
 			}
-			out, err := rpcCall[wrkfapi.TransitionResult](cmd, a, "wrkf.transition.apply", wrkfapi.TransitionApplyParams{
+			out, err := applyTransition(cmd, a, wrkfapi.TransitionApplyParams{
 				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.actor, Role: a.role, ExpectRevision: exp,
-				IdempotencyKey: idempotencyKey, CheckIDs: checks, RunChecks: runChecks, DryRun: dryRun,
-			})
+				IdempotencyKey: idempotencyKey, CheckIDs: checks, DryRun: dryRun,
+			}, runChecks)
 			if err != nil {
 				return err
 			}
@@ -1021,6 +1018,28 @@ func transitionCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate without committing")
 	cmd.Flags().StringArrayVar(&checks, "check", nil, "Check run id")
 	return cmd
+}
+
+func applyTransition(cmd *cobra.Command, a *app, params wrkfapi.TransitionApplyParams, runChecks bool) (wrkfapi.TransitionResult, error) {
+	if runChecks {
+		result, err := rpcCall[wrkfapi.CheckRunResult](cmd, a, "wrkf.check.run", wrkfapi.CheckRunParams{
+			TaskSelector: params.TaskSelector,
+			Transition:   params.Transition,
+			PrincipalRef: params.PrincipalRef,
+			Role:         params.Role,
+		})
+		if err != nil {
+			return wrkfapi.TransitionResult{}, err
+		}
+		for _, run := range result.Runs {
+			if strings.TrimSpace(run.ID) == "" {
+				return wrkfapi.TransitionResult{}, fmt.Errorf("wrkf.check.run returned a non-persisted check without an id")
+			}
+			params.CheckIDs = append(params.CheckIDs, run.ID)
+		}
+	}
+	params.RunChecks = false
+	return rpcCall[wrkfapi.TransitionResult](cmd, a, "wrkf.transition.apply", params)
 }
 
 func suspensionCmd() *cobra.Command {

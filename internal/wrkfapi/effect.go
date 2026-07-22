@@ -66,7 +66,9 @@ func (api *API) EffectDeliver(ctx context.Context, params EffectDeliverParams) (
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	delivery, err := api.service.DeliverEffect(params.EffectID, params.Adapter, api.hookCatalog, api.templateDir)
+	delivery, err := api.service.DeliverEffectWithOptions(params.EffectID, params.Adapter, api.hookCatalog, api.templateDir, workflow.HookExecutionOptions{
+		Context: ctx, TimeoutCeiling: api.hookTimeoutCeiling,
+	})
 	if err != nil {
 		return delivery, normalizeError(err)
 	}

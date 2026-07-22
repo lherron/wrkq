@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMethodCatalogMatchesRegistry(t *testing.T) {
@@ -92,6 +93,61 @@ func TestStdoutPurity_OnlyRPCFrames_ShutdownNotification(t *testing.T) {
 		t.Fatalf("Serve: %v", err)
 	}
 	assertOnlyRPCFrames(t, output.String())
+}
+
+func TestExternalExecutionDoesNotSerializeUnrelatedRPC(t *testing.T) {
+	srv := NewServer(io.Discard)
+	srv.Register("rpc.initialize", HandlerFunc(func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"protocolVersion":"2026-06-30"}`), nil
+	}))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	srv.Register("wrkf.hook.run", HandlerFunc(func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		close(started)
+		<-release
+		return json.RawMessage(`{"verdict":"pass"}`), nil
+	}))
+	srv.Register("wrkf.workflow.list", HandlerFunc(func(context.Context, json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{"templates":[]}`), nil
+	}))
+
+	initResp, ok := srv.HandleRequest(t.Context(), Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "rpc.initialize"})
+	if !ok || initResp.Error != nil {
+		t.Fatalf("initialize = (%#v, %v)", initResp, ok)
+	}
+	hookDone := make(chan Response, 1)
+	go func() {
+		resp, _ := srv.HandleRequest(t.Context(), Request{JSONRPC: "2.0", ID: json.RawMessage(`2`), Method: "wrkf.hook.run"})
+		hookDone <- resp
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("hook handler did not start")
+	}
+
+	readDone := make(chan Response, 1)
+	go func() {
+		resp, _ := srv.HandleRequest(t.Context(), Request{JSONRPC: "2.0", ID: json.RawMessage(`3`), Method: "wrkf.workflow.list"})
+		readDone <- resp
+	}()
+	select {
+	case resp := <-readDone:
+		if resp.Error != nil || !bytes.Contains(resp.Result, []byte(`"templates"`)) {
+			t.Fatalf("unrelated response = %#v", resp)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("unrelated RPC blocked behind external hook execution")
+	}
+	close(release)
+	select {
+	case resp := <-hookDone:
+		if resp.Error != nil {
+			t.Fatalf("hook response = %#v", resp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("hook request did not finish")
+	}
 }
 
 func assertOnlyRPCFrames(t *testing.T, output string) {

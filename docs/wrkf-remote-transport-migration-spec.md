@@ -69,7 +69,7 @@ Every new method carries the full contract obligation set (standing ruling): reg
 
 ## 8. D6 — Hook execution locus (the real design question)
 
-`wrkf.check.run`, `wrkf.hook.run`, `wrkf.effect.deliver`, and `wrkf.transition.apply --run-checks` execute hooks via the **daemon-configured** `hookCatalog`/`templateDir` (`api.go:339, 428, 432`; `effect.go:53`). The caller's `--hook-catalog` flag is not transmitted.
+`wrkf.check.run`, `wrkf.hook.run`, and `wrkf.effect.deliver` execute hooks via the **daemon-configured** `hookCatalog`/`templateDir` (`api.go:339, 428, 432`; `effect.go:53`). The CLI's `transition --run-checks` adapter composes `check.run` with `transition.apply`; the transition handler itself never executes hooks. The caller's `--hook-catalog` flag is not transmitted.
 
 **Decision (ratified, daedalus-amended): daemon-selected law, isolated execution.** Daemon-side authority is upheld — hooks are workflow law; the canonical host owns durability and law enforcement; a client-supplied catalog over RPC would let any caller substitute law. Two binding conditions shape the implementation:
 
@@ -86,7 +86,7 @@ Every new method carries the full contract obligation set (standing ruling): reg
 
 - Hook execution moves **outside** the global dispatch/stdout critical sections; no hook executes inside a writer transaction.
 - CLI `transition --run-checks` decomposes into daemon `check.run` followed by `transition.apply` with the persisted check IDs; the existing input-hash revalidation in `checkCommitBlockers` makes the race fail closed.
-- **Timeout ceiling (mable amendment, Lance scope-economy ruling):** in place of polled-operation machinery, the server enforces that a hook's execution timeout fits within the route's response deadline; catalog entries exceeding the bound are refused for remote execution with an explicit error. No mutation may continue ambiguously past a client's transport deadline.
+- **Timeout ceiling (mable amendment, Lance scope-economy ruling):** in place of polled-operation machinery, the server enforces a 25-second remote hook ceiling beneath the daemon's 30-second response deadline; catalog entries exceeding the bound (including the five-minute default implied by absent/zero `timeoutMs`) are refused before check persistence or effect claiming with `WRKF_VALIDATION`. Request cancellation kills the child and prevents post-execution persistence. No mutation may continue ambiguously past a client's transport deadline.
 
 Both conditions' behaviors receive ordinary unit coverage within their implementing slots; per Lance ruling 2026-07-21 no dedicated proof-harness acceptance bars are added.
 

@@ -113,8 +113,8 @@ func ServeDaemon(opts DaemonOptions) error {
 
 	httpServer := &http.Server{
 		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		ReadTimeout:  workrpc.HTTPResponseTimeout,
+		WriteTimeout: workrpc.HTTPResponseTimeout,
 	}
 
 	if opts.Unix != "" {

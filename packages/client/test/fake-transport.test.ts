@@ -837,7 +837,6 @@ describe("wrkf namespace", () => {
       principal_ref: "human:local",
       expectRevision: 0,
       idempotencyKey: "k:plan_ready:0",
-      runChecks: false,
       dryRun: false,
     });
 
