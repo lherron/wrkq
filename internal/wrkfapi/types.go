@@ -120,6 +120,7 @@ type EffectAckParams struct {
 	EffectID   string          `json:"effectId"`
 	LeaseToken string          `json:"leaseToken"`
 	Receipt    json.RawMessage `json:"receipt,omitempty"`
+	Force      bool            `json:"force,omitempty"`
 }
 
 type EffectFailParams struct {
@@ -127,6 +128,7 @@ type EffectFailParams struct {
 	LeaseToken string `json:"leaseToken"`
 	Reason     string `json:"reason"`
 	Retryable  bool   `json:"retryable,omitempty"`
+	Force      bool   `json:"force,omitempty"`
 }
 
 type EffectDeliverParams struct {

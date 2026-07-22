@@ -970,6 +970,7 @@ export interface WrkfEffectAckParams {
   effectId: string;
   leaseToken: string;
   receipt?: unknown;
+  force?: boolean;
 }
 
 export interface WrkfEffectFailParams {
@@ -977,6 +978,7 @@ export interface WrkfEffectFailParams {
   leaseToken: string;
   reason: string;
   retryable?: boolean;
+  force?: boolean;
 }
 
 export interface WrkfEffectRetryParams {

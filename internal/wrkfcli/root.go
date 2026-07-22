@@ -34,6 +34,7 @@ type app struct {
 	hookCatalog *workflow.HookCatalog
 	hookPath    string
 	transport   workrpcclient.Transport
+	remote      bool
 }
 
 var rootCmd = &cobra.Command{
@@ -344,12 +345,8 @@ func workflowCmd() *cobra.Command {
 			return nil
 		}),
 	}
-	discontinue := templateLifecycleCommand("discontinue", func(svc *workflow.Service, id, version, actor string) error {
-		return svc.DiscontinueTemplate(id, version, actor)
-	})
-	reinstate := templateLifecycleCommand("reinstate", func(svc *workflow.Service, id, version, actor string) error {
-		return svc.ReinstateTemplate(id, version)
-	})
+	discontinue := templateLifecycleCommand("discontinue")
+	reinstate := templateLifecycleCommand("reinstate")
 	diff := &cobra.Command{
 		Use:  "diff OLD NEW",
 		Args: cobra.ExactArgs(2),
@@ -365,19 +362,14 @@ func workflowCmd() *cobra.Command {
 	return cmd
 }
 
-func templateLifecycleCommand(verb string, mutate func(*workflow.Service, string, string, string) error) *cobra.Command {
+func templateLifecycleCommand(verb string) *cobra.Command {
 	return &cobra.Command{
 		Use:  verb + " ID@VERSION",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			id, version, err := workflow.ParseTemplateRef(args[0])
-			if err != nil {
-				return err
-			}
-			if err := mutate(a.service, id, version, a.actor); err != nil {
-				return err
-			}
-			info, err := a.service.ShowTemplateVersion(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			info, err := rpcCall[wrkfapi.WorkflowShowResult](cmd, a, "wrkf.workflow."+verb, map[string]any{
+				"ref": args[0], "principal_ref": a.actor,
+			})
 			if err != nil {
 				return err
 			}
@@ -400,7 +392,7 @@ func taskCmd() *cobra.Command {
 	attach := &cobra.Command{
 		Use:  "attach TASK --workflow ID@VERSION",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if workflowRef == "" {
 				return fmt.Errorf("--workflow is required")
 			}
@@ -408,16 +400,19 @@ func taskCmd() *cobra.Command {
 			if cmd.Flags().Changed("predecessor-revision") {
 				revision = &predecessorRevision
 			}
-			inst, err := a.service.AttachTask(args[0], workflowRef, a.actor, workflow.AttachTaskOptions{
+			result, err := rpcCall[wrkqapi.WrkqWorkflowAttachResult](cmd, a, "wrkq.workflow.attach", wrkqapi.WorkflowAttachParams{
+				Task:                  args[0],
+				Workflow:              workflowRef,
 				Supersede:             supersede,
 				PredecessorInstanceID: predecessorInstance,
 				PredecessorRevision:   revision,
 				AttachDiscontinued:    attachDiscontinued,
+				Actor:                 a.actor,
 			})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, inst)
+			return printAny(cmd, flagJSON, result.Instance)
 		}),
 	}
 	attach.Flags().StringVar(&workflowRef, "workflow", "", "Template ref id@version")
@@ -450,12 +445,12 @@ func taskCmd() *cobra.Command {
 	refresh := &cobra.Command{
 		Use:  "refresh TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			inst, err := a.service.Refresh(args[0], a.actor)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkqapi.WrkqWorkflowInspectResult](cmd, a, "wrkq.workflow.refresh", map[string]any{"task": args[0], "actor": a.actor})
 			if err != nil {
 				return err
 			}
-			return printAny(cmd, flagJSON, map[string]interface{}{"instance": inst})
+			return printAny(cmd, flagJSON, map[string]interface{}{"instance": result.Instance})
 		}),
 	}
 	syncMeta := &cobra.Command{
@@ -498,17 +493,17 @@ func evidenceCmd() *cobra.Command {
 	add := &cobra.Command{
 		Use:  "add TASK --kind KIND --ref REF",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if kind == "" || ref == "" {
 				return fmt.Errorf("--kind and --ref are required")
 			}
-			ev, err := a.service.AddEvidence(workflow.AddEvidenceParams{
+			ev, err := rpcCall[workflow.Evidence](cmd, a, "wrkf.evidence.add", wrkfapi.EvidenceAddParams{
 				TaskSelector: args[0],
 				Kind:         kind,
 				Ref:          ref,
 				Summary:      summary,
-				Facts:        facts,
-				Data:         data,
+				Facts:        rawJSON(facts),
+				Data:         rawJSON(data),
 				PrincipalRef: a.actor,
 				Role:         a.role,
 			})
@@ -580,7 +575,7 @@ func evidenceCmd() *cobra.Command {
 	execCmd := &cobra.Command{
 		Use:  "exec TASK --kind KIND -- COMMAND...",
 		Args: cobra.MinimumNArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if kind == "" {
 				return fmt.Errorf("--kind is required")
 			}
@@ -605,13 +600,13 @@ func evidenceCmd() *cobra.Command {
 			}
 			dataJSON, _ := json.Marshal(dataDoc)
 			ref := "command:" + strings.Join(commandArgs, " ")
-			ev, addErr := a.service.AddEvidence(workflow.AddEvidenceParams{
+			ev, addErr := rpcCall[workflow.Evidence](cmd, a, "wrkf.evidence.add", wrkfapi.EvidenceAddParams{
 				TaskSelector: task,
 				Kind:         kind,
 				Ref:          ref,
 				Summary:      summary,
-				Facts:        facts,
-				Data:         string(dataJSON),
+				Facts:        rawJSON(facts),
+				Data:         dataJSON,
 				PrincipalRef: a.actor,
 				Role:         a.role,
 			})
@@ -637,7 +632,7 @@ func ledgerCmd() *cobra.Command {
 	appendCmd := &cobra.Command{
 		Use:  "append --task TASK --kind KIND --about PRINCIPAL --body FILE|-",
 		Args: cobra.NoArgs,
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if appendTask == "" || appendKind == "" || appendAbout == "" || bodySource == "" {
 				return fmt.Errorf("--task, --kind, --about, and --body are required")
 			}
@@ -645,8 +640,8 @@ func ledgerCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entry, err := a.service.AppendLedger(workflow.AppendLedgerParams{
-				TaskID: appendTask, Kind: appendKind, AboutPrincipalRef: appendAbout, Body: body, WrittenBy: a.actor,
+			entry, err := rpcCall[workflow.LedgerEntry](cmd, a, "wrkf.ledger.append", workflow.AppendLedgerParams{
+				TaskID: appendTask, Kind: appendKind, AboutPrincipalRef: appendAbout, Body: body,
 			})
 			if err != nil {
 				return err
@@ -654,7 +649,7 @@ func ledgerCmd() *cobra.Command {
 			if flagJSON {
 				return printJSON(cmd, entry)
 			}
-			return printLedger(cmd, []workflow.LedgerEntry{*entry}, "", false)
+			return printLedger(cmd, []workflow.LedgerEntry{entry}, "", false)
 		}),
 	}
 	appendCmd.Flags().StringVar(&appendTask, "task", "", "Task selector")
@@ -764,8 +759,10 @@ func obligationCmd() *cobra.Command {
 		c := &cobra.Command{
 			Use:  use + " TASK OBLIGATION",
 			Args: cobra.ExactArgs(2),
-			RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-				obl, err := a.service.SetObligationStatusWithAuthority(args[0], args[1], status, evidenceID, reason, workflow.ObligationStatusOptions{PrincipalRef: a.actor, Role: a.role})
+			RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+				obl, err := rpcCall[workflow.Obligation](cmd, a, "wrkf.obligation."+use, wrkfapi.ObligationStatusParams{
+					TaskSelector: args[0], ID: args[1], EvidenceID: evidenceID, Reason: reason, PrincipalRef: a.actor, Role: a.role,
+				})
 				if err != nil {
 					return err
 				}
@@ -812,7 +809,7 @@ func effectCmd() *cobra.Command {
 	claim := &cobra.Command{
 		Use:  "claim [TASK]",
 		Args: cobra.MaximumNArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			taskSelector := ""
 			if len(args) > 0 {
 				taskSelector = args[0]
@@ -821,7 +818,9 @@ func effectCmd() *cobra.Command {
 			if claimAdapter == "" {
 				claimAdapter = a.actor
 			}
-			claim, err := a.service.ClaimEffects(claimAdapter, limit, leaseMs, taskSelector, kind)
+			claim, err := rpcCall[workflow.EffectClaim](cmd, a, "wrkf.effect.claim", wrkfapi.EffectClaimParams{
+				Adapter: claimAdapter, Limit: limit, LeaseMs: leaseMs, TaskSelector: taskSelector, Kind: kind,
+			})
 			if err != nil {
 				return err
 			}
@@ -835,16 +834,10 @@ func effectCmd() *cobra.Command {
 	ack := &cobra.Command{
 		Use:  "ack EFFECT",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			var (
-				eff *workflow.Effect
-				err error
-			)
-			if force {
-				eff, err = a.service.ForceAckEffect(args[0])
-			} else {
-				eff, err = a.service.AckEffect(args[0], leaseToken)
-			}
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.ack", wrkfapi.EffectAckParams{
+				EffectID: args[0], LeaseToken: leaseToken, Force: force,
+			})
 			if err != nil {
 				return err
 			}
@@ -870,16 +863,10 @@ func effectCmd() *cobra.Command {
 	fail := &cobra.Command{
 		Use:  "fail EFFECT",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			var (
-				eff *workflow.Effect
-				err error
-			)
-			if force {
-				eff, err = a.service.ForceFailEffect(args[0], reason)
-			} else {
-				eff, err = a.service.FailEffect(args[0], leaseToken, reason, false)
-			}
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.fail", wrkfapi.EffectFailParams{
+				EffectID: args[0], LeaseToken: leaseToken, Reason: reason, Force: force,
+			})
 			if err != nil {
 				return err
 			}
@@ -892,8 +879,8 @@ func effectCmd() *cobra.Command {
 	retry := &cobra.Command{
 		Use:  "retry EFFECT",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			eff, err := a.service.RetryEffect(args[0])
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			eff, err := rpcCall[workflow.Effect](cmd, a, "wrkf.effect.retry", map[string]any{"effectId": args[0]})
 			if err != nil {
 				return err
 			}
@@ -975,15 +962,17 @@ func transitionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "transition TASK TRANSITION",
 		Args: cobra.ExactArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			if runChecks && a.remote {
+				return fmt.Errorf("--run-checks over the transport is not supported until hook isolation lands")
+			}
 			var exp *int64
 			if cmd.Flags().Changed("expect-revision") {
 				exp = &expectRevision
 			}
-			out, err := a.service.Transition(args[0], args[1], workflow.TransitionOptions{
-				PrincipalRef: a.actor, Role: a.role, ExpectRevision: exp, IdempotencyKey: idempotencyKey,
-				CheckIDs: checks, RunChecks: runChecks, DryRun: dryRun,
-				HookCatalog: a.hookCatalog, TemplateDir: workflow.HookCatalogDir(a.hookPath),
+			out, err := rpcCall[wrkfapi.TransitionResult](cmd, a, "wrkf.transition.apply", wrkfapi.TransitionApplyParams{
+				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.actor, Role: a.role, ExpectRevision: exp,
+				IdempotencyKey: idempotencyKey, CheckIDs: checks, RunChecks: runChecks, DryRun: dryRun,
 			})
 			if err != nil {
 				return err
@@ -1007,12 +996,12 @@ func suspensionCmd() *cobra.Command {
 		Use:   "resolve SUSPENSION_ID --disposition resume|close|cancel",
 		Short: "Atomically resolve the active suspension named by SUSPENSION_ID",
 		Args:  cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			var exp *int64
 			if cmd.Flags().Changed("expect-revision") {
 				exp = &expectRevision
 			}
-			out, err := a.service.ResolveSuspension(workflow.ResolveSuspensionParams{
+			out, err := rpcCall[wrkfapi.SuspensionResolveResult](cmd, a, "wrkf.suspension.resolve", wrkfapi.SuspensionResolveParams{
 				SuspensionID:   args[0],
 				Disposition:    disposition,
 				Explanation:    explanation,
@@ -1039,7 +1028,7 @@ func runCmd() *cobra.Command {
 	start := &cobra.Command{
 		Use:  "start TASK --role ROLE --principal-ref PRINCIPAL_REF",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if actor == "" {
 				actor = a.actor
 			}
@@ -1049,7 +1038,8 @@ func runCmd() *cobra.Command {
 			if role == "" {
 				return fmt.Errorf("--role is required")
 			}
-			run, err := a.service.StartRun(args[0], role, actor, workflow.StartRunOptions{
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{
+				TaskSelector: args[0], Role: role, PrincipalRef: actor,
 				IdempotencyKey: idempotencyKey,
 				DeliveryRef:    delivery,
 				Lane:           lane,
@@ -1070,7 +1060,7 @@ func runCmd() *cobra.Command {
 	bind := &cobra.Command{
 		Use:  "bind TASK ROLE HANDLE",
 		Args: cobra.ExactArgs(3),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			task, role, handle := args[0], args[1], args[2]
 			if !strings.Contains(handle, "@") || !strings.Contains(handle, ":") {
 				return fmt.Errorf("handle must be project/task-scoped, e.g. observer@agent-spaces:%s~observer", task)
@@ -1080,7 +1070,9 @@ func runCmd() *cobra.Command {
 				lane = handle[i+1:]
 			}
 			actor := strings.SplitN(handle, "@", 2)[0]
-			run, err := a.service.StartRun(task, role, actor, workflow.StartRunOptions{DeliveryRef: handle, Lane: lane})
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{
+				TaskSelector: task, Role: role, PrincipalRef: actor, DeliveryRef: handle, Lane: lane,
+			})
 			if err != nil {
 				return err
 			}
@@ -1090,8 +1082,8 @@ func runCmd() *cobra.Command {
 	finish := &cobra.Command{
 		Use:  "finish RUN",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			run, err := a.service.FinishRun(args[0], "completed", summary)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.finish", wrkfapi.RunFinishParams{RunID: args[0], Status: "completed", Summary: summary})
 			if err != nil {
 				return err
 			}
@@ -1102,8 +1094,8 @@ func runCmd() *cobra.Command {
 	fail := &cobra.Command{
 		Use:  "fail RUN",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			run, err := a.service.FailRun(args[0], summary)
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.fail", wrkfapi.RunFailParams{RunID: args[0], Summary: summary})
 			if err != nil {
 				return err
 			}
@@ -1304,11 +1296,11 @@ func supervisorCmd() *cobra.Command {
 	start := &cobra.Command{
 		Use:  "start TASK",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if actor == "" {
 				actor = a.actor
 			}
-			run, err := a.service.StartRun(args[0], "supervisor", actor, workflow.StartRunOptions{})
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{TaskSelector: args[0], Role: "supervisor", PrincipalRef: actor})
 			if err != nil {
 				return err
 			}
@@ -1331,7 +1323,7 @@ func supervisorCmd() *cobra.Command {
 	action := &cobra.Command{
 		Use:  "action TASK ACTION",
 		Args: cobra.MinimumNArgs(2),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			switch args[1] {
 			case "escalate":
 				eff, err := a.service.SupervisorEscalate(args[0], reason)
@@ -1345,7 +1337,9 @@ func supervisorCmd() *cobra.Command {
 				if len(args) < 3 {
 					return fmt.Errorf("transition action requires target transition id")
 				}
-				out, err := a.service.Transition(args[0], args[2], workflow.TransitionOptions{PrincipalRef: a.actor, Role: "supervisor"})
+				out, err := rpcCall[wrkfapi.TransitionResult](cmd, a, "wrkf.transition.apply", wrkfapi.TransitionApplyParams{
+					TaskSelector: args[0], Transition: args[2], PrincipalRef: a.actor, Role: "supervisor",
+				})
 				if err != nil {
 					return err
 				}

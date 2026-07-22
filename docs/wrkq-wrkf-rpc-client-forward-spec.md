@@ -2215,7 +2215,8 @@ The work is complete when all of the following are true.
 - transition idempotency returns the original committed result.
 - `wrkf.evidence.add` idempotency returns the original committed evidence with no duplicate evidence/event/obligation/effect; a mismatched request hash returns `WRKF_IDEMPOTENCY_MISMATCH`.
 - dual-selector methods reject a `task`/`instanceId` mismatch before any mutation.
-- effect ack/fail requires a valid lease token.
+- effect ack/fail requires a valid lease token unless the explicit operator
+  override `force: true` is supplied.
 - same flow works through `wrkq rpc --stdio` and `wrkf rpc --stdio`.
 ```
 

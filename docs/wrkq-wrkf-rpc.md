@@ -1836,6 +1836,10 @@ wrkf.effect.retry
 wrkf.effect.deliver
 ```
 
+`wrkf.effect.ack` and `wrkf.effect.fail` accept optional `force: true` for the
+operator override exposed by the CLI. Without it, `leaseToken` remains the
+authority gate.
+
 ---
 
 ## 7. DTO reference

@@ -21,7 +21,13 @@ func (api *API) EffectAck(ctx context.Context, params EffectAckParams) (*workflo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	effect, err := api.service.AckEffectWithReceipt(params.EffectID, params.LeaseToken, params.Receipt)
+	var effect *workflow.Effect
+	var err error
+	if params.Force {
+		effect, err = api.service.ForceAckEffect(params.EffectID)
+	} else {
+		effect, err = api.service.AckEffectWithReceipt(params.EffectID, params.LeaseToken, params.Receipt)
+	}
 	if err != nil {
 		return nil, normalizeError(err)
 	}
@@ -32,7 +38,13 @@ func (api *API) EffectFail(ctx context.Context, params EffectFailParams) (*workf
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	effect, err := api.service.FailEffect(params.EffectID, params.LeaseToken, params.Reason, params.Retryable)
+	var effect *workflow.Effect
+	var err error
+	if params.Force {
+		effect, err = api.service.ForceFailEffect(params.EffectID, params.Reason)
+	} else {
+		effect, err = api.service.FailEffect(params.EffectID, params.LeaseToken, params.Reason, params.Retryable)
+	}
 	if err != nil {
 		return nil, normalizeError(err)
 	}

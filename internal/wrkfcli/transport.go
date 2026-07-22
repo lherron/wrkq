@@ -18,14 +18,14 @@ func withTransport(fn func(*app, *cobra.Command, []string) error) func(*cobra.Co
 		if err != nil {
 			return err
 		}
-		tr, _, closeTransport, err := openConfiguredTransport(cmd)
+		tr, cfg, closeTransport, err := openConfiguredTransport(cmd)
 		if err != nil {
 			return err
 		}
 		defer closeTransport()
 		a := &app{
 			actor: actor, wrkqActor: wrkqActor, role: roleDefault(), json: flagJSON,
-			transport: tr,
+			transport: tr, remote: cfg.RemoteEndpoint != "",
 		}
 		runErr := fn(a, cmd, args)
 		if runErr != nil && flagJSON {
@@ -52,6 +52,21 @@ func rpcCall[T any](cmd *cobra.Command, a *app, method string, params any) (T, e
 		return out, err
 	}
 	return out, nil
+}
+
+func rawJSON(value string) json.RawMessage {
+	if value == "" {
+		return nil
+	}
+	return json.RawMessage(value)
+}
+
+func rawJSONString(value string) json.RawMessage {
+	if value == "" {
+		return nil
+	}
+	raw, _ := json.Marshal(value)
+	return raw
 }
 
 // openConfiguredTransport is the single local-vs-remote selection point for

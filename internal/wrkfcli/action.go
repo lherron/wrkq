@@ -1,6 +1,7 @@
 package wrkfcli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -59,13 +60,13 @@ type actionEvidenceOptions struct {
 	data    string
 }
 
-func (opts actionEvidenceOptions) evidenceInput() *workflow.ActionEvidenceInput {
+func (opts actionEvidenceOptions) rpcEvidence() *wrkfapi.ActionEvidenceParams {
 	if opts.kind == "" && opts.ref == "" && opts.summary == "" && opts.facts == "" && opts.data == "" {
 		return nil
 	}
-	return &workflow.ActionEvidenceInput{
+	return &wrkfapi.ActionEvidenceParams{
 		Kind: opts.kind, Ref: opts.ref, Summary: opts.summary,
-		Facts: opts.facts, Data: opts.data,
+		Facts: rawJSON(opts.facts), Data: rawJSON(opts.data),
 	}
 }
 
@@ -74,15 +75,11 @@ type actionTransitionOptions struct {
 	noTransition bool
 }
 
-func (opts actionTransitionOptions) transitionSelection() (workflow.TransitionMode, string) {
-	switch {
-	case opts.noTransition:
-		return workflow.TransitionSkip, ""
-	case opts.transition != "":
-		return workflow.TransitionExplicit, opts.transition
-	default:
-		return workflow.TransitionDefault, ""
+func (opts actionTransitionOptions) rpcDirective() json.RawMessage {
+	if opts.noTransition {
+		return json.RawMessage("false")
 	}
+	return rawJSONString(opts.transition)
 }
 
 type actionCompleteOptions struct {
@@ -141,18 +138,18 @@ func actionStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "start TASK --action ACTION",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if opts.action == "" {
 				return fmt.Errorf("--action is required")
 			}
-			run, err := a.service.StartAction(workflow.StartActionParams{
+			run, err := rpcCall[wrkfapi.ActionRun](cmd, a, "wrkf.action.start", wrkfapi.ActionStartParams{
 				Task:           args[0],
 				Workflow:       opts.workflowRef,
 				Action:         opts.action,
 				Role:           opts.role,
 				PrincipalRef:   firstNonEmpty(opts.actor, a.actor),
 				Lane:           opts.lane,
-				DeliveryRef:    opts.deliveryRef,
+				DeliveryRef:    rawJSONString(opts.deliveryRef),
 				ExternalRunRef: opts.externalRunRef,
 				IdempotencyKey: opts.idempotencyKey,
 				LeaseOwner:     opts.leaseOwner,
@@ -233,7 +230,7 @@ With --json, a predecessor conflict is returned as:
 
 Follow error.fix and retry with --prior-run when predecessor review is required.`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			task := ""
 			if len(args) > 0 {
 				task = args[0]
@@ -246,7 +243,7 @@ Follow error.fix and retry with --prior-run when predecessor review is required.
 			if value := strings.TrimSpace(opts.priorRun); value != "" && value != "null" {
 				priorRun = &value
 			}
-			result, err := a.service.ClaimAction(workflow.ClaimActionParams{
+			result, err := rpcCall[wrkfapi.ActionClaimResult](cmd, a, "wrkf.action.claim", workflow.ClaimActionParams{
 				Task:       task,
 				InstanceID: opts.instanceID,
 				Prefer: workflow.ActionClaimPrefer{
@@ -284,14 +281,14 @@ func actionBindCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "bind ACTION_RUN --external-run-ref hrc:RUNID",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if opts.externalRunRef == "" {
 				return fmt.Errorf("--external-run-ref is required")
 			}
-			run, err := a.service.BindActionExternal(workflow.BindActionExternalParams{
+			run, err := rpcCall[wrkfapi.ActionRun](cmd, a, "wrkf.action.bindExternal", wrkfapi.ActionBindExternalParams{
 				ActionRunID:    args[0],
 				ExternalRunRef: opts.externalRunRef,
-				DeliveryRef:    opts.deliveryRef,
+				DeliveryRef:    rawJSONString(opts.deliveryRef),
 				Lane:           opts.lane,
 				IdempotencyKey: opts.idempotencyKey,
 			})
@@ -313,15 +310,13 @@ func actionCompleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "complete ACTION_RUN",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			mode, transitionID := opts.transition.transitionSelection()
-			out, err := a.service.CompleteAction(workflow.CompleteActionParams{
-				ActionRunID:    args[0],
-				LeaseToken:     opts.leaseToken,
-				Evidence:       opts.evidence.evidenceInput(),
-				TransitionMode: mode,
-				TransitionID:   transitionID,
-				RunSummary:     opts.runSummary,
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			out, err := rpcCall[wrkfapi.ActionCompleteResult](cmd, a, "wrkf.action.complete", wrkfapi.ActionCompleteParams{
+				ActionRunID: args[0],
+				LeaseToken:  opts.leaseToken,
+				Evidence:    opts.evidence.rpcEvidence(),
+				Transition:  opts.transition.rpcDirective(),
+				RunSummary:  opts.runSummary,
 			})
 			if err != nil {
 				return err
@@ -357,16 +352,14 @@ The success response shape is:
 Use binding.run.id, binding.authority.ownerToken, and
 binding.authority.ownerGeneration from the claim response.`,
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			mode, transitionID := opts.transition.transitionSelection()
-			out, err := a.service.SettleAction(workflow.SettleActionParams{
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			out, err := rpcCall[wrkfapi.ActionSettleResult](cmd, a, "wrkf.action.settle", wrkfapi.ActionSettleParams{
 				ActionRunID:     args[0],
 				OwnerToken:      opts.ownerToken,
 				OwnerGeneration: opts.ownerGeneration,
 				Result:          opts.result,
-				Evidence:        opts.evidence.evidenceInput(),
-				TransitionMode:  mode,
-				TransitionID:    transitionID,
+				Evidence:        opts.evidence.rpcEvidence(),
+				Transition:      opts.transition.rpcDirective(),
 				TerminalSummary: opts.terminalSummary,
 			})
 			if err != nil {
@@ -394,15 +387,15 @@ func actionFailCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "fail ACTION_RUN --run-summary SUMMARY",
 		Args: cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if opts.runSummary == "" {
 				return fmt.Errorf("--run-summary is required")
 			}
-			run, err := a.service.FailAction(workflow.FailActionParams{
+			run, err := rpcCall[wrkfapi.ActionRun](cmd, a, "wrkf.action.fail", wrkfapi.ActionFailParams{
 				ActionRunID: args[0],
 				LeaseToken:  opts.leaseToken,
 				Summary:     opts.runSummary,
-				Evidence:    opts.evidence.evidenceInput(),
+				Evidence:    opts.evidence.rpcEvidence(),
 			})
 			if err != nil {
 				return err
@@ -437,8 +430,8 @@ Use binding.run.id and binding.authority.ownerToken from the claim response as
 ACTION_RUN and --lease-token.`,
 		Aliases: []string{"renew-lease"},
 		Args:    cobra.ExactArgs(1),
-		RunE: withApp(true, func(a *app, cmd *cobra.Command, args []string) error {
-			run, err := a.service.HeartbeatAction(workflow.HeartbeatActionParams{
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			run, err := rpcCall[wrkfapi.ActionRun](cmd, a, "wrkf.action.heartbeat", wrkfapi.ActionHeartbeatParams{
 				ActionRunID: args[0],
 				LeaseToken:  opts.leaseToken,
 				LeaseMs:     opts.leaseMs,
