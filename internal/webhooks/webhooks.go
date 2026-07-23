@@ -21,12 +21,15 @@ const (
 	defaultTimeout     = 500 * time.Millisecond
 	defaultConcurrency = 4
 
-	EventWorkflowAttached           = "workflow_attached"
-	EventWorkflowTransitioned       = "workflow_transitioned"
-	EventWorkflowSuspended          = "workflow.suspended"
-	EventWorkflowSuspensionResolved = "workflow.suspension_resolved"
-	EventWorkflowInstanceCancelled  = "workflow.instance_cancelled"
-	eventCommentAdded               = "comment_added"
+	EventWorkflowAttached              = "workflow_attached"
+	EventWorkflowTransitioned          = "workflow_transitioned"
+	EventWorkflowSuspended             = "workflow.suspended"
+	EventWorkflowSuspensionResolved    = "workflow.suspension_resolved"
+	EventWorkflowInstanceCancelled     = "workflow.instance_cancelled"
+	EventContainerCampaignStateChanged = "container.campaign_state_changed"
+	eventCommentAdded                  = "comment_added"
+
+	CampaignPayloadSchema = "wrkq.campaign-transition.v1"
 )
 
 // BlockerInfo represents an incomplete blocking task.
@@ -139,6 +142,48 @@ type Payload struct {
 	BlockedBy      []BlockerInfo     `json:"blocked_by,omitempty"`
 	Subject        *Subject          `json:"subject,omitempty"`
 	Workflow       *WorkflowPayload  `json:"workflow,omitempty"`
+}
+
+// CampaignPayload is the container-native campaign transition webhook. It is
+// intentionally independent from the task-shaped Payload: consumers never
+// receive synthetic ticket/project fields for a container mutation.
+type CampaignPayload struct {
+	SchemaVersion    string  `json:"schema_version"`
+	Event            string  `json:"event"`
+	EventID          int64   `json:"event_id"`
+	IdempotencyKey   int64   `json:"idempotency_key"`
+	OccurredAt       string  `json:"occurred_at"`
+	Actor            string  `json:"actor"`
+	PrincipalRef     string  `json:"principal_ref"`
+	CampaignUUID     string  `json:"campaign_uuid"`
+	CampaignID       string  `json:"campaign_id"`
+	CampaignPath     string  `json:"campaign_path"`
+	OldCampaignState *string `json:"old_campaign_state"`
+	NewCampaignState string  `json:"new_campaign_state"`
+}
+
+type webhookTargetPayload interface {
+	webhookEvent() string
+	applyWebhookTemplate(string) string
+}
+
+func (p Payload) webhookEvent() string {
+	return p.Event
+}
+
+func (p Payload) applyWebhookTemplate(raw string) string {
+	result := strings.ReplaceAll(raw, "{ticket_id}", p.TicketID)
+	return strings.ReplaceAll(result, "{project_id}", p.ProjectID)
+}
+
+func (p CampaignPayload) webhookEvent() string {
+	return p.Event
+}
+
+func (p CampaignPayload) applyWebhookTemplate(raw string) string {
+	result := strings.ReplaceAll(raw, "{campaign_id}", p.CampaignID)
+	result = strings.ReplaceAll(result, "{campaign_uuid}", p.CampaignUUID)
+	return strings.ReplaceAll(result, "{campaign_path}", p.CampaignPath)
 }
 
 // TaskInfo carries task metadata needed for webhook dispatch.
@@ -283,6 +328,56 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 	dispatchURLs(urls, payload)
 }
 
+// DispatchCampaignTransition resolves inherited container webhook targets and
+// delivers one best-effort hint for a committed campaign transition. Callers
+// invoke it only after the transaction containing EventID has committed.
+func DispatchCampaignTransition(
+	database *db.DB,
+	containerUUID string,
+	from *string,
+	to string,
+	metadata events.EventMetadata,
+	principalRef string,
+) {
+	var campaignID, campaignPath string
+	if err := database.QueryRow(`
+		SELECT c.id, COALESCE(cp.path, c.slug)
+		  FROM containers c
+		  LEFT JOIN v_container_paths cp ON cp.uuid = c.uuid
+		 WHERE c.uuid = ?
+	`, containerUUID).Scan(&campaignID, &campaignPath); err != nil {
+		log.Printf("webhooks: lookup campaign container %s failed: %v", containerUUID, err)
+		return
+	}
+	actor := strings.TrimSpace(principalRef)
+	if actor == "" {
+		actor = "system"
+	}
+	payload := CampaignPayload{
+		SchemaVersion:    CampaignPayloadSchema,
+		Event:            EventContainerCampaignStateChanged,
+		EventID:          metadata.ID,
+		IdempotencyKey:   metadata.ID,
+		OccurredAt:       metadata.Timestamp,
+		Actor:            actor,
+		PrincipalRef:     strings.TrimSpace(principalRef),
+		CampaignUUID:     containerUUID,
+		CampaignID:       campaignID,
+		CampaignPath:     campaignPath,
+		OldCampaignState: from,
+		NewCampaignState: to,
+	}
+	urls, err := ResolveWebhookTargets(database, containerUUID, payload)
+	if err != nil {
+		log.Printf("webhooks: resolve targets for campaign %s failed: %v", campaignID, err)
+		return
+	}
+	// Network delivery must never extend or fail the lifecycle request. The
+	// committed event is the durable identity; this goroutine is only a
+	// best-effort hint and may be lost if the process exits.
+	go dispatchURLs(urls, payload)
+}
+
 func parseLabels(raw *string) []string {
 	if raw == nil || strings.TrimSpace(*raw) == "" {
 		return []string{}
@@ -395,8 +490,13 @@ type webhookSubscription struct {
 	Events []string
 }
 
-// ResolveWebhookTargets collects, templates, filters, normalizes, and de-dupes webhook URLs.
-func ResolveWebhookTargets(database *db.DB, containerUUID string, payload Payload) ([]string, error) {
+// ResolveWebhookTargets collects, templates, filters, normalizes, and de-dupes
+// webhook URLs for a task-shaped or container-native payload.
+func ResolveWebhookTargets(
+	database *db.DB,
+	containerUUID string,
+	payload webhookTargetPayload,
+) ([]string, error) {
 	raw, err := collectWebhookSubscriptions(database, containerUUID)
 	if err != nil {
 		return nil, err
@@ -449,7 +549,7 @@ func decodeWebhookSubscriptions(jsonStr string) ([]webhookSubscription, error) {
 		var urlOnly string
 		if err := json.Unmarshal(entry, &urlOnly); err == nil {
 			// A bare URL string with no explicit events defaults to ALL event
-			// families (task + workflow). Subscribers narrow via the object
+			// families (task + workflow + container). Subscribers narrow via the object
 			// form {"url":...,"events":[...]}.
 			out = append(out, webhookSubscription{URL: urlOnly, Events: []string{"*"}})
 			continue
@@ -469,7 +569,7 @@ func decodeWebhookSubscriptions(jsonStr string) ([]webhookSubscription, error) {
 	return out, nil
 }
 
-func normalizeWebhookURLs(urls []webhookSubscription, payload Payload) []string {
+func normalizeWebhookURLs(urls []webhookSubscription, payload webhookTargetPayload) []string {
 	if len(urls) == 0 {
 		return nil
 	}
@@ -478,14 +578,14 @@ func normalizeWebhookURLs(urls []webhookSubscription, payload Payload) []string 
 	var normalized []string
 
 	for _, sub := range urls {
-		if !subscriptionMatchesEvent(sub, payload.Event) {
+		if !subscriptionMatchesEvent(sub, payload.webhookEvent()) {
 			continue
 		}
 		trimmed := strings.TrimSpace(sub.URL)
 		if trimmed == "" {
 			continue
 		}
-		templated := applyTemplate(trimmed, payload)
+		templated := payload.applyWebhookTemplate(trimmed)
 		templated = strings.TrimSpace(templated)
 		if templated == "" {
 			continue
@@ -510,7 +610,7 @@ func normalizeWebhookURLs(urls []webhookSubscription, payload Payload) []string 
 
 func subscriptionMatchesEvent(sub webhookSubscription, event string) bool {
 	if len(sub.Events) == 0 {
-		// No explicit events => receive everything (task + workflow).
+		// No explicit events => receive everything (task + workflow + container).
 		return true
 	}
 	for _, allowed := range sub.Events {
@@ -526,6 +626,10 @@ func subscriptionMatchesEvent(sub webhookSubscription, event string) bool {
 			if isWorkflowWebhookEvent(event) {
 				return true
 			}
+		case "container", "container.*":
+			if isContainerWebhookEvent(event) {
+				return true
+			}
 		default:
 			if strings.EqualFold(allowed, event) {
 				return true
@@ -539,14 +643,12 @@ func isWorkflowWebhookEvent(event string) bool {
 	return event == EventWorkflowAttached || event == EventWorkflowTransitioned || strings.HasPrefix(event, "workflow.")
 }
 
-func isTaskWebhookEvent(event string) bool {
-	return !isWorkflowWebhookEvent(event)
+func isContainerWebhookEvent(event string) bool {
+	return strings.HasPrefix(event, "container.")
 }
 
-func applyTemplate(raw string, payload Payload) string {
-	result := strings.ReplaceAll(raw, "{ticket_id}", payload.TicketID)
-	result = strings.ReplaceAll(result, "{project_id}", payload.ProjectID)
-	return result
+func isTaskWebhookEvent(event string) bool {
+	return !isWorkflowWebhookEvent(event) && !isContainerWebhookEvent(event)
 }
 
 func isValidWebhookURL(raw string) bool {
@@ -563,7 +665,7 @@ func isValidWebhookURL(raw string) bool {
 	return true
 }
 
-func dispatchURLs(urls []string, payload Payload) {
+func dispatchURLs(urls []string, payload webhookTargetPayload) {
 	if len(urls) == 0 {
 		return
 	}

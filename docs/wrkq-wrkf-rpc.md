@@ -1556,7 +1556,7 @@ The workflow payload keeps the task fields populated and adds:
 with `instance_id`, wrkf `event_id`/`event_seq`, `schema_version:
 "wrkf.workflow-event.v0"`, `type`, `transition`, `outcome`, `from`, `to`,
 `principal_ref`, `role`, `run_id`, revision fields, task-doc hash fields, and
-`context_hash`. Legacy webhook URL strings are task-event subscriptions. A stored
+`context_hash`. Bare webhook URL strings receive all event families. A stored
 object entry can opt into workflow events without forcing task-only subscribers to
 receive them:
 
@@ -1572,6 +1572,14 @@ non-TTY output rendering (non-TTY list = one `{"url":<value>}` NDJSON line per U
 non-TTY add/rm = the indented map-alphabetical mutation JSON; TTY = the legacy human
 lines). There is **no** `--project` scoping (the target is always the root) and
 **no** `--if-match` flag (legacy has no CAS here).
+
+Campaign state transitions use the separate, container-native
+[`wrkq.campaign-transition.v1`](campaign-webhook.md) payload. They are
+post-commit best-effort hints with the committed event id as the idempotency
+key. The `container` subscription family is disjoint from `task`; bare/empty/all
+subscriptions continue to receive every family. The downstream closed-without-
+digest sweep is the delivery guarantee because v1 has no webhook outbox.
+
 #### Task-workflow methods
 
 ```

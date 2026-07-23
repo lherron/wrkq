@@ -186,3 +186,60 @@ func TestResolveWebhookTargets_BareStringDefaultsToAllEvents(t *testing.T) {
 		t.Fatalf("workflow event targets\nexpected: %v\nactual:   %v", want, workflowURLs)
 	}
 }
+
+func TestResolveWebhookTargets_ContainerClassIsolatedFromTaskCatchAll(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	s := store.New(database)
+
+	root, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{
+		Slug: "container-taxonomy", Kind: "project",
+	})
+	if err != nil {
+		t.Fatalf("create taxonomy project: %v", err)
+	}
+	rootJSON := `[` +
+		`{"url":"http://example.com/task","events":["task"]},` +
+		`{"url":"http://example.com/container","events":["container"]},` +
+		`{"url":"http://example.com/container-star","events":["container.*"]},` +
+		`{"url":"http://example.com/empty","events":[]},` +
+		`"http://example.com/bare"` +
+		`]`
+	if _, err := s.Containers.UpdateFields(
+		actorUUID, root.UUID, map[string]interface{}{"webhook_urls": rootJSON}, 0,
+	); err != nil {
+		t.Fatalf("set taxonomy webhook urls: %v", err)
+	}
+
+	containerPayload := webhooks.CampaignPayload{
+		Event:        webhooks.EventContainerCampaignStateChanged,
+		CampaignID:   root.ID,
+		CampaignUUID: root.UUID,
+		CampaignPath: "container-taxonomy",
+	}
+	containerURLs, err := webhooks.ResolveWebhookTargets(database, root.UUID, containerPayload)
+	if err != nil {
+		t.Fatalf("resolve container targets: %v", err)
+	}
+	if want := []string{
+		"http://example.com/container",
+		"http://example.com/container-star",
+		"http://example.com/empty",
+		"http://example.com/bare",
+	}; !reflect.DeepEqual(containerURLs, want) {
+		t.Fatalf("container event targets\nexpected: %v\nactual:   %v", want, containerURLs)
+	}
+
+	taskPayload := webhooks.Payload{Event: "updated", TicketID: "T-00001", ProjectID: root.ID}
+	taskURLs, err := webhooks.ResolveWebhookTargets(database, root.UUID, taskPayload)
+	if err != nil {
+		t.Fatalf("resolve task targets: %v", err)
+	}
+	if want := []string{
+		"http://example.com/task",
+		"http://example.com/empty",
+		"http://example.com/bare",
+	}; !reflect.DeepEqual(taskURLs, want) {
+		t.Fatalf("task event targets\nexpected: %v\nactual:   %v", want, taskURLs)
+	}
+}

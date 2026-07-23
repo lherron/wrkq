@@ -9,6 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 const (
@@ -142,6 +143,16 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 		}
 		return nil
 	})
+	if err == nil && result != nil {
+		webhooks.DispatchCampaignTransition(
+			cs.store.db,
+			containerUUID,
+			result.PreviousState,
+			result.CampaignState,
+			events.EventMetadata{ID: result.EventID, Timestamp: result.EventTimestamp},
+			attr.PrincipalRef,
+		)
+	}
 	return result, err
 }
 
@@ -228,6 +239,16 @@ func (cs *ContainerStore) TransitionCampaignWithAttribution(
 		}
 		return nil
 	})
+	if err == nil && result != nil {
+		webhooks.DispatchCampaignTransition(
+			cs.store.db,
+			containerUUID,
+			result.PreviousState,
+			result.CampaignState,
+			events.EventMetadata{ID: result.EventID, Timestamp: result.EventTimestamp},
+			attr.PrincipalRef,
+		)
+	}
 	return result, err
 }
 
