@@ -561,6 +561,118 @@ export interface WrkqCampaignTransitionResult {
   eventTimestamp: string;
 }
 
+export interface WrkqContainerTimelineViewParams {
+  container: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface WrkqTimelineContainer {
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  specification?: string;
+  kind: string;
+  parentUuid?: string;
+  path: string;
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface WrkqCampaignAdornment {
+  state: "active" | "completed" | "cancelled";
+  archived: boolean;
+  archivedAt?: string;
+}
+
+export interface WrkqTimelineMember {
+  uuid: string;
+  id: string;
+  path: string;
+  title: string;
+  state: WrkqTaskState;
+  outcome?: string;
+  membership: "resident" | "enrolled";
+}
+
+export interface WrkqTimelineRollup {
+  terminal: number;
+  total: number;
+}
+
+export interface WrkqTimelineComment {
+  id?: string;
+  kind?: WrkqCommentKind;
+  body: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface WrkqTimelineOutcome {
+  text: string | null;
+}
+
+export interface WrkqTimelineTaskState {
+  state: WrkqTaskState | "purged";
+  sourceEventType:
+    | "task.updated"
+    | "task.archived"
+    | "task.deleted"
+    | "task.restored"
+    | "task.purged";
+}
+
+export interface WrkqTimelineContainerState {
+  from: "active" | null;
+  to: "active" | "completed" | "cancelled";
+}
+
+interface WrkqTimelineEntryBase {
+  eventId: number;
+  timestamp: string;
+  principalRef?: string;
+  resourceUuid?: string;
+  taskUuid?: string;
+  taskId?: string;
+  taskPath?: string;
+  membership?: "resident" | "enrolled";
+  campaignUuid: string | null;
+  containerUuid?: string;
+}
+
+export type WrkqTimelineEntry =
+  | (WrkqTimelineEntryBase & {
+      type: "comment";
+      comment: WrkqTimelineComment;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "task.outcome";
+      outcome: WrkqTimelineOutcome;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "task.state";
+      taskState: WrkqTimelineTaskState;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "container.state";
+      containerState: WrkqTimelineContainerState;
+    });
+
+export interface WrkqContainerTimelineView {
+  container: WrkqTimelineContainer;
+  campaign: WrkqCampaignAdornment | null;
+  members: WrkqTimelineMember[];
+  rollup: WrkqTimelineRollup;
+  missingOutcomes: WrkqCampaignMemberDiagnostic[];
+  decisionTasks: WrkqTimelineMember[];
+  entries: WrkqTimelineEntry[];
+  snapshotEventId: number;
+  nextCursor?: string;
+}
+
 export interface WrkqContainerDeleteParams {
   container?: string;
   path?: string;

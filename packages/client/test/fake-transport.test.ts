@@ -537,6 +537,57 @@ describe("wrkq namespace", () => {
     expect(closed.container.campaignState).toBe("completed");
   });
 
+  test("container timeline facade preserves snapshot pagination and discriminated entries", async () => {
+    const transport = new FakeTransport().onResult("wrkq.container.timelineView", {
+      container: {
+        ...MOCK_CONTAINER,
+        description: "plain brief",
+        specification: "plain spec",
+      },
+      campaign: null,
+      members: [],
+      rollup: { terminal: 0, total: 0 },
+      missingOutcomes: [],
+      decisionTasks: [],
+      entries: [
+        {
+          type: "task.outcome",
+          eventId: 41,
+          timestamp: "2026-07-23T12:00:00Z",
+          taskUuid: "task-u-1",
+          taskId: "T-00001",
+          taskPath: "project/task",
+          membership: "resident",
+          campaignUuid: null,
+          containerUuid: "p-1",
+          outcome: { text: "done" },
+        },
+      ],
+      snapshotEventId: 44,
+      nextCursor: "snapshot-cursor",
+    });
+    const client = await clientWith(transport);
+
+    const view = await client.wrkq.container.timelineView({
+      container: "project",
+      cursor: "previous-cursor",
+      limit: 25,
+    });
+
+    expect(transport.capturedRequests[0]!.method).toBe("wrkq.container.timelineView");
+    expect(transport.capturedRequests[0]!.params).toEqual({
+      container: "project",
+      cursor: "previous-cursor",
+      limit: 25,
+    });
+    expect(view.campaign).toBeNull();
+    expect(view.snapshotEventId).toBe(44);
+    expect(view.entries[0]!.type).toBe("task.outcome");
+    if (view.entries[0]!.type === "task.outcome") {
+      expect(view.entries[0]!.outcome.text).toBe("done");
+    }
+  });
+
   test("project root registry forwards listView and setRoot with verbatim root strings", async () => {
     const transport = new FakeTransport()
       .onResult("wrkq.project.listView", {

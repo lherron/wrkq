@@ -25,6 +25,8 @@ import type {
   WrkqContainerCampaignCloseParams,
   WrkqContainerCampaignConvertParams,
   WrkqContainerCampaignUpdateParams,
+  WrkqContainerTimelineView,
+  WrkqContainerTimelineViewParams,
   WrkqContainerCreateParams,
   WrkqContainerDeleteParams,
   WrkqContainerDeleteRecursiveParams,
@@ -135,6 +137,7 @@ export interface WrkqContainerFacade {
   campaignClose(
     params: WrkqContainerCampaignCloseParams,
   ): Promise<WrkqCampaignTransitionResult>;
+  timelineView(params: WrkqContainerTimelineViewParams): Promise<WrkqContainerTimelineView>;
   delete(params: WrkqContainerDeleteParams): Promise<WrkqContainerDeleteResult>;
   deleteRecursive(
     params: WrkqContainerDeleteRecursiveParams,

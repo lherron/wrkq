@@ -33,6 +33,7 @@ func newVersionCmd() *cobra.Command {
 						"mkdir", "touch", "ls", "tree", "stat", "ids", "resolve",
 						"cat", "set", "mv", "rm", "restore",
 						"campaign",
+						"timeline",
 						"version", "completion", "config",
 						"edit", "apply", "log", "watch", "diff", "find",
 						"attach", "cp", "doctor",

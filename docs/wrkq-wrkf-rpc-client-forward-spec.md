@@ -879,6 +879,7 @@ wrkq.container.show
 wrkq.container.list
 wrkq.container.create
 wrkq.container.update         # in-place rename (Tranche B); see below
+wrkq.container.timelineView   # transactional plain/campaign composite snapshot
 wrkq.container.delete
 wrkq.container.deleteRecursive
 wrkq.project.listView         # top-level projects + stored checkout roots
@@ -923,6 +924,32 @@ interface WrkqContainerCreateParams {
 ```
 
 A duplicate slug under the same parent is `WRKQ_CONFLICT`; an invalid kind/placement (e.g. a `project` nested under a non-root container) is `WRKQ_VALIDATION`.
+
+##### `wrkq.container.timelineView` (composite snapshot)
+
+The published client adds:
+
+```ts
+client.wrkq.container.timelineView({
+  container: string,
+  cursor?: string,
+  limit?: number
+})
+```
+
+It returns one server-owned, container-neutral snapshot containing the base
+container (including brief/description and specification for plain and campaign
+containers), nullable campaign adornment, current resident/enrolled members,
+terminal rollup, missing-outcome diagnostics, open `awaiting-lance` decisions,
+and discriminated `comment | task.outcome | task.state | container.state`
+history. The server reads every component in one database transaction.
+
+`snapshotEventId` fences cursor pagination against concurrent appends, and
+entries are ordered solely by durable event id. Historical campaign/container
+affiliation is taken only from immutable event payload stamps; clients must not
+reclassify entries using current membership. Task-state history is restricted
+to state-bearing `task.updated`, `task.archived`, `task.deleted`,
+`task.restored`, and `task.purged`.
 
 ##### `wrkq.container.update` (in-place rename — Tranche B)
 

@@ -165,6 +165,7 @@ var methodCatalog = []string{
 	"wrkq.container.campaignConvert",
 	"wrkq.container.campaignUpdate",
 	"wrkq.container.campaignClose",
+	"wrkq.container.timelineView",
 	"wrkq.container.move",
 	"wrkq.container.webhookSet",
 	"wrkq.container.archive",
@@ -297,6 +298,16 @@ var dtoCatalog = []string{
 	"WrkqContainerListResult",
 	"WrkqCampaignMemberDiagnostic",
 	"WrkqCampaignTransitionResult",
+	"WrkqTimelineContainer",
+	"WrkqCampaignAdornment",
+	"WrkqTimelineMember",
+	"WrkqTimelineRollup",
+	"WrkqTimelineComment",
+	"WrkqTimelineOutcome",
+	"WrkqTimelineTaskState",
+	"WrkqTimelineContainerState",
+	"WrkqTimelineEntry",
+	"WrkqContainerTimelineView",
 	"WrkqProjectsListView", // CLI compatibility projection (projects)
 	"WrkqProjectEntry",     // element of projects listView (includes nullable registered root)
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
@@ -475,6 +486,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.container.campaignClose", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignCloseParams) (any, error) {
 		return wq.ContainerCampaignClose(ctx, p)
+	}))
+	s.Register("wrkq.container.timelineView", apiHandler(func(ctx context.Context, p wrkqapi.ContainerTimelineViewParams) (any, error) {
+		return wq.ContainerTimelineView(ctx, p)
 	}))
 	s.Register("wrkq.container.move", apiHandler(func(ctx context.Context, p wrkqapi.ContainerMoveParams) (any, error) {
 		return wq.ContainerMove(ctx, p)

@@ -1134,6 +1134,7 @@ wrkq.container.update
 wrkq.container.campaignConvert
 wrkq.container.campaignUpdate
 wrkq.container.campaignClose
+wrkq.container.timelineView
 wrkq.container.move
 wrkq.container.webhookSet
 wrkq.container.archive
@@ -1251,6 +1252,89 @@ interface WrkqCampaignTransitionResult {
 // campaignConvert and campaignClose return WrkqCampaignTransitionResult;
 // campaignUpdate returns the updated WrkqContainer.
 
+interface WrkqContainerTimelineViewParams {
+  container: string;
+  cursor?: string;
+  limit?: number;          // default 100; maximum 1000
+}
+
+interface WrkqTimelineContainer {
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+  description: string;     // brief; present for plain and campaign containers
+  specification?: string;
+  kind: string;
+  parentUuid?: string;
+  path: string;
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+interface WrkqCampaignAdornment {
+  state: "active" | "completed" | "cancelled";
+  archived: boolean;       // projection of archivedAt, not campaign state
+  archivedAt?: string;
+}
+
+interface WrkqTimelineMember {
+  uuid: string;
+  id: string;
+  path: string;
+  title: string;
+  state: WrkqTaskState;
+  outcome?: string;
+  membership: "resident" | "enrolled";
+}
+
+type WrkqTimelineEntry =
+  | ({ type: "comment"; comment: {
+        id?: string; kind?: WrkqCommentKind; body: string;
+        meta?: Record<string, unknown>;
+      } } & WrkqTimelineEntryBase)
+  | ({ type: "task.outcome"; outcome: { text: string | null } }
+      & WrkqTimelineEntryBase)
+  | ({ type: "task.state"; taskState: {
+        state: WrkqTaskState | "purged";
+        sourceEventType:
+          | "task.updated" | "task.archived" | "task.deleted"
+          | "task.restored" | "task.purged";
+      } } & WrkqTimelineEntryBase)
+  | ({ type: "container.state"; containerState: {
+        from: "active" | null;
+        to: "active" | "completed" | "cancelled";
+      } } & WrkqTimelineEntryBase);
+
+interface WrkqTimelineEntryBase {
+  eventId: number;
+  timestamp: string;
+  principalRef?: string;
+  resourceUuid?: string;
+  taskUuid?: string;
+  taskId?: string;
+  taskPath?: string;
+  membership?: "resident" | "enrolled";
+  campaignUuid: string | null;
+  containerUuid?: string;
+}
+
+interface WrkqContainerTimelineView {
+  container: WrkqTimelineContainer;
+  campaign: WrkqCampaignAdornment | null;
+  members: WrkqTimelineMember[];
+  rollup: { terminal: number; total: number };
+  missingOutcomes: WrkqCampaignMemberDiagnostic[];
+  decisionTasks: WrkqTimelineMember[];
+  entries: WrkqTimelineEntry[];
+  snapshotEventId: number;
+  nextCursor?: string;
+}
+
+// wrkq.container.timelineView returns WrkqContainerTimelineView.
+
 interface WrkqContainerMoveParams {
   container: string;        // path / friendly-id / uuid selector
   destination: string;      // existing container selector OR new container path
@@ -1312,6 +1396,24 @@ interface WrkqContainerDeleteRecursiveResult { /* see above */ }
 ```
 
 `container.show` resolves by `path` or `project`; a miss → `WRKQ_NOT_FOUND`.
+
+`wrkq.container.timelineView` is the single server-owned composite snapshot for
+plain containers and campaign-adorned containers. Selector resolution, base
+content, nullable campaign adornment, current effective members, rollup,
+missing-outcome diagnostics, open `awaiting-lance` decisions, the event
+high-water mark, and the requested event page are read in one database
+transaction. Continuation cursors carry `snapshotEventId` and the last emitted
+event id, so concurrent appends never enter later pages of an existing
+snapshot. Entries are ordered solely by `event_log.id`.
+
+Historical affiliation comes only from the immutable `campaign_uuid` and
+`container_uuid` stamps captured in each event payload, never from current task
+membership. The task-state projection admits exactly state-bearing
+`task.updated`, `task.archived`, `task.deleted`, `task.restored`, and
+`task.purged`; it deliberately excludes claim, release, unblocked, moved,
+copied, created, and non-state update events. The other discriminants are
+`comment.created` → `comment`, `task.outcome_set` → `task.outcome`, and
+`container.campaign_state_changed` → `container.state`.
 
 `wrkq.container.move` backs the container-source branch of legacy `wrkq mv`. It is
 deliberately **separate** from `wrkq.container.update`: update remains the narrow

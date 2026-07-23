@@ -153,6 +153,7 @@ class WorkClientImpl implements WorkClient {
       campaignConvert: (p) => this.call("wrkq.container.campaignConvert", p),
       campaignUpdate: (p) => this.call("wrkq.container.campaignUpdate", p),
       campaignClose: (p) => this.call("wrkq.container.campaignClose", p),
+      timelineView: (p) => this.call("wrkq.container.timelineView", p),
       delete: (p) => this.call("wrkq.container.delete", p),
       deleteRecursive: (p) => this.call("wrkq.container.deleteRecursive", p),
       show: (p) => this.call("wrkq.container.show", p),

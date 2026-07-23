@@ -2783,6 +2783,28 @@
         ]
       },
       {
+        "name": "timeline",
+        "use": "timeline \u003ccontainer\u003e",
+        "short": "Show a container or campaign timeline snapshot",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "cursor",
+            "usage": "Continue an event-id-fenced snapshot page",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "limit",
+            "usage": "Maximum entries in this page",
+            "type": "int",
+            "default": "0",
+            "hidden": false
+          }
+        ]
+      },
+      {
         "name": "touch",
         "use": "touch \u003cpath\u003e...",
         "short": "Create one or more tasks",
