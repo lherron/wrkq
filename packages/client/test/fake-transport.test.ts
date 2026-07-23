@@ -50,6 +50,7 @@ const MOCK_CONTAINER: WrkqContainer = {
   slug: "project",
   title: "Project",
   description: "",
+  labels: [],
   kind: "project",
   path: "project",
   etag: 1,
@@ -472,30 +473,59 @@ describe("wrkq namespace", () => {
     expect(updated.etag).toBe(2);
   });
 
-  test("campaign facade forwards convert, update, and close lifecycle methods", async () => {
-    const active = {
+  test("campaign facade forwards lifecycle and portfolio methods", async () => {
+    const draft = {
       ...MOCK_CONTAINER,
+      labels: ["domain:platform"],
+      campaignState: "draft" as const,
+      etag: 2,
+    };
+    const active = {
+      ...draft,
       description: "brief",
       specification: "ratified spec",
       campaignState: "active" as const,
-      etag: 2,
+      etag: 3,
     };
     const transport = new FakeTransport()
       .onResult("wrkq.container.campaignConvert", {
-        container: active,
+        container: draft,
         previousState: null,
-        campaignState: "active",
+        campaignState: "draft",
         missingOutcomes: [],
         eventId: 10,
         eventTimestamp: "2026-07-23T00:00:00Z",
       })
+      .onResult("wrkq.container.campaignActivate", {
+        container: active,
+        previousState: "draft",
+        campaignState: "active",
+        missingOutcomes: [],
+        eventId: 11,
+        eventTimestamp: "2026-07-23T00:00:30Z",
+      })
       .onResult("wrkq.container.campaignUpdate", {
         ...active,
         description: "amended brief",
-        etag: 3,
+        etag: 4,
+      })
+      .onResult("wrkq.container.campaignPortfolio", {
+        items: [
+          {
+            container: active,
+            totalMembers: 0,
+            stateCounts: {},
+            residentCount: 0,
+            enrolledCount: 0,
+            inProgressCount: 0,
+            missingOutcomeCount: 0,
+            footprint: [],
+            lastActivityAt: active.updatedAt,
+          },
+        ],
       })
       .onResult("wrkq.container.campaignClose", {
-        container: { ...active, campaignState: "completed", etag: 4 },
+        container: { ...active, campaignState: "completed", etag: 5 },
         previousState: "active",
         campaignState: "completed",
         missingOutcomes: [],
@@ -506,33 +536,45 @@ describe("wrkq namespace", () => {
 
     await client.wrkq.container.campaignConvert({
       container: "project",
+      state: "draft",
       description: "brief",
       specification: "ratified spec",
+      labels: ["domain:platform"],
       expectEtag: 1,
+    });
+    await client.wrkq.container.campaignActivate({
+      container: "project",
+      expectEtag: 2,
     });
     const updated = await client.wrkq.container.campaignUpdate({
       container: "project",
       description: "amended brief",
-      expectEtag: 2,
+      expectEtag: 3,
     });
+    const portfolio = await client.wrkq.container.campaignPortfolio();
     const closed = await client.wrkq.container.campaignClose({
       container: "project",
       state: "completed",
-      expectEtag: 3,
+      expectEtag: 4,
     });
 
     expect(transport.capturedRequests.map((frame) => frame.method)).toEqual([
       "wrkq.container.campaignConvert",
+      "wrkq.container.campaignActivate",
       "wrkq.container.campaignUpdate",
+      "wrkq.container.campaignPortfolio",
       "wrkq.container.campaignClose",
     ]);
     expect(transport.capturedRequests[0]!.params).toEqual({
       container: "project",
+      state: "draft",
       description: "brief",
       specification: "ratified spec",
+      labels: ["domain:platform"],
       expectEtag: 1,
     });
     expect(updated.description).toBe("amended brief");
+    expect(portfolio.items).toHaveLength(1);
     expect(closed.campaignState).toBe("completed");
     expect(closed.container.campaignState).toBe("completed");
   });
@@ -548,6 +590,8 @@ describe("wrkq namespace", () => {
       members: [],
       rollup: { terminal: 0, total: 0 },
       missingOutcomes: [],
+      footprint: [],
+      lastActivityAt: MOCK_CONTAINER.updatedAt,
       decisionTasks: [],
       entries: [
         {

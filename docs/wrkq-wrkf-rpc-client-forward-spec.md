@@ -879,6 +879,11 @@ wrkq.container.show
 wrkq.container.list
 wrkq.container.create
 wrkq.container.update         # in-place rename (Tranche B); see below
+wrkq.container.campaignConvert
+wrkq.container.campaignActivate
+wrkq.container.campaignUpdate
+wrkq.container.campaignClose
+wrkq.container.campaignPortfolio
 wrkq.container.timelineView   # transactional plain/campaign composite snapshot
 wrkq.container.delete
 wrkq.container.deleteRecursive
@@ -896,6 +901,10 @@ interface WrkqContainer {
   id: string;
   slug: string;
   title: string;
+  description: string;
+  specification?: string;
+  labels: string[];
+  campaignState?: "draft" | "active" | "completed" | "cancelled";
   kind: string;          // "project" | "directory" | ...
   parentUuid?: string;
   path: string;          // server-derived canonical path
@@ -925,6 +934,21 @@ interface WrkqContainerCreateParams {
 
 A duplicate slug under the same parent is `WRKQ_CONFLICT`; an invalid kind/placement (e.g. a `project` nested under a non-root container) is `WRKQ_VALIDATION`.
 
+##### Canonical campaign portfolio
+
+The published client exposes `convert`, `activate`, `update`, `close`, and
+`portfolio` under `client.wrkq.container`. Campaign labels use task-label array
+semantics exactly. Draft campaigns can hold tasks; terminal campaigns retain
+current members but reject new resident or enrolled admissions.
+
+`portfolio({states?, includeArchived?})` returns one complete aggregate snapshot
+from a single producer read transaction. It is intentionally not paginated and
+contains no member identities. The default is unarchived draft+active campaigns
+ordered by `createdAt DESC, uuid ASC`. Rows include state/resident/enrolled
+counts, stable top-level project footprint, missing-outcome count, and
+`lastActivityAt = max(campaign.updated_at, effective-member.updated_at)`.
+Consumers fetch member identities lazily through `timelineView`.
+
 ##### `wrkq.container.timelineView` (composite snapshot)
 
 The published client adds:
@@ -938,8 +962,9 @@ client.wrkq.container.timelineView({
 ```
 
 It returns one server-owned, container-neutral snapshot containing the base
-container (including brief/description and specification for plain and campaign
-containers), nullable campaign adornment, current resident/enrolled members,
+container (including brief/description, specification, and labels for plain and
+campaign containers), nullable campaign adornment, current resident/enrolled
+members with stable top-level project identity, footprint, exact last activity,
 terminal rollup, missing-outcome diagnostics, open `awaiting-lance` decisions,
 and discriminated `comment | task.outcome | task.state | container.state`
 history. The server reads every component in one database transaction.

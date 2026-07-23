@@ -22,8 +22,11 @@ import type {
   WrkqCommentListResult,
   WrkqCommentShowParams,
   WrkqContainer,
+  WrkqCampaignPortfolio,
+  WrkqContainerCampaignActivateParams,
   WrkqContainerCampaignCloseParams,
   WrkqContainerCampaignConvertParams,
+  WrkqContainerCampaignPortfolioParams,
   WrkqContainerCampaignUpdateParams,
   WrkqContainerTimelineView,
   WrkqContainerTimelineViewParams,
@@ -133,10 +136,16 @@ export interface WrkqContainerFacade {
   campaignConvert(
     params: WrkqContainerCampaignConvertParams,
   ): Promise<WrkqCampaignTransitionResult>;
+  campaignActivate(
+    params: WrkqContainerCampaignActivateParams,
+  ): Promise<WrkqCampaignTransitionResult>;
   campaignUpdate(params: WrkqContainerCampaignUpdateParams): Promise<WrkqContainer>;
   campaignClose(
     params: WrkqContainerCampaignCloseParams,
   ): Promise<WrkqCampaignTransitionResult>;
+  campaignPortfolio(
+    params?: WrkqContainerCampaignPortfolioParams,
+  ): Promise<WrkqCampaignPortfolio>;
   timelineView(params: WrkqContainerTimelineViewParams): Promise<WrkqContainerTimelineView>;
   delete(params: WrkqContainerDeleteParams): Promise<WrkqContainerDeleteResult>;
   deleteRecursive(

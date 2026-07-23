@@ -120,6 +120,24 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqContainer") {
 		t.Error("WrkqContainer missing from dtoCatalog (wrkq.container.update result DTO)")
 	}
+	for _, method := range []string{
+		"wrkq.container.campaignActivate",
+		"wrkq.container.campaignPortfolio",
+	} {
+		if !contains(methodCatalog, method) {
+			t.Errorf("%s missing from methodCatalog", method)
+		}
+	}
+	for _, dto := range []string{
+		"WrkqCampaignProject",
+		"WrkqCampaignFootprint",
+		"WrkqCampaignPortfolioRow",
+		"WrkqCampaignPortfolio",
+	} {
+		if !contains(dtoCatalog, dto) {
+			t.Errorf("%s missing from dtoCatalog", dto)
+		}
+	}
 	// Per-container webhook mutation is deliberately separate from
 	// wrkq.container.update's narrow slug/title patch surface. Its result is the
 	// legacy map-shaped `container set` output, so only the method name is cataloged.

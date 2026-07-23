@@ -26,7 +26,8 @@ Schema: `wrkq.campaign-transition.v1`
 ```
 
 Conversion uses `old_campaign_state: null` and
-`new_campaign_state: "active"`. Close uses `active -> completed|cancelled`.
+`new_campaign_state: "draft"|"active"`. Activation uses `draft -> active`.
+Close uses `draft -> cancelled` or `active -> completed|cancelled`.
 `actor` retains the established webhook actor field but carries the canonical
 principal identity; `principal_ref` makes that authority explicit.
 

@@ -10,13 +10,24 @@ import (
 	"github.com/lherron/wrkq/internal/store"
 )
 
-// ContainerCampaignConvert adorns a plain container as an active campaign.
+// ContainerCampaignConvert adorns a plain container as a draft or active
+// campaign. Omitted state preserves the original direct-to-active behavior.
 func (a *API) ContainerCampaignConvert(
 	ctx context.Context,
 	p ContainerCampaignConvertParams,
 ) (*WrkqCampaignTransitionResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	state := strings.TrimSpace(p.State)
+	if state == "" {
+		state = store.CampaignStateActive
+	}
+	if state != store.CampaignStateDraft && state != store.CampaignStateActive {
+		return nil, NewValidationError(
+			"campaign conversion state must be draft or active",
+			map[string]any{"field": "state"},
+		)
 	}
 	containerUUID, selector, err := a.resolveCampaignContainer(p.Container)
 	if err != nil {
@@ -26,8 +37,13 @@ func (a *API) ContainerCampaignConvert(
 	if err != nil {
 		return nil, err
 	}
+	var storedLabels *string
+	if p.Labels != nil {
+		value := labelsString(*p.Labels)
+		storedLabels = &value
+	}
 	result, err := a.store.Containers.ConvertCampaignWithAttribution(
-		attr, containerUUID, p.Description, p.Specification, p.ExpectETag,
+		attr, containerUUID, state, p.Description, p.Specification, storedLabels, p.ExpectETag,
 	)
 	if err != nil {
 		return nil, mapCampaignStoreError(err, selector)
@@ -45,10 +61,10 @@ func (a *API) ContainerCampaignUpdate(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if p.Description == nil && p.Specification == nil {
+	if p.Description == nil && p.Specification == nil && p.Labels == nil {
 		return nil, NewValidationError(
-			"description or specification is required",
-			map[string]any{"field": "description|specification"},
+			"description, specification, or labels is required",
+			map[string]any{"field": "description|specification|labels"},
 		)
 	}
 	containerUUID, selector, err := a.resolveCampaignContainer(p.Container)
@@ -76,6 +92,9 @@ func (a *API) ContainerCampaignUpdate(
 			fields["specification"] = *p.Specification
 		}
 	}
+	if p.Labels != nil {
+		fields["labels"] = labelsString(*p.Labels)
+	}
 	attr, err := a.attributionFor(p.Actor)
 	if err != nil {
 		return nil, err
@@ -86,6 +105,31 @@ func (a *API) ContainerCampaignUpdate(
 		return nil, mapCampaignStoreError(err, selector)
 	}
 	return a.loadContainer(containerUUID)
+}
+
+// ContainerCampaignActivate transitions one draft campaign to active.
+func (a *API) ContainerCampaignActivate(
+	ctx context.Context,
+	p ContainerCampaignActivateParams,
+) (*WrkqCampaignTransitionResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	containerUUID, selector, err := a.resolveCampaignContainer(p.Container)
+	if err != nil {
+		return nil, err
+	}
+	attr, err := a.attributionFor(p.Actor)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.store.Containers.TransitionCampaignWithAttribution(
+		attr, containerUUID, store.CampaignStateActive, p.ExpectETag,
+	)
+	if err != nil {
+		return nil, mapCampaignStoreError(err, selector)
+	}
+	return a.campaignTransitionDTO(containerUUID, result)
 }
 
 // ContainerCampaignClose declares an active campaign completed or cancelled.
@@ -179,6 +223,8 @@ func mapCampaignStoreError(err error, selector string) error {
 		strings.Contains(msg, "not a campaign"),
 		strings.Contains(msg, "only active campaigns"),
 		strings.Contains(msg, "target state"),
+		strings.Contains(msg, "can only be"),
+		strings.Contains(msg, "terminal campaigns"),
 		strings.Contains(msg, "cannot be converted"),
 		strings.Contains(msg, "campaign containers cannot be nested"),
 		strings.Contains(msg, "cannot remain enrolled"):

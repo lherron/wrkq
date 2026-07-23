@@ -106,7 +106,7 @@ func TestCampaignWebhookPostCommitPayloadInheritanceAndClassIsolation(t *testing
 
 	description := "campaign webhook fixture"
 	converted, err := f.store.Containers.ConvertCampaignWithAttribution(
-		attr, f.nonCampaignContainer, &description, nil, 0,
+		attr, f.nonCampaignContainer, CampaignStateDraft, &description, nil, nil, 0,
 	)
 	if err != nil {
 		t.Fatalf("convert campaign: %v", err)
@@ -126,7 +126,7 @@ func TestCampaignWebhookPostCommitPayloadInheritanceAndClassIsolation(t *testing
 		conversion.Payload.CampaignID == "" ||
 		conversion.Payload.CampaignPath != "campaign-project-a/plain-bucket" ||
 		conversion.Payload.OldCampaignState != nil ||
-		conversion.Payload.NewCampaignState != CampaignStateActive {
+		conversion.Payload.NewCampaignState != CampaignStateDraft {
 		t.Fatalf("conversion payload = %#v", conversion.Payload)
 	}
 	waitForCampaignDeliveryCount(t, &bareDeliveries, 1)
@@ -172,6 +172,27 @@ func TestCampaignWebhookPostCommitPayloadInheritanceAndClassIsolation(t *testing
 			taskDeliveries.Load(), bareDeliveries.Load(), len(received))
 	}
 
+	activated, err := f.store.Containers.TransitionCampaignWithAttribution(
+		attr, f.nonCampaignContainer, CampaignStateActive, 0,
+	)
+	if err != nil {
+		t.Fatalf("activate campaign: %v", err)
+	}
+	activationWebhook := receiveCampaignWebhook(t, received)
+	if !activationWebhook.Committed ||
+		activationWebhook.Payload.EventID != activated.EventID ||
+		activationWebhook.Payload.IdempotencyKey != activated.EventID ||
+		activationWebhook.Payload.OldCampaignState == nil ||
+		*activationWebhook.Payload.OldCampaignState != CampaignStateDraft ||
+		activationWebhook.Payload.NewCampaignState != CampaignStateActive {
+		t.Fatalf("activation webhook = %#v committed=%v", activationWebhook.Payload, activationWebhook.Committed)
+	}
+	waitForCampaignDeliveryCount(t, &bareDeliveries, 3)
+	if taskDeliveries.Load() != 0 || bareDeliveries.Load() != 3 {
+		t.Fatalf("activation deliveries task/bare = %d/%d, want 0/3",
+			taskDeliveries.Load(), bareDeliveries.Load())
+	}
+
 	closed, err := f.store.Containers.TransitionCampaignWithAttribution(
 		attr, f.nonCampaignContainer, CampaignStateCompleted, 0,
 	)
@@ -187,9 +208,50 @@ func TestCampaignWebhookPostCommitPayloadInheritanceAndClassIsolation(t *testing
 		closeWebhook.Payload.NewCampaignState != CampaignStateCompleted {
 		t.Fatalf("close webhook = %#v committed=%v", closeWebhook.Payload, closeWebhook.Committed)
 	}
-	waitForCampaignDeliveryCount(t, &bareDeliveries, 3)
-	if taskDeliveries.Load() != 0 || bareDeliveries.Load() != 3 {
-		t.Fatalf("close deliveries task/bare = %d/%d, want 0/3",
+	waitForCampaignDeliveryCount(t, &bareDeliveries, 4)
+	if taskDeliveries.Load() != 0 || bareDeliveries.Load() != 4 {
+		t.Fatalf("close deliveries task/bare = %d/%d, want 0/4",
+			taskDeliveries.Load(), bareDeliveries.Load())
+	}
+
+	draftToCancel, err := f.store.Containers.Create(f.actorUUID, ContainerCreateParams{
+		Slug: "draft-to-cancel", Kind: "directory", ParentUUID: &f.projectA,
+	})
+	if err != nil {
+		t.Fatalf("create draft-to-cancel container: %v", err)
+	}
+	draftResult, err := f.store.Containers.ConvertCampaignWithAttribution(
+		attr, draftToCancel.UUID, CampaignStateDraft, nil, nil, nil, 0,
+	)
+	if err != nil {
+		t.Fatalf("convert second draft: %v", err)
+	}
+	secondDraftWebhook := receiveCampaignWebhook(t, received)
+	if !secondDraftWebhook.Committed ||
+		secondDraftWebhook.Payload.EventID != draftResult.EventID ||
+		secondDraftWebhook.Payload.OldCampaignState != nil ||
+		secondDraftWebhook.Payload.NewCampaignState != CampaignStateDraft {
+		t.Fatalf("second draft webhook = %#v committed=%v", secondDraftWebhook.Payload, secondDraftWebhook.Committed)
+	}
+	waitForCampaignDeliveryCount(t, &bareDeliveries, 5)
+
+	cancelledDraft, err := f.store.Containers.TransitionCampaignWithAttribution(
+		attr, draftToCancel.UUID, CampaignStateCancelled, 0,
+	)
+	if err != nil {
+		t.Fatalf("cancel second draft: %v", err)
+	}
+	draftCancelWebhook := receiveCampaignWebhook(t, received)
+	if !draftCancelWebhook.Committed ||
+		draftCancelWebhook.Payload.EventID != cancelledDraft.EventID ||
+		draftCancelWebhook.Payload.OldCampaignState == nil ||
+		*draftCancelWebhook.Payload.OldCampaignState != CampaignStateDraft ||
+		draftCancelWebhook.Payload.NewCampaignState != CampaignStateCancelled {
+		t.Fatalf("draft cancel webhook = %#v committed=%v", draftCancelWebhook.Payload, draftCancelWebhook.Committed)
+	}
+	waitForCampaignDeliveryCount(t, &bareDeliveries, 6)
+	if taskDeliveries.Load() != 0 || bareDeliveries.Load() != 6 {
+		t.Fatalf("draft cancel deliveries task/bare = %d/%d, want 0/6",
 			taskDeliveries.Load(), bareDeliveries.Load())
 	}
 }

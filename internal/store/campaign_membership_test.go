@@ -75,13 +75,13 @@ func requireCampaignRejection(t *testing.T, err error, want string) {
 }
 
 func TestEffectiveCampaignMembershipValidatorMutationMatrix(t *testing.T) {
-	t.Run("enrollment requires active target", func(t *testing.T) {
+	t.Run("enrollment requires draft or active campaign target", func(t *testing.T) {
 		f := newCampaignMembershipFixture(t)
 		taskUUID := f.createTask(t, "inactive-target", f.projectB, nil)
 		_, err := f.store.Tasks.UpdateFields(f.actorUUID, taskUUID, map[string]any{
 			"campaign_uuid": f.nonCampaignContainer,
 		}, 0)
-		requireCampaignRejection(t, err, "active")
+		requireCampaignRejection(t, err, "draft or active")
 	})
 
 	t.Run("resident task rejects foreign enrollment", func(t *testing.T) {

@@ -330,7 +330,9 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		if err != nil {
 			return fmt.Errorf("failed to get task UUID: %w", err)
 		}
-		if err := validateEffectiveMembershipTx(tx, campaignValidation{taskUUIDs: []string{uuid}}); err != nil {
+		if err := validateEffectiveMembershipTx(tx, campaignValidation{
+			taskUUIDs: []string{uuid}, residentAdmission: true,
+		}); err != nil {
 			return err
 		}
 
@@ -607,7 +609,8 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		_, projectChange := fields["project_uuid"]
 		if enrollmentChange || projectChange {
 			if err := validateEffectiveMembershipTx(tx, campaignValidation{
-				taskUUIDs: []string{taskUUID}, enrollmentChange: enrollmentChange, move: projectChange,
+				taskUUIDs: []string{taskUUID}, enrollmentChange: enrollmentChange,
+				residentAdmission: projectChange, move: projectChange,
 			}); err != nil {
 				return err
 			}
@@ -973,7 +976,9 @@ func (ts *TaskStore) MoveWithViaAttribution(attr attribution.Attribution, taskUU
 				return fmt.Errorf("failed to stage task move: %w", err)
 			}
 		}
-		if err := validateEffectiveMembershipTx(tx, campaignValidation{taskUUIDs: moveUUIDs, move: true}); err != nil {
+		if err := validateEffectiveMembershipTx(tx, campaignValidation{
+			taskUUIDs: moveUUIDs, residentAdmission: true, move: true,
+		}); err != nil {
 			return err
 		}
 

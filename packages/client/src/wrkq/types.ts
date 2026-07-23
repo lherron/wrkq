@@ -417,7 +417,8 @@ export interface WrkqContainer {
   title: string;
   description: string;
   specification?: string;
-  campaignState?: "active" | "completed" | "cancelled";
+  labels: string[];
+  campaignState?: WrkqCampaignState;
   kind: string;
   parentUuid?: string;
   path: string;
@@ -426,6 +427,8 @@ export interface WrkqContainer {
   updatedAt: string;
   archivedAt?: string;
 }
+
+export type WrkqCampaignState = "draft" | "active" | "completed" | "cancelled";
 
 export interface WrkqContainerListResult {
   items: WrkqContainer[];
@@ -532,8 +535,10 @@ export interface WrkqContainerUpdateParams {
 
 export interface WrkqContainerCampaignConvertParams {
   container: string;
+  state?: "draft" | "active";
   description?: string;
   specification?: string;
+  labels?: string[];
   expectEtag?: number;
   actor?: string;
 }
@@ -542,6 +547,13 @@ export interface WrkqContainerCampaignUpdateParams {
   container: string;
   description?: string;
   specification?: string;
+  labels?: string[];
+  expectEtag?: number;
+  actor?: string;
+}
+
+export interface WrkqContainerCampaignActivateParams {
+  container: string;
   expectEtag?: number;
   actor?: string;
 }
@@ -563,11 +575,44 @@ export interface WrkqCampaignMemberDiagnostic {
 
 export interface WrkqCampaignTransitionResult {
   container: WrkqContainer;
-  previousState: "active" | null;
-  campaignState: "active" | "completed" | "cancelled";
+  previousState: WrkqCampaignState | null;
+  campaignState: WrkqCampaignState;
   missingOutcomes: WrkqCampaignMemberDiagnostic[];
   eventId: number;
   eventTimestamp: string;
+}
+
+export interface WrkqContainerCampaignPortfolioParams {
+  states?: WrkqCampaignState[];
+  includeArchived?: boolean;
+}
+
+export interface WrkqCampaignProject {
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+}
+
+export interface WrkqCampaignFootprint {
+  project: WrkqCampaignProject;
+  memberCount: number;
+}
+
+export interface WrkqCampaignPortfolioRow {
+  container: WrkqContainer;
+  totalMembers: number;
+  stateCounts: Record<string, number>;
+  residentCount: number;
+  enrolledCount: number;
+  inProgressCount: number;
+  missingOutcomeCount: number;
+  footprint: WrkqCampaignFootprint[];
+  lastActivityAt: string;
+}
+
+export interface WrkqCampaignPortfolio {
+  items: WrkqCampaignPortfolioRow[];
 }
 
 export interface WrkqContainerTimelineViewParams {
@@ -583,6 +628,7 @@ export interface WrkqTimelineContainer {
   title: string;
   description: string;
   specification?: string;
+  labels: string[];
   kind: string;
   parentUuid?: string;
   path: string;
@@ -593,7 +639,7 @@ export interface WrkqTimelineContainer {
 }
 
 export interface WrkqCampaignAdornment {
-  state: "active" | "completed" | "cancelled";
+  state: WrkqCampaignState;
   archived: boolean;
   archivedAt?: string;
 }
@@ -606,6 +652,7 @@ export interface WrkqTimelineMember {
   state: WrkqTaskState;
   outcome?: string;
   membership: "resident" | "enrolled";
+  project: WrkqCampaignProject;
 }
 
 export interface WrkqTimelineRollup {
@@ -635,8 +682,8 @@ export interface WrkqTimelineTaskState {
 }
 
 export interface WrkqTimelineContainerState {
-  from: "active" | null;
-  to: "active" | "completed" | "cancelled";
+  from: WrkqCampaignState | null;
+  to: WrkqCampaignState;
 }
 
 interface WrkqTimelineEntryBase {
@@ -676,6 +723,8 @@ export interface WrkqContainerTimelineView {
   members: WrkqTimelineMember[];
   rollup: WrkqTimelineRollup;
   missingOutcomes: WrkqCampaignMemberDiagnostic[];
+  footprint: WrkqCampaignFootprint[];
+  lastActivityAt: string;
   decisionTasks: WrkqTimelineMember[];
   entries: WrkqTimelineEntry[];
   snapshotEventId: number;

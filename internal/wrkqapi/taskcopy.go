@@ -15,6 +15,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -203,6 +204,9 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 		rowID, _ := res.LastInsertId()
 		if qerr := tx.QueryRow("SELECT uuid, id FROM tasks WHERE rowid = ?", rowID).Scan(&newUUID, &newID); qerr != nil {
 			return nil, NewInternalError(qerr)
+		}
+		if verr := store.ValidateTaskResidentAdmissionTx(tx, newUUID); verr != nil {
+			return nil, mapStoreError(verr, "")
 		}
 	}
 

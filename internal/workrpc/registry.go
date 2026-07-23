@@ -163,8 +163,10 @@ var methodCatalog = []string{
 	"wrkq.container.create",
 	"wrkq.container.update",
 	"wrkq.container.campaignConvert",
+	"wrkq.container.campaignActivate",
 	"wrkq.container.campaignUpdate",
 	"wrkq.container.campaignClose",
+	"wrkq.container.campaignPortfolio",
 	"wrkq.container.timelineView",
 	"wrkq.container.move",
 	"wrkq.container.webhookSet",
@@ -298,6 +300,10 @@ var dtoCatalog = []string{
 	"WrkqContainerListResult",
 	"WrkqCampaignMemberDiagnostic",
 	"WrkqCampaignTransitionResult",
+	"WrkqCampaignProject",
+	"WrkqCampaignFootprint",
+	"WrkqCampaignPortfolioRow",
+	"WrkqCampaignPortfolio",
 	"WrkqTimelineContainer",
 	"WrkqCampaignAdornment",
 	"WrkqTimelineMember",
@@ -481,11 +487,17 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.container.campaignConvert", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignConvertParams) (any, error) {
 		return wq.ContainerCampaignConvert(ctx, p)
 	}))
+	s.Register("wrkq.container.campaignActivate", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignActivateParams) (any, error) {
+		return wq.ContainerCampaignActivate(ctx, p)
+	}))
 	s.Register("wrkq.container.campaignUpdate", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignUpdateParams) (any, error) {
 		return wq.ContainerCampaignUpdate(ctx, p)
 	}))
 	s.Register("wrkq.container.campaignClose", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignCloseParams) (any, error) {
 		return wq.ContainerCampaignClose(ctx, p)
+	}))
+	s.Register("wrkq.container.campaignPortfolio", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignPortfolioParams) (any, error) {
+		return wq.ContainerCampaignPortfolio(ctx, p)
 	}))
 	s.Register("wrkq.container.timelineView", apiHandler(func(ctx context.Context, p wrkqapi.ContainerTimelineViewParams) (any, error) {
 		return wq.ContainerTimelineView(ctx, p)

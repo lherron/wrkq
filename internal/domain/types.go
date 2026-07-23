@@ -110,6 +110,7 @@ type Container struct {
 	SortIndex             int           `json:"sort_index" db:"sort_index"`
 	WebhookURLs           *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
 	Root                  *string       `json:"root" db:"root"`
+	Labels                *string       `json:"labels,omitempty" db:"labels"` // JSON array
 	CampaignState         *string       `json:"campaign_state,omitempty" db:"campaign_state"`
 	Specification         *string       `json:"specification,omitempty" db:"specification"`
 	ETag                  int64         `json:"etag" db:"etag"`

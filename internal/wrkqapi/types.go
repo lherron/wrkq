@@ -586,20 +586,21 @@ type RelationRemoveParams struct {
 // WrkqContainer is the stable container resource DTO (camelCase; no DB column
 // names leak). path is computed.
 type WrkqContainer struct {
-	UUID          string  `json:"uuid"`
-	ID            string  `json:"id"`
-	Slug          string  `json:"slug"`
-	Title         string  `json:"title"`
-	Description   string  `json:"description"`
-	Specification *string `json:"specification,omitempty"`
-	CampaignState *string `json:"campaignState,omitempty"`
-	Kind          string  `json:"kind"`
-	ParentUUID    string  `json:"parentUuid,omitempty"`
-	Path          string  `json:"path"`
-	ETag          int64   `json:"etag"`
-	CreatedAt     string  `json:"createdAt"`
-	UpdatedAt     string  `json:"updatedAt"`
-	ArchivedAt    string  `json:"archivedAt,omitempty"`
+	UUID          string   `json:"uuid"`
+	ID            string   `json:"id"`
+	Slug          string   `json:"slug"`
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	Specification *string  `json:"specification,omitempty"`
+	Labels        []string `json:"labels"`
+	CampaignState *string  `json:"campaignState,omitempty"`
+	Kind          string   `json:"kind"`
+	ParentUUID    string   `json:"parentUuid,omitempty"`
+	Path          string   `json:"path"`
+	ETag          int64    `json:"etag"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
+	ArchivedAt    string   `json:"archivedAt,omitempty"`
 
 	// createdAtRaw holds the un-normalized created_at for cursor anchoring; it is
 	// unexported and never serialized.
@@ -703,28 +704,37 @@ type ContainerUpdateParams struct {
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
 }
 
-// ContainerCampaignConvertParams adorns one plain container as an active
-// campaign and may seed its brief/specification bodies.
+// ContainerCampaignConvertParams adorns one plain container as a draft or
+// active campaign and may seed content/labels.
 type ContainerCampaignConvertParams struct {
-	Container     string  `json:"container"`
-	Description   *string `json:"description,omitempty"`
-	Specification *string `json:"specification,omitempty"`
-	ExpectETag    int64   `json:"expectEtag,omitempty"`
-	Actor         string  `json:"actor,omitempty"`
+	Container     string    `json:"container"`
+	State         string    `json:"state,omitempty"`
+	Description   *string   `json:"description,omitempty"`
+	Specification *string   `json:"specification,omitempty"`
+	Labels        *[]string `json:"labels,omitempty"`
+	ExpectETag    int64     `json:"expectEtag,omitempty"`
+	Actor         string    `json:"actor,omitempty"`
 }
 
 // ContainerCampaignUpdateParams edits campaign content. Pointer fields retain
 // omitted-vs-explicit-empty semantics.
 type ContainerCampaignUpdateParams struct {
-	Container     string  `json:"container"`
-	Description   *string `json:"description,omitempty"`
-	Specification *string `json:"specification,omitempty"`
-	ExpectETag    int64   `json:"expectEtag,omitempty"`
-	Actor         string  `json:"actor,omitempty"`
+	Container     string    `json:"container"`
+	Description   *string   `json:"description,omitempty"`
+	Specification *string   `json:"specification,omitempty"`
+	Labels        *[]string `json:"labels,omitempty"`
+	ExpectETag    int64     `json:"expectEtag,omitempty"`
+	Actor         string    `json:"actor,omitempty"`
 }
 
-// ContainerCampaignCloseParams declares an active campaign completed or
-// cancelled.
+// ContainerCampaignActivateParams activates one draft campaign.
+type ContainerCampaignActivateParams struct {
+	Container  string `json:"container"`
+	ExpectETag int64  `json:"expectEtag,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
+// ContainerCampaignCloseParams declares a draft/active campaign terminal.
 type ContainerCampaignCloseParams struct {
 	Container  string `json:"container"`
 	State      string `json:"state"`
@@ -747,6 +757,41 @@ type WrkqCampaignTransitionResult struct {
 	MissingOutcomes []WrkqCampaignMemberDiagnostic `json:"missingOutcomes"`
 	EventID         int64                          `json:"eventId"`
 	EventTimestamp  string                         `json:"eventTimestamp"`
+}
+
+// ContainerCampaignPortfolioParams selects the complete campaign aggregate
+// snapshot. Empty States defaults to draft+active.
+type ContainerCampaignPortfolioParams struct {
+	States          []string `json:"states,omitempty"`
+	IncludeArchived bool     `json:"includeArchived,omitempty"`
+}
+
+type WrkqCampaignProject struct {
+	UUID  string `json:"uuid"`
+	ID    string `json:"id"`
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+}
+
+type WrkqCampaignFootprint struct {
+	Project     WrkqCampaignProject `json:"project"`
+	MemberCount int                 `json:"memberCount"`
+}
+
+type WrkqCampaignPortfolioRow struct {
+	Container           WrkqContainer           `json:"container"`
+	TotalMembers        int                     `json:"totalMembers"`
+	StateCounts         map[string]int          `json:"stateCounts"`
+	ResidentCount       int                     `json:"residentCount"`
+	EnrolledCount       int                     `json:"enrolledCount"`
+	InProgressCount     int                     `json:"inProgressCount"`
+	MissingOutcomeCount int                     `json:"missingOutcomeCount"`
+	Footprint           []WrkqCampaignFootprint `json:"footprint"`
+	LastActivityAt      string                  `json:"lastActivityAt"`
+}
+
+type WrkqCampaignPortfolio struct {
+	Items []WrkqCampaignPortfolioRow `json:"items"`
 }
 
 // ContainerMoveParams mirrors the container-source branch of legacy `wrkq mv`.

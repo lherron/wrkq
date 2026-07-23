@@ -263,6 +263,39 @@ stamps. Event-log identity orders the immutable history even when the current
 `tasks.outcome` value is later edited or cleared. `wrkq find --has-outcome`
 selects tasks whose current outcome is present.
 
+### Campaigns and portfolio
+
+A campaign is an ordinary container with a canonical lifecycle adornment. Its
+states are `draft`, `active`, `completed`, and `cancelled`; container `kind` and
+`archived_at` remain independent. Conversion supports plain-to-draft and
+plain-to-active (the default). Draft campaigns can have resident and explicitly
+enrolled tasks, activate explicitly, or cancel without running. Active campaigns
+can complete or cancel. Terminal campaigns retain their current members but
+reject every new admission path, including create, move, copy, and explicit
+enrollment; moving or unenrolling a member out remains legal.
+
+Effective membership is exclusive and is defined as resident-or-enrolled.
+`wrkq set <task> --campaign <campaign>` remains the canonical explicit
+enrollment mutation. A resident task cannot simultaneously enroll in a foreign
+campaign. Campaigns cannot nest under another campaign.
+
+Campaign labels use the exact task-label value semantics: an ordered JSON string
+array whose whitespace, case, order, and duplicates are preserved. `[]` clears
+labels and the wire value is never `null`. Campaigns have no owner, scheduling,
+or priority fields. Display signals such as progress, footprint, missing
+outcomes, and activity are derived rather than written back.
+
+`wrkq.container.campaignPortfolio` is the producer-owned portfolio read model.
+It returns one complete aggregate snapshot in a single read transaction, with
+no pagination or member identities. The default selection is unarchived draft
+and active campaigns, ordered by `createdAt` descending and then stable UUID
+ascending. Each row contains canonical container data, effective-member counts,
+top-level project footprint, missing-outcome count, and
+`lastActivityAt = max(campaign.updated_at, effective-member.updated_at)`.
+Consumers fetch identities lazily from `wrkq.container.timelineView`, whose
+member project identities, footprint, labels, and `lastActivityAt` are derived
+from the same producer definitions.
+
 ### Attachments
 
 Attachment metadata is stored in SQLite. Bytes live under:

@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	CampaignStateDraft     = "draft"
 	CampaignStateActive    = "active"
 	CampaignStateCompleted = "completed"
 	CampaignStateCancelled = "cancelled"
@@ -53,18 +54,25 @@ type CampaignTransitionResult struct {
 	EventTimestamp  string
 }
 
-// ConvertCampaignWithAttribution adorns a plain container as an active
+// ConvertCampaignWithAttribution adorns a plain container as a draft or active
 // campaign. The conversion, optional content bodies, effective-membership
 // validation, container.updated snapshot, and campaign-state event are one
 // write transaction.
 func (cs *ContainerStore) ConvertCampaignWithAttribution(
 	attr attribution.Attribution,
 	containerUUID string,
-	description, specification *string,
+	targetState string,
+	description, specification, labels *string,
 	ifMatch int64,
 ) (*CampaignTransitionResult, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
+	}
+	if targetState == "" {
+		targetState = CampaignStateActive
+	}
+	if targetState != CampaignStateDraft && targetState != CampaignStateActive {
+		return nil, fmt.Errorf("campaign conversion state must be draft or active")
 	}
 	var result *CampaignTransitionResult
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
@@ -95,12 +103,14 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 			"updated_by_principal_ref = ?",
 			"updated_by_scope_ref = ?",
 		}
-		args := []interface{}{CampaignStateActive, attr.PrincipalRef, scopeSQL(attr)}
+		args := []interface{}{targetState, attr.PrincipalRef, scopeSQL(attr)}
 		contentChanged := false
+		snapshotFields := map[string]interface{}{}
 		if description != nil {
 			setClauses = append(setClauses, "description = ?")
 			args = append(args, *description)
 			contentChanged = true
+			snapshotFields["description"] = *description
 		}
 		if specification != nil {
 			setClauses = append(setClauses, "specification = ?")
@@ -110,6 +120,13 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 				args = append(args, *specification)
 			}
 			contentChanged = true
+			snapshotFields["specification"] = *specification
+		}
+		if labels != nil {
+			setClauses = append(setClauses, "labels = ?")
+			args = append(args, *labels)
+			contentChanged = true
+			snapshotFields["labels"] = *labels
 		}
 		args = append(args, containerUUID)
 		if _, err := tx.Exec(
@@ -123,7 +140,7 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 
 		newETag := currentETag + 1
 		if contentChanged {
-			snapshot, err := containerContentSnapshot(tx, containerUUID, map[string]interface{}{})
+			snapshot, err := containerContentSnapshot(tx, containerUUID, snapshotFields)
 			if err != nil {
 				return err
 			}
@@ -131,13 +148,13 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 				return err
 			}
 		}
-		meta, err := logCampaignStateEvent(tx, ew, attr, containerUUID, nil, CampaignStateActive, newETag)
+		meta, err := logCampaignStateEvent(tx, ew, attr, containerUUID, nil, targetState, newETag)
 		if err != nil {
 			return err
 		}
 		result = &CampaignTransitionResult{
 			ETag:           newETag,
-			CampaignState:  CampaignStateActive,
+			CampaignState:  targetState,
 			EventID:        meta.ID,
 			EventTimestamp: meta.Timestamp,
 		}
@@ -156,9 +173,10 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 	return result, err
 }
 
-// TransitionCampaignWithAttribution declares an active campaign completed or
-// cancelled. The completed guard reads effective resident+enrolled membership
-// and writes campaign_state under the same BEGIN IMMEDIATE transaction.
+// TransitionCampaignWithAttribution activates a draft campaign or declares a
+// draft/active campaign terminal. The active->completed guard reads effective
+// resident+enrolled membership and writes campaign_state under the same
+// BEGIN IMMEDIATE transaction.
 func (cs *ContainerStore) TransitionCampaignWithAttribution(
 	attr attribution.Attribution,
 	containerUUID, targetState string,
@@ -167,8 +185,10 @@ func (cs *ContainerStore) TransitionCampaignWithAttribution(
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
-	if targetState != CampaignStateCompleted && targetState != CampaignStateCancelled {
-		return nil, fmt.Errorf("campaign target state must be completed or cancelled")
+	if targetState != CampaignStateActive &&
+		targetState != CampaignStateCompleted &&
+		targetState != CampaignStateCancelled {
+		return nil, fmt.Errorf("campaign target state must be active, completed, or cancelled")
 	}
 
 	var result *CampaignTransitionResult
@@ -189,12 +209,21 @@ func (cs *ContainerStore) TransitionCampaignWithAttribution(
 		if !currentState.Valid {
 			return fmt.Errorf("container is not a campaign; convert it first")
 		}
-		if currentState.String != CampaignStateActive {
-			return fmt.Errorf("campaign is %s; only active campaigns can close", currentState.String)
+		switch currentState.String {
+		case CampaignStateDraft:
+			if targetState != CampaignStateActive && targetState != CampaignStateCancelled {
+				return fmt.Errorf("draft campaign can only be activated or cancelled")
+			}
+		case CampaignStateActive:
+			if targetState != CampaignStateCompleted && targetState != CampaignStateCancelled {
+				return fmt.Errorf("active campaign can only be completed or cancelled")
+			}
+		default:
+			return fmt.Errorf("campaign is %s; terminal campaigns cannot transition", currentState.String)
 		}
 
 		missing := []CampaignMemberDiagnostic{}
-		if targetState == CampaignStateCompleted {
+		if currentState.String == CampaignStateActive && targetState == CampaignStateCompleted {
 			members, err := campaignMemberDiagnosticsTx(tx, containerUUID)
 			if err != nil {
 				return err

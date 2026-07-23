@@ -283,6 +283,22 @@
         "available": true,
         "commands": [
           {
+            "name": "activate",
+            "use": "activate \u003ccontainer\u003e",
+            "short": "Activate a draft campaign",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "if-match",
+                "usage": "Only activate if the campaign etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              }
+            ]
+          },
+          {
             "name": "close",
             "use": "close \u003ccontainer\u003e",
             "short": "Declare an active campaign completed or cancelled",
@@ -307,7 +323,7 @@
           {
             "name": "convert",
             "use": "convert \u003ccontainer\u003e",
-            "short": "Convert a plain container into an active campaign",
+            "short": "Convert a plain container into a draft or active campaign",
             "hidden": false,
             "available": true,
             "flags": [
@@ -326,9 +342,22 @@
                 "hidden": false
               },
               {
+                "name": "labels",
+                "usage": "Campaign labels (JSON array; [] clears)",
+                "type": "string",
+                "hidden": false
+              },
+              {
                 "name": "specification",
                 "usage": "Campaign specification (literal, @file, or - for stdin)",
                 "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "state",
+                "usage": "Initial campaign state: draft or active",
+                "type": "string",
+                "default": "active",
                 "hidden": false
               }
             ]
@@ -355,9 +384,38 @@
                 "hidden": false
               },
               {
+                "name": "labels",
+                "usage": "Campaign labels (JSON array; [] clears)",
+                "type": "string",
+                "hidden": false
+              },
+              {
                 "name": "specification",
                 "usage": "Campaign specification (literal, @file, or - for stdin; empty clears)",
                 "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "portfolio",
+            "use": "portfolio",
+            "short": "Show the complete campaign portfolio aggregate",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "include-archived",
+                "usage": "Include archived campaign containers",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "state",
+                "usage": "Campaign states to include (repeatable or comma-separated)",
+                "type": "stringSlice",
+                "default": "[]",
                 "hidden": false
               }
             ]

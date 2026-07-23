@@ -7,10 +7,11 @@ import (
 )
 
 type campaignValidation struct {
-	taskUUIDs        []string
-	enrollmentChange bool
-	move             bool
-	containers       bool
+	taskUUIDs         []string
+	enrollmentChange  bool
+	residentAdmission bool
+	move              bool
+	containers        bool
 }
 
 // validateEffectiveMembershipTx validates the post-mutation resident-or-enrolled
@@ -30,8 +31,14 @@ func validateEffectiveMembershipTx(tx *sql.Tx, v campaignValidation) error {
 		`, taskUUID).Scan(&residentUUID, &enrolledUUID, &residentState, &enrolledState); err != nil {
 			return fmt.Errorf("failed to validate campaign membership for task %s: %w", taskUUID, err)
 		}
-		if v.enrollmentChange && enrolledUUID.Valid && (!enrolledState.Valid || enrolledState.String != "active") {
-			return fmt.Errorf("campaign enrollment target must be an active campaign")
+		if v.enrollmentChange && enrolledUUID.Valid &&
+			(!enrolledState.Valid ||
+				(enrolledState.String != CampaignStateDraft && enrolledState.String != CampaignStateActive)) {
+			return fmt.Errorf("campaign enrollment target must be a draft or active campaign")
+		}
+		if v.residentAdmission && residentState.Valid &&
+			(residentState.String == CampaignStateCompleted || residentState.String == CampaignStateCancelled) {
+			return fmt.Errorf("terminal campaign cannot accept new resident members")
 		}
 		if !residentState.Valid || !enrolledUUID.Valid {
 			continue
@@ -96,6 +103,16 @@ func validateEffectiveMembershipTx(tx *sql.Tx, v campaignValidation) error {
 		}
 	}
 	return nil
+}
+
+// ValidateTaskResidentAdmissionTx rejects a newly inserted task whose resident
+// container is a terminal campaign. Callers outside store use this after staging
+// an insert in the same transaction so rejection rolls the insert back.
+func ValidateTaskResidentAdmissionTx(tx *sql.Tx, taskUUID string) error {
+	return validateEffectiveMembershipTx(tx, campaignValidation{
+		taskUUIDs:         []string{taskUUID},
+		residentAdmission: true,
+	})
 }
 
 // StampTaskCampaignContext adds production-time resident container and effective

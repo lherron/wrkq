@@ -310,7 +310,7 @@ func (a *API) ContainerList(ctx context.Context, p ContainerListParams) (*WrkqCo
 	}
 
 	query := `SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
-		c.campaign_state, c.kind, c.parent_uuid, c.etag,
+		c.labels, c.campaign_state, c.kind, c.parent_uuid, c.etag,
 		c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
 		FROM containers c
 		LEFT JOIN v_container_paths v ON v.uuid = c.uuid`
@@ -517,7 +517,7 @@ func (a *API) ContainerDeleteRecursive(ctx context.Context, p ContainerDeleteRec
 func (a *API) loadContainer(containerUUID string) (*WrkqContainer, error) {
 	row := a.db.QueryRow(`
 		SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
-		       c.campaign_state, c.kind, c.parent_uuid, c.etag,
+		       c.labels, c.campaign_state, c.kind, c.parent_uuid, c.etag,
 		       c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
 		FROM containers c
 		LEFT JOIN v_container_paths v ON v.uuid = c.uuid
@@ -728,16 +728,16 @@ func mapContainerStoreError(err error, selector string) error {
 // above) into a WrkqContainer DTO.
 func scanContainerRow(s rowScanner) (*WrkqContainer, error) {
 	var (
-		containerUUID, id, slug, kind, path string
-		title                               sql.NullString
-		description                         string
-		specification, campaignState        sql.NullString
-		parentUUID, archivedAt              sql.NullString
-		etag                                int64
-		createdAt, updatedAt                string
+		containerUUID, id, slug, kind, path  string
+		title                                sql.NullString
+		description                          string
+		specification, labels, campaignState sql.NullString
+		parentUUID, archivedAt               sql.NullString
+		etag                                 int64
+		createdAt, updatedAt                 string
 	)
 	if err := s.Scan(
-		&containerUUID, &id, &slug, &title, &description, &specification,
+		&containerUUID, &id, &slug, &title, &description, &specification, &labels,
 		&campaignState, &kind, &parentUUID, &etag,
 		&createdAt, &updatedAt, &archivedAt, &path,
 	); err != nil {
@@ -750,6 +750,7 @@ func scanContainerRow(s rowScanner) (*WrkqContainer, error) {
 		Title:         title.String,
 		Description:   description,
 		Specification: nullStringPtr(specification),
+		Labels:        parseLabels(labels.String),
 		CampaignState: nullStringPtr(campaignState),
 		Kind:          kind,
 		ParentUUID:    parentUUID.String,

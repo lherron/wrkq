@@ -1132,8 +1132,10 @@ wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
 wrkq.project.setRoot    [dedicated top-level project checkout-root mutation]
 wrkq.container.update
 wrkq.container.campaignConvert
+wrkq.container.campaignActivate
 wrkq.container.campaignUpdate
 wrkq.container.campaignClose
+wrkq.container.campaignPortfolio
 wrkq.container.timelineView
 wrkq.container.move
 wrkq.container.webhookSet
@@ -1188,7 +1190,8 @@ interface WrkqContainer {
   title: string;
   description: string;  // campaign brief; available on every container
   specification?: string;
-  campaignState?: "active" | "completed" | "cancelled";
+  labels: string[];      // exact task-label semantics; never null
+  campaignState?: "draft" | "active" | "completed" | "cancelled";
   kind: string;
   parentUuid?: string;
   path: string;          // computed full container path
@@ -1211,8 +1214,10 @@ interface WrkqContainerUpdateParams {
 
 interface WrkqContainerCampaignConvertParams {
   container: string;
+  state?: "draft" | "active"; // default active
   description?: string;
   specification?: string;
+  labels?: string[];
   expectEtag?: number;
   actor?: string;
 }
@@ -1221,6 +1226,13 @@ interface WrkqContainerCampaignUpdateParams {
   container: string;
   description?: string;
   specification?: string;
+  labels?: string[];
+  expectEtag?: number;
+  actor?: string;
+}
+
+interface WrkqContainerCampaignActivateParams {
+  container: string;
   expectEtag?: number;
   actor?: string;
 }
@@ -1242,15 +1254,49 @@ interface WrkqCampaignMemberDiagnostic {
 
 interface WrkqCampaignTransitionResult {
   container: WrkqContainer;
-  previousState: "active" | null;
-  campaignState: "active" | "completed" | "cancelled";
+  previousState: "draft" | "active" | "completed" | "cancelled" | null;
+  campaignState: "draft" | "active" | "completed" | "cancelled";
   missingOutcomes: WrkqCampaignMemberDiagnostic[];
   eventId: number;
   eventTimestamp: string;
 }
 
-// campaignConvert and campaignClose return WrkqCampaignTransitionResult;
+// campaignConvert, campaignActivate, and campaignClose return
+// WrkqCampaignTransitionResult;
 // campaignUpdate returns the updated WrkqContainer.
+
+interface WrkqContainerCampaignPortfolioParams {
+  states?: ("draft" | "active" | "completed" | "cancelled")[];
+  includeArchived?: boolean;
+}
+
+interface WrkqCampaignProject {
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+}
+
+interface WrkqCampaignFootprint {
+  project: WrkqCampaignProject;
+  memberCount: number;
+}
+
+interface WrkqCampaignPortfolioRow {
+  container: WrkqContainer;
+  totalMembers: number;
+  stateCounts: Record<string, number>;
+  residentCount: number;
+  enrolledCount: number;
+  inProgressCount: number;
+  missingOutcomeCount: number;
+  footprint: WrkqCampaignFootprint[];
+  lastActivityAt: string;
+}
+
+interface WrkqCampaignPortfolio {
+  items: WrkqCampaignPortfolioRow[];
+}
 
 interface WrkqContainerTimelineViewParams {
   container: string;
@@ -1265,6 +1311,7 @@ interface WrkqTimelineContainer {
   title: string;
   description: string;     // brief; present for plain and campaign containers
   specification?: string;
+  labels: string[];
   kind: string;
   parentUuid?: string;
   path: string;
@@ -1275,7 +1322,7 @@ interface WrkqTimelineContainer {
 }
 
 interface WrkqCampaignAdornment {
-  state: "active" | "completed" | "cancelled";
+  state: "draft" | "active" | "completed" | "cancelled";
   archived: boolean;       // projection of archivedAt, not campaign state
   archivedAt?: string;
 }
@@ -1288,6 +1335,7 @@ interface WrkqTimelineMember {
   state: WrkqTaskState;
   outcome?: string;
   membership: "resident" | "enrolled";
+  project: WrkqCampaignProject;
 }
 
 type WrkqTimelineEntry =
@@ -1326,6 +1374,8 @@ interface WrkqContainerTimelineView {
   campaign: WrkqCampaignAdornment | null;
   members: WrkqTimelineMember[];
   rollup: { terminal: number; total: number };
+  footprint: WrkqCampaignFootprint[];
+  lastActivityAt: string;
   missingOutcomes: WrkqCampaignMemberDiagnostic[];
   decisionTasks: WrkqTimelineMember[];
   entries: WrkqTimelineEntry[];
@@ -1334,6 +1384,7 @@ interface WrkqContainerTimelineView {
 }
 
 // wrkq.container.timelineView returns WrkqContainerTimelineView.
+// wrkq.container.campaignPortfolio returns WrkqCampaignPortfolio.
 
 interface WrkqContainerMoveParams {
   container: string;        // path / friendly-id / uuid selector
@@ -1404,10 +1455,30 @@ interface WrkqContainerDeleteRecursiveResult { /* see above */ }
 
 `container.show` resolves by `path` or `project`; a miss → `WRKQ_NOT_FOUND`.
 
+Campaign lifecycle is `plain -> draft|active`, `draft -> active|cancelled`, and
+`active -> completed|cancelled`. Draft campaigns can accept resident and
+explicitly enrolled tasks. Completed/cancelled campaigns retain current members
+but reject new create, move, copy, and enrollment admissions; members may still
+move or unenroll out. Campaign labels have the exact task-label wire semantics:
+ordered strings preserve whitespace, case, order, and duplicates; `[]` clears
+and `null` is invalid. Labels are mutated only by campaign convert/update;
+`wrkq.container.update` remains the narrow slug/title patch.
+
+`wrkq.container.campaignPortfolio` returns the complete selected aggregate in
+one read transaction. It has no cursor and includes no member identities.
+Omitted `states` selects draft+active and archived containers are excluded by
+default. Rows sort by `createdAt DESC, uuid ASC`. Footprint groups effective
+members by stable top-level `kind=project` identity.
+`lastActivityAt` is exactly the maximum of the campaign container's
+`updated_at` and its current effective members' `updated_at`. Consumers use
+`timelineView` lazily for member identities and must derive expanded grouping
+from that returned member list.
+
 `wrkq.container.timelineView` is the single server-owned composite snapshot for
 plain containers and campaign-adorned containers. Selector resolution, base
-content, nullable campaign adornment, current effective members, rollup,
-missing-outcome diagnostics, open `awaiting-lance` decisions, the event
+content, nullable campaign adornment, current effective members with stable
+top-level project identity, footprint, last activity, rollup, missing-outcome
+diagnostics, open `awaiting-lance` decisions, the event
 high-water mark, and the requested event page are read in one database
 transaction. Continuation cursors carry `snapshotEventId` and the last emitted
 event id, so concurrent appends never enter later pages of an existing

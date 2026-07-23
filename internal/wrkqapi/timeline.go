@@ -29,19 +29,20 @@ type ContainerTimelineViewParams struct {
 // archive fields are orthogonal to campaign adornment and therefore exist for
 // every container.
 type WrkqTimelineContainer struct {
-	UUID          string  `json:"uuid"`
-	ID            string  `json:"id"`
-	Slug          string  `json:"slug"`
-	Title         string  `json:"title"`
-	Description   string  `json:"description"`
-	Specification *string `json:"specification,omitempty"`
-	Kind          string  `json:"kind"`
-	ParentUUID    string  `json:"parentUuid,omitempty"`
-	Path          string  `json:"path"`
-	ETag          int64   `json:"etag"`
-	CreatedAt     string  `json:"createdAt"`
-	UpdatedAt     string  `json:"updatedAt"`
-	ArchivedAt    string  `json:"archivedAt,omitempty"`
+	UUID          string   `json:"uuid"`
+	ID            string   `json:"id"`
+	Slug          string   `json:"slug"`
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	Specification *string  `json:"specification,omitempty"`
+	Labels        []string `json:"labels"`
+	Kind          string   `json:"kind"`
+	ParentUUID    string   `json:"parentUuid,omitempty"`
+	Path          string   `json:"path"`
+	ETag          int64    `json:"etag"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
+	ArchivedAt    string   `json:"archivedAt,omitempty"`
 }
 
 // WrkqCampaignAdornment is nullable in the timeline result. Archived is a
@@ -56,13 +57,14 @@ type WrkqCampaignAdornment struct {
 // from present residency/enrollment only; historical entries never use it for
 // affiliation.
 type WrkqTimelineMember struct {
-	UUID       string  `json:"uuid"`
-	ID         string  `json:"id"`
-	Path       string  `json:"path"`
-	Title      string  `json:"title"`
-	State      string  `json:"state"`
-	Outcome    *string `json:"outcome,omitempty"`
-	Membership string  `json:"membership"`
+	UUID       string              `json:"uuid"`
+	ID         string              `json:"id"`
+	Path       string              `json:"path"`
+	Title      string              `json:"title"`
+	State      string              `json:"state"`
+	Outcome    *string             `json:"outcome,omitempty"`
+	Membership string              `json:"membership"`
+	Project    WrkqCampaignProject `json:"project"`
 }
 
 type WrkqTimelineRollup struct {
@@ -117,6 +119,8 @@ type WrkqContainerTimelineView struct {
 	Members         []WrkqTimelineMember           `json:"members"`
 	Rollup          WrkqTimelineRollup             `json:"rollup"`
 	MissingOutcomes []WrkqCampaignMemberDiagnostic `json:"missingOutcomes"`
+	Footprint       []WrkqCampaignFootprint        `json:"footprint"`
+	LastActivityAt  string                         `json:"lastActivityAt"`
 	DecisionTasks   []WrkqTimelineMember           `json:"decisionTasks"`
 	Entries         []WrkqTimelineEntry            `json:"entries"`
 	SnapshotEventID int64                          `json:"snapshotEventId"`
@@ -167,7 +171,8 @@ func (a *API) ContainerTimelineView(
 	if err != nil {
 		return nil, err
 	}
-	members, rollup, missing, decisions, err := loadTimelineMembersTx(ctx, tx, containerUUID)
+	members, rollup, missing, decisions, footprint, memberActivityAt, err :=
+		loadTimelineMembersTx(ctx, tx, containerUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +219,7 @@ func (a *API) ContainerTimelineView(
 	return &WrkqContainerTimelineView{
 		Container: container, Campaign: campaign,
 		Members: members, Rollup: rollup, MissingOutcomes: missing,
+		Footprint: footprint, LastActivityAt: maxTimestamp(container.UpdatedAt, memberActivityAt),
 		DecisionTasks: decisions, Entries: entries,
 		SnapshotEventID: snapshotEventID, NextCursor: nextCursor,
 	}, nil
@@ -263,13 +269,13 @@ func loadTimelineContainerTx(
 	containerUUID string,
 ) (WrkqTimelineContainer, *WrkqCampaignAdornment, error) {
 	var (
-		container                                WrkqTimelineContainer
-		specification, campaignState, parentUUID sql.NullString
-		archivedAt                               sql.NullString
-		createdAt, updatedAt                     string
+		container                                        WrkqTimelineContainer
+		specification, labels, campaignState, parentUUID sql.NullString
+		archivedAt                                       sql.NullString
+		createdAt, updatedAt                             string
 	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT c.id, c.slug, c.title, c.description, c.specification,
+		SELECT c.id, c.slug, c.title, c.description, c.specification, c.labels,
 		       c.campaign_state, c.kind, c.parent_uuid, COALESCE(v.path, c.slug),
 		       c.etag, c.created_at, c.updated_at, c.archived_at
 		  FROM containers c
@@ -277,7 +283,7 @@ func loadTimelineContainerTx(
 		 WHERE c.uuid = ?
 	`, containerUUID).Scan(
 		&container.ID, &container.Slug, &container.Title, &container.Description,
-		&specification, &campaignState, &container.Kind, &parentUUID, &container.Path,
+		&specification, &labels, &campaignState, &container.Kind, &parentUUID, &container.Path,
 		&container.ETag, &createdAt, &updatedAt, &archivedAt,
 	)
 	if err != nil {
@@ -285,6 +291,7 @@ func loadTimelineContainerTx(
 	}
 	container.UUID = containerUUID
 	container.Specification = nullStringPtr(specification)
+	container.Labels = parseLabels(labels.String)
 	container.ParentUUID = parentUUID.String
 	container.CreatedAt = toRFC3339(createdAt)
 	container.UpdatedAt = toRFC3339(updatedAt)
@@ -304,33 +311,67 @@ func loadTimelineMembersTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	containerUUID string,
-) ([]WrkqTimelineMember, WrkqTimelineRollup, []WrkqCampaignMemberDiagnostic, []WrkqTimelineMember, error) {
+) (
+	[]WrkqTimelineMember,
+	WrkqTimelineRollup,
+	[]WrkqCampaignMemberDiagnostic,
+	[]WrkqTimelineMember,
+	[]WrkqCampaignFootprint,
+	string,
+	error,
+) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT t.uuid, t.id, COALESCE(tp.path, t.slug), t.title, t.state,
-		       t.outcome, t.labels,
-		       CASE WHEN t.project_uuid = ? THEN 'resident' ELSE 'enrolled' END
-		  FROM tasks t
-		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
-		 WHERE t.project_uuid = ? OR t.campaign_uuid = ?
-		 ORDER BY t.id
+		WITH RECURSIVE
+		member_tasks AS (
+			SELECT t.uuid, t.id, t.slug, t.title, t.state, t.outcome, t.labels,
+			       t.updated_at, t.project_uuid,
+			       CASE WHEN t.project_uuid = ? THEN 'resident' ELSE 'enrolled' END AS membership
+			  FROM tasks t
+			 WHERE t.project_uuid = ? OR t.campaign_uuid = ?
+		),
+		ancestors(task_uuid, uuid, id, slug, title, kind, parent_uuid) AS (
+			SELECT m.uuid, c.uuid, c.id, c.slug, c.title, c.kind, c.parent_uuid
+			  FROM member_tasks m
+			  JOIN containers c ON c.uuid = m.project_uuid
+			UNION ALL
+			SELECT a.task_uuid, p.uuid, p.id, p.slug, p.title, p.kind, p.parent_uuid
+			  FROM ancestors a
+			  JOIN containers p ON p.uuid = a.parent_uuid
+		),
+		projects AS (
+			SELECT task_uuid, uuid, id, slug, title
+			  FROM ancestors
+			 WHERE kind = 'project'
+		)
+		SELECT m.uuid, m.id, COALESCE(tp.path, m.slug), m.title, m.state,
+		       m.outcome, m.labels, m.membership, m.updated_at,
+		       p.uuid, p.id, p.slug, p.title
+		  FROM member_tasks m
+		  LEFT JOIN v_task_paths tp ON tp.uuid = m.uuid
+		  JOIN projects p ON p.task_uuid = m.uuid
+		 ORDER BY m.id
 	`, containerUUID, containerUUID, containerUUID)
 	if err != nil {
-		return nil, WrkqTimelineRollup{}, nil, nil, NewInternalError(err)
+		return nil, WrkqTimelineRollup{}, nil, nil, nil, "", NewInternalError(err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	members := []WrkqTimelineMember{}
 	missing := []WrkqCampaignMemberDiagnostic{}
 	decisions := []WrkqTimelineMember{}
+	footprintCounts := map[string]*WrkqCampaignFootprint{}
+	lastActivityAt := ""
 	terminal := 0
 	for rows.Next() {
 		var member WrkqTimelineMember
 		var outcome, labels sql.NullString
+		var updatedAt string
 		if err := rows.Scan(
 			&member.UUID, &member.ID, &member.Path, &member.Title, &member.State,
-			&outcome, &labels, &member.Membership,
+			&outcome, &labels, &member.Membership, &updatedAt,
+			&member.Project.UUID, &member.Project.ID, &member.Project.Slug, &member.Project.Title,
 		); err != nil {
-			return nil, WrkqTimelineRollup{}, nil, nil, NewInternalError(err)
+			return nil, WrkqTimelineRollup{}, nil, nil, nil, "", NewInternalError(err)
 		}
 		if outcome.Valid {
 			value := outcome.String
@@ -348,12 +389,20 @@ func loadTimelineMembersTx(
 		if member.State == "open" && timelineLabelsContain(labels.String, "awaiting-lance") {
 			decisions = append(decisions, member)
 		}
+		lastActivityAt = maxTimestamp(lastActivityAt, toRFC3339(updatedAt))
+		entry := footprintCounts[member.Project.UUID]
+		if entry == nil {
+			entry = &WrkqCampaignFootprint{Project: member.Project}
+			footprintCounts[member.Project.UUID] = entry
+		}
+		entry.MemberCount++
 		members = append(members, member)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, WrkqTimelineRollup{}, nil, nil, NewInternalError(err)
+		return nil, WrkqTimelineRollup{}, nil, nil, nil, "", NewInternalError(err)
 	}
-	return members, WrkqTimelineRollup{Terminal: terminal, Total: len(members)}, missing, decisions, nil
+	return members, WrkqTimelineRollup{Terminal: terminal, Total: len(members)},
+		missing, decisions, sortedCampaignFootprint(footprintCounts), lastActivityAt, nil
 }
 
 func isTimelineTerminal(state string) bool {

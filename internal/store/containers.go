@@ -271,6 +271,11 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 			if err != nil {
 				return err
 			}
+		} else if _, labelsChanged := fields["labels"]; labelsChanged {
+			eventFields, err = containerContentSnapshot(tx, containerUUID, fields)
+			if err != nil {
+				return err
+			}
 		}
 		changesJSON, err := json.Marshal(eventFields)
 		if err != nil {
@@ -299,10 +304,10 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 
 func containerContentSnapshot(tx *sql.Tx, containerUUID string, fields map[string]interface{}) (map[string]interface{}, error) {
 	var description string
-	var specification sql.NullString
+	var specification, labels sql.NullString
 	if err := tx.QueryRow(
-		"SELECT description, specification FROM containers WHERE uuid = ?", containerUUID,
-	).Scan(&description, &specification); err != nil {
+		"SELECT description, specification, labels FROM containers WHERE uuid = ?", containerUUID,
+	).Scan(&description, &specification, &labels); err != nil {
 		return nil, fmt.Errorf("failed to snapshot container content: %w", err)
 	}
 	snapshot := make(map[string]interface{}, len(fields)+2)
@@ -314,6 +319,16 @@ func containerContentSnapshot(tx *sql.Tx, containerUUID string, fields map[strin
 		snapshot["specification"] = specification.String
 	} else {
 		snapshot["specification"] = nil
+	}
+	if _, labelsChanged := fields["labels"]; labelsChanged {
+		var labelValues []string
+		if labels.Valid && strings.TrimSpace(labels.String) != "" {
+			_ = json.Unmarshal([]byte(labels.String), &labelValues)
+		}
+		if labelValues == nil {
+			labelValues = []string{}
+		}
+		snapshot["labels"] = labelValues
 	}
 	return snapshot, nil
 }

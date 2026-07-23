@@ -18,7 +18,8 @@ func TestCampaignConversionUsesEffectiveMembershipValidatorAtomically(t *testing
 	}
 	description := "must roll back"
 	_, err := f.store.Containers.ConvertCampaignWithAttribution(
-		testAttribution(f.actorUUID), f.nonCampaignContainer, &description, nil, 0,
+		testAttribution(f.actorUUID), f.nonCampaignContainer, CampaignStateActive,
+		&description, nil, nil, 0,
 	)
 	requireCampaignRejection(t, err, "unenroll")
 

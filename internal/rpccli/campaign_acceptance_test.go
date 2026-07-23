@@ -411,6 +411,85 @@ func TestCampaignLifecycleCLIContentAndSnapshotHistory(t *testing.T) {
 	}
 }
 
+func TestCampaignDraftLabelsActivationAndPortfolioCLI(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open draft fixture: %v", err)
+	}
+	if _, err := database.Exec(
+		"UPDATE containers SET campaign_state = NULL WHERE uuid = ?", f.campaignAUUID,
+	); err != nil {
+		t.Fatalf("reset campaign to plain: %v", err)
+	}
+	_ = database.Close()
+
+	labelsJSON := `["domain:platform"," domain:platform ","domain:platform"]`
+	convertOut, err := runCampaignCLI(
+		t, f.dbPath,
+		"campaign", "convert", f.campaignAUUID,
+		"--state", "draft",
+		"--labels", labelsJSON,
+	)
+	if err != nil {
+		t.Fatalf("draft campaign convert: %v\n%s", err, convertOut)
+	}
+	var converted campaignTransitionResult
+	if err := json.Unmarshal([]byte(convertOut), &converted); err != nil {
+		t.Fatalf("decode draft conversion: %v\n%s", err, convertOut)
+	}
+	if converted.CampaignState != "draft" || len(converted.Container.Labels) != 3 ||
+		converted.Container.Labels[1] != " domain:platform " {
+		t.Fatalf("draft conversion = %#v", converted)
+	}
+
+	portfolioOut, err := runCampaignCLI(
+		t, f.dbPath, "campaign", "portfolio", "--state", "draft",
+	)
+	if err != nil {
+		t.Fatalf("campaign portfolio: %v\n%s", err, portfolioOut)
+	}
+	var portfolio campaignPortfolioResult
+	if err := json.Unmarshal([]byte(portfolioOut), &portfolio); err != nil {
+		t.Fatalf("decode portfolio: %v\n%s", err, portfolioOut)
+	}
+	if len(portfolio.Items) != 1 ||
+		portfolio.Items[0].Container.ID != converted.Container.ID ||
+		portfolio.Items[0].TotalMembers != 1 {
+		t.Fatalf("portfolio = %#v", portfolio)
+	}
+
+	activateOut, err := runCampaignCLI(
+		t, f.dbPath, "campaign", "activate", f.campaignAUUID,
+		"--if-match", fmt.Sprint(converted.Container.ETag),
+	)
+	if err != nil {
+		t.Fatalf("activate campaign: %v\n%s", err, activateOut)
+	}
+	var activated campaignTransitionResult
+	if err := json.Unmarshal([]byte(activateOut), &activated); err != nil {
+		t.Fatalf("decode activation: %v\n%s", err, activateOut)
+	}
+	if activated.PreviousState == nil || *activated.PreviousState != "draft" ||
+		activated.CampaignState != "active" {
+		t.Fatalf("activation = %#v", activated)
+	}
+
+	editOut, err := runCampaignCLI(
+		t, f.dbPath, "campaign", "edit", f.campaignAUUID, "--labels", "[]",
+	)
+	if err != nil {
+		t.Fatalf("clear campaign labels: %v\n%s", err, editOut)
+	}
+	var edited campaignContainer
+	if err := json.Unmarshal([]byte(editOut), &edited); err != nil {
+		t.Fatalf("decode label clear: %v\n%s", err, editOut)
+	}
+	if edited.Labels == nil || len(edited.Labels) != 0 {
+		t.Fatalf("cleared labels = %#v", edited.Labels)
+	}
+}
+
 func TestCampaignLifecycleCLICompletedCloseDispositionMatrix(t *testing.T) {
 	t.Run("complete and cancel", func(t *testing.T) {
 		f := newCampaignCLIFixture(t)
