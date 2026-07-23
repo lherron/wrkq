@@ -45,6 +45,33 @@ func readTextValue(value, label string, stdin io.Reader, claims *stdinClaims) (s
 	return value, nil
 }
 
+// readNullableTextValue is the content-field input convention for nullable text:
+// unlike required bodies, an empty file/stdin is meaningful and clears the field.
+func readNullableTextValue(value, label string, stdin io.Reader, claims *stdinClaims) (string, error) {
+	if value == "-" {
+		if err := claims.claim(label); err != nil {
+			return "", err
+		}
+		if isReaderTTY(stdin) {
+			return "", fmt.Errorf("stdin is a terminal; pipe input or use a heredoc")
+		}
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("failed to read from stdin: %w", err)
+		}
+		return string(data), nil
+	}
+	if strings.HasPrefix(value, "@") {
+		filename := strings.TrimPrefix(value, "@")
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return "", fmt.Errorf("failed to read file %s: %w", filename, err)
+		}
+		return string(data), nil
+	}
+	return value, nil
+}
+
 func readFileValue(filename, label string, stdin io.Reader, claims *stdinClaims) ([]byte, error) {
 	if filename == "-" {
 		return readStdinValue(label, stdin, claims)

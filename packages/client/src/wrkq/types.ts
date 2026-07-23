@@ -74,6 +74,8 @@ export interface WrkqTaskUpdateParams {
     title?: string;
     description?: string;
     specification?: string;
+    /** Curated plain-terms result; blank/whitespace clears it. */
+    outcome?: string;
     state?: WrkqTaskState;
     priority?: number;
     kind?: string;
@@ -229,6 +231,8 @@ export interface WrkqTask {
   kind: string;
   description: string;
   specification: string;
+  /** Curated plain-terms result of the work. */
+  outcome?: string;
   hasDescription?: boolean;
   hasSpecification?: boolean;
   labels: string[];

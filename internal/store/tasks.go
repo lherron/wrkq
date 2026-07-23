@@ -175,7 +175,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "state", "slug", "title", "project_uuid", "kind", "resolution", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
+		case "state", "slug", "title", "project_uuid", "kind", "resolution", "outcome", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err
@@ -709,6 +709,31 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		})
 		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		if outcome, ok := fields["outcome"]; ok {
+			outcomePayload := map[string]any{
+				"task_uuid": taskUUID,
+				"outcome":   outcome,
+			}
+			if err := StampTaskCampaignContext(tx, taskUUID, outcomePayload); err != nil {
+				return err
+			}
+			outcomeJSON, err := json.Marshal(outcomePayload)
+			if err != nil {
+				return fmt.Errorf("failed to marshal task.outcome_set payload: %w", err)
+			}
+			outcomePayloadStr := string(outcomeJSON)
+			if _, err := ew.LogEventReturning(tx, &domain.Event{
+				PrincipalRef: attr.PrincipalRef,
+				ScopeRef:     attr.ScopeRef,
+				ResourceType: "task",
+				ResourceUUID: &taskUUID,
+				EventType:    "task.outcome_set",
+				ETag:         &newETag,
+				Payload:      &outcomePayloadStr,
+			}); err != nil {
+				return fmt.Errorf("failed to log task.outcome_set event: %w", err)
+			}
 		}
 		var transition *webhooks.Transition
 		if hasStateChange && currentState != newState {
@@ -1298,7 +1323,7 @@ func (ts *TaskStore) GetAttachments(taskUUID string) ([]AttachmentInfo, error) {
 func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task := &domain.Task{}
 	// Use string intermediates for nullable time fields since SQLite stores times as strings
-	var startAt, dueAt, labels, meta, completedAt, archivedAt *string
+	var startAt, dueAt, labels, meta, outcome, campaignUUID, completedAt, archivedAt *string
 	var requestedByProjectID, assignedProjectID, acknowledgedAt, resolution, parentTaskUUID *string
 	var sdkSessionID *string
 	var workflowPreset, phase, riskClass *string
@@ -1310,7 +1335,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			   state, priority, kind, parent_task_uuid,
 			   workflow_preset, preset_version, phase, risk_class,
-			   start_at, due_at, labels, meta, description, specification, etag,
+			   start_at, due_at, labels, meta, description, specification, outcome, campaign_uuid, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
 			   sdk_session_id,
@@ -1321,7 +1346,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
 		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority, &task.Kind, &parentTaskUUID,
 		&workflowPreset, &presetVersion, &phase, &riskClass,
-		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &task.ETag,
+		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &outcome, &campaignUUID, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&sdkSessionID,
@@ -1344,6 +1369,8 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 	task.WorkflowPreset = workflowPreset
 	task.Phase = phase
 	task.RiskClass = riskClass
+	task.Outcome = outcome
+	task.CampaignUUID = campaignUUID
 	if createdByPrincipal.Valid {
 		task.CreatedByPrincipalRef = createdByPrincipal.String
 	}

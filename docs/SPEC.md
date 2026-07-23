@@ -250,6 +250,19 @@ and `wrkq cat` output exclude deleted comments.
 `wrkq cat` includes comments by default. Use `--exclude-comments` to omit them.
 There is no canonical `--include-comments` flag.
 
+### Outcomes
+
+`wrkq set <task> --outcome <text|@file|->` stores a nullable curated summary of
+what changed. Blank or whitespace-only input clears it. A final comment remains
+the worker's raw record; outcome is its editable plain-terms projection.
+Completion never requires an outcome.
+
+Each write appends `task.outcome_set` with the full text snapshot (or explicit
+null), task UUID, and production-time resident-container/effective-campaign
+stamps. Event-log identity orders the immutable history even when the current
+`tasks.outcome` value is later edited or cleared. `wrkq find --has-outcome`
+selects tasks whose current outcome is present.
+
 ### Attachments
 
 Attachment metadata is stored in SQLite. Bytes live under:

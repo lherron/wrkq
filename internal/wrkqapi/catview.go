@@ -56,6 +56,7 @@ type WrkqTaskCatView struct {
 	Meta                  json.RawMessage   `json:"meta"`
 	Description           string            `json:"description"`
 	Specification         string            `json:"specification"`
+	Outcome               *string           `json:"outcome,omitempty"`
 	AcknowledgedAt        *string           `json:"acknowledged_at,omitempty"`
 	Resolution            *string           `json:"resolution,omitempty"`
 	Etag                  int64             `json:"etag"`
@@ -121,25 +122,25 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		id, slug, title, state, description, specification, kind string
-		priority                                                 int
-		startAt, dueAt, labels, meta, completedAt, archivedAt    *string
-		requestedBy, assignedProject, acknowledgedAt, resolution *string
-		parentTaskUUID, assigneePrincipalRef                     *string
-		claimedBy, claimedScope, claimedNode, claimedAt          *string
-		claimGeneration                                          int64
-		createdAt, updatedAt                                     string
-		etag                                                     int64
-		projectUUID                                              string
-		createdByPrincipalRef, updatedByPrincipalRef             sql.NullString
-		createdByScopeRef                                        *string
+		id, slug, title, state, description, specification, kind       string
+		priority                                                       int
+		startAt, dueAt, labels, meta, outcome, completedAt, archivedAt *string
+		requestedBy, assignedProject, acknowledgedAt, resolution       *string
+		parentTaskUUID, assigneePrincipalRef                           *string
+		claimedBy, claimedScope, claimedNode, claimedAt                *string
+		claimGeneration                                                int64
+		createdAt, updatedAt                                           string
+		etag                                                           int64
+		projectUUID                                                    string
+		createdByPrincipalRef, updatedByPrincipalRef                   sql.NullString
+		createdByScopeRef                                              *string
 	)
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 		       state, priority,
 		       kind, parent_task_uuid, assignee_principal_ref,
 		       claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at, claim_generation,
-		       start_at, due_at, labels, meta, description, specification, etag,
+		       start_at, due_at, labels, meta, description, specification, outcome, etag,
 		       created_at, updated_at, completed_at, archived_at,
 		       acknowledged_at, resolution,
 		       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
@@ -147,7 +148,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
 		&kind, &parentTaskUUID, &assigneePrincipalRef,
 		&claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
-		&startAt, &dueAt, &labels, &meta, &description, &specification, &etag,
+		&startAt, &dueAt, &labels, &meta, &description, &specification, &outcome, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&createdByPrincipalRef, &updatedByPrincipalRef, &createdByScopeRef,
@@ -221,6 +222,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		Meta:                  json.RawMessage(metaValue),
 		Description:           description,
 		Specification:         specification,
+		Outcome:               outcome,
 		AcknowledgedAt:        acknowledgedAt,
 		Resolution:            resolution,
 		Etag:                  etag,

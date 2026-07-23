@@ -69,10 +69,12 @@ wrkq rm inbox/task-slug --purge --yes
 wrkq set T-00001 --state in_progress
 wrkq set T-00001 --title "New title" --due-at 2025-12-01
 wrkq set T-00001 --state in_progress --priority 1 --description "Starting work"
+wrkq set T-00001 --outcome -       # Curated result from stdin; blank clears
 
 Supported states: idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted
 Priority: 1-4
 Common fields: state, priority, title, labels, due_at, start_at, description, specification, caused_by
+Outcome is the curated plain-terms result; final comments remain the worker's raw record. Completion never requires an outcome.
 Lineage: --caused-by T-XXXXX[,T-YYYYY] records the task(s) whose delivered work caused this defect/rework (wrkq set ... --caused-by "" clears it; wrkq find --caused-by T-XXXXX lists attributed tasks).
 Reserved label: needs_smoketest requests Smokey through webhook automation; it is not a state.
 Run `wrkq set --help` for the full current field surface.

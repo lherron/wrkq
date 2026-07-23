@@ -379,18 +379,19 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > `wrkq find`, **not** canonical `wrkq.task.list`. The server owns recursive
 > path-prefix matching (`path = ? OR path LIKE ?||'/%'`, or GLOB for `*` paths),
 > all metadata filters (state/type/kind/slug-glob/assignee/claimed-by/claimed-node/parent-task/
-> requested-by/assigned-project/due-before/due-after/ack-pending), assignee
+> requested-by/assigned-project/due-before/due-after/ack-pending/has-outcome), assignee
 > normalization + parent-task selector→UUID resolution, cursor.Apply + limit+1 +
 > sort-validation + BuildNextCursor over the filtered set, and the legacy
 > mixed-type in-memory merge-sort:
 > `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, assignee?, claimedBy?, claimedNode?,
-> parentTask?, requestedBy?, assignedProject?, causedBy?, ackPending?, sort?,
+> parentTask?, requestedBy?, assignedProject?, causedBy?, ackPending?, hasOutcome?, sort?,
 > reverse?, limit?, cursor? }` → `{ items: WrkqFindEntry[], next_cursor }`. Rows
 > are legacy-shaped (snake_case `findResult`); each task row carries current
 > `claimed_by`, `claimed_scope`, `claimed_node`, `claimed_at`, and monotonic
 > `claim_generation` (plus `caused_by`)
 > (array of friendly IDs) when non-empty. `causedBy` filters to tasks whose
-> lineage contains that task ID. PINNED PARITY QUIRKS the server
+> lineage contains that task ID; `hasOutcome` filters to task rows whose
+> normalized nullable outcome is present. PINNED PARITY QUIRKS the server
 > reproduces exactly: (1) when NO `--type` is given (searchBoth) the cursor is
 > IGNORED — pagination/limit run over the merged in-memory set with no
 > cursor.Apply; only a single `type` (`t`|`p`) applies the cursor SQL-side; (2)
@@ -520,6 +521,8 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > so it is not part of the snapshot. Params: `{ task: string; includeComments?:
 > boolean /* default true */ }`. `artifact_dir` is a **server-local host path
 > hint** (meaningful on the canonical host, not a remote-filesystem guarantee).
+> The projection includes nullable `outcome`, which raw `cat` renders as a
+> front-matter block and the styled card renders as its own section.
 > Do not add its projection fields to `wrkq.task.show`. Registering it changes
 > the method catalog and `protocolSchemaHash`.
 >
@@ -608,6 +611,7 @@ interface WrkqTaskUpdateParams {
     title?: string;
     description?: string;
     specification?: string;
+    outcome?: string; // blank/whitespace normalizes to NULL
     state?: WrkqTaskState;
     priority?: number;
     kind?: string;
@@ -683,6 +687,7 @@ interface WrkqTask {
   kind: string;
   description: string;
   specification: string;
+  outcome?: string;
   hasDescription: boolean;    // trim-aware presence of description
   hasSpecification: boolean;  // trim-aware presence of specification
   labels: string[];
@@ -733,6 +738,14 @@ interface WrkqTaskRestoreParams {
   ifMatch?: number;     // conditional etag precondition; mismatch → WRKQ_CONFLICT
 }
 ```
+
+Outcome writes preserve the normal task update/CAS/attribution envelope and also
+append one `task.outcome_set` event. Its payload carries `task_uuid`, the full
+outcome snapshot (`null` when cleared), and production-time `container_uuid` plus
+effective `campaign_uuid` (explicitly `null` outside a campaign). Outcome is
+editable history, not a completion gate: completing a task without an outcome
+always remains valid. A final comment is the worker's raw record; outcome is the
+curated plain-terms projection of what changed.
 
 `metaRaw` exists for CLI-compatibility projections that must preserve the legacy
 stored JSON bytes, including key order, for `--meta` / `--meta-file` parity. Normal

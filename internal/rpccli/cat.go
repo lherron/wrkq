@@ -124,6 +124,7 @@ func writeCatStyled(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeC
 			BlockedCount:  len(t.BlockedBy),
 			Description:   t.Description,
 			Specification: t.Specification,
+			Outcome:       stringValue(t.Outcome),
 			NoFrontmatter: noFrontmatter,
 		}, comments)
 	}
@@ -253,6 +254,7 @@ type catTask struct {
 	Meta                  json.RawMessage `json:"meta"`
 	Description           string          `json:"description"`
 	Specification         string          `json:"specification"`
+	Outcome               *string         `json:"outcome,omitempty"`
 	AcknowledgedAt        *string         `json:"acknowledged_at,omitempty"`
 	Resolution            *string         `json:"resolution,omitempty"`
 	Etag                  int64           `json:"etag"`
@@ -363,6 +365,12 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 					fmt.Fprintf(w, "  %s\n", line)
 				}
 			}
+			if t.Outcome != nil {
+				fmt.Fprintln(w, "outcome: |")
+				for _, line := range strings.Split(*t.Outcome, "\n") {
+					fmt.Fprintf(w, "  %s\n", line)
+				}
+			}
 			if t.AcknowledgedAt != nil {
 				fmt.Fprintf(w, "acknowledged_at: %s\n", *t.AcknowledgedAt)
 			}
@@ -418,4 +426,11 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 		}
 	}
 	return nil
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

@@ -22,6 +22,7 @@ func TestProtocolSchemaHashIncludesDTOShape(t *testing.T) {
 	for _, want := range []string{
 		"Title:title:string:string",
 		"ProjectUUID:projectUuid:string:string",
+		"Outcome:outcome,omitempty:*string:string",
 		"CreatedByPrincipalRef:createdByPrincipalRef,omitempty:string:string",
 	} {
 		if !strings.Contains(fingerprint, want) {

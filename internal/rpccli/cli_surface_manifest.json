@@ -1009,6 +1009,13 @@
             "hidden": false
           },
           {
+            "name": "has-outcome",
+            "usage": "Filter for tasks with a curated outcome",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
             "name": "json",
             "usage": "Output as JSON",
             "type": "bool",
@@ -2479,7 +2486,7 @@
         "aliases": [
           "edit"
         ],
-        "short": "Update task fields",
+        "short": "Update task fields; outcome is curated, comments are raw, and completion never requires outcome",
         "hidden": false,
         "available": true,
         "flags": [
@@ -2500,7 +2507,7 @@
             "usage": "Group operations into batches (not yet implemented)",
             "type": "int",
             "default": "1",
-            "hidden": false
+            "hidden": true
           },
           {
             "name": "campaign",
@@ -2585,6 +2592,12 @@
             "usage": "Preserve input order (disables parallelism)",
             "type": "bool",
             "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "outcome",
+            "usage": "Set curated task outcome (use @file or - for stdin; blank clears)",
+            "type": "string",
             "hidden": false
           },
           {

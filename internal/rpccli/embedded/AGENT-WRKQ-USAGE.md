@@ -9,6 +9,7 @@ wrkq tree                               # Show task tree
 wrkq cat T-00001                        # View task details
 wrkq touch inbox/task-slug -t "Title"   # Create task
 wrkq set T-00001 --state STATE          # Update state
+wrkq set T-00001 --outcome -            # Curated result from stdin; blank clears
 wrkq find --state open                  # Find open tasks
 wrkq ls --sort updated_at --reverse --limit 5  # Recent tasks
 wrkq search "query" --ndjson            # Full-text search with timestamps
@@ -26,6 +27,7 @@ wrkq set T-00001 --state completed      # Complete task
 
 ## Stdin Conventions
 `-` reads stdin for text flags/body slots (`-d -`, `--specification -`, `-m -`, `--body-file -`).
+Final comments are the worker's raw record; outcome is the curated plain-terms result. Completion never requires an outcome.
 `@file` reads file content for text flags (`-m @notes.md`).
 Use one stdin consumer per command. Dash-stdin on a terminal errors; pipe input or use a heredoc.
 Destructive commands with piped selector input may need `--yes` because prompts read stdin.

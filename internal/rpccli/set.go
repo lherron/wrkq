@@ -20,7 +20,7 @@ import (
 // newSetCmd mirrors `wrkq set` for task field updates that map to
 // wrkq.task.update.
 func newSetCmd() *cobra.Command {
-	var description, specification, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
+	var description, specification, outcome, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
 	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy, campaign string
 	var projectRoot string
 	var metaFile string
@@ -31,7 +31,7 @@ func newSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "set <path|id>... [flags]",
 		Aliases: []string{"edit"},
-		Short:   "Update task fields",
+		Short:   "Update task fields; outcome is curated, comments are raw, and completion never requires outcome",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("root") {
@@ -79,6 +79,18 @@ func newSetCmd() *cobra.Command {
 				}
 				patch["specification"] = spec
 				dryFields["specification"] = spec
+			}
+			if cmd.Flags().Changed("outcome") {
+				value, err := readNullableTextValue(outcome, "--outcome", cmd.InOrStdin(), claims)
+				if err != nil {
+					return fmt.Errorf("failed to read outcome: %w", err)
+				}
+				patch["outcome"] = value
+				if strings.TrimSpace(value) == "" {
+					dryFields["outcome"] = nil
+				} else {
+					dryFields["outcome"] = value
+				}
 			}
 			if kind != "" {
 				patch["kind"] = kind
@@ -181,6 +193,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&ordered, "ordered", false, "Preserve input order (disables parallelism)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Update task description")
 	cmd.Flags().StringVar(&specification, "specification", "", "Update task specification")
+	cmd.Flags().StringVar(&outcome, "outcome", "", "Set curated task outcome (use @file or - for stdin; blank clears)")
 	cmd.Flags().StringVar(&state, "state", "", "Update task state")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Update task priority (1-4)")
 	cmd.Flags().StringVar(&title, "title", "", "Update task title")
@@ -200,13 +213,14 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
 	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in an active campaign by ID or path (empty string unenrolls)")
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
-	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
+	_ = cmd.Flags().MarkHidden("batch-size") // Accepted for compatibility; it has no behavior.
+	_ = batchSize                            // Legacy accepts --batch-size but does not apply batching.
 	return cmd
 }
 
 func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatch int64, dryRun bool) error {
 	for _, name := range []string{
-		"description", "specification", "state", "priority", "title", "slug",
+		"description", "specification", "outcome", "state", "priority", "title", "slug",
 		"labels", "meta", "meta-file", "due-at", "start-at", "kind",
 		"parent-task", "parent-id", "assignee", "requested-by", "assigned-project",
 		"resolution", "caused-by", "campaign",

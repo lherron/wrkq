@@ -24,7 +24,7 @@ import (
 // remaining divergence is the deliberate one legacy itself enforces: --output raw
 // is unsupported (byte-identical error).
 func newFindCmd() *cobra.Command {
-	var asJSON, ndjson, porcelain, pretty, reverse, ackPending, print0 bool
+	var asJSON, ndjson, porcelain, pretty, reverse, ackPending, hasOutcome, print0 bool
 	var limit int
 	var cursorTok, typeFilter, sort string
 	var slugGlob, state, dueBefore, dueAfter, kind, assignee, claimedBy, claimedNode, parentTask, requestedBy, assignedProject, causedBy, campaign string
@@ -97,6 +97,9 @@ func newFindCmd() *cobra.Command {
 			}
 			if ackPending {
 				params["ackPending"] = true
+			}
+			if hasOutcome {
+				params["hasOutcome"] = true
 			}
 			if limit > 0 {
 				params["limit"] = limit
@@ -220,6 +223,7 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Filter by assignee project ID")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)")
 	cmd.Flags().BoolVar(&ackPending, "ack-pending", false, "Filter for ack-pending tasks (completed/cancelled, not yet acknowledged)")
+	cmd.Flags().BoolVar(&hasOutcome, "has-outcome", false, "Filter for tasks with a curated outcome")
 	cmd.Flags().StringVar(&campaign, "campaign", "", "Find resident and enrolled members of a campaign")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Limit number of results")
 	cmd.Flags().StringVar(&cursorTok, "cursor", "", "Pagination cursor")

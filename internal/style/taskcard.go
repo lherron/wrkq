@@ -23,6 +23,7 @@ type StyledTask struct {
 	BlockedCount  int
 	Description   string
 	Specification string
+	Outcome       string
 	NoFrontmatter bool
 }
 
@@ -62,6 +63,7 @@ func RenderStyledTask(w io.Writer, t StyledTask, comments []StyledComment) {
 
 	section("§ Description", t.Description)
 	section("§ Specification", t.Specification)
+	section("§ Outcome", t.Outcome)
 
 	if len(comments) > 0 {
 		renderComments(w, comments)

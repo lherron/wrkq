@@ -24,6 +24,7 @@ type WrkqTask struct {
 	RiskClass             string         `json:"riskClass,omitempty"`
 	Description           string         `json:"description"`
 	Specification         string         `json:"specification"`
+	Outcome               *string        `json:"outcome,omitempty"`
 	HasDescription        bool           `json:"hasDescription"`
 	HasSpecification      bool           `json:"hasSpecification"`
 	Labels                []string       `json:"labels"`
@@ -249,6 +250,7 @@ type TaskPatch struct {
 	Title                *string         `json:"title,omitempty"`
 	Description          *string         `json:"description,omitempty"`
 	Specification        *string         `json:"specification,omitempty"`
+	Outcome              *string         `json:"outcome,omitempty"`
 	State                *string         `json:"state,omitempty"`
 	Priority             *int            `json:"priority,omitempty"`
 	Kind                 *string         `json:"kind,omitempty"`
@@ -276,7 +278,7 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	allowed := map[string]bool{
-		"slug": true, "title": true, "description": true, "specification": true, "state": true,
+		"slug": true, "title": true, "description": true, "specification": true, "outcome": true, "state": true,
 		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
 		"assigneePrincipalRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
 		"dueAt": true, "startAt": true, "causedBy": true, "campaign": true,

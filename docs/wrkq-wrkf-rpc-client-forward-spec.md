@@ -634,6 +634,7 @@ interface WrkqTaskUpdateParams {
     title?: string;
     description?: string;
     specification?: string;
+    outcome?: string;
     state?: WrkqTaskState;
     priority?: number;
     kind?: string;
@@ -663,6 +664,7 @@ interface WrkqTask {
   kind: string;
   description: string;
   specification: string;
+  outcome?: string;
   labels: string[];
   meta: Record<string, unknown>;
   etag: number;

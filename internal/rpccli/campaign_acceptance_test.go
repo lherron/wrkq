@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -212,4 +213,110 @@ func TestCampaignFindAndTreeReadSemantics(t *testing.T) {
 			t.Errorf("interactive campaign tree missing %q: %q", want, humanOut)
 		}
 	}
+}
+
+func TestTaskOutcomeCLISetEditClearHistoryAndFind(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+	outcomeFile := t.TempDir() + "/outcome.md"
+	const initial = "Shipped the first behavior.\nPreserved the full snapshot.\n"
+	if err := os.WriteFile(outcomeFile, []byte(initial), 0o600); err != nil {
+		t.Fatalf("write outcome fixture: %v", err)
+	}
+
+	if out, err := runCampaignCLIInput(t, f.dbPath, "", "set", f.residentID, "--outcome", "@"+outcomeFile); err != nil {
+		t.Fatalf("set outcome from file: %v\n%s", err, out)
+	}
+	const amended = "Amended after verification.\n"
+	if out, err := runCampaignCLIInput(t, f.dbPath, amended, "set", f.residentID, "--outcome", "-"); err != nil {
+		t.Fatalf("edit outcome from stdin: %v\n%s", err, out)
+	}
+
+	findOut, err := runCampaignCLIInput(t, f.dbPath, "", "--project", "campaign-cli-a", "find", "--has-outcome", "--type", "t", "--ndjson")
+	if err != nil {
+		t.Fatalf("find --has-outcome after set: %v\n%s", err, findOut)
+	}
+	if !strings.Contains(findOut, "resident-member") || strings.Contains(findOut, "enrolled-member") {
+		t.Fatalf("find --has-outcome after set = %q, want resident only", findOut)
+	}
+
+	if out, err := runCampaignCLIInput(t, f.dbPath, "", "set", f.residentID, "--outcome", " \n\t"); err != nil {
+		t.Fatalf("clear whitespace outcome: %v\n%s", err, out)
+	}
+	findOut, err = runCampaignCLIInput(t, f.dbPath, "", "--project", "campaign-cli-a", "find", "--has-outcome", "--type", "t", "--ndjson")
+	if err != nil {
+		t.Fatalf("find --has-outcome after clear: %v\n%s", err, findOut)
+	}
+	if strings.Contains(findOut, "resident-member") {
+		t.Fatalf("cleared task still returned by --has-outcome: %q", findOut)
+	}
+
+	if out, err := runCampaignCLIInput(t, f.dbPath, "", "set", f.residentID, "--state", "completed"); err != nil {
+		t.Fatalf("completion without current outcome must succeed: %v\n%s", err, out)
+	}
+
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open outcome fixture DB: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	rows, err := database.Query(`
+		SELECT payload
+		  FROM event_log
+		 WHERE resource_uuid = ? AND event_type = 'task.outcome_set'
+		 ORDER BY id`, f.residentUUID)
+	if err != nil {
+		t.Fatalf("query outcome history: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	expected := []any{initial, amended, nil}
+	var index int
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatalf("scan outcome history: %v", err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			t.Fatalf("decode outcome payload %q: %v", raw, err)
+		}
+		if index >= len(expected) {
+			t.Fatalf("unexpected extra outcome event: %#v", payload)
+		}
+		if payload["task_uuid"] != f.residentUUID ||
+			payload["outcome"] != expected[index] ||
+			payload["container_uuid"] != f.campaignAUUID ||
+			payload["campaign_uuid"] != f.campaignAUUID {
+			t.Errorf("outcome event %d payload = %#v, want snapshot=%#v and resident campaign stamps",
+				index+1, payload, expected[index])
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate outcome history: %v", err)
+	}
+	if index != 3 {
+		t.Fatalf("task.outcome_set count = %d, want 3", index)
+	}
+
+	var outcome sql.NullString
+	var state string
+	if err := database.QueryRow("SELECT outcome, state FROM tasks WHERE uuid = ?", f.residentUUID).Scan(&outcome, &state); err != nil {
+		t.Fatalf("load final task state: %v", err)
+	}
+	if outcome.Valid || state != "completed" {
+		t.Fatalf("final task outcome/state = %#v/%q, want NULL/completed", outcome, state)
+	}
+}
+
+func runCampaignCLIInput(t *testing.T, dbPath, input string, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewRootCmdFor("wrkq")
+	cmd.SetArgs(append([]string{"--db", dbPath, "--principal-ref", "agent:campaign-test"}, args...))
+	cmd.SetIn(strings.NewReader(input))
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	err := cmd.Execute()
+	return output.String(), err
 }

@@ -37,6 +37,7 @@ type FindListViewParams struct {
 	AssignedProjectID    string   `json:"assignedProject,omitempty"`
 	CausedBy             string   `json:"causedBy,omitempty"`
 	AckPending           bool     `json:"ackPending,omitempty"`
+	HasOutcome           bool     `json:"hasOutcome,omitempty"`
 	Campaign             string   `json:"campaign,omitempty"`
 	Limit                int      `json:"limit,omitempty"`
 	Cursor               string   `json:"cursor,omitempty"`
@@ -174,6 +175,7 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		assignedProjectID:    p.AssignedProjectID,
 		causedByTaskUUID:     causedByTaskUUID,
 		ackPending:           p.AckPending,
+		hasOutcome:           p.HasOutcome,
 		campaignUUID:         campaignUUID,
 		limit:                p.Limit,
 		cursor:               p.Cursor,
@@ -214,6 +216,7 @@ type findQueryOptions struct {
 	assignedProjectID    string
 	causedByTaskUUID     string
 	ackPending           bool
+	hasOutcome           bool
 	campaignUUID         string
 	limit                int
 	cursor               string
@@ -229,7 +232,7 @@ func (a *API) executeFindQuery(ctx context.Context, opts findQueryOptions) ([]Wr
 	// Claim predicates describe task holdership. Unlike legacy metadata filters,
 	// they have no container interpretation, so an untyped claim query is a task
 	// query rather than a mixed result set padded with every matching container.
-	if opts.claimedBy != "" || opts.claimedNode != "" {
+	if opts.claimedBy != "" || opts.claimedNode != "" || opts.hasOutcome {
 		searchContainers = false
 	}
 	if opts.campaignUUID != "" {
@@ -355,6 +358,9 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	}
 	if opts.ackPending {
 		query += " AND t.acknowledged_at IS NULL AND t.state IN ('completed', 'cancelled')"
+	}
+	if opts.hasOutcome {
+		query += " AND t.outcome IS NOT NULL"
 	}
 
 	if opts.dueBefore != "" {

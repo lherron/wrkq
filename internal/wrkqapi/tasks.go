@@ -359,7 +359,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	if p.Summary {
 		bodyColumns = "'' AS description, '' AS specification"
 	}
-	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", " +
+	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", t.outcome, " +
 		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
 		"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
 		"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
@@ -1208,6 +1208,13 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 	if patch.Specification != nil {
 		fields["specification"] = *patch.Specification
 	}
+	if patch.Outcome != nil {
+		if strings.TrimSpace(*patch.Outcome) == "" {
+			fields["outcome"] = nil
+		} else {
+			fields["outcome"] = *patch.Outcome
+		}
+	}
 	if patch.State != nil {
 		if _, err := domain.ParseState(*patch.State); err != nil {
 			return nil, NewValidationError(err.Error(), map[string]any{"field": "state"})
@@ -1344,7 +1351,7 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 // loadTask reads a task by UUID into a WrkqTask DTO.
 func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
-		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, t.description, t.specification, "+
+		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, t.description, t.specification, t.outcome, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
 			"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
@@ -1382,6 +1389,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 	var (
 		uuid, id, slug, title, projectUUID, state, kind, description, specification string
 		campaignUUID                                                                sql.NullString
+		outcome                                                                     sql.NullString
 		labels, meta                                                                sql.NullString
 		priority                                                                    int
 		etag                                                                        int64
@@ -1394,7 +1402,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		hasDescription, hasSpecification                                            int
 	)
 	if err := s.Scan(
-		&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &state, &priority, &kind, &description, &specification,
+		&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &state, &priority, &kind, &description, &specification, &outcome,
 		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
 		&assignee, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification,
@@ -1415,6 +1423,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		RiskClass:             riskClass,
 		Description:           description,
 		Specification:         specification,
+		Outcome:               nullStringPtr(outcome),
 		HasDescription:        hasDescription != 0,
 		HasSpecification:      hasSpecification != 0,
 		Labels:                parseLabels(labels.String),
