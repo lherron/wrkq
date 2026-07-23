@@ -790,6 +790,13 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 			})
 		}
 
+		if hasStateChange && currentState != newState &&
+			!isCompletionState(currentState) && isCompletionState(newState) {
+			if err := maybeLogCampaignCloseNudgeForTask(tx, ew, attr, taskUUID); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
 
@@ -1129,6 +1136,11 @@ func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, tas
 		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
 		}
+		if !isCompletionState(currentState) {
+			if err := maybeLogCampaignCloseNudgeForTask(tx, ew, attr, taskUUID); err != nil {
+				return err
+			}
+		}
 		webhookCtx = webhooks.EventContext{
 			Metadata:     meta,
 			Event:        "archived",
@@ -1177,8 +1189,8 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
 		var currentETag int64
-		var slug string
-		err := tx.QueryRow("SELECT etag, slug FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &slug)
+		var slug, currentState string
+		err := tx.QueryRow("SELECT etag, slug, state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &slug, &currentState)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("task not found: %s", taskUUID)
@@ -1211,6 +1223,14 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 			return fmt.Errorf("failed to load webhook info: %w", err)
 		}
 		webhookInfo = &info
+
+		campaignUUID := ""
+		if !isCompletionState(currentState) {
+			campaignUUID, err = campaignUUIDForTaskTx(tx, taskUUID)
+			if err != nil {
+				return err
+			}
+		}
 
 		// Count attachments for statistics
 		var attachmentCount int
@@ -1277,6 +1297,9 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 		_, err = tx.Exec("DELETE FROM tasks WHERE uuid = ?", taskUUID)
 		if err != nil {
 			return fmt.Errorf("failed to delete task: %w", err)
+		}
+		if err := maybeLogCampaignCloseNudge(tx, ew, attr, campaignUUID); err != nil {
+			return err
 		}
 
 		result = &PurgeResult{

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 
 type campaignCLIFixture struct {
 	dbPath                       string
-	campaignAPath, campaignBPath string
+	projectAUUID                 string
 	campaignAUUID, campaignBUUID string
 	residentID, enrolledID       string
 	residentUUID, enrolledUUID   string
@@ -67,7 +68,7 @@ func newCampaignCLIFixture(t *testing.T) campaignCLIFixture {
 	}
 	return campaignCLIFixture{
 		dbPath:        dbPath,
-		campaignAPath: "campaign-cli-a/wave-a", campaignBPath: "campaign-cli-b/wave-b",
+		projectAUUID:  projectA.UUID,
 		campaignAUUID: campaignA.UUID, campaignBUUID: campaignB.UUID,
 		residentID: resident.ID, enrolledID: enrolled.ID,
 		residentUUID: resident.UUID, enrolledUUID: enrolled.UUID,
@@ -319,4 +320,260 @@ func runCampaignCLIInput(t *testing.T, dbPath, input string, args ...string) (st
 	cmd.SetErr(&output)
 	err := cmd.Execute()
 	return output.String(), err
+}
+
+func TestCampaignLifecycleCLIContentAndSnapshotHistory(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open lifecycle fixture: %v", err)
+	}
+	if _, err := database.Exec(
+		"UPDATE containers SET campaign_state = NULL WHERE uuid = ?", f.campaignAUUID,
+	); err != nil {
+		t.Fatalf("reset campaign to plain: %v", err)
+	}
+	_ = database.Close()
+
+	const initialBrief = "Initial campaign brief.\n"
+	const initialSpec = "Ratified campaign specification.\nSecond line.\n"
+	convertOut, err := runCampaignCLIInput(
+		t, f.dbPath, initialSpec,
+		"campaign", "convert", f.campaignAUUID,
+		"--description", initialBrief,
+		"--specification", "-",
+	)
+	if err != nil {
+		t.Fatalf("campaign convert: %v\n%s", err, convertOut)
+	}
+	var converted campaignTransitionResult
+	if err := json.Unmarshal([]byte(convertOut), &converted); err != nil {
+		t.Fatalf("decode convert output %q: %v", convertOut, err)
+	}
+	if converted.CampaignState != "active" || converted.Container.CampaignState == nil ||
+		*converted.Container.CampaignState != "active" ||
+		converted.Container.Description != initialBrief ||
+		converted.Container.Specification == nil ||
+		*converted.Container.Specification != initialSpec {
+		t.Fatalf("convert readback = %#v, want active + exact bodies", converted)
+	}
+
+	database, err = db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("reopen lifecycle fixture: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var kind string
+	var archivedAt sql.NullString
+	if err := database.QueryRow(
+		"SELECT kind, archived_at FROM containers WHERE uuid = ?", f.campaignAUUID,
+	).Scan(&kind, &archivedAt); err != nil {
+		t.Fatalf("read conversion orthogonal fields: %v", err)
+	}
+	if kind != "directory" || archivedAt.Valid {
+		t.Fatalf("conversion changed kind/archive = %q/%v, want directory/NULL", kind, archivedAt)
+	}
+
+	const amendedBrief = "Amended brief — exact bytes.\n"
+	const amendedSpec = "Amended specification.\n\nFull body retained.\n"
+	editOut, err := runCampaignCLIInput(
+		t, f.dbPath, "",
+		"campaign", "edit", f.campaignAUUID,
+		"--description", amendedBrief,
+		"--specification", amendedSpec,
+	)
+	if err != nil {
+		t.Fatalf("campaign edit: %v\n%s", err, editOut)
+	}
+	var edited campaignContainer
+	if err := json.Unmarshal([]byte(editOut), &edited); err != nil {
+		t.Fatalf("decode edit output %q: %v", editOut, err)
+	}
+	if edited.Description != amendedBrief || edited.Specification == nil ||
+		*edited.Specification != amendedSpec {
+		t.Fatalf("edit readback = %#v, want exact amended bodies", edited)
+	}
+
+	var payload string
+	if err := database.QueryRow(`
+		SELECT payload FROM event_log
+		 WHERE resource_uuid = ? AND event_type = 'container.updated'
+		 ORDER BY id DESC LIMIT 1
+	`, f.campaignAUUID).Scan(&payload); err != nil {
+		t.Fatalf("read content snapshot event: %v", err)
+	}
+	wantPayloadBytes, _ := json.Marshal(map[string]any{
+		"description":   amendedBrief,
+		"specification": amendedSpec,
+	})
+	if payload != string(wantPayloadBytes) {
+		t.Fatalf("container.updated payload bytes:\n got: %q\nwant: %q", payload, wantPayloadBytes)
+	}
+}
+
+func TestCampaignLifecycleCLICompletedCloseDispositionMatrix(t *testing.T) {
+	t.Run("complete and cancel", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", f.campaignAUUID); err != nil {
+			t.Fatalf("enroll member: %v\n%s", err, out)
+		}
+		out, err := runCampaignCLI(
+			t, f.dbPath, "campaign", "close", f.campaignAUUID, "--state", "completed",
+		)
+		if err == nil {
+			t.Fatalf("completed close with open members succeeded: %s", out)
+		}
+		for _, want := range []string{
+			"resident-member", "enrolled-member", "resident", "enrolled",
+			"complete/cancel", "move/unenroll",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("close guard error missing %q: %v", want, err)
+			}
+		}
+
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.residentID, "--state", "completed"); err != nil {
+			t.Fatalf("complete resident: %v\n%s", err, out)
+		}
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--state", "cancelled"); err != nil {
+			t.Fatalf("cancel enrolled: %v\n%s", err, out)
+		}
+		closeOut, err := runCampaignCLI(
+			t, f.dbPath, "campaign", "close", f.campaignAUUID, "--state", "completed",
+		)
+		if err != nil {
+			t.Fatalf("completed close after terminal dispositions: %v\n%s", err, closeOut)
+		}
+		var result campaignTransitionResult
+		if err := json.Unmarshal([]byte(closeOut), &result); err != nil {
+			t.Fatalf("decode close output %q: %v", closeOut, err)
+		}
+		if result.CampaignState != "completed" || len(result.MissingOutcomes) != 1 ||
+			result.MissingOutcomes[0].UUID != f.residentUUID {
+			t.Fatalf("completed close result = %#v, want non-blocking missing outcome", result)
+		}
+	})
+
+	t.Run("move and unenroll", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", f.campaignAUUID); err != nil {
+			t.Fatalf("enroll member: %v\n%s", err, out)
+		}
+		if out, err := runCampaignCLI(t, f.dbPath, "mv", f.residentID, f.projectAUUID); err != nil {
+			t.Fatalf("move resident out: %v\n%s", err, out)
+		}
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", ""); err != nil {
+			t.Fatalf("unenroll member: %v\n%s", err, out)
+		}
+		if out, err := runCampaignCLI(
+			t, f.dbPath, "campaign", "close", f.campaignAUUID, "--state", "completed",
+		); err != nil {
+			t.Fatalf("completed close after move/unenroll: %v\n%s", err, out)
+		}
+	})
+}
+
+func TestCampaignLifecycleCLICancelAndNudgeAreEventsNotComments(t *testing.T) {
+	t.Run("cancel bypasses disposition", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", f.campaignAUUID); err != nil {
+			t.Fatalf("enroll member: %v\n%s", err, out)
+		}
+		if out, err := runCampaignCLI(
+			t, f.dbPath, "campaign", "close", f.campaignAUUID, "--state", "cancelled",
+		); err != nil {
+			t.Fatalf("cancel campaign with open members: %v\n%s", err, out)
+		}
+		database, err := db.Open(f.dbPath)
+		if err != nil {
+			t.Fatalf("open cancelled fixture: %v", err)
+		}
+		defer func() { _ = database.Close() }()
+		for _, taskUUID := range []string{f.residentUUID, f.enrolledUUID} {
+			var state string
+			if err := database.QueryRow("SELECT state FROM tasks WHERE uuid = ?", taskUUID).Scan(&state); err != nil {
+				t.Fatalf("read cancelled-close member: %v", err)
+			}
+			if state != "open" {
+				t.Fatalf("cancelled close changed task %s to %s", taskUUID, state)
+			}
+		}
+	})
+
+	t.Run("last terminal member emits raw-monitor nudge", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", f.campaignAUUID); err != nil {
+			t.Fatalf("enroll member: %v\n%s", err, out)
+		}
+		database, err := db.Open(f.dbPath)
+		if err != nil {
+			t.Fatalf("open nudge fixture: %v", err)
+		}
+		var before int64
+		if err := database.QueryRow("SELECT COALESCE(MAX(id),0) FROM event_log").Scan(&before); err != nil {
+			t.Fatalf("read nudge cursor: %v", err)
+		}
+		_ = database.Close()
+
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.residentID, "--state", "completed"); err != nil {
+			t.Fatalf("complete first member: %v\n%s", err, out)
+		}
+		database, err = db.Open(f.dbPath)
+		if err != nil {
+			t.Fatalf("reopen nudge fixture: %v", err)
+		}
+		var earlyNudges int
+		if err := database.QueryRow(`
+			SELECT COUNT(*) FROM event_log
+			 WHERE id > ? AND resource_uuid = ?
+			   AND event_type = 'container.campaign_close_nudged'
+		`, before, f.campaignAUUID).Scan(&earlyNudges); err != nil {
+			t.Fatalf("count early nudges: %v", err)
+		}
+		_ = database.Close()
+		if earlyNudges != 0 {
+			t.Fatalf("first terminal member emitted %d nudge(s), want 0", earlyNudges)
+		}
+
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--state", "cancelled"); err != nil {
+			t.Fatalf("terminalize last member: %v\n%s", err, out)
+		}
+		watchOut, err := runCampaignCLI(
+			t, f.dbPath, "watch", "--since", fmt.Sprint(before), "--ndjson", "--follow=false",
+		)
+		if err != nil {
+			t.Fatalf("raw monitor replay: %v\n%s", err, watchOut)
+		}
+		if !strings.Contains(watchOut, `"event_type":"container.campaign_close_nudged"`) ||
+			!strings.Contains(watchOut, "all_members_terminal") {
+			t.Fatalf("raw monitor missing campaign nudge: %s", watchOut)
+		}
+
+		database, err = db.Open(f.dbPath)
+		if err != nil {
+			t.Fatalf("reopen final nudge fixture: %v", err)
+		}
+		defer func() { _ = database.Close() }()
+		var transitions, nudges, comments int
+		if err := database.QueryRow(`
+			SELECT COUNT(*) FROM event_log
+			 WHERE resource_uuid = ? AND event_type = 'container.campaign_close_nudged'
+		`, f.campaignAUUID).Scan(&nudges); err != nil {
+			t.Fatalf("count nudges: %v", err)
+		}
+		if err := database.QueryRow(`
+			SELECT COUNT(*) FROM event_log
+			 WHERE resource_uuid = ? AND event_type = 'container.campaign_state_changed'
+		`, f.campaignAUUID).Scan(&transitions); err != nil {
+			t.Fatalf("count transitions: %v", err)
+		}
+		if err := database.QueryRow(
+			"SELECT COUNT(*) FROM comments WHERE container_uuid = ?", f.campaignAUUID,
+		).Scan(&comments); err != nil {
+			t.Fatalf("count campaign comments: %v", err)
+		}
+		if nudges != 1 || transitions != 0 || comments != 0 {
+			t.Fatalf("nudge/state/comment counts = %d/%d/%d, want 1/0/0", nudges, transitions, comments)
+		}
+	})
 }

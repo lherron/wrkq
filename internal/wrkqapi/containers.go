@@ -309,7 +309,8 @@ func (a *API) ContainerList(ctx context.Context, p ContainerListParams) (*WrkqCo
 		args = append(args, page.Params...)
 	}
 
-	query := `SELECT c.uuid, c.id, c.slug, c.title, c.kind, c.parent_uuid, c.etag,
+	query := `SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
+		c.campaign_state, c.kind, c.parent_uuid, c.etag,
 		c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
 		FROM containers c
 		LEFT JOIN v_container_paths v ON v.uuid = c.uuid`
@@ -515,7 +516,8 @@ func (a *API) ContainerDeleteRecursive(ctx context.Context, p ContainerDeleteRec
 // loadContainer reads a container by UUID into a WrkqContainer DTO.
 func (a *API) loadContainer(containerUUID string) (*WrkqContainer, error) {
 	row := a.db.QueryRow(`
-		SELECT c.uuid, c.id, c.slug, c.title, c.kind, c.parent_uuid, c.etag,
+		SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
+		       c.campaign_state, c.kind, c.parent_uuid, c.etag,
 		       c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
 		FROM containers c
 		LEFT JOIN v_container_paths v ON v.uuid = c.uuid
@@ -699,6 +701,11 @@ func mapContainerStoreError(err error, selector string) error {
 	switch {
 	case strings.Contains(lower, "not found"):
 		return NewNotFoundError(selector, "container")
+	case strings.Contains(lower, "foreign key"):
+		return NewValidationError(
+			"cannot delete campaign container with enrolled members; unenroll them first",
+			map[string]any{"container": selector},
+		)
 	case strings.Contains(lower, "unique") || strings.Contains(lower, "constraint"):
 		// A slug collision surfaces as a SQLite UNIQUE-constraint failure on
 		// (parent_uuid, slug). Map it to a STABLE, implementation-free conflict
@@ -723,28 +730,34 @@ func scanContainerRow(s rowScanner) (*WrkqContainer, error) {
 	var (
 		containerUUID, id, slug, kind, path string
 		title                               sql.NullString
+		description                         string
+		specification, campaignState        sql.NullString
 		parentUUID, archivedAt              sql.NullString
 		etag                                int64
 		createdAt, updatedAt                string
 	)
 	if err := s.Scan(
-		&containerUUID, &id, &slug, &title, &kind, &parentUUID, &etag,
+		&containerUUID, &id, &slug, &title, &description, &specification,
+		&campaignState, &kind, &parentUUID, &etag,
 		&createdAt, &updatedAt, &archivedAt, &path,
 	); err != nil {
 		return nil, err
 	}
 	return &WrkqContainer{
-		UUID:         containerUUID,
-		ID:           id,
-		Slug:         slug,
-		Title:        title.String,
-		Kind:         kind,
-		ParentUUID:   parentUUID.String,
-		Path:         path,
-		ETag:         etag,
-		CreatedAt:    toRFC3339(createdAt),
-		UpdatedAt:    toRFC3339(updatedAt),
-		ArchivedAt:   toRFC3339(archivedAt.String),
-		createdAtRaw: createdAt,
+		UUID:          containerUUID,
+		ID:            id,
+		Slug:          slug,
+		Title:         title.String,
+		Description:   description,
+		Specification: nullStringPtr(specification),
+		CampaignState: nullStringPtr(campaignState),
+		Kind:          kind,
+		ParentUUID:    parentUUID.String,
+		Path:          path,
+		ETag:          etag,
+		CreatedAt:     toRFC3339(createdAt),
+		UpdatedAt:     toRFC3339(updatedAt),
+		ArchivedAt:    toRFC3339(archivedAt.String),
+		createdAtRaw:  createdAt,
 	}, nil
 }

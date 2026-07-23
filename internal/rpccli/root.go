@@ -105,6 +105,7 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	root.AddCommand(newCommentCmd())
 	root.AddCommand(newRelationCmd())
 	root.AddCommand(newContainerCmd())
+	root.AddCommand(newCampaignCmd())
 	root.AddCommand(newAttachCmd())
 	root.AddCommand(newLogCmd())
 	root.AddCommand(newLsCmd())

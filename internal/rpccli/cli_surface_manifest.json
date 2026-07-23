@@ -276,6 +276,95 @@
         ]
       },
       {
+        "name": "campaign",
+        "use": "campaign",
+        "short": "Manage the campaign adornment on containers",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "close",
+            "use": "close \u003ccontainer\u003e",
+            "short": "Declare an active campaign completed or cancelled",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "if-match",
+                "usage": "Only close if the container etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "state",
+                "usage": "Terminal campaign state: completed or cancelled",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "convert",
+            "use": "convert \u003ccontainer\u003e",
+            "short": "Convert a plain container into an active campaign",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "description",
+                "shorthand": "d",
+                "usage": "Campaign brief (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only convert if the container etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "specification",
+                "usage": "Campaign specification (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "edit",
+            "use": "edit \u003ccontainer\u003e",
+            "short": "Edit campaign brief or specification",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "description",
+                "shorthand": "d",
+                "usage": "Campaign brief (literal, @file, or - for stdin; empty clears)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only edit if the container etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "specification",
+                "usage": "Campaign specification (literal, @file, or - for stdin; empty clears)",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "cat",
         "use": "cat \u003cpath|id\u003e...",
         "aliases": [

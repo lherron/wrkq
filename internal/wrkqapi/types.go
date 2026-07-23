@@ -585,17 +585,20 @@ type RelationRemoveParams struct {
 // WrkqContainer is the stable container resource DTO (camelCase; no DB column
 // names leak). path is computed.
 type WrkqContainer struct {
-	UUID       string `json:"uuid"`
-	ID         string `json:"id"`
-	Slug       string `json:"slug"`
-	Title      string `json:"title"`
-	Kind       string `json:"kind"`
-	ParentUUID string `json:"parentUuid,omitempty"`
-	Path       string `json:"path"`
-	ETag       int64  `json:"etag"`
-	CreatedAt  string `json:"createdAt"`
-	UpdatedAt  string `json:"updatedAt"`
-	ArchivedAt string `json:"archivedAt,omitempty"`
+	UUID          string  `json:"uuid"`
+	ID            string  `json:"id"`
+	Slug          string  `json:"slug"`
+	Title         string  `json:"title"`
+	Description   string  `json:"description"`
+	Specification *string `json:"specification,omitempty"`
+	CampaignState *string `json:"campaignState,omitempty"`
+	Kind          string  `json:"kind"`
+	ParentUUID    string  `json:"parentUuid,omitempty"`
+	Path          string  `json:"path"`
+	ETag          int64   `json:"etag"`
+	CreatedAt     string  `json:"createdAt"`
+	UpdatedAt     string  `json:"updatedAt"`
+	ArchivedAt    string  `json:"archivedAt,omitempty"`
 
 	// createdAtRaw holds the un-normalized created_at for cursor anchoring; it is
 	// unexported and never serialized.
@@ -697,6 +700,52 @@ type ContainerUpdateParams struct {
 	ExpectETag     int64           `json:"expectEtag,omitempty"`
 	Actor          string          `json:"actor,omitempty"`
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
+}
+
+// ContainerCampaignConvertParams adorns one plain container as an active
+// campaign and may seed its brief/specification bodies.
+type ContainerCampaignConvertParams struct {
+	Container     string  `json:"container"`
+	Description   *string `json:"description,omitempty"`
+	Specification *string `json:"specification,omitempty"`
+	ExpectETag    int64   `json:"expectEtag,omitempty"`
+	Actor         string  `json:"actor,omitempty"`
+}
+
+// ContainerCampaignUpdateParams edits campaign content. Pointer fields retain
+// omitted-vs-explicit-empty semantics.
+type ContainerCampaignUpdateParams struct {
+	Container     string  `json:"container"`
+	Description   *string `json:"description,omitempty"`
+	Specification *string `json:"specification,omitempty"`
+	ExpectETag    int64   `json:"expectEtag,omitempty"`
+	Actor         string  `json:"actor,omitempty"`
+}
+
+// ContainerCampaignCloseParams declares an active campaign completed or
+// cancelled.
+type ContainerCampaignCloseParams struct {
+	Container  string `json:"container"`
+	State      string `json:"state"`
+	ExpectETag int64  `json:"expectEtag,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+}
+
+type WrkqCampaignMemberDiagnostic struct {
+	UUID       string `json:"uuid"`
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	State      string `json:"state"`
+	Membership string `json:"membership"`
+}
+
+type WrkqCampaignTransitionResult struct {
+	Container       *WrkqContainer                 `json:"container"`
+	PreviousState   *string                        `json:"previousState"`
+	CampaignState   string                         `json:"campaignState"`
+	MissingOutcomes []WrkqCampaignMemberDiagnostic `json:"missingOutcomes"`
+	EventID         int64                          `json:"eventId"`
+	EventTimestamp  string                         `json:"eventTimestamp"`
 }
 
 // ContainerMoveParams mirrors the container-source branch of legacy `wrkq mv`.

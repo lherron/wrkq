@@ -1131,6 +1131,9 @@ wrkq.container.list
 wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
 wrkq.project.setRoot    [dedicated top-level project checkout-root mutation]
 wrkq.container.update
+wrkq.container.campaignConvert
+wrkq.container.campaignUpdate
+wrkq.container.campaignClose
 wrkq.container.move
 wrkq.container.webhookSet
 wrkq.container.archive
@@ -1143,7 +1146,9 @@ wrkq.container.restore
 > `webhook_urls`, `created_by`/`updated_by` actor slugs) for one container
 > (`{ container?: string; path?: string }`), assembled under a single read
 > transaction over the **resolved container UUID** (selector resolution happens
-> before the snapshot). Do not back-propagate these fields into `WrkqContainer`.
+> before the snapshot). Campaign content fields are also canonical
+> `WrkqContainer` fields; the remaining legacy-only projection fields must not
+> be back-propagated.
 > Cataloged + fingerprinted. All `wrkq container cat` render modes
 > (json/ndjson/porcelain/markdown/raw) are produced **CLI-side** from this one
 > projection — no scalar is missing — so no per-mode RPC surface exists.
@@ -1180,6 +1185,9 @@ interface WrkqContainer {
   id: string;
   slug: string;
   title: string;
+  description: string;  // campaign brief; available on every container
+  specification?: string;
+  campaignState?: "active" | "completed" | "cancelled";
   kind: string;
   parentUuid?: string;
   path: string;          // computed full container path
@@ -1199,6 +1207,49 @@ interface WrkqContainerUpdateParams {
   idempotencyKey?: string;
 }
 // returns the updated WrkqContainer
+
+interface WrkqContainerCampaignConvertParams {
+  container: string;
+  description?: string;
+  specification?: string;
+  expectEtag?: number;
+  actor?: string;
+}
+
+interface WrkqContainerCampaignUpdateParams {
+  container: string;
+  description?: string;
+  specification?: string;
+  expectEtag?: number;
+  actor?: string;
+}
+
+interface WrkqContainerCampaignCloseParams {
+  container: string;
+  state: "completed" | "cancelled";
+  expectEtag?: number;
+  actor?: string;
+}
+
+interface WrkqCampaignMemberDiagnostic {
+  uuid: string;
+  id: string;
+  path: string;
+  state: WrkqTaskState;
+  membership: "resident" | "enrolled";
+}
+
+interface WrkqCampaignTransitionResult {
+  container: WrkqContainer;
+  previousState: "active" | null;
+  campaignState: "active" | "completed" | "cancelled";
+  missingOutcomes: WrkqCampaignMemberDiagnostic[];
+  eventId: number;
+  eventTimestamp: string;
+}
+
+// campaignConvert and campaignClose return WrkqCampaignTransitionResult;
+// campaignUpdate returns the updated WrkqContainer.
 
 interface WrkqContainerMoveParams {
   container: string;        // path / friendly-id / uuid selector

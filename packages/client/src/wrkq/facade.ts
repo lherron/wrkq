@@ -22,6 +22,9 @@ import type {
   WrkqCommentListResult,
   WrkqCommentShowParams,
   WrkqContainer,
+  WrkqContainerCampaignCloseParams,
+  WrkqContainerCampaignConvertParams,
+  WrkqContainerCampaignUpdateParams,
   WrkqContainerCreateParams,
   WrkqContainerDeleteParams,
   WrkqContainerDeleteRecursiveParams,
@@ -31,6 +34,7 @@ import type {
   WrkqContainerListResult,
   WrkqContainerShowParams,
   WrkqContainerUpdateParams,
+  WrkqCampaignTransitionResult,
   WrkqHandoff,
   WrkqHandoffAcknowledgeParams,
   WrkqHandoffCreateParams,
@@ -124,6 +128,13 @@ export interface WrkqRelationFacade {
 export interface WrkqContainerFacade {
   create(params: WrkqContainerCreateParams): Promise<WrkqContainer>;
   update(params: WrkqContainerUpdateParams): Promise<WrkqContainer>;
+  campaignConvert(
+    params: WrkqContainerCampaignConvertParams,
+  ): Promise<WrkqCampaignTransitionResult>;
+  campaignUpdate(params: WrkqContainerCampaignUpdateParams): Promise<WrkqContainer>;
+  campaignClose(
+    params: WrkqContainerCampaignCloseParams,
+  ): Promise<WrkqCampaignTransitionResult>;
   delete(params: WrkqContainerDeleteParams): Promise<WrkqContainerDeleteResult>;
   deleteRecursive(
     params: WrkqContainerDeleteRecursiveParams,

@@ -162,6 +162,9 @@ var methodCatalog = []string{
 	"wrkq.relation.remove",
 	"wrkq.container.create",
 	"wrkq.container.update",
+	"wrkq.container.campaignConvert",
+	"wrkq.container.campaignUpdate",
+	"wrkq.container.campaignClose",
 	"wrkq.container.move",
 	"wrkq.container.webhookSet",
 	"wrkq.container.archive",
@@ -292,6 +295,8 @@ var dtoCatalog = []string{
 	"WrkqRelation",
 	"WrkqContainer",
 	"WrkqContainerListResult",
+	"WrkqCampaignMemberDiagnostic",
+	"WrkqCampaignTransitionResult",
 	"WrkqProjectsListView", // CLI compatibility projection (projects)
 	"WrkqProjectEntry",     // element of projects listView (includes nullable registered root)
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
@@ -461,6 +466,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.container.update", apiHandler(func(ctx context.Context, p wrkqapi.ContainerUpdateParams) (any, error) {
 		return wq.ContainerUpdate(ctx, p)
+	}))
+	s.Register("wrkq.container.campaignConvert", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignConvertParams) (any, error) {
+		return wq.ContainerCampaignConvert(ctx, p)
+	}))
+	s.Register("wrkq.container.campaignUpdate", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignUpdateParams) (any, error) {
+		return wq.ContainerCampaignUpdate(ctx, p)
+	}))
+	s.Register("wrkq.container.campaignClose", apiHandler(func(ctx context.Context, p wrkqapi.ContainerCampaignCloseParams) (any, error) {
+		return wq.ContainerCampaignClose(ctx, p)
 	}))
 	s.Register("wrkq.container.move", apiHandler(func(ctx context.Context, p wrkqapi.ContainerMoveParams) (any, error) {
 		return wq.ContainerMove(ctx, p)

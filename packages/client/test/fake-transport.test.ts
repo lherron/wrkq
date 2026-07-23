@@ -49,6 +49,7 @@ const MOCK_CONTAINER: WrkqContainer = {
   id: "P-00001",
   slug: "project",
   title: "Project",
+  description: "",
   kind: "project",
   path: "project",
   etag: 1,
@@ -469,6 +470,71 @@ describe("wrkq namespace", () => {
     expect(updated.slug).toBe("renamed");
     expect(updated.title).toBe("Renamed");
     expect(updated.etag).toBe(2);
+  });
+
+  test("campaign facade forwards convert, update, and close lifecycle methods", async () => {
+    const active = {
+      ...MOCK_CONTAINER,
+      description: "brief",
+      specification: "ratified spec",
+      campaignState: "active" as const,
+      etag: 2,
+    };
+    const transport = new FakeTransport()
+      .onResult("wrkq.container.campaignConvert", {
+        container: active,
+        previousState: null,
+        campaignState: "active",
+        missingOutcomes: [],
+        eventId: 10,
+        eventTimestamp: "2026-07-23T00:00:00Z",
+      })
+      .onResult("wrkq.container.campaignUpdate", {
+        ...active,
+        description: "amended brief",
+        etag: 3,
+      })
+      .onResult("wrkq.container.campaignClose", {
+        container: { ...active, campaignState: "completed", etag: 4 },
+        previousState: "active",
+        campaignState: "completed",
+        missingOutcomes: [],
+        eventId: 12,
+        eventTimestamp: "2026-07-23T00:01:00Z",
+      });
+    const client = await clientWith(transport);
+
+    await client.wrkq.container.campaignConvert({
+      container: "project",
+      description: "brief",
+      specification: "ratified spec",
+      expectEtag: 1,
+    });
+    const updated = await client.wrkq.container.campaignUpdate({
+      container: "project",
+      description: "amended brief",
+      expectEtag: 2,
+    });
+    const closed = await client.wrkq.container.campaignClose({
+      container: "project",
+      state: "completed",
+      expectEtag: 3,
+    });
+
+    expect(transport.capturedRequests.map((frame) => frame.method)).toEqual([
+      "wrkq.container.campaignConvert",
+      "wrkq.container.campaignUpdate",
+      "wrkq.container.campaignClose",
+    ]);
+    expect(transport.capturedRequests[0]!.params).toEqual({
+      container: "project",
+      description: "brief",
+      specification: "ratified spec",
+      expectEtag: 1,
+    });
+    expect(updated.description).toBe("amended brief");
+    expect(closed.campaignState).toBe("completed");
+    expect(closed.container.campaignState).toBe("completed");
   });
 
   test("project root registry forwards listView and setRoot with verbatim root strings", async () => {

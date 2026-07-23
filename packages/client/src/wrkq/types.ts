@@ -415,6 +415,9 @@ export interface WrkqContainer {
   id: string;
   slug: string;
   title: string;
+  description: string;
+  specification?: string;
+  campaignState?: "active" | "completed" | "cancelled";
   kind: string;
   parentUuid?: string;
   path: string;
@@ -516,6 +519,46 @@ export interface WrkqContainerUpdateParams {
   expectEtag?: number;
   actor?: string;
   idempotencyKey?: string;
+}
+
+export interface WrkqContainerCampaignConvertParams {
+  container: string;
+  description?: string;
+  specification?: string;
+  expectEtag?: number;
+  actor?: string;
+}
+
+export interface WrkqContainerCampaignUpdateParams {
+  container: string;
+  description?: string;
+  specification?: string;
+  expectEtag?: number;
+  actor?: string;
+}
+
+export interface WrkqContainerCampaignCloseParams {
+  container: string;
+  state: "completed" | "cancelled";
+  expectEtag?: number;
+  actor?: string;
+}
+
+export interface WrkqCampaignMemberDiagnostic {
+  uuid: string;
+  id: string;
+  path: string;
+  state: WrkqTaskState;
+  membership: "resident" | "enrolled";
+}
+
+export interface WrkqCampaignTransitionResult {
+  container: WrkqContainer;
+  previousState: "active" | null;
+  campaignState: "active" | "completed" | "cancelled";
+  missingOutcomes: WrkqCampaignMemberDiagnostic[];
+  eventId: number;
+  eventTimestamp: string;
 }
 
 export interface WrkqContainerDeleteParams {

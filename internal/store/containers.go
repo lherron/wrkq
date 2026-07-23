@@ -256,8 +256,23 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 			}
 		}
 
-		// Log event with structured payload
-		changesJSON, err := json.Marshal(fields)
+		// Log event with structured payload. Container content edits retain a
+		// mechanical snapshot of BOTH full bodies, even when only one changed.
+		// Curated iteration remains a kind=decision comment; this event is the
+		// byte-preserving history channel.
+		eventFields := fields
+		if _, descriptionChanged := fields["description"]; descriptionChanged {
+			eventFields, err = containerContentSnapshot(tx, containerUUID, fields)
+			if err != nil {
+				return err
+			}
+		} else if _, specificationChanged := fields["specification"]; specificationChanged {
+			eventFields, err = containerContentSnapshot(tx, containerUUID, fields)
+			if err != nil {
+				return err
+			}
+		}
+		changesJSON, err := json.Marshal(eventFields)
 		if err != nil {
 			return fmt.Errorf("failed to marshal changes: %w", err)
 		}
@@ -280,6 +295,27 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 	})
 
 	return newETag, err
+}
+
+func containerContentSnapshot(tx *sql.Tx, containerUUID string, fields map[string]interface{}) (map[string]interface{}, error) {
+	var description string
+	var specification sql.NullString
+	if err := tx.QueryRow(
+		"SELECT description, specification FROM containers WHERE uuid = ?", containerUUID,
+	).Scan(&description, &specification); err != nil {
+		return nil, fmt.Errorf("failed to snapshot container content: %w", err)
+	}
+	snapshot := make(map[string]interface{}, len(fields)+2)
+	for key, value := range fields {
+		snapshot[key] = value
+	}
+	snapshot["description"] = description
+	if specification.Valid {
+		snapshot["specification"] = specification.String
+	} else {
+		snapshot["specification"] = nil
+	}
+	return snapshot, nil
 }
 
 // Move moves a container to a different parent and logs a container.moved event.

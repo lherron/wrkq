@@ -49,8 +49,33 @@ func validateEffectiveMembershipTx(tx *sql.Tx, v campaignValidation) error {
 	}
 
 	if v.containers {
-		var nested string
+		// Container mutations can change effective membership for every task in
+		// that container at once (most importantly plain -> campaign
+		// conversion). Re-run the exclusivity half of the validator over the
+		// resulting graph so conversion cannot strand resident tasks in a
+		// foreign campaign.
+		var taskUUID, residentUUID, enrolledUUID string
 		err := tx.QueryRow(`
+			SELECT t.uuid, t.project_uuid, t.campaign_uuid
+			  FROM tasks t
+			  JOIN containers resident ON resident.uuid = t.project_uuid
+			 WHERE resident.campaign_state IS NOT NULL
+			   AND t.campaign_uuid IS NOT NULL
+			   AND t.campaign_uuid != t.project_uuid
+			 LIMIT 1
+		`).Scan(&taskUUID, &residentUUID, &enrolledUUID)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to validate campaign conversion membership: %w", err)
+		}
+		if err == nil {
+			return fmt.Errorf(
+				"task %s resident in campaign %s cannot remain enrolled in foreign campaign %s; unenroll it before conversion",
+				taskUUID, residentUUID, enrolledUUID,
+			)
+		}
+
+		var nested string
+		err = tx.QueryRow(`
 			WITH RECURSIVE ancestors(campaign_uuid, ancestor_uuid) AS (
 				SELECT c.uuid, c.parent_uuid FROM containers c WHERE c.campaign_state IS NOT NULL
 				UNION ALL
