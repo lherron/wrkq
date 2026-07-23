@@ -1,0 +1,5 @@
+schemaVersion: praesidium.docs.collection.v1
+id: wrkq
+project: wrkq
+contentRoot: .
+defaultVisibility: internal
