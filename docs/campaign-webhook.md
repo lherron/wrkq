@@ -47,7 +47,27 @@ Structured subscriptions can select:
 - `"*"` / `"all"`, a bare URL, or an empty event list for all families.
 
 Task-class subscriptions never receive `container.*`. Campaign templates may
-use `{campaign_id}`, `{campaign_uuid}`, and `{campaign_path}`.
+use `{campaign_id}`, `{campaign_uuid}`, and `{campaign_path}`. Those template
+vars have no value on a task-shaped delivery and pass through literally
+(percent-encoded), so keep campaign-templated URLs on their own
+container-class subscription rather than mixing them into a catch-all one.
+
+Write them with `wrkq container set`, either as the stored JSON form or by
+pairing `--webhook-events` with the URL flags:
+
+```bash
+wrkq container set wave-a \
+  --webhook-urls '[{"url":"https://hooks.test/campaign/{campaign_id}","events":["container"]}]'
+
+wrkq container set wave-a \
+  --add-webhook-url https://hooks.test/tasks --webhook-events task
+```
+
+`--webhook-events` narrows every URL passed with `--webhook-url` /
+`--add-webhook-url` in the same invocation. Entries are keyed by URL: adding a
+URL that is already subscribed re-points its event narrowing instead of
+duplicating it, and `--remove-webhook-url` drops an entry whether it was stored
+bare or structured.
 
 ## Delivery contract
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/webhooksub"
 )
 
 const (
@@ -485,10 +486,10 @@ func LookupTaskInfoWith(database taskInfoQueryer, taskUUID string) (TaskInfo, er
 	return info, nil
 }
 
-type webhookSubscription struct {
-	URL    string
-	Events []string
-}
+// webhookSubscription is the dispatcher's view of a stored webhook_urls entry.
+// The wire grammar (bare string vs {"url":...,"events":[...]}) is owned by
+// internal/webhooksub so the CLI/write path parse it identically.
+type webhookSubscription = webhooksub.Subscription
 
 // ResolveWebhookTargets collects, templates, filters, normalizes, and de-dupes
 // webhook URLs for a task-shaped or container-native payload.
@@ -539,34 +540,12 @@ func collectWebhookSubscriptions(database *db.DB, containerUUID string) ([]webho
 	return collected, nil
 }
 
+// decodeWebhookSubscriptions parses one container's stored webhook_urls array.
+// A bare URL string (and an object with no events) carries NO explicit
+// narrowing, which subscriptionMatchesEvent treats as "receive every event
+// family"; subscribers narrow via the object form {"url":...,"events":[...]}.
 func decodeWebhookSubscriptions(jsonStr string) ([]webhookSubscription, error) {
-	var entries []json.RawMessage
-	if err := json.Unmarshal([]byte(jsonStr), &entries); err != nil {
-		return nil, err
-	}
-	out := make([]webhookSubscription, 0, len(entries))
-	for _, entry := range entries {
-		var urlOnly string
-		if err := json.Unmarshal(entry, &urlOnly); err == nil {
-			// A bare URL string with no explicit events defaults to ALL event
-			// families (task + workflow + container). Subscribers narrow via the object
-			// form {"url":...,"events":[...]}.
-			out = append(out, webhookSubscription{URL: urlOnly, Events: []string{"*"}})
-			continue
-		}
-		var structured struct {
-			URL    string   `json:"url"`
-			Events []string `json:"events"`
-		}
-		if err := json.Unmarshal(entry, &structured); err != nil {
-			return nil, err
-		}
-		if len(structured.Events) == 0 {
-			structured.Events = []string{"*"}
-		}
-		out = append(out, webhookSubscription{URL: structured.URL, Events: structured.Events})
-	}
-	return out, nil
+	return webhooksub.DecodeStrict(jsonStr)
 }
 
 func normalizeWebhookURLs(urls []webhookSubscription, payload webhookTargetPayload) []string {

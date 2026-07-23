@@ -577,3 +577,36 @@ func TestCampaignLifecycleCLICancelAndNudgeAreEventsNotComments(t *testing.T) {
 		}
 	})
 }
+
+// TestCampaignSelectorGrammarIsUniform pins the finding from T-06823: a BARE
+// campaign slug resolved for `campaign convert|close` (which scope the argument
+// to the project root) but not for `set --campaign`, which shipped the raw token
+// to the server and failed with "campaign not found". One selector grammar,
+// every command.
+func TestCampaignSelectorGrammarIsUniform(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+
+	if out, err := runCampaignCLI(
+		t, f.dbPath, "--project", "campaign-cli-a", "set", f.enrolledID, "--campaign", "wave-a",
+	); err != nil {
+		t.Fatalf("bare-slug --campaign failed: %v\n%s", err, out)
+	}
+	if got := campaignUUIDForTask(t, f.dbPath, f.enrolledUUID); !got.Valid || got.String != f.campaignAUUID {
+		t.Fatalf("bare-slug enrollment = %v, want %s", got, f.campaignAUUID)
+	}
+
+	// The qualified forms must keep resolving identically.
+	for _, selector := range []string{"campaign-cli-a/wave-a", f.campaignAUUID} {
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", ""); err != nil {
+			t.Fatalf("unenroll before %q failed: %v\n%s", selector, err, out)
+		}
+		if out, err := runCampaignCLI(
+			t, f.dbPath, "--project", "campaign-cli-a", "set", f.enrolledID, "--campaign", selector,
+		); err != nil {
+			t.Fatalf("--campaign %q failed: %v\n%s", selector, err, out)
+		}
+		if got := campaignUUIDForTask(t, f.dbPath, f.enrolledUUID); !got.Valid || got.String != f.campaignAUUID {
+			t.Fatalf("--campaign %q enrollment = %v, want %s", selector, got, f.campaignAUUID)
+		}
+	}
+}

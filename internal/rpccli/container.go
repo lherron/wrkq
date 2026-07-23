@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/webhooksub"
 	"github.com/spf13/cobra"
 )
 
@@ -20,24 +21,24 @@ import (
 // is load-bearing: legacy encodes the struct directly (struct order, not alpha), so
 // json/ndjson/porcelain must preserve it.
 type containerCatModel struct {
-	ID          string   `json:"id"`
-	UUID        string   `json:"uuid"`
-	Slug        string   `json:"slug"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Kind        string   `json:"kind"`
-	ParentID    *string  `json:"parent_id,omitempty"`
-	ParentUUID  *string  `json:"parent_uuid,omitempty"`
-	ParentPath  *string  `json:"parent_path,omitempty"`
-	Path        string   `json:"path"`
-	WebhookURLs []string `json:"webhook_urls,omitempty"`
-	SortIndex   int      `json:"sort_index"`
-	Etag        int64    `json:"etag"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
-	ArchivedAt  *string  `json:"archived_at,omitempty"`
-	CreatedBy   string   `json:"created_by"`
-	UpdatedBy   string   `json:"updated_by"`
+	ID          string                    `json:"id"`
+	UUID        string                    `json:"uuid"`
+	Slug        string                    `json:"slug"`
+	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	Kind        string                    `json:"kind"`
+	ParentID    *string                   `json:"parent_id,omitempty"`
+	ParentUUID  *string                   `json:"parent_uuid,omitempty"`
+	ParentPath  *string                   `json:"parent_path,omitempty"`
+	Path        string                    `json:"path"`
+	WebhookURLs []webhooksub.Subscription `json:"webhook_urls,omitempty"`
+	SortIndex   int                       `json:"sort_index"`
+	Etag        int64                     `json:"etag"`
+	CreatedAt   string                    `json:"created_at"`
+	UpdatedAt   string                    `json:"updated_at"`
+	ArchivedAt  *string                   `json:"archived_at,omitempty"`
+	CreatedBy   string                    `json:"created_by"`
+	UpdatedBy   string                    `json:"updated_by"`
 }
 
 // newContainerCmd mirrors `wrkq container`. `cat` is RPC-backed via the
@@ -74,6 +75,7 @@ func newContainerSetCmd() *cobra.Command {
 	var webhookURL []string
 	var addWebhookURL []string
 	var removeWebhookURL []string
+	var webhookEvents []string
 	var ifMatch int64
 	var all bool
 
@@ -82,10 +84,19 @@ func newContainerSetCmd() *cobra.Command {
 		Short: "Update container fields",
 		Long: `Update container configuration fields.
 
+A webhook subscription is either a bare URL (receives every event family) or a
+URL narrowed to one or more event classes: task, workflow, container — or an
+exact event name. --webhook-events narrows every URL passed with --webhook-url /
+--add-webhook-url in the same invocation; --webhook-urls takes the stored JSON
+form directly and may mix bare and narrowed entries.
+
 Examples:
   wrkq container set inbox --webhook-urls '["http://localhost/hook/{ticket_id}"]'
+  wrkq container set inbox --webhook-urls '[{"url":"http://localhost/hook","events":["container"]}]'
   wrkq container set P-00001 --webhook-url http://localhost/hook/{ticket_id}
+  wrkq container set inbox --webhook-url http://localhost/hook --webhook-events container
   wrkq container set inbox --add-webhook-url http://localhost/hook2
+  wrkq container set inbox --add-webhook-url http://localhost/hook2 --webhook-events task,workflow
   wrkq container set inbox --remove-webhook-url http://localhost/old-hook
   wrkq container set --all --remove-webhook-url http://localhost/old-hook
 `,
@@ -96,15 +107,17 @@ Examples:
 				webhookURL:       webhookURL,
 				addWebhookURL:    addWebhookURL,
 				removeWebhookURL: removeWebhookURL,
+				webhookEvents:    webhookEvents,
 				ifMatch:          ifMatch,
 				all:              all,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&webhookURLsJSON, "webhook-urls", "", "Webhook URLs JSON array")
+	cmd.Flags().StringVar(&webhookURLsJSON, "webhook-urls", "", `Webhook subscriptions JSON array; entries are "url" or {"url":...,"events":[...]}`)
 	cmd.Flags().StringArrayVar(&webhookURL, "webhook-url", nil, "Webhook URL (repeatable)")
 	cmd.Flags().StringArrayVar(&addWebhookURL, "add-webhook-url", nil, "Add webhook URL to existing list (repeatable)")
-	cmd.Flags().StringArrayVar(&removeWebhookURL, "remove-webhook-url", nil, "Remove webhook URL from existing list (repeatable)")
+	cmd.Flags().StringArrayVar(&removeWebhookURL, "remove-webhook-url", nil, "Remove webhook URL from existing list, matched by URL (repeatable)")
+	cmd.Flags().StringSliceVar(&webhookEvents, "webhook-events", nil, "Narrow --webhook-url/--add-webhook-url to these event classes (task, workflow, container) or exact event names")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Conditional update (etag)")
 	cmd.Flags().BoolVar(&all, "all", false, "Apply to all containers")
 	return cmd
@@ -115,12 +128,21 @@ type containerSetOptions struct {
 	webhookURL       []string
 	addWebhookURL    []string
 	removeWebhookURL []string
+	webhookEvents    []string
 	ifMatch          int64
 	all              bool
 }
 
 func runContainerSet(cmd *cobra.Command, args []string, opts containerSetOptions) error {
 	hasAddRemove := len(opts.addWebhookURL) > 0 || len(opts.removeWebhookURL) > 0
+
+	events, err := normalizeWebhookEvents(opts.webhookEvents)
+	if err != nil {
+		return err
+	}
+	if len(events) > 0 && len(opts.webhookURL) == 0 && len(opts.addWebhookURL) == 0 {
+		return fmt.Errorf("--webhook-events requires --webhook-url or --add-webhook-url")
+	}
 
 	if opts.all {
 		if !hasAddRemove {
@@ -129,14 +151,13 @@ func runContainerSet(cmd *cobra.Command, args []string, opts containerSetOptions
 		if len(args) > 0 {
 			return fmt.Errorf("--all cannot be used with a container argument")
 		}
-		for _, u := range opts.addWebhookURL {
-			if !isValidContainerWebhookURL(strings.TrimSpace(u)) {
-				return fmt.Errorf("invalid webhook url: %s", u)
-			}
+		adds, err := containerWebhookSubscriptions(opts.addWebhookURL, events)
+		if err != nil {
+			return err
 		}
 		return runContainerSetRPC(cmd, map[string]any{
 			"all":               true,
-			"addWebhookUrls":    opts.addWebhookURL,
+			"addWebhookUrls":    adds,
 			"removeWebhookUrls": opts.removeWebhookURL,
 		}, true)
 	}
@@ -150,15 +171,14 @@ func runContainerSet(cmd *cobra.Command, args []string, opts containerSetOptions
 	}
 	replace := false
 	if hasAddRemove {
-		for _, u := range opts.addWebhookURL {
-			if !isValidContainerWebhookURL(strings.TrimSpace(u)) {
-				return fmt.Errorf("invalid webhook url: %s", u)
-			}
+		adds, err := containerWebhookSubscriptions(opts.addWebhookURL, events)
+		if err != nil {
+			return err
 		}
-		params["addWebhookUrls"] = opts.addWebhookURL
+		params["addWebhookUrls"] = adds
 		params["removeWebhookUrls"] = opts.removeWebhookURL
 	} else {
-		urls, hasWebhookURLs, err := collectContainerWebhookURLs(cmd, opts.webhookURLsJSON, opts.webhookURL)
+		urls, hasWebhookURLs, err := collectContainerWebhookURLs(cmd, opts.webhookURLsJSON, opts.webhookURL, events)
 		if err != nil {
 			return err
 		}
@@ -212,37 +232,87 @@ func runContainerSetRPC(cmd *cobra.Command, params map[string]any, all bool) err
 	return renderContainerSetResult(cmd, raw, all)
 }
 
-func collectContainerWebhookURLs(cmd *cobra.Command, webhookURLsJSON string, webhookURL []string) ([]string, bool, error) {
-	var urls []string
+// collectContainerWebhookURLs builds the REPLACEMENT subscription list from
+// --webhook-urls (the stored JSON form, mixing bare strings and
+// {"url":...,"events":[...]} objects) and --webhook-url (bare URLs, narrowed by
+// --webhook-events when given). Validation mirrors the server so a bad list is
+// rejected before the RPC.
+func collectContainerWebhookURLs(
+	cmd *cobra.Command,
+	webhookURLsJSON string,
+	webhookURL []string,
+	events []string,
+) ([]webhooksub.Subscription, bool, error) {
+	var subs []webhooksub.Subscription
 	hasWebhookURLs := false
 
 	if cmd.Flags().Changed("webhook-urls") {
 		hasWebhookURLs = true
-		if err := json.Unmarshal([]byte(webhookURLsJSON), &urls); err != nil {
+		parsed, err := webhooksub.DecodeStrict(webhookURLsJSON)
+		if err != nil {
 			return nil, false, fmt.Errorf("invalid webhook urls JSON: %w", err)
 		}
+		subs = parsed
 	}
 
 	if len(webhookURL) > 0 {
 		hasWebhookURLs = true
-		urls = append(urls, webhookURL...)
+		fromFlags, err := containerWebhookSubscriptions(webhookURL, events)
+		if err != nil {
+			return nil, false, err
+		}
+		subs = append(subs, fromFlags...)
 	}
 
-	for i, raw := range urls {
-		trimmed := strings.TrimSpace(raw)
+	for i, sub := range subs {
+		trimmed := strings.TrimSpace(sub.URL)
 		if trimmed == "" {
 			return nil, false, fmt.Errorf("webhook url cannot be empty")
 		}
 		if !isValidContainerWebhookURL(trimmed) {
 			return nil, false, fmt.Errorf("invalid webhook url: %s", trimmed)
 		}
-		urls[i] = trimmed
+		normalized, err := normalizeWebhookEvents(sub.Events)
+		if err != nil {
+			return nil, false, err
+		}
+		subs[i] = webhooksub.Subscription{URL: trimmed, Events: normalized}
 	}
 
-	if hasWebhookURLs && urls == nil {
-		urls = []string{}
+	if hasWebhookURLs && subs == nil {
+		subs = []webhooksub.Subscription{}
 	}
-	return urls, hasWebhookURLs, nil
+	return subs, hasWebhookURLs, nil
+}
+
+// containerWebhookSubscriptions pairs each bare URL flag value with the shared
+// --webhook-events narrowing.
+func containerWebhookSubscriptions(urls []string, events []string) ([]webhooksub.Subscription, error) {
+	subs := make([]webhooksub.Subscription, 0, len(urls))
+	for _, raw := range urls {
+		trimmed := strings.TrimSpace(raw)
+		if !isValidContainerWebhookURL(trimmed) {
+			return nil, fmt.Errorf("invalid webhook url: %s", raw)
+		}
+		subs = append(subs, webhooksub.Subscription{URL: trimmed, Events: events})
+	}
+	return subs, nil
+}
+
+// normalizeWebhookEvents trims event names and rejects empty ones. Unknown names
+// are NOT rejected: the dispatcher matches class names (task/workflow/container,
+// plus */all) and exact event names alike, so narrowing the vocabulary here
+// would make legal subscriptions unwritable.
+func normalizeWebhookEvents(events []string) ([]string, error) {
+	var out []string
+	for _, ev := range events {
+		trimmed := strings.TrimSpace(ev)
+		if trimmed == "" {
+			return nil, fmt.Errorf("webhook event cannot be empty")
+		}
+		out = append(out, trimmed)
+	}
+	return out, nil
 }
 
 func renderContainerSetResult(cmd *cobra.Command, raw json.RawMessage, all bool) error {

@@ -868,8 +868,15 @@
               },
               {
                 "name": "remove-webhook-url",
-                "usage": "Remove webhook URL from existing list (repeatable)",
+                "usage": "Remove webhook URL from existing list, matched by URL (repeatable)",
                 "type": "stringArray",
+                "default": "[]",
+                "hidden": false
+              },
+              {
+                "name": "webhook-events",
+                "usage": "Narrow --webhook-url/--add-webhook-url to these event classes (task, workflow, container) or exact event names",
+                "type": "stringSlice",
                 "default": "[]",
                 "hidden": false
               },
@@ -882,7 +889,7 @@
               },
               {
                 "name": "webhook-urls",
-                "usage": "Webhook URLs JSON array",
+                "usage": "Webhook subscriptions JSON array; entries are \"url\" or {\"url\":...,\"events\":[...]}",
                 "type": "string",
                 "hidden": false
               }

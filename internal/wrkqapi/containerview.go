@@ -3,10 +3,10 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/webhooksub"
 )
 
 // ContainerCatViewParams selects the container to project.
@@ -21,24 +21,24 @@ type ContainerCatViewParams struct {
 // sort_index, webhook_urls, and created_by/updated_by actor slugs — none of
 // which are on the canonical WrkqContainer DTO. Not a domain resource.
 type WrkqContainerCatView struct {
-	ID          string   `json:"id"`
-	UUID        string   `json:"uuid"`
-	Slug        string   `json:"slug"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Kind        string   `json:"kind"`
-	ParentID    *string  `json:"parent_id,omitempty"`
-	ParentUUID  *string  `json:"parent_uuid,omitempty"`
-	ParentPath  *string  `json:"parent_path,omitempty"`
-	Path        string   `json:"path"`
-	WebhookURLs []string `json:"webhook_urls,omitempty"`
-	SortIndex   int      `json:"sort_index"`
-	Etag        int64    `json:"etag"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
-	ArchivedAt  *string  `json:"archived_at,omitempty"`
-	CreatedBy   string   `json:"created_by"`
-	UpdatedBy   string   `json:"updated_by"`
+	ID          string                    `json:"id"`
+	UUID        string                    `json:"uuid"`
+	Slug        string                    `json:"slug"`
+	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	Kind        string                    `json:"kind"`
+	ParentID    *string                   `json:"parent_id,omitempty"`
+	ParentUUID  *string                   `json:"parent_uuid,omitempty"`
+	ParentPath  *string                   `json:"parent_path,omitempty"`
+	Path        string                    `json:"path"`
+	WebhookURLs []webhooksub.Subscription `json:"webhook_urls,omitempty"`
+	SortIndex   int                       `json:"sort_index"`
+	Etag        int64                     `json:"etag"`
+	CreatedAt   string                    `json:"created_at"`
+	UpdatedAt   string                    `json:"updated_at"`
+	ArchivedAt  *string                   `json:"archived_at,omitempty"`
+	CreatedBy   string                    `json:"created_by"`
+	UpdatedBy   string                    `json:"updated_by"`
 }
 
 // ContainerCatView assembles the legacy container-cat projection for one
@@ -116,12 +116,9 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 		}
 	}
 
-	var webhookURLs []string
-	if webhookRaw != nil && *webhookRaw != "" {
-		if json.Unmarshal([]byte(*webhookRaw), &webhookURLs) != nil {
-			webhookURLs = nil
-		}
-	}
+	// Bare-string entries round-trip as strings; structured
+	// {"url":...,"events":[...]} entries round-trip as objects (T-06823).
+	webhookURLs := webhooksub.Decode(webhookRaw)
 
 	if err := tx.Commit(); err != nil {
 		return nil, NewInternalError(err)

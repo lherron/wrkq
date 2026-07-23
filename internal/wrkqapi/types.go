@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/webhooksub"
 	"github.com/lherron/wrkq/internal/workflow"
 )
 
@@ -763,15 +764,19 @@ type ContainerMoveParams struct {
 // ContainerWebhookSetParams mirrors the legacy `container set` webhook-url
 // compatibility surface. It is separate from ContainerUpdateParams so
 // wrkq.container.update stays the deliberately narrow slug/title patch method.
+// Subscription entries accept BOTH wire forms — a bare URL string (receive every
+// event family) and {"url":...,"events":[...]} (narrowed to those classes) — so
+// pre-existing string-array callers keep working unchanged. Removal matches by
+// URL, which drops a structured entry as readily as a bare one.
 type ContainerWebhookSetParams struct {
-	Container         string   `json:"container,omitempty"`
-	All               bool     `json:"all,omitempty"`
-	Replace           bool     `json:"replace,omitempty"`
-	WebhookURLs       []string `json:"webhookUrls,omitempty"`
-	AddWebhookURLs    []string `json:"addWebhookUrls,omitempty"`
-	RemoveWebhookURLs []string `json:"removeWebhookUrls,omitempty"`
-	ExpectETag        int64    `json:"expectEtag,omitempty"`
-	Actor             string   `json:"actor,omitempty"`
+	Container         string                    `json:"container,omitempty"`
+	All               bool                      `json:"all,omitempty"`
+	Replace           bool                      `json:"replace,omitempty"`
+	WebhookURLs       []webhooksub.Subscription `json:"webhookUrls,omitempty"`
+	AddWebhookURLs    []webhooksub.Subscription `json:"addWebhookUrls,omitempty"`
+	RemoveWebhookURLs []string                  `json:"removeWebhookUrls,omitempty"`
+	ExpectETag        int64                     `json:"expectEtag,omitempty"`
+	Actor             string                    `json:"actor,omitempty"`
 }
 
 // ContainerArchiveParams mirrors WrkqContainerArchiveParams.

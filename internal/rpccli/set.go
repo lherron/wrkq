@@ -384,6 +384,20 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 		scopedArgs = append(scopedArgs, sc.selector(ref, false))
 	}
 
+	// --campaign takes a CONTAINER selector, so it gets the same project-root
+	// scoping as task refs and --parent-task. Without this a bare campaign slug
+	// resolved for `campaign convert|close` (which scope it) but not here
+	// (T-06823). Container IDs, UUIDs, and already-rooted paths pass through.
+	if raw, ok := opts.patch["campaign"].(string); ok {
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			scoped := sc.selector(trimmed, false)
+			opts.patch["campaign"] = scoped
+			if _, present := opts.dryFields["campaign"]; present {
+				opts.dryFields["campaign"] = scoped
+			}
+		}
+	}
+
 	if opts.parentChanged {
 		parentRef := strings.TrimSpace(opts.parentValue)
 		if parentRef == "" {

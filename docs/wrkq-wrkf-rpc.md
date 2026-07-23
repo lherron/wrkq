@@ -1345,13 +1345,20 @@ interface WrkqContainerMoveParams {
 }
 // returns the source WrkqContainer after validation/mutation
 
+// A subscription entry is EITHER a bare URL string (every event family) or
+// { url, events } narrowed to event classes ("task" | "workflow" | "container",
+// "*" / "all") or exact event names. Both forms coexist in one list; a list
+// written as bare strings is stored and returned as bare strings.
+type WrkqWebhookSubscription = string | { url: string; events?: string[] };
+
 interface WrkqContainerWebhookSetParams {
   container?: string;       // required unless all=true; path / friendly-id / uuid selector
   all?: boolean;            // apply add/remove delta to all non-archived containers
   replace?: boolean;        // true => webhookUrls replaces the stored list
-  webhookUrls?: string[];   // replacement list; trimmed + http(s)-with-host validated
-  addWebhookUrls?: string[];    // delta add list; trimmed + validated
-  removeWebhookUrls?: string[]; // delta remove list; exact-match removal, no URL validation
+  webhookUrls?: WrkqWebhookSubscription[];    // replacement list; trimmed + http(s)-with-host validated
+  addWebhookUrls?: WrkqWebhookSubscription[]; // delta add list; keyed by URL — re-adding a
+                                              // known URL re-points its events, never duplicates
+  removeWebhookUrls?: string[]; // delta remove list; removal matches by URL (bare or structured)
   expectEtag?: number;      // optional single-container etag CAS; stale → WRKQ_CONFLICT
   actor?: string;
 }
@@ -1457,8 +1464,13 @@ slug/title patch + CAS + event are server-owned. The method is **non-destructive
 `wrkq.container.webhookSet` is the dedicated compatibility mutation for
 `wrkq container set`, not an extension of `wrkq.container.update`. It updates only
 `webhook_urls` on one resolved container or applies an add/remove delta to all
-non-archived containers. Replacement and added URLs are validated as http/https
-URLs with a host; removals are exact string matches and are not URL-validated,
+non-archived containers. Each entry is a bare URL string or a
+`{ url, events }` object narrowed to event classes (`task` | `workflow` |
+`container`, `*` / `all`) or exact event names — the same grammar the dispatcher
+reads, so class-isolated subscriptions are writable from every client. Event
+names are trimmed and required to be non-empty but are otherwise not validated
+against a vocabulary. Replacement and added URLs are validated as http/https URLs
+with a host; removals match by URL (bare or structured) and are not URL-validated,
 matching legacy. The server records attribution and emits the normal
 `container.updated` event through the store update path. The CLI mirror owns
 legacy flag precedence, project-root scoping for the single-container selector,
@@ -1526,6 +1538,9 @@ interface WrkqWebhookMutateParams {
 // map, NOT a struct — this OVERRIDES the struct-field-order convention):
 //   changed:   { changed: true,  count, target, webhook_urls }
 //   no-change: { changed: false, webhook_urls }
+// The global family is URL-only, but it PRESERVES any structured entry written on
+// the root by `container set`: webhook_urls may therefore contain { url, events }
+// objects, and add/remove key on the URL.
 
 interface WrkqWebhookListViewParams {}   // empty
 interface WebhookRow { url: string }      // legacy {url:<value>} row

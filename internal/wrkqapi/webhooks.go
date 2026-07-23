@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/webhooksub"
 )
 
 // Global webhook subscriptions live on the SINGLETON ROOT container (kind='root')
@@ -70,7 +71,7 @@ func (a *API) WebhookAdd(ctx context.Context, p WebhookMutateParams) (json.RawMe
 	if !isValidWebhookURL(url) {
 		return nil, NewValidationError("invalid webhook url: "+url, map[string]any{"field": "url"})
 	}
-	return a.mutateRootWebhooks([]string{url}, nil, p.ExpectETag, p.Actor)
+	return a.mutateRootWebhooks([]webhooksub.Subscription{{URL: url}}, nil, p.ExpectETag, p.Actor)
 }
 
 // WebhookRemove removes a global webhook URL from the root container (idempotent:
@@ -105,10 +106,9 @@ func (a *API) ContainerWebhookSet(ctx context.Context, p ContainerWebhookSetPara
 		if strings.TrimSpace(p.Container) != "" {
 			return nil, NewValidationError("--all cannot be used with a container argument", map[string]any{"field": "container"})
 		}
-		for _, u := range p.AddWebhookURLs {
-			if !isValidWebhookURL(strings.TrimSpace(u)) {
-				return nil, NewValidationError("invalid webhook url: "+u, map[string]any{"field": "addWebhookUrls"})
-			}
+		adds, verr := normalizeWebhookSubscriptions(p.AddWebhookURLs, "addWebhookUrls")
+		if verr != nil {
+			return nil, verr
 		}
 		containers, err := a.store.Containers.ListAll(false)
 		if err != nil {
@@ -116,15 +116,15 @@ func (a *API) ContainerWebhookSet(ctx context.Context, p ContainerWebhookSetPara
 		}
 		updated := 0
 		for _, c := range containers {
-			newURLs, changed := applyWebhookDelta(c.WebhookURLs, p.AddWebhookURLs, p.RemoveWebhookURLs)
+			newURLs, changed := applyWebhookDelta(c.WebhookURLs, adds, p.RemoveWebhookURLs)
 			if !changed {
 				continue
 			}
-			payload, err := json.Marshal(newURLs)
+			payload, err := webhooksub.Encode(newURLs)
 			if err != nil {
 				return nil, NewInternalError(errors.New("failed to encode webhook urls: " + err.Error()))
 			}
-			fields := map[string]interface{}{"webhook_urls": string(payload)}
+			fields := map[string]interface{}{"webhook_urls": payload}
 			if _, err := a.store.Containers.UpdateFieldsWithAttribution(attr, c.UUID, fields, 0); err != nil {
 				return nil, NewInternalError(errors.New("failed to update container " + c.ID + ": " + err.Error()))
 			}
@@ -145,33 +145,35 @@ func (a *API) ContainerWebhookSet(ctx context.Context, p ContainerWebhookSetPara
 		}{Ref: selector, Kind: "container"}, err)
 	}
 
-	var webhookURLs []string
+	var webhookURLs []webhooksub.Subscription
 	if p.Replace {
-		webhookURLs, err = normalizeWebhookURLs(p.WebhookURLs)
+		webhookURLs, err = normalizeWebhookSubscriptions(p.WebhookURLs, "webhookUrls")
 		if err != nil {
 			return nil, err
+		}
+		if webhookURLs == nil {
+			webhookURLs = []webhooksub.Subscription{}
 		}
 	} else {
 		if len(p.AddWebhookURLs) == 0 && len(p.RemoveWebhookURLs) == 0 {
 			return nil, NewValidationError("no updates specified", map[string]any{"field": "webhookUrls"})
 		}
-		for _, u := range p.AddWebhookURLs {
-			if !isValidWebhookURL(strings.TrimSpace(u)) {
-				return nil, NewValidationError("invalid webhook url: "+u, map[string]any{"field": "addWebhookUrls"})
-			}
+		adds, verr := normalizeWebhookSubscriptions(p.AddWebhookURLs, "addWebhookUrls")
+		if verr != nil {
+			return nil, verr
 		}
 		container, err := a.store.Containers.GetByUUID(containerUUID)
 		if err != nil {
 			return nil, NewInternalError(err)
 		}
-		webhookURLs, _ = applyWebhookDelta(container.WebhookURLs, p.AddWebhookURLs, p.RemoveWebhookURLs)
+		webhookURLs, _ = applyWebhookDelta(container.WebhookURLs, adds, p.RemoveWebhookURLs)
 	}
 
-	payload, err := json.Marshal(webhookURLs)
+	payload, err := webhooksub.Encode(webhookURLs)
 	if err != nil {
 		return nil, NewInternalError(errors.New("failed to encode webhook urls: " + err.Error()))
 	}
-	fields := map[string]interface{}{"webhook_urls": string(payload)}
+	fields := map[string]interface{}{"webhook_urls": payload}
 	if _, err := a.store.Containers.UpdateFieldsWithAttribution(attr, containerUUID, fields, p.ExpectETag); err != nil {
 		return nil, mapWebhookStoreError(err)
 	}
@@ -185,22 +187,35 @@ func (a *API) ContainerWebhookSet(ctx context.Context, p ContainerWebhookSetPara
 	})
 }
 
-func normalizeWebhookURLs(raw []string) ([]string, error) {
-	urls := append([]string{}, raw...)
-	for i, u := range urls {
-		trimmed := strings.TrimSpace(u)
+// normalizeWebhookSubscriptions trims and validates every entry of a
+// subscription list. The URL keeps the legacy http(s)-with-host rule; event
+// names are only trimmed and required to be non-empty, matching the
+// dispatcher's permissive matcher (class names like "container"/"task" AND
+// exact event names both resolve there, so this layer must not narrow them).
+func normalizeWebhookSubscriptions(raw []webhooksub.Subscription, field string) ([]webhooksub.Subscription, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	subs := make([]webhooksub.Subscription, 0, len(raw))
+	for _, sub := range raw {
+		trimmed := strings.TrimSpace(sub.URL)
 		if trimmed == "" {
-			return nil, NewValidationError("webhook url cannot be empty", map[string]any{"field": "webhookUrls"})
+			return nil, NewValidationError("webhook url cannot be empty", map[string]any{"field": field})
 		}
 		if !isValidWebhookURL(trimmed) {
-			return nil, NewValidationError("invalid webhook url: "+trimmed, map[string]any{"field": "webhookUrls"})
+			return nil, NewValidationError("invalid webhook url: "+trimmed, map[string]any{"field": field})
 		}
-		urls[i] = trimmed
+		var events []string
+		for _, ev := range sub.Events {
+			e := strings.TrimSpace(ev)
+			if e == "" {
+				return nil, NewValidationError("webhook event cannot be empty", map[string]any{"field": field})
+			}
+			events = append(events, e)
+		}
+		subs = append(subs, webhooksub.Subscription{URL: trimmed, Events: events})
 	}
-	if urls == nil {
-		urls = []string{}
-	}
-	return urls, nil
+	return subs, nil
 }
 
 // mutateRootWebhooks resolves the root container, applies the idempotent add/remove
@@ -208,7 +223,12 @@ func normalizeWebhookURLs(raw []string) ([]string, error) {
 // legacy MUTATION RESULT in MAP-ALPHABETICAL key order (built from a map so
 // encoding/json sorts the keys): changed = {changed,count,target,webhook_urls};
 // no-change = {changed,webhook_urls}.
-func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor string) (json.RawMessage, error) {
+func (a *API) mutateRootWebhooks(
+	add []webhooksub.Subscription,
+	remove []string,
+	expectEtag int64,
+	actor string,
+) (json.RawMessage, error) {
 	// Validate the explicit actor BEFORE returning any mutation-family response —
 	// including the idempotent no-change branch — so a malformed explicit actor
 	// never yields a successful no-op. attributionFor rejects invalid non-empty
@@ -235,16 +255,16 @@ func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor s
 		})
 	}
 
-	payload, merr := json.Marshal(newURLs)
+	payload, merr := webhooksub.Encode(newURLs)
 	if merr != nil {
 		return nil, NewInternalError(merr)
 	}
-	fields := map[string]interface{}{"webhook_urls": string(payload)}
+	fields := map[string]interface{}{"webhook_urls": payload}
 	if _, uerr := a.store.Containers.UpdateFieldsWithAttribution(attr, rootUUID, fields, expectEtag); uerr != nil {
 		return nil, mapWebhookStoreError(uerr)
 	}
 
-	target := strings.Join(append(append([]string{}, add...), remove...), ", ")
+	target := strings.Join(append(webhooksub.URLs(add), remove...), ", ")
 	return marshalAlpha(map[string]any{
 		"changed":      true,
 		"target":       target,
@@ -253,7 +273,10 @@ func (a *API) mutateRootWebhooks(add, remove []string, expectEtag int64, actor s
 	})
 }
 
-// rootWebhookURLs reads the decoded webhook_urls slice off the root container.
+// rootWebhookURLs reads the URLs of the root container's subscriptions. The
+// global webhook family is URL-only by design, so a structured entry written
+// through `container set` on the root surfaces here as its bare URL (and is
+// preserved verbatim by add/remove, which key on URL).
 func (a *API) rootWebhookURLs() ([]string, error) {
 	rootUUID, err := store.RootContainerUUID(a.db)
 	if err != nil {
@@ -263,7 +286,7 @@ func (a *API) rootWebhookURLs() ([]string, error) {
 	if err != nil {
 		return nil, NewInternalError(err)
 	}
-	return decodeWebhookURLs(container.WebhookURLs), nil
+	return webhooksub.URLs(webhooksub.Decode(container.WebhookURLs)), nil
 }
 
 // marshalAlpha marshals m into JSON. encoding/json emits map keys in sorted
@@ -294,63 +317,38 @@ func mapWebhookStoreError(err error) error {
 // returning the new list and whether it changed. Mirrors the legacy
 // internal/cli applyWebhookDelta byte-for-byte (idempotent dedupe on add, exact
 // match on remove, order preserved).
-func applyWebhookDelta(existing *string, add, remove []string) ([]string, bool) {
-	var urls []string
-	if existing != nil && *existing != "" {
-		_ = json.Unmarshal([]byte(*existing), &urls)
-	}
+func applyWebhookDelta(existing *string, add []webhooksub.Subscription, remove []string) ([]webhooksub.Subscription, bool) {
+	subs := webhooksub.Decode(existing)
 
 	removeSet := make(map[string]bool, len(remove))
 	for _, u := range remove {
 		removeSet[strings.TrimSpace(u)] = true
 	}
 
-	filtered := urls[:0]
-	for _, u := range urls {
-		if !removeSet[u] {
-			filtered = append(filtered, u)
+	filtered := make([]webhooksub.Subscription, 0, len(subs)+len(add))
+	index := make(map[string]int, len(subs))
+	for _, sub := range subs {
+		if removeSet[sub.URL] {
+			continue
 		}
+		index[sub.URL] = len(filtered)
+		filtered = append(filtered, sub)
 	}
 
-	existingSet := make(map[string]bool, len(filtered))
-	for _, u := range filtered {
-		existingSet[u] = true
-	}
-	for _, u := range add {
-		trimmed := strings.TrimSpace(u)
-		if !existingSet[trimmed] {
-			filtered = append(filtered, trimmed)
-			existingSet[trimmed] = true
+	for _, sub := range add {
+		trimmed := strings.TrimSpace(sub.URL)
+		if at, ok := index[trimmed]; ok {
+			// Re-adding a known URL is still idempotent, but it RE-POINTS that
+			// URL's event narrowing so `--add-webhook-url X --webhook-events …`
+			// can retarget an existing subscription instead of duplicating it.
+			filtered[at].Events = sub.Events
+			continue
 		}
+		index[trimmed] = len(filtered)
+		filtered = append(filtered, webhooksub.Subscription{URL: trimmed, Events: sub.Events})
 	}
 
-	changed := len(filtered) != len(urls)
-	if !changed {
-		for i := range filtered {
-			if filtered[i] != urls[i] {
-				changed = true
-				break
-			}
-		}
-	}
-
-	if filtered == nil {
-		filtered = []string{}
-	}
-	return filtered, changed
-}
-
-// decodeWebhookURLs decodes the stored webhook_urls JSON string into a slice,
-// returning nil for empty/absent/malformed values (legacy behavior).
-func decodeWebhookURLs(raw *string) []string {
-	if raw == nil || strings.TrimSpace(*raw) == "" {
-		return nil
-	}
-	var urls []string
-	if err := json.Unmarshal([]byte(*raw), &urls); err != nil {
-		return nil
-	}
-	return urls
+	return filtered, !webhooksub.Equal(filtered, subs)
 }
 
 // isValidWebhookURL accepts only http/https URLs with a host (legacy parity).
