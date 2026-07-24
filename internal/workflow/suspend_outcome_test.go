@@ -98,6 +98,72 @@ func TestSuspensionPolicyRejectsDeadDeclaration(t *testing.T) {
 	requireTemplateValidationError(t, bad, "suspension is declared but no outcome uses suspend")
 }
 
+func TestSuspensionPolicyReasonDeclarationValidation(t *testing.T) {
+	tests := []struct {
+		name         string
+		document     string
+		wantErrors   []string
+		wantErrorLen int
+	}{
+		{
+			name:         "used declaration",
+			document:     suspendOutcomeTemplate,
+			wantErrorLen: 0,
+		},
+		{
+			name:     "unused declaration",
+			document: strings.Replace(suspendOutcomeTemplate, `["operator_required"]`, `["operator_required", "never_used"]`, 1),
+			wantErrors: []string{
+				`suspension reason "never_used" is declared but not referenced by any outcome`,
+			},
+			wantErrorLen: 1,
+		},
+		{
+			name:     "duplicate declaration",
+			document: strings.Replace(suspendOutcomeTemplate, `["operator_required"]`, `["operator_required", "operator_required"]`, 1),
+			wantErrors: []string{
+				`duplicate suspension reason "operator_required"`,
+			},
+			wantErrorLen: 1,
+		},
+		{
+			name:     "empty declaration",
+			document: strings.Replace(suspendOutcomeTemplate, `["operator_required"]`, `["operator_required", " "]`, 1),
+			wantErrors: []string{
+				`suspension.reasons[1] must not be empty`,
+			},
+			wantErrorLen: 1,
+		},
+		{
+			name:     "referenced but undeclared",
+			document: strings.Replace(suspendOutcomeTemplate, `"reason": "operator_required"`, `"reason": "unlisted_reason"`, 1),
+			wantErrors: []string{
+				`transition park outcome needs_operator suspend reason "unlisted_reason" is not declared in suspension.reasons`,
+				`suspension reason "operator_required" is declared but not referenced by any outcome`,
+			},
+			wantErrorLen: 2,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tpl, canonical, err := ParseTemplate([]byte(tc.document))
+			if err != nil {
+				t.Fatalf("ParseTemplate: %v", err)
+			}
+			errs := ValidateTemplate(tpl, canonical, nil)
+			if len(errs) != tc.wantErrorLen {
+				t.Fatalf("validation errors = %v, want %d", errs, tc.wantErrorLen)
+			}
+			for i, want := range tc.wantErrors {
+				if errs[i] != want {
+					t.Fatalf("validation errors[%d] = %q, want %q; all errors: %v", i, errs[i], want, errs)
+				}
+			}
+		})
+	}
+}
+
 func TestSuspensionPolicyRejectsUnknownDisposition(t *testing.T) {
 	bad := strings.Replace(suspendOutcomeTemplate,
 		`"resume": [{ "kind": "resume_notice", "role": "coordinator" }]`,

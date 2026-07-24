@@ -207,6 +207,7 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 	}
 	transitions := map[string]bool{}
 	suspendOutcomeCount := 0
+	suspendReasonUsage := map[string]int{}
 	for _, tr := range tpl.Transitions {
 		if tr.ID == "" {
 			errs = append(errs, "transition id is required")
@@ -305,6 +306,7 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			}
 			if hasSuspend {
 				suspendOutcomeCount++
+				suspendReasonUsage[strings.TrimSpace(out.Suspend.Reason)]++
 				if tr.From.Status == "closed" {
 					errs = append(errs, fmt.Sprintf("transition %s outcome %s cannot suspend from a closed state", tr.ID, out.ID))
 				}
@@ -324,12 +326,12 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			}
 		}
 	}
-	errs = append(errs, validateSuspensionPolicy(tpl.Suspension, suspendOutcomeCount)...)
+	errs = append(errs, validateSuspensionPolicy(tpl.Suspension, suspendOutcomeCount, suspendReasonUsage)...)
 	errs = append(errs, validateExecutableActions(tpl, stateSet, transitions)...)
 	return errs
 }
 
-func validateSuspensionPolicy(spec *SuspensionPolicySpec, suspendOutcomeCount int) []string {
+func validateSuspensionPolicy(spec *SuspensionPolicySpec, suspendOutcomeCount int, reasonUsage map[string]int) []string {
 	if spec == nil {
 		return nil
 	}
@@ -346,8 +348,12 @@ func validateSuspensionPolicy(spec *SuspensionPolicySpec, suspendOutcomeCount in
 		}
 		if seen[reason] {
 			errs = append(errs, fmt.Sprintf("duplicate suspension reason %q", reason))
+			continue
 		}
 		seen[reason] = true
+		if reasonUsage[reason] == 0 {
+			errs = append(errs, fmt.Sprintf("suspension reason %q is declared but not referenced by any outcome", reason))
+		}
 	}
 	if suspendOutcomeCount > 0 && len(seen) == 0 {
 		errs = append(errs, "suspension.reasons must not be empty when an outcome uses suspend")
