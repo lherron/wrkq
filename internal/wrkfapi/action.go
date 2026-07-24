@@ -19,6 +19,13 @@ type ActionNextResult = workflow.ActionNextResult
 type ActionClaimParams = workflow.ClaimActionParams
 type ActionClaimResult = workflow.ClaimActionResult
 type ActionClaimPredecessor = workflow.ActionClaimPredecessor
+
+// DefaultActionWorkflowRef projects the workflow producer's default into
+// transport adapters without duplicating ownership of the selected version.
+func DefaultActionWorkflowRef() string {
+	return workflow.DefaultActionWorkflowTemplateRef
+}
+
 type ActionEvidenceParams struct {
 	Kind           string          `json:"kind,omitempty"`
 	Ref            string          `json:"ref,omitempty"`

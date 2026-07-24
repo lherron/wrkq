@@ -332,10 +332,10 @@ func (s *Service) StartAction(p StartActionParams) (*ActionRun, error) {
 		}
 		workflowRef := strings.TrimSpace(p.Workflow)
 		if workflowRef == "" {
-			if _, _, err := s.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, p.PrincipalRef); err != nil {
+			if _, _, err := s.EnsureBuiltinTemplate(DefaultActionWorkflowTemplateRef, p.PrincipalRef); err != nil {
 				return nil, err
 			}
-			workflowRef = BuiltinSimpleTaskTemplateRef
+			workflowRef = DefaultActionWorkflowTemplateRef
 		} else if _, builtinErr := builtinTemplateData(workflowRef); builtinErr == nil {
 			if _, _, err := s.EnsureBuiltinTemplate(workflowRef, p.PrincipalRef); err != nil {
 				return nil, err

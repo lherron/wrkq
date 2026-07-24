@@ -973,6 +973,7 @@ export interface WrkfActionSettleResult {
 export interface WrkfActionStartParams {
   task?: string;
   instanceId?: string;
+  /** Defaults to the producer-owned built-in wrkq-simple-task@5. */
   workflow?: string;
   action: "triage" | "implement" | "review" | "verify" | (string & {});
   role?: string;

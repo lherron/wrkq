@@ -3,7 +3,7 @@
  * `wrkq rpc --stdio` binary, through @wrkq/client only (T-05009).
  *
  *   initialize → task.create → action.start (built-in workflow)
- *   → action.bindExternal (hrc:<id>) → action.complete (evidence + transition)
+ *   → action.bindExternal (hrc:<id>) → action.fail (terminal run)
  *   → action.list (includeClosedInstances)
  *
  * Binary discovery: env WRKQ_BIN / WRKQADM_BIN, else PATH.
@@ -46,7 +46,7 @@ afterAll(async () => {
 });
 
 describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
-  test("start (built-in) → bindExternal → complete → list, typed results", async () => {
+  test("start (default @5) → bindExternal → fail → list, typed results", async () => {
     client = await createClient({
       command: WRKQ,
       dbPath,
@@ -65,21 +65,22 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     // ── action.start — no workflow supplied → built-in wrkq-simple-task ──
     const run = await client.wrkf.action.start({
       task: task.id,
-      action: "triage",
+      action: "implement",
       principal_ref: ACTOR,
       idempotencyKey: "action-itest:start:1",
     });
     expect(typeof run.runId).toBe("string");
     expect(run.actionRunId).toBe(run.runId);
-    expect(run.action).toBe("triage");
-    expect(run.role).toBe("triager");
+    expect(run.action).toBe("implement");
+    expect(run.role).toBe("implementer");
     expect(run.status).toBe("active");
     expect(run.workflow.id).toBe("wrkq-simple-task");
+    expect(run.workflow.version).toBe("5");
 
     // Idempotent replay → same run.
     const again = await client.wrkf.action.start({
       task: task.id,
-      action: "triage",
+      action: "implement",
       principal_ref: ACTOR,
       idempotencyKey: "action-itest:start:1",
     });
@@ -98,16 +99,13 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     });
     expect(bound.externalRunRef).toBe("hrc:itest-run-1");
 
-    // ── action.complete — evidence + default triage_complete transition ──
-    const completed = await client.wrkf.action.complete({
+    // ── action.fail — terminal run without changing the attached workflow ──
+    const failed = await client.wrkf.action.fail({
       actionRunId: run.runId,
-      evidence: { summary: "triaged" },
-      runSummary: "done",
+      summary: "expected integration terminalization",
+      evidence: { summary: "typed failure evidence" },
     });
-    expect(completed.run.status).toBe("completed");
-    expect(completed.evidence?.kind).toBe("triage_result");
-    expect(completed.evidence?.runId).toBe(run.runId);
-    expect(completed.transition?.state).toBeDefined();
+    expect(failed.status).toBe("failed");
 
     // ── action.list — all runs for the task ──
     const list = await client.wrkf.action.list({
@@ -117,6 +115,6 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     expect(list.items.length).toBe(1);
     expect(list.items[0]!.runId).toBe(run.runId);
     expect(list.items[0]!.externalRunRef).toBe("hrc:itest-run-1");
-    expect(list.items[0]!.status).toBe("completed");
+    expect(list.items[0]!.status).toBe("failed");
   });
 });

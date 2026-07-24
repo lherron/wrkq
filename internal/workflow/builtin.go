@@ -6,14 +6,18 @@ import (
 	"strings"
 )
 
-// BuiltinSimpleTaskTemplateRef is the canonical ref for the built-in
-// low-ceremony task lifecycle workflow used by wrkf.action.* when a caller does
-// not supply an explicit workflow.
+// BuiltinSimpleTaskTemplateRef is the canonical ref for the historical v1
+// built-in. It remains addressable for explicit selection and existing
+// instances.
 const BuiltinSimpleTaskTemplateRef = "wrkq-simple-task@1"
 const BuiltinSimpleTaskV2TemplateRef = "wrkq-simple-task@2"
 const BuiltinSimpleTaskV3TemplateRef = "wrkq-simple-task@3"
 const BuiltinSimpleTaskV5TemplateRef = "wrkq-simple-task@5"
 const BuiltinRoom2BoxTemplateRef = "room-2box@1"
+
+// DefaultActionWorkflowTemplateRef is the producer-owned workflow selected by
+// wrkf.action.start when the caller does not supply an explicit workflow.
+const DefaultActionWorkflowTemplateRef = BuiltinSimpleTaskV5TemplateRef
 
 //go:embed builtins/wrkq-simple-task.workflow.json
 var builtinSimpleTaskJSON []byte

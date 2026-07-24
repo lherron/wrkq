@@ -2189,7 +2189,7 @@ into single semantic task-lifecycle calls. It is not a second ledger: an action
 run *is* a `workflow_runs` row (carrying a semantic `action` label), evidence is
 recorded via `wrkf.evidence.add`, and state moves go through `wrkf.transition.apply`.
 When no workflow is attached and none is supplied, the built-in
-`wrkq-simple-task@1` workflow is installed and attached automatically. The action
+`wrkq-simple-task@5` workflow is installed and attached automatically. The action
 surface never reads or writes legacy task scalar linkage fields.
 
 ```
@@ -2205,7 +2205,7 @@ wrkf.action.list
 interface WrkfActionStartParams {
   task?: string;
   instanceId?: string;
-  workflow?: string;            // defaults to built-in wrkq-simple-task@1
+  workflow?: string;            // defaults to built-in wrkq-simple-task@5
   action: "triage" | "implement" | "review" | "verify" | (string & {});
   role?: string;                // defaults from action (triage→triager, ...)
   principal_ref?: string;

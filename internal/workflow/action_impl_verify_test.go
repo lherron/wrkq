@@ -19,7 +19,9 @@ import (
 // in active/ready, the from-state for implement_complete.
 func driveToReady(t *testing.T, svc *Service, taskUUID string) {
 	t.Helper()
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := svc.StartAction(StartActionParams{
+		Task: taskUUID, Workflow: BuiltinSimpleTaskTemplateRef, Action: "triage", PrincipalRef: "agent:t",
+	})
 	if err != nil {
 		t.Fatalf("StartAction triage: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/spf13/cobra"
 )
 
@@ -66,5 +67,22 @@ func TestActionResponseShapesAreDocumentedInHelp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestActionStartHelpUsesProducerOwnedDefault(t *testing.T) {
+	var output bytes.Buffer
+	cmd := actionStartCmd()
+	cmd.SetOut(&output)
+	cmd.SetErr(&output)
+	if err := cmd.Help(); err != nil {
+		t.Fatalf("render help: %v", err)
+	}
+	help := output.String()
+	if want := "defaults to built-in " + wrkfapi.DefaultActionWorkflowRef(); !strings.Contains(help, want) {
+		t.Fatalf("help missing producer-owned default %q:\n%s", want, help)
+	}
+	if strings.Contains(help, "defaults to built-in wrkq-simple-task@1") {
+		t.Fatalf("help still advertises discontinued default:\n%s", help)
 	}
 }

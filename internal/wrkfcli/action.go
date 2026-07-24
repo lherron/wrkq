@@ -161,7 +161,7 @@ func actionStartCmd() *cobra.Command {
 		}),
 	}
 	cmd.Flags().StringVar(&opts.action, "action", "", "Semantic action (triage|implement|review|verify|...)")
-	cmd.Flags().StringVar(&opts.workflowRef, "workflow", "", "Workflow ref to attach when none exists (defaults to built-in wrkq-simple-task@1)")
+	cmd.Flags().StringVar(&opts.workflowRef, "workflow", "", fmt.Sprintf("Workflow ref to attach when none exists (defaults to built-in %s)", wrkfapi.DefaultActionWorkflowRef()))
 	cmd.Flags().StringVar(&opts.role, "role", "", "Workflow role (defaults from action)")
 	cmd.Flags().StringVar(&opts.actor, "principal-ref", "", "Principal ref (agent:<id>)")
 	cmd.Flags().StringVar(&opts.lane, "lane", "", "Lane (defaults from action)")

@@ -97,13 +97,13 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 	frames := p3Run(t, dbPath,
 		mkRPC("s1", "wrkf.action.start", map[string]any{
 			"task":           taskID,
-			"action":         "triage",
+			"action":         "implement",
 			"principal_ref":  actActor,
 			"idempotencyKey": "act:start:1",
 		}),
 		mkRPC("s2", "wrkf.action.start", map[string]any{
 			"task":           taskID,
-			"action":         "triage",
+			"action":         "implement",
 			"principal_ref":  actActor,
 			"idempotencyKey": "act:start:1",
 		}),
@@ -114,18 +114,18 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 	if got, _ := r1["actionRunId"].(string); got != runID {
 		t.Errorf("actionRunId %q must equal runId %q", got, runID)
 	}
-	if got, _ := r1["action"].(string); got != "triage" {
-		t.Errorf("action = %q, want triage", got)
+	if got, _ := r1["action"].(string); got != "implement" {
+		t.Errorf("action = %q, want implement", got)
 	}
-	if got, _ := r1["role"].(string); got != "triager" {
-		t.Errorf("role defaulted to %q, want triager", got)
+	if got, _ := r1["role"].(string); got != "implementer" {
+		t.Errorf("role defaulted to %q, want implementer", got)
 	}
 	if got, _ := r1["status"].(string); got != "active" {
 		t.Errorf("status = %q, want active", got)
 	}
 	wf, _ := r1["workflow"].(map[string]any)
-	if wf == nil || wf["id"] != "wrkq-simple-task" {
-		t.Errorf("workflow = %#v, want built-in wrkq-simple-task", wf)
+	if wf == nil || wf["id"] != "wrkq-simple-task" || wf["version"] != "5" {
+		t.Errorf("workflow = %#v, want built-in wrkq-simple-task@5", wf)
 	}
 
 	// Replay → same run id.
@@ -138,6 +138,70 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 	runs, _ := frames[3]["result"].([]any)
 	if len(runs) != 1 {
 		t.Fatalf("expected exactly 1 run after replay, got %d: %#v", len(runs), frames[3]["result"])
+	}
+}
+
+func TestWrkfActionStart_DefaultV5WithV1DiscontinuedAndExplicitRefsRemainAuthoritative(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	v1Task := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000101",
+		"action-explicit-v1-seed", "Action Explicit V1 Seed")
+	v5InstallTask := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000102",
+		"action-explicit-v5-seed", "Action Explicit V5 Seed")
+	defaultTask := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000103",
+		"action-default-v5", "Action Default V5")
+	discontinuedTask := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000104",
+		"action-explicit-discontinued", "Action Explicit Discontinued")
+	explicitV2Task := p2SeedTask(t, dbPath,
+		"a5000000-0000-4000-8000-000000000105",
+		"action-explicit-v2", "Action Explicit V2")
+
+	frames := p3Run(t, dbPath,
+		mkRPC("seed-v1", "wrkf.action.start", map[string]any{
+			"task": v1Task, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
+		mkRPC("discontinue-v1", "wrkf.workflow.discontinue", map[string]any{
+			"ref": "wrkq-simple-task@1", "principal_ref": "agent:curator",
+		}),
+		mkRPC("install-v5", "wrkq.workflow.attach", map[string]any{
+			"task": v5InstallTask, "workflow": "wrkq-simple-task@5", "principal_ref": actActor,
+		}),
+		mkRPC("default", "wrkf.action.start", map[string]any{
+			"task": defaultTask, "action": "implement", "principal_ref": actActor,
+		}),
+		mkRPC("explicit-discontinued", "wrkf.action.start", map[string]any{
+			"task": discontinuedTask, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
+		mkRPC("explicit-v2", "wrkf.action.start", map[string]any{
+			"task": explicitV2Task, "workflow": "wrkq-simple-task@2", "action": "triage", "principal_ref": actActor,
+		}),
+	)
+	p2ResultOrFail(t, frames[1], "seed explicit v1")
+	p2ResultOrFail(t, frames[2], "discontinue v1")
+	p2ResultOrFail(t, frames[3], "ensure-install explicit v5")
+
+	defaultRun := p2ResultOrFail(t, frames[4], "bare default")
+	defaultWorkflow, _ := defaultRun["workflow"].(map[string]any)
+	if defaultWorkflow == nil || defaultWorkflow["id"] != "wrkq-simple-task" || defaultWorkflow["version"] != "5" {
+		t.Fatalf("bare workflow = %#v, want wrkq-simple-task@5", defaultWorkflow)
+	}
+	if got := p2ErrCode(frames[5]); got != "WRKF_VALIDATION" {
+		t.Fatalf("explicit discontinued v1 code = %q, want WRKF_VALIDATION; frame=%#v", got, frames[5])
+	}
+	if got := p2ErrDataField(frames[5], "field"); got != "workflow" {
+		t.Fatalf("explicit discontinued v1 field = %#v, want workflow", got)
+	}
+
+	explicitV2Run := p2ResultOrFail(t, frames[6], "explicit v2")
+	explicitV2Workflow, _ := explicitV2Run["workflow"].(map[string]any)
+	if explicitV2Workflow == nil || explicitV2Workflow["version"] != "2" {
+		t.Fatalf("explicit workflow = %#v, want wrkq-simple-task@2", explicitV2Workflow)
 	}
 }
 
@@ -687,7 +751,9 @@ func TestWrkfActionComplete_EvidenceTransitionFinishAndReplay(t *testing.T) {
 		"action-complete", "Action Complete")
 	actSeedSpecification(t, dbPath, "a5000000-0000-4000-8000-000000000004", "spec: triaged deliverable")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -761,7 +827,9 @@ func TestWrkfActionComplete_TransitionFalseSkips(t *testing.T) {
 		"a5000000-0000-4000-8000-000000000005",
 		"action-complete-skip", "Action Complete Skip")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -799,7 +867,9 @@ func TestWrkfActionFail_RecordsEvidenceAndFails(t *testing.T) {
 		"a5000000-0000-4000-8000-000000000006",
 		"action-fail", "Action Fail")
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -843,7 +913,9 @@ func TestWrkfAction_FullStdioFlow(t *testing.T) {
 		"action-flow", "Action Flow")
 
 	startFrames := p3Run(t, dbPath,
-		mkRPC("s1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
+		mkRPC("s1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
 	)
 	runID := actRunID(t, p2ResultOrFail(t, startFrames[1], "start"), "start")
 
@@ -891,7 +963,9 @@ func TestWrkfActionList_IncludeClosedInstances(t *testing.T) {
 	// Drive a full lifecycle through the simple workflow to close the first
 	// instance: triage -> implement -> verify -> review (review_complete closes).
 	driveFrames := p3Run(t, dbPath,
-		mkRPC("t1", "wrkf.action.start", map[string]any{"task": taskID, "action": "triage", "principal_ref": actActor}),
+		mkRPC("t1", "wrkf.action.start", map[string]any{
+			"task": taskID, "workflow": "wrkq-simple-task@1", "action": "triage", "principal_ref": actActor,
+		}),
 	)
 	triageRun := actRunID(t, p2ResultOrFail(t, driveFrames[1], "triage start"), "triage start")
 	p3Run(t, dbPath, mkRPC("tc", "wrkf.action.complete", map[string]any{"actionRunId": triageRun, "evidence": map[string]any{"summary": "t"}}))

@@ -56,6 +56,13 @@ func actionFixture(t *testing.T) (*Service, string) {
 	return svc, taskUUID
 }
 
+func startV1Action(svc *Service, params StartActionParams) (*ActionRun, error) {
+	if strings.TrimSpace(params.Workflow) == "" {
+		params.Workflow = BuiltinSimpleTaskTemplateRef
+	}
+	return svc.StartAction(params)
+}
+
 // Action leases are durable claim metadata, so a migrated workflow DB must
 // expose the fields claim and settlement paths rely on.
 func TestActionLeaseRecoveryMigrationAddsRunColumns(t *testing.T) {
@@ -100,19 +107,19 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 
 	run, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "k1",
+		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "k1",
 	})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
-	if run.Role != "triager" {
-		t.Errorf("role = %q, want triager", run.Role)
+	if run.Role != "implementer" {
+		t.Errorf("role = %q, want implementer", run.Role)
 	}
-	if run.Lane != "triage" {
-		t.Errorf("lane = %q, want triage", run.Lane)
+	if run.Lane != "implementation" {
+		t.Errorf("lane = %q, want implementation", run.Lane)
 	}
-	if run.Workflow.ID != "wrkq-simple-task" || run.Workflow.Version != "1" {
-		t.Errorf("workflow = %+v, want wrkq-simple-task@1", run.Workflow)
+	if run.Workflow.ID != "wrkq-simple-task" || run.Workflow.Version != "5" {
+		t.Errorf("workflow = %+v, want wrkq-simple-task@5", run.Workflow)
 	}
 	if run.Status != "active" {
 		t.Errorf("status = %q, want active", run.Status)
@@ -120,7 +127,7 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 
 	// Replay → same run.
 	again, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "k1",
+		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "k1",
 	})
 	if err != nil {
 		t.Fatalf("StartAction replay: %v", err)
@@ -140,15 +147,53 @@ func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
 
 	// Mismatch: same key, different action → idempotency mismatch.
 	if _, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "k1",
+		Task: taskUUID, Action: "verify", PrincipalRef: "agent:t", IdempotencyKey: "k1",
 	}); err == nil {
 		t.Errorf("expected idempotency mismatch for same key + different action")
 	}
 }
 
+func TestStartAction_DefaultV5IgnoresDiscontinuedV1AndExplicitRefRemainsAuthoritative(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, "agent:installer"); err != nil {
+		t.Fatalf("EnsureBuiltinTemplate(v1): %v", err)
+	}
+	if err := svc.DiscontinueTemplate("wrkq-simple-task", "1", "agent:curator"); err != nil {
+		t.Fatalf("DiscontinueTemplate(v1): %v", err)
+	}
+	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskV5TemplateRef, "agent:installer"); err != nil {
+		t.Fatalf("EnsureBuiltinTemplate(v5): %v", err)
+	}
+
+	run, err := svc.StartAction(StartActionParams{
+		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t",
+	})
+	if err != nil {
+		t.Fatalf("StartAction default with discontinued v1: %v", err)
+	}
+	if run.Workflow.ID != "wrkq-simple-task" || run.Workflow.Version != "5" {
+		t.Fatalf("default workflow = %+v, want wrkq-simple-task@5", run.Workflow)
+	}
+
+	explicitTaskUUID := "ffffffff-ffff-4fff-bfff-000000000002"
+	if _, err := svc.db.Exec(
+		`INSERT INTO tasks (uuid, slug, title, specification, project_uuid, state, priority, kind, created_by_actor_uuid, updated_by_actor_uuid)
+		 SELECT ?, 'explicit-discontinued', 'Explicit Discontinued', 'Shaped spec.', project_uuid, 'open', 2, 'task', created_by_actor_uuid, updated_by_actor_uuid
+		 FROM tasks WHERE uuid = ?`,
+		explicitTaskUUID, taskUUID,
+	); err != nil {
+		t.Fatalf("insert explicit task: %v", err)
+	}
+	if _, err := startV1Action(svc, StartActionParams{
+		Task: explicitTaskUUID, Workflow: BuiltinSimpleTaskTemplateRef, Action: "triage", PrincipalRef: "agent:t",
+	}); err == nil || !strings.Contains(err.Error(), "discontinued") {
+		t.Fatalf("explicit discontinued v1 error = %v, want discontinued refusal", err)
+	}
+}
+
 func TestCompleteAction_EvidenceTransitionFinishReplay(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -210,7 +255,7 @@ func TestCompleteAction_EvidenceTransitionFinishReplay(t *testing.T) {
 // evidence/transition and with the run finished (daedalus required test #2).
 func TestCompleteAction_PartialReplayRecovers(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -309,7 +354,7 @@ func TestCompleteAction_DefaultEvidenceKindMatchesTemplate(t *testing.T) {
 		{"verify", "verify_result"},
 		{"review", "review_result"},
 	} {
-		run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: s.action, PrincipalRef: "agent:t"})
+		run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: s.action, PrincipalRef: "agent:t"})
 		if err != nil {
 			t.Fatalf("StartAction %s: %v", s.action, err)
 		}
@@ -331,7 +376,7 @@ func TestCompleteAction_DefaultEvidenceKindMatchesTemplate(t *testing.T) {
 
 func TestFailAction_EvidenceAndTerminalNoTransition(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -373,7 +418,7 @@ func TestFailAction_EvidenceAndTerminalNoTransition(t *testing.T) {
 // terminalization must not record success evidence or apply a success transition.
 func TestCompleteAction_TerminalFailedRunRejectsSuccessSideEffects(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -438,7 +483,7 @@ func TestCompleteAction_TriageReadyNormalizesInProgressToOpen(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "A shaped specification.", "in_progress")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -466,7 +511,7 @@ func TestCompleteAction_TriageNoSpecBlocksTask(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "", "open")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -494,7 +539,7 @@ func TestCompleteAction_TriageWhitespaceSpecBlocksTask(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "   \n\t  ", "open")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -515,7 +560,7 @@ func TestCompleteAction_TriageBlockedReplayIdempotent(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "", "open")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
 		t.Fatalf("StartAction: %v", err)
 	}
@@ -543,7 +588,7 @@ func TestCompleteAction_TriageReTriageFromBlocked(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	setTaskSpecAndState(t, svc, taskUUID, "", "open")
 
-	run1, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "t1"})
+	run1, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "t1"})
 	if err != nil {
 		t.Fatalf("StartAction 1: %v", err)
 	}
@@ -556,7 +601,7 @@ func TestCompleteAction_TriageReTriageFromBlocked(t *testing.T) {
 
 	// Re-triage: a spec is now produced.
 	setTaskSpecAndState(t, svc, taskUUID, "Now properly shaped.", "blocked")
-	run2, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "t2"})
+	run2, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t", IdempotencyKey: "t2"})
 	if err != nil {
 		t.Fatalf("StartAction 2: %v", err)
 	}
