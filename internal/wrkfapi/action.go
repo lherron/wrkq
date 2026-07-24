@@ -18,6 +18,7 @@ type ActionNextParams = workflow.ActionNextParams
 type ActionNextResult = workflow.ActionNextResult
 type ActionClaimParams = workflow.ClaimActionParams
 type ActionClaimResult = workflow.ClaimActionResult
+type ActionClaimPredecessor = workflow.ActionClaimPredecessor
 type ActionEvidenceParams struct {
 	Kind           string          `json:"kind,omitempty"`
 	Ref            string          `json:"ref,omitempty"`

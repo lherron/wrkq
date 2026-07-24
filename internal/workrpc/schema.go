@@ -96,6 +96,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkfDiffResult":               dtoType[wrkfapi.DiffResult](),
 	"WrkfSuggestResult":            dtoType[wrkfapi.SuggestResult](),
 	"WrkfEffectClaimResult":        dtoType[wrkfapi.EffectClaim](),
+	"WrkfActionClaimPredecessor":   dtoType[wrkfapi.ActionClaimPredecessor](),
 	"WrkfWatchSnapshot":            dtoType[wrkfapi.WatchSnapshot](),
 	"WrkfWatchEventsResult":        dtoType[wrkfapi.WatchEventsResult](),
 }

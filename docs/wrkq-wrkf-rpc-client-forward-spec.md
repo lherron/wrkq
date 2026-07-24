@@ -1538,6 +1538,12 @@ interface WrkfActionSourceBinding {
 it through and compare it as a string; neither parses or derives meaning from
 it. No commit-derived source-binding field is part of the RPC DTO.
 
+When `wrkf.action.claim` refuses an unacknowledged predecessor with
+`WRKF_LEASE_CONFLICT`, `data.predecessor` includes both the exact
+`settleStatus: string` and a required `settled: boolean`. The engine computes
+`settled` from its terminal-run predicate. Client consumers use that boolean as
+the discriminator and do not enumerate terminal status strings locally.
+
 #### Evidence
 
 ```text

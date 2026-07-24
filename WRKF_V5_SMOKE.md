@@ -68,7 +68,7 @@ Setup: scratch DB, install @5, create task, attach instance (initial: active/tes
 | F1 | First claim with priorRun null | Accepted. |
 | F2 | Second claim while the first lease is live | Refused (exclusivity). |
 | F3 | Claim with a short `--lease-ms`, let it expire, NO successor; original claimer settles late | **Accepted.** Expiry alone forfeits nothing. |
-| F4 | Expired lease; successor claims WITHOUT priorRun | Refused; refusal payload carries the FULL predecessor record — assert every field present: owner, claimedAt, heartbeatAt, leaseExpiresAt, settle status, sideEffectClasses, externalRunRef, workspaceRef, evidence refs. Payload completeness is the loop's API — missing field = FAIL, not cosmetic. |
+| F4 | Expired lease; successor claims WITHOUT priorRun | Refused; refusal payload carries the FULL predecessor record — assert every field present: owner, claimedAt, heartbeatAt, leaseExpiresAt, exact settle status, engine-computed settled boolean, sideEffectClasses, externalRunRef, workspaceRef, evidence refs. Payload completeness is the loop's API — missing field = FAIL, not cosmetic. |
 | F5 | Successor re-claims WITH the predecessor's run id | Accepted; predecessor terminalized as **superseded** (not "failed"); succession event in the ledger. |
 | F6 | After F5: the evicted predecessor attempts to settle | Refused with "superseded by <run>". |
 | F7 | Over a cleanly SETTLED prior attempt (e.g. after a `fail` rewind), claim without naming it | Refused — uniformity: every retry names its predecessor. |

@@ -1305,6 +1305,7 @@ describe("error mapping", () => {
           heartbeatAt: "2026-07-12T12:01:00Z",
           expiresAt: "2026-07-12T12:02:00Z",
           settleStatus: "active",
+          settled: false,
           sideEffectClasses: ["git.commit"],
           evidenceWritten: [],
         },
@@ -1322,6 +1323,7 @@ describe("error mapping", () => {
     }
     const error = caught as WorkRpcError;
     expect(error.data?.predecessor?.runId).toBe("run_000001");
+    expect(error.data?.predecessor?.settled).toBe(false);
     expect(error.data?.predecessor?.sideEffectClasses).toEqual(["git.commit"]);
   });
 

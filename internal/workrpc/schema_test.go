@@ -47,6 +47,22 @@ func TestProtocolSchemaHashIncludesInitializeHandshakeShape(t *testing.T) {
 	}
 }
 
+func TestProtocolSchemaHashIncludesActionClaimPredecessorShape(t *testing.T) {
+	typ := dtoSchemaTypes["WrkfActionClaimPredecessor"]
+	if typ == nil {
+		t.Fatal("WrkfActionClaimPredecessor missing from dtoSchemaTypes")
+	}
+	fingerprint := dtoSchemaFingerprint("WrkfActionClaimPredecessor", typ)
+	for _, want := range []string{
+		"SettleStatus:settleStatus:string:string",
+		"Settled:settled:bool:bool",
+	} {
+		if !strings.Contains(fingerprint, want) {
+			t.Fatalf("action claim predecessor schema fingerprint missing %q:\n%s", want, fingerprint)
+		}
+	}
+}
+
 func TestDTOSchemaCatalogCoversEveryProtocolDTO(t *testing.T) {
 	for _, name := range dtoCatalog {
 		if dtoSchemaTypes[name] == nil {

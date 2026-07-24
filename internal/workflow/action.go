@@ -193,6 +193,7 @@ type ActionClaimPredecessor struct {
 	HeartbeatAt       string                      `json:"heartbeatAt,omitempty"`
 	ExpiresAt         string                      `json:"expiresAt,omitempty"`
 	SettleStatus      string                      `json:"settleStatus"`
+	Settled           bool                        `json:"settled"`
 	TerminalResult    string                      `json:"terminalResult,omitempty"`
 	SideEffectClasses []string                    `json:"sideEffectClasses"`
 	ExternalRunRef    string                      `json:"externalRunRef,omitempty"`
@@ -865,7 +866,8 @@ func actionClaimPredecessorTx(tx *sql.Tx, run *claimedRun) (*ActionClaimPredeces
 	record := &ActionClaimPredecessor{
 		RunID: run.ID, Owner: run.LeaseOwner, ClaimedAt: run.StartedAt,
 		HeartbeatAt: run.HeartbeatAt, ExpiresAt: run.LeaseExpiresAt,
-		SettleStatus: run.Status, TerminalResult: run.TerminalSummary,
+		SettleStatus: run.Status, Settled: isTerminalRunStatus(run.Status),
+		TerminalResult: run.TerminalSummary,
 		ExternalRunRef: run.ExternalRunRef, WorkspaceRef: run.WorkspaceRef,
 		SideEffectClasses: []string{}, EvidenceWritten: []ActionClaimEvidenceRecord{},
 	}

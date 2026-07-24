@@ -117,7 +117,7 @@ func TestClaimActionRefusalCarriesFullPredecessorRecord(t *testing.T) {
 		t.Fatalf("claim refusal detail = %+v err=%v, want predecessor", detail, err)
 	}
 	pred := detail.Predecessor
-	if pred.RunID != first.Binding.Run.ID || pred.Owner != "runner-implement" || pred.ClaimedAt == "" || pred.HeartbeatAt == "" || pred.ExpiresAt == "" || pred.SettleStatus != "active" {
+	if pred.RunID != first.Binding.Run.ID || pred.Owner != "runner-implement" || pred.ClaimedAt == "" || pred.HeartbeatAt == "" || pred.ExpiresAt == "" || pred.SettleStatus != "active" || pred.Settled {
 		t.Fatalf("predecessor identity/timestamps/status = %+v", pred)
 	}
 	if len(pred.SideEffectClasses) != 2 || pred.ExternalRunRef != "hrc:run-live" || pred.WorkspaceRef != "/worktrees/implement" {
@@ -125,6 +125,39 @@ func TestClaimActionRefusalCarriesFullPredecessorRecord(t *testing.T) {
 	}
 	if len(pred.EvidenceWritten) != 1 || pred.EvidenceWritten[0].ID != "ev-predecessor" {
 		t.Fatalf("predecessor evidence = %+v", pred.EvidenceWritten)
+	}
+}
+
+func TestClaimActionRefusalSettledUsesTerminalStatusPredicate(t *testing.T) {
+	svc, taskUUID := actionFixture(t)
+	attachSimpleTaskV2(t, svc, taskUUID)
+	triage := claimActionForTest(t, svc, taskUUID, "triage")
+	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
+
+	first := claimActionForTest(t, svc, taskUUID, "implement")
+	const futureTerminalStatus = "future_terminal_status"
+	if _, err := svc.db.Exec(
+		`UPDATE workflow_runs SET status = ?, completed_at = '2026-07-24T00:00:00Z' WHERE id = ?`,
+		futureTerminalStatus,
+		first.Binding.Run.ID,
+	); err != nil {
+		t.Fatalf("seed future terminal predecessor status: %v", err)
+	}
+
+	_, err := svc.ClaimAction(ClaimActionParams{
+		Task: taskUUID, RunnerID: "runner-successor", AgentRef: "agent:successor",
+		Prefer: ActionClaimPrefer{Action: "implement"}, LeaseMs: 300000,
+		PriorRunProvided: true,
+	})
+	detail, ok := AsErrorDetail(err)
+	if !ok || detail.Predecessor == nil {
+		t.Fatalf("claim refusal detail = %+v err=%v, want predecessor", detail, err)
+	}
+	if got := detail.Predecessor.SettleStatus; got != futureTerminalStatus {
+		t.Fatalf("predecessor settleStatus = %q, want %q", got, futureTerminalStatus)
+	}
+	if !detail.Predecessor.Settled {
+		t.Fatalf("predecessor settled = false for terminal status outside consumer enumerations: %+v", detail.Predecessor)
 	}
 }
 
@@ -264,7 +297,7 @@ func TestActionOccurrenceAttemptNumberingAfterOperationalFailure(t *testing.T) {
 		Prefer: ActionClaimPrefer{Action: "verify"}, LeaseMs: 300000, PriorRunProvided: true,
 	})
 	detail, ok := AsErrorDetail(err)
-	if !ok || detail.Predecessor == nil || detail.Predecessor.Owner == "" || detail.Predecessor.HeartbeatAt == "" || detail.Predecessor.ExpiresAt == "" || detail.Predecessor.SettleStatus != "operational_failed" {
+	if !ok || detail.Predecessor == nil || detail.Predecessor.Owner == "" || detail.Predecessor.HeartbeatAt == "" || detail.Predecessor.ExpiresAt == "" || detail.Predecessor.SettleStatus != "operational_failed" || !detail.Predecessor.Settled {
 		t.Fatalf("settled predecessor review record = %+v err=%v", detail.Predecessor, err)
 	}
 

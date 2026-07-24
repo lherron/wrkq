@@ -24,7 +24,7 @@ export interface WorkRpcErrorData {
   code?: string;
   /** Whether the operation may be retried. */
   retryable?: boolean;
-  /** Present when wrkf.action.claim refuses an unacknowledged predecessor. */
+  /** Present when wrkf.action.claim refuses an unacknowledged predecessor; its settled discriminator is producer-owned. */
   predecessor?: WrkfActionClaimPredecessor;
   /** Present when a write, including wrkf.action.claim, is refused while suspended. */
   suspension?: WrkfSuspension;

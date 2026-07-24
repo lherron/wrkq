@@ -253,7 +253,7 @@ Every domain error must include:
 | `WRKF_TRANSITION_BLOCKED` | -32011 | false | blockers/guards/obligations/checks prevent transition |
 | `WRKF_ROLE_DENIED` | -32012 | false | role cannot perform transition |
 | `WRKF_IDEMPOTENCY_MISMATCH` | -32013 | false | same idempotency key with different request hash |
-| `WRKF_LEASE_CONFLICT` | -32014 | true | effect ack/fail with wrong or expired lease |
+| `WRKF_LEASE_CONFLICT` | -32014 | true | effect ack/fail with wrong or expired lease, or action claim with an unacknowledged predecessor |
 | `WRKF_EFFECT_NOT_DELIVERABLE` | -32015 | false | effect cannot be delivered in current state |
 | `WRKF_HOOK_FAILED` | -32016 | context-dependent | hook/check execution failed |
 | `WRKF_KIND_ROLE_DENIED` | -32018 | false | supplied role cannot produce evidence kind |
@@ -265,6 +265,31 @@ Every domain error must include:
 Standard JSON-RPC protocol errors (parse error, invalid request, method not
 found) may omit `data.code`. Clients must classify those as protocol errors,
 not domain errors.
+
+An action claim refused for an unacknowledged predecessor carries
+`data.predecessor` as the cataloged `WrkfActionClaimPredecessor` DTO:
+
+```ts
+interface WrkfActionClaimPredecessor {
+  runId: string;
+  owner?: string;
+  claimedAt: string;
+  heartbeatAt?: string;
+  expiresAt?: string;
+  settleStatus: string;
+  settled: boolean;
+  terminalResult?: string;
+  sideEffectClasses: string[];
+  externalRunRef?: string;
+  workspaceRef?: string;
+  evidenceWritten: WrkfActionClaimEvidenceRecord[];
+}
+```
+
+`settled` is computed by the producer from the engine's terminal-run predicate.
+Consumers must use it as the classification discriminator and retain
+`settleStatus` only as the exact status value for diagnostics; they must not
+maintain their own terminal-status enumeration.
 
 The remote stdio bridge also reports upstream HTTP and transport failures as
 protocol-level errors with no `data.code`. Its safe diagnostic data includes

@@ -354,6 +354,7 @@ var dtoCatalog = []string{
 	"WrkfDiffResult",
 	"WrkfSuggestResult",
 	"WrkfEffectClaimResult",
+	"WrkfActionClaimPredecessor", // WRKF_LEASE_CONFLICT claim-refusal data.predecessor
 	"WrkfWatchSnapshot",
 	"WrkfWatchEventsResult",
 }

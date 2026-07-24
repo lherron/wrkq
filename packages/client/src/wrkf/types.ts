@@ -924,6 +924,8 @@ export interface WrkfActionClaimPredecessor {
   heartbeatAt?: string;
   expiresAt?: string;
   settleStatus: string;
+  /** Producer-owned terminal-status classification; consumers must not derive this from settleStatus. */
+  settled: boolean;
   terminalResult?: string;
   sideEffectClasses: string[];
   externalRunRef?: string;

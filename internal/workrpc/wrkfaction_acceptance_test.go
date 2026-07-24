@@ -261,7 +261,10 @@ func TestWrkfActionClaimV2FencedRunAndSuccession(t *testing.T) {
 	if errData["code"] != "WRKF_LEASE_CONFLICT" || predecessor["runId"] != run1["id"] || predecessor["owner"] != "runner-a" {
 		t.Fatalf("claim refusal payload = %#v, want full named predecessor", errObj)
 	}
-	for _, field := range []string{"claimedAt", "heartbeatAt", "expiresAt", "settleStatus", "sideEffectClasses", "evidenceWritten"} {
+	if settled, ok := predecessor["settled"].(bool); !ok || settled {
+		t.Fatalf("active claim refusal predecessor settled = %#v, want false", predecessor["settled"])
+	}
+	for _, field := range []string{"claimedAt", "heartbeatAt", "expiresAt", "settleStatus", "settled", "sideEffectClasses", "evidenceWritten"} {
 		if _, ok := predecessor[field]; !ok {
 			t.Fatalf("claim refusal predecessor missing %s: %#v", field, predecessor)
 		}
