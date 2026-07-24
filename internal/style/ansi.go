@@ -74,6 +74,22 @@ func StateColor(state string) string {
 	}
 }
 
+// PriorityColor maps task priorities from most to least urgent. The mapping
+// reuses the shared state palette so priority accents stay consistent with the
+// rest of the CLI.
+func PriorityColor(priority int) string {
+	switch priority {
+	case 1:
+		return ColStateStop
+	case 2:
+		return ColStateOpen
+	case 3:
+		return ColStateWIP
+	default: // priority 4 and invalid values recede
+		return ColDim
+	}
+}
+
 var ansiSeq = regexp.MustCompile(`\033\[[0-9;]*m`)
 
 // StripANSI removes SGR sequences so visible width can be measured.

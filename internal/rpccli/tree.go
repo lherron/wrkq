@@ -1,6 +1,7 @@
 package rpccli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +15,9 @@ import (
 // newTreeCmd mirrors `wrkq tree` via wrkq.task.treeView (the server-owned
 // compatibility tree projection that reproduces legacy recursive traversal:
 // container pruning, "all done" rollups, subtask nesting, hidden-container
-// counting). The SERVER owns the entire hierarchy walk; the CLI owns ONLY byte
-// rendering (json / ndjson / porcelain).
+// counting). The SERVER owns the entire hierarchy walk; the CLI owns byte
+// rendering plus best-effort priority enrichment for human task rows through
+// existing task read methods.
 //
 // Implemented surface (byte-proven against legacy, non-TTY): the bare non-TTY
 // default (NDJSON), --json, --ndjson, --porcelain, --pretty, -L/--level,
@@ -76,6 +78,9 @@ func newTreeCmd() *cobra.Command {
 			var view treeWireView
 			if err := json.Unmarshal(raw, &view); err != nil {
 				return err
+			}
+			if mode == "human" {
+				hydrateTreePriorities(cmd.Context(), tr, path, view.Children, includeArchived, openOnly)
 			}
 
 			out := cmd.OutOrStdout()
@@ -185,6 +190,7 @@ type treeWireNode struct {
 	ExternalPath         string          `json:"external_path,omitempty"`
 	WireCreatedAt        string          `json:"wire_created_at,omitempty"`
 	WireParentTaskUUID   string          `json:"wire_parent_task_uuid,omitempty"`
+	Priority             int             `json:"-"`
 }
 
 type treeWireView struct {
@@ -395,6 +401,93 @@ func renderTreeHuman(w io.Writer, view *treeWireView) error {
 	return nil
 }
 
+const treePriorityPageSize = 500
+
+type treePriorityPage struct {
+	Items []struct {
+		UUID     string `json:"uuid"`
+		Priority int    `json:"priority"`
+	} `json:"items"`
+	NextCursor string `json:"nextCursor"`
+}
+
+// hydrateTreePriorities enriches the human-only tree projection from paginated
+// bulk reads. Explicitly out-of-path nodes use a bounded per-node fallback.
+// Every read is best-effort: a missing or transiently unreadable priority leaves
+// that row unlabeled rather than failing the tree. Priority remains absent from
+// the compatibility tree wire DTO and all machine tree formats.
+func hydrateTreePriorities(ctx context.Context, tr Transport, path string, nodes []*treeWireNode, includeArchived, openOnly bool) {
+	priorities := fetchTreePriorities(ctx, tr, path, includeArchived, openOnly)
+	fallbackAttempted := make(map[string]bool)
+	var walk func([]*treeWireNode)
+	walk = func(children []*treeWireNode) {
+		for _, child := range children {
+			if child.Type == "task" {
+				if priority, ok := priorities[child.UUID]; ok {
+					child.Priority = priority
+				} else if treePriorityNeedsFallback(child) && !fallbackAttempted[child.UUID] {
+					fallbackAttempted[child.UUID] = true
+					raw, err := tr.Call(ctx, "wrkq.task.show", map[string]string{"task": child.UUID})
+					var task struct {
+						Priority int `json:"priority"`
+					}
+					if err == nil && json.Unmarshal(raw, &task) == nil && task.Priority > 0 {
+						priorities[child.UUID] = task.Priority
+						child.Priority = task.Priority
+					}
+				}
+			}
+			walk(child.Children)
+			walk(child.ExternalChildren)
+		}
+	}
+	walk(nodes)
+}
+
+func fetchTreePriorities(ctx context.Context, tr Transport, path string, includeArchived, openOnly bool) map[string]int {
+	priorities := make(map[string]int)
+	params := map[string]any{
+		"path":      path,
+		"recursive": true,
+		"summary":   true,
+		"limit":     treePriorityPageSize,
+	}
+	if openOnly {
+		params["state"] = "open"
+	} else if !includeArchived {
+		params["state"] = []string{"draft", "open"}
+	}
+	if includeArchived {
+		params["includeDeleted"] = true
+	}
+
+	cursor := ""
+	for {
+		raw, err := tr.Call(ctx, "wrkq.task.list", params)
+		if err != nil {
+			return priorities
+		}
+		var page treePriorityPage
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return priorities
+		}
+		for _, task := range page.Items {
+			if task.Priority > 0 {
+				priorities[task.UUID] = task.Priority
+			}
+		}
+		if page.NextCursor == "" || page.NextCursor == cursor {
+			return priorities
+		}
+		cursor = page.NextCursor
+		params["cursor"] = cursor
+	}
+}
+
+func treePriorityNeedsFallback(node *treeWireNode) bool {
+	return node.ExternalBacklink || strings.HasPrefix(node.ExternalPath, "campaign:")
+}
+
 func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
 	for i, child := range nodes {
 		isLastChild := i == len(nodes)-1
@@ -429,6 +522,9 @@ func formatTreeHumanNode(node *treeWireNode) string {
 		}
 		if node.Title != "" && node.Title != node.Slug {
 			parts = append(parts, node.Title)
+		}
+		if node.Priority > 0 {
+			parts = append(parts, style.Paint(style.PriorityColor(node.Priority), fmt.Sprintf("P%d", node.Priority)))
 		}
 		if node.State != "" {
 			parts = append(parts, style.Paint(style.StateColor(node.State), fmt.Sprintf("<%s>", formatTreeHumanTaskState(node))))
