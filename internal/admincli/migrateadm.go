@@ -9,10 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var migrateAdmCmd = &cobra.Command{
-	Use:   "migrate",
-	Short: "Run any pending database migrations",
-	Long: `Migrate applies any pending SQL migrations to the database.
+var migrateAdmCmd = newMigrateAdmCmd()
+
+func newMigrateAdmCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Run any pending database migrations",
+		Long: `Migrate applies any pending SQL migrations to the database.
 
 Migrations are embedded in the wrkq binary and tracked via the schema_migrations
 table. Each migration file (e.g., 000001_baseline.sql) is applied exactly once.
@@ -22,26 +25,34 @@ haven't been applied yet.
 
 Use --dry-run to see which migrations would be applied without running them.
 Use --status to show the current migration status.`,
-	Args: cobra.NoArgs,
-	RunE: runMigrateAdm,
-}
+		Args: cobra.NoArgs,
+		RunE: runMigrateAdm,
+	}
 
-var (
-	migrateDryRun bool
-	migrateStatus bool
-)
+	cmd.Flags().Bool("dry-run", false, "Show which migrations would be applied without running them")
+	cmd.Flags().Bool("status", false, "Show current migration status")
+	return cmd
+}
 
 func init() {
 	rootAdmCmd.AddCommand(migrateAdmCmd)
-
-	migrateAdmCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show which migrations would be applied without running them")
-	migrateAdmCmd.Flags().BoolVar(&migrateStatus, "status", false, "Show current migration status")
 }
 
 func runMigrateAdm(cmd *cobra.Command, args []string) error {
-	dbPathFlag := cmd.Flag("db").Value.String()
+	dbPathFlag, err := cmd.Flags().GetString("db")
+	if err != nil {
+		return exitError(2, fmt.Errorf("failed to read --db: %w", err))
+	}
 	if cmd.Flags().Changed("db") && strings.TrimSpace(dbPathFlag) == "" {
 		return exitError(2, fmt.Errorf("--db was explicitly provided but empty; pass a local database path"))
+	}
+	status, err := cmd.Flags().GetBool("status")
+	if err != nil {
+		return exitError(2, fmt.Errorf("failed to read --status: %w", err))
+	}
+	dryRun, err := cmd.Flags().GetBool("dry-run")
+	if err != nil {
+		return exitError(2, fmt.Errorf("failed to read --dry-run: %w", err))
 	}
 
 	// Load configuration
@@ -67,12 +78,12 @@ func runMigrateAdm(cmd *cobra.Command, args []string) error {
 	defer func() { _ = database.Close() }()
 
 	// Handle --status flag
-	if migrateStatus {
+	if status {
 		return showMigrationStatus(database)
 	}
 
 	// Handle --dry-run flag
-	if migrateDryRun {
+	if dryRun {
 		return showPendingMigrations(database)
 	}
 
