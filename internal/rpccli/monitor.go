@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -138,6 +139,12 @@ Task selectors: T-XXXXX friendly IDs or container paths (e.g. inbox/my-task).
 Invalid selectors fail with exit code 2 before any streaming.
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if until != "" {
+				if err := validateMonitorCondition(until); err != nil {
+					return monitorUsageError(cmd.ErrOrStderr(), err)
+				}
+			}
+
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
@@ -229,6 +236,13 @@ Shares the exact condition evaluator and exit-code contract with monitor watch -
 Useful for scripted sequencing: wrkq monitor wait T-00001 --until state=completed
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(until) == "" {
+				return monitorUsageError(cmd.ErrOrStderr(), errors.New("monitor wait requires --until"))
+			}
+			if err := validateMonitorCondition(until); err != nil {
+				return monitorUsageError(cmd.ErrOrStderr(), err)
+			}
+
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
@@ -238,9 +252,6 @@ Useful for scripted sequencing: wrkq monitor wait T-00001 --until state=complete
 			out := cmd.OutOrStdout()
 			errOut := cmd.ErrOrStderr()
 
-			if strings.TrimSpace(until) == "" {
-				return monitorUsageError(errOut, errors.New("monitor wait requires --until"))
-			}
 			scoped := make([]string, 0, len(args))
 			for _, arg := range args {
 				scoped = append(scoped, sc.selector(arg, false))
@@ -624,6 +635,31 @@ func parseMonitorDuration(raw string, def time.Duration) (time.Duration, error) 
 		return 0, fmt.Errorf("invalid duration %q: %w", raw, err)
 	}
 	return value, nil
+}
+
+func validateMonitorCondition(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "all-terminal" {
+		return nil
+	}
+	if !strings.HasPrefix(raw, "state=") {
+		return fmt.Errorf("invalid --until condition %q: expected state=<s>[,<s>...] or all-terminal", raw)
+	}
+
+	stateList := strings.TrimPrefix(raw, "state=")
+	if stateList == "" {
+		return fmt.Errorf("invalid --until condition %q: state list must include at least one task state", raw)
+	}
+	states := strings.Split(stateList, ",")
+	for _, state := range states {
+		if state == "" {
+			return fmt.Errorf("invalid --until condition %q: state list contains an empty entry", raw)
+		}
+		if _, err := domain.ParseState(state); err != nil {
+			return fmt.Errorf("invalid --until condition %q: unknown task state %q", raw, state)
+		}
+	}
+	return nil
 }
 
 func splitMonitorComma(raw string) []string {

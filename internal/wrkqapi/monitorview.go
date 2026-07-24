@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
 )
 
@@ -406,21 +407,24 @@ func parseMonitorCondition(raw string) (monitorCondition, error) {
 	case raw == "all-terminal":
 		return monitorCondition{kind: "all-terminal"}, nil
 	case strings.HasPrefix(raw, "state="):
-		states := strings.Split(strings.TrimPrefix(raw, "state="), ",")
+		stateList := strings.TrimPrefix(raw, "state=")
+		if stateList == "" {
+			return monitorCondition{}, fmt.Errorf("invalid --until condition %q: state list must include at least one task state", raw)
+		}
+		states := strings.Split(stateList, ",")
 		allowed := make(map[string]bool, len(states))
 		for _, state := range states {
-			state = strings.TrimSpace(state)
 			if state == "" {
-				continue
+				return monitorCondition{}, fmt.Errorf("invalid --until condition %q: state list contains an empty entry", raw)
+			}
+			if _, err := domain.ParseState(state); err != nil {
+				return monitorCondition{}, fmt.Errorf("invalid --until condition %q: unknown task state %q", raw, state)
 			}
 			allowed[state] = true
 		}
-		if len(allowed) == 0 {
-			return monitorCondition{}, fmt.Errorf("state= condition must include at least one state")
-		}
 		return monitorCondition{kind: "state", states: allowed}, nil
 	default:
-		return monitorCondition{}, fmt.Errorf("unsupported --until condition %q", raw)
+		return monitorCondition{}, fmt.Errorf("invalid --until condition %q: expected state=<s>[,<s>...] or all-terminal", raw)
 	}
 }
 

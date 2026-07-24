@@ -297,8 +297,8 @@ func TestMonitorStateView_ConditionEval(t *testing.T) {
 	}
 }
 
-// TestMonitorStateView_BadCondition proves an unsupported --until condition
-// hard-gates with WRKQ_VALIDATION.
+// TestMonitorStateView_BadCondition proves every out-of-grammar or unknown-state
+// --until condition hard-gates with WRKQ_VALIDATION.
 func TestMonitorStateView_BadCondition(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	proj := seedMonitorProject(t, s)
@@ -308,13 +308,23 @@ func TestMonitorStateView_BadCondition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	_, err = api.MonitorStateView(context.Background(), MonitorStateViewParams{
-		Tasks:     []string{task.ID},
-		Condition: "bogus",
-	})
-	de, ok := err.(*DomainError)
-	if !ok || de.Code() != "WRKQ_VALIDATION" {
-		t.Fatalf("want WRKQ_VALIDATION for bad condition, got %T %v", err, err)
+
+	for _, condition := range []string{
+		"bogus",
+		"state=blocked|all-terminal",
+		"state=blokced",
+		"state=open,",
+	} {
+		t.Run(condition, func(t *testing.T) {
+			_, err := api.MonitorStateView(context.Background(), MonitorStateViewParams{
+				Tasks:     []string{task.ID},
+				Condition: condition,
+			})
+			de, ok := err.(*DomainError)
+			if !ok || de.Code() != "WRKQ_VALIDATION" {
+				t.Fatalf("want WRKQ_VALIDATION for bad condition, got %T %v", err, err)
+			}
+		})
 	}
 }
 

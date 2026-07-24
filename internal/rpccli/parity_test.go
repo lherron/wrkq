@@ -121,6 +121,63 @@ func TestProductionCommandContract_BoundedMonitorAndWatch(t *testing.T) {
 	}
 }
 
+func TestProductionCommandContract_MonitorUntilValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds production wrkq and wrkqadm binaries; skipped under -short")
+	}
+	bins := buildProductionBinaries(t)
+	dir := seedFixture(t, bins, [][]string{{"touch", "inbox/watched", "-t", "Watched"}})
+
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		wantError string
+	}{
+		{
+			name:      "wait-composed-conditions",
+			args:      []string{"monitor", "wait", "T-00001", "--until", "state=blocked|all-terminal", "--timeout", "10ms"},
+			wantError: `invalid --until condition "state=blocked|all-terminal"`,
+		},
+		{
+			name:      "wait-unknown-state",
+			args:      []string{"monitor", "wait", "T-00001", "--until", "state=blokced", "--timeout", "10ms"},
+			wantError: `unknown task state "blokced"`,
+		},
+		{
+			name:      "watch-empty-list-entry",
+			args:      []string{"monitor", "watch", "T-00001", "--until", "state=open,", "--timeout", "10ms"},
+			wantError: `invalid --until condition "state=open,"`,
+		},
+	} {
+		res := runCLI(t, bins.wrkq, dir, tc.args)
+		if res.exit != 2 {
+			t.Errorf("%s exit=%d, want 2; stdout=%q stderr=%q", tc.name, res.exit, res.stdout, res.stderr)
+		}
+		if res.stdout != "" {
+			t.Errorf("%s emitted stdout before refusing to arm: %q", tc.name, res.stdout)
+		}
+		if !strings.Contains(res.stderr, tc.wantError) {
+			t.Errorf("%s stderr missing %q:\n%s", tc.name, tc.wantError, res.stderr)
+		}
+	}
+
+	validList := runCLI(t, bins.wrkq, dir,
+		[]string{"monitor", "wait", "T-00001", "--until", "state=blocked,open", "--timeout", "1s"})
+	if validList.exit != 0 || !strings.Contains(validList.stdout, `"result":"met"`) {
+		t.Fatalf("valid state list exit=%d stdout=%q stderr=%q", validList.exit, validList.stdout, validList.stderr)
+	}
+
+	completed := runCLI(t, bins.wrkq, dir, []string{"set", "T-00001", "--state", "completed"})
+	if completed.exit != 0 {
+		t.Fatalf("complete fixture exit=%d stdout=%q stderr=%q", completed.exit, completed.stdout, completed.stderr)
+	}
+	allTerminal := runCLI(t, bins.wrkq, dir,
+		[]string{"monitor", "watch", "T-00001", "--until", "all-terminal", "--timeout", "1s"})
+	if allTerminal.exit != 0 || !strings.Contains(allTerminal.stdout, `"result":"met"`) {
+		t.Fatalf("all-terminal exit=%d stdout=%q stderr=%q", allTerminal.exit, allTerminal.stdout, allTerminal.stderr)
+	}
+}
+
 func TestProductionCommandContract_ProjectRootAndAttribution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds production wrkq and wrkqadm binaries; skipped under -short")
