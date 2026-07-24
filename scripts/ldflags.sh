@@ -5,6 +5,7 @@ set -euo pipefail
 
 VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+REVISION="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 pkgs=(
@@ -19,5 +20,9 @@ for p in "${pkgs[@]}"; do
   flags+=("-X" "${p}.GitCommit=${COMMIT}")
   flags+=("-X" "${p}.BuildDate=${BUILD_DATE}")
 done
+
+flags+=("-X" "github.com/lherron/wrkq/internal/wrkqd.Version=${VERSION}")
+flags+=("-X" "github.com/lherron/wrkq/internal/wrkqd.GitCommit=${REVISION}")
+flags+=("-X" "github.com/lherron/wrkq/internal/wrkqd.BuildDate=${BUILD_DATE}")
 
 echo "${flags[*]}"

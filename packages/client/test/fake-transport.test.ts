@@ -113,7 +113,13 @@ describe("createClient lifecycle", () => {
     const transport = new FakeTransport().onResult("rpc.initialize", {
       protocolVersion: "2026-06-30",
       protocolSchemaHash: "sha256:x",
-      server: { name: "wrkq-wrkf-rpc", version: "dev", pid: 1, entrypoint: "wrkq" },
+      server: {
+        name: "wrkq-wrkf-rpc",
+        version: "dev",
+        revision: "unknown",
+        pid: 1,
+        entrypoint: "wrkq",
+      },
       database: { path: "/db", migrationHash: "sha256:y" },
       capabilities: {
         cancel: true,

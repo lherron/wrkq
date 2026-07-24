@@ -22,6 +22,8 @@ func TestDaemonWorkRPCRouteRequiresAuthAndDispatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap.Server: %v", err)
 	}
+	opts.ServerVersion = "v-test-dirty"
+	opts.ServerRevision = "0123456789abcdef"
 	rpcServer := workrpc.NewServer(nil)
 	workrpc.RegisterAPI(rpcServer, api, opts)
 	s := &daemonServer{db: database, cfg: cfg, token: "secret", workrpc: rpcServer}
@@ -58,6 +60,22 @@ func TestDaemonWorkRPCRouteRequiresAuthAndDispatches(t *testing.T) {
 	}
 	if len(resp.Result) == 0 {
 		t.Fatal("expected initialize result")
+	}
+	var init struct {
+		ProtocolSchemaHash string `json:"protocolSchemaHash"`
+		Server             struct {
+			Version  string `json:"version"`
+			Revision string `json:"revision"`
+		} `json:"server"`
+	}
+	if err := json.Unmarshal(resp.Result, &init); err != nil {
+		t.Fatalf("decode initialize result: %v", err)
+	}
+	if init.ProtocolSchemaHash != workrpc.ProtocolSchemaHash() {
+		t.Fatalf("protocolSchemaHash=%q want %q", init.ProtocolSchemaHash, workrpc.ProtocolSchemaHash())
+	}
+	if init.Server.Version != "v-test-dirty" || init.Server.Revision != "0123456789abcdef" {
+		t.Fatalf("server build metadata=%+v", init.Server)
 	}
 }
 

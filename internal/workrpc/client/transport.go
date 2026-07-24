@@ -148,10 +148,14 @@ func (c *conn) initialize() error {
 }
 
 type initializeResult struct {
-	ProtocolVersion    string          `json:"protocolVersion"`
-	ProtocolSchemaHash string          `json:"protocolSchemaHash"`
-	Capabilities       map[string]bool `json:"capabilities"`
-	Methods            []string        `json:"methods"`
+	ProtocolVersion    string `json:"protocolVersion"`
+	ProtocolSchemaHash string `json:"protocolSchemaHash"`
+	Server             struct {
+		Version  string `json:"version"`
+		Revision string `json:"revision"`
+	} `json:"server"`
+	Capabilities map[string]bool `json:"capabilities"`
+	Methods      []string        `json:"methods"`
 }
 
 func validateInitializeResult(res json.RawMessage, profile Profile) error {
@@ -166,13 +170,27 @@ func validateInitializeResult(res json.RawMessage, profile Profile) error {
 		return fmt.Errorf("decode initialize result: %w", err)
 	}
 	if init.ProtocolVersion != workrpc.ProtocolVersion {
-		return fmt.Errorf("rpc protocol mismatch: server %q, client %q", init.ProtocolVersion, workrpc.ProtocolVersion)
+		return fmt.Errorf(
+			"rpc protocol mismatch: server %q, client %q (server revision %q)",
+			init.ProtocolVersion,
+			workrpc.ProtocolVersion,
+			serverRevision(init.Server.Revision),
+		)
 	}
 	if want := workrpc.ProtocolSchemaHash(); init.ProtocolSchemaHash != want {
 		if init.ProtocolSchemaHash == "" {
-			return fmt.Errorf("rpc server reported no protocolSchemaHash; client requires %s", want)
+			return fmt.Errorf(
+				"rpc server reported no protocolSchemaHash: client expected %s, server actual <missing> (server revision %q)",
+				want,
+				serverRevision(init.Server.Revision),
+			)
 		}
-		return fmt.Errorf("rpc protocol schema mismatch: server %s, client %s", init.ProtocolSchemaHash, want)
+		return fmt.Errorf(
+			"rpc protocol schema mismatch: client expected %s, server actual %s (server revision %q)",
+			want,
+			init.ProtocolSchemaHash,
+			serverRevision(init.Server.Revision),
+		)
 	}
 	for _, method := range profile.RequiredMethods {
 		if !containsMethod(init.Methods, method) {
@@ -183,6 +201,13 @@ func validateInitializeResult(res json.RawMessage, profile Profile) error {
 		return fmt.Errorf("rpc server does not advertise the %s capability", profile.Capability)
 	}
 	return nil
+}
+
+func serverRevision(revision string) string {
+	if revision = strings.TrimSpace(revision); revision != "" {
+		return revision
+	}
+	return "unknown"
 }
 
 func containsMethod(methods []string, want string) bool {

@@ -10,6 +10,7 @@ import (
 )
 
 var dtoSchemaTypes = map[string]reflect.Type{
+	"RPCInitializeResult":          dtoType[initializeResult](),
 	"WrkqTask":                     dtoType[wrkqapi.WrkqTask](),
 	"WrkqTaskCopyParams":           dtoType[wrkqapi.TaskCopyParams](),
 	"WrkqTaskCopyResult":           dtoType[wrkqapi.WrkqTaskCopyResult](),

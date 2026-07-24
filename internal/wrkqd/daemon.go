@@ -95,6 +95,8 @@ func ServeDaemon(opts DaemonOptions) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize workrpc registry: %w", err)
 	}
+	rpcOpts.ServerVersion = Version
+	rpcOpts.ServerRevision = GitCommit
 	rpcServer := workrpc.NewServer(io.Discard)
 	workrpc.RegisterAPI(rpcServer, api, rpcOpts)
 

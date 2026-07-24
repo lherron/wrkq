@@ -82,6 +82,7 @@ type initializeResult struct {
 type serverInfo struct {
 	Name       string `json:"name"`
 	Version    string `json:"version"`
+	Revision   string `json:"revision"`
 	PID        int    `json:"pid"`
 	Entrypoint string `json:"entrypoint"`
 }
@@ -96,6 +97,10 @@ func newInitializeResult(opts RegistryOptions, methods []string) initializeResul
 	if version == "" {
 		version = "dev"
 	}
+	revision := opts.ServerRevision
+	if revision == "" {
+		revision = "unknown"
+	}
 	entrypoint := opts.Entrypoint
 	if entrypoint == "" {
 		entrypoint = "wrkq"
@@ -106,6 +111,7 @@ func newInitializeResult(opts RegistryOptions, methods []string) initializeResul
 		Server: serverInfo{
 			Name:       "wrkq-wrkf-rpc",
 			Version:    version,
+			Revision:   revision,
 			PID:        os.Getpid(),
 			Entrypoint: entrypoint,
 		},

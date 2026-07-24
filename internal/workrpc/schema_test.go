@@ -31,6 +31,22 @@ func TestProtocolSchemaHashIncludesDTOShape(t *testing.T) {
 	}
 }
 
+func TestProtocolSchemaHashIncludesInitializeHandshakeShape(t *testing.T) {
+	typ := dtoSchemaTypes["RPCInitializeResult"]
+	if typ == nil {
+		t.Fatal("RPCInitializeResult missing from dtoSchemaTypes")
+	}
+	fingerprint := dtoSchemaFingerprint("RPCInitializeResult", typ)
+	for _, want := range []string{
+		"ProtocolSchemaHash:protocolSchemaHash:string:string",
+		"Revision:revision:string:string",
+	} {
+		if !strings.Contains(fingerprint, want) {
+			t.Fatalf("initialize schema fingerprint missing %q:\n%s", want, fingerprint)
+		}
+	}
+}
+
 func TestDTOSchemaCatalogCoversEveryProtocolDTO(t *testing.T) {
 	for _, name := range dtoCatalog {
 		if dtoSchemaTypes[name] == nil {

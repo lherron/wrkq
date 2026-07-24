@@ -15,6 +15,7 @@ type RegistryOptions struct {
 	DatabasePath     string
 	MigrationHash    string
 	ServerVersion    string
+	ServerRevision   string
 	Entrypoint       string
 	DefaultActor     string
 	WrkqDefaultActor string
@@ -267,6 +268,7 @@ var methodCatalog = []string{
 }
 
 var dtoCatalog = []string{
+	"RPCInitializeResult", // rpc.initialize compatibility handshake, including server build provenance
 	"WrkqTask",
 	"WrkqTaskCopyParams", // wrkq.task.copy request envelope (server-owned deep copy)
 	"WrkqTaskCopyResult", // wrkq.task.copy per-source outcome (legacy copyResult output shape)

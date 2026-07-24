@@ -18,7 +18,10 @@ export interface InitializeResult {
   protocolSchemaHash: string;
   server: {
     name: string;
+    /** Dirty-bearing build version (for example a git-describe string). */
     version: string;
+    /** Build source revision; "unknown" for unstamped development builds. */
+    revision: string;
     pid: number;
     /** Diagnostic only: which binary launched the server ("wrkq" | "wrkf"). */
     entrypoint?: string;

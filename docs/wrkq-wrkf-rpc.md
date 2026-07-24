@@ -96,6 +96,7 @@ in the `rpc.initialize` response:
   "server": {
     "name": "wrkq-wrkf-rpc",
     "version": "0.1.0",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
     "pid": 12345,
     "entrypoint": "wrkq"
   }
@@ -159,6 +160,7 @@ Result:
   "server": {
     "name": "wrkq-wrkf-rpc",
     "version": "0.1.0",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
     "pid": 12345,
     "entrypoint": "wrkq"
   },
@@ -185,6 +187,14 @@ Result:
 `capabilities.cancel: true` means best-effort cancellation via `$/cancelRequest`
 is accepted. Do not advertise strong cancellation unless every handler is
 context-aware.
+
+`server.revision` is diagnostic build provenance, not a compatibility
+authority. A stamped `wrkqd` reports its full Git revision and retains the
+dirty-bearing build string in `server.version`; unstamped development servers
+report `revision: "unknown"`. Clients continue to fail closed on
+`protocolVersion`, `protocolSchemaHash`, required methods, and capabilities.
+Schema-mismatch diagnostics must name the client-expected hash, server-actual
+hash, and server revision.
 
 ### rpc.shutdown / rpc.exit
 

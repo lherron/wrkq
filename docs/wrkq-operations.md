@@ -197,6 +197,10 @@ wrkqd -unix /tmp/wrkqd.sock -token dev -db /path/to/wrkq.db
 wrkqd -node-tokens "mini=abc123,max3=def456" -db /path/to/wrkq.db
 wrkqd -node-tokens-file /path/to/tokens.txt -db /path/to/wrkq.db
 
+# Inspect build and RPC compatibility metadata without starting the daemon
+wrkqd version
+wrkqd version --json
+
 # Via the wrkq CLI wrapper
 wrkq server serve --addr 127.0.0.1:7171 --token dev   # foreground
 wrkq server start                                      # background

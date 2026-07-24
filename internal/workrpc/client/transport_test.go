@@ -15,6 +15,7 @@ func healthyInitializeResult(t *testing.T) json.RawMessage {
 	b, err := json.Marshal(map[string]any{
 		"protocolVersion":    workrpc.ProtocolVersion,
 		"protocolSchemaHash": workrpc.ProtocolSchemaHash(),
+		"server":             map[string]string{"version": "test", "revision": "abc123"},
 		"capabilities":       map[string]bool{"wrkq": true, "wrkf": true},
 		"methods":            []string{"wrkq.task.show", "wrkf.workflow.list"},
 	})
@@ -22,6 +23,29 @@ func healthyInitializeResult(t *testing.T) json.RawMessage {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestInitializeSchemaMismatchNamesBothHashesAndServerRevision(t *testing.T) {
+	var init map[string]any
+	if err := json.Unmarshal(healthyInitializeResult(t), &init); err != nil {
+		t.Fatal(err)
+	}
+	serverHash := "sha256:" + strings.Repeat("f", 64)
+	init["protocolSchemaHash"] = serverHash
+	raw, err := json.Marshal(init)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = validateInitializeResult(raw, WrkqProfile)
+	if err == nil {
+		t.Fatal("expected schema mismatch")
+	}
+	for _, want := range []string{workrpc.ProtocolSchemaHash(), serverHash, "abc123"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("schema mismatch error %q missing %q", err, want)
+		}
+	}
 }
 
 func TestErrorCodePreservesRemoteDomainIdentifier(t *testing.T) {

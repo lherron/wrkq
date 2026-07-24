@@ -63,6 +63,8 @@ func newSkewedRemote(t *testing.T, skew func(map[string]any)) *skewedRemote {
 	if err != nil {
 		t.Fatalf("bootstrap.Server: %v", err)
 	}
+	opts.ServerVersion = "v-test-dirty"
+	opts.ServerRevision = "server-revision-test"
 	rpcServer := workrpc.NewServer(nil)
 	workrpc.RegisterAPI(rpcServer, api, opts)
 
@@ -180,6 +182,17 @@ func TestRemoteInitializeRefusesIncompatibleDaemons(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %q, want it to contain %q", err, tc.wantErr)
+			}
+			if tc.name == "schema hash mismatch" {
+				for _, want := range []string{
+					workrpc.ProtocolSchemaHash(),
+					"sha256:" + strings.Repeat("f", 64),
+					"server-revision-test",
+				} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("schema mismatch error %q missing %q", err, want)
+					}
+				}
 			}
 			// The refusal is a transport error. Reporting it as SQLite
 			// contention would send the operator hunting a lock that does
