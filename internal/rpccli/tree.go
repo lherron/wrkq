@@ -15,8 +15,9 @@ import (
 // newTreeCmd mirrors `wrkq tree` via wrkq.task.treeView (the server-owned
 // compatibility tree projection that reproduces legacy recursive traversal:
 // container pruning, "all done" rollups, subtask nesting, hidden-container
-// counting). The SERVER owns the entire hierarchy walk; the CLI owns ONLY byte
-// rendering (json / ndjson / porcelain).
+// counting). The SERVER owns the entire hierarchy walk; the CLI owns byte
+// rendering plus best-effort priority enrichment for human task rows through
+// existing task read methods.
 //
 // Implemented surface (byte-proven against legacy, non-TTY): the bare non-TTY
 // default (NDJSON), --json, --ndjson, --porcelain, --pretty, -L/--level,
@@ -79,12 +80,7 @@ func newTreeCmd() *cobra.Command {
 				return err
 			}
 			if mode == "human" {
-				if err := hydrateTreePriorities(cmd.Context(), tr, view.Children); err != nil {
-					if re, ok := err.(*Error); ok {
-						return errors.New(re.Message)
-					}
-					return err
-				}
+				hydrateTreePriorities(cmd.Context(), tr, path, view.Children, includeArchived, openOnly)
 			}
 
 			out := cmd.OutOrStdout()
@@ -405,42 +401,91 @@ func renderTreeHuman(w io.Writer, view *treeWireView) error {
 	return nil
 }
 
-// hydrateTreePriorities enriches the human-only tree projection through the
-// existing task read surface. Priority intentionally remains absent from the
-// compatibility tree wire DTO and all machine tree formats.
-func hydrateTreePriorities(ctx context.Context, tr Transport, nodes []*treeWireNode) error {
-	priorities := make(map[string]int)
-	var walk func([]*treeWireNode) error
-	walk = func(children []*treeWireNode) error {
+const treePriorityPageSize = 500
+
+type treePriorityPage struct {
+	Items []struct {
+		UUID     string `json:"uuid"`
+		Priority int    `json:"priority"`
+	} `json:"items"`
+	NextCursor string `json:"nextCursor"`
+}
+
+// hydrateTreePriorities enriches the human-only tree projection from paginated
+// bulk reads. Explicitly out-of-path nodes use a bounded per-node fallback.
+// Every read is best-effort: a missing or transiently unreadable priority leaves
+// that row unlabeled rather than failing the tree. Priority remains absent from
+// the compatibility tree wire DTO and all machine tree formats.
+func hydrateTreePriorities(ctx context.Context, tr Transport, path string, nodes []*treeWireNode, includeArchived, openOnly bool) {
+	priorities := fetchTreePriorities(ctx, tr, path, includeArchived, openOnly)
+	fallbackAttempted := make(map[string]bool)
+	var walk func([]*treeWireNode)
+	walk = func(children []*treeWireNode) {
 		for _, child := range children {
 			if child.Type == "task" {
-				priority, ok := priorities[child.UUID]
-				if !ok {
+				if priority, ok := priorities[child.UUID]; ok {
+					child.Priority = priority
+				} else if treePriorityNeedsFallback(child) && !fallbackAttempted[child.UUID] {
+					fallbackAttempted[child.UUID] = true
 					raw, err := tr.Call(ctx, "wrkq.task.show", map[string]string{"task": child.UUID})
-					if err != nil {
-						return err
-					}
 					var task struct {
 						Priority int `json:"priority"`
 					}
-					if err := json.Unmarshal(raw, &task); err != nil {
-						return err
+					if err == nil && json.Unmarshal(raw, &task) == nil && task.Priority > 0 {
+						priorities[child.UUID] = task.Priority
+						child.Priority = task.Priority
 					}
-					priority = task.Priority
-					priorities[child.UUID] = priority
 				}
-				child.Priority = priority
 			}
-			if err := walk(child.Children); err != nil {
-				return err
-			}
-			if err := walk(child.ExternalChildren); err != nil {
-				return err
+			walk(child.Children)
+			walk(child.ExternalChildren)
+		}
+	}
+	walk(nodes)
+}
+
+func fetchTreePriorities(ctx context.Context, tr Transport, path string, includeArchived, openOnly bool) map[string]int {
+	priorities := make(map[string]int)
+	params := map[string]any{
+		"path":      path,
+		"recursive": true,
+		"summary":   true,
+		"limit":     treePriorityPageSize,
+	}
+	if openOnly {
+		params["state"] = "open"
+	} else if !includeArchived {
+		params["state"] = []string{"draft", "open"}
+	}
+	if includeArchived {
+		params["includeDeleted"] = true
+	}
+
+	cursor := ""
+	for {
+		raw, err := tr.Call(ctx, "wrkq.task.list", params)
+		if err != nil {
+			return priorities
+		}
+		var page treePriorityPage
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return priorities
+		}
+		for _, task := range page.Items {
+			if task.Priority > 0 {
+				priorities[task.UUID] = task.Priority
 			}
 		}
-		return nil
+		if page.NextCursor == "" || page.NextCursor == cursor {
+			return priorities
+		}
+		cursor = page.NextCursor
+		params["cursor"] = cursor
 	}
-	return walk(nodes)
+}
+
+func treePriorityNeedsFallback(node *treeWireNode) bool {
+	return node.ExternalBacklink || strings.HasPrefix(node.ExternalPath, "campaign:")
 }
 
 func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
