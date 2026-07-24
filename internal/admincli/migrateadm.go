@@ -2,6 +2,7 @@ package admincli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
@@ -21,6 +22,7 @@ haven't been applied yet.
 
 Use --dry-run to see which migrations would be applied without running them.
 Use --status to show the current migration status.`,
+	Args: cobra.NoArgs,
 	RunE: runMigrateAdm,
 }
 
@@ -37,6 +39,11 @@ func init() {
 }
 
 func runMigrateAdm(cmd *cobra.Command, args []string) error {
+	dbPathFlag := cmd.Flag("db").Value.String()
+	if cmd.Flags().Changed("db") && strings.TrimSpace(dbPathFlag) == "" {
+		return exitError(2, fmt.Errorf("--db was explicitly provided but empty; pass a local database path"))
+	}
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -44,7 +51,6 @@ func runMigrateAdm(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use database path from flag if provided
-	dbPathFlag := cmd.Flag("db").Value.String()
 	if dbPathFlag != "" {
 		cfg.DBPath = dbPathFlag
 	}
