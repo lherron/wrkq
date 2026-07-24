@@ -301,8 +301,32 @@ doc-links:
 architecture-records *args:
   go run ./cmd/architecture-records --root . {{args}}
 
+# Install tools/hooks/pre-push into .git/hooks — only when ABSENT, never clobbering
+hooks-install:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Git does not track .git/hooks, so a fresh clone has no pre-push hook and
+  # fitkit-s6 fails with hook.pre-push.missing — on laptops and CI exactly as in
+  # the devbox container. This bootstrap makes the gate satisfiable from a virgin
+  # clone (T-06894, ruling T-06894/C-12337).
+  #
+  # NON-CLOBBERING ON PURPOSE. An existing hook is left untouched, so a hook that
+  # someone edited to skip verify is still caught by fitkit-s6 rather than being
+  # silently repaired. Bootstrapping absence is not the same as overwriting
+  # divergence, and only the first is safe to automate.
+  hook_dir="$(git rev-parse --git-path hooks)"
+  hook="$hook_dir/pre-push"
+  if [[ -e "$hook" ]]; then
+    echo "hooks-install: .git/hooks/pre-push already present — left untouched"
+    exit 0
+  fi
+  mkdir -p "$hook_dir"
+  cp tools/hooks/pre-push "$hook"
+  chmod +x "$hook"
+  echo "hooks-install: installed .git/hooks/pre-push from tools/hooks/pre-push"
+
 # Run local fitkit S6 guard: pre-push hook must delegate to just verify.
-fitkit-s6:
+fitkit-s6: hooks-install
   node tools/fitkit/s6-hook-runs-verify.mjs --root .
 
 # Emit machine-readable per-predicate verify evidence: json, ndjson, recipe, predicate_id, exit_code, diagnostic.
@@ -369,6 +393,91 @@ smoke: build
 check-wrkf-adoption:
   scripts/check-wrkf-adoption.sh
 
+# --- Environment lifecycle: env-up / env-down / e2e ---------------------------
+#
+# Roster convention (T-06887): env-up provisions everything the e2e suite needs
+# from a fresh clone using only image substrate; env-down tears it down; e2e
+# depends on env-up and runs the suite. The verbs are host-agnostic by design —
+# the same three serve a laptop, CI, and the devbox container, so none of them
+# may assume a host service, a shared database, or the network.
+#
+# WHY env-up STARTS NO DAEMON. Every test/smoke-*.sh script already owns its own
+# environment: it mktemp's a private SQLite DB and, where it needs wrkqd, binds
+# its own free port and reaps the process on exit. A long-lived wrkqd here would
+# be provisioning something nothing consumes, and would add a shared-port flake
+# to a suite that currently has none. So env-up does the two things the scripts
+# genuinely cannot do for themselves — prove the substrate is present, and build
+# the binaries they refuse to start without — plus a scratch DB for interactive
+# poking. Projects whose suites DO need a live service should start it here, on
+# a free port, recorded in the state dir. (Reference implementation for the
+# roster; see T-06894.)
+
+env_dir := justfile_directory() / "tmp/env"
+
+# Provision the e2e environment (idempotent, self-healing, no host services)
+env-up:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "==> env-up: wrkq"
+
+  # Substrate preflight. Failing here names the one missing tool, instead of
+  # letting the seventh smoke script fail eight minutes in with a bare 127.
+  missing=()
+  for tool in go python3 jq curl; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if (( ${#missing[@]} > 0 )); then
+    echo "env-up: missing substrate: ${missing[*]}" >&2
+    echo "        These are image/host substrate, not project env — wrkq does not vendor them." >&2
+    echo "        go: build+test · python3: free-port helper and JSON parsing in smoke-wrkqd/smoke-wrkf-rpc" >&2
+    echo "        jq: assertions in the wrkf smoke scripts · curl: wrkqd HTTP probes" >&2
+    exit 1
+  fi
+  echo "  ok    substrate present: go python3 jq curl"
+
+  # Self-healing: a crashed env-down can leave a half-written state dir behind,
+  # so treat whatever is here as suspect and rebuild it rather than trusting it.
+  mkdir -p "{{env_dir}}"
+  rm -f "{{env_dir}}/wrkq.db" "{{env_dir}}/wrkq.db-wal" "{{env_dir}}/wrkq.db-shm"
+
+  just build >/dev/null
+  echo "  ok    built bin/{wrkq,wrkf,wrkqadm,wrkqd}"
+
+  bin/wrkqadm --db "{{env_dir}}/wrkq.db" init >/dev/null
+  echo "  ok    ephemeral store initialized at tmp/env/wrkq.db (scratch; the suite uses its own)"
+
+  echo "==> env-up: ready — run 'just e2e'"
+
+# Tear down the e2e environment (safe to run when nothing is up)
+env-down:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "==> env-down: wrkq"
+  # Nothing long-lived is started by env-up, so teardown is the state dir alone.
+  # Kept unconditional and non-failing: env-down must be safe to run twice, and
+  # after a crash, without becoming the reason a room cannot clean up.
+  if [[ -d "{{env_dir}}" ]]; then
+    rm -rf "{{env_dir}}"
+    echo "  ok    removed tmp/env"
+  else
+    echo "  ok    tmp/env already absent"
+  fi
+  echo "==> env-down: clean"
+
+# Run the e2e suite (provisions its own environment first)
+e2e: env-up
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "==> e2e: wrkq smoke suite"
+  test/smoke-wrkqd.sh
+  test/smoke-mergeadm.sh
+  test/smoke-wrkf.sh
+  test/smoke-wrkf-rpc.sh
+  test/smoke-wrkf-wrkq-code-change.sh
+  test/smoke-wrkf-adoption.sh
+  test/smoke-wrkf-adoption-negative.sh
+  echo "==> e2e: green"
+
 # --- @wrkq/client TS package (not part of `just build`; published by `just install`) ---
 
 # Install JS deps for the quarantined @wrkq/client package
@@ -376,12 +485,16 @@ client-install:
   cd packages/client && bun install
 
 # Type-check + run @wrkq/client unit tests (fake transport; no binary needed)
-client-test:
+# Depends on client-install: on a fresh clone packages/client/node_modules is
+# absent, and `bun x tsc` auto-installs runtime deps only — it rewrites bun.lock
+# and still leaves the @types/bun devDependency unresolved, so typecheck dies
+# with TS2688 on every virgin clone (T-06894).
+client-test: client-install
   cd packages/client && bun run typecheck && bun run test:unit
 
 # Run @wrkq/client integration tests against repo-local binaries and isolated temp DBs.
 # Verification must never mutate the installed CLI or publish the local client package.
-client-integration: build
+client-integration: build client-install
   #!/usr/bin/env bash
   set -euo pipefail
   repo_root="$PWD"

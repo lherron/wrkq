@@ -1,0 +1,28 @@
+#!/bin/sh
+# wrkq pre-push hook — canonical tracked source for .git/hooks/pre-push.
+#
+# Installed by `just hooks-install`, which is a bootstrap dependency of the
+# `fitkit-s6` gate predicate. Git does not track .git/hooks, so before this file
+# existed every fresh clone — laptop, CI, or container — failed `just verify` at
+# predicate 1 with `hook.pre-push.missing` (T-06894).
+#
+# fit:s6/hook-runs-verify requires a non-comment line matching `just verify`
+# below; keep the invocation bare (no `exec`, no leading `&&`) or the guard will
+# stop recognizing it.
+#
+# SUPPRESSION. Set either variable to skip the hook:
+#   LEFTHOOK=0             ratified roster posture (T-06892) for in-container
+#                          room pushes. Raw git hooks are NOT lefthook-managed,
+#                          so honoring it here is what actually makes that
+#                          posture true for wrkq.
+#   WRKQ_SKIP_VERIFY_HOOK=1  repo-native escape for a deliberate local push.
+#
+# Suppression is a real hole by design: the compensating control is the
+# supervisor's merge gate outside the container, not this hook.
+
+if [ "${LEFTHOOK:-}" = "0" ] || [ "${WRKQ_SKIP_VERIFY_HOOK:-}" = "1" ]; then
+  echo "pre-push: verify suppressed (LEFTHOOK=0 / WRKQ_SKIP_VERIFY_HOOK=1)" >&2
+  exit 0
+fi
+
+just verify
