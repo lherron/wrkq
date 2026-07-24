@@ -1,6 +1,7 @@
 package rpccli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,6 +77,14 @@ func newTreeCmd() *cobra.Command {
 			var view treeWireView
 			if err := json.Unmarshal(raw, &view); err != nil {
 				return err
+			}
+			if mode == "human" {
+				if err := hydrateTreePriorities(cmd.Context(), tr, view.Children); err != nil {
+					if re, ok := err.(*Error); ok {
+						return errors.New(re.Message)
+					}
+					return err
+				}
 			}
 
 			out := cmd.OutOrStdout()
@@ -185,6 +194,7 @@ type treeWireNode struct {
 	ExternalPath         string          `json:"external_path,omitempty"`
 	WireCreatedAt        string          `json:"wire_created_at,omitempty"`
 	WireParentTaskUUID   string          `json:"wire_parent_task_uuid,omitempty"`
+	Priority             int             `json:"-"`
 }
 
 type treeWireView struct {
@@ -395,6 +405,44 @@ func renderTreeHuman(w io.Writer, view *treeWireView) error {
 	return nil
 }
 
+// hydrateTreePriorities enriches the human-only tree projection through the
+// existing task read surface. Priority intentionally remains absent from the
+// compatibility tree wire DTO and all machine tree formats.
+func hydrateTreePriorities(ctx context.Context, tr Transport, nodes []*treeWireNode) error {
+	priorities := make(map[string]int)
+	var walk func([]*treeWireNode) error
+	walk = func(children []*treeWireNode) error {
+		for _, child := range children {
+			if child.Type == "task" {
+				priority, ok := priorities[child.UUID]
+				if !ok {
+					raw, err := tr.Call(ctx, "wrkq.task.show", map[string]string{"task": child.UUID})
+					if err != nil {
+						return err
+					}
+					var task struct {
+						Priority int `json:"priority"`
+					}
+					if err := json.Unmarshal(raw, &task); err != nil {
+						return err
+					}
+					priority = task.Priority
+					priorities[child.UUID] = priority
+				}
+				child.Priority = priority
+			}
+			if err := walk(child.Children); err != nil {
+				return err
+			}
+			if err := walk(child.ExternalChildren); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(nodes)
+}
+
 func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
 	for i, child := range nodes {
 		isLastChild := i == len(nodes)-1
@@ -429,6 +477,9 @@ func formatTreeHumanNode(node *treeWireNode) string {
 		}
 		if node.Title != "" && node.Title != node.Slug {
 			parts = append(parts, node.Title)
+		}
+		if node.Priority > 0 {
+			parts = append(parts, style.Paint(style.PriorityColor(node.Priority), fmt.Sprintf("P%d", node.Priority)))
 		}
 		if node.State != "" {
 			parts = append(parts, style.Paint(style.StateColor(node.State), fmt.Sprintf("<%s>", formatTreeHumanTaskState(node))))
