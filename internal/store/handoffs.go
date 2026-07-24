@@ -228,19 +228,11 @@ func GetHandoff(ctx context.Context, database *db.DB, idOrUUID string) (Handoff,
 	if database == nil {
 		return Handoff{}, fmt.Errorf("database is required")
 	}
-	idOrUUID = strings.TrimSpace(idOrUUID)
-	if idOrUUID == "" {
+	if strings.TrimSpace(idOrUUID) == "" {
 		return Handoff{}, fmt.Errorf("handoff id or uuid is required")
 	}
 
-	handoff, err := scanHandoff(database.QueryRowContext(ctx, handoffSelectSQL()+` WHERE id = ? OR uuid = ?`, idOrUUID, idOrUUID))
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return Handoff{}, fmt.Errorf("handoff not found: %s", idOrUUID)
-		}
-		return Handoff{}, err
-	}
-	return handoff, nil
+	return getHandoffByIDOrUUID(ctx, database, idOrUUID)
 }
 
 // ListHandoffs returns handoffs ordered by created_at DESC, id DESC.
@@ -512,9 +504,17 @@ func getHandoffByIdempotencyKey(ctx context.Context, tx *sql.Tx, scopeRef, key s
 	return handoff, true, nil
 }
 
+type queryRower interface {
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
 func getHandoffByIDOrUUIDTx(ctx context.Context, tx *sql.Tx, idOrUUID string) (Handoff, error) {
+	return getHandoffByIDOrUUID(ctx, tx, idOrUUID)
+}
+
+func getHandoffByIDOrUUID(ctx context.Context, queryer queryRower, idOrUUID string) (Handoff, error) {
 	idOrUUID = strings.TrimSpace(idOrUUID)
-	handoff, err := scanHandoff(tx.QueryRowContext(ctx, handoffSelectSQL()+` WHERE id = ? OR uuid = ?`, idOrUUID, idOrUUID))
+	handoff, err := scanHandoff(queryer.QueryRowContext(ctx, handoffSelectSQL()+` WHERE id = ? OR uuid = ?`, idOrUUID, idOrUUID))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return Handoff{}, fmt.Errorf("handoff not found: %s", idOrUUID)
