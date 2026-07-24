@@ -101,26 +101,9 @@ runtimes receive the opaque claim token and generation, and completion is
 accepted only from the current holder. Preserve remote HTTP/auth errors (for
 example HTTP 401) rather than collapsing them into task-not-found.
 
-## Exit codes
-
-- `0` success
-- `1` generic error (db, io)
-- `2` usage error
-- `3` not found
-- `4` conflict (etag mismatch, merge conflict)
-- `5` partial success (with `--continue-on-error`)
-
-## Output formats
-
-`--json`, `--ndjson` (best for piping), `--yaml`, `--tsv`, `--porcelain` (stable machine-readable, no ANSI).
-
 ## Commits & PRs
 
-Conventional Commits (`feat`, `fix`, `chore`, `test`, optional scopes like `fix(mcp): ...`). Run `just verify` before opening PRs; mention affected commands or migration IDs.
-
-## Talking to the user
-
-If you have questions, number them for easier responses.
+Conventional Commits with optional scopes (`fix(mcp): ...`); mention affected commands or migration IDs.
 
 ## Territory docs & further reading
 
