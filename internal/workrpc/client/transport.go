@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -383,6 +382,12 @@ func (t *remoteTransport) request(ctx context.Context, method string, params any
 		if rpcResp.Error != nil {
 			return nil, errorFromRPC(rpcResp.Error)
 		}
+		// An auth rejection is the one status where the caller cannot act without
+		// knowing WHICH credential was sent, so name the source and what else was
+		// available. Source and length only — never the token bytes.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("remote workrpc HTTP %d (%s)", resp.StatusCode, workrpc.DescribeTokenSource(t.token))
+		}
 		return nil, fmt.Errorf("remote workrpc HTTP %d", resp.StatusCode)
 	}
 	if rpcResp.Error != nil {
@@ -401,14 +406,11 @@ func (t *remoteTransport) Close() error {
 // TokenFromEnv resolves wrkqd bearer credentials. config.Load preserves an
 // explicit token-file reference from dotenv shadowing before this function is
 // called, while an explicitly exported inline token retains precedence.
+//
+// Resolution lives in package workrpc so the stdio-forwarding path shares the
+// same credential diagnostics; resolving also emits the one-per-process warning
+// when an env token shadows a readable token file (T-06976).
 func TokenFromEnv() string {
-	if token := strings.TrimSpace(os.Getenv("WRKQD_TOKEN")); token != "" {
-		return token
-	}
-	if path := strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")); path != "" {
-		if b, err := os.ReadFile(path); err == nil {
-			return strings.TrimSpace(string(b))
-		}
-	}
-	return ""
+	token, _ := workrpc.ResolveToken()
+	return token
 }
