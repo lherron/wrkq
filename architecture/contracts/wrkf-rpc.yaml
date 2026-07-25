@@ -24,6 +24,17 @@ predicate: >
   (`wrkq.workflow.syncMeta`, `wrkf.evidence.schema`, `wrkf.supervisor.call`,
   `wrkf.supervisor.escalate`, `wrkf.obligation.create`) remains present in the
   registry, schema hash, and typed client.
+  The task-workflow generation-history read contract is frozen across the same
+  registry, named DTO/schema hash, CLI, and typed-client surfaces:
+  `wrkq.workflow.instances {task}` returns
+  `WrkqWorkflowInstancesResult {instances}`. A known task without workflow
+  history returns a non-null empty list; an unknown task remains typed
+  `WRKQ_NOT_FOUND`. Populated results include every generation, including
+  closed and superseded history, ordered non-closed first, then `createdAt DESC`,
+  then `id DESC`; element zero agrees with the preserved singleton
+  `wrkq.workflow.inspect`. The CLI surface is `wrkf task instances`, while the
+  typed client exposes only `client.wrkq.workflow.instances`; no
+  `wrkf.task.instances` method exists.
   Instance terminalization is frozen across the same surfaces:
   `wrkf.instance.cancel` applies ordinary selector/revision gates to an active
   unsuspended instance, atomically revokes every active run while closing the
@@ -53,18 +64,27 @@ source:
   - internal/workrpc/project_root_test.go
   - internal/workrpc/instance_cancel_acceptance_test.go
   - internal/workrpc/container_task_counts_test.go
+  - internal/workrpc/schema.go
+  - internal/workrpc/schema_test.go
+  - internal/workrpc/wrkqapi_acceptance_test.go
   - internal/wrkqapi/container_task_counts.go
   - internal/wrkqapi/container_task_counts_test.go
   - internal/wrkqapi/projectroots.go
   - internal/wrkqapi/projectsview.go
+  - internal/wrkqapi/types.go
+  - internal/wrkqapi/workflow.go
   - internal/wrkfapi/api.go
   - internal/wrkfapi/types.go
   - internal/wrkfapi/gaps.go
   - internal/wrkfapi/instance_cancel.go
+  - internal/workflow/service.go
+  - internal/workflow/instances_test.go
   - internal/workflow/instance_cancel.go
   - internal/workflow/instance_terminalization.go
   - internal/workflow/terminal_disposition_test.go
+  - internal/wrkfcli/root.go
   - internal/wrkfcli/transport.go
+  - internal/wrkfcli/transport_test.go
   - internal/wrkfcli/importguard_test.go
   - packages/client/src/errors.ts         # client preserves data.code + retryability
   - packages/client/src/client.ts
@@ -103,15 +123,20 @@ required_tests:
   - TestContainerTaskCountsCanonicalInclusionAndIdentity
   - TestContainerTaskCountsPaginationIndependentAndMatchesExhaustiveTaskList
   - TestContainerTaskCountsOverRealRPC
+  - TestInstancesReturnsAllGenerationsInInspectCompatibleOrder
+  - TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence
+  - TestProtocolSchemaHashIncludesWorkflowInstancesEnvelope
+  - TestTaskInstancesCLIJSONParityAndInspectCompatibility
   - TestCommandAdapterImportGuard
   - TestLegacyDirectDBBootstrapCannotRegrow
   - TestEntrypointEquivalence
+  - "cd packages/client && bun run typecheck"
   - "bun test packages/client/test/fake-transport.test.ts"
   - "bun test packages/client/test/workflow-template-discontinue-contract.test.ts"
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
   date: 2026-07-24
-  evidence: "T-06652 added the cataloged/fingerprinted wrkq.container.taskCounts producer/client slice: focused API/workrpc/client tests, pagination-equivalence coverage, authenticated local-vs-rpc:// parity, full just verify, and an isolated scratch-prefix installed-binary drive all green. Prior terminalization/shared-client evidence remains T-06755..T-06761 plus T-06783 at 33c598a."
+  evidence: "T-06124 at 212d66f added the cataloged/fingerprinted wrkq.workflow.instances producer/client slice (schema hash sha256:0a3a6c70d97d3ce38ccace1a33cc8b920990c7e757d709991f797cad011fd6f9): isolated scratch-prefix branch binaries with an explicit catalog, authenticated matching daemon/stdio, and real @wrkq/client proved empty, unknown, multi-generation order, inspect agreement, and local/remote parity; full just verify, pre-push verify, and just smoke were green. Daedalus independently inspected the sources, reran the four focused Go guards plus client typecheck/fake-transport tests, drove the isolated branch binary against the scratch DB for empty/multi/inspect/unknown behavior, and passed post-amendment just verify before activation. Prior container-count, terminalization, and shared-client evidence remains T-06652 and T-06755..T-06761 plus T-06783."
 reopen_when:
   - WRKF_* code set changes
   - retryable semantics change
@@ -123,5 +148,7 @@ reopen_when:
   - wrkf.instance.cancel or wrkf.suspension.resolve terminalization names, params, result DTOs, state/revision gates, or token-free summaries change
   - registry, schema hash, CLI, or @wrkq/client diverges from the instance-terminalization producer surface
   - wrkq.container.taskCounts name, params, identity fields, inclusion semantics, completeness, or typed client facade changes
+  - wrkq.workflow.instances name, namespace, params, named envelope, known-empty versus unknown semantics, generation inclusion/order, inspect element-zero agreement, or absence of wrkf.task.instances changes
+  - task instances CLI local/rpc parity, method/DTO catalog/schema hash, or @wrkq/client facade/error mapping diverges from the generation-history producer surface
 supersedes: []
 superseded_by: null
