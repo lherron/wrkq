@@ -186,6 +186,7 @@ var methodCatalog = []string{
 	"wrkq.webhook.listView",
 	"wrkq.workflow.attach",
 	"wrkq.workflow.inspect",
+	"wrkq.workflow.instances",
 	"wrkq.workflow.timeline",
 	"wrkq.workflow.refresh",
 	"wrkq.workflow.syncMeta",
@@ -325,6 +326,7 @@ var dtoCatalog = []string{
 	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
+	"WrkqWorkflowInstancesResult",
 	"WrkqWorkflowSyncMetaResult",
 	"WrkqHandoff",              // handoff resource DTO (legacy handoffJSON field order)
 	"WrkqHandoffCreateResult",  // wrkq.handoff.create envelope (handoff + idempotentReplay)
@@ -560,6 +562,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.workflow.inspect", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
 		return wq.WorkflowInspect(ctx, p)
+	}))
+	s.Register("wrkq.workflow.instances", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
+		return wq.WorkflowInstances(ctx, p)
 	}))
 	s.Register("wrkq.workflow.timeline", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
 		return wq.WorkflowTimeline(ctx, p)

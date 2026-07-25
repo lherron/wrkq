@@ -175,6 +175,7 @@ class WorkClientImpl implements WorkClient {
     workflow: {
       attach: (p) => this.call("wrkq.workflow.attach", p),
       inspect: (p) => this.call("wrkq.workflow.inspect", p),
+      instances: (p) => this.call("wrkq.workflow.instances", p),
       timeline: (p) => this.call("wrkq.workflow.timeline", p),
       refresh: (p) => this.call("wrkq.workflow.refresh", p),
       syncMeta: (p) => this.call("wrkq.workflow.syncMeta", p ?? {}),

@@ -1155,6 +1155,47 @@ describe("wrkq namespace", () => {
     expect(transport.capturedRequests[0]!.method).toBe("wrkq.workflow.timeline");
     expect(res.events[0]!.payload?.transition).toBe("finish");
   });
+
+  test("workflow.instances preserves the stable list envelope and typed not-found errors", async () => {
+    const instance = {
+      id: "wfi_x",
+      taskRef: "wrkq:T-00001",
+      templateId: "f",
+      templateVersion: "1",
+      templateHash: "sha256:abc",
+      status: "active",
+      revision: 0,
+      taskDocEtag: "1",
+      taskDocHash: "sha256:def",
+      createdAt: "2026-07-24T00:00:00Z",
+      updatedAt: "2026-07-24T00:00:00Z",
+      suspension: null,
+    };
+    const transport = new FakeTransport().onResult("wrkq.workflow.instances", {
+      instances: [instance],
+    });
+    const client = await clientWith(transport);
+    const result = await client.wrkq.workflow.instances({ task: "T-00001" });
+    expect(transport.capturedRequests[0]!.method).toBe("wrkq.workflow.instances");
+    expect(transport.capturedRequests[0]!.params).toEqual({ task: "T-00001" });
+    expect(result.instances).toEqual([instance]);
+
+    const missingTransport = new FakeTransport().onError("wrkq.workflow.instances", {
+      code: -32004,
+      message: "task not found: T-99999",
+      data: { code: "WRKQ_NOT_FOUND", retryable: false, ref: "T-99999", kind: "task" },
+    });
+    const missingClient = await clientWith(missingTransport);
+    try {
+      await missingClient.wrkq.workflow.instances({ task: "T-99999" });
+      throw new Error("expected typed not-found");
+    } catch (error) {
+      expect(isWorkRpcError(error)).toBe(true);
+      expect(isWrkqError(error)).toBe(true);
+      expect((error as WorkRpcError).domainCode).toBe("WRKQ_NOT_FOUND");
+      expect((error as WorkRpcError).retryable).toBe(false);
+    }
+  });
 });
 
 describe("wrkf namespace", () => {

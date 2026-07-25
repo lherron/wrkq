@@ -1513,6 +1513,48 @@ func (s *Service) LatestInstance(taskSelector string) (*Instance, error) {
 	return inst, s.populateInstanceLineage(inst)
 }
 
+// Instances returns every workflow generation attached to a task. The order is
+// deliberately identical to the singleton inspect selection: live instances
+// first, then newest creation time and id. A known task with no history returns
+// a non-nil empty slice.
+func (s *Service) Instances(taskSelector string) ([]*Instance, error) {
+	taskUUID, _, err := selectors.ResolveTask(s.db, taskSelector)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`
+		SELECT `+instanceSelectColumns+`
+		FROM workflow_instances
+		WHERE task_uuid = ?
+		ORDER BY `+instanceInspectOrder+`
+	`, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	instances := make([]*Instance, 0)
+	for rows.Next() {
+		inst, scanErr := scanInstanceRow(rows)
+		if scanErr != nil {
+			_ = rows.Close()
+			return nil, scanErr
+		}
+		instances = append(instances, inst)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, inst := range instances {
+		if err := s.populateInstanceLineage(inst); err != nil {
+			return nil, err
+		}
+	}
+	return instances, nil
+}
+
 // instanceSelectColumns is the single source of truth for the instance column
 // projection. Every instance read (row and rows) selects exactly these columns
 // in this order and scans them through scanInstanceRow, so the suspension
@@ -1521,6 +1563,8 @@ const instanceSelectColumns = `id, task_uuid, task_ref, COALESCE(project_id,''),
 	       status, COALESCE(phase,''), COALESCE(outcome,''), revision,
 	       task_doc_etag, task_doc_hash, created_at, updated_at, COALESCE(closed_at,''),
 	       COALESCE(suspension_id,''), COALESCE(suspension_reason,''), COALESCE(suspension_at,''), COALESCE(suspension_cause_ref,'')`
+
+const instanceInspectOrder = `CASE WHEN status != 'closed' THEN 0 ELSE 1 END, created_at DESC, id DESC`
 
 // instanceScanner is satisfied by both *sql.Row and *sql.Rows.
 type instanceScanner interface {
@@ -2184,7 +2228,7 @@ func latestInstanceByTaskUUIDQuery(q queryer, taskUUID string) (*Instance, error
 		SELECT `+instanceSelectColumns+`
 		FROM workflow_instances
 		WHERE task_uuid = ?
-		ORDER BY CASE WHEN status != 'closed' THEN 0 ELSE 1 END, created_at DESC, id DESC LIMIT 1
+		ORDER BY `+instanceInspectOrder+` LIMIT 1
 	`, taskUUID)
 	return scanInstance(row)
 }

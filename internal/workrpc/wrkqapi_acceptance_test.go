@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/workflow"
 )
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -1264,6 +1265,117 @@ func TestWrkqWorkflowInspect_ReturnsTypedDTO(t *testing.T) {
 	p2AssertAbsent(t, inst, "contextHash")
 	p2AssertAbsent(t, inst, "template_id")
 	p2AssertAbsent(t, inst, "context_hash")
+}
+
+func TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	emptyTaskID := p2SeedTask(t, dbPath,
+		"c2000000-0000-4000-8000-000000000001",
+		"wf-instances-empty", "Workflow Instances Empty Task")
+	oneTaskID := p2SeedTask(t, dbPath,
+		"c2000000-0000-4000-8000-000000000002",
+		"wf-instances-one", "Workflow Instances One Task")
+	multiTaskID := p2SeedTask(t, dbPath,
+		"c2000000-0000-4000-8000-000000000003",
+		"wf-instances-multi", "Workflow Instances Multi Task")
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := workflow.NewService(database)
+	for _, ref := range []string{workflow.BuiltinSimpleTaskV2TemplateRef, workflow.BuiltinSimpleTaskV3TemplateRef} {
+		if _, _, err := svc.EnsureBuiltinTemplate(ref, "agent:smokey"); err != nil {
+			_ = database.Close()
+			t.Fatalf("EnsureBuiltinTemplate(%s): %v", ref, err)
+		}
+	}
+	one, err := svc.AttachTask(oneTaskID, workflow.BuiltinSimpleTaskV2TemplateRef, "agent:smokey")
+	if err != nil {
+		_ = database.Close()
+		t.Fatalf("AttachTask(one): %v", err)
+	}
+	first, err := svc.AttachTask(multiTaskID, workflow.BuiltinSimpleTaskV2TemplateRef, "agent:smokey")
+	if err != nil {
+		_ = database.Close()
+		t.Fatalf("AttachTask(multi first): %v", err)
+	}
+	revision := first.Revision
+	second, err := svc.AttachTask(multiTaskID, workflow.BuiltinSimpleTaskV3TemplateRef, "agent:smokey", workflow.AttachTaskOptions{
+		Supersede:             true,
+		PredecessorInstanceID: first.ID,
+		PredecessorRevision:   &revision,
+	})
+	if err != nil {
+		_ = database.Close()
+		t.Fatalf("AttachTask(multi second): %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	frames := p2Run(t, dbPath,
+		mkRPC("empty", "wrkq.workflow.instances", map[string]any{"task": emptyTaskID}),
+		mkRPC("empty-inspect", "wrkq.workflow.inspect", map[string]any{"task": emptyTaskID}),
+		mkRPC("unknown", "wrkq.workflow.instances", map[string]any{"task": "T-99999"}),
+		mkRPC("one", "wrkq.workflow.instances", map[string]any{"task": oneTaskID}),
+		mkRPC("multi", "wrkq.workflow.instances", map[string]any{"task": multiTaskID}),
+		mkRPC("inspect", "wrkq.workflow.inspect", map[string]any{"task": multiTaskID}),
+	)
+
+	initResult := p2ResultOrFail(t, frames[0], "initialize")
+	if hash, _ := initResult["protocolSchemaHash"].(string); hash == "" {
+		t.Fatal("initialize omitted protocolSchemaHash")
+	}
+	methods, _ := initResult["methods"].([]any)
+	var hasInstances, hasForbidden bool
+	for _, method := range methods {
+		hasInstances = hasInstances || method == "wrkq.workflow.instances"
+		hasForbidden = hasForbidden || method == "wrkf.task.instances"
+	}
+	if !hasInstances || hasForbidden {
+		t.Fatalf("initialize methods: has instances=%v, has forbidden wrkf.task.instances=%v", hasInstances, hasForbidden)
+	}
+
+	empty := p2ResultOrFail(t, frames[1], "known empty task")
+	emptyInstances, ok := empty["instances"].([]any)
+	if !ok || emptyInstances == nil || len(emptyInstances) != 0 {
+		t.Fatalf("known empty result = %#v, want {instances:[]}", empty)
+	}
+	if got := p2ErrCode(frames[2]); got != "WRKF_NOT_FOUND" {
+		t.Fatalf("singleton inspect empty error code = %q, want preserved WRKF_NOT_FOUND; frame=%#v", got, frames[2])
+	}
+	if got := p2ErrCode(frames[3]); got != "WRKQ_NOT_FOUND" {
+		t.Fatalf("unknown task error code = %q, want WRKQ_NOT_FOUND; frame=%#v", got, frames[3])
+	}
+
+	oneResult := p2ResultOrFail(t, frames[4], "one instance")
+	oneInstances, _ := oneResult["instances"].([]any)
+	if len(oneInstances) != 1 || oneInstances[0].(map[string]any)["id"] != one.ID {
+		t.Fatalf("one instance result = %#v, want %s", oneResult, one.ID)
+	}
+
+	multiResult := p2ResultOrFail(t, frames[5], "multi generation")
+	multiInstances, _ := multiResult["instances"].([]any)
+	if len(multiInstances) != 2 {
+		t.Fatalf("multi generation result = %#v, want two instances", multiResult)
+	}
+	current := multiInstances[0].(map[string]any)
+	history := multiInstances[1].(map[string]any)
+	if current["id"] != second.ID || current["status"] == "closed" {
+		t.Fatalf("multi current = %#v, want live successor %s", current, second.ID)
+	}
+	if history["id"] != first.ID || history["status"] != "closed" || history["phase"] != "superseded" {
+		t.Fatalf("multi history = %#v, want closed/superseded predecessor %s", history, first.ID)
+	}
+	inspect := p2ResultOrFail(t, frames[6], "inspect compatibility")
+	inspectInstance, _ := inspect["instance"].(map[string]any)
+	if inspectInstance["id"] != current["id"] {
+		t.Fatalf("inspect instance %v != instances[0] %v", inspectInstance["id"], current["id"])
+	}
 }
 
 // TestWrkqWorkflowTimeline_ReturnsItems verifies that wrkq.workflow.timeline

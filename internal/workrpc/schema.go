@@ -66,6 +66,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WebhookRow":                   dtoType[wrkqapi.WebhookRow](),
 	"WrkqWorkflowAttachResult":     dtoType[wrkqapi.WrkqWorkflowAttachResult](),
 	"WrkqWorkflowInspectResult":    dtoType[wrkqapi.WrkqWorkflowInspectResult](),
+	"WrkqWorkflowInstancesResult":  dtoType[wrkqapi.WrkqWorkflowInstancesResult](),
 	"WrkqWorkflowSyncMetaResult":   dtoType[wrkqapi.WrkqWorkflowSyncMetaResult](),
 	"WrkqHandoff":                  dtoType[wrkqapi.WrkqHandoff](),
 	"WrkqHandoffCreateResult":      dtoType[wrkqapi.WrkqHandoffCreateResult](),

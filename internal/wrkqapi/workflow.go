@@ -82,6 +82,29 @@ func (a *API) WorkflowInspect(ctx context.Context, p WorkflowTaskParams) (*WrkqW
 	return &WrkqWorkflowInspectResult{Instance: inst}, nil
 }
 
+// WorkflowInstances returns all workflow generations for a known task in the
+// same order used by singleton inspect. A known task without history returns an
+// explicit empty list; task absence remains a typed wrkq not-found error.
+func (a *API) WorkflowInstances(ctx context.Context, p WorkflowTaskParams) (*WrkqWorkflowInstancesResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a.wf == nil {
+		return nil, NewInternalError(errWorkflowUnavailable)
+	}
+	if _, err := a.resolveTaskUUID(p.Task); err != nil {
+		return nil, err
+	}
+	instances, err := a.wf.TaskInstances(ctx, p.Task)
+	if err != nil {
+		return nil, err
+	}
+	if instances == nil {
+		instances = []*workflow.Instance{}
+	}
+	return &WrkqWorkflowInstancesResult{Instances: instances}, nil
+}
+
 // WorkflowTimeline returns the workflow event timeline for a task, wrapped in a
 // typed result envelope with a non-nil events array.
 func (a *API) WorkflowTimeline(ctx context.Context, p WorkflowTaskParams) (*WrkqWorkflowTimelineResult, error) {

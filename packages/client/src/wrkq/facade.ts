@@ -92,6 +92,8 @@ import type {
   WrkqWorkflowAttachResult,
   WrkqWorkflowInspectParams,
   WrkqWorkflowInspectResult,
+  WrkqWorkflowInstancesParams,
+  WrkqWorkflowInstancesResult,
   WrkqWorkflowRefreshParams,
   WrkqWorkflowSyncMetaParams,
   WrkqWorkflowSyncMetaResult,
@@ -181,6 +183,7 @@ export interface WrkqWebhookFacade {
 export interface WrkqWorkflowFacade {
   attach(params: WrkqWorkflowAttachParams): Promise<WrkqWorkflowAttachResult>;
   inspect(params: WrkqWorkflowInspectParams): Promise<WrkqWorkflowInspectResult>;
+  instances(params: WrkqWorkflowInstancesParams): Promise<WrkqWorkflowInstancesResult>;
   timeline(params: WrkqWorkflowTimelineParams): Promise<WrkqWorkflowTimelineResult>;
   refresh(params: WrkqWorkflowRefreshParams): Promise<WrkqWorkflowInspectResult>;
   syncMeta(params?: WrkqWorkflowSyncMetaParams): Promise<WrkqWorkflowSyncMetaResult>;

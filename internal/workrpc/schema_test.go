@@ -76,6 +76,23 @@ func TestProtocolSchemaHashIncludesActionClaimPredecessorShape(t *testing.T) {
 	}
 }
 
+func TestProtocolSchemaHashIncludesWorkflowInstancesEnvelope(t *testing.T) {
+	typ := dtoSchemaTypes["WrkqWorkflowInstancesResult"]
+	if typ == nil {
+		t.Fatal("WrkqWorkflowInstancesResult missing from dtoSchemaTypes")
+	}
+	fingerprint := dtoSchemaFingerprint("WrkqWorkflowInstancesResult", typ)
+	if want := "Instances:instances:slice[*workflow.Instance{"; !strings.Contains(fingerprint, want) {
+		t.Fatalf("workflow instances schema fingerprint missing %q:\n%s", want, fingerprint)
+	}
+	if !contains(methodCatalog, "wrkq.workflow.instances") {
+		t.Fatal("wrkq.workflow.instances missing from the canonical method catalog")
+	}
+	if contains(methodCatalog, "wrkf.task.instances") {
+		t.Fatal("forbidden wrkf.task.instances method entered the canonical catalog")
+	}
+}
+
 func TestDTOSchemaCatalogCoversEveryProtocolDTO(t *testing.T) {
 	for _, name := range dtoCatalog {
 		if dtoSchemaTypes[name] == nil {

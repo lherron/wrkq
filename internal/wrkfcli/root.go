@@ -385,6 +385,32 @@ func taskCmd() *cobra.Command {
 			return printAny(cmd, flagJSON, result.Instance)
 		}),
 	}
+	instances := &cobra.Command{
+		Use:   "instances TASK",
+		Short: "List every workflow instance generation attached to a task",
+		Long: "List every workflow instance generation attached to a task.\n" +
+			"Use --json for the stable {\"instances\": [...]} machine envelope. " +
+			"Human output is presentation-only: one tab-separated id, status, phase, template, and creation time per row.",
+		Args: cobra.ExactArgs(1),
+		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
+			result, err := rpcCall[wrkqapi.WrkqWorkflowInstancesResult](cmd, a, "wrkq.workflow.instances", map[string]any{"task": args[0]})
+			if err != nil {
+				return err
+			}
+			if flagJSON {
+				return printJSON(cmd, result)
+			}
+			if len(result.Instances) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No workflow instances.")
+				return nil
+			}
+			for _, inst := range result.Instances {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s@%s\t%s\n",
+					inst.ID, inst.Status, inst.Phase, inst.TemplateID, inst.TemplateVersion, inst.CreatedAt)
+			}
+			return nil
+		}),
+	}
 	timeline := &cobra.Command{
 		Use:  "timeline TASK",
 		Args: cobra.ExactArgs(1),
@@ -431,7 +457,7 @@ func taskCmd() *cobra.Command {
 		}),
 	}
 	syncMeta.Flags().Bool("all", false, "Sync all workflow task projections")
-	cmd.AddCommand(attach, inspect, timeline, refresh, syncMeta)
+	cmd.AddCommand(attach, inspect, instances, timeline, refresh, syncMeta)
 	return cmd
 }
 

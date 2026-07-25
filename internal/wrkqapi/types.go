@@ -101,6 +101,11 @@ type WrkqWorkflowInspectResult struct {
 	Instance *workflow.Instance `json:"instance"`
 }
 
+// WrkqWorkflowInstancesResult wraps every workflow generation for a task.
+type WrkqWorkflowInstancesResult struct {
+	Instances []*workflow.Instance `json:"instances"`
+}
+
 // WrkqWorkflowTimelineResult wraps the workflow event timeline for a task.
 type WrkqWorkflowTimelineResult struct {
 	Events []workflow.Event `json:"events"`

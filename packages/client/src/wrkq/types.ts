@@ -900,6 +900,15 @@ export interface WrkqWorkflowInspectResult {
   [k: string]: unknown;
 }
 
+export interface WrkqWorkflowInstancesParams {
+  task: string;
+}
+
+export interface WrkqWorkflowInstancesResult {
+  instances: WrkfInstance[];
+  [k: string]: unknown;
+}
+
 export interface WrkqWorkflowTimelineParams {
   task: string;
 }

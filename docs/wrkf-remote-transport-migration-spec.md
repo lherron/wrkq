@@ -94,7 +94,9 @@ Both conditions' behaviors receive ordinary unit coverage within their implement
 
 - S1: seam only (§3). S2: read commands → adapters. S3: mutation commands → adapters (deferring `--run-checks`/`effect deliver` to S5 per D6). S5: template + hook families per D5/D6.
 - Every migrated command: byte-identical local output vs pre-migration (golden tests), plus an `rpc://mini` smoke.
-- `wrkf task attach/refresh/inspect/timeline` route to `wrkq.workflow.*` (task-side, D2).
+- `wrkf task attach/refresh/inspect/instances/timeline` route to
+  `wrkq.workflow.*` (task-side, D2); the list command is
+  `wrkq.workflow.instances`, never `wrkf.task.instances`.
 - Guards (S6): importguard on wrkf command paths permits the shared `internal/workrpc/client` package and forbids direct bootstrap/db/workflow imports (sanctioned local-execution carve-outs: evidence exec, watch loop); entrypoint-equivalence extension; golden-parity suite as CI guard.
 - S6 enforcement keeps local registry/database construction inside
   `internal/workrpc/client`, gives `watch.go` the sole workflow-import carve-out,

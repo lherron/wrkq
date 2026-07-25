@@ -1251,6 +1251,7 @@ Workflow attachment to a task lives here:
 ```text
 wrkq.workflow.attach
 wrkq.workflow.inspect
+wrkq.workflow.instances
 wrkq.workflow.timeline
 wrkq.workflow.refresh
 wrkq.workflow.syncMeta
@@ -1261,6 +1262,7 @@ Required minimum for agent-loop readiness:
 ```text
 wrkq.workflow.attach
 wrkq.workflow.inspect
+wrkq.workflow.instances
 wrkq.workflow.timeline
 ```
 
@@ -1285,17 +1287,34 @@ interface WrkqWorkflowAttachResult {
 }
 ```
 
-`wrkq.workflow.inspect` and `wrkq.workflow.timeline` are task-scoped accessors for the attached workflow instance:
+`wrkq.workflow.inspect`, `wrkq.workflow.instances`, and
+`wrkq.workflow.timeline` are task-scoped accessors for attached workflow state:
 
 ```ts
 interface WrkqWorkflowInspectParams {
   task: string;
 }
 
+interface WrkqWorkflowInstancesParams {
+  task: string;
+}
+
+interface WrkqWorkflowInstancesResult {
+  instances: WrkfInstance[];
+}
+
 interface WrkqWorkflowTimelineParams {
   task: string;
 }
 ```
+
+`inspect` remains singleton and returns `{instance: WrkfInstance}` with its
+existing typed-not-found behavior. `instances` is additive: a known task with
+no history returns `{instances:[]}`, an unknown task returns typed
+`WRKQ_NOT_FOUND`, and a populated task includes every closed/superseded
+generation in non-closed-first, then `createdAt DESC`, then `id DESC` order.
+Element zero agrees with inspect. The typed client exposes this only as
+`client.wrkq.workflow.instances(...)`; `wrkf.task.instances` is forbidden.
 
 `wrkq.workflow.refresh` may update wrkf instance context from the current task document. It must not be exposed as `wrkf.task.refresh`.
 
@@ -2115,6 +2134,7 @@ WrkqAttachment
 WrkqRelation
 WrkqWorkflowAttachResult
 WrkqWorkflowInspectResult
+WrkqWorkflowInstancesResult
 WrkfInstance
 WrkfEvent
 WrkfEvidence

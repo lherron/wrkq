@@ -41,7 +41,8 @@ wrkf rpc --stdio
 - Create, show, list, update, acknowledge, delete, or restore tasks
 - Add, list, show, or remove comments, attachments, and relations
 - Attach a workflow to a task (`wrkq.workflow.attach`)
-- Query the workflow instance attached to a task (`wrkq.workflow.inspect`,
+- Query the workflow instance or complete generation history attached to a task
+  (`wrkq.workflow.inspect`, `wrkq.workflow.instances`,
   `wrkq.workflow.timeline`, `wrkq.workflow.refresh`)
 
 **`wrkf.*` owns workflow templates, instances, evidence, obligations, checks,
@@ -1734,6 +1735,7 @@ digest sweep is the delivery guarantee because v1 has no webhook outbox.
 ```
 wrkq.workflow.attach    [required]
 wrkq.workflow.inspect   [required]
+wrkq.workflow.instances [required]
 wrkq.workflow.timeline  [required]
 wrkq.workflow.refresh
 wrkq.workflow.syncMeta
@@ -1762,6 +1764,12 @@ interface WrkqWorkflowAttachResult {
 
 interface WrkqWorkflowInspectParams { task: string }
 
+interface WrkqWorkflowInstancesParams { task: string }
+
+interface WrkqWorkflowInstancesResult {
+  instances: WrkfInstance[];
+}
+
 interface WrkqWorkflowTimelineParams { task: string }
 
 interface WrkqWorkflowSyncMetaParams { task?: string; actor?: string }
@@ -1770,6 +1778,21 @@ interface WrkqWorkflowSyncMetaResult { synced: number }
 
 `wrkq.workflow.syncMeta` is the explicit task-owned projection repair method;
 there is no `wrkf.task.syncMeta` alias.
+
+`wrkq.workflow.inspect` remains the singleton accessor and returns
+`{instance: WrkfInstance}`; its typed not-found behavior is unchanged.
+`wrkq.workflow.instances {task}` is the additive list accessor. A known task
+with no workflow history returns `{instances:[]}`; an unknown task returns
+typed `WRKQ_NOT_FOUND`. A populated task returns every generation, including
+closed and superseded history, ordered by non-closed first, then
+`createdAt DESC`, then `id DESC`. Element zero therefore agrees with singleton
+inspect. There is no `wrkf.task.instances` method.
+
+The CLI exposes the list as `wrkf task instances TASK --json`. JSON is the
+stable indented envelope. Without `--json`, an empty list prints
+`No workflow instances.`; populated output is one tab-separated
+`id status phase template@version createdAt` row per instance and is
+presentation-only.
 
 #### Search + index methods
 
@@ -2327,6 +2350,7 @@ WrkqAttachment
 WrkqRelation
 WrkqWorkflowAttachResult
 WrkqWorkflowInspectResult
+WrkqWorkflowInstancesResult
 WrkqWorkflowSyncMetaResult
 WrkfInstance
 WrkfEvent

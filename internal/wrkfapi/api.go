@@ -200,6 +200,17 @@ func (api *API) TaskInspect(ctx context.Context, taskSelector string) (*workflow
 	return inst, nil
 }
 
+func (api *API) TaskInstances(ctx context.Context, taskSelector string) ([]*workflow.Instance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	instances, err := api.service.Instances(taskSelector)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return instances, nil
+}
+
 func (api *API) InstanceShow(ctx context.Context, taskSelector, instanceID string) (*workflow.Instance, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

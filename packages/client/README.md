@@ -74,7 +74,14 @@ const attached = await client.wrkq.workflow.attach({
   idempotencyKey: `agent-loop:attach:${task.id}:code_change@1`,
 });
 const inspect = await client.wrkq.workflow.inspect({ task: task.id });
+const history = await client.wrkq.workflow.instances({ task: task.id });
 ```
+
+`inspect` remains the singleton `{ instance }` accessor. `instances` returns
+the stable `{ instances: WrkfInstance[] }` envelope: `[]` means the task exists
+and has never had an attached workflow; an unknown task rejects with typed
+`WRKQ_NOT_FOUND`. Populated history includes closed and superseded generations,
+ordered non-closed first, then newest `createdAt`, then newest `id`.
 
 ## wrkf: evidence / transition / run / effect
 
