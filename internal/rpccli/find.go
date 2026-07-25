@@ -27,6 +27,7 @@ func newFindCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, reverse, ackPending, hasOutcome, print0 bool
 	var limit int
 	var cursorTok, typeFilter, sort string
+	var labels []string
 	var slugGlob, state, dueBefore, dueAfter, kind, assignee, claimedBy, claimedNode, parentTask, requestedBy, assignedProject, causedBy, campaign string
 	cmd := &cobra.Command{
 		Use:   "find [PATH...]",
@@ -72,6 +73,9 @@ func newFindCmd() *cobra.Command {
 			}
 			if kind != "" {
 				params["kind"] = kind
+			}
+			if len(labels) > 0 {
+				params["labels"] = labels
 			}
 			if assignee != "" {
 				params["assignee"] = assignee
@@ -215,6 +219,7 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dueBefore, "due-before", "", "Filter tasks due before date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&dueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")
+	cmd.Flags().StringArrayVar(&labels, "label", nil, "Filter by exact task label (repeatable; all must match)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Filter by assignee principal ref or bare agent slug")
 	cmd.Flags().StringVar(&claimedBy, "claimed-by", "", "Filter by claim holder principal ref")
 	cmd.Flags().StringVar(&claimedNode, "claimed-node", "", "Filter by server-derived claim node")

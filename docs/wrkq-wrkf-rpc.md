@@ -415,12 +415,12 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > **`wrkq.task.findListView`** is a CLI compatibility list read model for
 > `wrkq find`, **not** canonical `wrkq.task.list`. The server owns recursive
 > path-prefix matching (`path = ? OR path LIKE ?||'/%'`, or GLOB for `*` paths),
-> all metadata filters (state/type/kind/slug-glob/assignee/claimed-by/claimed-node/parent-task/
+> all metadata filters (state/type/kind/slug-glob/labels/assignee/claimed-by/claimed-node/parent-task/
 > requested-by/assigned-project/due-before/due-after/ack-pending/has-outcome), assignee
 > normalization + parent-task selector→UUID resolution, cursor.Apply + limit+1 +
 > sort-validation + BuildNextCursor over the filtered set, and the legacy
 > mixed-type in-memory merge-sort:
-> `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, assignee?, claimedBy?, claimedNode?,
+> `{ paths?, type?, slugGlob?, state?, dueBefore?, dueAfter?, kind?, labels?, assignee?, claimedBy?, claimedNode?,
 > parentTask?, requestedBy?, assignedProject?, causedBy?, ackPending?, hasOutcome?, sort?,
 > reverse?, limit?, cursor? }` → `{ items: WrkqFindEntry[], next_cursor }`. Rows
 > are legacy-shaped (snake_case `findResult`); each task row carries current
@@ -428,7 +428,11 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > `claim_generation` (plus `caused_by`)
 > (array of friendly IDs) when non-empty. `causedBy` filters to tasks whose
 > lineage contains that task ID; `hasOutcome` filters to task rows whose
-> normalized nullable outcome is present. PINNED PARITY QUIRKS the server
+> normalized nullable outcome is present. `labels` requires exact,
+> case-sensitive membership in canonical `tasks.labels`; every distinct value
+> must be present, duplicate values are idempotent, and a label-filtered find
+> returns task rows only. The predicates are applied before cursor/limit
+> pagination. PINNED PARITY QUIRKS the server
 > reproduces exactly: (1) when NO `--type` is given (searchBoth) the cursor is
 > IGNORED — pagination/limit run over the merged in-memory set with no
 > cursor.Apply; only a single `type` (`t`|`p`) applies the cursor SQL-side; (2)
@@ -1794,6 +1798,11 @@ wrkq.index.resume       [server-owned indexing resume]
 > server DB config (`<db>.search.sqlite`), overridable by the server's
 > `WRKQ_SEARCH_DB_PATH`. When search is disabled the methods report
 > `WRKQ_VALIDATION` "search is disabled".
+> A non-empty `labels` request is checked against canonical `tasks.labels` after
+> candidate retrieval but before aggregation/sort/paging. Membership is exact
+> and case-sensitive, all distinct requested values are required, duplicates are
+> idempotent, and neither indexed label metadata nor matching prose can satisfy
+> the predicate. `query` remains required.
 >
 > **Field order:** `WrkqSearchListView` reproduces the legacy `search.Response`
 > STRUCT order; `WrkqSearchResult` the legacy `search.Result` STRUCT order;
@@ -1809,6 +1818,7 @@ interface WrkqSearchListViewParams {
   paths?: string[];               // pre-scoped path prefixes (caller scopes)
   state?: string;                 // "" → open only; "all" → non-deleted
   kind?: string;
+  labels?: string[];              // exact case-sensitive canonical membership; AND
   assigneePrincipalRef?: string;
   limit?: number;                 // default 20
   candidateLimit?: number;        // default 300

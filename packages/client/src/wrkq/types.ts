@@ -262,6 +262,74 @@ export interface WrkqTaskListResult {
   nextCursor?: string;
 }
 
+/**
+ * Params for wrkq.task.findListView, the server-owned CLI compatibility
+ * projection. `labels` uses exact, case-sensitive membership and requires every
+ * requested value; duplicate values are idempotent.
+ */
+export interface WrkqFindListViewParams {
+  paths?: string[];
+  type?: "t" | "p";
+  slugGlob?: string;
+  state?: string;
+  dueBefore?: string;
+  dueAfter?: string;
+  kind?: string;
+  labels?: string[];
+  assignee?: string;
+  claimedBy?: string;
+  claimedNode?: string;
+  parentTask?: string;
+  requestedBy?: string;
+  assignedProject?: string;
+  causedBy?: string;
+  ackPending?: boolean;
+  hasOutcome?: boolean;
+  campaign?: string;
+  limit?: number;
+  cursor?: string;
+  sort?: "updated_at" | "created_at" | "id" | "path";
+  reverse?: boolean;
+}
+
+/** One legacy-shaped task/container row returned by wrkq.task.findListView. */
+export interface WrkqFindEntry {
+  type: "task" | "container";
+  uuid: string;
+  id: string;
+  slug: string;
+  title: string;
+  path: string;
+  specification?: string;
+  state?: string;
+  priority?: number;
+  kind?: string;
+  assignee?: string;
+  assignee_principal_ref?: string;
+  claimed_by?: string;
+  claimed_scope?: string;
+  claimed_node?: string;
+  claimed_at?: string;
+  claim_generation?: number;
+  parent_task_id?: string;
+  requested_by_project_id?: string;
+  assigned_project_id?: string;
+  acknowledged_at?: string;
+  resolution?: string;
+  due_at?: string;
+  caused_by?: string[];
+  created_at: string;
+  updated_at: string;
+  etag: number;
+  membership?: string;
+}
+
+/** Result of wrkq.task.findListView. */
+export interface WrkqFindListView {
+  items: WrkqFindEntry[];
+  next_cursor?: string;
+}
+
 // ── Comments ─────────────────────────────────────────────────────────────────
 
 export type WrkqCommentKind = "blocker" | "decision" | "postmortem" | "digest";
@@ -974,6 +1042,8 @@ export interface WrkqSearchListViewParams {
   /** State filter ("" → open only; "all" → non-deleted). */
   state?: string;
   kind?: string;
+  /** Exact, case-sensitive canonical task labels; every value must be present. */
+  labels?: string[];
   /** Assignee principal ref (or bare agent slug the caller resolved). */
   assigneePrincipalRef?: string;
   limit?: number;

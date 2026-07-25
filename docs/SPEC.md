@@ -549,6 +549,20 @@ Index lifecycle:
 
 The sidecar is rebuildable and not the canonical source of task state.
 
+Both task discovery surfaces accept a repeatable singular label filter:
+
+```bash
+wrkq find --label refactor --label urgent --state all --type t
+wrkq search "prompt shaping" --label refactor --state all
+```
+
+Each `--label VALUE` requires exact, case-sensitive membership in the canonical
+`tasks.labels` JSON array. Repeated distinct values are logical AND; duplicate
+values are idempotent. Filtering is server-side and happens before paging, so
+search-sidecar text/metadata and substring matches cannot satisfy it. Search
+still requires its text query. The existing `--labels` flag remains the
+JSON-array write surface on task mutations.
+
 ## 9. Daemon API
 
 `wrkqd` serves token-auth HTTP endpoints over the configured DB. `wrkq server`

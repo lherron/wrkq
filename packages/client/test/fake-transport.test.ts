@@ -1669,6 +1669,45 @@ describe("error mapping", () => {
   });
 });
 
+describe("wrkq exact label filter read surfaces", () => {
+  test("task.findListView forwards repeatable exact-label params", async () => {
+    const transport = new FakeTransport().onResult("wrkq.task.findListView", {
+      items: [
+        {
+          type: "task",
+          uuid: "u-1",
+          id: "T-00001",
+          slug: "my-task",
+          title: "my task",
+          path: "inbox/my-task",
+          state: "open",
+          created_at: "2026-06-30T00:00:00Z",
+          updated_at: "2026-06-30T00:00:00Z",
+          etag: 2,
+        },
+      ],
+    });
+    const client = await clientWith(transport);
+
+    const view = await client.wrkq.task.findListView({
+      type: "t",
+      state: "all",
+      labels: ["alpha", "beta"],
+      sort: "id",
+    });
+
+    const frame = transport.capturedRequests[0]!;
+    expect(frame.method).toBe("wrkq.task.findListView");
+    expect(frame.params).toMatchObject({
+      type: "t",
+      state: "all",
+      labels: ["alpha", "beta"],
+      sort: "id",
+    });
+    expect(view.items[0]!.id).toBe("T-00001");
+  });
+});
+
 describe("wrkq search + index family (T-05114)", () => {
   const MOCK_STATUS = {
     path: "/db/wrkq.db.search.sqlite",
@@ -1713,6 +1752,7 @@ describe("wrkq search + index family (T-05114)", () => {
       query: "alpha",
       paths: ["inbox"],
       state: "all",
+      labels: ["alpha", "beta"],
       sort: "updated_at",
       fresh: true,
     });
@@ -1723,6 +1763,7 @@ describe("wrkq search + index family (T-05114)", () => {
       query: "alpha",
       paths: ["inbox"],
       state: "all",
+      labels: ["alpha", "beta"],
       sort: "updated_at",
       fresh: true,
     });

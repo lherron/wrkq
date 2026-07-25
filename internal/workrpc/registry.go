@@ -280,6 +280,7 @@ var dtoCatalog = []string{
 	"WrkqCommentListView",    // CLI compatibility list projection (comment ls)
 	"WrkqAttachmentListView", // CLI compatibility list projection (attach ls)
 	"WrkqLsListView",         // CLI compatibility list projection (ls)
+	"WrkqFindListViewParams", // CLI compatibility find request (exact label filters included)
 	"WrkqFindListView",       // CLI compatibility list projection (find)
 	"WrkqHistoryListView",    // CLI compatibility history read model (log over event_log); nested WrkqLogEvent is part of this DTO
 	"WrkqLogEvent",           // element of history.listView (the legacy logEvent row shape)
@@ -325,13 +326,14 @@ var dtoCatalog = []string{
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
 	"WrkqWorkflowSyncMetaResult",
-	"WrkqHandoff",             // handoff resource DTO (legacy handoffJSON field order)
-	"WrkqHandoffCreateResult", // wrkq.handoff.create envelope (handoff + idempotentReplay)
-	"WrkqHandoffListResult",   // wrkq.handoff.listView page envelope
-	"WrkqHandoffSearchResult", // wrkq.handoff.searchView legacy search output envelope
-	"WrkqSearchListView",      // CLI compatibility search read model (search); nested WrkqSearchResult + WrkqIndexStatus are part of this DTO
-	"WrkqSearchResult",        // element of search.listView (legacy search.Result struct order)
-	"WrkqIndexStatus",         // CLI compatibility index status projection (index status; legacy indexdb.Status struct order)
+	"WrkqHandoff",              // handoff resource DTO (legacy handoffJSON field order)
+	"WrkqHandoffCreateResult",  // wrkq.handoff.create envelope (handoff + idempotentReplay)
+	"WrkqHandoffListResult",    // wrkq.handoff.listView page envelope
+	"WrkqHandoffSearchResult",  // wrkq.handoff.searchView legacy search output envelope
+	"WrkqSearchListViewParams", // server-owned search request (canonical exact label filters included)
+	"WrkqSearchListView",       // CLI compatibility search read model (search); nested WrkqSearchResult + WrkqIndexStatus are part of this DTO
+	"WrkqSearchResult",         // element of search.listView (legacy search.Result struct order)
+	"WrkqIndexStatus",          // CLI compatibility index status projection (index status; legacy indexdb.Status struct order)
 	"WrkfInstance",
 	"WrkfEvent",
 	"WrkfEventQueryResult",

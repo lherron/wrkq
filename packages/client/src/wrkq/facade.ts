@@ -66,6 +66,8 @@ import type {
   WrkqProjectsListView,
   WrkqSearchListView,
   WrkqSearchListViewParams,
+  WrkqFindListView,
+  WrkqFindListViewParams,
   WrkqTask,
   WrkqTaskAcknowledgeParams,
   WrkqTaskClaim,
@@ -101,6 +103,7 @@ export interface WrkqTaskFacade {
   create(params: WrkqTaskCreateParams): Promise<WrkqTask>;
   show(params: WrkqTaskShowParams): Promise<WrkqTask>;
   list(params?: WrkqTaskListParams): Promise<WrkqTaskListResult>;
+  findListView(params?: WrkqFindListViewParams): Promise<WrkqFindListView>;
   update(params: WrkqTaskUpdateParams): Promise<WrkqTask>;
   claim(params: WrkqTaskClaimParams): Promise<WrkqTaskClaim>;
   claimValidate(params: WrkqTaskClaimValidateParams): Promise<WrkqTaskClaim>;

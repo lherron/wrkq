@@ -181,8 +181,11 @@ func TestHandoffDTOFingerprint(t *testing.T) {
 
 // TestFindListViewDTOFingerprint guards the find projection shapes.
 func TestFindListViewDTOFingerprint(t *testing.T) {
-	got := dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))
-	const want = "WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,caused_by,omitempty,created_at,updated_at,etag}"
+	got := dtoFingerprint(reflect.TypeOf(FindListViewParams{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))
+	const want = "FindListViewParams{paths,omitempty,type,omitempty,slugGlob,omitempty,state,omitempty,dueBefore,omitempty,dueAfter,omitempty,kind,omitempty,labels,omitempty,assignee,omitempty,claimedBy,omitempty,claimedNode,omitempty,parentTask,omitempty,requestedBy,omitempty,assignedProject,omitempty,causedBy,omitempty,ackPending,omitempty,hasOutcome,omitempty,campaign,omitempty,limit,omitempty,cursor,omitempty,sort,omitempty,reverse,omitempty}\n" +
+		"WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,caused_by,omitempty,created_at,updated_at,etag}"
 	if got != want {
 		t.Errorf("find list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}
@@ -262,10 +265,12 @@ func TestTreeViewDTOFingerprint(t *testing.T) {
 // must be made deliberately (bump fingerprint, update docs/dtoCatalog, re-verify
 // search/index parity).
 func TestSearchIndexViewDTOFingerprint(t *testing.T) {
-	got := dtoFingerprint(reflect.TypeOf(WrkqSearchListView{})) + "\n" +
+	got := dtoFingerprint(reflect.TypeOf(SearchListViewParams{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqSearchListView{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqSearchResult{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqIndexStatus{}))
-	const want = "WrkqSearchListView{query,stale,status,results,total_matches,offset}\n" +
+	const want = "SearchListViewParams{query,paths,omitempty,state,omitempty,kind,omitempty,labels,omitempty,assigneePrincipalRef,omitempty,limit,omitempty,candidateLimit,omitempty,sort,omitempty,reverse,omitempty,fresh,omitempty,explain,omitempty}\n" +
+		"WrkqSearchListView{query,stale,status,results,total_matches,offset}\n" +
 		"WrkqSearchResult{resource_type,resource_id,resource_uuid,task_id,omitempty,task_uuid,omitempty,comment_id,omitempty,scope_ref,omitempty,status,omitempty,path,title,state,omitempty,kind,omitempty,snippet,score,created_at,updated_at,stale,explain,omitempty}\n" +
 		"WrkqIndexStatus{path,enabled,status,last_indexed_event_id,canonical_max_event_id,stale_event_count,dense_model_id,omitempty,dense_dimension,omitempty,dense_vector_count,omitempty,last_error,omitempty,searchable_chunk_count}"
 	if got != want {

@@ -120,6 +120,7 @@ class WorkClientImpl implements WorkClient {
       create: async (p) => this.call("wrkq.task.create", rejectLegacyActorAttribution(p)),
       show: (p) => this.call("wrkq.task.show", p),
       list: (p) => this.call("wrkq.task.list", p ?? {}),
+      findListView: (p) => this.call("wrkq.task.findListView", p ?? {}),
       update: (p) => this.call("wrkq.task.update", p),
       claim: (p) => this.call("wrkq.task.claim", p),
       claimValidate: (p) => this.call("wrkq.task.claimValidate", p),

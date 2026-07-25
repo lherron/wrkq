@@ -1101,6 +1101,15 @@ client.wrkq.project.setRoot(params)
 During decoupled rollout, consumers must tolerate `root` and
 `wrkq.project.setRoot` being absent until the wrkq producer has landed.
 
+##### Exact-label task discovery
+
+The typed client exposes the compatibility discovery view as
+`client.wrkq.task.findListView(params?)`. Its `labels?: string[]` request field
+is the repeatable CLI `--label` surface: exact, case-sensitive canonical
+membership; every distinct value is required and duplicates are idempotent.
+The legacy-shaped result is
+`WrkqFindListView{items: WrkqFindEntry[], next_cursor?}`.
+
 ##### `wrkq.search.*` / `wrkq.index.*` (server-owned search + index — Tranche D)
 
 The search + index family (T-05114, daedalus hrcchat#10211) puts the derived
@@ -1114,12 +1123,15 @@ pre-scoped) + presentation ONLY; the published `@wrkq/client` surface adds
 pause,resume}`. The result DTOs keep the LEGACY snake_case output keys
 (`search.Response` / `search.Result` / `indexdb.Status` struct shapes); the
 lifecycle methods return legacy map-alphabetical acks.
+Search `labels` are evaluated against canonical task JSON before paging, never
+against sidecar metadata/prose; all values are exact case-sensitive AND terms
+and duplicates are idempotent.
 
 ```ts
 interface WrkqSearchListViewParams {
   query: string;
   paths?: string[];               // pre-scoped path prefixes
-  state?: string; kind?: string; assigneePrincipalRef?: string;
+  state?: string; kind?: string; labels?: string[]; assigneePrincipalRef?: string;
   limit?: number; candidateLimit?: number;
   sort?: string; reverse?: boolean; fresh?: boolean; explain?: boolean;
 }

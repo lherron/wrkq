@@ -47,6 +47,19 @@ func TestProtocolSchemaHashIncludesInitializeHandshakeShape(t *testing.T) {
 	}
 }
 
+func TestProtocolSchemaHashIncludesExactLabelFilterParams(t *testing.T) {
+	for _, name := range []string{"WrkqFindListViewParams", "WrkqSearchListViewParams"} {
+		typ := dtoSchemaTypes[name]
+		if typ == nil {
+			t.Fatalf("%s missing from dtoSchemaTypes", name)
+		}
+		fingerprint := dtoSchemaFingerprint(name, typ)
+		if !strings.Contains(fingerprint, "Labels:labels,omitempty:slice[string:string]") {
+			t.Fatalf("%s schema fingerprint missing repeatable labels field:\n%s", name, fingerprint)
+		}
+	}
+}
+
 func TestProtocolSchemaHashIncludesActionClaimPredecessorShape(t *testing.T) {
 	typ := dtoSchemaTypes["WrkfActionClaimPredecessor"]
 	if typ == nil {

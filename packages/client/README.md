@@ -154,6 +154,12 @@ complete, unpaginated producer-owned subtree-count snapshot. Each row includes
 stable container/project identity plus `totalTaskCount` and
 `activeTaskCount`; no per-project task-list fanout is required.
 
+Exact-label discovery is available through
+`client.wrkq.task.findListView({ labels: ["refactor", "urgent"], type: "t" })`
+and text-plus-label discovery through
+`client.wrkq.search.listView({ query: "prompt shaping", labels: ["refactor"] })`.
+Label values use exact, case-sensitive canonical membership with AND semantics.
+
 ## Testing
 
 `@wrkq/client/testing` exports `FakeTransport`, an in-memory transport you can

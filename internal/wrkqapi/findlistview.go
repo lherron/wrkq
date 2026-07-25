@@ -29,6 +29,7 @@ type FindListViewParams struct {
 	DueBefore            string   `json:"dueBefore,omitempty"`
 	DueAfter             string   `json:"dueAfter,omitempty"`
 	Kind                 string   `json:"kind,omitempty"`
+	Labels               []string `json:"labels,omitempty"`
 	Assignee             string   `json:"assignee,omitempty"`
 	ClaimedBy            string   `json:"claimedBy,omitempty"`
 	ClaimedNode          string   `json:"claimedNode,omitempty"`
@@ -167,6 +168,7 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		dueBefore:            p.DueBefore,
 		dueAfter:             p.DueAfter,
 		kind:                 p.Kind,
+		labels:               uniqueLabels(p.Labels),
 		assigneePrincipalRef: assigneePrincipalRef,
 		claimedBy:            p.ClaimedBy,
 		claimedNode:          p.ClaimedNode,
@@ -208,6 +210,7 @@ type findQueryOptions struct {
 	dueBefore            string
 	dueAfter             string
 	kind                 string
+	labels               []string
 	assigneePrincipalRef string
 	claimedBy            string
 	claimedNode          string
@@ -232,7 +235,7 @@ func (a *API) executeFindQuery(ctx context.Context, opts findQueryOptions) ([]Wr
 	// Claim predicates describe task holdership. Unlike legacy metadata filters,
 	// they have no container interpretation, so an untyped claim query is a task
 	// query rather than a mixed result set padded with every matching container.
-	if opts.claimedBy != "" || opts.claimedNode != "" || opts.hasOutcome {
+	if len(opts.labels) > 0 || opts.claimedBy != "" || opts.claimedNode != "" || opts.hasOutcome {
 		searchContainers = false
 	}
 	if opts.campaignUUID != "" {
@@ -327,6 +330,14 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	if opts.kind != "" {
 		query += " AND t.kind = ?"
 		args = append(args, opts.kind)
+	}
+	for _, label := range opts.labels {
+		query += ` AND EXISTS (
+			SELECT 1
+			FROM json_each(CASE WHEN json_valid(t.labels) THEN t.labels ELSE '[]' END) AS task_label
+			WHERE task_label.type = 'text' AND task_label.value = ?
+		)`
+		args = append(args, label)
 	}
 	if opts.assigneePrincipalRef != "" {
 		query += " AND t.assignee_principal_ref = ?"
@@ -523,6 +534,25 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 		results = results[:opts.limit]
 	}
 	return results, hasMore, nil
+}
+
+// uniqueLabels collapses duplicate repeated filters without changing their exact
+// spelling. Canonical task labels are JSON strings: membership is case-sensitive
+// and byte-exact; no trimming or case folding is applied.
+func uniqueLabels(labels []string) []string {
+	if len(labels) < 2 {
+		return labels
+	}
+	seen := make(map[string]struct{}, len(labels))
+	out := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		out = append(out, label)
+	}
+	return out
 }
 
 func (a *API) findContainers(ctx context.Context, opts findQueryOptions, skipPagination bool) ([]WrkqFindEntry, bool, error) {

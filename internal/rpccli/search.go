@@ -27,6 +27,7 @@ import (
 // color remains terminal-gated, so the forced output is deterministic.
 func newSearchCmd() *cobra.Command {
 	var state, kind, assignee, sort string
+	var labels []string
 	var limit, candidateLimit int
 	var reverse, asJSON, ndjson, porcelain, human, pretty, explain, fresh bool
 	cmd := &cobra.Command{
@@ -63,6 +64,9 @@ func newSearchCmd() *cobra.Command {
 			}
 			if kind != "" {
 				params["kind"] = kind
+			}
+			if len(labels) > 0 {
+				params["labels"] = labels
 			}
 			if assignee != "" {
 				params["assigneePrincipalRef"] = assignee
@@ -109,6 +113,7 @@ func newSearchCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&state, "state", "", "Filter by state (default open, use all for non-deleted states)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by task kind")
+	cmd.Flags().StringArrayVar(&labels, "label", nil, "Filter by exact task label (repeatable; all must match)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Filter by assignee principal ref or bare agent slug")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of task results")
 	cmd.Flags().IntVar(&candidateLimit, "candidate-limit", 300, "Candidate chunks to retrieve before aggregation")

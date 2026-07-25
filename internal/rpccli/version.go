@@ -43,7 +43,7 @@ func newVersionCmd() *cobra.Command {
 					},
 					"supported_flags": map[string][]string{
 						"output":     []string{"--json", "--ndjson", "--yaml", "--tsv", "--porcelain", "-1", "-0"},
-						"filtering":  []string{"--state", "--priority", "--labels", "--since", "--until"},
+						"filtering":  []string{"--state", "--priority", "--label", "--labels", "--since", "--until"},
 						"sorting":    []string{"--sort"},
 						"pagination": []string{"--limit", "--cursor"},
 						"operations": []string{"--dry-run", "--yes", "--if-match", "--continue-on-error"},

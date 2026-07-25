@@ -109,6 +109,7 @@ type SearchListViewParams struct {
 	Paths                []string `json:"paths,omitempty"`
 	State                string   `json:"state,omitempty"`
 	Kind                 string   `json:"kind,omitempty"`
+	Labels               []string `json:"labels,omitempty"`
 	AssigneePrincipalRef string   `json:"assigneePrincipalRef,omitempty"`
 	Limit                int      `json:"limit,omitempty"`
 	CandidateLimit       int      `json:"candidateLimit,omitempty"`
@@ -232,6 +233,7 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 		Paths:                p.Paths,
 		State:                p.State,
 		Kind:                 p.Kind,
+		Labels:               p.Labels,
 		AssigneePrincipalRef: assigneePrincipalRef,
 		Limit:                p.Limit,
 		CandidateLimit:       p.CandidateLimit,

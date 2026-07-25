@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,7 @@ type Options struct {
 	Paths                []string
 	State                string
 	Kind                 string
+	Labels               []string
 	AssigneeUUID         string // Deprecated: use AssigneePrincipalRef.
 	AssigneePrincipalRef string
 	ResourceType         string
@@ -477,8 +479,8 @@ func handoffMatches(scopeRef, status string, opts Options) bool {
 
 func (s *Service) canonicalTaskMatches(taskUUID string, opts Options) bool {
 	var state, kind string
-	var assignee sql.NullString
-	err := s.Canonical.QueryRow(`SELECT state, kind, assignee_principal_ref FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &kind, &assignee)
+	var assignee, labelsJSON sql.NullString
+	err := s.Canonical.QueryRow(`SELECT state, kind, assignee_principal_ref, labels FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &kind, &assignee, &labelsJSON)
 	if err != nil {
 		return false
 	}
@@ -499,12 +501,37 @@ func (s *Service) canonicalTaskMatches(taskUUID string, opts Options) bool {
 	if opts.Kind != "" && kind != opts.Kind {
 		return false
 	}
+	if !hasEveryExactLabel(labelsJSON.String, opts.Labels) {
+		return false
+	}
 	assigneeFilter := opts.AssigneePrincipalRef
 	if assigneeFilter == "" {
 		assigneeFilter = opts.AssigneeUUID
 	}
 	if assigneeFilter != "" && (!assignee.Valid || assignee.String != assigneeFilter) {
 		return false
+	}
+	return true
+}
+
+// hasEveryExactLabel checks the canonical tasks.labels JSON array. Membership is
+// byte-exact and case-sensitive; duplicate requested filters are idempotent.
+func hasEveryExactLabel(raw string, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	var labels []string
+	if err := json.Unmarshal([]byte(raw), &labels); err != nil {
+		return false
+	}
+	present := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		present[label] = struct{}{}
+	}
+	for _, label := range required {
+		if _, ok := present[label]; !ok {
+			return false
+		}
 	}
 	return true
 }

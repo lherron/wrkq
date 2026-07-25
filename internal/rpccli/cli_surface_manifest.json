@@ -1183,6 +1183,13 @@
             "hidden": false
           },
           {
+            "name": "label",
+            "usage": "Filter by exact task label (repeatable; all must match)",
+            "type": "stringArray",
+            "default": "[]",
+            "hidden": false
+          },
+          {
             "name": "limit",
             "usage": "Limit number of results",
             "type": "int",
@@ -2420,6 +2427,13 @@
             "name": "kind",
             "usage": "Filter by task kind",
             "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "label",
+            "usage": "Filter by exact task label (repeatable; all must match)",
+            "type": "stringArray",
+            "default": "[]",
             "hidden": false
           },
           {

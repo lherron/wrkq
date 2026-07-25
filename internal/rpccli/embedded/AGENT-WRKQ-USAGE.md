@@ -11,9 +11,15 @@ wrkq touch inbox/task-slug -t "Title"   # Create task
 wrkq set T-00001 --state STATE          # Update state
 wrkq set T-00001 --outcome -            # Curated result from stdin; blank clears
 wrkq find --state open                  # Find open tasks
+wrkq find --label refactor --label urgent --state all --type t
 wrkq ls --sort updated_at --reverse --limit 5  # Recent tasks
 wrkq search "query" --ndjson            # Full-text search with timestamps
+wrkq search "query" --label refactor --state all
 ```
+
+`--label VALUE` is a repeatable, exact, case-sensitive read filter with AND
+semantics. Duplicate filters are idempotent. `--labels` is the JSON-array write
+flag.
 
 ## Task Lifecycle
 ```bash

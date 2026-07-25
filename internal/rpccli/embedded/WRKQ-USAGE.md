@@ -34,11 +34,18 @@ wrkq find --project myproject --state open     # Find open tasks in myproject
 
 ## Finding Tasks
 wrkq find inbox --state open
+wrkq find --label refactor --label urgent --state all --type t
 wrkq find --sort updated_at --reverse --limit 5
 wrkq index update
 wrkq search 'query text' --ndjson
+wrkq search 'query text' --label refactor --state all
 wrkq search 'query text' --sort updated_at --reverse --limit 5
 wrkq tree myfeat --json
+
+`--label VALUE` is a repeatable exact-membership read filter; every requested
+label must be present. Matching is case-sensitive, and duplicate filters are
+idempotent. `--labels` remains the JSON-array write flag on `touch`, `set`, and
+`restore`.
 
 ## Reading Tasks
 wrkq cat T-00001 --json
