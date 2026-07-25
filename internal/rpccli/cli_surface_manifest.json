@@ -343,7 +343,7 @@
               },
               {
                 "name": "labels",
-                "usage": "Campaign labels (JSON array; [] clears)",
+                "usage": "Campaign labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)",
                 "type": "string",
                 "hidden": false
               },
@@ -385,7 +385,7 @@
               },
               {
                 "name": "labels",
-                "usage": "Campaign labels (JSON array; [] clears)",
+                "usage": "Campaign labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)",
                 "type": "string",
                 "hidden": false
               },
@@ -2228,7 +2228,7 @@
           },
           {
             "name": "labels",
-            "usage": "Update labels on restore (JSON array)",
+            "usage": "Update labels on restore (comma-separated or JSON string array; empty/[] clears; use JSON for commas)",
             "type": "string",
             "hidden": false
           },
@@ -2752,7 +2752,7 @@
           },
           {
             "name": "labels",
-            "usage": "Update task labels (JSON array)",
+            "usage": "Update labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)",
             "type": "string",
             "hidden": false
           },
@@ -2955,7 +2955,7 @@
           },
           {
             "name": "labels",
-            "usage": "Initial task labels (JSON array)",
+            "usage": "Initial labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)",
             "type": "string",
             "hidden": false
           },

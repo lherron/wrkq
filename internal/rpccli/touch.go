@@ -46,6 +46,7 @@ func newTouchCmd() *cobra.Command {
 				assignee: assignee, requestedBy: requestedBy, assignedProject: assignedProject,
 				resolution: resolution, labels: labels, meta: meta, metaFile: metaFile,
 				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, causedBy: causedBy, json: asJSON,
+				labelsSet: cmd.Flags().Changed("labels"),
 			})
 		},
 	}
@@ -60,7 +61,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Requester project ID (return-to target)")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
-	cmd.Flags().StringVar(&labels, "labels", "", "Initial task labels (JSON array)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Initial labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
 	cmd.Flags().StringVar(&meta, "meta", "", "Initial task metadata (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file (JSON object or null)")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Initial task due date")
@@ -77,9 +78,18 @@ type touchOpts struct {
 	dueAt, startAt, forceUUID, causedBy                                  string
 	priority                                                             int
 	json                                                                 bool
+	labelsSet                                                            bool
 }
 
 func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
+	var labelValues []string
+	if o.labelsSet {
+		var err error
+		labelValues, err = parseLabelValue(o.labels)
+		if err != nil {
+			return err
+		}
+	}
 	claims := &stdinClaims{}
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
@@ -157,12 +167,8 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		if o.resolution != "" {
 			params["resolution"] = o.resolution
 		}
-		if o.labels != "" {
-			var lbls []string
-			if err := json.Unmarshal([]byte(o.labels), &lbls); err != nil {
-				return fmt.Errorf("invalid --labels JSON array: %w", err)
-			}
-			params["labels"] = lbls
+		if o.labelsSet {
+			params["labels"] = labelValues
 		}
 		if metaSet {
 			if metaRaw != nil {

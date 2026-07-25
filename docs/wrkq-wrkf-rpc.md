@@ -781,6 +781,11 @@ interface WrkqTaskRestoreParams {
 }
 ```
 
+The CLI accepts comma-separated or JSON-array `--labels` input and sends this
+compatibility field as an encoded JSON array string. The server/wire contract
+above does not accept shorthand directly; omitted remains unchanged, while the
+CLI encodes both explicit clear forms as `"[]"`.
+
 Outcome writes preserve the normal task update/CAS/attribution envelope and also
 append one `task.outcome_set` event. Its payload carries `task_uuid`, the full
 outcome snapshot (`null` when cleared), and production-time `container_uuid` plus

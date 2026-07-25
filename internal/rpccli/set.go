@@ -151,13 +151,13 @@ func newSetCmd() *cobra.Command {
 				patch["startAt"] = startAt
 				dryFields["start_at"] = startAt
 			}
-			if labels != "" {
-				var lbls []string
-				if err := json.Unmarshal([]byte(labels), &lbls); err != nil {
-					return fmt.Errorf("invalid --labels JSON array: %w", err)
+			if cmd.Flags().Changed("labels") {
+				lbls, err := parseLabelValue(labels)
+				if err != nil {
+					return err
 				}
 				patch["labels"] = lbls
-				dryFields["labels"] = labels
+				dryFields["labels"] = lbls
 			}
 			if meta != "" || metaFile != "" {
 				_, raw, m, err := readMetaValue(meta, metaFile, cmd.InOrStdin(), claims)
@@ -198,7 +198,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().IntVar(&priority, "priority", 0, "Update task priority (1-4)")
 	cmd.Flags().StringVar(&title, "title", "", "Update task title")
 	cmd.Flags().StringVar(&slug, "slug", "", "Update task slug")
-	cmd.Flags().StringVar(&labels, "labels", "", "Update task labels (JSON array)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Update labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
 	cmd.Flags().StringVar(&meta, "meta", "", "Update task metadata (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Update task due date")

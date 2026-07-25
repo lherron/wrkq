@@ -295,11 +295,17 @@ Effective membership is exclusive and is defined as resident-or-enrolled.
 enrollment mutation. A resident task cannot simultaneously enroll in a foreign
 campaign. Campaigns cannot nest under another campaign.
 
-Campaign labels use the exact task-label value semantics: an ordered JSON string
-array whose whitespace, case, order, and duplicates are preserved. `[]` clears
-labels and the wire value is never `null`. Campaigns have no owner, scheduling,
-or priority fields. Display signals such as progress, footprint, missing
-outcomes, and activity are derived rather than written back.
+Campaign labels use the exact task-label value semantics: an ordered string
+array whose whitespace, case, order, and duplicates are preserved on the wire.
+The CLI acquisition form is shared by task touch/set/restore and campaign
+convert/edit: a value beginning with `[` is a strict JSON string array;
+otherwise it is literal-comma shorthand whose trimmed, non-empty segments
+become labels. Shorthand has no escaping or quoting, so comma-bearing labels and
+lossless element whitespace/empty strings require JSON. Empty input and `[]`
+both explicitly clear; omission leaves labels unchanged. `null`, non-arrays,
+non-string elements, and malformed JSON arrays are invalid. Campaigns have no
+owner, scheduling, or priority fields. Display signals such as progress,
+footprint, missing outcomes, and activity are derived rather than written back.
 
 `wrkq.container.campaignPortfolio` is the producer-owned portfolio read model.
 It returns one complete aggregate snapshot in a single read transaction, with
@@ -564,8 +570,9 @@ Each `--label VALUE` requires exact, case-sensitive membership in the canonical
 `tasks.labels` JSON array. Repeated distinct values are logical AND; duplicate
 values are idempotent. Filtering is server-side and happens before paging, so
 search-sidecar text/metadata and substring matches cannot satisfy it. Search
-still requires its text query. The existing `--labels` flag remains the
-JSON-array write surface on task mutations.
+still requires its text query. The plural `--labels` write flag is separate and
+accepts comma-separated shorthand or a strict JSON string array as described in
+the campaign/task label mutation contract above.
 
 ## 9. Daemon API
 

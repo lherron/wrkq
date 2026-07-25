@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const labelValueForms = "comma-separated labels or a JSON array of strings"
+
 type stdinClaims struct {
 	claimedBy string
 }
@@ -110,6 +112,55 @@ func isReaderTTY(r io.Reader) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// parseLabelValue owns CLI acquisition for every task/campaign --labels write
+// flag. JSON arrays retain their element values and ordering exactly; shorthand
+// trims comma-separated segments and drops empty ones.
+func parseLabelValue(raw string) ([]string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{}, nil
+	}
+
+	if strings.HasPrefix(trimmed, "[") {
+		var elements []json.RawMessage
+		if err := json.Unmarshal([]byte(trimmed), &elements); err != nil {
+			return nil, fmt.Errorf("invalid --labels value: expected %s: %w", labelValueForms, err)
+		}
+		if elements == nil {
+			return nil, fmt.Errorf("invalid --labels value: expected %s: null is not allowed", labelValueForms)
+		}
+		labels := make([]string, 0, len(elements))
+		for i, element := range elements {
+			value := strings.TrimSpace(string(element))
+			if !strings.HasPrefix(value, `"`) {
+				return nil, fmt.Errorf("invalid --labels value: expected %s: element %d is not a string", labelValueForms, i)
+			}
+			var label string
+			if err := json.Unmarshal(element, &label); err != nil {
+				return nil, fmt.Errorf("invalid --labels value: expected %s: element %d: %w", labelValueForms, i, err)
+			}
+			labels = append(labels, label)
+		}
+		return labels, nil
+	}
+
+	// Valid JSON values outside the accepted array form are almost certainly an
+	// attempted JSON label value. Refuse them instead of silently storing their
+	// JSON punctuation as shorthand label bytes.
+	if json.Valid([]byte(trimmed)) {
+		return nil, fmt.Errorf("invalid --labels value: expected %s: JSON value must be an array of strings", labelValueForms)
+	}
+
+	parts := strings.Split(trimmed, ",")
+	labels := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if label := strings.TrimSpace(part); label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return labels, nil
 }
 
 func readMetaValue(value, filename string, stdin io.Reader, claims *stdinClaims) (bool, *string, map[string]any, error) {

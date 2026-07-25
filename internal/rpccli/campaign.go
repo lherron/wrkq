@@ -80,7 +80,7 @@ func newCampaignConvertCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Campaign brief (literal, @file, or - for stdin)")
 	cmd.Flags().StringVar(&specification, "specification", "", "Campaign specification (literal, @file, or - for stdin)")
-	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (JSON array; [] clears)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
 	cmd.Flags().StringVar(&state, "state", "active", "Initial campaign state: draft or active")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only convert if the container etag matches")
 	return cmd
@@ -132,7 +132,7 @@ edit. Use a kind=decision container comment for curated amendment rationale.`,
 	}
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Campaign brief (literal, @file, or - for stdin; empty clears)")
 	cmd.Flags().StringVar(&specification, "specification", "", "Campaign specification (literal, @file, or - for stdin; empty clears)")
-	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (JSON array; [] clears)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only edit if the container etag matches")
 	return cmd
 }
@@ -195,12 +195,9 @@ func runCampaignContentMutation(
 		params["specification"] = value
 	}
 	if hasLabels {
-		var values []string
-		if err := json.Unmarshal([]byte(labels), &values); err != nil {
-			return fmt.Errorf("invalid --labels JSON array: %w", err)
-		}
-		if values == nil {
-			return fmt.Errorf("invalid --labels JSON array: null is not allowed")
+		values, err := parseLabelValue(labels)
+		if err != nil {
+			return err
 		}
 		params["labels"] = values
 	}

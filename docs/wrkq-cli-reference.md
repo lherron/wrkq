@@ -96,7 +96,9 @@ wrkq cat T-00001 --json --one       # bare object; asserts one selector/result
 
 # Update fields (set is aliased as edit; supports bulk over refs/stdin)
 wrkq set T-00001 --state in_progress
-wrkq set T-00001 --priority 1 --labels '["needs_smoketest"]'
+wrkq set T-00001 --priority 1 --labels needs_smoketest
+wrkq set T-00001 --labels '["comma,bearing"," exact whitespace "]'
+wrkq set T-00001 --labels ""                       # clear (also: '[]')
 wrkq set T-00001 --caused-by T-00012,T-00034   # replace causal lineage
 wrkq set T-00001 --caused-by ""                # clear causal lineage
 
@@ -116,6 +118,15 @@ wrkq restore T-00001
 wrkq mv T-00001 otherproject/new-slug
 wrkq cp T-00001 otherproject/copy-slug
 ```
+
+Every task/campaign write surface exposing `--labels` accepts either a plain
+comma-separated list or a JSON string array. Shorthand splits on literal commas,
+trims each segment, and drops empty segments; it has no quoting or escaping
+syntax. Use JSON for labels containing commas or when preserving leading/trailing
+element whitespace and empty strings. JSON also preserves order, duplicates,
+and case. `--labels ""` and `--labels '[]'` explicitly clear labels; omitting
+the flag does not change them. `campaign convert` and `campaign edit` use the
+same rules. The singular repeatable `--label` read filter is unchanged.
 
 ## Discovery: find, search, stat, diff, log
 

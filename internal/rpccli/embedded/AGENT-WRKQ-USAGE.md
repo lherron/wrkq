@@ -18,8 +18,11 @@ wrkq search "query" --label refactor --state all
 ```
 
 `--label VALUE` is a repeatable, exact, case-sensitive read filter with AND
-semantics. Duplicate filters are idempotent. `--labels` is the JSON-array write
-flag.
+semantics. Duplicate filters are idempotent. The plural task/campaign write flag
+accepts comma-separated shorthand or a JSON string array. Shorthand trims and
+drops empty segments; JSON is required for comma-bearing labels and preserves
+element whitespace, duplicates, case, order, and empty strings. Empty input or
+`[]` clears; an omitted flag leaves labels unchanged.
 
 ## Task Lifecycle
 ```bash

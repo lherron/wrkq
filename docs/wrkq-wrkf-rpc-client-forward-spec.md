@@ -740,6 +740,9 @@ Error precedence mirrors legacy: state/priority/labels/assignee validation →
 not-deleted-or-archived check → `ifMatch` mismatch (`WRKQ_CONFLICT`) → `toPath`
 resolve + slug-conflict (`WRKQ_CONFLICT`). `labels` is a JSON **array string**
 (not a `string[]`), matching the Go `TaskRestoreParams.Labels` json tag.
+The CLI-only `--labels` parser accepts comma shorthand or a JSON string array,
+then serializes the resulting values into this compatibility field; shorthand
+is never part of the RPC contract.
 
 #### `wrkq.task.copy` (server-owned deep copy — Tranche B)
 
