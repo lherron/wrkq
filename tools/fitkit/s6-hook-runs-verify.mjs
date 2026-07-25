@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
@@ -75,10 +75,34 @@ function readText(root, path) {
   return existsSync(absolute) ? readFileSync(absolute, 'utf8') : undefined
 }
 
+// Git's own hook environment exports GIT_DIR/GIT_WORK_TREE, and those override
+// `-C` during repository discovery. Inheriting them makes every `-C <root>`
+// lookup below resolve to whichever repo invoked us instead of the root we
+// asked about — which is how the negative smoke once perturbed the real
+// .git/hooks/pre-push while believing it was editing its temp clone. Strip them
+// so `-C` is authoritative no matter who spawned this guard.
+const GIT_DISCOVERY_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+  'GIT_CEILING_DIRECTORIES',
+]
+
+function gitEnv() {
+  const env = { ...process.env }
+  for (const key of GIT_DISCOVERY_ENV) delete env[key]
+  return env
+}
+
 function resolveGitPath(root, path) {
   const result = spawnSync('git', ['-C', root, 'rev-parse', '--git-path', path], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: gitEnv(),
   })
   const gitPath = (result.stdout || '').trim()
   if (result.status !== 0 || gitPath.length === 0) {
@@ -269,6 +293,30 @@ function copyIfPresent(sourceRoot, targetRoot, path) {
   return true
 }
 
+// Resolve through symlinks so containment compares real locations rather than
+// spellings of them (macOS tmpdir is /var -> /private/var). The hook leaf does
+// not exist yet at check time, so realpath the nearest existing ancestor and
+// re-append the remainder instead of giving up on the whole path.
+function realish(path) {
+  let current = resolve(path)
+  const trailing = []
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...trailing)
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) return resolve(path)
+      trailing.unshift(basename(current))
+      current = parent
+    }
+  }
+}
+
+function isContainedIn(candidate, root) {
+  const rel = relative(realish(root), realish(candidate))
+  return rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
 function perturbHook(hookPath) {
   if (!existsSync(hookPath)) return false
   const original = readFileSync(hookPath, 'utf8')
@@ -286,6 +334,7 @@ function runNegativeSmoke(root) {
     const gitInit = spawnSync('git', ['init', '--quiet', smokeRoot], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: gitEnv(),
     })
     if (gitInit.status !== 0) {
       return {
@@ -300,6 +349,17 @@ function runNegativeSmoke(root) {
     }
     const targetHook = resolvePrePushHook(smokeRoot)
     if (!targetHook.ok) return targetHook
+    if (!isContainedIn(targetHook.path, smokeRoot)) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          'smoke.target.escaped',
+          'Do not point Git discovery env vars (GIT_DIR, GIT_WORK_TREE, …) at another repository when running this guard.',
+          'The negative smoke perturbs the hook it resolves, so a target outside the temp root would rewrite a real repository hook.',
+          { resolved: targetHook.path, smokeRoot },
+        ),
+      }
+    }
 
     const justfile = findJustfile(root)
     if (justfile) copyIfPresent(root, smokeRoot, justfile)

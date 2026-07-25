@@ -89,6 +89,41 @@ func TestS6HookRunsVerifyRejectsTamperedHookInMainCheckout(t *testing.T) {
 	assertS6DiagnosticCode(t, payload, "hook.pre-push.verify.missing")
 }
 
+func TestS6HookRunsVerifyNeverPerturbsHooksOutsideSmokeRoot(t *testing.T) {
+	requireS6Dependencies(t)
+	// Regression bar: Git exports GIT_DIR/GIT_WORK_TREE when it runs a hook, and
+	// those override `git -C <root>` during repository discovery. The guard used
+	// to inherit them, so its negative smoke resolved the *invoking* repo's hooks
+	// path and rewrote a real installed pre-push hook — replacing `just verify`
+	// with a comment while still reporting ok. Every later `just verify` then
+	// failed with hook.pre-push.verify.missing.
+	goodHook := "#!/usr/bin/env bash\nset -euo pipefail\njust verify\n"
+	mainRoot := newS6Repository(t, goodHook)
+	decoyRoot := newS6Repository(t, goodHook)
+	decoyHook := filepath.Join(cleanGitPath(decoyRoot, strings.TrimSpace(runGit(t, decoyRoot, "rev-parse", "--git-path", "hooks"))), "pre-push")
+
+	payload, output, err := runS6GuardWithEnv(mainRoot, []string{
+		"GIT_DIR=" + filepath.Join(decoyRoot, ".git"),
+		"GIT_WORK_TREE=" + decoyRoot,
+	})
+	if err != nil {
+		t.Fatalf("expected guard to evaluate --root despite ambient GIT_DIR, got %v:\n%s", err, output)
+	}
+	if detail, ok := payload["detail"].(map[string]any); !ok || detail["prePushRunsVerify"] != true {
+		t.Fatalf("expected guard to inspect the --root hook, got %#v", payload["detail"])
+	}
+
+	for name, path := range map[string]string{"decoy": decoyHook, "root": filepath.Join(mainRoot, ".git/hooks/pre-push")} {
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("reading %s hook: %v", name, readErr)
+		}
+		if string(got) != goodHook {
+			t.Fatalf("guard perturbed the %s repository's installed hook outside its smoke root:\n%s", name, got)
+		}
+	}
+}
+
 func requireS6Dependencies(t *testing.T) {
 	t.Helper()
 	for _, binary := range []string{"git", "node"} {
@@ -153,8 +188,15 @@ func cleanGitPath(root, path string) string {
 }
 
 func runS6Guard(root string) (map[string]any, []byte, error) {
+	return runS6GuardWithEnv(root, nil)
+}
+
+func runS6GuardWithEnv(root string, extraEnv []string) (map[string]any, []byte, error) {
 	cmd := exec.Command("node", "tools/fitkit/s6-hook-runs-verify.mjs", "--root", root, "--json")
 	cmd.Dir = root
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	output, err := cmd.CombinedOutput()
 	var payload map[string]any
 	if jsonErr := json.Unmarshal(output, &payload); jsonErr != nil {
