@@ -198,7 +198,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().IntVar(&priority, "priority", 0, "Update task priority (1-4)")
 	cmd.Flags().StringVar(&title, "title", "", "Update task title")
 	cmd.Flags().StringVar(&slug, "slug", "", "Update task slug")
-	cmd.Flags().StringVar(&labels, "labels", "", "Update labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Update labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().StringVar(&meta, "meta", "", "Update task metadata (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Update task due date")

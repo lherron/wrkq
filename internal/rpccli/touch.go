@@ -61,7 +61,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Requester project ID (return-to target)")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
-	cmd.Flags().StringVar(&labels, "labels", "", "Initial labels (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Initial labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().StringVar(&meta, "meta", "", "Initial task metadata (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file (JSON object or null)")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Initial task due date")

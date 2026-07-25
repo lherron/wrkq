@@ -120,13 +120,15 @@ wrkq cp T-00001 otherproject/copy-slug
 ```
 
 Every task/campaign write surface exposing `--labels` accepts either a plain
-comma-separated list or a JSON string array. Shorthand splits on literal commas,
-trims each segment, and drops empty segments; it has no quoting or escaping
-syntax. Use JSON for labels containing commas or when preserving leading/trailing
-element whitespace and empty strings. JSON also preserves order, duplicates,
-and case. `--labels ""` and `--labels '[]'` explicitly clear labels; omitting
-the flag does not change them. `campaign convert` and `campaign edit` use the
-same rules. The singular repeatable `--label` read filter is unchanged.
+comma-separated list or a JSON string array. Only a trimmed value beginning with
+`[` selects JSON; every other value is shorthand, including JSON-looking text
+such as `123`, `true`, `null`, `"a"`, or `{x}`. Shorthand splits on literal
+commas, trims each segment, and drops empty segments; it has no quoting or
+escaping syntax. Use JSON for labels containing commas or when preserving
+leading/trailing element whitespace and empty strings. JSON also preserves order,
+duplicates, and case. `--labels ""` and `--labels '[]'` explicitly clear labels;
+omitting the flag does not change them. `campaign convert` and `campaign edit`
+use the same rules. The singular repeatable `--label` read filter is unchanged.
 
 ## Discovery: find, search, stat, diff, log
 

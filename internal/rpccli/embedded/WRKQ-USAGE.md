@@ -46,10 +46,11 @@ wrkq tree myfeat --json
 label must be present. Matching is case-sensitive, and duplicate filters are
 idempotent. The plural write flag on task and campaign mutations accepts either
 comma-separated shorthand (`--labels "urgent, agent"`) or a JSON string array.
-Shorthand trims segments and drops empty segments; use JSON when a label itself
-contains a comma or when element whitespace/empty values must be preserved.
-`--labels ""` and `--labels '[]'` both clear labels; omitting the flag leaves
-labels unchanged.
+Only a trimmed value beginning `[` selects JSON; every other value, including
+JSON-looking text such as `null`, is shorthand. Shorthand trims segments and
+drops empty segments; use JSON when a label itself contains a comma or when
+element whitespace/empty values must be preserved. `--labels ""` and
+`--labels '[]'` both clear labels; omitting the flag leaves labels unchanged.
 
 ## Reading Tasks
 wrkq cat T-00001 --json

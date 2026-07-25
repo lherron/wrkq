@@ -37,10 +37,13 @@ func TestParseLabelValue(t *testing.T) {
 			raw:  `  [" a ","a,b","a","a",""]  `,
 			want: []string{" a ", "a,b", "a", "a", ""},
 		},
+		{name: "numeric JSON-looking shorthand", raw: "123", want: []string{"123"}},
+		{name: "boolean JSON-looking shorthand", raw: "true", want: []string{"true"}},
+		{name: "null JSON-looking shorthand", raw: "null", want: []string{"null"}},
+		{name: "quoted JSON-looking shorthand", raw: `"a"`, want: []string{`"a"`}},
+		{name: "object-like shorthand", raw: `{x}`, want: []string{`{x}`}},
+		{name: "valid object JSON-looking shorthand", raw: `{"label":"a"}`, want: []string{`{"label":"a"}`}},
 		{name: "malformed JSON", raw: `["a"`, wantErr: true},
-		{name: "null", raw: "null", wantErr: true},
-		{name: "object", raw: `{"label":"a"}`, wantErr: true},
-		{name: "JSON string", raw: `"a"`, wantErr: true},
 		{name: "non-string element", raw: `["a",1]`, wantErr: true},
 		{name: "null element", raw: `["a",null]`, wantErr: true},
 	}
@@ -87,6 +90,9 @@ func TestLabelWriteSurfacesLocalAndAuthenticatedRPC(t *testing.T) {
 				"--labels", "a, b,,a",
 			)
 			assertTaskLabels(t, locator, "labels-e2e/task", []string{"a", "b", "a"})
+
+			mustRunLabelWriteCLI(t, locator, "set", "labels-e2e/task", "--labels", "null")
+			assertTaskLabels(t, locator, "labels-e2e/task", []string{"null"})
 
 			lossless := []string{" a ", "a,b", "a", "a", ""}
 			losslessJSON := `[" a ","a,b","a","a",""]`

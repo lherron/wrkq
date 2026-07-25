@@ -302,10 +302,12 @@ convert/edit: a value beginning with `[` is a strict JSON string array;
 otherwise it is literal-comma shorthand whose trimmed, non-empty segments
 become labels. Shorthand has no escaping or quoting, so comma-bearing labels and
 lossless element whitespace/empty strings require JSON. Empty input and `[]`
-both explicitly clear; omission leaves labels unchanged. `null`, non-arrays,
-non-string elements, and malformed JSON arrays are invalid. Campaigns have no
-owner, scheduling, or priority fields. Display signals such as progress,
-footprint, missing outcomes, and activity are derived rather than written back.
+both explicitly clear; omission leaves labels unchanged. Non-`[` values are
+always shorthand, including JSON-looking literals such as `123`, `true`, `null`,
+`"a"`, or object-like text. Within the `[`-selected JSON form, non-string/null
+elements and malformed arrays are invalid. Campaigns have no owner, scheduling,
+or priority fields. Display signals such as progress, footprint, missing
+outcomes, and activity are derived rather than written back.
 
 `wrkq.container.campaignPortfolio` is the producer-owned portfolio read model.
 It returns one complete aggregate snapshot in a single read transaction, with

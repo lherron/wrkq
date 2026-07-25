@@ -146,13 +146,6 @@ func parseLabelValue(raw string) ([]string, error) {
 		return labels, nil
 	}
 
-	// Valid JSON values outside the accepted array form are almost certainly an
-	// attempted JSON label value. Refuse them instead of silently storing their
-	// JSON punctuation as shorthand label bytes.
-	if json.Valid([]byte(trimmed)) {
-		return nil, fmt.Errorf("invalid --labels value: expected %s: JSON value must be an array of strings", labelValueForms)
-	}
-
 	parts := strings.Split(trimmed, ",")
 	labels := make([]string, 0, len(parts))
 	for _, part := range parts {

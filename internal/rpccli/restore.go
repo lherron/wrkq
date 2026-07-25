@@ -58,7 +58,7 @@ Subtasks are cascade-restored when their parent is restored.`,
 	cmd.Flags().StringVar(&description, "description", "", "Update description on restore")
 	cmd.Flags().StringVar(&state, "state", "", "Restore to specific state (default: open)")
 	cmd.Flags().IntVar(&priority, "priority", 0, "Update priority on restore (1-4)")
-	cmd.Flags().StringVar(&labels, "labels", "", "Update labels on restore (comma-separated or JSON string array; empty/[] clears; use JSON for commas)")
+	cmd.Flags().StringVar(&labels, "labels", "", "Update labels on restore (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Update assignee on restore")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Conditional restore (etag)")
 	cmd.Flags().StringVar(&comment, "comment", "", "Add comment explaining restoration")
