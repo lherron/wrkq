@@ -1335,8 +1335,14 @@
             "available": true,
             "flags": [
               {
+                "name": "body",
+                "usage": "Inline Markdown body (mutually exclusive with --body-file)",
+                "type": "string",
+                "hidden": false
+              },
+              {
                 "name": "body-file",
-                "usage": "Path to a file containing the markdown body, or '-' to read from stdin (required)",
+                "usage": "Path to a Markdown body file, or '-' for stdin (mutually exclusive with --body)",
                 "type": "string",
                 "hidden": false
               },

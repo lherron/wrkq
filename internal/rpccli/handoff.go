@@ -185,6 +185,7 @@ func handoffFromRPC(raw json.RawMessage) (handoffJSON, error) {
 func newHandoffCreateCmd() *cobra.Command {
 	var (
 		title          string
+		body           string
 		bodyFile       string
 		scopeOverride  string
 		profile        string
@@ -198,16 +199,19 @@ func newHandoffCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new pending handoff for the resolved agent/project scope",
+		Long: "Create a new pending handoff for the resolved agent/project scope.\n\n" +
+			"Exactly one body source must be explicitly selected: --body or --body-file.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runHandoffCreate(cmd, handoffCreateFlags{
-				title: title, bodyFile: bodyFile, scopeOverride: scopeOverride,
+				title: title, body: body, bodyFile: bodyFile, scopeOverride: scopeOverride,
 				idempotencyKey: idempotencyKey, meta: meta, dryRun: dryRun,
 				asJSON: asJSON, ndjson: ndjson, human: human,
 			})
 		},
 	}
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Handoff title (required)")
-	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Path to a file containing the markdown body, or '-' to read from stdin (required)")
+	cmd.Flags().StringVar(&body, "body", "", "Inline Markdown body (mutually exclusive with --body-file)")
+	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Path to a Markdown body file, or '-' for stdin (mutually exclusive with --body)")
 	cmd.Flags().StringVar(&scopeOverride, "scope", "", "Override scope (ScopeRef like agent:cody:project:wrkq or handle like cody@wrkq)")
 	cmd.Flags().StringVar(&profile, "profile", "", "Named profile to resolve scope/defaults from")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key to safely retry create without producing duplicates")
@@ -220,8 +224,8 @@ func newHandoffCreateCmd() *cobra.Command {
 }
 
 type handoffCreateFlags struct {
-	title, bodyFile, scopeOverride, idempotencyKey, meta string
-	dryRun, asJSON, ndjson, human                        bool
+	title, body, bodyFile, scopeOverride, idempotencyKey, meta string
+	dryRun, asJSON, ndjson, human                              bool
 }
 
 func runHandoffCreate(cmd *cobra.Command, f handoffCreateFlags) error {
@@ -303,25 +307,33 @@ type handoffCreateOutput struct {
 
 func readHandoffCreateInputs(cmd *cobra.Command, f handoffCreateFlags) (string, string, *string, *string, error) {
 	claims := &stdinClaims{}
+	bodySelected := cmd.Flags().Changed("body")
+	bodyFileSelected := cmd.Flags().Changed("body-file")
+	if bodySelected == bodyFileSelected {
+		return "", "", nil, nil, fmt.Errorf("exactly one body source is required: use either --body or --body-file")
+	}
+
 	title := strings.TrimSpace(f.title)
 	if title == "" {
 		return "", "", nil, nil, fmt.Errorf("title is required (use -t or --title)")
 	}
-	bodyFile := strings.TrimSpace(f.bodyFile)
-	if bodyFile == "" {
-		return "", "", nil, nil, fmt.Errorf("body is required (use --body-file <path|->)")
-	}
+
 	var bodyBytes []byte
 	var err error
-	if bodyFile == "-" {
-		bodyBytes, err = readStdinValue("--body-file", cmd.InOrStdin(), claims)
-		if err != nil {
-			return "", "", nil, nil, err
-		}
+	if bodySelected {
+		bodyBytes = []byte(f.body)
 	} else {
-		bodyBytes, err = os.ReadFile(bodyFile)
-		if err != nil {
-			return "", "", nil, nil, fmt.Errorf("failed to read --body-file %s: %w", bodyFile, err)
+		bodyFile := strings.TrimSpace(f.bodyFile)
+		if bodyFile == "-" {
+			bodyBytes, err = readStdinValue("--body-file", cmd.InOrStdin(), claims)
+			if err != nil {
+				return "", "", nil, nil, err
+			}
+		} else if bodyFile != "" {
+			bodyBytes, err = os.ReadFile(bodyFile)
+			if err != nil {
+				return "", "", nil, nil, fmt.Errorf("failed to read --body-file %s: %w", bodyFile, err)
+			}
 		}
 	}
 	body := strings.TrimRightFunc(string(bodyBytes), func(r rune) bool {
