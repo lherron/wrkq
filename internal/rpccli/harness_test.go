@@ -1,6 +1,8 @@
 package rpccli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/config"
@@ -21,6 +23,11 @@ const (
 // test still go through the RPC seam.
 func migratedDBWithTask(t *testing.T) (dbPath, taskID string) {
 	t.Helper()
+	catalogPath := filepath.Join(t.TempDir(), "empty-hook-catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"schemaVersion":"wrkf.hook-catalog.v0","hooks":{}}`), 0o600); err != nil {
+		t.Fatalf("write hook catalog: %v", err)
+	}
+	t.Setenv("WRKF_HOOK_CATALOG", catalogPath)
 	dbPath = t.TempDir() + "/wrkq.db"
 	database, err := db.Open(dbPath)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 )
 
 func TestConfiguredTransportWrkfReadParityLocalAndRemote(t *testing.T) {
+	t.Setenv("WRKF_HOOK_CATALOG", explicitEmptyHookCatalog(t))
 	dbPath := filepath.Join(t.TempDir(), "wrkq.db")
 	database, err := db.Open(dbPath)
 	if err != nil {

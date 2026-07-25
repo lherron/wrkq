@@ -1475,7 +1475,7 @@ type ExitMap = { // Mapping from validator exit code to workflow routing result.
   outcome?: string // Branch-routing label such as plan_ready, revise_plan, or supervisor_recovery.
 }
 
-type HookCatalog = { // Local script catalog loaded from WRKF_HOOK_CATALOG or autodiscovery.
+type HookCatalog = { // Local script catalog loaded from --hook-catalog or WRKF_HOOK_CATALOG.
   schemaVersion: 'wrkf.hook-catalog.v0' // Hook catalog schema version.
   hooks: Record&lt;string, HookSpec&gt; // Check hook definitions keyed by hook id.
   effectHandlers?: Record&lt;string, HookSpec&gt; // Effect delivery handlers keyed by effect kind.

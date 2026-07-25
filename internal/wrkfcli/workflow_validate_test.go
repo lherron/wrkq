@@ -31,10 +31,7 @@ func TestWorkflowValidateCLIEnforcesSuspensionReasonReferences(t *testing.T) {
 	flagDB = dbPath
 	flagJSON = true
 	flagHookCatalog = ""
-	emptyCatalog := filepath.Join(t.TempDir(), "empty-hook-catalog.json")
-	if err := os.WriteFile(emptyCatalog, []byte(`{"hooks":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	emptyCatalog := explicitEmptyHookCatalog(t)
 	t.Setenv("WRKF_HOOK_CATALOG", emptyCatalog)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ASP_PROJECT", "")

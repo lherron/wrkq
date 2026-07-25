@@ -12,7 +12,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, type WorkClient } from "../src/client";
@@ -27,6 +27,7 @@ const WRKQADM = process.env.WRKQADM_BIN ?? "wrkqadm";
 
 let dir: string;
 let dbPath: string;
+let hookCatalogPath: string;
 
 function mkdb(): string {
   const env = { ...process.env };
@@ -40,6 +41,8 @@ function mkdb(): string {
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "wrkq-equiv-root-"));
+  hookCatalogPath = join(dir, "empty-hook-catalog.json");
+  writeFileSync(hookCatalogPath, JSON.stringify({ schemaVersion: "wrkf.hook-catalog.v0", hooks: {} }));
   dbPath = mkdb();
 });
 
@@ -52,6 +55,7 @@ async function initVia(command: string, db: string) {
     command,
     dbPath: db,
     principalRef: "agent:local-human",
+    hookCatalogPath: command === WRKF ? hookCatalogPath : undefined,
     cwd: tmpdir(),
     autoInitialize: false,
     env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },

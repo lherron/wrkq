@@ -157,7 +157,12 @@ func runRPC(t *testing.T, entrypoint, dbPath string, requests []string) []map[st
 
 func scopeFreeAuthorityEnv(t *testing.T) []string {
 	t.Helper()
+	catalogPath := filepath.Join(t.TempDir(), "empty-hook-catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"schemaVersion":"wrkf.hook-catalog.v0","hooks":{}}`), 0o600); err != nil {
+		t.Fatalf("write explicit hook catalog fixture: %v", err)
+	}
 	cleared := map[string]struct{}{
+		"WRKF_HOOK_CATALOG":  {},
 		"WRKF_PRINCIPAL_REF": {},
 		"WRKF_ACTOR":         {},
 		"WRKQ_PRINCIPAL_REF": {},
@@ -177,6 +182,7 @@ func scopeFreeAuthorityEnv(t *testing.T) []string {
 		}
 	}
 	env = append(env,
+		"WRKF_HOOK_CATALOG="+catalogPath,
 		"WRKF_PRINCIPAL_REF=",
 		"WRKF_ACTOR=",
 		"WRKQ_PRINCIPAL_REF=",

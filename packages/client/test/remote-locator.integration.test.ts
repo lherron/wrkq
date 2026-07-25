@@ -8,7 +8,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -22,6 +22,7 @@ const WRKQADM = process.env.WRKQADM_BIN ?? "wrkqadm";
 let dir: string;
 let dbPath: string;
 let attachDir: string;
+let hookCatalogPath: string;
 let port: number;
 let token: string;
 let daemon: ReturnType<typeof Bun.spawn> | undefined;
@@ -62,6 +63,8 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "wrkq-client-remote-"));
   dbPath = join(dir, "wrkq.db");
   attachDir = join(dir, "attachments");
+  hookCatalogPath = join(dir, "empty-hook-catalog.json");
+  writeFileSync(hookCatalogPath, JSON.stringify({ schemaVersion: "wrkf.hook-catalog.v0", hooks: {} }));
   port = await freePort();
   token = `remote-client-${process.pid}-${Date.now()}`;
 
@@ -77,7 +80,12 @@ beforeAll(async () => {
   // agent identity the client declares below so the forwarded write is attributed.
   daemon = Bun.spawn([WRKQD, "--db", dbPath, "--addr", `127.0.0.1:${port}`, "--token", token], {
     cwd: dir,
-    env: { ...process.env, WRKQ_ATTACH_DIR: attachDir, WRKQ_PRINCIPAL_REF: "agent:local-human" },
+    env: {
+      ...process.env,
+      WRKF_HOOK_CATALOG: hookCatalogPath,
+      WRKQ_ATTACH_DIR: attachDir,
+      WRKQ_PRINCIPAL_REF: "agent:local-human",
+    },
     stdout: "pipe",
     stderr: "pipe",
   });

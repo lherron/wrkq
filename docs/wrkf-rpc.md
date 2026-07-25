@@ -61,7 +61,11 @@ Protocol version string: **`2026-06-30`**.
 ```
 `cancel: true` means *accepted, best-effort*. Protocol-version mismatch on initialize → `WRKF_VALIDATION` with `data.expected`/`data.actual`.
 
-RPC mode loads config + DB once and keeps the `workflow.Service` warm for the process lifetime. Config (db path, hook catalog path, principal_ref/role defaults) arrives via argv flags on `wrkf rpc --stdio` and/or `initialize` params — never environment-only magic.
+RPC mode loads config + DB once and keeps the `workflow.Service` warm for the
+process lifetime. Local mode requires an explicit hook catalog path from
+`--hook-catalog` or `WRKF_HOOK_CATALOG`; it never searches cwd, workspace
+ancestry, room state, or home directories. Database and principal/role defaults
+retain their documented flag, environment, and config precedence.
 
 The launch-time caller is principal-only. Supply `--principal-ref agent:<id>`,
 `WRKF_PRINCIPAL_REF=agent:<id>`, a valid agent runtime scope, or config

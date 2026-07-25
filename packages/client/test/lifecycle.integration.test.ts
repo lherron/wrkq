@@ -373,13 +373,16 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
   let wrkfDir: string;
   let wrkfDb: string;
   let wrkfWfPath: string;
+  let wrkfHookCatalogPath: string;
   let wrkfClient: WorkClient;
 
   beforeAll(() => {
     wrkfDir = mkdtempSync(join(tmpdir(), "wrkq-client-wrkf-e2e-"));
     wrkfDb = join(wrkfDir, "wrkq.db");
     wrkfWfPath = join(wrkfDir, "workflow.json");
+    wrkfHookCatalogPath = join(wrkfDir, "empty-hook-catalog.json");
     writeFileSync(wrkfWfPath, JSON.stringify(WORKFLOW));
+    writeFileSync(wrkfHookCatalogPath, JSON.stringify({ schemaVersion: "wrkf.hook-catalog.v0", hooks: {} }));
     const env = { ...process.env };
     delete env.ASP_PROJECT;
     delete env.WRKQ_PROJECT;
@@ -400,6 +403,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
       dbPath: wrkfDb,
       principalRef: ACTOR,
       role: "coordinator",
+      hookCatalogPath: wrkfHookCatalogPath,
       cwd: wrkfDir,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
     });

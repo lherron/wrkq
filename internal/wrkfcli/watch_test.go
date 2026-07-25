@@ -154,6 +154,7 @@ func TestWatchFollowEmitsEventsAndSingleSummary(t *testing.T) {
 
 func watchCLIFixture(t *testing.T) (*app, string, *db.DB, *workflow.Service) {
 	t.Helper()
+	t.Setenv("WRKF_HOOK_CATALOG", explicitEmptyHookCatalog(t))
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "watch_cli.db"))
 	if err != nil {

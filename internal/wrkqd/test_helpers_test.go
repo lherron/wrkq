@@ -1,6 +1,7 @@
 package wrkqd
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -9,6 +10,11 @@ import (
 
 func setupTestEnv(t *testing.T) (*db.DB, string) {
 	t.Helper()
+	catalogPath := filepath.Join(t.TempDir(), "empty-hook-catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"schemaVersion":"wrkf.hook-catalog.v0","hooks":{}}`), 0o600); err != nil {
+		t.Fatalf("write hook catalog: %v", err)
+	}
+	t.Setenv("WRKF_HOOK_CATALOG", catalogPath)
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	database, err := db.Open(dbPath)
 	if err != nil {

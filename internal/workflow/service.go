@@ -3852,14 +3852,11 @@ func limitBytes(b []byte, max int) []byte {
 }
 
 func LoadHookCatalog(path string) (*HookCatalog, error) {
-	resolved, err := ResolveHookCatalogPath(path)
-	if err != nil {
-		return nil, err
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, ErrHookCatalogNotConfigured
 	}
-	if resolved == "" {
-		return nil, nil
-	}
-	data, err := os.ReadFile(resolved)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -3876,75 +3873,22 @@ func LoadHookCatalog(path string) (*HookCatalog, error) {
 	return &cat, nil
 }
 
-func ResolveHookCatalogPath(path string) (string, error) {
+var ErrHookCatalogNotConfigured = errors.New(
+	"hook catalog configuration is required; set --hook-catalog PATH or WRKF_HOOK_CATALOG=PATH",
+)
+
+// ConfiguredHookCatalogPath returns the caller-selected catalog path. Catalogs
+// are workflow law, so resolution is deliberately limited to explicit
+// configuration and never consults cwd, ancestor directories, room state, or a
+// user's home directory.
+func ConfiguredHookCatalogPath(path string) (string, error) {
 	if strings.TrimSpace(path) != "" {
-		return path, nil
+		return strings.TrimSpace(path), nil
 	}
 	if envPath := strings.TrimSpace(os.Getenv("WRKF_HOOK_CATALOG")); envPath != "" {
 		return envPath, nil
 	}
-
-	candidates := []string{".wrkf/hooks.json", "wrkf-hooks.json"}
-	for _, pattern := range []string{
-		".wrkq/wrkf-*/hook-catalog.wrapped.json",
-		".wrkq/wrkf-*/hook-catalog.json",
-	} {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			return "", err
-		}
-		sort.Strings(matches)
-		candidates = append(candidates, matches...)
-	}
-
-	cwd, err := os.Getwd()
-	if err == nil {
-		for dir := filepath.Clean(cwd); ; dir = filepath.Dir(dir) {
-			for _, pattern := range []string{
-				filepath.Join(dir, ".wrkf", "hooks.json"),
-				filepath.Join(dir, "wrkf-hooks.json"),
-				filepath.Join(dir, ".wrkq", "wrkf-*", "hook-catalog.wrapped.json"),
-				filepath.Join(dir, ".wrkq", "wrkf-*", "hook-catalog.json"),
-			} {
-				matches, err := filepath.Glob(pattern)
-				if err != nil {
-					return "", err
-				}
-				sort.Strings(matches)
-				candidates = append(candidates, matches...)
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-		}
-	}
-
-	if home, err := os.UserHomeDir(); err == nil {
-		for _, pattern := range []string{
-			filepath.Join(home, "praesidium", "*", ".wrkq", "wrkf-*", "hook-catalog.wrapped.json"),
-			filepath.Join(home, "praesidium", "*", ".wrkq", "wrkf-*", "hook-catalog.json"),
-		} {
-			matches, err := filepath.Glob(pattern)
-			if err != nil {
-				return "", err
-			}
-			sort.Strings(matches)
-			candidates = append(candidates, matches...)
-		}
-	}
-
-	seen := map[string]bool{}
-	for _, candidate := range candidates {
-		if candidate == "" || seen[candidate] {
-			continue
-		}
-		seen[candidate] = true
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, nil
-		}
-	}
-	return "", nil
+	return "", ErrHookCatalogNotConfigured
 }
 
 func HookCatalogDir(path string) string {

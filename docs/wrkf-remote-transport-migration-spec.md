@@ -76,7 +76,7 @@ Every new method carries the full contract obligation set (standing ruling): reg
 **Condition 1 — pinned catalog identity** (invariant: a template-bound hook definition cannot be silently substituted by caller input or daemon filesystem discovery):
 
 - Remote `--hook-catalog` hard-refuses ("hook catalog is canonical-node configuration"); local (InProcess) mode may honor it as today.
-- wrkqd hook configuration is an **explicit deployed path/bundle**. The daemon never consults `ResolveHookCatalogPath("")` autodiscovery (which searches cwd and every `~/praesidium/*` checkout, `internal/workflow/service.go:3763-3817`).
+- wrkqd hook configuration is an **explicit deployed path/bundle**. Hook catalog loading accepts only `WRKF_HOOK_CATALOG` or the explicit daemon configuration seam; it never searches cwd, workspace ancestry, room state, or home directories.
 - Execution for check/run/effect/transition selects the HookSpec from the template version's **stored `hook_catalog_json`**. v1 single-bundle deployments compare the stored `hook_catalog_hash` against the configured catalog and **fail closed on mismatch**. The daemon bundle supplies the executable root.
 - `wrkf hook list/show` expose the daemon's active catalog in remote mode but never redefine already-installed template law.
 - The workspace-scoped class is **live, not hypothetical**: `.wrkq/wrkf-agent-tasker/hook-catalog.json` invokes `scripts/*` with `cwd=template_dir` and its effect handler invokes `hrcchat`. That catalog + executable bundle (scripts, `jq`, `hrcchat`) must actually be deployed to mini — an explicit item on the §10 landing checklist. A future caller-workspace-data hook class gets an explicit prepare/execute/record verb; never a catalog override.

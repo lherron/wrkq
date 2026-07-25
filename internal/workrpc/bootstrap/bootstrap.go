@@ -26,33 +26,41 @@ import (
 // the mirror CLI; keep all server-construction policy (hook catalog, default
 // principal, attach-dir policy, attachment limits, entrypoint identity) here.
 func Server(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.RegistryOptions, error) {
-	hookPath, err := workflow.ResolveHookCatalogPath("")
+	hookPath, err := workflow.ConfiguredHookCatalogPath("")
 	if err != nil {
-		return nil, workrpc.RegistryOptions{}, fmt.Errorf("failed to resolve hook catalog: %w", err)
+		return nil, workrpc.RegistryOptions{}, err
 	}
 	return serverWithHookPath(database, cfg, hookPath, 0)
 }
 
 // DaemonServer constructs the canonical HTTP daemon registry. Unlike local
-// InProcess/stdio construction, it never performs workspace/home catalog
-// autodiscovery: WRKF_HOOK_CATALOG must name the deployed bundle explicitly.
+// InProcess/stdio construction, it enforces the remote execution timeout
+// ceiling. WRKF_HOOK_CATALOG must name the deployed bundle explicitly.
 func DaemonServer(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.RegistryOptions, error) {
-	return serverWithHookPath(database, cfg, os.Getenv("WRKF_HOOK_CATALOG"), workrpc.RemoteHookTimeoutCeiling)
+	hookPath, err := workflow.ConfiguredHookCatalogPath("")
+	if err != nil {
+		return nil, workrpc.RegistryOptions{}, err
+	}
+	return serverWithHookPath(database, cfg, hookPath, workrpc.RemoteHookTimeoutCeiling)
 }
 
 func serverWithHookPath(database *db.DB, cfg *config.Config, hookPath string, hookTimeoutCeiling time.Duration) (*wrkfapi.API, workrpc.RegistryOptions, error) {
-	var cat *workflow.HookCatalog
-	var err error
-	if hookPath != "" {
-		cat, err = workflow.LoadHookCatalog(hookPath)
-	}
+	cat, err := workflow.LoadHookCatalog(hookPath)
 	if err != nil {
 		return nil, workrpc.RegistryOptions{}, fmt.Errorf("failed to load hook catalog: %w", err)
 	}
+	return serverWithCatalog(database, cfg, cat, workflow.HookCatalogDir(hookPath), hookTimeoutCeiling)
+}
+
+func serverWithoutHookCatalog(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.RegistryOptions, error) {
+	return serverWithCatalog(database, cfg, nil, "", 0)
+}
+
+func serverWithCatalog(database *db.DB, cfg *config.Config, cat *workflow.HookCatalog, templateDir string, hookTimeoutCeiling time.Duration) (*wrkfapi.API, workrpc.RegistryOptions, error) {
 	api := wrkfapi.New(
 		workflow.NewService(database),
 		wrkfapi.WithHookCatalog(cat),
-		wrkfapi.WithTemplateDir(workflow.HookCatalogDir(hookPath)),
+		wrkfapi.WithTemplateDir(templateDir),
 		wrkfapi.WithHookTimeoutCeiling(hookTimeoutCeiling),
 	)
 	opts := workrpc.RegistryOptions{
@@ -101,11 +109,11 @@ func Open(dbLocatorOverride string) (*Handle, error) {
 }
 
 // OpenWithHookCatalog builds a local InProcess server using the caller-selected
-// local catalog path. Empty retains local autodiscovery semantics.
+// local catalog path or WRKF_HOOK_CATALOG.
 func OpenWithHookCatalog(dbLocatorOverride, hookCatalogOverride string) (*Handle, error) {
-	hookPath, err := workflow.ResolveHookCatalogPath(hookCatalogOverride)
+	hookPath, err := workflow.ConfiguredHookCatalogPath(hookCatalogOverride)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve hook catalog: %w", err)
+		return nil, err
 	}
 	return open(dbLocatorOverride, hookPath, true)
 }
@@ -139,7 +147,11 @@ func open(dbLocatorOverride, hookPath string, explicitHookPath bool) (*Handle, e
 	if explicitHookPath {
 		api, opts, err = serverWithHookPath(database, cfg, hookPath, 0)
 	} else {
-		api, opts, err = Server(database, cfg)
+		// Open is the wrkq mirror entrypoint. It deliberately constructs a
+		// hookless registry instead of resolving workflow law that wrkq commands
+		// neither select nor execute. Wrkf local mode uses OpenWithHookCatalog,
+		// which requires an explicit flag or WRKF_HOOK_CATALOG.
+		api, opts, err = serverWithoutHookCatalog(database, cfg)
 	}
 	if err != nil {
 		_ = database.Close()

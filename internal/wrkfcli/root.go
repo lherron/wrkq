@@ -56,7 +56,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagTask, "task", "", "Default task")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output JSON")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "Verbose output")
-	rootCmd.PersistentFlags().StringVar(&flagHookCatalog, "hook-catalog", "", "Path to wrkf hook catalog JSON (overrides WRKF_HOOK_CATALOG and autodiscovery)")
+	rootCmd.PersistentFlags().StringVar(&flagHookCatalog, "hook-catalog", "", "Path to wrkf hook catalog JSON (defaults to WRKF_HOOK_CATALOG; required in local mode)")
 
 	rootCmd.AddCommand(workflowCmd())
 	rootCmd.AddCommand(taskCmd())
