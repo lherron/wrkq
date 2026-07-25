@@ -2,7 +2,7 @@
 
 ## Domain model essentials
 
-**Resources:** Actor, Container (project/subproject, hierarchical via `parent_uuid`), Task, Comment (append-only, soft-deletable), Attachment, Event (append-only audit log).
+**Resources:** Principal-attributed Container (project/subproject, hierarchical via `parent_uuid`), Task, Comment (append-only, soft-deletable), Attachment, and Event (append-only audit log). Legacy Actor rows remain as admin/display/history compatibility storage.
 
 **Addressing** — any of:
 - Path: `project/subproject/task`
@@ -15,7 +15,12 @@
 
 **Slug rules:** lowercase `[a-z0-9-]`, must start with `[a-z0-9]`, max 255 bytes, unique among siblings. Source: `internal/domain/validation.go`.
 
-**Attribution, not auth:** every mutating command requires an actor (`--as`, `WRKQ_ACTOR_ID`, `WRKQ_ACTOR`, or config default). Resolution order is in `internal/actors/`.
+**Attribution, not auth:** every mutating command requires a canonical caller
+principal (`agent:<id>`), supplied by `--principal-ref` / `--as`, the product's
+principal env, a valid runtime scope, or config `default_principal_ref`.
+`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, `WRKF_ACTOR`, bare slugs, actor IDs/UUIDs, and
+`default_actor` are legacy compatibility inputs and never caller authority.
+Resolution lives in `internal/attribution/`.
 
 ## Concurrency
 

@@ -39,7 +39,7 @@ import { FakeTransport } from "@wrkq/client/testing";
 const client = await createClient({
   command: "wrkq",          // or "wrkf" — identical behavior
   dbPath: "/path/to/wrkq.db",
-  actor: "agent:agent-loop",
+  principalRef: "agent:agent-loop",
   role: "coordinator",
   clientInfo: { name: "agent-loop", version: "0.1.0" },
 });

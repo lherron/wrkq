@@ -1,10 +1,10 @@
 # wrkq
 
-WRKQ is task-based collaboration surface between coding agents and humans. Command structure mimics a Unix filesystem-style interface for maximum human/agent familiarity, and structured output formats and actor attribution make it native to agent workflows. Changes can be bundled as diffs and committed to git, enabling version-controlled task state that flows through your normal PR process.  The easiest way to integrate is to have your agent run `wrkq info` directly or add to an agent startup hook.
+WRKQ is a task-based collaboration surface between coding agents and humans. Command structure mimics a Unix filesystem-style interface for maximum human/agent familiarity, and structured output formats plus canonical principal attribution make it native to agent workflows. Changes can be bundled as diffs and committed to git, enabling version-controlled task state that flows through your normal PR process. The easiest way to integrate is to have your agent run `wrkq info` directly or add it to an agent startup hook.
 
 ## Features
 
-- **Agent-first** - Structured output, actor attribution, and machine-readable formats designed for AI agent workflows
+- **Agent-first** - Structured output, principal attribution, and machine-readable formats designed for AI agent workflows
 - **Unix-style interface** - Familiar commands like `ls`, `cat`, `mv`, `rm`, `tree`, `touch`, `mkdir`
 - **Git-native** - SQLite database hydrated from git; bundle changes as diffs for PRs
 - **Pipe-friendly** - JSON, NDJSON, and porcelain output formats for scripting
@@ -102,7 +102,7 @@ daemon contract. The wrkf JSON-RPC stdio contract lives in
 
 | Concept | Description |
 |---------|-------------|
-| **Actor** | Human or agent performing actions (attribution, not authentication) |
+| **Principal** | Canonical caller identity (`agent:<id>`); runtime/task/project provenance remains in scope and delivery refs |
 | **Container** | Project or subproject (hierarchical); changesets bundle container state for git |
 | **Task** | Actionable item with state, priority, labels |
 | **Comment** | Append-only notes on tasks |
@@ -135,11 +135,16 @@ wrkq ls myproject --type t --sort updated_at --reverse --limit 5
 
 Configuration is loaded from (in precedence order):
 1. CLI flags
-2. Environment variables (`WRKQ_DB_PATH`, `WRKQ_ACTOR`)
+2. Environment variables (`WRKQ_DB_PATH`, `WRKQ_PRINCIPAL_REF`)
 3. Nearest `.env.local`, walking upward from the current directory
 4. `$PRAESIDIUM_HOME/.env.local` (or `~/praesidium/.env.local`) as a
    cwd-independent platform fallback
 5. `~/.config/wrkq/config.yaml`
+
+Caller authority is principal-only. Use `--principal-ref agent:<id>` (or
+`--as agent:<id>` on wrkq) or `WRKQ_PRINCIPAL_REF=agent:<id>`. For wrkf,
+use `WRKF_PRINCIPAL_REF=agent:<id>`. Legacy actor env/config values and bare,
+`A-*`, UUID, or `system:*` identities are not caller authority.
 
 ## License
 

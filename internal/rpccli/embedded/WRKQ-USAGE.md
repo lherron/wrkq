@@ -97,4 +97,11 @@ wrkq log T-00001 --patch      # Show detailed changes
 
 Defaults: non-TTY list/search/history commands use NDJSON; singleton, detail, mutation, and content commands use JSON. Use `--output raw` when a pipeline needs raw markdown from `cat`.
 
+## Caller principal
+- Canonical caller authority is `agent:<id>`.
+- Use `--principal-ref agent:<id>` / `--as agent:<id>` or `WRKQ_PRINCIPAL_REF=agent:<id>`.
+- For wrkf, use `--principal-ref agent:<id>` or `WRKF_PRINCIPAL_REF=agent:<id>`.
+- Runtime task/project context belongs in scope/delivery refs, not the principal.
+- `WRKQ_ACTOR`, `WRKF_ACTOR`, actor UUIDs / `A-*` ids, bare slugs, `system:*`, and config `default_actor` are not caller authority.
+
 </task_tracking_rules>

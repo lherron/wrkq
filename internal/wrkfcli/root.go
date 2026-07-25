@@ -21,12 +21,11 @@ import (
 )
 
 type app struct {
-	actor     string
-	wrkqActor string
-	role      string
-	json      bool
-	transport workrpcclient.Transport
-	remote    bool
+	principalRef string
+	role         string
+	json         bool
+	transport    workrpcclient.Transport
+	remote       bool
 }
 
 var rootCmd = &cobra.Command{
@@ -37,13 +36,13 @@ var rootCmd = &cobra.Command{
 }
 
 var (
-	flagDB          string
-	flagActor       string
-	flagRole        string
-	flagTask        string
-	flagJSON        bool
-	flagVerbose     bool
-	flagHookCatalog string
+	flagDB           string
+	flagPrincipalRef string
+	flagRole         string
+	flagTask         string
+	flagJSON         bool
+	flagVerbose      bool
+	flagHookCatalog  string
 )
 
 func Execute() error {
@@ -52,7 +51,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagDB, "db", "", "Path to wrkq database file")
-	rootCmd.PersistentFlags().StringVar(&flagActor, "principal-ref", "", "Workflow principal ref (agent:<id>)")
+	rootCmd.PersistentFlags().StringVar(&flagPrincipalRef, "principal-ref", "", "Workflow caller principal ref (agent:<id>)")
 	rootCmd.PersistentFlags().StringVar(&flagRole, "role", "", "Workflow role")
 	rootCmd.PersistentFlags().StringVar(&flagTask, "task", "", "Default task")
 	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output JSON")
@@ -111,33 +110,18 @@ func codeFromError(err error) string {
 
 const wrkfPrincipalEnv = "WRKF_PRINCIPAL_REF"
 
-func actorDefaults(cmd *cobra.Command) (workflowActor, wrkqDefaultActor string, err error) {
-	principal, err := wrkfPrincipalDefault(cmd)
-	if err != nil {
-		return "", "", err
-	}
-	if principal != "" {
-		return principal, principal, nil
-	}
-	if v := os.Getenv("WRKF_ACTOR"); v != "" {
-		return v, "", nil
-	}
-	if v := os.Getenv("WRKQ_ACTOR"); v != "" {
-		return v, "", nil
-	}
-	return "system:wrkf", "", nil
-}
-
-func wrkfPrincipalDefault(cmd *cobra.Command) (string, error) {
+func wrkfPrincipalDefault(cmd *cobra.Command, cfg *config.Config) (string, error) {
 	attr, err := attribution.ResolveWithPrincipalEnvs(attribution.ResolveOptions{
 		Command:       cmd,
+		Config:        cfg,
 		ResolvedScope: resolvedRuntimeScope(),
 	}, wrkfPrincipalEnv)
-	if attribution.IsNoPrincipalConfigured(err) {
-		return "", nil
-	}
 	if err != nil {
-		return "", err
+		const fix = "set --principal-ref agent:<id> or WRKF_PRINCIPAL_REF=agent:<id>"
+		if attribution.IsNoPrincipalConfigured(err) {
+			return "", fmt.Errorf("workflow caller principal is required; %s", fix)
+		}
+		return "", fmt.Errorf("invalid workflow caller principal; %s: %w", fix, err)
 	}
 	return attr.PrincipalRef, nil
 }
@@ -222,7 +206,7 @@ func workflowCmd() *cobra.Command {
 				return err
 			}
 			out, err := rpcCall[wrkfapi.InstallResult](cmd, a, "wrkf.workflow.install", wrkfapi.WorkflowInstallParams{
-				Body: body, SourceName: args[0], PrincipalRef: a.actor,
+				Body: body, SourceName: args[0], PrincipalRef: a.principalRef,
 			})
 			if err != nil {
 				return err
@@ -336,7 +320,7 @@ func templateLifecycleCommand(verb string) *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			info, err := rpcCall[wrkfapi.WorkflowShowResult](cmd, a, "wrkf.workflow."+verb, map[string]any{
-				"ref": args[0], "principal_ref": a.actor,
+				"ref": args[0], "principal_ref": a.principalRef,
 			})
 			if err != nil {
 				return err
@@ -375,7 +359,9 @@ func taskCmd() *cobra.Command {
 				PredecessorInstanceID: predecessorInstance,
 				PredecessorRevision:   revision,
 				AttachDiscontinued:    attachDiscontinued,
-				Actor:                 a.actor,
+				// Actor is the retained wrkq compatibility wire key; the value is
+				// always the resolved canonical caller principal.
+				Actor: a.principalRef,
 			})
 			if err != nil {
 				return err
@@ -414,7 +400,11 @@ func taskCmd() *cobra.Command {
 		Use:  "refresh TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			result, err := rpcCall[wrkqapi.WrkqWorkflowInspectResult](cmd, a, "wrkq.workflow.refresh", map[string]any{"task": args[0], "actor": a.actor})
+			result, err := rpcCall[wrkqapi.WrkqWorkflowInspectResult](cmd, a, "wrkq.workflow.refresh", map[string]any{
+				"task": args[0],
+				// Retained wrkq compatibility wire key; never a legacy authority source.
+				"actor": a.principalRef,
+			})
 			if err != nil {
 				return err
 			}
@@ -429,7 +419,11 @@ func taskCmd() *cobra.Command {
 			if len(args) > 0 {
 				task = args[0]
 			}
-			result, err := rpcCall[wrkqapi.WrkqWorkflowSyncMetaResult](cmd, a, "wrkq.workflow.syncMeta", wrkqapi.WorkflowSyncMetaParams{Task: task, Actor: a.actor})
+			result, err := rpcCall[wrkqapi.WrkqWorkflowSyncMetaResult](cmd, a, "wrkq.workflow.syncMeta", wrkqapi.WorkflowSyncMetaParams{
+				Task: task,
+				// Actor is the retained wrkq compatibility wire key.
+				Actor: a.principalRef,
+			})
 			if err != nil {
 				return err
 			}
@@ -470,7 +464,7 @@ func instanceCmd() *cobra.Command {
 			}
 			out, err := rpcCall[wrkfapi.InstanceCancelResult](cmd, a, "wrkf.instance.cancel", wrkfapi.InstanceCancelParams{
 				TaskSelector: args[0], InstanceID: instanceID, ExpectRevision: expected, Explanation: explanation,
-				PrincipalRef: a.actor, Role: a.role,
+				PrincipalRef: a.principalRef, Role: a.role,
 			})
 			if err != nil {
 				return err
@@ -502,7 +496,7 @@ func evidenceCmd() *cobra.Command {
 				Summary:      summary,
 				Facts:        rawJSON(facts),
 				Data:         rawJSON(data),
-				PrincipalRef: a.actor,
+				PrincipalRef: a.principalRef,
 				Role:         a.role,
 			})
 			if err != nil {
@@ -605,7 +599,7 @@ func evidenceCmd() *cobra.Command {
 				Summary:      summary,
 				Facts:        rawJSON(facts),
 				Data:         dataJSON,
-				PrincipalRef: a.actor,
+				PrincipalRef: a.principalRef,
 				Role:         a.role,
 			})
 			if addErr != nil {
@@ -759,7 +753,7 @@ func obligationCmd() *cobra.Command {
 			Args: cobra.ExactArgs(2),
 			RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 				obl, err := rpcCall[wrkfapi.Obligation](cmd, a, "wrkf.obligation."+use, wrkfapi.ObligationStatusParams{
-					TaskSelector: args[0], ID: args[1], EvidenceID: evidenceID, Reason: reason, PrincipalRef: a.actor, Role: a.role,
+					TaskSelector: args[0], ID: args[1], EvidenceID: evidenceID, Reason: reason, PrincipalRef: a.principalRef, Role: a.role,
 				})
 				if err != nil {
 					return err
@@ -814,7 +808,7 @@ func effectCmd() *cobra.Command {
 			}
 			claimAdapter := adapter
 			if claimAdapter == "" {
-				claimAdapter = a.actor
+				claimAdapter = a.principalRef
 			}
 			claim, err := rpcCall[wrkfapi.EffectClaim](cmd, a, "wrkf.effect.claim", wrkfapi.EffectClaimParams{
 				Adapter: claimAdapter, Limit: limit, LeaseMs: leaseMs, TaskSelector: taskSelector, Kind: kind,
@@ -848,7 +842,7 @@ func effectCmd() *cobra.Command {
 		Use:  "deliver EFFECT",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			out, err := rpcCall[wrkfapi.EffectDelivery](cmd, a, "wrkf.effect.deliver", wrkfapi.EffectDeliverParams{EffectID: args[0], Adapter: a.actor})
+			out, err := rpcCall[wrkfapi.EffectDelivery](cmd, a, "wrkf.effect.deliver", wrkfapi.EffectDeliverParams{EffectID: args[0], Adapter: a.principalRef})
 			if err != nil {
 				return err
 			}
@@ -904,7 +898,7 @@ func checkCmd() *cobra.Command {
 		Args: cobra.ExactArgs(2),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			result, err := rpcCall[wrkfapi.CheckRunResult](cmd, a, "wrkf.check.run", wrkfapi.CheckRunParams{
-				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.actor, Role: a.role,
+				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.principalRef, Role: a.role,
 			})
 			if err != nil {
 				return err
@@ -965,7 +959,7 @@ func transitionCmd() *cobra.Command {
 				exp = &expectRevision
 			}
 			out, err := applyTransition(cmd, a, wrkfapi.TransitionApplyParams{
-				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.actor, Role: a.role, ExpectRevision: exp,
+				TaskSelector: args[0], Transition: args[1], PrincipalRef: a.principalRef, Role: a.role, ExpectRevision: exp,
 				IdempotencyKey: idempotencyKey, CheckIDs: checks, DryRun: dryRun,
 			}, runChecks)
 			if err != nil {
@@ -1022,7 +1016,7 @@ func suspensionCmd() *cobra.Command {
 				Disposition:    disposition,
 				Explanation:    explanation,
 				ExpectRevision: exp,
-				PrincipalRef:   a.actor,
+				PrincipalRef:   a.principalRef,
 				Role:           a.role,
 			})
 			if err != nil {
@@ -1040,13 +1034,13 @@ func suspensionCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "run", Short: "Bind principals to workflow runs"}
-	var actor, role, delivery, lane, externalRunRef, idempotencyKey, summary string
+	var principalRef, role, delivery, lane, externalRunRef, idempotencyKey, summary string
 	start := &cobra.Command{
 		Use:  "start TASK --role ROLE --principal-ref PRINCIPAL_REF",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			if actor == "" {
-				actor = a.actor
+			if principalRef == "" {
+				principalRef = a.principalRef
 			}
 			if role == "" {
 				role = a.role
@@ -1055,7 +1049,7 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("--role is required")
 			}
 			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{
-				TaskSelector: args[0], Role: role, PrincipalRef: actor,
+				TaskSelector: args[0], Role: role, PrincipalRef: principalRef,
 				IdempotencyKey: idempotencyKey,
 				DeliveryRef:    delivery,
 				Lane:           lane,
@@ -1068,7 +1062,7 @@ func runCmd() *cobra.Command {
 		}),
 	}
 	start.Flags().StringVar(&role, "role", "", "Workflow role")
-	start.Flags().StringVar(&actor, "principal-ref", "", "Principal ref (agent:<id>)")
+	start.Flags().StringVar(&principalRef, "principal-ref", "", "Principal ref (agent:<id>)")
 	start.Flags().StringVar(&delivery, "delivery-ref", "", "Delivery ref")
 	start.Flags().StringVar(&lane, "lane", "", "Lane")
 	start.Flags().StringVar(&externalRunRef, "external-run-ref", "", "External run ref")
@@ -1085,9 +1079,12 @@ func runCmd() *cobra.Command {
 			if i := strings.LastIndex(handle, "~"); i >= 0 && i+1 < len(handle) {
 				lane = handle[i+1:]
 			}
-			actor := strings.SplitN(handle, "@", 2)[0]
+			principalRef, err := attribution.NormalizeCanonical("agent:" + strings.SplitN(handle, "@", 2)[0])
+			if err != nil {
+				return fmt.Errorf("invalid delivery handle principal: %w", err)
+			}
 			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{
-				TaskSelector: task, Role: role, PrincipalRef: actor, DeliveryRef: handle, Lane: lane,
+				TaskSelector: task, Role: role, PrincipalRef: principalRef, DeliveryRef: handle, Lane: lane,
 			})
 			if err != nil {
 				return err
@@ -1188,7 +1185,7 @@ func hookCmd() *cobra.Command {
 				return fmt.Errorf("--hook is required")
 			}
 			out, err := rpcCall[wrkfapi.CheckRun](cmd, a, "wrkf.hook.run", wrkfapi.HookRunParams{
-				TaskSelector: args[0], Transition: args[1], HookID: hookID, PrincipalRef: a.actor, Role: a.role,
+				TaskSelector: args[0], Transition: args[1], HookID: hookID, PrincipalRef: a.principalRef, Role: a.role,
 			})
 			if err != nil {
 				return err
@@ -1211,14 +1208,13 @@ func rpcCmd() *cobra.Command {
 			if !stdio {
 				return fmt.Errorf("--stdio is required")
 			}
-			cfg, err := config.Load()
+			cfg, err := loadConfiguredConfig()
 			if err != nil {
 				return err
 			}
-			if flagDB != "" {
-				if err := config.ApplyDBLocator(cfg, flagDB, false); err != nil {
-					return err
-				}
+			principalRef, err := wrkfPrincipalDefault(cmd, cfg)
+			if err != nil {
+				return err
 			}
 			if cfg.RemoteEndpoint != "" {
 				if flagHookCatalog != "" {
@@ -1226,17 +1222,13 @@ func rpcCmd() *cobra.Command {
 				}
 				return workrpcclient.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, workrpcclient.TokenFromEnv())
 			}
-			actor, wrkqActor, err := actorDefaults(cmd)
-			if err != nil {
-				return err
-			}
 			return workrpcclient.ServeConfiguredLocalStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.DBLocator, flagHookCatalog, workrpcclient.LocalServerOptions{
-				Entrypoint:       "wrkf",
-				ServerVersion:    Version,
-				DefaultActor:     actor,
-				WrkqDefaultActor: wrkqActor,
-				UseWrkqDefault:   true,
-				DefaultRole:      roleDefault(),
+				Entrypoint:              "wrkf",
+				ServerVersion:           Version,
+				DefaultPrincipalRef:     principalRef,
+				WrkqDefaultPrincipalRef: principalRef,
+				UseWrkqDefault:          true,
+				DefaultRole:             roleDefault(),
 			})
 		},
 	}
@@ -1246,22 +1238,22 @@ func rpcCmd() *cobra.Command {
 
 func supervisorCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "supervisor", Short: "Operate recovery and escalation role"}
-	var actor, reason string
+	var principalRef, reason string
 	start := &cobra.Command{
 		Use:  "start TASK",
 		Args: cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
-			if actor == "" {
-				actor = a.actor
+			if principalRef == "" {
+				principalRef = a.principalRef
 			}
-			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{TaskSelector: args[0], Role: "supervisor", PrincipalRef: actor})
+			run, err := rpcCall[wrkfapi.Run](cmd, a, "wrkf.run.start", wrkfapi.RunStartParams{TaskSelector: args[0], Role: "supervisor", PrincipalRef: principalRef})
 			if err != nil {
 				return err
 			}
 			return printAny(cmd, flagJSON, run)
 		}),
 	}
-	start.Flags().StringVar(&actor, "principal-ref", "", "Principal ref (agent:<id>)")
+	start.Flags().StringVar(&principalRef, "principal-ref", "", "Principal ref (agent:<id>)")
 	call := &cobra.Command{
 		Use:  "call TASK",
 		Args: cobra.ExactArgs(1),
@@ -1292,7 +1284,7 @@ func supervisorCmd() *cobra.Command {
 					return fmt.Errorf("transition action requires target transition id")
 				}
 				out, err := rpcCall[wrkfapi.TransitionResult](cmd, a, "wrkf.transition.apply", wrkfapi.TransitionApplyParams{
-					TaskSelector: args[0], Transition: args[2], PrincipalRef: a.actor, Role: "supervisor",
+					TaskSelector: args[0], Transition: args[2], PrincipalRef: a.principalRef, Role: "supervisor",
 				})
 				if err != nil {
 					return err

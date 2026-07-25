@@ -15,7 +15,7 @@ TESTS_FAILED=0
 
 # Test database path
 export WRKQ_DB_PATH="/tmp/wrkq-m1-smoke-test.db"
-export WRKQ_ACTOR="test-human"
+export WRKQ_PRINCIPAL_REF="agent:test-human"
 
 # Build the CLI
 echo -e "${YELLOW}Building CLI...${NC}"

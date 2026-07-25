@@ -13,7 +13,7 @@ type actionStartOptions struct {
 	workflowRef    string
 	action         string
 	role           string
-	actor          string
+	principalRef   string
 	lane           string
 	deliveryRef    string
 	externalRunRef string
@@ -37,7 +37,7 @@ type actionClaimOptions struct {
 	semanticActionKey string
 	actionFilter      string
 	runnerID          string
-	actor             string
+	agentRef          string
 	scopeRef          string
 	leaseMs           int64
 	workspaceRoot     string
@@ -146,7 +146,7 @@ func actionStartCmd() *cobra.Command {
 				Workflow:       opts.workflowRef,
 				Action:         opts.action,
 				Role:           opts.role,
-				PrincipalRef:   firstNonEmpty(opts.actor, a.actor),
+				PrincipalRef:   firstNonEmpty(opts.principalRef, a.principalRef),
 				Lane:           opts.lane,
 				DeliveryRef:    rawJSONString(opts.deliveryRef),
 				ExternalRunRef: opts.externalRunRef,
@@ -163,7 +163,7 @@ func actionStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.action, "action", "", "Semantic action (triage|implement|review|verify|...)")
 	cmd.Flags().StringVar(&opts.workflowRef, "workflow", "", fmt.Sprintf("Workflow ref to attach when none exists (defaults to built-in %s)", wrkfapi.DefaultActionWorkflowRef()))
 	cmd.Flags().StringVar(&opts.role, "role", "", "Workflow role (defaults from action)")
-	cmd.Flags().StringVar(&opts.actor, "principal-ref", "", "Principal ref (agent:<id>)")
+	cmd.Flags().StringVar(&opts.principalRef, "principal-ref", "", "Principal ref (agent:<id>)")
 	cmd.Flags().StringVar(&opts.lane, "lane", "", "Lane (defaults from action)")
 	cmd.Flags().StringVar(&opts.deliveryRef, "delivery-ref", "", "Delivery ref")
 	cmd.Flags().StringVar(&opts.externalRunRef, "external-run-ref", "", "External run ref (hrc:<runId>)")
@@ -250,7 +250,7 @@ Follow error.fix and retry with --prior-run when predecessor review is required.
 					Action:            opts.actionFilter,
 				},
 				RunnerID:         opts.runnerID,
-				AgentRef:         firstNonEmpty(opts.actor, a.actor),
+				AgentRef:         firstNonEmpty(opts.agentRef, a.principalRef),
 				ScopeRef:         opts.scopeRef,
 				LeaseMs:          claimLeaseMs,
 				WorkspaceRoot:    opts.workspaceRoot,
@@ -267,7 +267,7 @@ Follow error.fix and retry with --prior-run when predecessor review is required.
 	cmd.Flags().StringVar(&opts.semanticActionKey, "semantic-action-key", "", "Preferred semantic action key")
 	cmd.Flags().StringVar(&opts.actionFilter, "action", "", "Preferred action")
 	cmd.Flags().StringVar(&opts.runnerID, "runner-id", "", "Runner identity")
-	cmd.Flags().StringVar(&opts.actor, "agent-ref", "", "Agent ref (agent:<id>)")
+	cmd.Flags().StringVar(&opts.agentRef, "agent-ref", "", "Agent ref (agent:<id>)")
 	cmd.Flags().StringVar(&opts.scopeRef, "scope-ref", "", "Runtime scope ref")
 	cmd.Flags().Int64Var(&opts.leaseMs, "lease-ms", 300000, "Lease duration in milliseconds")
 	cmd.Flags().StringVar(&opts.workspaceRoot, "workspace-root", "", "Opaque physical worktree ref recorded on the run record (never interpreted by the engine)")

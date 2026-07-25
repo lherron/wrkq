@@ -58,7 +58,7 @@ func newRPCCmd() *cobra.Command {
 			if principal, perr := launchPrincipalRef(cmd); perr != nil {
 				return perr
 			} else if principal != "" {
-				h.Opts.DefaultActor = principal
+				h.Opts.DefaultPrincipalRef = principal
 			}
 			return workrpc.ServeStdio(context.Background(), os.Stdin, os.Stdout, h.API, h.Opts)
 		},

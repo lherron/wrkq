@@ -101,7 +101,7 @@ describe("WorkClient over real `wrkq rpc --stdio`", () => {
     client = await createClient({
       command: WRKQ,
       dbPath,
-      actor: ACTOR,
+      principalRef: ACTOR,
       role: "coordinator",
       cwd: dir,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
@@ -265,7 +265,7 @@ describe("evidence idempotency & canonicalization via @wrkq/client", () => {
     idemClient = await createClient({
       command: WRKQ,
       dbPath: idemDb,
-      actor: ACTOR,
+      principalRef: ACTOR,
       role: "coordinator",
       cwd: idemDir,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
@@ -398,7 +398,7 @@ describe("WorkClient over real `wrkf rpc --stdio`", () => {
     wrkfClient = await createClient({
       command: WRKF,
       dbPath: wrkfDb,
-      actor: ACTOR,
+      principalRef: ACTOR,
       role: "coordinator",
       cwd: wrkfDir,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },

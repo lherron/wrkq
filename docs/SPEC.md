@@ -96,8 +96,9 @@ Key variables:
 | `WRKQ_CLAIM_TOKEN` / `WRKQ_CLAIM_GENERATION` | Current task-claim authority injected into a claimed runtime; `wrkq set --state completed` forwards it with the active task scope. |
 | `WRKQ_ATTACH_DIR` | Attachment byte storage root. |
 | `WRKQ_PRINCIPAL_REF` | Mutation principal input: `agent:<id>` or full agent ScopeRef, reduced to `agent:<id>`. |
+| `WRKF_PRINCIPAL_REF` | wrkf workflow caller principal input: `agent:<id>` or full agent ScopeRef, reduced to `agent:<id>`. |
 | `WRKQ_ACTOR_ID` | Legacy actor/display-cache input; ignored for wrkq-core caller attribution. |
-| `WRKQ_ACTOR` | Legacy actor/display-cache input; ignored for wrkq-core caller attribution. |
+| `WRKQ_ACTOR` / `WRKF_ACTOR` | Legacy actor/display-cache inputs; ignored for caller authority. |
 | `WRKQ_PROJECT_ROOT` | Default project/container path for relative task paths. |
 | `ASP_PROJECT` | Runtime project fallback when `WRKQ_PROJECT_ROOT` is not explicitly exported. |
 | `WRKQ_OUTPUT` | Default output mode. |
@@ -129,23 +130,38 @@ Principal attribution for mutating commands:
    full agent ScopeRef such as `agent:<id>:project:<projectId>`, reduced to
    `agent:<id>`. If both flags are supplied they must resolve to the same
    agent.
-2. `WRKQ_PRINCIPAL_REF`. Accepts `agent:<id>` or a full agent ScopeRef and
-   reduces it to `agent:<id>`.
+2. The product principal env: `WRKQ_PRINCIPAL_REF` for wrkq or
+   `WRKF_PRINCIPAL_REF` for wrkf. Both accept `agent:<id>` or a full agent
+   ScopeRef and reduce it to `agent:<id>`.
 3. A validated ASP scope (`ASP_SCOPE_REF`, `ASP_HANDLE`, or
    `ASP_AGENT_ID`+`ASP_PROJECT`) reduced to `agent:<agentId>`.
 4. `default_principal_ref` in config.
 
 wrkq validates principal syntax but never creates actors or requires an actor
 row for ordinary writes. Bare slugs, actor UUIDs, `A-*` actor IDs, `system:*`,
-`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, and `default_actor` are not caller attribution
-sources. Passing a full ScopeRef as a principal input keeps only the agent
-identity; scope provenance must travel through `scope_ref` / runtime scope.
+`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, `WRKF_ACTOR`, and `default_actor` are not caller
+attribution sources. Passing a full ScopeRef as a principal input keeps only
+the agent identity; runtime/task/project provenance must travel through
+`scope_ref` and delivery fields.
 
 ## 5. Domain Model
 
-### Actors
+### Principals and legacy actor compatibility
 
-Actors represent humans, agents, and system processes. Valid actor roles are:
+Canonical caller identity is a principal ref (`agent:<id>`). It does not
+require an actor row and is stored separately from runtime scope and delivery
+provenance.
+
+The physical `actors` table has **not** been dropped or compacted. It remains an
+intentional compatibility surface for:
+
+- `wrkqadm actors` and `/v1/actors/*` legacy admin/display-cache operations;
+- `A-*` / actor UUID resource selection in compatibility history reads;
+- actor UUID/slug/role display caches on older tasks, comments, relations, and
+  `event_log` projections; and
+- inert legacy workflow actor columns retained for data-preserving migration.
+
+Those rows and columns are not caller authority. Their historical roles remain:
 
 `human`, `agent`, `system`
 
@@ -581,7 +597,7 @@ Current implementation facts:
 
 Known limits:
 
-- Role/actor authority is still shallow compared with a real authorization
+- Role/principal authorization is still shallow compared with a real authorization
   system.
 - Evidence facts are validated as small decision surfaces; they do not prove the
   truth of referenced artifacts.

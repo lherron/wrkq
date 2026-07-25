@@ -26,7 +26,7 @@ mkdir -p "$(dirname "$TEST_DB")" "$TEST_ATTACH_DIR"
 
 export WRKQ_DB_PATH="$TEST_DB"
 export WRKQ_ATTACH_DIR="$TEST_ATTACH_DIR"
-export WRKQ_ACTOR="local-human"
+export WRKQ_PRINCIPAL_REF="agent:local-human"
 
 WRKQ="$PROJECT_ROOT/bin/wrkq"
 WRKQADM="$PROJECT_ROOT/bin/wrkqadm"

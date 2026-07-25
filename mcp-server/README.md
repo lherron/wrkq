@@ -53,7 +53,7 @@ Add to your Claude Code MCP settings (`.claude/mcp.json` or global config):
       "args": ["/absolute/path/to/wrkq/mcp-server/dist/index.js"],
       "env": {
         "WRKQ_DB_PATH": "/path/to/your/wrkq.db",
-        "WRKQ_ACTOR": "claude-assistant"
+        "WRKQ_PRINCIPAL_REF": "agent:claude-assistant"
       }
     }
   }
@@ -69,7 +69,7 @@ If you installed globally via `npm link`:
       "command": "wrkq-mcp-server",
       "env": {
         "WRKQ_DB_PATH": "/path/to/your/wrkq.db",
-        "WRKQ_ACTOR": "claude-assistant"
+        "WRKQ_PRINCIPAL_REF": "agent:claude-assistant"
       }
     }
   }
@@ -93,8 +93,10 @@ node dist/index.js
 The MCP server inherits environment variables from its parent process. You can configure wrkq behavior via:
 
 - `WRKQ_DB_PATH`: Path to wrkq database
-- `WRKQ_ACTOR`: Actor slug for mutations
-- `WRKQ_ACTOR_ID`: Actor friendly ID for mutations, such as `A-00001`
+- `WRKQ_PRINCIPAL_REF`: Canonical caller principal for mutations, such as
+  `agent:claude-assistant`
+
+Legacy `WRKQ_ACTOR` / `WRKQ_ACTOR_ID` values are not caller authority.
 
 See main project documentation for full configuration options.
 

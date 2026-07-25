@@ -50,7 +50,7 @@ describe("wrkf.action.* via @wrkq/client over real `wrkq rpc --stdio`", () => {
     client = await createClient({
       command: WRKQ,
       dbPath,
-      actor: ACTOR,
+      principalRef: ACTOR,
       cwd: dir,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
     });

@@ -28,21 +28,23 @@ source:
   - internal/attribution/principal.go          # Resolve / NormalizeCanonical (agent ScopeRef → agent:<id>) / ValidatePrincipalRef (stored principal grammar = agent:<id>)
   - internal/scope/resolve.go                  # caller-owned runtime scope order: --scope > AGENT_SCOPE_REF > ASP_SCOPE_REF > ASP_HANDLE > ASP_AGENT_ID+ASP_PROJECT
   - internal/workrpc/bootstrap/bootstrap.go    # default_principal_ref is optional; empty means no ambient system fallback
-  - internal/wrkfcli/root.go                   # wrkf splits workflow actor fallback from wrkq-core default principal
+  - internal/wrkfcli/root.go                   # wrkf requires a canonical workflow caller principal and rejects legacy actor defaults
+  - internal/workrpc/registry.go               # principal-named local/server defaults stamp wrkf and wrkq compatibility methods
   - internal/wrkqapi/webhooks.go               # validates actor BEFORE the no-change branch (no successful no-op for an invalid actor)
   - internal/wrkqapi/projectroots.go           # setRoot resolves canonical attribution before its sole write/event path
   - internal/workrpc/project_root_test.go       # setRoot row+event exact attribution and invalid-identity no-op guards
 required_tests:
   - internal/attribution/principal_test.go     # principal-only Resolve precedence; product principal envs; full ScopeRef flags reduce; legacy actor env/config ignored; bare --as rejected
   - internal/scope/resolve_test.go             # AGENT_SCOPE_REF precedence and disagreement diagnostics
-  - internal/wrkfcli/root_test.go              # wrkf workflow actor fallback does not become wrkq-core default attribution
+  - internal/wrkfcli/root_test.go              # scope-free flag/env/runtime/config resolution plus legacy actor and invalid-principal refusal
+  - internal/workrpc/entrypoint_equivalence_test.go # scope-free entrypoint-specific principal env parity
   - internal/workrpc/webhook_test.go           # TestWrkqWebhookAdd_ExactAttribution (changed-add exact + invalid reject) + TestWrkqWebhook_NoChangeInvalidActorRejected (duplicate add / missing remove invalid actor → WRKQ_VALIDATION, etag unchanged, no event)
   - internal/workrpc/commentdelete_mode_test.go # TestCommentAdd_ExactAttribution (non-webhook producer records the caller principal exactly)
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
   - internal/rpccli/parity_test.go             # webhook/add-with-principal mutates row (cross-binary updated_by_principal_ref parity)
 last_verified:
-  date: 2026-07-14
-  evidence: "T-05381 principal-only suite remains green; T-06366 real-RPC setRoot guard verifies canonical agent attribution on row+event and invalid bare identity as an atomic no-op; Daedalus focused rerun green at 97a3a71."
+  date: 2026-07-24
+  evidence: "T-05397: wrkf flag/env/runtime/config resolution and legacy/invalid refusal tests, scope-free entrypoint parity, full just verify, and isolated local + authenticated remote wrkqd canonical-principal/legacy-only smokes green."
 reopen_when:
   - attributionFor stops returning an error for missing/invalid principal identity
   - any wrkqapi mutation returns a successful response (including no-change/dry-run) without validating caller principal identity

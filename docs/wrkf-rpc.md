@@ -10,7 +10,7 @@
 > conform to this file. Design rationale now lives in git history and tracked wrkq tasks; this
 > file is the maintained contract.
 
-Protocol version string: **`2026-06-01`**.
+Protocol version string: **`2026-06-30`**.
 
 > **Durable-law anchor:** the error-recovery half of this contract is captured as durable
 > architecture law in [architecture/contracts/wrkf-rpc.yaml](architecture/contracts/wrkf-rpc.yaml)
@@ -47,12 +47,12 @@ Protocol version string: **`2026-06-01`**.
 
 **initialize params:**
 ```json
-{ "protocolVersion": "2026-06-01", "client": { "name": "acp", "version": "..." } }
+{ "protocolVersion": "2026-06-30", "client": { "name": "acp", "version": "..." } }
 ```
 **initialize result:**
 ```json
 {
-  "protocolVersion": "2026-06-01",
+  "protocolVersion": "2026-06-30",
   "server": { "name": "wrkf", "version": "...", "pid": 12345 },
   "database": { "path": "/.../wrkq.db" },
   "capabilities": { "cancel": true, "effectClaimLease": true, "runExternalBinding": true },
@@ -62,6 +62,12 @@ Protocol version string: **`2026-06-01`**.
 `cancel: true` means *accepted, best-effort*. Protocol-version mismatch on initialize → `WRKF_VALIDATION` with `data.expected`/`data.actual`.
 
 RPC mode loads config + DB once and keeps the `workflow.Service` warm for the process lifetime. Config (db path, hook catalog path, principal_ref/role defaults) arrives via argv flags on `wrkf rpc --stdio` and/or `initialize` params — never environment-only magic.
+
+The launch-time caller is principal-only. Supply `--principal-ref agent:<id>`,
+`WRKF_PRINCIPAL_REF=agent:<id>`, a valid agent runtime scope, or config
+`default_principal_ref`. `WRKF_ACTOR`, `WRKQ_ACTOR`, actor UUID / `A-*` ids,
+bare slugs, `system:*`, and config `default_actor` are not authority inputs.
+Runtime/task/project provenance remains in scope and delivery refs.
 
 ---
 
@@ -189,7 +195,7 @@ New named DTOs to add (replace current `map[string]interface{}` returns). All fi
 
 **`wrkf.transition.apply` params** (maps onto `TransitionOptions`):
 ```json
-{ "task": "T-00001", "transition": "plan_ready", "role": "coordinator", "principal_ref": "human:local",
+{ "task": "T-00001", "transition": "plan_ready", "role": "coordinator", "principal_ref": "agent:local",
   "expectRevision": 0, "contextHash": "sha256:...", "idempotencyKey": "acp:T-00001:plan_ready:0",
   "checkIds": ["chk_000001"], "dryRun": false }
 ```

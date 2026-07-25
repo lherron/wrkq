@@ -51,7 +51,7 @@ async function initVia(command: string, db: string) {
   const client = await createClient({
     command,
     dbPath: db,
-    actor: "agent:local-human",
+    principalRef: "agent:local-human",
     cwd: tmpdir(),
     autoInitialize: false,
     env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },
@@ -149,7 +149,7 @@ describe("initialize result shape", () => {
     const client = await createClient({
       command: WRKQ,
       dbPath: mkdb(),
-      actor: "agent:local-human",
+      principalRef: "agent:local-human",
       cwd: tmpdir(),
       autoInitialize: false,
       env: { ...process.env, ASP_PROJECT: "", WRKQ_PROJECT: "" },

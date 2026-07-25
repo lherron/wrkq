@@ -23,18 +23,18 @@ describe("StdioTransport spawn construction", () => {
     expect(spec.env.WRKQ_DB).toBeUndefined();
   });
 
-  test("wrkq sessions reject legacy actor; wrkf launches with canonical --principal-ref", () => {
-    let wrkqRejectedActor = false;
+  test("all sessions reject legacy actor; wrkf launches with canonical --principal-ref", () => {
+    let rejectedActor = false;
     try {
       buildStdioSpawnSpec({
-        command: "wrkq",
+        command: "wrkf",
         actor: "agent:cody",
-      });
+      } as StdioSpawnOptions & { actor: string });
     } catch (err) {
-      wrkqRejectedActor = true;
+      rejectedActor = true;
       expect((err as Error).message).toMatch(/actor|principalRef/i);
     }
-    expect(wrkqRejectedActor).toBe(true);
+    expect(rejectedActor).toBe(true);
 
     // T-05372: wrkf participant identity is canonical principal_ref — the wrkf
     // binary launches with --principal-ref, never the legacy --actor flag.
@@ -50,11 +50,11 @@ describe("StdioTransport spawn construction", () => {
     const spec = buildStdioSpawnSpec({
       command: "wrkq",
       dbPath: "/tmp/wrkq.db",
-      actor: "agent:cody",
+      principalRef: "agent:cody",
       env: { WRKQ_DB: undefined, WRKQ_DB_PATH: undefined },
     });
 
-    expect(spec.argv).toEqual(["--db", "/tmp/wrkq.db", "--as", "agent:cody", "rpc", "--stdio"]);
+    expect(spec.argv).toEqual(["--db", "/tmp/wrkq.db", "--principal-ref", "agent:cody", "rpc", "--stdio"]);
     expect(spec.env.WRKQ_DB).toBeUndefined();
   });
 
@@ -62,7 +62,7 @@ describe("StdioTransport spawn construction", () => {
     const spec = buildStdioSpawnSpec({
       command: "wrkq",
       dbLocator: "rpc://127.0.0.1:7171",
-      actor: "agent:cody",
+      principalRef: "agent:cody",
       env: {
         WRKQ_DB: "rpc://old:7171",
         WRKQ_DB_PATH: "rpc://poison:7171",
@@ -70,7 +70,7 @@ describe("StdioTransport spawn construction", () => {
       },
     });
 
-    expect(spec.argv).toEqual(["--as", "agent:cody", "rpc", "--stdio"]);
+    expect(spec.argv).toEqual(["--principal-ref", "agent:cody", "rpc", "--stdio"]);
     expect(spec.argv).not.toContain("--db");
     expect(spec.env.WRKQ_DB).toBe("rpc://127.0.0.1:7171");
     expect(spec.env.WRKQ_DB_PATH).toBeUndefined();

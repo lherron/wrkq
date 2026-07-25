@@ -14,18 +14,25 @@ func withTransport(fn func(*app, *cobra.Command, []string) error) func(*cobra.Co
 		if err := resolveStdinTextFlags(cmd); err != nil {
 			return err
 		}
-		actor, wrkqActor, err := actorDefaults(cmd)
+		cfg, err := loadConfiguredConfig()
 		if err != nil {
 			return err
 		}
-		tr, cfg, closeTransport, err := openConfiguredTransport(cmd)
+		principalRef, err := wrkfPrincipalDefault(cmd, cfg)
+		if err != nil {
+			return err
+		}
+		tr, closeTransport, err := openConfiguredTransportWithConfig(cmd, cfg, principalRef)
 		if err != nil {
 			return err
 		}
 		defer closeTransport()
 		a := &app{
-			actor: actor, wrkqActor: wrkqActor, role: roleDefault(), json: flagJSON,
-			transport: tr, remote: cfg.RemoteEndpoint != "",
+			principalRef: principalRef,
+			role:         roleDefault(),
+			json:         flagJSON,
+			transport:    tr,
+			remote:       cfg.RemoteEndpoint != "",
 		}
 		runErr := fn(a, cmd, args)
 		if runErr != nil && flagJSON {
@@ -73,28 +80,52 @@ func rawJSONString(value string) json.RawMessage {
 // wrkf command adapters. Commands added to the transport path must not branch
 // on the locator themselves.
 func openConfiguredTransport(cmd *cobra.Command) (workrpcclient.Transport, *config.Config, func(), error) {
-	cfg, err := config.Load()
+	cfg, err := loadConfiguredConfig()
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	tr, closeTransport, err := openConfiguredTransportWithConfig(cmd, cfg, "")
+	return tr, cfg, closeTransport, err
+}
+
+func loadConfiguredConfig() (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
 	}
 	if flagDB != "" {
 		if err := config.ApplyDBLocator(cfg, flagDB, false); err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
 	}
+	return cfg, nil
+}
+
+func openConfiguredTransportWithConfig(cmd *cobra.Command, cfg *config.Config, principalRef string) (workrpcclient.Transport, func(), error) {
 	if cfg.RemoteEndpoint != "" {
 		if flagHookCatalog != "" {
-			return nil, nil, nil, fmt.Errorf("--hook-catalog is local-only; hook catalog is canonical-node configuration in remote mode")
+			return nil, nil, fmt.Errorf("--hook-catalog is local-only; hook catalog is canonical-node configuration in remote mode")
 		}
 		tr, err := workrpcclient.NewRemote(cfg.RemoteEndpoint, workrpcclient.TokenFromEnv(), workrpcclient.WrkfProfile)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
-		return tr, cfg, func() { _ = tr.Close() }, nil
+		return tr, func() { _ = tr.Close() }, nil
 	}
-	tr, localCfg, err := workrpcclient.NewConfiguredInProcess(cfg.DBLocator, flagHookCatalog, "wrkf", workrpcclient.WrkfProfile)
+	tr, err := workrpcclient.NewConfiguredInProcess(
+		cfg.DBLocator,
+		flagHookCatalog,
+		workrpcclient.LocalServerOptions{
+			Entrypoint:              "wrkf",
+			DefaultPrincipalRef:     principalRef,
+			WrkqDefaultPrincipalRef: principalRef,
+			UseWrkqDefault:          true,
+			DefaultRole:             roleDefault(),
+		},
+		workrpcclient.WrkfProfile,
+	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return tr, localCfg, func() { _ = tr.Close() }, nil
+	return tr, func() { _ = tr.Close() }, nil
 }

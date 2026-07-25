@@ -6,7 +6,7 @@
 # obligation. Scoped to the T-00001 test instance.
 #
 # SCOPED predicate asserted:
-#   workflow_runs >= 3 (tester / implementer / reviewer, distinct actors)
+#   workflow_runs >= 3 (tester / implementer / reviewer, distinct principals)
 #   workflow_role_bindings >= 3
 #   workflow_obligations >= 1 kind=review_signoff
 #   instance phase == review (reached active/review)
@@ -33,7 +33,7 @@ go build -tags sqlite_fts5 -o "$BIN/wrkf"    "$ROOT/cmd/wrkf"
 
 cd "$TMPDIR"
 export WRKQ_DB_PATH="$DB"
-export WRKQ_ACTOR="local-human"
+export WRKF_PRINCIPAL_REF="agent:local-human"
 export WRKQ_PROJECT_ROOT=""
 unset ASP_PROJECT
 
@@ -52,9 +52,9 @@ TEMPLATE="$ROOT/wrkf/templates/wrkq-code-change.workflow.json"
 "$BIN/wrkf" --db "$DB" task attach T-00001 --workflow wrkq-code-change@1 --json \
   | jq -e '.phase == "intake"' >/dev/null
 
-# ── bind all three roles via `run start` (DISTINCT actors) ───────────────────
+# ── bind all three roles via `run start` (DISTINCT principals) ───────────────
 # This is the surface under test: each call creates a workflow_runs row
-# AND a workflow_role_bindings row for the given role/actor pair.
+# AND a workflow_role_bindings row for the given role/principal pair.
 if [ "${WRKF_ADOPTION_NEGATIVE_SKIP_RUN_STARTS:-}" != "1" ]; then
   "$BIN/wrkf" --db "$DB" run start T-00001 --role tester      --principal-ref agent:tester      --json \
     | jq -e '.role == "tester" and .status == "active"' >/dev/null
@@ -87,7 +87,7 @@ fi
   | jq -e '.state.phase == "red" and .revision == 1' >/dev/null
 
 # transition 2: implement (implementer) — active/red → active/verify
-# SoD: verify.actor (agent:implementer) ≠ red_test.actor (agent:tester) ✓
+# SoD: verify principal (agent:implementer) ≠ red_test principal (agent:tester) ✓
 "$BIN/wrkf" --db "$DB" --principal-ref agent:implementer --role implementer \
   evidence add T-00001 --kind verify --ref "git:sha-green-s14" \
   --facts '{"verdict":"pass"}' --summary "S14 verify green" --json \
@@ -99,7 +99,7 @@ fi
   | jq -e '.state.phase == "verify" and .revision == 2' >/dev/null
 
 # transition 3: full_verify (tester) — active/verify → active/review
-# SoD: verify_full.actor (agent:tester) ≠ verify.actor (agent:implementer) ✓
+# SoD: verify_full principal (agent:tester) ≠ verify principal (agent:implementer) ✓
 # Effect: opens a blocking review_signoff obligation owned by reviewer
 "$BIN/wrkf" --db "$DB" --principal-ref agent:tester --role tester \
   evidence add T-00001 --kind verify_full --ref "git:sha-smoke-s14" \

@@ -24,7 +24,7 @@ go build -tags sqlite_fts5 -o "$BIN/wrkqd" "$ROOT/cmd/wrkqd"
 
 cd "$TMPDIR"
 export WRKQ_DB_PATH="$DB"
-export WRKQ_ACTOR="agent:local-human"
+export WRKF_PRINCIPAL_REF="agent:local-human"
 export WRKQ_PROJECT_ROOT=""
 unset ASP_PROJECT
 

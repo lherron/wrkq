@@ -65,8 +65,8 @@ export interface CreateClientOptions {
   dbLocator?: string;
   /** Legacy name for dbLocator. */
   dbPath?: string;
+  /** Canonical caller authority passed to the selected CLI entrypoint. */
   principalRef?: string;
-  actor?: string;
   role?: string;
   hookCatalogPath?: string;
   cwd?: string;
@@ -340,6 +340,9 @@ function rejectLegacyActorAttribution<T>(params: T): T {
  * `rpc.initialize` before resolving. Pass `transport` to inject a fake.
  */
 export async function createClient(opts: CreateClientOptions = {}): Promise<WorkClient> {
+  if (Object.prototype.hasOwnProperty.call(opts, "actor")) {
+    throw new Error("actor is no longer accepted for caller authority; use principalRef");
+  }
   const transport =
     opts.transport ??
     new StdioTransport({
@@ -348,7 +351,6 @@ export async function createClient(opts: CreateClientOptions = {}): Promise<Work
       dbLocator: opts.dbLocator,
       dbPath: opts.dbPath,
       principalRef: opts.principalRef,
-      actor: opts.actor,
       role: opts.role,
       hookCatalogPath: opts.hookCatalogPath,
       signal: opts.signal,

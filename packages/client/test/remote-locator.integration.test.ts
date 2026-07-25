@@ -102,7 +102,7 @@ describe("@wrkq/client remote locator through stdio subprocess", () => {
       client = await createClient({
         command: WRKQ,
         dbPath: `rpc://127.0.0.1:${port}`,
-        actor: "agent:local-human",
+        principalRef: "agent:local-human",
         cwd,
         env: {
           ...process.env,
@@ -149,7 +149,7 @@ describe("@wrkq/client remote locator through stdio subprocess", () => {
       await createClient({
         command: WRKQ,
         dbPath: `rpc://127.0.0.1:${port}`,
-        actor: "agent:local-human",
+        principalRef: "agent:local-human",
         env: {
           ...process.env,
           WRKQD_TOKEN: badToken,

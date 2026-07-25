@@ -15,7 +15,7 @@ TESTS_FAILED=0
 
 # Test database path - explicit env vars to avoid loading from .env.local
 export WRKQ_DB_PATH="/tmp/wrkq-async-run-linkage-smoke-test.db"
-export WRKQ_ACTOR="test-human"
+export WRKQ_PRINCIPAL_REF="agent:test-human"
 export WRKQ_PROJECT_ROOT=""  # Explicitly clear to prevent loading from .env.local
 
 # Build the CLI

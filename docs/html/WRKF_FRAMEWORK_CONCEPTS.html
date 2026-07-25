@@ -1181,7 +1181,7 @@
             </div>
 
             <div class="callout">
-              <strong>Delivery reference:</strong> the model's template is <span class="inline-code">{actor}@{project}:{taskId}</span> with lane default <span class="inline-code">main</span>. <span class="inline-code">wrkf run bind TASK ROLE HANDLE</span> persists the role-to-handle binding.
+              <strong>Delivery reference:</strong> the model's template is <span class="inline-code">{agent}@{project}:{taskId}</span> with lane default <span class="inline-code">main</span>. <span class="inline-code">wrkf run bind TASK ROLE HANDLE</span> persists the role-to-handle binding.
             </div>
           </section>
 
@@ -1519,7 +1519,7 @@ type HookSpec = { // Deterministic local script execution contract.
   facts?: Record&lt;string, unknown&gt; // Flat routing facts stored as facts_json and validated when a kind contract exists.
   data?: unknown // Rich freeform evidence payload for humans and agents.
   source?: unknown // Source descriptor, currently external_ref for AddEvidence.
-  actor?: string // Actor that produced the evidence.
+  principalRef?: string // Canonical agent principal that produced the evidence.
   role?: string // Workflow role that produced the evidence.
   runId?: string // Workflow run that produced the evidence when known.
   taskEtagAtProduction?: string // Task etag observed when the evidence was recorded.
@@ -1533,7 +1533,7 @@ type AddEvidenceParams = { // Service input accepted by wrkf evidence add and ev
   summary?: string // Optional human summary.
   facts?: string // JSON object string validated as flat evidence facts.
   data?: string // JSON document string stored as evidence data.
-  actor?: string // Actor identity copied into the evidence row.
+  principalRef?: string // Canonical principal copied into the evidence row.
   role?: string // Role identity copied into the evidence row.
 }</code></pre>
               </div>
@@ -1583,7 +1583,7 @@ type Obligation = { // Outstanding duty that can block or guide progress.
   instanceId?: string // Owning workflow instance id.
   kind: string // Obligation kind such as assignee_close_task or await_observer_completion_review.
   ownerRole?: string // Role responsible for resolving the duty.
-  ownerActor?: string // Specific actor responsible when known.
+  ownerPrincipalRef?: string // Specific canonical principal responsible when known.
   blocking: boolean // True when open status blocks transition progress.
   status: 'open' | 'satisfied' | 'waived' | 'cancelled' // Resolution lifecycle state.
   reason?: string // Human-readable explanation or computed status detail.
@@ -1601,7 +1601,7 @@ type Obligation = { // Outstanding duty that can block or guide progress.
                 <div>
                   <span class="badge runtime">Execution records</span>
                   <h3><span class="inline-code">CheckRun</span> and <span class="inline-code">Run</span></h3>
-                  <p>Check runs record validator decisions; runs bind roles to actors and delivery handles.</p>
+                  <p>Check runs record validator decisions; runs bind roles to canonical principals and delivery handles.</p>
                 </div>
                 <div class="object-chip-row">
                   <span class="badge ledger">check</span>
@@ -1623,7 +1623,7 @@ type Obligation = { // Outstanding duty that can block or guide progress.
   code?: string // Optional structured code emitted by JSON stdout hooks.
   summary?: string // Human summary or stderr text from the check.
   facts?: Record&lt;string, unknown&gt; // Optional facts emitted by JSON stdout hooks.
-  actor?: string // Actor that ran the check.
+  principalRef?: string // Canonical principal that ran the check.
   role?: string // Role that ran the check.
   runId?: string // Associated workflow run id when supplied.
   startedAt: string // RFC3339 start timestamp.
@@ -1634,7 +1634,7 @@ type Run = { // Active or completed role binding and execution record.
   id: string // Run id allocated from workflow_run_seq.
   instanceId?: string // Owning workflow instance id.
   role: string // Workflow role for this run or binding.
-  actor: string // Actor id such as clod, cody, larry, curly, or smokey.
+  principalRef: string // Canonical agent principal such as agent:cody.
   deliveryRef?: string // Project/task-scoped handle used by effect delivery.
   lane?: string // Optional lane parsed from the delivery handle suffix.
   externalRunRef?: string // External runtime reference when known.
@@ -1673,7 +1673,7 @@ type NextAction = { // One candidate action emitted by the scheduler.
   id: string // Stable action id within this response.
   kind: string // Action class such as transition, run_check, collect_evidence, bind_role, or deliver_effect.
   mode: 'deterministic' | string // Scheduling mode; current service emits deterministic actions.
-  owner: ActionOwner // Role, actor, and delivery target expected to perform the action.
+  owner: ActionOwner // Role, principal, and delivery target expected to perform the action.
   rank: number // Numeric priority used for sorting, with higher rank first.
   confidence?: number // Optional confidence score for future scheduler variants.
   why: string // Human-readable reason this action is recommended.
@@ -1687,8 +1687,8 @@ type NextAction = { // One candidate action emitted by the scheduler.
 
 type ActionOwner = { // Runtime owner resolved for an action.
   role: string // Workflow role responsible for the action.
-  actor?: string // Bound actor when known.
-  deliveryRef?: string // Bound delivery handle such as actor@project:taskId.
+  principalRef?: string // Bound canonical principal when known.
+  deliveryRef?: string // Bound delivery handle such as agent@project:taskId.
   lane?: string // Bound lane parsed from the handle.
 }
 
@@ -1699,7 +1699,7 @@ type Blocker = { // Structured blocker explaining why work cannot advance.
 }
 
 type Guardrails = { // Execution constraints attached to a next action.
-  hard: string[] // Non-negotiable rules the actor must follow.
+  hard: string[] // Non-negotiable rules the assigned principal must follow.
   warnings: string[] // Advisory cautions that do not block execution.
 }</code></pre>
               </div>
@@ -1724,7 +1724,7 @@ type Guardrails = { // Execution constraints attached to a next action.
   task: string // Task selector resolved to the latest workflow instance.
   transition: string // Transition id to attempt from the current state.
   role?: string // Role supplied by --role or WRKF_ROLE for by-list enforcement.
-  actor?: string // Actor supplied by --actor, WRKF_ACTOR, or WRKQ_ACTOR.
+  principalRef?: string // Caller supplied by --principal-ref or WRKF_PRINCIPAL_REF.
   expectRevision?: number // Optional --expect-revision guard that must match instance revision.
   context?: string // Optional --context guard that must match instance contextHash.
   idempotencyKey?: string // Optional retry key looked up in workflow_events for this instance.
@@ -1749,7 +1749,7 @@ type Event = { // Append-only workflow event emitted for attach and transition c
   seq: number // Monotonic sequence number within the instance event stream.
   schemaVersion: 'wrkf.workflow-event.v0' // Event schema version written by insertEvent.
   type: string // Event type such as workflow.attached or workflow.transitioned.
-  actor?: string // Actor responsible for the event.
+  principalRef?: string // Canonical principal responsible for the event.
   role?: string // Role responsible for the event.
   runId?: string // Associated run id when known.
   observedRevision: number // Revision observed before the mutation.

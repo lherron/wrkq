@@ -1565,7 +1565,7 @@ interface WrkfEvidenceAddParams {
   summary?: string;
   facts?: Record<string, unknown>;
   data?: unknown;
-  actor?: string;
+  principal_ref?: string;
   role?: string;
   runId?: string;
   idempotencyKey?: string;
@@ -1639,7 +1639,7 @@ interface WrkfTransitionApplyParams {
   instanceId?: string;
   transition: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   expectRevision?: number;
   contextHash?: string;
   idempotencyKey?: string;
@@ -1699,7 +1699,7 @@ interface WrkfRunStartParams {
   task?: string;
   instanceId?: string;
   role?: string;
-  actor?: string;
+  principal_ref?: string;
   idempotencyKey?: string;
   deliveryRef?: string;
   lane?: string;
@@ -1765,7 +1765,7 @@ import { createClient, WorkRpcError } from "@wrkq/client";
 const client = await createClient({
   command: "wrkq",
   dbPath: "/path/to/wrkq.db",
-  actor: "agent:agent-loop",
+  principalRef: "agent:agent-loop",
   role: "coordinator",
   clientInfo: { name: "agent-loop", version: "0.1.0" },
 });
@@ -1798,7 +1798,7 @@ try {
     facts: { verdict: "ready" },
     data: { artifactsDir: "/path/to/artifacts" },
     role: "implementer",
-    actor: "agent:agent-loop",
+    principal_ref: "agent:agent-loop",
   });
 
   const inspect = await client.wrkq.workflow.inspect({ task: task.id });
@@ -1807,7 +1807,7 @@ try {
     task: task.id,
     transition: "implementation_ready",
     role: "implementer",
-    actor: "agent:agent-loop",
+    principal_ref: "agent:agent-loop",
     expectRevision: inspect.instance.revision,
     contextHash: inspect.instance.contextHash,
     idempotencyKey: `agent-loop:transition:${task.id}:implementation_ready:${inspect.instance.revision}`,
@@ -1856,7 +1856,7 @@ interface CreateClientOptions {
   command?: "wrkq" | "wrkf" | string;
   args?: string[];
   dbPath?: string;
-  actor?: string;
+  principalRef?: string;
   role?: string;
   hookCatalogPath?: string;
   cwd?: string;
@@ -2044,7 +2044,7 @@ type EvidenceAddParams struct {
     Summary        string                 `json:"summary,omitempty"`
     Facts          map[string]any         `json:"facts,omitempty"`
     Data           any                    `json:"data,omitempty"`
-    Actor          string                 `json:"actor,omitempty"`
+    PrincipalRef   string                 `json:"principal_ref,omitempty"`
     Role           string                 `json:"role,omitempty"`
     RunID          string                 `json:"runId,omitempty"`
     IdempotencyKey string                 `json:"idempotencyKey,omitempty"`
@@ -2166,7 +2166,7 @@ Effect lease state must include a real `leaseToken`. `ack` and `fail` must requi
 
 `wrkf.evidence.add` exposes `idempotencyKey` because agent-loop and other orchestrators retry evidence submission. The replay/mismatch contract is mandatory; an exposed key with undefined semantics is forbidden.
 
-Persist the committed evidence result keyed by `(instanceId, idempotencyKey)`, where `instanceId` is the workflow instance resolved from the supplied `task` or `instanceId` selector. Compute a canonical request hash over the normalized evidence params (`kind`, `ref`, `summary`, `facts`, `data`, `actor`, `role`, `runId`) excluding the key itself.
+Persist the committed evidence result keyed by `(instanceId, idempotencyKey)`, where `instanceId` is the workflow instance resolved from the supplied `task` or `instanceId` selector. Compute a canonical request hash over the normalized evidence params (`kind`, `ref`, `summary`, `facts`, `data`, `principal_ref`, `role`, `runId`) excluding the key itself.
 
 Replay semantics:
 
@@ -2281,7 +2281,7 @@ wrkq.workflow.timeline
 3. Keep template registry under `wrkf.workflow.*`.
 4. Keep evidence/obligation/check/hook/transition/run/effect under `wrkf.*`.
 5. Remove `syncMeta` from the public RPC surface.
-6. Patch evidence add params and persistence for `actor`, `role`, `data`, `runId`, and `idempotencyKey`.
+6. Patch evidence add params and persistence for `principal_ref`, `role`, `data`, `runId`, and `idempotencyKey`.
 7. Ensure workflow transitions can project task fields only as internal transition side effects.
 
 ### P4 — Unified Bun TypeScript package
@@ -2442,7 +2442,7 @@ import { createClient } from "@wrkq/client";
 const client = await createClient({
   command: "wrkq",
   dbPath,
-  actor: "agent:agent-loop",
+  principalRef: "agent:agent-loop",
   role: "coordinator",
 });
 
@@ -2469,7 +2469,7 @@ const attached = await client.wrkq.workflow.attach({
 const run = await client.wrkf.run.start({
   task: task.id,
   role: "implementer",
-  actor: "agent:agent-loop",
+  principal_ref: "agent:agent-loop",
   externalRunRef: "agent-loop-run-123",
   idempotencyKey: `demo:run:${task.id}:implementer:1`,
 });
@@ -2482,7 +2482,7 @@ const evidence = await client.wrkf.evidence.add({
   facts: { verdict: "ready" },
   data: { artifactsDir: "/tmp/agent-loop/artifacts" },
   role: "implementer",
-  actor: "agent:agent-loop",
+  principal_ref: "agent:agent-loop",
   runId: run.id,
   idempotencyKey: `demo:evidence:${run.id}:implementation`,
 });
@@ -2493,7 +2493,7 @@ await client.wrkf.transition.apply({
   task: task.id,
   transition: "implementation_ready",
   role: "implementer",
-  actor: "agent:agent-loop",
+  principal_ref: "agent:agent-loop",
   expectRevision: inspected.instance.revision,
   contextHash: inspected.instance.contextHash,
   idempotencyKey: `demo:transition:${task.id}:implementation_ready:${inspected.instance.revision}`,

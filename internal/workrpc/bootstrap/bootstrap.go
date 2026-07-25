@@ -24,7 +24,7 @@ import (
 // Server builds the wrkf API and registry options for an already-open database
 // and loaded config. This is the shared core used by both the stdio server and
 // the mirror CLI; keep all server-construction policy (hook catalog, default
-// actor, attach-dir policy, attachment limits, entrypoint identity) here.
+// principal, attach-dir policy, attachment limits, entrypoint identity) here.
 func Server(database *db.DB, cfg *config.Config) (*wrkfapi.API, workrpc.RegistryOptions, error) {
 	hookPath, err := workflow.ResolveHookCatalogPath("")
 	if err != nil {
@@ -56,15 +56,15 @@ func serverWithHookPath(database *db.DB, cfg *config.Config, hookPath string, ho
 		wrkfapi.WithHookTimeoutCeiling(hookTimeoutCeiling),
 	)
 	opts := workrpc.RegistryOptions{
-		Database:         database,
-		DatabasePath:     database.Path(),
-		ServerVersion:    "dev",
-		Entrypoint:       "wrkq",
-		DefaultActor:     DefaultPrincipalRef(cfg.DefaultPrincipalRef),
-		DefaultRole:      os.Getenv("WRKF_ROLE"),
-		AttachDir:        AttachDir(cfg.AttachDir),
-		AttachmentsMaxMB: cfg.AttachmentsMaxMB,
-		Search:           SearchConfig(cfg, database.Path()),
+		Database:            database,
+		DatabasePath:        database.Path(),
+		ServerVersion:       "dev",
+		Entrypoint:          "wrkq",
+		DefaultPrincipalRef: DefaultPrincipalRef(cfg.DefaultPrincipalRef),
+		DefaultRole:         os.Getenv("WRKF_ROLE"),
+		AttachDir:           AttachDir(cfg.AttachDir),
+		AttachmentsMaxMB:    cfg.AttachmentsMaxMB,
+		Search:              SearchConfig(cfg, database.Path()),
 	}
 	return api, opts, nil
 }

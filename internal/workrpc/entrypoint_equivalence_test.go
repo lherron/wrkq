@@ -97,10 +97,22 @@ func runRPC(t *testing.T, entrypoint, dbPath string, requests []string) []map[st
 	args := []string{"run", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = repoRoot(t)
-	// Principal-only attribution: supply a default caller principal for the rpc
-	// server (mirrors a configured agent session). Mutation steps that pass an
-	// explicit `actor: agent:<id>` override this; seed steps fall back to it.
-	cmd.Env = append(os.Environ(), "WRKQ_PRINCIPAL_REF=agent:smokey")
+	// Principal-only attribution: each entrypoint receives its own explicit
+	// principal env in an otherwise scope-free environment.
+	cmd.Env = scopeFreeAuthorityEnv(t)
+	if entrypoint == "wrkf" {
+		principal := os.Getenv("WRKF_PRINCIPAL_REF")
+		if principal == "" {
+			principal = "agent:smokey"
+		}
+		cmd.Env = append(cmd.Env, "WRKF_PRINCIPAL_REF="+principal)
+	} else {
+		principal := os.Getenv("WRKQ_PRINCIPAL_REF")
+		if principal == "" {
+			principal = "agent:smokey"
+		}
+		cmd.Env = append(cmd.Env, "WRKQ_PRINCIPAL_REF="+principal)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)
@@ -141,6 +153,42 @@ func runRPC(t *testing.T, entrypoint, dbPath string, requests []string) []map[st
 		t.Fatalf("%s failed: %v; stderr=%s", entrypoint, err, stderr.String())
 	}
 	return frames
+}
+
+func scopeFreeAuthorityEnv(t *testing.T) []string {
+	t.Helper()
+	cleared := map[string]struct{}{
+		"WRKF_PRINCIPAL_REF": {},
+		"WRKF_ACTOR":         {},
+		"WRKQ_PRINCIPAL_REF": {},
+		"WRKQ_ACTOR":         {},
+		"WRKQ_ACTOR_ID":      {},
+		"AGENT_SCOPE_REF":    {},
+		"ASP_SCOPE_REF":      {},
+		"ASP_HANDLE":         {},
+		"ASP_AGENT_ID":       {},
+		"ASP_PROJECT":        {},
+	}
+	env := make([]string, 0, len(os.Environ())+len(cleared))
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		if _, ok := cleared[key]; !ok {
+			env = append(env, item)
+		}
+	}
+	env = append(env,
+		"WRKF_PRINCIPAL_REF=",
+		"WRKF_ACTOR=",
+		"WRKQ_PRINCIPAL_REF=",
+		"WRKQ_ACTOR=",
+		"WRKQ_ACTOR_ID=",
+		"AGENT_SCOPE_REF=",
+		"ASP_SCOPE_REF=",
+		"ASP_HANDLE=",
+		"ASP_AGENT_ID=",
+		"ASP_PROJECT=",
+	)
+	return env
 }
 
 func resultMap(t *testing.T, frame map[string]any) map[string]any {

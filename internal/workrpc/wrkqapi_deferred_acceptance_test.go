@@ -41,10 +41,9 @@ import (
 
 // ─── p4 helpers ─────────────────────────────────────────────────────────────
 
-// runRPCWithEnv is like runRPC but appends extraEnv after a default caller
-// principal. Like runRPC, it injects WRKQ_PRINCIPAL_REF=agent:smokey so seed
-// writes have a valid principal-only attribution; extraEnv is appended last so a
-// test may still override it.
+// runRPCWithEnv is like runRPC but appends extraEnv after an entrypoint-specific
+// default caller principal. Extra env is appended last so a test may override
+// the default explicitly.
 func runRPCWithEnv(t *testing.T, entrypoint, dbPath string, requests []string, extraEnv []string) []map[string]any {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -53,7 +52,11 @@ func runRPCWithEnv(t *testing.T, entrypoint, dbPath string, requests []string, e
 	args := []string{"run", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = repoRoot(t)
-	cmd.Env = append(append(os.Environ(), "WRKQ_PRINCIPAL_REF=agent:smokey"), extraEnv...)
+	principalEnv := "WRKQ_PRINCIPAL_REF=agent:smokey"
+	if entrypoint == "wrkf" {
+		principalEnv = "WRKF_PRINCIPAL_REF=agent:smokey"
+	}
+	cmd.Env = append(append(scopeFreeAuthorityEnv(t), principalEnv), extraEnv...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

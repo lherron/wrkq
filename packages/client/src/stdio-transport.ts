@@ -28,10 +28,8 @@ export interface StdioSpawnOptions {
   dbLocator?: string;
   /** Legacy name for dbLocator. */
   dbPath?: string;
-  /** wrkq --principal-ref */
+  /** Canonical caller authority passed as --principal-ref. */
   principalRef?: string;
-  /** wrkf participant identity -> --principal-ref (wrkq legacy: --as with explicit DB locator). */
-  actor?: string;
   /** --role */
   role?: string;
   /** --hook-catalog */
@@ -76,6 +74,9 @@ function isRemoteLocator(locator: string): boolean {
 }
 
 export function buildStdioSpawnSpec(opts: StdioSpawnOptions): StdioSpawnSpec {
+  if (Object.prototype.hasOwnProperty.call(opts, "actor")) {
+    throw new Error("actor is no longer accepted for caller authority; use principalRef");
+  }
   const dbLocator = opts.dbLocator ?? opts.dbPath;
   if (opts.dbLocator && opts.dbPath && opts.dbLocator !== opts.dbPath) {
     throw new Error("dbLocator and dbPath refer to different database locators");
@@ -94,25 +95,7 @@ export function buildStdioSpawnSpec(opts: StdioSpawnOptions): StdioSpawnSpec {
       argv.push("--db", dbLocator);
     }
   }
-  if (isWrkf) {
-    // wrkf participant identity is canonical principal_ref (T-05372): the wrkf
-    // binary's global flag is --principal-ref. Accept either spawn option for
-    // back-compat (legacy callers still pass `actor`), but always emit
-    // --principal-ref.
-    const identity = opts.principalRef ?? opts.actor;
-    if (identity) argv.push("--principal-ref", identity);
-  } else {
-    if (opts.principalRef) {
-      argv.push("--principal-ref", opts.principalRef);
-    }
-    if (opts.actor) {
-      if (dbLocator) {
-        argv.push("--as", opts.actor);
-      } else {
-        throw new Error("actor is no longer accepted for wrkq caller attribution; use principalRef");
-      }
-    }
-  }
+  if (opts.principalRef) argv.push("--principal-ref", opts.principalRef);
   if (isWrkf && opts.role) argv.push("--role", opts.role);
   if (isWrkf && opts.hookCatalogPath && dbLocator && isRemoteLocator(dbLocator)) {
     throw new Error("hookCatalogPath is local-only; hook catalog is canonical-node configuration in remote mode");
@@ -138,10 +121,10 @@ export class StdioTransport implements Transport {
     this.closeTimeoutMs = opts.closeTimeoutMs ?? 5000;
 
     // The two entrypoints share the RPC server but NOT the global CLI flag
-    // surface: `wrkq` attributes writes via `--as` and has no role/hook-catalog
+    // surface: `wrkq` has no role/hook-catalog
     // flags, while `wrkf` uses `--principal-ref`/`--role`/`--hook-catalog`. Map session
-    // options to whichever the launched binary accepts; per-call `actor`/`role`
-    // still travel in method params either way.
+    // options to whichever the launched binary accepts. Wrkq compatibility DTOs
+    // may still carry actor-named wire fields, but session authority never does.
     const { argv, env } = buildStdioSpawnSpec(opts);
 
     // Bun.spawn: no shell, no injection, no human CLI parsing.
