@@ -47,6 +47,7 @@ cat >"$TMPDIR/hooks.json" <<HOOKS
   }
 }
 HOOKS
+export WRKF_HOOK_CATALOG="$TMPDIR/hooks.json"
 
 cat >"$TMPDIR/workflow.json" <<'FLOW'
 {

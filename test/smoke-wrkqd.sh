@@ -113,6 +113,11 @@ init_db() {
 
 echo "Temp dir: $TMP_DIR"
 
+HOOK_CATALOG="$TMP_DIR/hook-catalog.json"
+cat >"$HOOK_CATALOG" <<'JSON'
+{"schemaVersion":"wrkf.hook-catalog.v0","hooks":{}}
+JSON
+
 DB1_DIR="$TMP_DIR/db1"
 mkdir -p "$DB1_DIR"
 DB1_PATH="$(init_db "$DB1_DIR" "wrkq1.db")"
@@ -120,7 +125,7 @@ DB1_PATH="$(init_db "$DB1_DIR" "wrkq1.db")"
 PORT1="$(free_port)"
 ADDR1="127.0.0.1:$PORT1"
 BASE1="http://$ADDR1/v1"
-"$BIN_DIR/wrkqd" --addr "$ADDR1" --db "$DB1_PATH" >/dev/null 2>&1 &
+WRKF_HOOK_CATALOG="$HOOK_CATALOG" "$BIN_DIR/wrkqd" --addr "$ADDR1" --db "$DB1_PATH" >/dev/null 2>&1 &
 PID1=$!
 
 wait_health "$BASE1"

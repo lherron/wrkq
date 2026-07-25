@@ -37,6 +37,12 @@ export WRKF_PRINCIPAL_REF="agent:local-human"
 export WRKQ_PROJECT_ROOT=""
 unset ASP_PROJECT
 
+HOOK_CATALOG="$TMPDIR/hooks.json"
+cat >"$HOOK_CATALOG" <<'JSON'
+{"schemaVersion":"wrkf.hook-catalog.v0","hooks":{}}
+JSON
+export WRKF_HOOK_CATALOG="$HOOK_CATALOG"
+
 "$BIN/wrkqadm" init --db "$DB" >/dev/null
 
 # Create the test task
