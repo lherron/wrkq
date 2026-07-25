@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
@@ -74,6 +75,40 @@ function readText(root, path) {
   return existsSync(absolute) ? readFileSync(absolute, 'utf8') : undefined
 }
 
+function resolveGitPath(root, path) {
+  const result = spawnSync('git', ['-C', root, 'rev-parse', '--git-path', path], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const gitPath = (result.stdout || '').trim()
+  if (result.status !== 0 || gitPath.length === 0) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        'hook.path.unresolvable',
+        `Run the guard from a Git repository with a resolvable ${path} path.`,
+        `${GUARD_ID} asks Git where hooks are stored so linked worktrees and configured hook paths are evaluated correctly.`,
+        {
+          root,
+          gitPath: path,
+          error: result.error?.message || (result.stderr || '').trim() || `git exited ${result.status}`,
+        },
+      ),
+    }
+  }
+
+  return {
+    ok: true,
+    path: isAbsolute(gitPath) ? resolve(gitPath) : resolve(root, gitPath),
+  }
+}
+
+function resolvePrePushHook(root) {
+  const hooks = resolveGitPath(root, 'hooks')
+  if (!hooks.ok) return hooks
+  return { ok: true, path: join(hooks.path, 'pre-push') }
+}
+
 function findJustfile(root) {
   if (existsSync(join(root, 'Justfile'))) return 'Justfile'
   if (existsSync(join(root, 'justfile'))) return 'justfile'
@@ -109,11 +144,26 @@ function evaluateGuard(root) {
 
   const justfileContent = readText(root, justfile)
   const verifyTargetPresent = justfileContent !== undefined && hasVerifyTarget(justfileContent)
-  const hookContent = readText(root, PRE_PUSH_HOOK)
+  const hook = resolvePrePushHook(root)
+  if (!hook.ok) {
+    return {
+      passed: false,
+      result: { level: 'ABSENT', exercise: 'DORMANT' },
+      detail: { justfile, verifyTargetPresent, prePushHookPresent: false, prePushRunsVerify: false },
+      diagnostic: hook.diagnostic,
+    }
+  }
+  const hookContent = existsSync(hook.path) ? readFileSync(hook.path, 'utf8') : undefined
   const prePushHookPresent = hookContent !== undefined
   const prePushRunsVerify = hookContent !== undefined && hookContainsJustVerify(hookContent)
   const passed = verifyTargetPresent && prePushHookPresent && prePushRunsVerify
-  const detail = { justfile, verifyTargetPresent, prePushHookPresent, prePushRunsVerify }
+  const detail = {
+    justfile,
+    verifyTargetPresent,
+    prePushHookPresent,
+    prePushRunsVerify,
+    resolvedPrePushHook: hook.path,
+  }
 
   if (passed) {
     return { passed, result: { level: 'PRESENT', exercise: 'EXERCISED' }, detail }
@@ -219,8 +269,7 @@ function copyIfPresent(sourceRoot, targetRoot, path) {
   return true
 }
 
-function perturbHook(root) {
-  const hookPath = join(root, PRE_PUSH_HOOK)
+function perturbHook(hookPath) {
   if (!existsSync(hookPath)) return false
   const original = readFileSync(hookPath, 'utf8')
   const perturbed = original.replace(/^(\s*)just\s+verify(?:\s.*)?$/gm, '$1# fitkit negative smoke removed just verify')
@@ -231,13 +280,37 @@ function perturbHook(root) {
 function runNegativeSmoke(root) {
   const smokeRoot = mkdtempSync(join(tmpdir(), 'fitkit-s6-smoke-'))
   try {
+    const sourceHook = resolvePrePushHook(root)
+    if (!sourceHook.ok) return sourceHook
+
+    const gitInit = spawnSync('git', ['init', '--quiet', smokeRoot], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    if (gitInit.status !== 0) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          'smoke.git-init.failed',
+          'Ensure git can initialize the isolated negative-smoke repository.',
+          'The negative smoke needs a genuine Git hooks path to exercise the same lookup as the target repository.',
+          { root: smokeRoot, error: gitInit.error?.message || (gitInit.stderr || '').trim() || `git exited ${gitInit.status}` },
+        ),
+      }
+    }
+    const targetHook = resolvePrePushHook(smokeRoot)
+    if (!targetHook.ok) return targetHook
+
     const justfile = findJustfile(root)
     if (justfile) copyIfPresent(root, smokeRoot, justfile)
-    copyIfPresent(root, smokeRoot, PRE_PUSH_HOOK)
+    if (existsSync(sourceHook.path)) {
+      mkdirSync(dirname(targetHook.path), { recursive: true })
+      writeFileSync(targetHook.path, readFileSync(sourceHook.path, 'utf8'))
+    }
     copyIfPresent(root, smokeRoot, PROVENANCE_FILE)
     copyIfPresent(root, smokeRoot, ENTRYPOINT)
 
-    const mutated = perturbHook(smokeRoot)
+    const mutated = perturbHook(targetHook.path)
     if (!mutated) {
       return {
         ok: false,
