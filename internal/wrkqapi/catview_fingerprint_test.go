@@ -88,6 +88,19 @@ func TestContainerCatViewDTOFingerprint(t *testing.T) {
 	}
 }
 
+// TestContainerTaskCountsDTOFingerprint pins the dedicated aggregate read-model
+// shape. The method is complete and unpaginated, so adding a cursor or changing
+// count/project identity fields is a deliberate protocol contract change.
+func TestContainerTaskCountsDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqContainerTaskCount{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqContainerTaskCounts{}))
+	const want = "WrkqContainerTaskCount{uuid,id,path,kind,projectUuid,omitempty,projectId,omitempty,projectSlug,omitempty,archivedAt,omitempty,totalTaskCount,activeTaskCount}\n" +
+		"WrkqContainerTaskCounts{items}"
+	if got != want {
+		t.Errorf("container task-count DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
 // TestCommentCatViewDTOFingerprint guards the comment compat projection shape.
 func TestCommentCatViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqCommentCatView{}))

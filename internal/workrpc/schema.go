@@ -42,6 +42,8 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqRelation":                 dtoType[wrkqapi.WrkqRelation](),
 	"WrkqContainer":                dtoType[wrkqapi.WrkqContainer](),
 	"WrkqContainerListResult":      dtoType[wrkqapi.WrkqContainerListResult](),
+	"WrkqContainerTaskCount":       dtoType[wrkqapi.WrkqContainerTaskCount](),
+	"WrkqContainerTaskCounts":      dtoType[wrkqapi.WrkqContainerTaskCounts](),
 	"WrkqCampaignMemberDiagnostic": dtoType[wrkqapi.WrkqCampaignMemberDiagnostic](),
 	"WrkqCampaignTransitionResult": dtoType[wrkqapi.WrkqCampaignTransitionResult](),
 	"WrkqCampaignProject":          dtoType[wrkqapi.WrkqCampaignProject](),

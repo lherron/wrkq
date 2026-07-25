@@ -148,6 +148,12 @@ shapes, and error contract. The only difference is the diagnostic
 `server.entrypoint` field on the `rpc.initialize` result. Pick whichever binary
 is convenient.
 
+Container-tree consumers can call
+`client.wrkq.container.taskCounts({ includeArchived?: boolean })` for one
+complete, unpaginated producer-owned subtree-count snapshot. Each row includes
+stable container/project identity plus `totalTaskCount` and
+`activeTaskCount`; no per-project task-list fanout is required.
+
 ## Testing
 
 `@wrkq/client/testing` exports `FakeTransport`, an in-memory transport you can

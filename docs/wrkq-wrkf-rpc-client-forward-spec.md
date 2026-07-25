@@ -877,6 +877,7 @@ Read + full mutation surface (container mutation shipped in T-04849 / gap1):
 ```text
 wrkq.container.show
 wrkq.container.list
+wrkq.container.taskCounts      # complete producer-owned subtree-count aggregate
 wrkq.container.create
 wrkq.container.update         # in-place rename (Tranche B); see below
 wrkq.container.campaignConvert
@@ -914,6 +915,40 @@ interface WrkqContainer {
   archivedAt?: string;
 }
 ```
+
+##### `wrkq.container.taskCounts` (complete subtree aggregate)
+
+```ts
+interface WrkqContainerTaskCountsParams {
+  includeArchived?: boolean;
+}
+
+interface WrkqContainerTaskCount {
+  uuid: string;
+  id: string;
+  path: string;
+  kind: string;
+  projectUuid?: string;
+  projectId?: string;
+  projectSlug?: string;
+  archivedAt?: string;
+  totalTaskCount: number;
+  activeTaskCount: number;
+}
+
+interface WrkqContainerTaskCounts {
+  items: WrkqContainerTaskCount[];
+}
+
+client.wrkq.container.taskCounts(params?) // → WrkqContainerTaskCounts
+```
+
+The snapshot is one unpaginated producer read transaction and one recursive
+aggregate query. It includes project roots, nested containers, and empty
+containers; omits archived container rows by default; follows
+`tasks.project_uuid` descendant residency; excludes deleted tasks from totals;
+and treats exactly `idea|draft|open|in_progress|blocked` unarchived,
+non-deleted tasks as active.
 
 ##### `wrkq.container.create`
 

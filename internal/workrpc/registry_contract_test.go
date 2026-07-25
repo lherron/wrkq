@@ -39,6 +39,7 @@ var requiredMethods = []string{
 	// wrkq namespace — task create and workflow attach (§6.2).
 	"wrkq.task.create",
 	"wrkq.workflow.attach",
+	"wrkq.container.taskCounts",
 	// wrkf namespace — workflow install, transition, instance, (§6.3).
 	"wrkf.workflow.install",
 	"wrkf.transition.apply",

@@ -178,6 +178,7 @@ var methodCatalog = []string{
 	"wrkq.container.show",
 	"wrkq.container.catView",
 	"wrkq.container.list",
+	"wrkq.container.taskCounts",
 	"wrkq.project.listView",
 	"wrkq.project.setRoot",
 	"wrkq.webhook.add",
@@ -300,6 +301,8 @@ var dtoCatalog = []string{
 	"WrkqRelation",
 	"WrkqContainer",
 	"WrkqContainerListResult",
+	"WrkqContainerTaskCount",
+	"WrkqContainerTaskCounts",
 	"WrkqCampaignMemberDiagnostic",
 	"WrkqCampaignTransitionResult",
 	"WrkqCampaignProject",
@@ -531,6 +534,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.container.list", apiHandler(func(ctx context.Context, p wrkqapi.ContainerListParams) (any, error) {
 		return wq.ContainerList(ctx, p)
+	}))
+	s.Register("wrkq.container.taskCounts", apiHandler(func(ctx context.Context, p wrkqapi.ContainerTaskCountsParams) (any, error) {
+		return wq.ContainerTaskCounts(ctx, p)
 	}))
 	s.Register("wrkq.project.listView", apiHandler(func(ctx context.Context, p wrkqapi.ProjectsListViewParams) (any, error) {
 		return wq.ProjectsListView(ctx, p)

@@ -30,6 +30,11 @@ predicate: >
   instance, and returns token-free terminalized-run summaries. Suspension
   `resume` preserves active run authority; suspension `close|cancel` use the
   same atomic terminalization fence.
+  The producer-owned container-count aggregate is frozen across the same
+  registry/schema/client boundary: `wrkq.container.taskCounts
+  {includeArchived?}` returns one complete unpaginated read-transaction snapshot
+  with stable container/project identity, non-deleted total subtree counts, and
+  idea/draft/open/in_progress/blocked active subtree counts.
 authority:
   repo: wrkq
   surface: shared wrkq/wrkf JSON-RPC (stdio)
@@ -47,6 +52,9 @@ source:
   - internal/workrpc/workflow_discontinued_acceptance_test.go
   - internal/workrpc/project_root_test.go
   - internal/workrpc/instance_cancel_acceptance_test.go
+  - internal/workrpc/container_task_counts_test.go
+  - internal/wrkqapi/container_task_counts.go
+  - internal/wrkqapi/container_task_counts_test.go
   - internal/wrkqapi/projectroots.go
   - internal/wrkqapi/projectsview.go
   - internal/wrkfapi/api.go
@@ -65,6 +73,7 @@ source:
   - packages/client/src/wrkf/types.ts
   - packages/client/src/wrkq/types.ts
   - packages/client/test/fake-transport.test.ts
+  - packages/client/test/remote-locator.integration.test.ts
   - packages/client/test/workflow-template-discontinue-contract.test.ts
   - docs/wrkf-rpc.md                      # explanatory projection (companion)
   - docs/wrkq-wrkf-rpc.md
@@ -91,6 +100,9 @@ required_tests:
   - TestResolveSuspensionResumePreservesActiveRunAuthorityAndHolderSettles
   - TestResolveSuspensionTerminalDispositionAtomicallyRevokesAllActiveRuns
   - TestResolveSuspensionTerminalizationFailureRollsBackEveryMutation
+  - TestContainerTaskCountsCanonicalInclusionAndIdentity
+  - TestContainerTaskCountsPaginationIndependentAndMatchesExhaustiveTaskList
+  - TestContainerTaskCountsOverRealRPC
   - TestCommandAdapterImportGuard
   - TestLegacyDirectDBBootstrapCannotRegrow
   - TestEntrypointEquivalence
@@ -98,8 +110,8 @@ required_tests:
   - "bun test packages/client/test/workflow-template-discontinue-contract.test.ts"
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
-  date: 2026-07-22
-  evidence: "T-06755..T-06761 shared-client migration proof plus T-06783 at 33c598a: registry/schema/client guards, workflow/RPC terminalization tests, full just verify, and isolated scratch-prefix installed-binary drive green."
+  date: 2026-07-24
+  evidence: "T-06652 added the cataloged/fingerprinted wrkq.container.taskCounts producer/client slice: focused API/workrpc/client tests, pagination-equivalence coverage, authenticated local-vs-rpc:// parity, full just verify, and an isolated scratch-prefix installed-binary drive all green. Prior terminalization/shared-client evidence remains T-06755..T-06761 plus T-06783 at 33c598a."
 reopen_when:
   - WRKF_* code set changes
   - retryable semantics change
@@ -110,5 +122,6 @@ reopen_when:
   - the project-root producer/client slice diverges from wrkq.project-root-registry
   - wrkf.instance.cancel or wrkf.suspension.resolve terminalization names, params, result DTOs, state/revision gates, or token-free summaries change
   - registry, schema hash, CLI, or @wrkq/client diverges from the instance-terminalization producer surface
+  - wrkq.container.taskCounts name, params, identity fields, inclusion semantics, completeness, or typed client facade changes
 supersedes: []
 superseded_by: null

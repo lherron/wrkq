@@ -37,6 +37,8 @@ import type {
   WrkqContainerDeleteResult,
   WrkqContainerListParams,
   WrkqContainerListResult,
+  WrkqContainerTaskCounts,
+  WrkqContainerTaskCountsParams,
   WrkqContainerShowParams,
   WrkqContainerUpdateParams,
   WrkqCampaignTransitionResult,
@@ -153,6 +155,7 @@ export interface WrkqContainerFacade {
   ): Promise<WrkqContainerDeleteRecursiveResult>;
   show(params: WrkqContainerShowParams): Promise<WrkqContainer>;
   list(params?: WrkqContainerListParams): Promise<WrkqContainerListResult>;
+  taskCounts(params?: WrkqContainerTaskCountsParams): Promise<WrkqContainerTaskCounts>;
 }
 
 /** Top-level project discovery and host-portable checkout-root registry. */

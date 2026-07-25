@@ -120,6 +120,15 @@ func TestCatViewInCatalogs(t *testing.T) {
 	if !contains(dtoCatalog, "WrkqContainer") {
 		t.Error("WrkqContainer missing from dtoCatalog (wrkq.container.update result DTO)")
 	}
+	if !contains(methodCatalog, "wrkq.container.taskCounts") {
+		t.Error("wrkq.container.taskCounts missing from methodCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqContainerTaskCount") {
+		t.Error("WrkqContainerTaskCount missing from dtoCatalog")
+	}
+	if !contains(dtoCatalog, "WrkqContainerTaskCounts") {
+		t.Error("WrkqContainerTaskCounts missing from dtoCatalog")
+	}
 	for _, method := range []string{
 		"wrkq.container.campaignActivate",
 		"wrkq.container.campaignPortfolio",

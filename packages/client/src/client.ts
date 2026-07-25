@@ -160,6 +160,7 @@ class WorkClientImpl implements WorkClient {
       deleteRecursive: (p) => this.call("wrkq.container.deleteRecursive", p),
       show: (p) => this.call("wrkq.container.show", p),
       list: (p) => this.call("wrkq.container.list", p ?? {}),
+      taskCounts: (p) => this.call("wrkq.container.taskCounts", p ?? {}),
     },
     project: {
       listView: (p) => this.call("wrkq.project.listView", p ?? {}),

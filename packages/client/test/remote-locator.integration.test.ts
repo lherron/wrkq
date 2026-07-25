@@ -134,6 +134,28 @@ describe("@wrkq/client remote locator through stdio subprocess", () => {
       const shown = await client.wrkq.task.show({ task: task.id });
       expect(shown.title).toBe("remote locator client task");
 
+      const remoteCounts = await client.wrkq.container.taskCounts();
+      const localClient = await createClient({
+        command: WRKQ,
+        dbPath,
+        principalRef: "agent:local-human",
+        cwd,
+        env: {
+          ...process.env,
+          ASP_PROJECT: "",
+          WRKQ_PROJECT: "",
+        },
+      });
+      try {
+        const localCounts = await localClient.wrkq.container.taskCounts();
+        expect(remoteCounts).toEqual(localCounts);
+        const inbox = remoteCounts.items.find((item) => item.path === "inbox");
+        expect(inbox?.totalTaskCount).toBe(1);
+        expect(inbox?.activeTaskCount).toBe(1);
+      } finally {
+        await localClient.close();
+      }
+
       let notFound: unknown;
       try {
         await client.wrkq.task.show({ task: "T-99999" });

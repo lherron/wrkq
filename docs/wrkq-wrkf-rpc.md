@@ -405,7 +405,9 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > is the multi-path form (the CLI sends `paths` when more than one path is given,
 > `path` otherwise). When both are empty the view lists the top-level (root)
 > containers. Rows are legacy-shaped (snake_case). `task_count`/`active_task_count`
-> are container rollups. Cataloged + fingerprinted.
+> are container rollups using the same descendant-residency, non-deleted total,
+> and `idea|draft|open|in_progress|blocked` active rules as
+> `wrkq.container.taskCounts`. Cataloged + fingerprinted.
 > The mirror `ls` command is command-parity-green across its FULL read surface:
 > --json/--ndjson/--porcelain, table/human/yaml/tsv, --one/--nul, --type/--all/
 > --sort/--reverse/--limit/--cursor, multi-path, and --recursive (a legacy no-op).
@@ -1163,6 +1165,7 @@ deletes by composite key; a 0-row delete → `WRKQ_NOT_FOUND`.
 wrkq.container.show
 wrkq.container.catView  [CLI compatibility projection]
 wrkq.container.list
+wrkq.container.taskCounts [complete producer-owned subtree-count aggregate]
 wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
 wrkq.project.setRoot    [dedicated top-level project checkout-root mutation]
 wrkq.container.update
@@ -1190,6 +1193,27 @@ wrkq.container.restore
 > Cataloged + fingerprinted. All `wrkq container cat` render modes
 > (json/ndjson/porcelain/markdown/raw) are produced **CLI-side** from this one
 > projection — no scalar is missing — so no per-mode RPC surface exists.
+
+> **`wrkq.container.taskCounts`** is the general container-tree count
+> aggregate; it is separate from the campaign-specific `campaignPortfolio`.
+> `{ includeArchived?: boolean }` returns
+> `{ items: WrkqContainerTaskCount[] }` as one complete, unpaginated snapshot
+> under one SQLite read transaction and one recursive aggregate SQL statement.
+> Rows are ordered by canonical container `path`, then UUID, and carry
+> `{uuid,id,path,kind,projectUuid?,projectId?,projectSlug?,archivedAt?,
+> totalTaskCount,activeTaskCount}`. The system root is omitted; project roots,
+> nested containers, and empty containers receive rows. By default archived
+> containers do not receive rows; `includeArchived=true` includes them. In
+> either mode, a selected row's counts cover its complete descendant-container
+> subtree, including archived descendants, matching `wrkq.task.lsView` ancestry.
+> Residency is exclusively `tasks.project_uuid`; task parent edges and campaign
+> enrollment do not alter counts. `totalTaskCount` includes every non-deleted
+> task state (including completed, cancelled, and archived) and excludes both
+> `state=deleted` and a non-null `deleted_at`. `activeTaskCount` includes exactly
+> `idea|draft|open|in_progress|blocked` tasks whose `archived_at` and
+> `deleted_at` are null. There is no cursor or limit, so consumers neither fan
+> out per project nor manage task pagination. Cataloged + fingerprinted and
+> exported as `client.wrkq.container.taskCounts()` by `@wrkq/client`.
 
 > **`wrkq.project.listView`** is a CLI compatibility read model for
 > `wrkq projects`. It returns only root-child project containers, ignores

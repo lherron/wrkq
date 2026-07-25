@@ -329,10 +329,15 @@ func (a *API) containerRollupCounts(ctx context.Context, containerUUID string) (
 			UNION ALL
 			SELECT c.uuid FROM containers c JOIN descendants d ON c.parent_uuid = d.uuid
 		)
-		SELECT COUNT(t.uuid),
-		       COALESCE(SUM(CASE WHEN t.state IN ('draft','open','in_progress','blocked')
-		                          AND t.archived_at IS NULL AND t.deleted_at IS NULL
-		                         THEN 1 ELSE 0 END), 0)
+		SELECT COUNT(CASE
+		               WHEN t.state != 'deleted' AND t.deleted_at IS NULL THEN 1
+		             END),
+		       COUNT(CASE
+		               WHEN t.state IN ('idea','draft','open','in_progress','blocked')
+		                AND t.archived_at IS NULL
+		                AND t.deleted_at IS NULL
+		               THEN 1
+		             END)
 		FROM descendants d LEFT JOIN tasks t ON t.project_uuid = d.uuid`, containerUUID).Scan(&taskCount, &activeTaskCount)
 	if err != nil {
 		return 0, 0, NewInternalError(err)

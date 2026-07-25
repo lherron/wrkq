@@ -435,6 +435,34 @@ export interface WrkqContainerListResult {
   nextCursor?: string;
 }
 
+/**
+ * Selects rows for wrkq.container.taskCounts. Counts always cover the complete
+ * descendant subtree; this flag controls only whether archived containers have
+ * their own result rows.
+ */
+export interface WrkqContainerTaskCountsParams {
+  includeArchived?: boolean;
+}
+
+/** One stable container/project identity plus producer-owned subtree counts. */
+export interface WrkqContainerTaskCount {
+  uuid: string;
+  id: string;
+  path: string;
+  kind: string;
+  projectUuid?: string;
+  projectId?: string;
+  projectSlug?: string;
+  archivedAt?: string;
+  totalTaskCount: number;
+  activeTaskCount: number;
+}
+
+/** Complete, stable-path-ordered, unpaginated container-count snapshot. */
+export interface WrkqContainerTaskCounts {
+  items: WrkqContainerTaskCount[];
+}
+
 // ── Project root registry ───────────────────────────────────────────────────
 
 /**

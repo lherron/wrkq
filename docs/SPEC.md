@@ -312,6 +312,24 @@ Consumers fetch identities lazily from `wrkq.container.timelineView`, whose
 member project identities, footprint, labels, and `lastActivityAt` are derived
 from the same producer definitions.
 
+### Container task-count aggregate
+
+`wrkq.container.taskCounts` returns the complete container/project subtree
+task-count snapshot in one read transaction and one recursive aggregate query.
+It is unpaginated and avoids the former project-linear recursive task-list
+sweep. Every non-root selected row carries stable container UUID/ID/path/kind,
+its nearest project UUID/ID/slug, and total/active subtree counts.
+
+Counts follow task residency (`tasks.project_uuid`) through descendant
+containers. Task parent edges and campaign enrollment are not containment.
+Totals include all non-deleted states, including completed, cancelled, and
+archived, while excluding `state=deleted` and non-null `deleted_at`. Active
+counts are exactly `idea`, `draft`, `open`, `in_progress`, and `blocked` with
+clear archive/delete markers. Archived containers are omitted as rows by
+default but remain part of ancestor subtrees; `includeArchived` returns their
+rows. Project roots, nested containers, and empty containers are always
+represented when selected.
+
 ### Attachments
 
 Attachment metadata is stored in SQLite. Bytes live under:

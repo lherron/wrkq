@@ -861,6 +861,36 @@ describe("wrkq namespace", () => {
     }
   });
 
+  test("container taskCounts forwards one aggregate request and returns typed rollups", async () => {
+    const transport = new FakeTransport().onResult("wrkq.container.taskCounts", {
+      items: [
+        {
+          uuid: "p-1",
+          id: "P-00001",
+          path: "project",
+          kind: "project",
+          projectUuid: "p-1",
+          projectId: "P-00001",
+          projectSlug: "project",
+          totalTaskCount: 13,
+          activeTaskCount: 5,
+        },
+      ],
+    });
+    const client = await clientWith(transport);
+
+    const counts = await client.wrkq.container.taskCounts({ includeArchived: true });
+
+    expect(transport.capturedRequests).toHaveLength(1);
+    expect(transport.capturedRequests[0]).toMatchObject({
+      method: "wrkq.container.taskCounts",
+      params: { includeArchived: true },
+    });
+    expect(counts.items[0]?.projectUuid).toBe("p-1");
+    expect(counts.items[0]?.totalTaskCount).toBe(13);
+    expect(counts.items[0]?.activeTaskCount).toBe(5);
+  });
+
   test("project root registry forwards listView and setRoot with verbatim root strings", async () => {
     const transport = new FakeTransport()
       .onResult("wrkq.project.listView", {
