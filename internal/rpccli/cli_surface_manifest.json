@@ -461,6 +461,13 @@
             "hidden": false
           },
           {
+            "name": "one",
+            "usage": "Assert one selector/result and emit one bare JSON object (requires --json)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
             "name": "porcelain",
             "usage": "Machine-readable output",
             "type": "bool",

@@ -17,6 +17,7 @@ import (
 // that projection into legacy `cat` output for every exposed render mode:
 //
 //	json (non-TTY default + --json, indented; +--porcelain → compact),
+//	json object (--json --one, exactly one explicit selector; +--porcelain → compact),
 //	ndjson (--ndjson, one compact object per line),
 //	raw (--output raw / --porcelain / TTY default markdown front-matter).
 //
@@ -25,29 +26,50 @@ import (
 // legacy — or whenever --pretty forces it; color follows style.ColorEnabled, so
 // a non-TTY --pretty card is plain text and byte-comparable to legacy's.
 func newCatCmd() *cobra.Command {
-	var noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty bool
+	var noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty, one bool
 	cmd := &cobra.Command{
 		Use:     "cat <path|id>...",
 		Aliases: []string{"show"},
 		Short:   "Print one or more tasks",
-		Args:    cobra.MinimumNArgs(1),
+		Long: `Print one or more tasks.
+
+JSON output is always array-shaped for compatibility, even with one selector.
+Singleton automation should use --json --one, which asserts exactly one explicit
+selector and one resolved task and emits that task object without an array wrapper.
+Shell expansion still counts toward the explicit-selector cardinality.`,
+		Example: `  wrkq cat T-00001 --json
+  wrkq cat T-00001 T-00002 --json
+  wrkq cat T-00001 --json --one`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if one && len(args) != 1 {
+				return fmt.Errorf("--one requires exactly one explicit selector (got %d)", len(args))
+			}
+			return cobra.MinimumNArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCat(cmd, args, noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty)
+			return runCat(cmd, args, noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty, one)
 		},
 	}
 	cmd.Flags().BoolVar(&noFrontmatter, "no-frontmatter", false, "Print body only without front matter")
 	cmd.Flags().BoolVar(&excludeComments, "exclude-comments", false, "Exclude comments from output")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
+	cmd.Flags().BoolVar(&one, "one", false, "Assert one selector/result and emit one bare JSON object (requires --json)")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled task card even when not a TTY")
 	return cmd
 }
 
-func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty bool) error {
+func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty, one bool) error {
 	mode, stable, err := resolveCatMode(cmd, asJSON, ndjson, porcelain)
 	if err != nil {
 		return err
+	}
+	if one {
+		mode, stable, err = resolveCatOneMode(cmd, asJSON, ndjson, porcelain, pretty, noFrontmatter)
+		if err != nil {
+			return err
+		}
 	}
 
 	tr, sc, closeFn, err := openMirror(cmd)
@@ -80,6 +102,9 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 	}
 	switch mode {
 	case "json":
+		if one {
+			return writeCatOneJSON(out, objs[0], stable)
+		}
 		return writeCatJSON(out, objs, stable)
 	case "ndjson":
 		return writeCatNDJSON(out, objs)
@@ -184,6 +209,36 @@ func resolveCatMode(cmd *cobra.Command, asJSON, ndjson, porcelain bool) (mode st
 	return "json", false, nil
 }
 
+// resolveCatOneMode defines the deliberately narrow singleton automation
+// surface. It requires explicit JSON intent so `--one` never changes behavior
+// according to whether stdout happens to be a TTY. --porcelain is the one
+// formatting modifier: it compacts the bare object. --exclude-comments is
+// orthogonal and is handled by the catView request.
+func resolveCatOneMode(cmd *cobra.Command, asJSON, ndjson, porcelain, pretty, noFrontmatter bool) (mode string, stable bool, err error) {
+	if ndjson {
+		return "", false, fmt.Errorf("--one requires JSON output and cannot be combined with --ndjson")
+	}
+	if pretty {
+		return "", false, fmt.Errorf("--one requires JSON output and cannot be combined with --pretty")
+	}
+	if noFrontmatter {
+		return "", false, fmt.Errorf("--one requires JSON output and cannot be combined with --no-frontmatter")
+	}
+
+	outputJSON := false
+	if outF := cmd.Flag("output"); outF != nil && outF.Changed {
+		outputMode := strings.ToLower(strings.TrimSpace(outF.Value.String()))
+		if outputMode != "json" {
+			return "", false, fmt.Errorf("--one requires JSON output and cannot be combined with --output %s", outputMode)
+		}
+		outputJSON = true
+	}
+	if !asJSON && !outputJSON {
+		return "", false, fmt.Errorf("--one requires explicit JSON output; use --json or --output json")
+	}
+	return "json", porcelain, nil
+}
+
 // writeCatJSON renders the per-task projections as one JSON array. Legacy uses a
 // json.Encoder (HTML-escaping on, trailing newline); indented unless Stable
 // (porcelain), in which case compact. The server already produced each element
@@ -195,6 +250,23 @@ func writeCatJSON(w io.Writer, objs []json.RawMessage, stable bool) error {
 		data, err = json.Marshal(objs)
 	} else {
 		data, err = json.MarshalIndent(objs, "", "  ")
+	}
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(data, '\n'))
+	return err
+}
+
+// writeCatOneJSON renders one catView projection as a bare JSON object. This is
+// opt-in only; writeCatJSON remains the unchanged one-or-many compatibility path.
+func writeCatOneJSON(w io.Writer, obj json.RawMessage, stable bool) error {
+	var data []byte
+	var err error
+	if stable {
+		data, err = json.Marshal(obj)
+	} else {
+		data, err = json.MarshalIndent(obj, "", "  ")
 	}
 	if err != nil {
 		return err

@@ -480,6 +480,10 @@ Important behavior:
   Metadata in input is ignored unless `--with-metadata` is passed.
 - `cat` prints markdown with YAML front matter and comments on a TTY; when
   piped, it defaults to JSON. Use `--output raw` for markdown in pipelines.
+  Compatibility JSON is always an array for one or many selectors. Singleton
+  automation should use `cat ID --json --one`, which requires exactly one
+  explicit selector and one resolved task and emits the task object bare.
+  `--porcelain` may be added for compact JSON; non-JSON modes are refused.
 - `rm` archives by default; `--purge --yes` permanently deletes.
 - `restore` restores archived/deleted tasks to `open` by default or to a
   provided non-archived/non-deleted state.

@@ -89,6 +89,10 @@ wrkq touch myproject/sub-piece --parent-task T-00001
 wrkq cat myproject/implement-feature
 wrkq cat T-00001 --output raw       # markdown in pipelines
 wrkq cat T-00001 --exclude-comments
+wrkq cat T-00001 --json --one       # bare object; asserts one selector/result
+
+# `cat ... --json` remains array-shaped for one or many selectors. `--one`
+# requires explicit JSON and exactly one selector after shell expansion.
 
 # Update fields (set is aliased as edit; supports bulk over refs/stdin)
 wrkq set T-00001 --state in_progress
