@@ -143,11 +143,11 @@ install no-sync="": build
 
 # Sync downstream repos that consume @wrkq/client from local Verdaccio.
 sync-downstream:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  ( cd ../hrc-runtime && bun run sync:wrkq ) 2>&1 | sed 's/^/[hrc-sync] /'
-  ( cd ../agent-control-plane && bun run sync:wrkq ) 2>&1 | sed 's/^/[acp-sync] /'
-  ( cd ../taskboard && bun run sync:wrkq ) 2>&1 | sed 's/^/[taskboard-sync] /'
+  bun scripts/sync-downstream.ts
+
+# Validate the downstream consumer inventory and fail-closed sync driver.
+sync-downstream-test:
+  bun test test/sync-downstream.test.ts
 
 # Install the wrkq launchd agent plist
 install-launchd:
@@ -344,8 +344,8 @@ test:
 test-verbose:
   go test -v -tags sqlite_fts5 ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + @wrkq/client unit+integration RPC)
-verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records verify-rpc
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + downstream sync + @wrkq/client unit+integration RPC)
+verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records sync-downstream-test verify-rpc
   @just verify-evidence-summary "{{summary}}"
   @echo "✓ All checks passed"
 
