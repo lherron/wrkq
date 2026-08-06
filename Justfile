@@ -58,6 +58,45 @@ build:
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
+# Build the portable, CGO-free, REMOTE-ONLY wrkq client (T-07090).
+#
+# This is the second build product: it links no SQLite driver, needs no cgo
+# toolchain, and cross-compiles to any Go target. It speaks rpc:// only and
+# refuses a local database locator. For local-file operation use `just build`,
+# which carries the wrkq_local tag.
+#
+#   just build-portable                  # host platform
+#   just build-portable windows amd64
+#   just build-portable linux arm64
+build-portable goos="" goarch="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  target_os="{{goos}}"; target_arch="{{goarch}}"
+  target_os="${target_os:-$(go env GOHOSTOS)}"
+  target_arch="${target_arch:-$(go env GOHOSTARCH)}"
+  ext=""; [ "$target_os" = "windows" ] && ext=".exe"
+  out="dist/portable/wrkq-${target_os}-${target_arch}${ext}"
+  mkdir -p dist/portable
+  LDFLAGS="$(scripts/ldflags.sh)"
+  CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
+    go build -ldflags "$LDFLAGS" -o "$out" ./cmd/wrkq
+  # Fail loudly if the cgo/server dependency ever regrows: a portable binary
+  # that silently linked SQLite would stop cross-compiling on the next target.
+  if CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go list -deps ./cmd/wrkq \
+     | grep -qE 'sqlite|wrkq/internal/(db|store|search|wrkqd)$'; then
+    echo "✗ portable build linked durable local state; see internal/rpccli/portable_importguard_test.go" >&2
+    exit 1
+  fi
+  echo "✓ $out ($(du -h "$out" | cut -f1 | tr -d ' '), remote-only)"
+
+# Build the portable client for every target we ship to
+build-portable-all:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  for target in "windows amd64" "linux amd64" "linux arm64" "darwin arm64"; do
+    just build-portable $target
+  done
+
 # Conservative no-network check for agents/CI sandboxes
 agent-check:
   scripts/agent-check.sh
