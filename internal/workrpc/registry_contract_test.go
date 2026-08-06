@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // registry_contract_test.go — RED gate for the unified wrkq/wrkf RPC method registry.

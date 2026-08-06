@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // room2box_lifecycle_test.go — acceptance tests for the room-2box@1 builtin

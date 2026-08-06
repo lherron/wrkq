@@ -1,14 +1,12 @@
 package rpccli
 
 import (
-	"context"
 	"fmt"
 	"os"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/workrpc"
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	"github.com/spf13/cobra"
 )
 
@@ -45,22 +43,7 @@ func newRPCCmd() *cobra.Command {
 			if cfg.RemoteEndpoint != "" {
 				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv())
 			}
-			h, err := bootstrap.Open(cfg.DBLocator)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = h.Close() }()
-			// Apply the launch-time caller principal (--principal-ref / --as) as
-			// the rpc server's default principal so a session launched with an
-			// explicit agent identity attributes writes without every mutation
-			// re-passing principalRef. Full ScopeRefs are reduced to agent:<id>;
-			// the flags must resolve to the same agent when both are set.
-			if principal, perr := launchPrincipalRef(cmd); perr != nil {
-				return perr
-			} else if principal != "" {
-				h.Opts.DefaultPrincipalRef = principal
-			}
-			return workrpc.ServeStdio(context.Background(), os.Stdin, os.Stdout, h.API, h.Opts)
+			return serveLocalStdio(cmd, cfg)
 		},
 	}
 	cmd.Flags().BoolVar(&stdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")

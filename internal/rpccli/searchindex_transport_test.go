@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package rpccli
 
 import (
@@ -13,7 +15,7 @@ import (
 func buildWrkqFTS(t *testing.T) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "wrkq")
-	cmd := exec.Command("go", "build", "-tags", "sqlite_fts5", "-o", out, "./cmd/wrkq")
+	cmd := exec.Command("go", "build", "-tags", "sqlite_fts5,wrkq_local", "-o", out, "./cmd/wrkq")
 	cmd.Dir = repoRootFromTest(t)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build -tags sqlite_fts5 ./cmd/wrkq: %v\n%s", err, b)

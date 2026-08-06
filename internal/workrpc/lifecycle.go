@@ -4,10 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
-
-	"github.com/lherron/wrkq/internal/db"
 )
 
 type Capabilities struct {
@@ -48,24 +45,6 @@ func ProtocolSchemaHash() string {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-func MigrationHash(database *db.DB) string {
-	if database == nil {
-		return zeroHash()
-	}
-	applied, pending, err := database.MigrationStatus()
-	if err != nil {
-		return zeroHash()
-	}
-	h := sha256.New()
-	for _, migration := range applied {
-		_, _ = fmt.Fprintln(h, "applied:"+migration)
-	}
-	for _, migration := range pending {
-		_, _ = fmt.Fprintln(h, "pending:"+migration)
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))
-}
-
 func zeroHash() string {
 	return "sha256:" + strings.Repeat("0", 64)
 }
@@ -90,36 +69,4 @@ type serverInfo struct {
 type databaseInfo struct {
 	Path          string `json:"path"`
 	MigrationHash string `json:"migrationHash"`
-}
-
-func newInitializeResult(opts RegistryOptions, methods []string) initializeResult {
-	version := opts.ServerVersion
-	if version == "" {
-		version = "dev"
-	}
-	revision := opts.ServerRevision
-	if revision == "" {
-		revision = "unknown"
-	}
-	entrypoint := opts.Entrypoint
-	if entrypoint == "" {
-		entrypoint = "wrkq"
-	}
-	return initializeResult{
-		ProtocolVersion:    ProtocolVersion,
-		ProtocolSchemaHash: ProtocolSchemaHash(),
-		Server: serverInfo{
-			Name:       "wrkq-wrkf-rpc",
-			Version:    version,
-			Revision:   revision,
-			PID:        os.Getpid(),
-			Entrypoint: entrypoint,
-		},
-		Database: databaseInfo{
-			Path:          opts.DatabasePath,
-			MigrationHash: opts.MigrationHash,
-		},
-		Capabilities: defaultCapabilities(),
-		Methods:      methods,
-	}
 }

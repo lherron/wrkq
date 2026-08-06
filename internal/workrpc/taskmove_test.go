@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // taskmove_test.go — RED acceptance tests for T-04852 (gap5).

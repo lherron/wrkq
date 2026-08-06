@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // suspension_resolve_test.go — T-06262. The atomic resolveSuspension command:

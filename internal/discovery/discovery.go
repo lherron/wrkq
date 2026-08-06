@@ -77,7 +77,7 @@ func ExplainArea(root, path string) (Area, error) {
 		return Area{}, err
 	}
 
-	importGraph, err := layerguard.BuildImportGraph(root, []string{"sqlite_fts5"})
+	importGraph, err := layerguard.BuildImportGraph(root, []string{"sqlite_fts5", "wrkq_local"})
 	if err != nil {
 		return Area{}, err
 	}

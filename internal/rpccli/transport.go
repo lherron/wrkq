@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/lherron/wrkq/internal/config"
-	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/spf13/cobra"
 )
@@ -13,10 +12,6 @@ import (
 // machinery is shared with wrkfcli from internal/workrpc/client.
 type Transport = workrpcclient.Transport
 type Error = workrpcclient.Error
-
-func NewInProcess(h *bootstrap.Handle) (Transport, error) {
-	return workrpcclient.NewInProcess(h, workrpcclient.WrkqProfile)
-}
 
 func NewSubprocess(ctx context.Context, binPath, dbPath string, extraEnv []string) (Transport, error) {
 	return workrpcclient.NewSubprocess(ctx, binPath, dbPath, extraEnv, workrpcclient.WrkqProfile)
@@ -45,14 +40,5 @@ func openConfiguredTransport(cmd *cobra.Command) (Transport, *config.Config, fun
 		}
 		return tr, cfg, func() { _ = tr.Close() }, nil
 	}
-	h, err := bootstrap.Open(cfg.DBLocator)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	tr, err := NewInProcess(h)
-	if err != nil {
-		_ = h.Close()
-		return nil, nil, nil, err
-	}
-	return tr, h.Config, func() { _ = tr.Close() }, nil
+	return openLocalTransport(cfg.DBLocator)
 }

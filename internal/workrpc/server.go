@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc
 
 import (

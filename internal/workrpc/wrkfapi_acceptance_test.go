@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // wrkfapi_acceptance_test.go — RED acceptance tests for T-04428 P3.

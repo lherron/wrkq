@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // commentdelete_mode_test.go — acceptance tests for the caller-owned-confirmation

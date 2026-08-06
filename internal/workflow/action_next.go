@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -23,11 +25,6 @@ func (s *Service) ActionNext(p ActionNextParams) (*ActionNextResult, error) {
 		return nil, err
 	}
 	return s.actionCandidatesForInstance(s.db, inst, p)
-}
-
-type actionCandidateQueryer interface {
-	queryer
-	rowsQueryer
 }
 
 func (s *Service) actionCandidatesForInstance(q actionCandidateQueryer, inst *Instance, p ActionNextParams) (*ActionNextResult, error) {
@@ -134,12 +131,6 @@ func (s *Service) actionCandidatesForInstance(q actionCandidateQueryer, inst *In
 	return &ActionNextResult{Candidates: candidates}, nil
 }
 
-type staleContextFreshnessCandidate struct {
-	ReverifyAction string
-	Reason         string
-	Candidate      ActionCandidate
-}
-
 func staleContextFreshnessCandidates(q queryer, inst *Instance, task *taskDoc, tpl *Template, ev []Evidence, actionIDs []string) (map[string]staleContextFreshnessCandidate, error) {
 	stale := map[string]staleContextFreshnessCandidate{}
 	for idx, actionID := range actionIDs {
@@ -225,10 +216,7 @@ func candidateForExecutableAction(q queryer, inst *Instance, task *taskDoc, tpl 
 	if err != nil {
 		return ActionCandidate{}, "", err
 	}
-	// Legality of the source state uses the same closed-state guard as every
-	// other transition-legality surface. An explicit spec.From overrides the
-	// transition's source; otherwise the transition's full source set (From plus
-	// any FromAny) applies — a blank/wildcard From must NOT match closed.
+
 	matched := false
 	requirement := ""
 	if spec.From != nil {

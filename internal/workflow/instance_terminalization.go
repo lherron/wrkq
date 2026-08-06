@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -5,15 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 )
-
-// TerminalizedRunSummary is the token-free readback for a run whose authority
-// ended because its workflow instance was explicitly terminalized.
-type TerminalizedRunSummary struct {
-	RunID          string `json:"runId"`
-	Status         string `json:"status"`
-	CompletedAt    string `json:"completedAt"`
-	TerminalResult string `json:"terminalResult"`
-}
 
 // terminalizeActiveRunsTx is the shared authority fence for explicit instance
 // terminalization. The caller supplies the identity of the terminal instance

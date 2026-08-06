@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -26,18 +28,6 @@ var supportedArrayItemTypes = map[string]bool{
 	"boolean": true,
 	"number":  true,
 	"integer": true,
-}
-
-type parsedEvidenceFacts struct {
-	Raw    json.RawMessage
-	Fields map[string]json.RawMessage
-}
-
-type evidenceMatchResult struct {
-	OK      bool
-	Latest  *Evidence
-	Detail  string
-	Missing bool
 }
 
 func validateFactsContracts(tpl *Template) []string {
@@ -504,8 +494,7 @@ func validateLinkageRefs(existing []Evidence, spec *KindSpec, dataRaw json.RawMe
 	}
 	dataObj := map[string]json.RawMessage{}
 	if len(dataRaw) > 0 {
-		// A non-object data doc simply yields no resolvable fields; required
-		// refs then fail below with a clear message.
+
 		_ = json.Unmarshal(dataRaw, &dataObj)
 	}
 	for _, ref := range spec.LinkageRefs {
@@ -529,8 +518,7 @@ func validateLinkageRefs(existing []Evidence, spec *KindSpec, dataRaw json.RawMe
 			return linkageUnresolvedError(ref.Path, id, ref.ResolvesToKind, fmt.Sprintf("resolves to kind %s, expected %s", match.Kind, ref.ResolvesToKind))
 		}
 		if ref.Latest {
-			// ResolvesToKind is guaranteed non-empty here (install-time check);
-			// the matched evidence is of that kind, so a latest always exists.
+
 			if latest, ok := latestEvidenceByKind(existing, ref.ResolvesToKind); ok && latest.ID != id {
 				return linkageStaleError(ref.Path, id, ref.ResolvesToKind, latest.ID)
 			}

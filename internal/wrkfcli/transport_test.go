@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkfcli
 
 import (
@@ -197,7 +199,7 @@ func runWrkfCLI(t *testing.T, hookCatalog string, args ...string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), "go", append([]string{"run", "./cmd/wrkf"}, args...)...)
+	cmd := exec.CommandContext(t.Context(), "go", append([]string{"run", "-tags", "sqlite_fts5,wrkq_local", "./cmd/wrkf"}, args...)...)
 	cmd.Dir = filepath.Clean(filepath.Join(wd, "..", ".."))
 	cmd.Env = append(os.Environ(),
 		"WRKF_HOOK_CATALOG="+hookCatalog,

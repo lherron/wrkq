@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // tasklist_sortrecursive_test.go — RED acceptance tests for T-04851 (gap4).

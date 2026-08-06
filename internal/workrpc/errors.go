@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
 
@@ -118,7 +117,7 @@ func MapError(err error) *RPCError {
 	// matter which layer wrapped it (T-05066, docs/wrkq-wrkf-rpc.md §5). This
 	// is checked first because a busy error is always an infrastructure
 	// contention signal, never a semantic conflict/validation failure.
-	if db.IsBusy(err) {
+	if isSQLiteBusy(err) {
 		return domainError(CodeWRKQDBBusy, "database is busy due to write contention; retry", true, map[string]any{"reason": "sqlite_busy"})
 	}
 	var validation *ValidationError

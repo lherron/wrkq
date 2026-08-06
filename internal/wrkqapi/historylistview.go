@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -9,46 +11,6 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/id"
 )
-
-// HistoryListViewParams mirrors the legacy `wrkq log <PATHSPEC|ID>` surface. The
-// CLI scopes the raw target through the project-root scoper BEFORE these params
-// are sent; the server NEVER reads project-root env/flags. Resource resolution
-// (friendly ID / UUID → resource_type+resource_uuid among task/container/actor)
-// is durable read behavior and so is owned here on the server side.
-type HistoryListViewParams struct {
-	Target string `json:"target"`
-	Since  string `json:"since,omitempty"`
-	Until  string `json:"until,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
-	Cursor string `json:"cursor,omitempty"`
-}
-
-// WrkqLogEvent matches the legacy logEvent shape EXACTLY (field order + json tags
-// + pointer/omitempty). Marshaled by encoding/json — NOT alphabetical (legacy
-// uses a struct, not a map), so the field order here is the wire order. payload
-// stays a STRING (the raw event_log.payload); --patch is rendered CLIENT-side.
-type WrkqLogEvent struct {
-	ID           int64     `json:"id"`
-	Timestamp    time.Time `json:"timestamp"`
-	PrincipalRef *string   `json:"principal_ref,omitempty"`
-	ScopeRef     *string   `json:"scope_ref,omitempty"`
-	ResourceType string    `json:"resource_type"`
-	ResourceUUID string    `json:"resource_uuid"`
-	EventType    string    `json:"event_type"`
-	ETag         *int64    `json:"etag,omitempty"`
-	Payload      *string   `json:"payload,omitempty"`
-}
-
-// WrkqHistoryListView is the server-owned CLI COMPATIBILITY history read model for
-// `wrkq log`. It reads the generic event_log table (NOT workflow_events, which is
-// the wrkf.event.query substrate), resolves the caller-scoped target to exactly
-// one (resource_type, resource_uuid), and owns cursor.Apply + limit+1 +
-// BuildNextCursor over event_log.id DESC. Not a canonical resource/event-stream
-// API. Field order is legacy struct order, NOT alphabetical.
-type WrkqHistoryListView struct {
-	Items      []WrkqLogEvent `json:"items"`
-	NextCursor string         `json:"next_cursor,omitempty"`
-}
 
 // HistoryListView reproduces legacy `wrkq log` byte-for-byte: the same resource
 // resolution, the same event_log query with since/until + cursor pagination over
@@ -63,13 +25,13 @@ func (a *API) HistoryListView(ctx context.Context, p HistoryListViewParams) (*Wr
 
 	resourceUUID, resourceType, err := a.resolveLogResource(ctx, p.Target)
 	if err != nil {
-		// Legacy runLog wraps with "failed to resolve resource: %w".
+
 		return nil, prefixLogError("failed to resolve resource: ", err)
 	}
 
 	events, hasMore, err := a.queryLogEventLog(ctx, resourceUUID, resourceType, p)
 	if err != nil {
-		// Legacy runLog wraps with "failed to query event log: %w".
+
 		return nil, prefixLogError("failed to query event log: ", err)
 	}
 
@@ -122,9 +84,6 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 		return "", "", NewValidationError(fmt.Sprintf("UUID not found: %s", target), nil)
 	}
 
-	// PINNED DIVERGENCE: legacy path resolution is intentionally a TODO; path args
-	// advertised in help but error today. Do NOT add path resolution here unless
-	// legacy changes in the same deliberate semantic-fix increment.
 	return "", "", NewValidationError(fmt.Sprintf("path resolution not yet implemented: %s", target), nil)
 }
 
@@ -141,7 +100,7 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 		Limit:      p.Limit,
 	})
 	if err != nil {
-		// cursor.Apply prefixes "invalid cursor:"; surface it raw (matches legacy).
+
 		return nil, false, NewValidationError(err.Error(), nil)
 	}
 
@@ -208,7 +167,6 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 			return nil, false, NewInternalError(err)
 		}
 
-		// Parse timestamp the same way legacy does (RFC3339, then a fallback).
 		e.Timestamp, err = time.Parse(time.RFC3339, timestampStr)
 		if err != nil {
 			e.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", timestampStr)

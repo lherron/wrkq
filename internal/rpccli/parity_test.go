@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package rpccli
 
 import (
@@ -240,7 +242,7 @@ func buildProductionBinaries(t *testing.T) binaries {
 		root := repoRootFromTest(t)
 		build := func(name, pkg string) string {
 			out := filepath.Join(dir, name)
-			cmd := exec.Command("go", "build", "-tags", "sqlite_fts5", "-o", out, pkg)
+			cmd := exec.Command("go", "build", "-tags", "sqlite_fts5,wrkq_local", "-o", out, pkg)
 			cmd.Dir = root
 			if b, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("build %s: %v\n%s", pkg, err, b)

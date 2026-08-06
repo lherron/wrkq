@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package client
 
 import (
@@ -63,9 +65,4 @@ func applyLocalServerOptions(registryOpts *workrpc.RegistryOptions, opts LocalSe
 	if opts.DefaultRole != "" {
 		registryOpts.DefaultRole = opts.DefaultRole
 	}
-}
-
-// ServeRemoteStdio forwards the unified stdio surface to a remote wrkqd.
-func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint, token string) error {
-	return workrpc.ServeRemoteStdio(ctx, in, out, endpoint, token)
 }

@@ -1,14 +1,11 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
 	"context"
 	"database/sql"
 )
-
-// RelationListViewParams selects the task whose relations to list.
-type RelationListViewParams struct {
-	Task string `json:"task"`
-}
 
 // RelationListView is the server-owned COMPATIBILITY list projection for
 // `wrkq relation ls`. It returns the legacy relation rows (outgoing then
@@ -36,7 +33,6 @@ func (a *API) RelationListView(ctx context.Context, p RelationListViewParams) ([
 	if err := tx.Commit(); err != nil {
 		return nil, NewInternalError(err)
 	}
-	// Return nil (not []) when empty: legacy `relation ls --json` encodes a nil
-	// slice as JSON `null`, which the mirror reproduces.
+
 	return rels, nil
 }

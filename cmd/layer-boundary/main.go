@@ -29,7 +29,7 @@ func main() {
 
 	cfg := liveConfig()
 	cfg.Exclude = exclude
-	result, err := layerguard.Check(root, cfg, []string{"sqlite_fts5"})
+	result, err := layerguard.Check(root, cfg, []string{"sqlite_fts5", "wrkq_local"})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "layer-boundary: %v\n", err)
 		os.Exit(2)

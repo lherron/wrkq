@@ -24,20 +24,6 @@ const (
 	wrkfCodeActiveRunGuard       = "WRKF_ACTIVE_RUN"
 )
 
-// ErrorDetail is the single machine-parseable error shape carried by wrkf
-// domain/validation errors. CLI (--json envelope) and wrkfapi/RPC both map
-// from it so the contract stays uniform across surfaces.
-type ErrorDetail struct {
-	Code        string                  `json:"code"`
-	Field       string                  `json:"field,omitempty"`
-	Message     string                  `json:"message"`
-	Expected    string                  `json:"expected,omitempty"`
-	Allowed     []string                `json:"allowed,omitempty"`
-	Fix         string                  `json:"fix,omitempty"`
-	Suspension  *Suspension             `json:"suspension,omitempty"`
-	Predecessor *ActionClaimPredecessor `json:"predecessor,omitempty"`
-}
-
 func claimRefusedError(predecessor *ActionClaimPredecessor) error {
 	return &wrkfError{
 		code:        wrkfCodeLeaseConflict,
@@ -58,13 +44,6 @@ func supersededSettleError(runID, successorRunID string) error {
 	}
 }
 
-// DetailedError is implemented by wrkf errors that carry an ErrorDetail.
-type DetailedError interface {
-	error
-	Code() string
-	Detail() ErrorDetail
-}
-
 // AsErrorDetail extracts a structured ErrorDetail from err when present.
 func AsErrorDetail(err error) (ErrorDetail, bool) {
 	var de DetailedError
@@ -72,17 +51,6 @@ func AsErrorDetail(err error) (ErrorDetail, bool) {
 		return de.Detail(), true
 	}
 	return ErrorDetail{}, false
-}
-
-type wrkfError struct {
-	code        string
-	msg         string
-	field       string
-	expected    string
-	allowed     []string
-	fix         string
-	suspension  *Suspension
-	predecessor *ActionClaimPredecessor
 }
 
 func (e *wrkfError) Error() string {
@@ -263,16 +231,6 @@ func effectNotDeliverableError(effectID, status string) error {
 		code: wrkfCodeNotDeliverable,
 		msg:  fmt.Sprintf("effect %s is not deliverable from status %s", effectID, status),
 	}
-}
-
-type transitionEffectDeliveryError struct {
-	transitionID string
-	eventID      string
-	effectID     string
-	kind         string
-	status       string
-	err          error
-	result       map[string]interface{}
 }
 
 func (e *transitionEffectDeliveryError) Error() string {

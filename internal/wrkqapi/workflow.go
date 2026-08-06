@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -171,7 +173,5 @@ func defaultString(value, fallback string) string {
 }
 
 var errWorkflowUnavailable = &simpleError{"workflow API is unavailable"}
-
-type simpleError struct{ msg string }
 
 func (e *simpleError) Error() string { return e.msg }

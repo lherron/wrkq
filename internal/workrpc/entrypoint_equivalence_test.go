@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 import (
@@ -94,7 +96,7 @@ func runRPC(t *testing.T, entrypoint, dbPath string, requests []string) []map[st
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	args := []string{"run", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
+	args := []string{"run", "-tags", "sqlite_fts5,wrkq_local", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = repoRoot(t)
 	// Principal-only attribution: each entrypoint receives its own explicit

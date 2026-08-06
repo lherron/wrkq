@@ -1,10 +1,12 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
 	"database/sql"
 	"encoding/json"
 	"strings"
-	"sync"
+
 	"time"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -13,32 +15,6 @@ import (
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
-
-// API is the wrkq-namespace business surface. It owns task/comment mutation and
-// the task↔workflow binding (wrkq.workflow.attach is a wrkq verb), delegating
-// workflow state reads to the shared wrkfapi.API.
-type API struct {
-	db                  *db.DB
-	store               *store.Store
-	wf                  *wrkfapi.API
-	defaultPrincipalRef string
-	attachDir           string
-	attachMaxMB         int
-
-	// searchCfg is the SERVER's search/index host configuration. The server owns
-	// the derived sidecar + dense embedder behind the wrkq.search.* / wrkq.index.*
-	// methods (T-05114). Zero-value (Enabled=false) means the search host is not
-	// configured and search/index methods report WRKQ_VALIDATION "search is
-	// disabled".
-	searchCfg SearchConfig
-
-	// uploads tracks in-progress chunked byte uploads (wrkq.attachment.addBytes),
-	// keyed by server-generated uploadId. Each session stages bytes into a temp
-	// file under the attach dir; finalize atomically renames into place. The mutex
-	// guards the map; per-session writes are serialized by the monotonic seq check.
-	uploadsMu sync.Mutex
-	uploads   map[string]*attachmentUpload
-}
 
 // New constructs a wrkq API over the given database. wf provides workflow
 // instance/timeline access for the wrkq.workflow.* verbs (may be nil).
@@ -61,17 +37,12 @@ func New(database *db.DB, wf *wrkfapi.API, defaultPrincipalRef, attachDir string
 	return a
 }
 
-// Option configures optional API capabilities at construction time.
-type Option func(*API)
-
 // WithSearch wires the server-owned search/index host (sidecar + dense embedder)
 // behind the wrkq.search.* / wrkq.index.* methods. Without it the search/index
 // methods report WRKQ_VALIDATION "search is disabled".
 func WithSearch(cfg SearchConfig) Option {
 	return func(a *API) { a.searchCfg = cfg }
 }
-
-// ─── attribution ─────────────────────────────────────────────────────────────
 
 // attributionFor resolves principal-only write attribution. The parameter name
 // remains actor while older RPC DTOs are retired. Accepted non-empty values are
@@ -106,8 +77,6 @@ func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 	return attribution.Attribution{PrincipalRef: principal}, nil
 }
 
-// ─── shared canonical request hashing ────────────────────────────────────────
-
 // canonicalRequestHash is the single canonicalizer used by every mutating wrkq
 // method for idempotency request-hashing. It normalizes the value to a
 // key-sorted JSON document (Go sorts map keys on marshal) and hashes the
@@ -117,8 +86,6 @@ func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 func canonicalRequestHash(v any) string {
 	return rpcidem.CanonicalRequestHash(v)
 }
-
-// ─── idempotency ledger (wrkq_rpc_idempotency) ───────────────────────────────
 
 // idempotentReplay looks up a persisted result for (namespace, key). It returns
 // (result, true, nil) when a row exists with a matching request hash,
@@ -156,34 +123,6 @@ func (a *API) idempotentStore(namespace, key, requestHash string, result any) er
 	)
 	if err != nil {
 		return NewInternalError(err)
-	}
-	return nil
-}
-
-// ─── small helpers ───────────────────────────────────────────────────────────
-
-// flexString accepts either a JSON string or array of strings.
-type flexString []string
-
-func (f *flexString) UnmarshalJSON(data []byte) error {
-	data = []byte(strings.TrimSpace(string(data)))
-	if len(data) == 0 || string(data) == "null" {
-		return nil
-	}
-	if data[0] == '[' {
-		var arr []string
-		if err := json.Unmarshal(data, &arr); err != nil {
-			return err
-		}
-		*f = arr
-		return nil
-	}
-	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
-	}
-	if s != "" {
-		*f = []string{s}
 	}
 	return nil
 }

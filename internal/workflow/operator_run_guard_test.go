@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // operator_run_guard_test.go — T-06235. Covers the transactional

@@ -1,5 +1,13 @@
 version: "2"
 
+# Lint the canonical shipped build. The portable (untagged, CGO-free) product
+# excludes every wrkq_local file; its exclusive sources are compiled and
+# exercised by the portable test lane instead (T-07090).
+run:
+  build-tags:
+    - sqlite_fts5
+    - wrkq_local
+
 linters:
   settings:
     errcheck:

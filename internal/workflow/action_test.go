@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // action_test.go — service-level tests for the low-ceremony wrkf.action.* API

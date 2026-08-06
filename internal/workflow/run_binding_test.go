@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // run_binding_test.go — regression tests for T-01902 (wrkf-rpc Phase D).

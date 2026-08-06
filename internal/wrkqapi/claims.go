@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -18,18 +20,6 @@ import (
 	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/scope"
 )
-
-type taskClaimRow struct {
-	taskID         string
-	state          string
-	claimedBy      sql.NullString
-	claimedScope   sql.NullString
-	claimedNode    sql.NullString
-	claimedAt      sql.NullString
-	generation     int64
-	claimTokenHash sql.NullString
-	etag           int64
-}
 
 func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim, error) {
 	nodeID, ok := nodeauth.FromContext(ctx)
@@ -237,10 +227,6 @@ func (a *API) claimAttribution(principalRef, scopeRef, field string) (attributio
 	}
 	attr.ScopeRef = parsed.ScopeRef
 	return attr, parsed, nil
-}
-
-type claimRowQuerier interface {
-	QueryRow(query string, args ...any) *sql.Row
 }
 
 func loadTaskClaimRow(q claimRowQuerier, uuid string) (taskClaimRow, error) {

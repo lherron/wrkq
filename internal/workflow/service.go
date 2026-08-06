@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -25,11 +27,6 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
-
-type Service struct {
-	db  *db.DB
-	now nowFunc
-}
 
 func suspensionID(suspension *Suspension) interface{} {
 	if suspension == nil {
@@ -218,9 +215,7 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 		}
 		transitions[tr.ID] = true
 		if len(tr.FromAny) > 0 {
-			// Multi-source: the source set is defined by FromAny. A blank From is
-			// allowed (source set comes entirely from FromAny); a non-blank From
-			// still contributes and must be declared.
+
 			if stateKey(tr.From) != stateKey(State{}) && !stateSet[stateKey(tr.From)] {
 				errs = append(errs, fmt.Sprintf("transition %s from state is not declared", tr.ID))
 			}
@@ -882,15 +877,6 @@ func (s *Service) ListTemplates() ([]map[string]interface{}, error) {
 	return out, rows.Err()
 }
 
-// TemplateVersionInfo combines an immutable workflow definition with the
-// operator-managed metadata for that installed version.
-type TemplateVersionInfo struct {
-	Template       *Template `json:"template"`
-	Hash           string    `json:"hash"`
-	DiscontinuedAt string    `json:"discontinuedAt,omitempty"`
-	DiscontinuedBy string    `json:"discontinuedBy,omitempty"`
-}
-
 func (s *Service) ShowTemplateVersion(ref string) (*TemplateVersionInfo, error) {
 	id, version, err := parseTemplateRef(ref)
 	if err != nil {
@@ -1040,13 +1026,6 @@ func emptyToNil(s string) interface{} {
 	return s
 }
 
-type AttachTaskOptions struct {
-	Supersede             bool
-	PredecessorInstanceID string
-	PredecessorRevision   *int64
-	AttachDiscontinued    bool
-}
-
 func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...AttachTaskOptions) (*Instance, error) {
 	var options AttachTaskOptions
 	if len(opts) > 0 {
@@ -1074,9 +1053,7 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 	if err != nil {
 		return nil, err
 	}
-	// Built-in refs are ensure-installed on demand so attach works on a fresh
-	// DB without a prior manual install, matching wrkf.action.start. Ensure
-	// never clears discontinued_at, so the discontinued guard below still holds.
+
 	if _, builtinErr := builtinTemplateData(templateRef); builtinErr == nil {
 		if _, _, err := s.EnsureBuiltinTemplate(templateRef, actor); err != nil {
 			return nil, err
@@ -1216,23 +1193,6 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 	return inst, nil
 }
 
-type taskDoc struct {
-	UUID          string
-	ID            string
-	ProjectID     string
-	Slug          string
-	Title         string
-	Description   string
-	Specification string
-	State         string
-	Priority      int
-	Kind          string
-	Labels        string
-	Meta          string
-	ETag          int64
-	UpdatedAt     string
-}
-
 func loadTaskDoc(tx queryer, taskUUID string) (*taskDoc, error) {
 	var t taskDoc
 	var labels, meta sql.NullString
@@ -1254,14 +1214,6 @@ func loadTaskDoc(tx queryer, taskUUID string) (*taskDoc, error) {
 		t.Meta = meta.String
 	}
 	return &t, nil
-}
-
-type queryer interface {
-	QueryRow(query string, args ...interface{}) *sql.Row
-}
-
-type rowsQueryer interface {
-	Query(query string, args ...interface{}) (*sql.Rows, error)
 }
 
 func taskRelationBlockers(q rowsQueryer, taskUUID string) ([]Blocker, error) {
@@ -1361,15 +1313,6 @@ func withImmediateTx(database *db.DB, fn func(*sql.Tx) error) error {
 	return tx.Commit()
 }
 
-type workflowEventMetadata struct {
-	ID            string
-	Seq           int64
-	SchemaVersion string
-	Type          string
-	CreatedAt     string
-	Payload       interface{}
-}
-
 func insertEventReturning(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {
 	return insertEventWithResult(tx, instanceID, typ, actor, role, runID, observed, next, key, "", "", taskETag, taskHash, payload)
 }
@@ -1453,8 +1396,7 @@ func updateTaskWorkflowMeta(tx *sql.Tx, taskUUID string, inst Instance, actor st
 	}
 	meta["workflow"] = wf
 	b, _ := json.Marshal(meta)
-	// Principal-only: workflow meta sync no longer stamps updated_by_actor_uuid
-	// from the actors table; the meta payload is the only mutation here.
+
 	_, err := tx.Exec(`UPDATE tasks SET meta = ? WHERE uuid = ?`, string(b), taskUUID)
 	return err
 }
@@ -1565,11 +1507,6 @@ const instanceSelectColumns = `id, task_uuid, task_ref, COALESCE(project_id,''),
 	       COALESCE(suspension_id,''), COALESCE(suspension_reason,''), COALESCE(suspension_at,''), COALESCE(suspension_cause_ref,'')`
 
 const instanceInspectOrder = `CASE WHEN status != 'closed' THEN 0 ELSE 1 END, created_at DESC, id DESC`
-
-// instanceScanner is satisfied by both *sql.Row and *sql.Rows.
-type instanceScanner interface {
-	Scan(dest ...any) error
-}
 
 // scanInstanceRow scans one instance row (projected via instanceSelectColumns)
 // and reconstitutes its active suspension record when present.
@@ -1938,16 +1875,6 @@ func (s *Service) ListRoleBindings(taskSelector, instanceID string) ([]RoleBindi
 		return nil, err
 	}
 	return listRoleBindingsForInstance(s.db, inst.ID)
-}
-
-type RoleBindOptions struct {
-	TaskSelector string
-	InstanceID   string
-	Role         string
-	PrincipalRef string
-	DeliveryRef  string
-	Lane         string
-	BindingMode  string
 }
 
 func (s *Service) BindRole(opts RoleBindOptions) (*RoleBinding, error) {
@@ -2345,8 +2272,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
 			kindSpec = &spec
 		}
-		// E1 — supplied-role conformance: reject when the kind declares producers
-		// and the supplied role is not among them. Not an authenticated boundary.
+
 		if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
 			return err
 		}
@@ -2386,8 +2312,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err != nil {
 			return err
 		}
-		// E3 — data-linkage correctness: declared refs must resolve to a live
-		// evidence id on this instance before the new row is written.
+
 		if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
 			existing, err := listEvidenceTx(tx, inst.ID)
 			if err != nil {
@@ -2773,8 +2698,7 @@ func roleBindingAllowed(q queryer, inst *Instance, tpl *Template, role, actor st
 		return false
 	}
 	if count == 0 {
-		// Legacy/simple mode: require an authenticated actor and declared role, but do not
-		// require pre-binding until a binding exists for this role.
+
 		return true
 	}
 	var matched int
@@ -2895,8 +2819,7 @@ func (s *Service) ownersForRole(inst *Instance, tpl *Template, role string) ([]A
 		return nil, err
 	}
 	if len(owners) == 0 {
-		// Legacy/simple mode matches roleBindingAllowed: no binding rows for this
-		// role means a declared role plus authenticated actor is sufficient.
+
 		return []ActionOwner{{Role: role}}, nil
 	}
 	return owners, nil
@@ -2938,15 +2861,6 @@ func transitionCommand(taskRef, transitionID string, owner ActionOwner, revision
 	}
 	cmd += fmt.Sprintf(" --expect-revision %d", revision)
 	return cmd
-}
-
-type evalContext struct {
-	Evidence    []Evidence
-	Obligations []Obligation
-	Checks      map[string]CheckRun
-	Facts       map[string]interface{}
-	Task        *taskDoc
-	State       State
 }
 
 func evalPredicate(p Predicate, ctx evalContext) bool {
@@ -3014,9 +2928,7 @@ func resolveFact(ctx evalContext, path string) interface{} {
 		case "task.id":
 			return ctx.Task.ID
 		case "task.has_specification":
-			// Derived fact: true iff the task carries a non-empty specification.
-			// Lets transition outcomes branch on the triage deliverable without a
-			// coordinator-run check (checks do not auto-run in the action flow).
+
 			return strings.TrimSpace(ctx.Task.Specification) != ""
 		}
 	}
@@ -3561,11 +3473,6 @@ func filterPendingEffects(in []Effect) []Effect {
 		}
 	}
 	return out
-}
-
-type HookExecutionOptions struct {
-	Context        context.Context
-	TimeoutCeiling time.Duration
 }
 
 func (o HookExecutionOptions) context() context.Context {

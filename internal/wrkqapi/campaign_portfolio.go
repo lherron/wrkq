@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -8,17 +10,6 @@ import (
 
 	"github.com/lherron/wrkq/internal/store"
 )
-
-type campaignAggregate struct {
-	TotalMembers        int
-	StateCounts         map[string]int
-	ResidentCount       int
-	EnrolledCount       int
-	InProgressCount     int
-	MissingOutcomeCount int
-	Footprint           []WrkqCampaignFootprint
-	LastActivityAt      string
-}
 
 // ContainerCampaignPortfolio returns the complete selected campaign aggregate
 // under one SQLite read transaction. Campaign volume is deliberately small; the

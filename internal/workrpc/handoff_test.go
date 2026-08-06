@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // handoff_test.go — server-side acceptance for the handoff family (T-05117).

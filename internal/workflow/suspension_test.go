@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // suspension_test.go — T-06260. Suspension as a first-class condition on a

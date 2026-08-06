@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // action_impl_verify_test.go — service-level tests for the fact-branched

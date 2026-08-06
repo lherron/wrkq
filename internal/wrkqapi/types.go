@@ -2,13 +2,10 @@ package wrkqapi
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/lherron/wrkq/internal/webhooksub"
 	"github.com/lherron/wrkq/internal/workflow"
 )
-
-// ─── DTOs (camelCase JSON; no DB column names leak) ──────────────────────────
 
 // WrkqTask is the stable task resource DTO (docs/wrkq-wrkf-rpc.md §6.2).
 type WrkqTask struct {
@@ -111,8 +108,6 @@ type WrkqWorkflowTimelineResult struct {
 	Events []workflow.Event `json:"events"`
 }
 
-// ─── Params ──────────────────────────────────────────────────────────────────
-
 // TaskCreateParams mirrors WrkqTaskCreateParams (§6.2).
 type TaskCreateParams struct {
 	Path                 string         `json:"path,omitempty"`
@@ -139,23 +134,6 @@ type TaskCreateParams struct {
 	PrincipalRef         string         `json:"principalRef,omitempty"`
 	Actor                string         `json:"actor,omitempty"`
 	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
-}
-
-func (p *TaskCreateParams) UnmarshalJSON(b []byte) error {
-	type taskCreateParams TaskCreateParams
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	if _, ok := raw["actor"]; ok {
-		return fmt.Errorf("unsupported task create field %q; use principalRef", "actor")
-	}
-	var out taskCreateParams
-	if err := json.Unmarshal(b, &out); err != nil {
-		return err
-	}
-	*p = TaskCreateParams(out)
-	return nil
 }
 
 // TaskShowParams mirrors WrkqTaskShowParams.
@@ -277,31 +255,6 @@ type TaskPatch struct {
 	CausedBy *[]string `json:"causedBy,omitempty"`
 }
 
-func (p *TaskPatch) UnmarshalJSON(b []byte) error {
-	type taskPatch TaskPatch
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	allowed := map[string]bool{
-		"slug": true, "title": true, "description": true, "specification": true, "outcome": true, "state": true,
-		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
-		"assigneePrincipalRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
-		"dueAt": true, "startAt": true, "causedBy": true, "campaign": true,
-	}
-	for key := range raw {
-		if !allowed[key] {
-			return fmt.Errorf("unsupported task patch field %q", key)
-		}
-	}
-	var out taskPatch
-	if err := json.Unmarshal(b, &out); err != nil {
-		return err
-	}
-	*p = TaskPatch(out)
-	return nil
-}
-
 // CommentAddParams mirrors WrkqCommentAddParams.
 type CommentAddParams struct {
 	Task           string         `json:"task,omitempty"`
@@ -347,8 +300,6 @@ type WorkflowSyncMetaParams struct {
 type WrkqWorkflowSyncMetaResult struct {
 	Synced int `json:"synced"`
 }
-
-// ─── Task lifecycle params (acknowledge / delete / restore) ──────────────────
 
 // TaskAcknowledgeParams mirrors WrkqTaskAcknowledgeParams. force allows ack on
 // non-terminal tasks (mirrors `wrkq ack --force`).
@@ -404,8 +355,6 @@ type TaskRestoreParams struct {
 	Actor       string `json:"actor,omitempty"`
 }
 
-// ─── Comment show / delete params ────────────────────────────────────────────
-
 // CommentShowParams mirrors WrkqCommentShowParams.
 type CommentShowParams struct {
 	ID string `json:"id"`
@@ -424,8 +373,6 @@ type CommentDeleteParams struct {
 	IfMatch int64  `json:"ifMatch,omitempty"`
 	Actor   string `json:"actor,omitempty"`
 }
-
-// ─── Attachments ─────────────────────────────────────────────────────────────
 
 // WrkqAttachment is the stable attachment resource DTO. The DB/CLI field name is
 // `checksum` (not sha256).
@@ -480,19 +427,6 @@ type AttachmentRemoveParams struct {
 	Actor string `json:"actor,omitempty"`
 }
 
-// ─── attachment byte transfer (T-05103, daedalus OPTION 1) ───────────────────
-//
-// Attachment CONTENT crosses the RPC boundary as explicit protocol data (base64
-// + declared size + checksum), never as a server-local host path. Transfers are
-// CHUNKED because the 8 MiB frame cap is smaller than the default 50 MB attach
-// limit (a single base64 frame for a max-size attachment would exceed the frame
-// cap). See docs/wrkq-wrkf-rpc.md "attachment byte transfer".
-
-// AttachmentByteChunkBytes is the server's preferred raw-bytes-per-chunk on read.
-// 1 MiB raw → ~1.34 MiB base64, comfortably under the 8 MiB frame cap with JSON
-// envelope overhead.
-const AttachmentByteChunkBytes = 1 << 20
-
 // AttachmentGetBytesParams requests a slice of an attachment's stored bytes.
 // offset/limit are byte offsets into the decoded content; the server clamps limit
 // to AttachmentByteChunkBytes. A caller streams by looping until eof is true.
@@ -546,8 +480,6 @@ type WrkqAttachmentAddBytesResult struct {
 	Attachment    *WrkqAttachment `json:"attachment,omitempty"`
 }
 
-// ─── Relations ───────────────────────────────────────────────────────────────
-
 // WrkqRelation is the stable relation resource DTO. Relations are identified by
 // the composite key (fromTask, kind, toTask); there is no synthetic id.
 type WrkqRelation struct {
@@ -585,8 +517,6 @@ type RelationRemoveParams struct {
 	ToTask   string `json:"toTask"`
 	Actor    string `json:"actor,omitempty"`
 }
-
-// ─── Containers ──────────────────────────────────────────────────────────────
 
 // WrkqContainer is the stable container resource DTO (camelCase; no DB column
 // names leak). path is computed.

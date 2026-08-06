@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // wrkqapi_acceptance_test.go — RED acceptance tests for P2: internal/wrkqapi.

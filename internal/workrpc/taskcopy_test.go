@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // taskcopy_test.go — acceptance tests for T-05111 (Tranche B, part of T-05088).

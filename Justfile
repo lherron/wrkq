@@ -53,10 +53,10 @@ build:
   echo "Building wrkq, wrkf, wrkqadm, and wrkqd binaries..."
   rm -f bin/wrkq-rpccli bin/wrkq-legacy
   LDFLAGS="$(scripts/ldflags.sh)"
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
 # Conservative no-network check for agents/CI sandboxes
 agent-check:
@@ -65,7 +65,7 @@ agent-check:
 # Compile packages only with vendored deps, no network, and conservative parallelism
 agent-compile:
   GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0' \
-    go test -tags sqlite_fts5 -run '^$' ./...
+    go test -tags "sqlite_fts5,wrkq_local" -run '^$' ./...
 
 # Build all binaries with vendored deps, no network, and conservative parallelism
 agent-build:
@@ -74,10 +74,10 @@ agent-build:
   mkdir -p bin
   LDFLAGS="$(scripts/ldflags.sh)"
   export GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0'
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
 # Run the wrkq CLI
 run *args:
@@ -97,7 +97,7 @@ wrkqadm-run *args:
 
 # Run CLI tests with coverage
 test-coverage:
-  go test -tags sqlite_fts5 -v -coverprofile=coverage.out ./...
+  go test -tags "sqlite_fts5,wrkq_local" -v -coverprofile=coverage.out ./...
   go tool cover -html=coverage.out -o coverage.html
 
 # Install CLI binaries to ~/.local/bin and, on producer nodes, publish @wrkq/client.
@@ -185,10 +185,10 @@ install-system:
   set -euo pipefail
   echo "Building wrkq binaries..."
   LDFLAGS="$(scripts/ldflags.sh)"
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
-  go build -tags sqlite_fts5 -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
   # Remove old binary first to avoid crashes when overwriting running binaries
   sudo rm -f /usr/local/bin/wrkq
@@ -337,12 +337,12 @@ verify-evidence-summary format="":
 # Run all tests (Go + Node.js when available)
 test:
   @echo "Running Golang tests..."
-  go test -tags sqlite_fts5 ./...
+  go test -tags "sqlite_fts5,wrkq_local" ./...
   @echo "✓ Golang tests complete"
 
 # Run all tests with verbose logs
 test-verbose:
-  go test -v -tags sqlite_fts5 ./...
+  go test -v -tags "sqlite_fts5,wrkq_local" ./...
 
 # Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + downstream sync + @wrkq/client unit+integration RPC)
 verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records sync-downstream-test verify-rpc

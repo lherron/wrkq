@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // wrkqapi_deferred_acceptance_test.go — RED acceptance tests for T-04448.
@@ -49,7 +51,7 @@ func runRPCWithEnv(t *testing.T, entrypoint, dbPath string, requests []string, e
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	args := []string{"run", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
+	args := []string{"run", "-tags", "sqlite_fts5,wrkq_local", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = repoRoot(t)
 	principalEnv := "WRKQ_PRINCIPAL_REF=agent:smokey"

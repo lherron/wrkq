@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -137,48 +139,6 @@ func scanObligations(rows *sql.Rows) ([]Obligation, error) {
 		out = append(out, o)
 	}
 	return out, rows.Err()
-}
-
-type delegatedTaskManifestData struct {
-	Tasks []delegatedTaskManifestTask `json:"tasks"`
-}
-
-type delegatedTaskManifestTask struct {
-	ID     string `json:"id"`
-	TaskID string `json:"taskId"`
-	Handle string `json:"handle"`
-	Agent  string `json:"agent"`
-}
-
-type coordinatorRunbookData struct {
-	LockedAt              string `json:"lockedAt"`
-	LockedAfterEvidenceID string `json:"lockedAfterEvidenceId"`
-	Scope                 string `json:"scope"`
-	ExecutableBy          string `json:"executableBy"`
-	Steps                 []struct {
-		ID string `json:"id"`
-	} `json:"steps"`
-}
-
-type coordinatorSmokeExecutionData struct {
-	RunbookEvidenceID string `json:"runbookEvidenceId"`
-	Executions        []struct {
-		StepID        string `json:"stepId"`
-		Verdict       string `json:"verdict"`
-		ActualOutcome string `json:"actualOutcome"`
-	} `json:"executions"`
-}
-
-type completionClaimData struct {
-	SupersedesClaimEvidenceID string `json:"supersedesClaimEvidenceId"`
-	AddressesReviewEvidenceID string `json:"addressesReviewEvidenceId"`
-}
-
-type observerCompletionReviewData struct {
-	ReviewedClaimEvidenceID string   `json:"reviewedClaimEvidenceId"`
-	ClaimEvidenceID         string   `json:"claimEvidenceId"`
-	Verdict                 string   `json:"verdict"`
-	FollowUpTaskIDs         []string `json:"followUpTaskIds"`
 }
 
 func withObserverCompletionReviewState(obl []Obligation, ev []Evidence, includeClosed bool) []Obligation {
@@ -723,11 +683,6 @@ func (s *Service) ShowObligation(id string) (*Obligation, error) {
 	return &obl[0], nil
 }
 
-type ObligationStatusOptions struct {
-	PrincipalRef string
-	Role         string
-}
-
 func (s *Service) SetObligationStatus(taskSelector, id, status, evidenceID, reason string) (*Obligation, error) {
 	return s.SetObligationStatusWithAuthority(taskSelector, id, status, evidenceID, reason, ObligationStatusOptions{PrincipalRef: "system:wrkf", Role: "system"})
 }
@@ -1098,15 +1053,6 @@ func (s *Service) ForceAckEffect(id string) (*Effect, error) {
 	return s.ShowEffect(id)
 }
 
-type EffectDelivery struct {
-	Effect   *Effect         `json:"effect"`
-	Binding  *Run            `json:"binding,omitempty"`
-	Receipt  json.RawMessage `json:"receipt,omitempty"`
-	ExitCode int             `json:"exitCode"`
-	Stdout   string          `json:"stdout,omitempty"`
-	Stderr   string          `json:"stderr,omitempty"`
-}
-
 const transitionBuiltinEffectAdapter = "wrkf-transition-builtin"
 
 var engineOwnedBuiltinEffectKinds = map[string]struct{}{
@@ -1150,8 +1096,7 @@ func (s *Service) DeliverEffectWithOptions(id, adapter string, catalog *HookCata
 	if !ok {
 		return nil, fmt.Errorf("no effect handler registered for %s", current.Kind)
 	}
-	// Validate the remote execution budget before claiming the effect. A
-	// refused catalog entry must not leave a lease or any other mutation behind.
+
 	if _, err := effectiveHookTimeout(handler, execOpts.TimeoutCeiling); err != nil {
 		return nil, err
 	}
@@ -1293,9 +1238,7 @@ func (s *Service) deliverBuiltinTransitionEffects(result map[string]interface{},
 	if result == nil {
 		return result, nil
 	}
-	// workflow_events.result_json remains the transition commit record. This
-	// post-commit pass refreshes the returned result; effect list/show are the
-	// durable delivery truth for builtin effect terminal status and receipts.
+
 	effects, err := transitionResultEffects(result["effects"])
 	if err != nil {
 		return result, err
@@ -1482,13 +1425,6 @@ func nextEffectSequenceTx(tx *sql.Tx, instanceID string) (int64, error) {
 	var seq int64
 	err := tx.QueryRow(`SELECT COALESCE(MAX(sequence), 0) + 1 FROM workflow_effects WHERE instance_id = ?`, instanceID).Scan(&seq)
 	return seq, err
-}
-
-type effectRenderContext struct {
-	instance  Instance
-	outcomeID string
-	runID     string
-	sequence  int64
 }
 
 var unresolvedEffectTokenRE = regexp.MustCompile(`\{[A-Za-z][A-Za-z0-9_]*\}`)
@@ -1730,12 +1666,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		if err != nil {
 			return err
 		}
-		// Operator-class lease guard: an operator transition marked
-		// requiresNoActiveRun must refuse inside this transaction while the
-		// instance holds an open action run — the action run is the seat's
-		// lease. Enforced here (not client-side preflight) so it cannot race a
-		// concurrent claim; returning refuses and rolls the tx back, leaving the
-		// instance revision and task state unchanged. Applies to dry-run too.
+
 		if tr.RequiresNoActiveRun {
 			activeRuns, err := activeActionRunIDsTx(tx, inst.ID)
 			if err != nil {
@@ -1800,9 +1731,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			return nil
 		}
 
-		// Suspended-write gate (door 1 of 3). A suspended instance rejects the
-		// write; reads, inspection, and dry-run are unaffected. This is the
-		// entire fencing story — a pre-park worker's settle bounces here.
 		if inst.Suspension != nil {
 			return suspendedWriteError(inst)
 		}
@@ -1954,8 +1882,7 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		webhookCtx = &ctx
 		webhookTaskUUID = updated.TaskUUID
 		if chosen.Suspend != nil {
-			// Parking never projects into the task document. The suspension on
-			// the instance is the sole truth, so evidence freshness survives.
+
 			return nil
 		}
 		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.PrincipalRef)
@@ -1973,10 +1900,6 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		}
 	}
 	return result, nil
-}
-
-type instanceRevision struct {
-	revision int64
 }
 
 func instanceRevisionTx(tx *sql.Tx, instanceID string) (instanceRevision, error) {
@@ -2338,10 +2261,6 @@ func (s *Service) ShowRun(id string) (*Run, error) {
 		return nil, err
 	}
 	return &r, nil
-}
-
-type runRowScanner interface {
-	Scan(dest ...interface{}) error
 }
 
 func scanRun(scanner runRowScanner) (*Run, error) {

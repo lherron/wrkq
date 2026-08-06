@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // effect_lease_test.go — regression tests for T-01903 (wrkf-rpc Phase E: effect claim/lease).

@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -20,41 +22,6 @@ import (
 )
 
 const nsTaskCopy = "wrkq.task.copy"
-
-// TaskCopyParams selects ONE source task + a destination container and the copy
-// options. It is the server-owned "one source-task copy envelope" (daedalus
-// hrcchat#10196, T-05111): the CLI fans out over multiple sources and calls this
-// once per source. Field order is the daedalus-approved semantic order.
-type TaskCopyParams struct {
-	Source          string `json:"source"`
-	Destination     string `json:"destination"`
-	Overwrite       bool   `json:"overwrite,omitempty"`
-	WithAttachments bool   `json:"withAttachments,omitempty"`
-	Shallow         bool   `json:"shallow,omitempty"`
-	ExpectEtag      *int64 `json:"expectEtag,omitempty"`
-	Actor           string `json:"actor,omitempty"`
-	IdempotencyKey  string `json:"idempotencyKey,omitempty"`
-}
-
-// WrkqTaskCopyResult is the per-source copy outcome DTO. Field order matches the
-// daedalus-approved semantic order; the snake_case JSON tags are deliberately the
-// LEGACY copyResult output keys so the mirror renders byte-identical output.
-type WrkqTaskCopyResult struct {
-	SourceID          string `json:"source_id"`
-	SourceUUID        string `json:"source_uuid"`
-	DestID            string `json:"dest_id"`
-	DestUUID          string `json:"dest_uuid"`
-	DestPath          string `json:"dest_path"`
-	AttachmentsCopied int    `json:"attachments_copied,omitempty"`
-	WithFiles         bool   `json:"with_files,omitempty"`
-}
-
-// stagedFile is one attachment file copied into a temp staging path BEFORE the DB
-// commit; on commit success it is atomically renamed into finalPath.
-type stagedFile struct {
-	tmpPath   string
-	finalPath string
-}
 
 // TaskCopy performs the server-owned deep copy of a SINGLE source task into a
 // destination container: source resolution, destination-container resolution,
@@ -107,12 +74,11 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 		}
 	}
 
-	// Source resolution (mirror legacy selectors.ResolveTask → NOT_FOUND taxonomy).
 	sourceUUID, _, serr := selectors.ResolveTask(a.db, p.Source)
 	if serr != nil {
 		return nil, NewNotFoundError(p.Source, "task")
 	}
-	// Destination-container resolution.
+
 	destUUID, _, derr := selectors.ResolveContainer(a.db, p.Destination)
 	if derr != nil {
 		return nil, NewNotFoundError(p.Destination, "container")
@@ -132,8 +98,7 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 	defer func() {
 		if !committed {
 			_ = tx.Rollback()
-			// Staging failure / rollback: remove any temp files so a failed copy
-			// leaves no stray durable file.
+
 			for _, sf := range staged {
 				_ = os.Remove(sf.tmpPath)
 			}
@@ -219,7 +184,6 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 		}
 	}
 
-	// task.copied event (LogEventReturning so the metadata feeds the webhook).
 	payloadData := map[string]interface{}{
 		"source_id":   sourceID,
 		"source_uuid": sourceUUID,
@@ -248,17 +212,12 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 	}
 	committed = true
 
-	// Post-commit: atomically move staged attachment files into place. Same-dir
-	// rename (no cross-fs partial write). The metadata rows already point at these
-	// canonical paths.
 	for _, sf := range staged {
 		if rerr := os.Rename(sf.tmpPath, sf.finalPath); rerr != nil {
 			return nil, NewInternalError(fmt.Errorf("failed to place copied attachment file: %w", rerr))
 		}
 	}
 
-	// Post-commit `created` webhook carrying the synthetic source_uuid change. Best
-	// effort (legacy dispatches outside the tx, errors are logged not surfaced).
 	webhooks.DispatchTaskEvent(a.db, newUUID, webhooks.EventContext{
 		Metadata:     eventMeta,
 		Event:        "created",
@@ -372,7 +331,7 @@ func (a *API) stageAttachmentCopy(sourceRelative, destRelative, destTaskUUID str
 		return stagedFile{}, NewInternalError(eerr)
 	}
 
-	src, oerr := os.Open(sourcePath) // #nosec G304 -- server-controlled store path
+	src, oerr := os.Open(sourcePath)
 	if oerr != nil {
 		if os.IsNotExist(oerr) {
 			return stagedFile{}, NewNotFoundError(sourceRelative, "attachment file")

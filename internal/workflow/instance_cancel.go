@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -7,15 +9,6 @@ import (
 
 	"github.com/lherron/wrkq/internal/webhooks"
 )
-
-type CancelInstanceParams struct {
-	Task           string
-	InstanceID     string
-	ExpectRevision *int64
-	Explanation    string
-	PrincipalRef   string
-	Role           string
-}
 
 func (s *Service) CancelInstance(params CancelInstanceParams) (map[string]interface{}, error) {
 	if strings.TrimSpace(params.Task) == "" && strings.TrimSpace(params.InstanceID) == "" {

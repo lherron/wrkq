@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkfapi
 
 import (
@@ -9,19 +11,6 @@ import (
 
 	"github.com/lherron/wrkq/internal/workflow"
 )
-
-type TransitionApplyParams struct {
-	TaskSelector   string   `json:"task"`
-	InstanceID     string   `json:"instanceId,omitempty"`
-	Transition     string   `json:"transition"`
-	Role           string   `json:"role,omitempty"`
-	PrincipalRef   string   `json:"principal_ref,omitempty"`
-	ExpectRevision *int64   `json:"expectRevision,omitempty"`
-	IdempotencyKey string   `json:"idempotencyKey,omitempty"`
-	CheckIDs       []string `json:"checkIds,omitempty"`
-	RunChecks      bool     `json:"runChecks,omitempty"`
-	DryRun         bool     `json:"dryRun,omitempty"`
-}
 
 func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParams) (TransitionResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -42,10 +31,6 @@ func (api *API) TransitionApply(ctx context.Context, params TransitionApplyParam
 		return TransitionResult{}, normalizeTransitionError(err)
 	}
 	return transitionResultFromAny(out), nil
-}
-
-type codedError interface {
-	Code() string
 }
 
 func normalizeTransitionError(err error) error {

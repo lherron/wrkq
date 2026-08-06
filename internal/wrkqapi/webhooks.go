@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -12,35 +14,6 @@ import (
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooksub"
 )
-
-// Global webhook subscriptions live on the SINGLETON ROOT container (kind='root')
-// and are inherited by every project via the container chain. This DEDICATED
-// family (wrkq.webhook.add / remove / listView, T-05119 daedalus #10211) owns the
-// root resolution, URL validation, idempotent add/remove delta, and the
-// webhook_urls write — it is deliberately SEPARATE from wrkq.container.update,
-// whose patch surface stays narrow ({slug?, title?} only) and rejects webhookUrls
-// to avoid reopening the overbroad-mutation-sink it was kept narrow to avoid.
-
-// WebhookListViewParams is the (empty) parameter set for wrkq.webhook.listView.
-type WebhookListViewParams struct{}
-
-// WebhookRow is one global webhook URL row. The mirror renders these as legacy
-// {url:<value>} NDJSON when non-TTY (and as a plain URL line per row on a TTY).
-type WebhookRow struct {
-	URL string `json:"url"`
-}
-
-// WebhookMutateParams mirrors wrkq.webhook.add / wrkq.webhook.remove params. The
-// URL is the single webhook target. ExpectETag is an OPTIONAL CAS over the root
-// container's etag; absent (0) preserves the legacy no-CAS last-writer-wins
-// behavior, so the CLI mirror — which never sends it — stays byte-for-byte with
-// legacy. A raw RPC caller MAY pass it to reduce the concurrent last-writer-wins
-// risk; a stale etag → WRKQ_CONFLICT.
-type WebhookMutateParams struct {
-	URL        string `json:"url"`
-	ExpectETag int64  `json:"expectEtag,omitempty"`
-	Actor      string `json:"actor,omitempty"`
-}
 
 // WebhookListView returns the global webhook URLs stored on the root container,
 // in stored order. The mirror renders --json / NDJSON / TTY from these rows.
@@ -229,11 +202,7 @@ func (a *API) mutateRootWebhooks(
 	expectEtag int64,
 	actor string,
 ) (json.RawMessage, error) {
-	// Validate the explicit actor BEFORE returning any mutation-family response —
-	// including the idempotent no-change branch — so a malformed explicit actor
-	// never yields a successful no-op. attributionFor rejects invalid non-empty
-	// selectors with WRKQ_VALIDATION (daedalus #10291) and reduces valid full
-	// ScopeRefs to their durable agent principal.
+
 	attr, aerr := a.attributionFor(actor)
 	if aerr != nil {
 		return nil, aerr
@@ -338,9 +307,7 @@ func applyWebhookDelta(existing *string, add []webhooksub.Subscription, remove [
 	for _, sub := range add {
 		trimmed := strings.TrimSpace(sub.URL)
 		if at, ok := index[trimmed]; ok {
-			// Re-adding a known URL is still idempotent, but it RE-POINTS that
-			// URL's event narrowing so `--add-webhook-url X --webhook-events …`
-			// can retarget an existing subscription instead of duplicating it.
+
 			filtered[at].Events = sub.Events
 			continue
 		}

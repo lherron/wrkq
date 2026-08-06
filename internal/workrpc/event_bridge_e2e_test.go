@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // event_bridge_e2e_test.go — gap6 (T-04853) event-bridge contract e2e.
@@ -70,7 +72,7 @@ func e2eBinary(t *testing.T) string {
 			return
 		}
 		bin := filepath.Join(dir, "wrkq")
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/wrkq")
+		cmd := exec.Command("go", "build", "-tags", "sqlite_fts5,wrkq_local", "-o", bin, "./cmd/wrkq")
 		cmd.Dir = repoRoot(t)
 		var out strings.Builder
 		cmd.Stdout = &out

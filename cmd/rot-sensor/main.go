@@ -41,7 +41,7 @@ func main() {
 }
 
 func workflowTestsGreen(root string) (bool, error) {
-	cmd := exec.Command("go", "test", "-tags", "sqlite_fts5", "./internal/workflow")
+	cmd := exec.Command("go", "test", "-tags", "sqlite_fts5,wrkq_local", "./internal/workflow")
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
 	if err == nil {

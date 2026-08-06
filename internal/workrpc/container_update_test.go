@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // container_update_test.go — server protocol/behavior acceptance tests for the

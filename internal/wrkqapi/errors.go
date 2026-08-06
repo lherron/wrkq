@@ -1,14 +1,6 @@
-// Package wrkqapi implements the wrkq-namespace business surface of the unified
-// wrkq/wrkf JSON-RPC protocol (docs/wrkq-wrkf-rpc.md). It calls the existing
-// store/domain/selectors layers directly — never Cobra handlers — and returns
-// named camelCase DTOs plus WRKQ_* typed domain errors.
 package wrkqapi
 
-import (
-	"fmt"
-
-	"github.com/lherron/wrkq/internal/db"
-)
+import "fmt"
 
 // Stable machine-readable error codes (docs/wrkq-wrkf-rpc.md §5).
 const (
@@ -24,27 +16,6 @@ const (
 	CodeNodeIdentity     = "WRKQ_NODE_IDENTITY_REQUIRED"
 	CodeInternal         = "WORKRPC_INTERNAL"
 )
-
-// Error is the wrkq domain error interface. It is method-set compatible with
-// the wrkf error interface used by workrpc.MapError, so workrpc maps these to
-// the right JSON-RPC envelope (error.data.code = the WRKQ_* code) without any
-// special-casing: errors.As(err, &wrkfapi.Error) matches any value that
-// implements Error()/Code()/Retryable(), and the data carrier interface picks
-// up Data().
-type Error interface {
-	error
-	Code() string
-	Retryable() bool
-}
-
-// DomainError is the concrete wrkq error type.
-type DomainError struct {
-	code      string
-	message   string
-	retryable bool
-	data      any
-	err       error
-}
 
 func (e *DomainError) Error() string {
 	if e == nil {
@@ -153,7 +124,7 @@ func NewBusyError(err error) *DomainError {
 // WRKQ_DB_BUSY so contention never surfaces as a generic internal error
 // (docs/wrkq-wrkf-rpc.md §5; T-05066).
 func NewInternalError(err error) *DomainError {
-	if db.IsBusy(err) {
+	if isSQLiteBusy(err) {
 		return NewBusyError(err)
 	}
 	msg := "internal error"

@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -297,7 +299,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 			perr := a.db.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", containerUUID).Scan(&containerPath)
 			switch {
 			case perr == sql.ErrNoRows:
-				// Container has no visible path (e.g. root) — direct filter only.
+
 				where = append(where, "t.project_uuid = ?")
 				args = append(args, containerUUID)
 			case perr != nil:
@@ -397,7 +399,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	if err := rows.Err(); err != nil {
 		return nil, NewInternalError(err)
 	}
-	// Hydrate caused_by lineage for each task (after the rows cursor is closed).
+
 	for i := range items {
 		causedBy, cerr := store.CausedByIDs(a.db, items[i].UUID)
 		if cerr != nil {
@@ -412,8 +414,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	if len(items) > limit {
 		result.Items = items[:limit]
 		anchor := result.Items[limit-1]
-		// Encode the active (sort, direction) tuple into the cursor so it can
-		// only be reused under the same ordering (cursor identity).
+
 		next := &cursor.Cursor{
 			SortFields: []string{sortField},
 			LastValues: []any{taskCursorAnchor(anchor, sortField)},
@@ -484,7 +485,7 @@ func taskCursorAnchor(t WrkqTask, sortField string) any {
 		return t.updatedAtRaw
 	case "path":
 		return t.Path
-	default: // created_at
+	default:
 		return t.createdAtRaw
 	}
 }
@@ -537,7 +538,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	if ferr != nil {
 		return nil, ferr
 	}
-	// Reject self-causation: a task cannot be in its own caused_by set.
+
 	if cbv, ok := fields["caused_by"]; ok {
 		if cu, ok := cbv.(store.CausedByUpdate); ok {
 			for _, r := range cu.Refs {
@@ -548,7 +549,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		}
 	}
 	if len(fields) == 0 {
-		// Nothing to change; return the current DTO.
+
 		return a.loadTask(uuid)
 	}
 
@@ -719,7 +720,6 @@ func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*Wr
 		return nil, NewInternalError(scanErr)
 	}
 
-	// Already acknowledged → no-op (mirror ack.go:106-115).
 	if acknowledgedAt.Valid && strings.TrimSpace(acknowledgedAt.String) != "" {
 		return a.loadTask(uuid)
 	}
@@ -791,14 +791,12 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		}
 		return a.loadTask(uuid)
 	case "purge":
-		// Snapshot the task DTO BEFORE the row is gone so the method still returns a
-		// valid task; the mirror derives its purge stats (count + bytes) from a
-		// pre-purge attachment.list, not from this return value.
+
 		snapshot, serr := a.loadTask(uuid)
 		if serr != nil {
 			return nil, serr
 		}
-		// Capture attachment paths BEFORE purge for post-commit file cleanup.
+
 		attachments, gerr := a.store.Tasks.GetAttachments(uuid)
 		if gerr != nil {
 			return nil, NewInternalError(gerr)
@@ -806,9 +804,7 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		if _, perr := a.store.Tasks.PurgeWithAttribution(attr, uuid, 0); perr != nil {
 			return nil, mapStoreError(perr, p.Task)
 		}
-		// Delete attachment files + the task dir AFTER the DB purge commits. File
-		// cleanup is best-effort (the durable DB delete already committed); skipped
-		// entirely when no attach dir is configured.
+
 		if strings.TrimSpace(a.attachDir) != "" {
 			for _, at := range attachments {
 				if at.RelativePath == "" {
@@ -820,12 +816,12 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		}
 		return snapshot, nil
 	default:
-		// mode == "" — legacy reversible delete, PRESERVED.
+
 		if state == string(domain.StateDeleted) {
 			return a.loadTask(uuid)
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
-		// Setting state=deleted triggers cascade-delete of subtasks in the store.
+
 		if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{
 			"state":      string(domain.StateDeleted),
 			"deleted_at": now,
@@ -845,9 +841,6 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		return nil, err
 	}
 
-	// Legacy precedence: state/priority/labels/assignee are validated BEFORE the
-	// task ref is resolved, so a bad flag errors even on an unresolvable ref.
-	// Validate target state.
 	targetState := string(domain.StateOpen)
 	if strings.TrimSpace(p.State) != "" {
 		parsed, perr := domain.ParseState(p.State)
@@ -860,14 +853,12 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		targetState = string(parsed)
 	}
 
-	// Validate priority (legacy: only when non-zero).
 	if p.Priority != 0 {
 		if verr := domain.ValidatePriority(p.Priority); verr != nil {
 			return nil, NewValidationError(verr.Error(), map[string]any{"field": "priority"})
 		}
 	}
 
-	// Validate labels JSON (legacy: only when non-empty).
 	if strings.TrimSpace(p.Labels) != "" {
 		var labels []string
 		if jerr := json.Unmarshal([]byte(p.Labels), &labels); jerr != nil {
@@ -905,8 +896,6 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		)
 	}
 
-	// --if-match precondition (legacy: checked AFTER the state check, BEFORE --to).
-	// Mirrors legacy "etag mismatch: expected %d, got %d"; surfaced as WRKQ_CONFLICT.
 	if p.IfMatch != 0 && p.IfMatch != currentEtag {
 		return nil, NewConflictError(
 			"etag mismatch: expected "+strconv.FormatInt(p.IfMatch, 10)+", got "+strconv.FormatInt(currentEtag, 10),
@@ -960,29 +949,13 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 	if rerr != nil {
 		return nil, rerr
 	}
-	// Dispatch the restore webhook for the ROOT task (legacy runRestore parity).
+
 	webhooks.DispatchTaskEvent(a.db, uuid, webhookCtx)
-	// Subtasks cascade-restore to the target state only (no field updates / move /
-	// comment propagate to children — legacy cascadeRestoreSubtasks passes a bare
-	// options struct); each restored subtask dispatches its own webhook.
+
 	if rerr := a.cascadeRestoreSubtasks(uuid, targetState, attr); rerr != nil {
 		return nil, rerr
 	}
 	return a.loadTask(uuid)
-}
-
-// restoreOptions carries the per-task restore mutation (target state + the
-// optional move / field updates / comment). Mirrors internal/cli restoreTaskOptions.
-type restoreOptions struct {
-	targetState          string
-	newProjectUUID       *string
-	newSlug              *string
-	newTitle             string
-	newDescription       string
-	newPriority          int
-	newLabels            string
-	assigneePrincipalRef *string
-	comment              string
 }
 
 // restoreTaskTx clears the archived/deleted markers and sets the target state for
@@ -1011,9 +984,6 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		updated_by_principal_ref = ?, updated_by_scope_ref = ?`
 	args := []any{opts.targetState, attr.PrincipalRef, scopeBind(attr)}
 
-	// fields mirrors legacy restoreTaskWithOptions' webhook `fields` map exactly —
-	// it drives Changed (sorted keys) + Changes (from→to). Note description is
-	// reported as {"length": N}, not the raw body (legacy parity).
 	fields := map[string]any{
 		"state":       opts.targetState,
 		"archived_at": nil,
@@ -1062,7 +1032,6 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		return webhooks.EventContext{}, NewInternalError(eerr)
 	}
 
-	// Event payload mirrors legacy: action + target_state, plus moved_to on a move.
 	payloadMap := map[string]any{"action": "restored", "target_state": opts.targetState}
 	if opts.newProjectUUID != nil {
 		payloadMap["moved_to"] = *opts.newProjectUUID
@@ -1085,8 +1054,7 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 	}
 
 	var commentResult *store.CommentCreateResult
-	// --comment: append through the canonical store path so its comment.created
-	// event is part of this same restore transaction.
+
 	if opts.comment != "" {
 		commentResult, eerr = a.store.Comments.CreateTxWithAttribution(
 			tx,
@@ -1106,9 +1074,6 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		webhooks.DispatchCommentCreated(a.db, taskUUID, commentResult.EventMeta, attr.PrincipalRef, "rpc")
 	}
 
-	// EventContext mirrors legacy restoreTaskWithOptions: an `updated` event with
-	// the archived/deleted→target transition, the per-field Changed/Changes derived
-	// from the same `fields` map, and Via="rpc" (this path's mutation convention).
 	return webhooks.EventContext{
 		Metadata:     eventMeta,
 		Event:        "updated",
@@ -1376,11 +1341,6 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 		task.CausedBy = causedBy
 	}
 	return task, nil
-}
-
-// rowScanner abstracts *sql.Row and *sql.Rows for scanTaskRow.
-type rowScanner interface {
-	Scan(dest ...any) error
 }
 
 // scanTaskRow scans a task row (column order matches the queries above) into a

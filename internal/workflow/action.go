@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 import (
@@ -10,138 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
-
-// action.go — low-ceremony wrkf.action.* surface.
-//
-// A wrkf "action" is a single semantic task-lifecycle step (triage, implement,
-// verify, review, ...). The action API is a thin composition over the existing
-// wrkf primitives — run.start, run.bindExternal, evidence.add, transition.apply,
-// run.finish/fail — not a second ledger. It does not touch tasks.state directly
-// and never reads or writes legacy task scalar linkage fields.
-
-// ActionWorkflowRef identifies the workflow template backing an action run.
-type ActionWorkflowRef struct {
-	ID      string `json:"id"`
-	Version string `json:"version"`
-	Hash    string `json:"hash,omitempty"`
-}
-
-// ActionRun is the canonical semantic view of one action run. ActionRunID and
-// RunID are the same durable workflow_runs.id; both names are preserved so
-// callers can use existing wrkf run language.
-type ActionRun struct {
-	ActionRunID        string            `json:"actionRunId"`
-	RunID              string            `json:"runId"`
-	Task               string            `json:"task"`
-	InstanceID         string            `json:"instanceId"`
-	Workflow           ActionWorkflowRef `json:"workflow"`
-	Action             string            `json:"action"`
-	Role               string            `json:"role"`
-	PrincipalRef       string            `json:"principal_ref,omitempty"`
-	Lane               string            `json:"lane,omitempty"`
-	DeliveryRef        string            `json:"deliveryRef,omitempty"`
-	ExternalRunRef     string            `json:"externalRunRef,omitempty"`
-	Status             string            `json:"status"`
-	StartedAt          string            `json:"startedAt"`
-	CompletedAt        string            `json:"completedAt,omitempty"`
-	TerminalResult     string            `json:"terminalResult,omitempty"`
-	LeaseOwner         string            `json:"leaseOwner,omitempty"`
-	LeaseToken         string            `json:"leaseToken,omitempty"`
-	LeaseExpiresAt     string            `json:"leaseExpiresAt,omitempty"`
-	HeartbeatAt        string            `json:"heartbeatAt,omitempty"`
-	EvidenceIDs        []string          `json:"evidenceIds,omitempty"`
-	EvidenceKinds      []string          `json:"evidenceKinds,omitempty"`
-	TransitionEventIDs []string          `json:"transitionEventIds,omitempty"`
-}
-
-// ActionEvidenceInput is the optional evidence recorded by complete/fail.
-type ActionEvidenceInput struct {
-	Kind           string
-	Ref            string
-	Summary        string
-	Facts          string
-	Data           string
-	ContentHash    string
-	IdempotencyKey string
-}
-
-// StartActionParams drives StartAction.
-type StartActionParams struct {
-	Task           string
-	InstanceID     string
-	Workflow       string
-	Action         string
-	Role           string
-	PrincipalRef   string
-	Lane           string
-	DeliveryRef    string
-	ExternalRunRef string
-	IdempotencyKey string
-	LeaseOwner     string
-	LeaseMs        int64
-}
-
-// BindActionExternalParams drives BindActionExternal.
-type BindActionExternalParams struct {
-	ActionRunID    string
-	ExternalRunRef string
-	DeliveryRef    string
-	Lane           string
-	IdempotencyKey string
-}
-
-// TransitionMode selects how CompleteAction handles the workflow transition.
-type TransitionMode int
-
-const (
-	// TransitionDefault resolves the unique transition available from the
-	// current state for the run's role.
-	TransitionDefault TransitionMode = iota
-	// TransitionSkip records evidence and finishes the run without a transition.
-	TransitionSkip
-	// TransitionExplicit applies the caller-supplied transition id.
-	TransitionExplicit
-)
-
-// CompleteActionParams drives CompleteAction.
-type CompleteActionParams struct {
-	ActionRunID              string
-	LeaseToken               string
-	Evidence                 *ActionEvidenceInput
-	TransitionMode           TransitionMode
-	TransitionID             string
-	TransitionIdempotencyKey string
-	RunSummary               string
-}
-
-// FailActionParams drives FailAction.
-type FailActionParams struct {
-	ActionRunID string
-	LeaseToken  string
-	Summary     string
-	Evidence    *ActionEvidenceInput
-}
-
-type HeartbeatActionParams struct {
-	ActionRunID string
-	LeaseToken  string
-	LeaseMs     int64
-}
-
-type ClaimActionParams struct {
-	Task             string             `json:"task,omitempty"`
-	InstanceID       string             `json:"instanceId,omitempty"`
-	Prefer           ActionClaimPrefer  `json:"prefer,omitempty"`
-	RunnerID         string             `json:"runnerId"`
-	AgentRef         string             `json:"agentRef"`
-	ScopeRef         string             `json:"scopeRef,omitempty"`
-	Capabilities     []RunnerCapability `json:"capabilities,omitempty"`
-	LeaseMs          int64              `json:"leaseMs"`
-	WorkspaceRoot    string             `json:"workspaceRoot,omitempty"`
-	IdempotencyKey   string             `json:"idempotencyKey,omitempty"`
-	PriorRun         *string            `json:"priorRun"`
-	PriorRunProvided bool               `json:"-"`
-}
 
 func (p *ClaimActionParams) UnmarshalJSON(data []byte) error {
 	type plain ClaimActionParams
@@ -156,130 +26,6 @@ func (p *ClaimActionParams) UnmarshalJSON(data []byte) error {
 	*p = ClaimActionParams(decoded)
 	_, p.PriorRunProvided = fields["priorRun"]
 	return nil
-}
-
-type ActionClaimPrefer struct {
-	InstanceID        string `json:"instanceId,omitempty"`
-	SemanticActionKey string `json:"semanticActionKey,omitempty"`
-	Action            string `json:"action,omitempty"`
-}
-
-type RunnerCapability struct {
-	HandlerContract   string   `json:"handlerContract,omitempty"`
-	HandlerID         string   `json:"handlerId,omitempty"`
-	HandlerVersion    string   `json:"handlerVersion,omitempty"`
-	Actions           []string `json:"actions,omitempty"`
-	Roles             []string `json:"roles,omitempty"`
-	SideEffectClasses []string `json:"sideEffectClasses,omitempty"`
-	WorkspaceModes    []string `json:"workspaceModes,omitempty"`
-}
-
-type ClaimActionResult struct {
-	Binding *FencedRunBinding `json:"binding,omitempty"`
-}
-
-type ActionClaimEvidenceRecord struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Ref        string `json:"ref"`
-	Summary    string `json:"summary,omitempty"`
-	ProducedAt string `json:"producedAt"`
-}
-
-type ActionClaimPredecessor struct {
-	RunID             string                      `json:"runId"`
-	Owner             string                      `json:"owner,omitempty"`
-	ClaimedAt         string                      `json:"claimedAt"`
-	HeartbeatAt       string                      `json:"heartbeatAt,omitempty"`
-	ExpiresAt         string                      `json:"expiresAt,omitempty"`
-	SettleStatus      string                      `json:"settleStatus"`
-	Settled           bool                        `json:"settled"`
-	TerminalResult    string                      `json:"terminalResult,omitempty"`
-	SideEffectClasses []string                    `json:"sideEffectClasses"`
-	ExternalRunRef    string                      `json:"externalRunRef,omitempty"`
-	WorkspaceRef      string                      `json:"workspaceRef,omitempty"`
-	EvidenceWritten   []ActionClaimEvidenceRecord `json:"evidenceWritten"`
-}
-
-type SettleActionParams struct {
-	ActionRunID     string               `json:"actionRunId,omitempty"`
-	RunID           string               `json:"runId,omitempty"`
-	OwnerToken      string               `json:"ownerToken,omitempty"`
-	OwnerGeneration int64                `json:"ownerGeneration,omitempty"`
-	Result          string               `json:"result"`
-	Evidence        *ActionEvidenceInput `json:"evidence,omitempty"`
-	TransitionMode  TransitionMode       `json:"-"`
-	TransitionID    string               `json:"-"`
-	TerminalSummary string               `json:"terminalSummary,omitempty"`
-}
-
-type SettleActionResult struct {
-	Run         WorkflowRunAttempt     `json:"run"`
-	Evidence    *Evidence              `json:"evidence,omitempty"`
-	Transition  map[string]interface{} `json:"transition,omitempty"`
-	Effects     []Effect               `json:"effects,omitempty"`
-	Obligations []Obligation           `json:"obligations,omitempty"`
-}
-
-type FencedRunBinding struct {
-	Run       WorkflowRunAttempt `json:"run"`
-	Task      ActionTaskBinding  `json:"task"`
-	Instance  Instance           `json:"instance"`
-	Authority ActionRunAuthority `json:"authority"`
-}
-
-type WorkflowRunAttempt struct {
-	ID                string               `json:"id"`
-	InstanceID        string               `json:"instanceId"`
-	SemanticActionKey string               `json:"semanticActionKey"`
-	Action            string               `json:"action"`
-	Role              string               `json:"role"`
-	Attempt           int64                `json:"attempt"`
-	Status            string               `json:"status"`
-	AgentRef          string               `json:"agentRef,omitempty"`
-	ScopeRef          string               `json:"scopeRef,omitempty"`
-	HandlerContract   string               `json:"handlerContract,omitempty"`
-	HandlerID         string               `json:"handlerId,omitempty"`
-	HandlerVersion    string               `json:"handlerVersion,omitempty"`
-	ExternalRunRef    string               `json:"externalRunRef,omitempty"`
-	WorkspaceRef      string               `json:"workspaceRef,omitempty"`
-	Source            *ActionSourceBinding `json:"source,omitempty"`
-	StartedAt         string               `json:"startedAt"`
-	CompletedAt       string               `json:"completedAt,omitempty"`
-	TerminalSummary   string               `json:"terminalSummary,omitempty"`
-	PredecessorRunID  string               `json:"predecessorRunId,omitempty"`
-}
-
-type ActionTaskBinding struct {
-	UUID string `json:"uuid"`
-	Ref  string `json:"ref"`
-	Path string `json:"path,omitempty"`
-}
-
-type ActionRunAuthority struct {
-	RunnerID        string `json:"runnerId"`
-	OwnerToken      string `json:"ownerToken"`
-	OwnerGeneration int64  `json:"ownerGeneration"`
-	ClaimedAt       string `json:"claimedAt"`
-	HeartbeatAt     string `json:"heartbeatAt,omitempty"`
-	LeaseExpiresAt  string `json:"leaseExpiresAt"`
-}
-
-// ActionCompleteResult is the committed result of CompleteAction.
-type ActionCompleteResult struct {
-	Run        *ActionRun             `json:"run"`
-	Evidence   *Evidence              `json:"evidence,omitempty"`
-	Transition map[string]interface{} `json:"transition,omitempty"`
-}
-
-// ListActionsParams drives ListActions.
-type ListActionsParams struct {
-	Task                   string
-	InstanceID             string
-	IncludeClosedInstances bool
-	Status                 string
-	Action                 string
-	Limit                  int
 }
 
 const actionListMaxLimit = 1000
@@ -394,23 +140,20 @@ func (s *Service) ClaimAction(p ClaimActionParams) (*ClaimActionResult, error) {
 		return nil, validationError("leaseMs", "leaseMs must be greater than zero", "positive milliseconds", nil, "supply leaseMs")
 	}
 	if !p.PriorRunProvided {
-		// Existing predecessors are reported below with their full review record.
-		// A first-ever claim must still state the null CAS value explicitly.
+
 		p.PriorRun = nil
 	}
 	var binding *FencedRunBinding
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
 		task := strings.TrimSpace(p.Task)
 		instanceID := strings.TrimSpace(firstNonEmptyAction(p.InstanceID, p.Prefer.InstanceID))
-		// workspaceRef is an opaque reported fact on the run record: recorded at
-		// claim time, surfaced in run readback, never interpreted by the engine.
+
 		workspaceRoot := strings.TrimSpace(p.WorkspaceRoot)
 		inst, err := resolveInstanceSelectors(tx, task, instanceID)
 		if err != nil {
 			return err
 		}
-		// Suspended-write gate (door 3 of 3). Refuse before candidate and
-		// predecessor evaluation so suspension wins over succession.
+
 		if inst.Suspension != nil {
 			return suspendedWriteError(inst)
 		}
@@ -706,37 +449,6 @@ func (s *Service) SettleAction(p SettleActionParams) (*SettleActionResult, error
 		out.Effects = transitionEffectsFromMap(transition)
 	}
 	return out, nil
-}
-
-type claimedRun struct {
-	ID                    string
-	InstanceID            string
-	SemanticActionKey     string
-	Action                string
-	Role                  string
-	Attempt               int64
-	Status                string
-	AgentRef              string
-	ScopeRef              string
-	HandlerContract       string
-	HandlerID             string
-	HandlerVersion        string
-	ExternalRunRef        string
-	WorkspaceRef          string
-	SourceRunID           string
-	SourceEvidenceID      string
-	SourceIdentity        string
-	StartedAt             string
-	CompletedAt           string
-	TerminalSummary       string
-	LeaseOwner            string
-	LeaseToken            string
-	LeaseExpiresAt        string
-	HeartbeatAt           string
-	OwnerGeneration       int64
-	SupersededByRunID     string
-	SideEffectClassesJSON string
-	PredecessorRunID      string
 }
 
 func selectClaimCandidate(candidates []ActionCandidate, prefer ActionClaimPrefer) (ActionCandidate, bool) {
@@ -1400,9 +1112,6 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	}
 	chosen := decision.Outcome
 
-	// Suspended-write gate (door 2 of 3). A suspended instance rejects the
-	// write; reads and inspection are unaffected. This is the entire fencing
-	// story — a pre-park worker's settle bounces here.
 	if inst.Suspension != nil {
 		return nil, suspendedWriteError(inst)
 	}
@@ -1627,9 +1336,7 @@ func (s *Service) CompleteAction(p CompleteActionParams) (*ActionCompleteResult,
 			transitionID = resolved
 		}
 		if transitionID != "" {
-			// Re-resolve the instance immediately before applying so the
-			// transition runs against current state. We rely on transition.apply's
-			// own invariants rather than supplying a possibly-stale context hash.
+
 			fresh, err := instanceByIDQuery(s.db, run.InstanceID)
 			if err != nil {
 				return nil, err
@@ -1829,8 +1536,6 @@ func (s *Service) ListActions(p ListActionsParams) ([]ActionRun, error) {
 	return out, nil
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 func (s *Service) resolveActiveInstance(taskSelector, instanceID string) (*Instance, error) {
 	if strings.TrimSpace(instanceID) != "" {
 		inst, err := instanceByIDQuery(s.db, instanceID)
@@ -1910,10 +1615,6 @@ func (s *Service) defaultTransitionFor(inst *Instance, role string) (string, err
 	default:
 		return "", validationError("transition", "multiple transitions are available; pass an explicit transition", "transition", matches, "set transition to one of the available ids")
 	}
-}
-
-type actionRunViewOptions struct {
-	includeLeaseToken bool
 }
 
 func (s *Service) toActionRun(run *Run, inst *Instance) (*ActionRun, error) {

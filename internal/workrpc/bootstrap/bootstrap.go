@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 // Package bootstrap is the single, neutral source of truth for constructing the
 // wrkq/wrkf JSON-RPC server's *wrkfapi.API and workrpc.RegistryOptions from
 // already-open config/database inputs.

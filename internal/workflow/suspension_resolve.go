@@ -1,19 +1,6 @@
-package workflow
+//go:build wrkq_local
 
-// suspension_resolve.go — T-06262. The single atomic resolution command for a
-// suspended instance, and the sole exception to the suspended-write gate.
-//
-// Contract (WRKF_SIMPLIFICATION.md §4): resolveSuspension(suspensionId,
-// disposition) runs in one transaction —
-//   1. Load the instance whose ACTIVE suspension carries the presented id. The
-//      matching suspension id is the ONLY gate: no role checks, no evidence
-//      validation, no per-reason policy.
-//   2. Apply the disposition's template-declared effects.
-//   3. Clear the suspension, bump the revision, emit workflow.suspension_resolved.
-//
-// Dispositions: resume (back in the parked phase, state untouched), close
-// (closed/done), cancel (closed/cancelled). The operator explanation is free
-// text, recorded on the event, never validated. Ordinary revision CAS applies.
+package workflow
 
 import (
 	"database/sql"
@@ -31,18 +18,6 @@ const (
 	DispositionClose  = "close"
 	DispositionCancel = "cancel"
 )
-
-// ResolveSuspensionParams is the input to the atomic resolution command. Only
-// SuspensionID and Disposition are required; ExpectRevision is the ordinary CAS
-// precondition and Explanation is recorded free text.
-type ResolveSuspensionParams struct {
-	SuspensionID   string
-	Disposition    string
-	Explanation    string
-	ExpectRevision *int64
-	PrincipalRef   string
-	Role           string
-}
 
 // dispositionTargetState maps a disposition to the instance state it lands in.
 // resume returns (nil, true): the instance stays exactly where it parked, so
@@ -81,9 +56,7 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 	var webhookCtx *webhooks.EventContext
 	var webhookTaskUUID string
 	err := withImmediateTx(s.db, func(tx *sql.Tx) error {
-		// Gate: the instance is located BY its active suspension id. If no
-		// running instance carries this suspension, the id does not match the
-		// active suspension — that is the entire gate.
+
 		inst, err := instanceBySuspensionIDTx(tx, suspensionID)
 		if err != nil {
 			return err
@@ -122,9 +95,6 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 			resolved.ClosedAt = now
 		}
 
-		// CAS + gate in one WHERE: the revision must be unchanged AND the active
-		// suspension must still be the one we resolved. A concurrent resolve
-		// bumps the revision and clears the suspension, so this fails cleanly.
 		res, err := tx.Exec(`
 			UPDATE workflow_instances
 			SET status = ?, phase = ?, outcome = ?, revision = ?, updated_at = ?, closed_at = ?,
@@ -188,10 +158,6 @@ func (s *Service) ResolveSuspension(params ResolveSuspensionParams) (map[string]
 			"terminalizedRuns": terminalizedRuns,
 		}
 
-		// resume never touches the task document — the parked task returns
-		// exactly to its phase (§5). close/cancel terminalize the instance, so
-		// they mirror the closed state into task workflow meta like any normal
-		// terminal transition.
 		if resolved.Status == "closed" {
 			return updateTaskWorkflowMeta(tx, resolved.TaskUUID, resolved, params.PrincipalRef)
 		}

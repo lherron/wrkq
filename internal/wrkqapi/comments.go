@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -182,14 +184,6 @@ func (a *API) taskFriendlyID(taskUUID string) (string, error) {
 	return taskID, nil
 }
 
-type resolvedCommentParent struct {
-	selector      string
-	taskUUID      string
-	taskID        string
-	containerUUID string
-	containerID   string
-}
-
 func (a *API) resolveCommentParent(taskSelector, containerSelector string) (resolvedCommentParent, error) {
 	if (strings.TrimSpace(taskSelector) == "") == (strings.TrimSpace(containerSelector) == "") {
 		return resolvedCommentParent{}, NewValidationError(
@@ -287,7 +281,6 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		}
 	}
 
-	// Snapshot the DTO before a purge removes the row.
 	preDTO, err := a.loadComment(commentUUID, taskID, "")
 	if err != nil {
 		return nil, err
@@ -342,10 +335,6 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, NewInternalError(eerr)
 	}
 
-	// Event-log payload MUST byte-match legacy internal/rpccli/comment_rm.go:
-	// task_id = the task UUID (not the friendly id), comment_id = the FRIENDLY
-	// comment id (not the uuid), deleted_by_principal_ref present, soft_delete:true.
-	// The event ETag is the NEW (post-bump) comment etag.
 	payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID +
 		`","deleted_by_principal_ref":"` + attr.PrincipalRef + `","soft_delete":true}`
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{

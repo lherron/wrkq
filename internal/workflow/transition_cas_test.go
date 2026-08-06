@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workflow
 
 // transition_cas_test.go — regression tests for T-01901 (wrkf-rpc Phase C).

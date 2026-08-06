@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkfapi
 
 import (
@@ -10,13 +12,6 @@ import (
 )
 
 const maxWatchEventsPage = 500
-
-type watchCursor struct {
-	Kind       string `json:"kind"`
-	InstanceID string `json:"instanceId"`
-	RunID      string `json:"runId,omitempty"`
-	Seq        int64  `json:"seq"`
-}
 
 func (api *API) EvidenceSchema(ctx context.Context, params EvidenceSchemaParams) (*EvidenceSchema, error) {
 	if err := ctx.Err(); err != nil {
@@ -84,8 +79,7 @@ func (api *API) WatchEvents(ctx context.Context, params WatchEventsParams) (*Wat
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Resolve once, then query the explicit identity. This avoids a task selector
-	// changing instances between cursor validation and event selection.
+
 	snapshot, err := api.service.WatchSnapshot(params.Selector, workflow.WatchUntilTerminal)
 	if err != nil {
 		return nil, normalizeError(err)
@@ -100,9 +94,7 @@ func (api *API) WatchEvents(ctx context.Context, params WatchEventsParams) (*Wat
 		if watchCursorMatches(cursor, target) {
 			afterSeq = cursor.Seq
 		}
-		// A task selector may now resolve to a successor instance. An identity
-		// mismatch deliberately resets seq to zero so its early events are not
-		// suppressed by the predecessor's high-water mark.
+
 	}
 	limit := params.Limit
 	if limit <= 0 {

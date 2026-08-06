@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package workrpc_test
 
 // wrkfaction_acceptance_test.go — acceptance tests for T-05009, the

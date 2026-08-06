@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 import (
@@ -71,9 +73,6 @@ func (a *API) AttachmentGetBytes(ctx context.Context, p AttachmentGetBytesParams
 	}
 	defer func() { _ = f.Close() }()
 
-	// Compute the authoritative full-file size + checksum (cheap relative to the
-	// transfer; lets the client verify the reassembled bytes regardless of how the
-	// row's stored checksum was produced).
 	hasher := sha256.New()
 	size, cerr := io.Copy(hasher, f)
 	if cerr != nil {
@@ -99,7 +98,7 @@ func (a *API) AttachmentGetBytes(ctx context.Context, p AttachmentGetBytesParams
 		EOF:       true,
 	}
 	if p.Offset >= size {
-		// Past EOF (or empty file): empty terminal chunk.
+
 		return out, nil
 	}
 
@@ -114,21 +113,6 @@ func (a *API) AttachmentGetBytes(ctx context.Context, p AttachmentGetBytesParams
 	out.Content = base64.StdEncoding.EncodeToString(buf[:n])
 	out.EOF = p.Offset+int64(n) >= size
 	return out, nil
-}
-
-// attachmentUpload is the staged state for one chunked byte upload.
-type attachmentUpload struct {
-	taskUUID    string
-	filename    string
-	mimeType    string
-	actor       string
-	idemKey     string
-	tmpPath     string
-	file        *os.File
-	nextSeq     int
-	received    int64
-	maxBytes    int64
-	idemReqHash string
 }
 
 // AttachmentAddBytes accepts one chunk of a stdin/byte attachment upload. The
@@ -162,8 +146,6 @@ func (a *API) attachmentAddBytesBegin(p AttachmentAddBytesParams) (*WrkqAttachme
 		return nil, NewValidationError("first upload chunk must have seq 0", map[string]any{"field": "seq"})
 	}
 
-	// Legacy runAttachPut resolves the task BEFORE the --name check, so an unknown
-	// task surfaces first.
 	taskUUID, err := a.resolveTaskUUID(p.Task)
 	if err != nil {
 		return nil, err
@@ -230,8 +212,6 @@ func (a *API) attachmentAddBytesBegin(p AttachmentAddBytesParams) (*WrkqAttachme
 		return nil, NewInternalError(eerr)
 	}
 
-	// Stage into a temp file under the task dir so the finalize rename is atomic
-	// (same filesystem) — this is the cleanup/atomicity parity with AttachmentAdd.
 	tmpFile, terr := os.CreateTemp(attach.TaskDir(a.attachDir, taskUUID), ".upload-*")
 	if terr != nil {
 		return nil, NewInternalError(terr)
@@ -303,7 +283,7 @@ func (a *API) attachmentAddBytesWrite(uploadID string, up *attachmentUpload, p A
 			return nil, NewInternalError(werr)
 		}
 		up.received += int64(len(decoded))
-		// Enforce the size limit incrementally, cleaning up on reject.
+
 		if verr := attach.ValidateSize(up.received, int64(a.attachMaxMB)); verr != nil {
 			a.discardUpload(uploadID, up)
 			return nil, NewValidationError(verr.Error(), map[string]any{"field": "content"})
@@ -335,8 +315,7 @@ func (a *API) attachmentAddBytesWrite(uploadID string, up *attachmentUpload, p A
 // renames it into the canonical attach path, inserts the metadata row + event,
 // and returns the committed DTO. The session + temp file are always removed.
 func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttachment, error) {
-	// Remove the session bookkeeping; the temp file is renamed (success) or removed
-	// (failure) below.
+
 	a.uploadsMu.Lock()
 	delete(a.uploads, uploadID)
 	a.uploadsMu.Unlock()
@@ -369,7 +348,6 @@ func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttach
 		})
 	}
 
-	// Compute checksum from the staged bytes.
 	checksum, herr := checksumFile(up.tmpPath)
 	if herr != nil {
 		cleanup()
@@ -466,7 +444,7 @@ func (a *API) discardUpload(uploadID string, up *attachmentUpload) {
 
 // checksumFile computes the sha256 of a file's contents as a hex string.
 func checksumFile(path string) (string, error) {
-	f, err := os.Open(path) // #nosec G304 -- server-controlled staging path
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}

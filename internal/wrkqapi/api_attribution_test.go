@@ -1,3 +1,5 @@
+//go:build wrkq_local
+
 package wrkqapi
 
 // api_attribution_test.go — white-box coverage for the shared write-attribution
