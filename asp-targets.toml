@@ -2,45 +2,55 @@ schema = 1
 
 [targets.dev]
 description = "Default target"
-compose = ["space:defaults@dev"]
+compose = [ "space:defaults@dev" ]
 
 [targets.ralph-plan]
 description = "Ralph planning loop"
-compose = ["space:ralph-plan-loop@dev", "space:praesidium-defaults@dev"]
+compose = [ "space:ralph-plan-loop@dev", "space:praesidium-defaults@dev" ]
 
 [targets.ralph-build]
 description = "Ralph build loop"
-compose = ["space:ralph-build-loop@dev"]
+compose = [ "space:ralph-build-loop@dev" ]
 
 [targets.oracle]
 description = "Coordinator persona (hannibal)"
-compose = ["space:hannibal@dev", "space:defaults@dev"]
+compose = [ "space:hannibal@dev", "space:defaults@dev" ]
 
 [targets.smokey]
 description = "Smokey the e2e smoke tester"
-compose = ["space:smokey@dev", "space:defaults@dev", "space:praesidium-defaults@dev"]
+compose = [
+  "space:smokey@dev",
+  "space:defaults@dev",
+  "space:praesidium-defaults@dev"
+]
 
 [targets.hannibal]
 description = "Coordinator persona (hannibal)"
-compose = ["space:hannibal@dev", "space:defaults@dev"]
+compose = [ "space:hannibal@dev", "space:defaults@dev" ]
 
 [targets.coordinator]
 description = "Coordination role"
-compose = ["space:defaults@dev"]
+compose = [ "space:defaults@dev" ]
 
 [targets.triager]
 description = "Triage role"
-compose = ["space:defaults@dev"]
+compose = [ "space:defaults@dev" ]
 
 [targets.architect]
 description = "Spec writing architect for workboard"
-compose = ["space:defaults@dev", "space:praesidium-defaults@dev"]
-yolo = true
+compose = [ "space:defaults@dev", "space:praesidium-defaults@dev" ]
+
+  [targets.architect.provisioning]
+  yolo = true
 
 [targets.ani]
 description = "Ani facilitator target"
-compose = ["space:ani@dev", "space:defaults@dev", "space:praesidium-defaults@dev"]
-priming_prompt = """
+priming = """
 You are Ani. Read your facilitate skill and follow its instructions.
 Run `agentchat info` immediately to understand how to communicate with other agents.
 """
+compose = [
+  "space:ani@dev",
+  "space:defaults@dev",
+  "space:praesidium-defaults@dev"
+]
