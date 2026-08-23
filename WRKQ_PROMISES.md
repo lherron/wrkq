@@ -488,14 +488,19 @@ grammar.
 
 The current local-trust CLI cannot cryptographically distinguish “Cody ran
 `--for lance` because Lance asked” from an unsolicited use of that flag.
-Ruling (2026-08-23): creating for a different owner requires an explicit
-`--on-behalf` assertion in addition to `--for`. Without it the mutation is
-rejected before insertion (acceptance scenario 7). With it the promise is
-accepted immediately and the creator's assertion is recorded in the
-`promise.created` payload (`on_behalf_asserted_by: <creator principal>`). This
-keeps the audit honest about who claimed authority and is the hook a future
-runtime delegation/request provenance slots into; the promise row must not
-invent a false `accepted_by` event.
+Ruling (2026-08-23): `--on-behalf` is the **auto-accept assertion**, not a
+general gate on `--for`. It is required only when a promise for a different
+owner is to be created already accepted (`state = open`): the creator asserts
+the owner requested it, and that assertion is recorded in the `promise.created`
+payload (`on_behalf_asserted_by: <creator principal>`). `--for <other>` without
+`--on-behalf` is an unsolicited assignment — the deferred promise-request path
+that would create a `proposed` promise. Because `proposed` is outside the MVP,
+that form is rejected before insertion today (acceptance scenario 7) and will
+become a promise request when that concept lands; the flag's meaning does not
+change. Self-owned promises never need the flag. This keeps the audit honest
+about who claimed authority and is the hook a future runtime delegation/request
+provenance slots into; the promise row must not invent a false `accepted_by`
+event.
 
 The default owner is the caller principal (`WRKQ_PRINCIPAL_REF` /
 `--principal-ref`). `--for lance` is sugar for `agent:lance` under today's
@@ -535,10 +540,11 @@ wrkq promise add \
 ```
 
 Expected result: an accepted `PR-xxxxx` owned by `agent:lance`, created by the
-acting Cody principal with the on-behalf assertion recorded. `--in <duration>`
+acting Cody principal with the auto-accept assertion recorded. `--in <duration>`
 and `--at <timestamp>` are alternatives; both use wrkq's existing timestamp
 parsing and store absolute UTC. Omitting `--for` makes the caller the owner and
-`--on-behalf` is then not required.
+`--on-behalf` is then not required. `--for lance` without `--on-behalf` is a
+request, not an accepted promise (deferred; rejected in MVP).
 
 ### Attach at creation
 
@@ -768,8 +774,11 @@ instance, then cut the daemon and clients forward in one coordinated window.
 
 Lance ruled on the previously open decisions in review with mable:
 
-1. **On-behalf authority**: explicit `--on-behalf` assertion, recorded in the
-   `promise.created` payload; rejected without it. See *Principal ownership*.
+1. **On-behalf authority**: `--on-behalf` is the auto-accept assertion,
+   required only to create an already-accepted promise for another owner;
+   recorded in the `promise.created` payload. `--for` alone is an unsolicited
+   assignment (future promise request; rejected in MVP only because `proposed`
+   is deferred). See *Principal ownership*.
 2. **Principal grammar**: separate work. Owner defaults from the caller
    principal; `--for lance` is sugar for `agent:lance`.
 3. **Mandatory attention surface**: `wrkq promise ready`, `wrkq check`
