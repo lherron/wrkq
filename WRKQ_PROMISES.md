@@ -670,6 +670,11 @@ Ruling (2026-08-23) — mandatory for MVP:
 - subject-side visibility: `wrkq cat T-xxxxx` and campaign/container show list
   attached promises (owner, review_at, state) so an agent working a subject
   learns someone is revisiting it.
+- `wrkq tree` renders attached open promises as leaf rows under their task or
+  container node (`PR-xxxxx  owner  review_at  ready 2d`), in all four tree
+  renderers (human, json, ndjson, porcelain) with a `promises` array on the
+  node in the wire view. Standalone promises have no project and do not appear
+  in `tree`; closed promises are omitted unless `--state all`.
 
 Session-surface scoping: a standalone promise has no project, so it is
 owner-global and appears in every session of that principal. An attached
@@ -704,7 +709,7 @@ The smallest useful release includes:
 5. Lifecycle actions: renew, resolve, and abandon.
 6. Append-only promise events.
 7. CLI add/list/ready/renew/resolve/abandon/attach/detach/edit behavior, plus
-   `cat` and `log` accepting promise selectors.
+   `cat`, `log`, and `tree` surfacing promises.
 8. RPC/API/client contracts required to keep the current remote-first CLI
    architecture intact.
 9. The ready-attention surfaces ruled mandatory above (`ready`, `check`,
@@ -857,7 +862,8 @@ Lance ruled on the previously open decisions in review with mable:
     `last_review_note`.
 12. **Purge detach**: purge path emits `promise.retargeted` with the lost
     reference; FK `SET NULL` alone is insufficient.
-13. **Subject-side visibility**: in MVP.
+13. **Subject-side visibility**: in MVP, including `wrkq tree` rows for
+    attached open promises.
 
 14. **Flags**: `--review-at` absolute / `--in` relative (not `--by`, not
     `--at`); attach targets `--task` or `--container` (`--campaign` alias).
