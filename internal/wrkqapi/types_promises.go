@@ -19,6 +19,8 @@ type WrkqPromise struct {
 	ReviewQuestion        *string                `json:"reviewQuestion,omitempty"`
 	SubjectRef            *WrkqPromiseSubjectRef `json:"subjectRef"`
 	ReviewAt              string                 `json:"reviewAt"`
+	Ready                 bool                   `json:"ready"`
+	ReadyFor              *string                `json:"readyFor,omitempty"`
 	State                 string                 `json:"state"`
 	ClosedAt              *string                `json:"closedAt,omitempty"`
 	LastReviewedAt        *string                `json:"lastReviewedAt,omitempty"`

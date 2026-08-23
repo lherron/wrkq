@@ -96,6 +96,65 @@ func TestPromiseAssignmentAndReviewValidationWriteNothing(t *testing.T) {
 	}
 }
 
+func TestPromiseListOwnerAndSubjectFilters(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	ctx := context.Background()
+	projectUUID := seedMonitorProject(t, s)
+	task, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
+		Slug: "promise-list-target", Title: "Promise list target", ProjectUUID: projectUUID, State: "open", Priority: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(owner, subject, target string) WrkqPromise {
+		t.Helper()
+		params := PromiseAddParams{OwnerPrincipalRef: owner, Subject: subject, Task: target, ReviewIn: "7d", PrincipalRef: "agent:cody"}
+		if owner != "" && owner != "agent:cody" {
+			params.OnBehalf = true
+		}
+		promise, err := api.PromiseAdd(ctx, params)
+		if err != nil {
+			t.Fatalf("create %s: %v", subject, err)
+		}
+		return *promise
+	}
+	codyAttached := create("agent:cody", "cody attached", task.ID)
+	codyStandalone := create("agent:cody", "cody standalone", "")
+	mableAttached := create("agent:mable", "mable attached", task.ID)
+	mableStandalone := create("agent:mable", "mable standalone", "")
+
+	tests := []struct {
+		name   string
+		params PromiseListParams
+		want   []string
+	}{
+		{"default owner", PromiseListParams{PrincipalRef: "agent:cody"}, []string{codyAttached.ID, codyStandalone.ID}},
+		{"subject all owners", PromiseListParams{Task: task.ID, PrincipalRef: "agent:cody"}, []string{codyAttached.ID, mableAttached.ID}},
+		{"explicit owner", PromiseListParams{OwnerPrincipalRef: "agent:mable", PrincipalRef: "agent:cody"}, []string{mableAttached.ID, mableStandalone.ID}},
+		{"owner subject intersection", PromiseListParams{OwnerPrincipalRef: "agent:mable", Task: task.ID, PrincipalRef: "agent:cody"}, []string{mableAttached.ID}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := api.PromiseList(ctx, tt.params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(result.Items))
+			for _, item := range result.Items {
+				got = append(got, item.ID)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("ids = %v, want %v (all items=%#v)", got, tt.want, result.Items)
+			}
+			for index := range got {
+				if got[index] != tt.want[index] {
+					t.Fatalf("ids = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestPromiseNonOwnerCannotMutateAnySurface(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	ctx := context.Background()

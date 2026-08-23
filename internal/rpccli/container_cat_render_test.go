@@ -45,7 +45,9 @@ func TestContainerCatMarkdownRender(t *testing.T) {
 	// resolved actor slugs. This pins the field set and order exactly against legacy
 	// runContainerCat.
 	var md bytes.Buffer
-	renderContainerMarkdown(&md, &c, false)
+	if err := renderContainerMarkdown(&md, &c, false); err != nil {
+		t.Fatal(err)
+	}
 	wantMarkdown := "---\n" +
 		"id: " + c.ID + "\n" +
 		"uuid: <UUID>\n" +
@@ -68,7 +70,9 @@ func TestContainerCatMarkdownRender(t *testing.T) {
 
 	// --no-frontmatter ("raw"): body only. No description on this fixture → empty.
 	var rawOut bytes.Buffer
-	renderContainerMarkdown(&rawOut, &c, true)
+	if err := renderContainerMarkdown(&rawOut, &c, true); err != nil {
+		t.Fatal(err)
+	}
 	if rawOut.Len() != 0 {
 		t.Errorf("no-frontmatter render should be empty for description-less container, got %q", rawOut.String())
 	}
@@ -78,12 +82,16 @@ func TestContainerCatMarkdownRender(t *testing.T) {
 	withDesc := c
 	withDesc.Description = "a project description"
 	var rawDesc bytes.Buffer
-	renderContainerMarkdown(&rawDesc, &withDesc, true)
+	if err := renderContainerMarkdown(&rawDesc, &withDesc, true); err != nil {
+		t.Fatal(err)
+	}
 	if got, want := rawDesc.String(), "a project description\n"; got != want {
 		t.Errorf("raw body render mismatch:\n got: %q\n want: %q", got, want)
 	}
 	var mdDesc bytes.Buffer
-	renderContainerMarkdown(&mdDesc, &withDesc, false)
+	if err := renderContainerMarkdown(&mdDesc, &withDesc, false); err != nil {
+		t.Fatal(err)
+	}
 	if !strings.HasSuffix(mdDesc.String(), "---\n\na project description\n") {
 		t.Errorf("markdown-with-body should end with framed body, got %q", mdDesc.String())
 	}

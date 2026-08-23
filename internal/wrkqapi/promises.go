@@ -88,10 +88,6 @@ func (a *API) PromiseList(ctx context.Context, p PromiseListParams) (*WrkqPromis
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	owner, err := a.promiseReadOwner(p.OwnerPrincipalRef, p.PrincipalRef)
-	if err != nil {
-		return nil, err
-	}
 	var state domain.PromiseState
 	if strings.TrimSpace(p.State) != "" && p.State != "all" {
 		state = domain.PromiseState(p.State)
@@ -102,6 +98,21 @@ func (a *API) PromiseList(ctx context.Context, p PromiseListParams) (*WrkqPromis
 	taskUUID, containerUUID, _, err := a.resolvePromiseTarget(p.Task, p.Container)
 	if err != nil {
 		return nil, err
+	}
+	owner := ""
+	if strings.TrimSpace(p.OwnerPrincipalRef) != "" {
+		owner, err = normalizePromiseOwner(p.OwnerPrincipalRef)
+		if err != nil {
+			return nil, err
+		}
+	} else if taskUUID == nil && containerUUID == nil {
+		// An unscoped list is the caller's personal queue. A subject-scoped list
+		// deliberately leaves owner empty so unrestricted subject-side surfaces
+		// can show every principal who is carrying attention for that resource.
+		owner, err = a.promiseReadOwner("", p.PrincipalRef)
+		if err != nil {
+			return nil, err
+		}
 	}
 	params := store.PromiseListParams{OwnerPrincipalRef: owner, State: state}
 	if taskUUID != nil {
@@ -427,6 +438,19 @@ func (a *API) promiseListDTO(ctx context.Context, rows []domain.Promise) (*WrkqP
 	return result, nil
 }
 
+func (a *API) attachedPromiseDTOs(ctx context.Context, taskUUID, containerUUID string) ([]WrkqPromise, error) {
+	params := store.PromiseListParams{SubjectTaskUUID: taskUUID, SubjectContainerUUID: containerUUID}
+	rows, err := a.store.Promises.List(params)
+	if err != nil {
+		return nil, mapPromiseStoreError(err, "")
+	}
+	result, err := a.promiseListDTO(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return result.Items, nil
+}
+
 func (a *API) promiseDTO(ctx context.Context, promise *domain.Promise) (*WrkqPromise, error) {
 	dto := &WrkqPromise{
 		UUID: promise.UUID, ID: promise.ID, OwnerPrincipalRef: promise.OwnerPrincipalRef,
@@ -436,6 +460,17 @@ func (a *API) promiseDTO(ctx context.Context, promise *domain.Promise) (*WrkqPro
 		Meta: map[string]any{}, ETag: promise.ETag, CreatedAt: toRFC3339(promise.CreatedAt),
 		UpdatedAt: toRFC3339(promise.UpdatedAt), CreatedByPrincipalRef: promise.CreatedByPrincipalRef,
 		UpdatedByPrincipalRef: promise.UpdatedByPrincipalRef,
+	}
+	if promise.State == domain.PromiseStateOpen {
+		reviewAt, err := time.Parse("2006-01-02T15:04:05Z", promise.ReviewAt)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		if elapsed := time.Since(reviewAt); elapsed >= 0 {
+			readyFor := formatPromiseReadyFor(elapsed)
+			dto.Ready = true
+			dto.ReadyFor = &readyFor
+		}
 	}
 	if promise.Meta != nil {
 		dto.Meta = parseMeta(*promise.Meta)
@@ -469,6 +504,31 @@ func (a *API) promiseDTO(ctx context.Context, promise *domain.Promise) (*WrkqPro
 		dto.SubjectRef = ref
 	}
 	return dto, nil
+}
+
+func formatPromiseReadyFor(elapsed time.Duration) string {
+	units := []struct {
+		name     string
+		duration time.Duration
+	}{
+		{"year", 365 * 24 * time.Hour},
+		{"month", 30 * 24 * time.Hour},
+		{"week", 7 * 24 * time.Hour},
+		{"day", 24 * time.Hour},
+		{"hour", time.Hour},
+		{"minute", time.Minute},
+	}
+	for _, unit := range units {
+		if elapsed >= unit.duration {
+			value := int64(elapsed / unit.duration)
+			name := unit.name
+			if value != 1 {
+				name += "s"
+			}
+			return fmt.Sprintf("%d %s", value, name)
+		}
+	}
+	return "less than a minute"
 }
 
 func mapPromiseStoreError(err error, selector string) error {

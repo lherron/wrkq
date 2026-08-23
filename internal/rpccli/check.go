@@ -20,10 +20,41 @@ import (
 // Error line on stderr), `--quiet` exit-code-only, and the legacy TTY human
 // message.
 func newCheckCmd() *cobra.Command {
+	var owner string
+	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Run pre-flight checks on tasks",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			tr, _, closeFn, err := openMirror(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			params := map[string]any{}
+			if owner != "" {
+				params["ownerPrincipalRef"] = owner
+			}
+			if err := addPromisePrincipal(cmd, params); err != nil {
+				return err
+			}
+			raw, err := tr.Call(cmd.Context(), "wrkq.promise.ready", params)
+			if err != nil {
+				return err
+			}
+			items, err := decodePromiseList(raw)
+			if err != nil {
+				return err
+			}
+			if (output.pretty || isStdoutTTY(cmd.OutOrStdout())) && !output.asJSON && !output.ndjson && !output.porcelain {
+				fmt.Fprintln(cmd.OutOrStdout(), "Ready promises")
+			}
+			return renderPromiseList(cmd, items, output)
+		},
 	}
+	cmd.Flags().StringVar(&owner, "for", "", "Promise owner principal (bare agent slug or agent:<id>)")
+	addPromiseOutputFlags(cmd, &output, true)
 	cmd.AddCommand(newCheckBlockedCmd())
 	return cmd
 }

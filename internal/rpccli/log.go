@@ -52,7 +52,7 @@ func newLogCmd() *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "log <PATHSPEC|ID>",
-		Short: "Show change history for a task or container",
+		Short: "Show change history for a task, container, or promise",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tr, sc, closeFn, err := openMirror(cmd)

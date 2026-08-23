@@ -49,6 +49,7 @@ func TestTransform(t *testing.T) {
 			{"empty-no-default", "", false, ""},
 			{"friendly-task-id", "T-00001", false, "T-00001"},
 			{"friendly-container-id", "P-00001", false, "P-00001"},
+			{"friendly-promise-id", "PR-00001", false, "PR-00001"},
 			{"uuid", "00000000-0000-0000-0000-000000000001", false, "00000000-0000-0000-0000-000000000001"},
 			{"bare-sequence", "1454", false, "1454"},
 			{"typed-friendly-id", "t:T-00001", false, "t:T-00001"},

@@ -428,7 +428,7 @@
         "aliases": [
           "show"
         ],
-        "short": "Print one or more tasks",
+        "short": "Print one or more tasks or promises",
         "hidden": false,
         "available": true,
         "flags": [
@@ -489,6 +489,42 @@
         "short": "Run pre-flight checks on tasks",
         "hidden": false,
         "available": true,
+        "flags": [
+          {
+            "name": "for",
+            "usage": "Promise owner principal (bare agent slug or agent:\u003cid\u003e)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "ndjson",
+            "usage": "Output as newline-delimited JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "porcelain",
+            "usage": "Stable machine-readable output",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "pretty",
+            "usage": "Force human-readable output even when not a TTY",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          }
+        ],
         "commands": [
           {
             "name": "blocked",
@@ -1643,7 +1679,7 @@
       {
         "name": "log",
         "use": "log \u003cPATHSPEC|ID\u003e",
-        "short": "Show change history for a task or container",
+        "short": "Show change history for a task, container, or promise",
         "hidden": false,
         "available": true,
         "flags": [
@@ -2060,6 +2096,619 @@
             "type": "bool",
             "default": "false",
             "hidden": false
+          }
+        ]
+      },
+      {
+        "name": "promise",
+        "use": "promise",
+        "short": "Manage future-attention promises",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "abandon",
+            "use": "abandon \u003cpromise\u003e",
+            "short": "Deliberately abandon a promise after review",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "etag",
+                "usage": "Alias for --if-match",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only mutate if the promise etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "note",
+                "usage": "Review note (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "add",
+            "use": "add",
+            "short": "Record a promise to revisit a subject",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "campaign",
+                "usage": "Alias for --container",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "container",
+                "usage": "Attach to a container",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "for",
+                "usage": "Owner principal (bare agent slug or agent:\u003cid\u003e)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "in",
+                "usage": "Relative review duration resolved by the API (for example 7d or 36h)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "meta",
+                "usage": "Metadata JSON object",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "meta-file",
+                "usage": "Read metadata JSON from a file or - for stdin",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "on-behalf",
+                "usage": "Assert the named owner requested this accepted promise",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "question",
+                "usage": "Review question (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "review-at",
+                "usage": "Absolute review timestamp (forwarded verbatim to the API)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "subject",
+                "usage": "Subject snapshot (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "task",
+                "usage": "Attach to a task",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "attach",
+            "use": "attach \u003cpromise\u003e",
+            "short": "Attach a promise to a task or container",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "campaign",
+                "usage": "Alias for --container",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "container",
+                "usage": "Attach to a container",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "etag",
+                "usage": "Alias for --if-match",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only mutate if the promise etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "task",
+                "usage": "Attach to a task",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "detach",
+            "use": "detach \u003cpromise\u003e",
+            "short": "Detach a promise while preserving its subject snapshot",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "etag",
+                "usage": "Alias for --if-match",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only mutate if the promise etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "edit",
+            "use": "edit \u003cpromise\u003e",
+            "short": "Edit an open promise",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "etag",
+                "usage": "Alias for --if-match",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only mutate if the promise etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "in",
+                "usage": "Relative review duration resolved by the API",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "meta",
+                "usage": "Metadata JSON object",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "meta-file",
+                "usage": "Read metadata JSON from a file or - for stdin",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "question",
+                "usage": "Review question (literal, @file, or - for stdin; empty clears)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "review-at",
+                "usage": "Absolute review timestamp (forwarded verbatim to the API)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "subject",
+                "usage": "Subject snapshot (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "list",
+            "use": "list",
+            "short": "List promises",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "campaign",
+                "usage": "Alias for --container",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "container",
+                "usage": "Filter by attached container",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "for",
+                "usage": "Owner principal (bare agent slug or agent:\u003cid\u003e)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "state",
+                "usage": "Filter by open, resolved, abandoned, or all",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "task",
+                "usage": "Filter by attached task",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "ready",
+            "use": "ready",
+            "short": "List promises ready for review",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "for",
+                "usage": "Owner principal (bare agent slug or agent:\u003cid\u003e)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "renew",
+            "use": "renew \u003cpromise\u003e",
+            "short": "Record a review and choose the next review time",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "etag",
+                "usage": "Alias for --if-match",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only mutate if the promise etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "in",
+                "usage": "Relative review duration resolved by the API",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "note",
+                "usage": "Review note (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "review-at",
+                "usage": "Absolute review timestamp (forwarded verbatim to the API)",
+                "type": "string",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "resolve",
+            "use": "resolve \u003cpromise\u003e",
+            "short": "Resolve a promise after review",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "etag",
+                "usage": "Alias for --if-match",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Only mutate if the promise etag matches",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "ndjson",
+                "usage": "Output as newline-delimited JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "note",
+                "usage": "Review note (literal, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "porcelain",
+                "usage": "Stable machine-readable output",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "pretty",
+                "usage": "Force human-readable output even when not a TTY",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              }
+            ]
           }
         ]
       },
@@ -3086,6 +3735,12 @@
             "usage": "Force human-readable tree output even when not a TTY",
             "type": "bool",
             "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "state",
+            "usage": "Promise leaf state: open (default) or all",
+            "type": "string",
             "hidden": false
           }
         ]

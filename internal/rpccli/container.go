@@ -39,6 +39,7 @@ type containerCatModel struct {
 	ArchivedAt  *string                   `json:"archived_at,omitempty"`
 	CreatedBy   string                    `json:"created_by"`
 	UpdatedBy   string                    `json:"updated_by"`
+	Promises    []promiseWire             `json:"promises"`
 }
 
 // newContainerCmd mirrors `wrkq container`. `cat` is RPC-backed via the
@@ -399,14 +400,13 @@ func runContainerCat(cmd *cobra.Command, args []string, asJSON, ndjson, porcelai
 
 	// Markdown output. With --no-frontmatter this collapses to "raw" body-only:
 	// just the description (if any).
-	renderContainerMarkdown(out, &c, noFrontmatter)
-	return nil
+	return renderContainerMarkdown(out, &c, noFrontmatter)
 }
 
 // renderContainerMarkdown reproduces legacy runContainerCat's markdown branch
 // byte-for-byte: a YAML front matter block (suppressed by noFrontmatter) followed
 // by the description. With noFrontmatter set it is the "raw" body-only mode.
-func renderContainerMarkdown(out io.Writer, c *containerCatModel, noFrontmatter bool) {
+func renderContainerMarkdown(out io.Writer, c *containerCatModel, noFrontmatter bool) error {
 	if !noFrontmatter {
 		fmt.Fprintln(out, "---")
 		fmt.Fprintf(out, "id: %s\n", c.ID)
@@ -444,4 +444,8 @@ func renderContainerMarkdown(out io.Writer, c *containerCatModel, noFrontmatter 
 	if c.Description != "" {
 		fmt.Fprintln(out, c.Description)
 	}
+	if len(c.Promises) > 0 {
+		return renderAttachedPromises(out, c.Promises)
+	}
+	return nil
 }

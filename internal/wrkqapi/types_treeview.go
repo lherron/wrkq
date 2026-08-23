@@ -9,6 +9,7 @@ type TreeViewParams struct {
 	IncludeArchived        bool   `json:"includeArchived,omitempty"`
 	OpenOnly               bool   `json:"openOnly,omitempty"`
 	IncludeCampaignMembers bool   `json:"includeCampaignMembers,omitempty"`
+	PromiseState           string `json:"promiseState,omitempty"`
 }
 
 // WrkqTreeNode is the server-owned COMPATIBILITY projection of one tree node. Its
@@ -33,6 +34,7 @@ type WrkqTreeNode struct {
 	IsArchived           bool            `json:"is_archived"`
 	IsDeleted            bool            `json:"is_deleted"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
+	Promises             []WrkqPromise   `json:"promises"`
 	Children             []*WrkqTreeNode `json:"children,omitempty"`
 	ExternalChildren     []*WrkqTreeNode `json:"external_children,omitempty"`
 	ExternalBacklink     bool            `json:"external_backlink,omitempty"`
@@ -59,6 +61,7 @@ type WrkqTreeView struct {
 	Path                         string          `json:"path"`
 	ProjectID                    string          `json:"project_id,omitempty"`
 	Children                     []*WrkqTreeNode `json:"children"`
+	Promises                     []WrkqPromise   `json:"promises"`
 	HiddenContainersNotDisplayed int             `json:"hidden_containers_not_displayed"`
 
 	// WireRawPath carries the UN-normalized request path (empty for the root view)

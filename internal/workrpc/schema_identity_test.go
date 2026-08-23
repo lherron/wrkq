@@ -19,9 +19,9 @@ import (
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
 // pinnedProtocolSchemaHash is the intentional wire identity after adding the
-// wrkq.promise.* family. Update it only alongside an explicit protocol change;
+// wrkq.promise.* family and its ready/tree/cat attention projections. Update it only alongside an explicit protocol change;
 // an incidental mismatch remains a test failure.
-const pinnedProtocolSchemaHash = "sha256:e89dc1b8ba7dda9cc874b6441b8e618e3b50d2a63583f31322b82513af808ec3"
+const pinnedProtocolSchemaHash = "sha256:32d75635c35f29c38c767a952132ef6de0db6b58413f73f76143fa3fdf18b5fa"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

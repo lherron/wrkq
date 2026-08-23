@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 // TreeView walks the container/task hierarchy under p.Path and returns the legacy
@@ -19,8 +21,12 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if p.PromiseState != "" && p.PromiseState != "open" && p.PromiseState != "all" {
+		return nil, NewValidationError("tree promiseState must be open or all", map[string]any{"field": "promiseState"})
+	}
+	includeClosedPromises := p.PromiseState == "all"
 	pruneEmpty := !p.IncludeArchived
-	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, p.IncludeArchived, p.OpenOnly, pruneEmpty, 0)
+	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, p.IncludeArchived, p.OpenOnly, pruneEmpty, includeClosedPromises, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -32,6 +38,16 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 			return nil, err
 		}
 	}
+	rootContainerUUID := ""
+	if p.Path == "" {
+		_ = a.db.QueryRowContext(ctx, "SELECT uuid FROM containers WHERE kind = 'root'").Scan(&rootContainerUUID)
+	} else if uuid, _, resolveErr := selectors.WalkContainerPath(a.db, p.Path); resolveErr == nil {
+		rootContainerUUID = uuid
+	}
+	rootPromises, err := a.attachTreePromises(ctx, root.Children, rootContainerUUID, includeClosedPromises)
+	if err != nil {
+		return nil, err
+	}
 
 	outputPath := p.Path
 	if outputPath == "" {
@@ -42,9 +58,58 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 		Path:                         outputPath,
 		ProjectID:                    a.treeTopLevelProjectID(p.Path),
 		Children:                     root.Children,
+		Promises:                     rootPromises,
 		HiddenContainersNotDisplayed: root.hiddenContainerCount,
 		WireRawPath:                  p.Path,
 	}, nil
+}
+
+// attachTreePromises adds every attached promise, across owners, to its visible
+// subject node. Promise list ownership defaults are intentionally bypassed here:
+// tree is a server-owned unrestricted read projection and the owner is displayed
+// on each leaf. Standalone promises have no subject UUID and never enter tree.
+func (a *API) attachTreePromises(ctx context.Context, nodes []*WrkqTreeNode, rootContainerUUID string, includeClosed bool) ([]WrkqPromise, error) {
+	params := store.PromiseListParams{}
+	if !includeClosed {
+		params.State = domain.PromiseStateOpen
+	}
+	rows, err := a.store.Promises.List(params)
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	byTask := make(map[string][]WrkqPromise)
+	byContainer := make(map[string][]WrkqPromise)
+	for i := range rows {
+		if rows[i].SubjectTaskUUID == nil && rows[i].SubjectContainerUUID == nil {
+			continue
+		}
+		dto, err := a.promiseDTO(ctx, &rows[i])
+		if err != nil {
+			return nil, err
+		}
+		if rows[i].SubjectTaskUUID != nil {
+			byTask[*rows[i].SubjectTaskUUID] = append(byTask[*rows[i].SubjectTaskUUID], *dto)
+		} else {
+			byContainer[*rows[i].SubjectContainerUUID] = append(byContainer[*rows[i].SubjectContainerUUID], *dto)
+		}
+	}
+	var walk func([]*WrkqTreeNode)
+	walk = func(children []*WrkqTreeNode) {
+		for _, node := range children {
+			node.Promises = make([]WrkqPromise, 0)
+			if node.Type == "task" {
+				node.Promises = append(node.Promises, byTask[node.UUID]...)
+			} else {
+				node.Promises = append(node.Promises, byContainer[node.UUID]...)
+			}
+			walk(node.Children)
+			walk(node.ExternalChildren)
+		}
+	}
+	walk(nodes)
+	rootPromises := make([]WrkqPromise, 0)
+	rootPromises = append(rootPromises, byContainer[rootContainerUUID]...)
+	return rootPromises, nil
 }
 
 func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode, path string, includeArchived, openOnly bool) error {
@@ -133,7 +198,7 @@ func (a *API) treeTopLevelProjectID(rootPath string) string {
 }
 
 // buildTreeNode is the faithful port of internal/cli buildTree.
-func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, includeArchived, openOnly, pruneEmptyContainers bool, currentDepth int) (*WrkqTreeNode, error) {
+func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, includeArchived, openOnly, pruneEmptyContainers, includeClosedPromises bool, currentDepth int) (*WrkqTreeNode, error) {
 	root := &WrkqTreeNode{
 		Type:     "container",
 		Slug:     path,
@@ -189,7 +254,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 		}
 		childPath += node.Slug
 
-		child, err := a.buildTreeNode(ctx, childPath, maxDepth, includeArchived, openOnly, pruneEmptyContainers, currentDepth+1)
+		child, err := a.buildTreeNode(ctx, childPath, maxDepth, includeArchived, openOnly, pruneEmptyContainers, includeClosedPromises, currentDepth+1)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -200,6 +265,12 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 		node.hasVisibleTasks = child.hasVisibleTasks
 		node.hasVisibleContent = child.hasVisibleContent
 		node.hiddenContainerCount = child.hiddenContainerCount
+		if visible, err := a.containerHasVisiblePromises(ctx, node.UUID, includeClosedPromises); err != nil {
+			_ = rows.Close()
+			return nil, err
+		} else if visible {
+			node.hasVisibleContent = true
+		}
 
 		shouldShowContainer := !pruneEmptyContainers || node.hasVisibleContent || treeAlwaysShow(&node)
 		if shouldShowContainer {
@@ -317,6 +388,19 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 
 	root.hasVisibleContent = root.hasVisibleContent || root.hasVisibleTasks || len(root.Children) > 0
 	return root, nil
+}
+
+func (a *API) containerHasVisiblePromises(ctx context.Context, containerUUID string, includeClosed bool) (bool, error) {
+	query := "SELECT EXISTS(SELECT 1 FROM promises WHERE subject_container_uuid = ?"
+	if !includeClosed {
+		query += " AND state = 'open'"
+	}
+	query += ")"
+	var exists bool
+	if err := a.db.QueryRowContext(ctx, query, containerUUID).Scan(&exists); err != nil {
+		return false, NewInternalError(err)
+	}
+	return exists, nil
 }
 
 func treeAlwaysShow(node *WrkqTreeNode) bool {

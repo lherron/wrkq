@@ -187,6 +187,11 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	if err := tx.Commit(); err != nil {
 		return nil, NewInternalError(err)
 	}
+	promises, err := a.attachedPromiseDTOs(ctx, taskUUID, "")
+	if err != nil {
+		return nil, err
+	}
+	view.Promises = promises
 	return view, nil
 }
 

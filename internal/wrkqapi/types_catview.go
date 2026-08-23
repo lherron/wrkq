@@ -64,6 +64,7 @@ type WrkqTaskCatView struct {
 	BlockedBy             []CatViewBlocker  `json:"blocked_by,omitempty"`
 	Comments              []CatViewComment  `json:"comments,omitempty"`
 	Relations             []CatViewRelation `json:"relations,omitempty"`
+	Promises              []WrkqPromise     `json:"promises"`
 }
 
 type CatViewComment struct {

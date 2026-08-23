@@ -101,6 +101,35 @@ EOF
 wrkq log T-00001 --oneline
 wrkq log T-00001 --patch      # Show detailed changes
 
+## Promises (future attention, not task deadlines)
+```bash
+wrkq promise add --subject "Revisit rollout" --in 7d
+wrkq promise add --for lance --on-behalf --review-at 2026-09-01T15:00:00-05:00 --subject "Review rollout"
+wrkq promise add --task T-00001 --in 36h --question "What remains?"
+wrkq promise list                         # Current principal's promises
+wrkq promise list --task T-00001          # All owners watching this task
+wrkq promise ready --for lance
+wrkq promise renew PR-00001 --in 7d --note "Still active"
+wrkq promise resolve PR-00001 --note "Satisfied"
+wrkq promise abandon PR-00001 --note "Superseded"
+wrkq promise attach PR-00001 --campaign rollout/wave
+wrkq promise detach PR-00001
+wrkq cat PR-00001 --json --one
+wrkq log PR-00001 --patch
+wrkq rm PR-00001                          # Deliberately abandons
+wrkq rm PR-00001 --purge --yes            # Permanently deletes
+```
+
+Exactly one of `--review-at` or `--in` is required by `promise add` and
+`promise renew`. The CLI forwards both values unchanged; the API normalizes
+absolute timestamps and resolves relative durations against server time.
+`--task` and `--container` are exclusive; `--campaign` aliases `--container`.
+Promise mutations accept `--etag` or `--if-match`. `--subject`, `--question`,
+and `--note` follow the standard literal/`@file`/`-` stdin conventions.
+There are no `promise show` or `promise history` commands: use root `cat` and
+`log`. `wrkq check` and `wrkq tree` surface ready/attached promises; tree shows
+open promise leaves by default and includes closed leaves with `--state all`.
+
 ## Output Formats
 - `--json` - Pretty JSON
 - `--ndjson` - Newline-delimited JSON (best for parsing)
@@ -111,7 +140,7 @@ Defaults: non-TTY list/search/history commands use NDJSON; singleton, detail, mu
 
 `wrkq cat ... --json` is always array-shaped, including one selector. For a bare
 singleton object, use `wrkq cat ID --json --one`. `--one` requires exactly one
-explicit selector and one resolved task, refuses non-JSON output modes, and emits
+explicit selector and one resolved task or promise, refuses non-JSON output modes, and emits
 no partial JSON on failure. Add `--porcelain` for compact singleton JSON.
 
 ## Caller principal

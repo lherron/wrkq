@@ -32,4 +32,5 @@ type WrkqContainerCatView struct {
 	ArchivedAt  *string                   `json:"archived_at,omitempty"`
 	CreatedBy   string                    `json:"created_by"`
 	UpdatedBy   string                    `json:"updated_by"`
+	Promises    []WrkqPromise             `json:"promises"`
 }

@@ -56,7 +56,7 @@ func TestCatViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(CatViewBlocker{})),
 	}, "\n")
 
-	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,outcome,omitempty,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty}\n" +
+	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,outcome,omitempty,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty,promises}\n" +
 		"CatViewComment{id,created_at,body,principal_ref,omitempty}\n" +
 		"CatViewRelation{direction,kind,task_id,task_uuid,task_slug,task_title,created_at,created_by_id}\n" +
 		"CatViewBlocker{id,state}"
@@ -84,7 +84,7 @@ func dtoFingerprint(t reflect.Type) string {
 // field/tag shape (same rationale as TestCatViewDTOFingerprint).
 func TestContainerCatViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqContainerCatView{}))
-	const want = "WrkqContainerCatView{id,uuid,slug,title,description,kind,parent_id,omitempty,parent_uuid,omitempty,parent_path,omitempty,path,webhook_urls,omitempty,sort_index,etag,created_at,updated_at,archived_at,omitempty,created_by,updated_by}"
+	const want = "WrkqContainerCatView{id,uuid,slug,title,description,kind,parent_id,omitempty,parent_uuid,omitempty,parent_path,omitempty,path,webhook_urls,omitempty,sort_index,etag,created_at,updated_at,archived_at,omitempty,created_by,updated_by,promises}"
 	if got != want {
 		t.Errorf("WrkqContainerCatView DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
@@ -252,10 +252,22 @@ func TestProjectsListViewDTOFingerprint(t *testing.T) {
 // mirror depends on them to reconstruct legacy's NDJSON stream + JSON `path`.
 func TestTreeViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqTreeView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqTreeNode{}))
-	const want = "WrkqTreeView{path,project_id,omitempty,children,hidden_containers_not_displayed,wire_raw_path,omitempty}\n" +
-		"WrkqTreeNode{type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,children,omitempty,external_children,omitempty,external_backlink,omitempty,external_project_id,omitempty,external_path,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
+	const want = "WrkqTreeView{path,project_id,omitempty,children,promises,hidden_containers_not_displayed,wire_raw_path,omitempty}\n" +
+		"WrkqTreeNode{type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,promises,children,omitempty,external_children,omitempty,external_backlink,omitempty,external_project_id,omitempty,external_path,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
 	if got != want {
 		t.Errorf("tree view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestPromiseDTOFingerprint(t *testing.T) {
+	got := dtoFingerprint(reflect.TypeOf(WrkqPromise{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqPromiseSubjectRef{})) + "\n" +
+		dtoFingerprint(reflect.TypeOf(WrkqPromiseListResult{}))
+	const want = "WrkqPromise{uuid,id,ownerPrincipalRef,subject,reviewQuestion,omitempty,subjectRef,reviewAt,ready,readyFor,omitempty,state,closedAt,omitempty,lastReviewedAt,omitempty,lastReviewNote,omitempty,meta,etag,createdAt,updatedAt,createdByPrincipalRef,updatedByPrincipalRef}\n" +
+		"WrkqPromiseSubjectRef{type,uuid,id,path}\n" +
+		"WrkqPromiseListResult{items}"
+	if got != want {
+		t.Errorf("promise DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
 }
 

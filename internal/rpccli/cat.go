@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -30,12 +31,12 @@ func newCatCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cat <path|id>...",
 		Aliases: []string{"show"},
-		Short:   "Print one or more tasks",
+		Short:   "Print one or more tasks or promises",
 		Long: `Print one or more tasks.
 
 JSON output is always array-shaped for compatibility, even with one selector.
 Singleton automation should use --json --one, which asserts exactly one explicit
-selector and one resolved task and emits that task object without an array wrapper.
+selector and one resolved resource and emits that object without an array wrapper.
 Shell expansion still counts toward the explicit-selector cardinality.`,
 		Example: `  wrkq cat T-00001 --json
   wrkq cat T-00001 T-00002 --json
@@ -80,16 +81,34 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 
 	includeComments := !excludeComments
 	objs := make([]json.RawMessage, 0, len(args))
+	promiseIndexes := make(map[int]bool)
 	for _, ref := range args {
 		// Legacy: applyProjectRootToSelector(arg, false) before resolving the task.
 		sref := sc.selector(ref, false)
-		raw, err := tr.Call(cmd.Context(), "wrkq.task.catView",
-			map[string]any{"task": sref, "includeComments": includeComments})
+		var raw json.RawMessage
+		var err error
+		promiseSelector := strings.HasPrefix(strings.ToUpper(strings.TrimSpace(ref)), "PR-")
+		if promiseSelector {
+			raw, err = tr.Call(cmd.Context(), "wrkq.promise.show", map[string]any{"promise": ref})
+		} else {
+			raw, err = tr.Call(cmd.Context(), "wrkq.task.catView",
+				map[string]any{"task": sref, "includeComments": includeComments})
+			if isNotFound(err) {
+				raw, err = tr.Call(cmd.Context(), "wrkq.promise.show", map[string]any{"promise": ref})
+				promiseSelector = err == nil
+			}
+		}
 		if err != nil {
 			if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
+				if promiseSelector {
+					return fmt.Errorf("promise not found: %s", ref)
+				}
 				return fmt.Errorf("task not found: %s", sref)
 			}
 			return err
+		}
+		if promiseSelector {
+			promiseIndexes[len(objs)] = true
 		}
 		objs = append(objs, raw)
 	}
@@ -98,7 +117,7 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 	// --pretty forces the styled card (overriding an explicit machine mode and the
 	// non-TTY JSON default); on a TTY it is the default, matching legacy.
 	if pretty || (mode == "raw" && !stable && style.ColorEnabled) {
-		return writeCatStyled(out, objs, noFrontmatter, excludeComments)
+		return writeCatMixed(out, objs, promiseIndexes, noFrontmatter, excludeComments, true)
 	}
 	switch mode {
 	case "json":
@@ -109,8 +128,34 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 	case "ndjson":
 		return writeCatNDJSON(out, objs)
 	default: // "raw"
-		return writeCatRaw(out, objs, noFrontmatter, excludeComments)
+		return writeCatMixed(out, objs, promiseIndexes, noFrontmatter, excludeComments, false)
 	}
+}
+
+func writeCatMixed(w io.Writer, objs []json.RawMessage, promiseIndexes map[int]bool, noFrontmatter, excludeComments, styled bool) error {
+	for index, obj := range objs {
+		if index > 0 {
+			fmt.Fprintln(w)
+		}
+		if promiseIndexes[index] {
+			promise, err := decodePromise(obj)
+			if err != nil {
+				return err
+			}
+			if err := renderPromiseDetail(w, promise); err != nil {
+				return err
+			}
+			continue
+		}
+		if styled {
+			if err := writeCatStyled(w, []json.RawMessage{obj}, noFrontmatter, excludeComments); err != nil {
+				return err
+			}
+		} else if err := writeCatRaw(w, []json.RawMessage{obj}, noFrontmatter, excludeComments); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeCatStyled renders each task projection as the shared styled card. It maps
@@ -152,6 +197,11 @@ func writeCatStyled(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeC
 			Outcome:       stringValue(t.Outcome),
 			NoFrontmatter: noFrontmatter,
 		}, comments)
+		if len(t.Promises) > 0 {
+			if err := renderAttachedPromises(w, t.Promises); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -342,6 +392,7 @@ type catTask struct {
 	CausedBy              []string        `json:"caused_by"`
 	BlockedBy             []catBlocker    `json:"blocked_by,omitempty"`
 	Comments              []catComment    `json:"comments,omitempty"`
+	Promises              []promiseWire   `json:"promises"`
 }
 
 type catComment struct {
@@ -496,8 +547,20 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 				fmt.Fprintln(w)
 			}
 		}
+		if len(t.Promises) > 0 {
+			if err := renderAttachedPromises(w, t.Promises); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func renderAttachedPromises(w io.Writer, promises []promiseWire) error {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Promises")
+	headers, rows := promiseTable(promises)
+	return render.NewRenderer(w, render.Options{Format: render.FormatTable}).RenderTable(headers, rows)
 }
 
 func stringValue(value *string) string {

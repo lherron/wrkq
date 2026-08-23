@@ -28,7 +28,7 @@ import (
 func newTreeCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, includeArchived, openOnly bool
 	var depth int
-	var fields string
+	var fields, promiseState string
 	cmd := &cobra.Command{
 		Use:   "tree [path...]",
 		Short: "Display containers and tasks in a tree structure",
@@ -63,6 +63,9 @@ func newTreeCmd() *cobra.Command {
 			}
 			if openOnly {
 				params["openOnly"] = true
+			}
+			if promiseState != "" {
+				params["promiseState"] = promiseState
 			}
 			if mode == "human" {
 				params["includeCampaignMembers"] = true
@@ -100,6 +103,7 @@ func newTreeCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include completed/archived/deleted tasks and empty containers")
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only open tasks")
 	cmd.Flags().StringVar(&fields, "fields", "", "Fields to display (comma-separated)")
+	cmd.Flags().StringVar(&promiseState, "state", "", "Promise leaf state: open (default) or all")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
@@ -183,6 +187,7 @@ type treeWireNode struct {
 	IsArchived           bool            `json:"is_archived"`
 	IsDeleted            bool            `json:"is_deleted"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
+	Promises             []promiseWire   `json:"promises"`
 	Children             []*treeWireNode `json:"children,omitempty"`
 	ExternalChildren     []*treeWireNode `json:"external_children,omitempty"`
 	ExternalBacklink     bool            `json:"external_backlink,omitempty"`
@@ -197,6 +202,7 @@ type treeWireView struct {
 	Path                         string          `json:"path"`
 	ProjectID                    string          `json:"project_id,omitempty"`
 	Children                     []*treeWireNode `json:"children"`
+	Promises                     []promiseWire   `json:"promises"`
 	HiddenContainersNotDisplayed int             `json:"hidden_containers_not_displayed"`
 	WireRawPath                  string          `json:"wire_raw_path,omitempty"`
 }
@@ -220,6 +226,7 @@ type treeJSONNode struct {
 	IsArchived           bool            `json:"is_archived"`
 	IsDeleted            bool            `json:"is_deleted"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
+	Promises             []promiseWire   `json:"promises"`
 	Children             []*treeJSONNode `json:"children,omitempty"`
 }
 
@@ -227,6 +234,7 @@ type treeJSONOutput struct {
 	Path                         string          `json:"path"`
 	ProjectID                    string          `json:"project_id,omitempty"`
 	Children                     []*treeJSONNode `json:"children"`
+	Promises                     []promiseWire   `json:"promises"`
 	HiddenContainersNotDisplayed int             `json:"hidden_containers_not_displayed"`
 }
 
@@ -250,6 +258,7 @@ func toTreeJSONNodes(nodes []*treeWireNode) []*treeJSONNode {
 			IsArchived:           n.IsArchived,
 			IsDeleted:            n.IsDeleted,
 			AllTasksCompleted:    n.AllTasksCompleted,
+			Promises:             n.Promises,
 			Children:             toTreeJSONNodes(n.Children),
 		})
 	}
@@ -261,6 +270,7 @@ func renderTreeJSON(w io.Writer, view *treeWireView, stable bool) error {
 		Path:                         view.Path,
 		ProjectID:                    view.ProjectID,
 		Children:                     toTreeJSONNodes(view.Children),
+		Promises:                     view.Promises,
 		HiddenContainersNotDisplayed: view.HiddenContainersNotDisplayed,
 	}
 	// Legacy writeJSONOutput: json.Encoder (HTML-escaping, trailing newline);
@@ -295,6 +305,10 @@ type treeStreamEntry struct {
 	IsArchived           bool    `json:"is_archived"`
 	IsDeleted            bool    `json:"is_deleted"`
 	AllTasksCompleted    bool    `json:"all_tasks_completed,omitempty"`
+	OwnerPrincipalRef    string  `json:"owner_principal_ref,omitempty"`
+	ReviewAt             string  `json:"review_at,omitempty"`
+	Ready                bool    `json:"ready,omitempty"`
+	ReadyFor             string  `json:"ready_for,omitempty"`
 }
 
 func flattenTreeWire(view *treeWireView) []treeStreamEntry {
@@ -304,6 +318,18 @@ func flattenTreeWire(view *treeWireView) []treeStreamEntry {
 	// parent_path; with "." legacy's joinTreePath strips it but the parentPath!=""
 	// guard would wrongly emit parent_path=".". WireRawPath carries the raw value.
 	rootPath := view.WireRawPath
+	for _, promise := range view.Promises {
+		readyFor := ""
+		if promise.ReadyFor != nil {
+			readyFor = *promise.ReadyFor
+		}
+		entries = append(entries, treeStreamEntry{
+			Type: "promise", ID: promise.ID, Slug: promise.ID, Title: promise.Subject,
+			Path: joinTreePath(rootPath, promise.ID), Depth: 0, State: promise.State, UUID: promise.UUID,
+			OwnerPrincipalRef: promise.OwnerPrincipalRef, ReviewAt: promise.ReviewAt,
+			Ready: promise.Ready, ReadyFor: readyFor,
+		})
+	}
 	var walk func(nodes []*treeWireNode, parentID *string, parentPath string, depth int)
 	walk = func(nodes []*treeWireNode, parentID *string, parentPath string, depth int) {
 		for _, node := range nodes {
@@ -340,6 +366,19 @@ func flattenTreeWire(view *treeWireView) []treeStreamEntry {
 			entries = append(entries, entry)
 
 			nodeID := node.ID
+			for _, promise := range node.Promises {
+				readyFor := ""
+				if promise.ReadyFor != nil {
+					readyFor = *promise.ReadyFor
+				}
+				promisePath := joinTreePath(path, promise.ID)
+				entries = append(entries, treeStreamEntry{
+					Type: "promise", ID: promise.ID, Slug: promise.ID, Title: promise.Subject,
+					Path: promisePath, Depth: depth + 1, ParentID: &nodeID, ParentPath: &path,
+					State: promise.State, UUID: promise.UUID, OwnerPrincipalRef: promise.OwnerPrincipalRef,
+					ReviewAt: promise.ReviewAt, Ready: promise.Ready, ReadyFor: readyFor,
+				})
+			}
 			walk(node.Children, &nodeID, path, depth+1)
 		}
 	}
@@ -372,13 +411,31 @@ func renderTreePorcelain(w io.Writer, view *treeWireView) error {
 	// Legacy: rootPath "" → ".". TreeView already normalized Path to "." for the
 	// root view, so header is the display path directly.
 	fmt.Fprintln(w, header)
+	printRootPromisesPorcelain(w, view.Promises)
 	printTreePorcelain(w, view.Children, "")
 	return nil
+}
+
+func printRootPromisesPorcelain(w io.Writer, promises []promiseWire) {
+	for _, promise := range promises {
+		readyFor := ""
+		if promise.ReadyFor != nil {
+			readyFor = *promise.ReadyFor
+		}
+		fmt.Fprintf(w, "promise\t%s\t%s\t%s\t%s\t%s\t%s\n", promise.ID, promise.OwnerPrincipalRef, promise.ReviewAt, promise.State, readyFor, promise.Subject)
+	}
 }
 
 func printTreePorcelain(w io.Writer, nodes []*treeWireNode, prefix string) {
 	for _, child := range nodes {
 		fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\n", prefix, child.Type, child.ID, child.Slug, child.Title)
+		for _, promise := range child.Promises {
+			readyFor := ""
+			if promise.ReadyFor != nil {
+				readyFor = *promise.ReadyFor
+			}
+			fmt.Fprintf(w, "%spromise\t%s\t%s\t%s\t%s\t%s\t%s\n", prefix+"  ", promise.ID, promise.OwnerPrincipalRef, promise.ReviewAt, promise.State, readyFor, promise.Subject)
+		}
 		if len(child.Children) > 0 {
 			printTreePorcelain(w, child.Children, prefix+"  ")
 		}
@@ -394,6 +451,13 @@ func renderTreeHuman(w io.Writer, view *treeWireView) error {
 		header += " " + style.Paint(style.ColDim, fmt.Sprintf("[%s]", view.ProjectID))
 	}
 	fmt.Fprintln(w, header)
+	for index, promise := range view.Promises {
+		connector := "├── "
+		if index == len(view.Promises)-1 && len(view.Children) == 0 {
+			connector = "└── "
+		}
+		fmt.Fprintf(w, "%s%s\n", style.Paint(style.ColDim, connector), formatTreeHumanPromise(promise))
+	}
 	printTreeHuman(w, view.Children, "")
 	if view.HiddenContainersNotDisplayed > 0 {
 		fmt.Fprintln(w, style.Paint(style.ColDim, fmt.Sprintf("(plus %d empty containers not displayed; use --all to show empty containers)", view.HiddenContainersNotDisplayed)))
@@ -496,6 +560,17 @@ func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
 			connector = "└── "
 		}
 		fmt.Fprintf(w, "%s%s%s\n", prefix, style.Paint(style.ColDim, connector), formatTreeHumanNode(child))
+		promisePrefix := prefix + style.Paint(style.ColDim, "│") + "   "
+		if isLastChild {
+			promisePrefix = prefix + "    "
+		}
+		for index, promise := range child.Promises {
+			promiseConnector := "├── "
+			if index == len(child.Promises)-1 && len(child.Children) == 0 && len(child.ExternalChildren) == 0 {
+				promiseConnector = "└── "
+			}
+			fmt.Fprintf(w, "%s%s%s\n", promisePrefix, style.Paint(style.ColDim, promiseConnector), formatTreeHumanPromise(promise))
+		}
 		if len(child.Children) > 0 {
 			newPrefix := prefix + style.Paint(style.ColDim, "│") + "   "
 			if isLastChild {
@@ -511,6 +586,23 @@ func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
 			printTreeHuman(w, child.ExternalChildren, newPrefix)
 		}
 	}
+}
+
+func formatTreeHumanPromise(promise promiseWire) string {
+	parts := []string{style.Paint(style.ColDim, promise.ID), promise.OwnerPrincipalRef, promise.ReviewAt}
+	if promise.Ready {
+		ready := "ready"
+		if promise.ReadyFor != nil {
+			ready += " " + *promise.ReadyFor
+		}
+		parts = append(parts, style.Paint(style.ColStateOpen, ready))
+	} else {
+		parts = append(parts, promise.State)
+	}
+	if promise.Subject != "" {
+		parts = append(parts, promise.Subject)
+	}
+	return strings.Join(parts, " ")
 }
 
 func formatTreeHumanNode(node *treeWireNode) string {

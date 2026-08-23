@@ -91,11 +91,17 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 	if err := tx.Commit(); err != nil {
 		return nil, NewInternalError(err)
 	}
-	return &WrkqContainerCatView{
+	view := &WrkqContainerCatView{
 		ID: id, UUID: containerUUID, Slug: slug, Title: title, Description: description,
 		Kind: kind, ParentID: parentID, ParentUUID: parentUUID, ParentPath: parentPath,
 		Path: containerPath, WebhookURLs: webhookURLs, SortIndex: sortIndex, Etag: etag,
 		CreatedAt: createdAt, UpdatedAt: updatedAt, ArchivedAt: archivedAt,
 		CreatedBy: createdBySlug, UpdatedBy: updatedBySlug,
-	}, nil
+	}
+	promises, err := a.attachedPromiseDTOs(ctx, "", containerUUID)
+	if err != nil {
+		return nil, err
+	}
+	view.Promises = promises
+	return view, nil
 }

@@ -14,6 +14,7 @@ var (
 	commentIDPattern    = regexp.MustCompile(`^C-\d{5}$`)
 	handoffIDPattern    = regexp.MustCompile(`^H-\d{5}$`)
 	attachmentIDPattern = regexp.MustCompile(`^ATT-\d{5}$`)
+	promiseIDPattern    = regexp.MustCompile(`^PR-\d{5}$`)
 	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	bareSeqPattern      = regexp.MustCompile(`^\d{1,5}$`)
 )
@@ -28,6 +29,7 @@ const (
 	TypeComment    Type = "comment"
 	TypeHandoff    Type = "handoff"
 	TypeAttachment Type = "attachment"
+	TypePromise    Type = "promise"
 )
 
 // FormatActor formats an actor friendly ID
@@ -60,6 +62,11 @@ func FormatAttachment(seq int) string {
 	return fmt.Sprintf("ATT-%05d", seq)
 }
 
+// FormatPromise formats a promise friendly ID.
+func FormatPromise(seq int) string {
+	return fmt.Sprintf("PR-%05d", seq)
+}
+
 // Parse parses an ID string and returns the type and sequence number
 func Parse(id string) (Type, int, error) {
 	id = strings.TrimSpace(id)
@@ -83,6 +90,9 @@ func Parse(id string) (Type, int, error) {
 	case attachmentIDPattern.MatchString(id):
 		seq, _ := strconv.Atoi(id[4:])
 		return TypeAttachment, seq, nil
+	case promiseIDPattern.MatchString(id):
+		seq, _ := strconv.Atoi(id[3:])
+		return TypePromise, seq, nil
 	default:
 		return "", 0, fmt.Errorf("invalid friendly ID format: %s", id)
 	}

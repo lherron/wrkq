@@ -100,7 +100,7 @@ type rmResult struct {
 
 // rmTarget is a resolved removal target.
 type rmTarget struct {
-	Type  string // "task" | "container"
+	Type  string // "task" | "container" | "promise"
 	UUID  string
 	ID    string
 	Slug  string
@@ -253,6 +253,8 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 				} else {
 					fmt.Fprintf(out, "✓ %s permanently deleted\n", r.ID)
 				}
+			} else if r.Type == "promise" {
+				fmt.Fprintf(out, "✓ %s abandoned\n", r.ID)
 			} else {
 				fmt.Fprintf(out, "✓ %s archived\n", r.ID)
 			}
@@ -272,6 +274,9 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 // mirroring legacy ResolveTask-then-ResolveContainer ordering. Returns found=false
 // when neither resolves (the caller decides nullglob vs error).
 func resolveRmTarget(ctx context.Context, tr Transport, ref string) (rmTarget, bool, error) {
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(ref)), "PR-") {
+		return resolveRmPromise(ctx, tr, ref)
+	}
 	show, err := tr.Call(ctx, "wrkq.task.show", map[string]string{"task": ref})
 	if err == nil {
 		var t struct {
@@ -308,7 +313,22 @@ func resolveRmTarget(ctx context.Context, tr Transport, ref string) (rmTarget, b
 	if !isNotFound(cerr) {
 		return rmTarget{}, false, errors.New(rpcMessage(cerr))
 	}
-	return rmTarget{}, false, nil
+	return resolveRmPromise(ctx, tr, ref)
+}
+
+func resolveRmPromise(ctx context.Context, tr Transport, ref string) (rmTarget, bool, error) {
+	raw, err := tr.Call(ctx, "wrkq.promise.show", map[string]any{"promise": ref})
+	if err != nil {
+		if isNotFound(err) {
+			return rmTarget{}, false, nil
+		}
+		return rmTarget{}, false, err
+	}
+	promise, err := decodePromise(raw)
+	if err != nil {
+		return rmTarget{}, false, err
+	}
+	return rmTarget{Type: "promise", UUID: promise.UUID, ID: promise.ID, Slug: promise.ID, Title: promise.Subject, State: promise.State}, true, nil
 }
 
 // removeTarget performs the durable removal. Tasks go through wrkq.task.delete
@@ -322,6 +342,20 @@ func removeTarget(ctx context.Context, tr Transport, actor string, tgt rmTarget,
 		Slug:   tgt.Slug,
 		Path:   tgt.Slug,
 		Purged: purge,
+	}
+	if tgt.Type == "promise" {
+		params := map[string]any{"promise": tgt.UUID, "mode": "soft"}
+		if purge {
+			params["mode"] = "purge"
+		}
+		if actor != "" {
+			params["principalRef"] = actor
+		}
+		if _, err := tr.Call(ctx, "wrkq.promise.delete", params); err != nil {
+			return nil, err
+		}
+		res.Path = tgt.ID
+		return res, nil
 	}
 
 	if tgt.Type == "container" {
@@ -441,6 +475,12 @@ func showRemovalPlan(ctx context.Context, cmd *cobra.Command, tr Transport, targ
 	}
 
 	for _, tgt := range targets {
+		if tgt.Type == "promise" {
+			fmt.Fprintf(out, "  %s\n", tgt.ID)
+			fmt.Fprintf(out, "    Subject: %s\n", tgt.Title)
+			fmt.Fprintf(out, "    State: %s\n\n", tgt.State)
+			continue
+		}
 		if tgt.Type == "container" {
 			fmt.Fprintf(out, "  %s (%s/)\n", tgt.ID, tgt.Slug)
 			if tgt.Title != "" {
@@ -491,9 +531,12 @@ func showRemovalPlanJSON(ctx context.Context, cmd *cobra.Command, tr Transport, 
 			"slug":  tgt.Slug,
 			"title": tgt.Title,
 		}
-		if tgt.Type == "container" {
+		switch tgt.Type {
+		case "container":
 			entry["kind"] = tgt.Kind
-		} else {
+		case "promise":
+			entry["state"] = tgt.State
+		default:
 			entry["state"] = tgt.State
 			entry["priority"] = tgt.Prio
 		}

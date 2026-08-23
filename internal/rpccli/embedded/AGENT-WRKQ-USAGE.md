@@ -15,6 +15,7 @@ wrkq find --label refactor --label urgent --state all --type t
 wrkq ls --sort updated_at --reverse --limit 5  # Recent tasks
 wrkq search "query" --ndjson            # Full-text search with timestamps
 wrkq search "query" --label refactor --state all
+wrkq promise ready                       # Attention reviews due now
 ```
 
 `--label VALUE` is a repeatable, exact, case-sensitive read filter with AND
@@ -56,6 +57,27 @@ wrkq ls --project other inbox          # Work in different project
 ```
 
 ## Search Freshness: run `wrkq index update` before search when freshness matters
+
+## Promises
+```bash
+wrkq promise add --subject "Revisit rollout" --in 7d
+wrkq promise add --for lance --on-behalf --in 7d --subject "Review rollout"
+wrkq promise add --task T-00001 --in 36h --question "What remains?"
+wrkq promise list
+wrkq promise list --task T-00001          # Cross-owner subject visibility
+wrkq promise ready --for lance
+wrkq promise renew PR-00001 --in 7d --note "Still active"
+wrkq promise resolve PR-00001 --note "Satisfied"
+wrkq promise abandon PR-00001 --note "Superseded"
+wrkq cat PR-00001 --json --one
+wrkq log PR-00001 --patch
+```
+
+Promises commit a principal to revisit a subject; they are not task deadlines.
+`add`/`renew` require exactly one of `--review-at` or `--in`; the API, not the
+CLI, normalizes/resolves that value. Text flags use literal/`@file`/`-` stdin.
+Use root `cat`/`log` for detail/history. `wrkq check` shows ready promises and
+`wrkq tree --state all` includes closed attached promise leaves.
 
 ## Output: Add `--json` or `--ndjson` to most commands
 </task_tracking_rules>
