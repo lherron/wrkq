@@ -1194,8 +1194,8 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
 		var currentETag int64
-		var slug, currentState string
-		err := tx.QueryRow("SELECT etag, slug, state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &slug, &currentState)
+		var id, slug, currentState string
+		err := tx.QueryRow("SELECT etag, id, slug, state FROM tasks WHERE uuid = ?", taskUUID).Scan(&currentETag, &id, &slug, &currentState)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("task not found: %s", taskUUID)
@@ -1296,6 +1296,9 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 		}
 		if err := purgeResidentSubtasks(tx, ew, attr, taskUUID); err != nil {
 			return fmt.Errorf("failed to purge resident subtasks: %w", err)
+		}
+		if err := retargetPromisesForPurgedTask(tx, ew, attr, taskUUID, id, slug); err != nil {
+			return err
 		}
 
 		// Hard delete (CASCADE will delete attachments and comments)
@@ -1644,7 +1647,7 @@ func cascadeDeleteResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attributi
 // cross-project parent edges are graph backlinks, not containment.
 func purgeResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, parentTaskUUID string) error {
 	rows, err := tx.Query(`
-		SELECT c.uuid, c.slug
+		SELECT c.uuid, c.id, c.slug
 		FROM tasks c
 		JOIN tasks p ON p.uuid = c.parent_task_uuid
 		WHERE c.parent_task_uuid = ?
@@ -1658,12 +1661,13 @@ func purgeResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attri
 
 	type subtask struct {
 		uuid string
+		id   string
 		slug string
 	}
 	var subtasks []subtask
 	for rows.Next() {
 		var st subtask
-		if err := rows.Scan(&st.uuid, &st.slug); err != nil {
+		if err := rows.Scan(&st.uuid, &st.id, &st.slug); err != nil {
 			return fmt.Errorf("failed to scan resident subtask for purge: %w", err)
 		}
 		subtasks = append(subtasks, st)
@@ -1697,6 +1701,9 @@ func purgeResidentSubtasks(tx *sql.Tx, ew *events.Writer, attr attribution.Attri
 			Payload:      &payloadStr,
 		}); err != nil {
 			return fmt.Errorf("failed to log resident subtask purge event: %w", err)
+		}
+		if err := retargetPromisesForPurgedTask(tx, ew, attr, st.uuid, st.id, st.slug); err != nil {
+			return err
 		}
 		if _, err := tx.Exec("DELETE FROM tasks WHERE uuid = ?", st.uuid); err != nil {
 			return fmt.Errorf("failed to purge resident subtask %s: %w", st.uuid, err)

@@ -545,8 +545,8 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 	return cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
 		var currentETag int64
-		var slug, kind string
-		err := tx.QueryRow("SELECT etag, slug, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &slug, &kind)
+		var id, slug, kind string
+		err := tx.QueryRow("SELECT etag, id, slug, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &id, &slug, &kind)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("container not found: %s", containerUUID)
@@ -594,6 +594,9 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 			Payload:      &payloadStr,
 		}); err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+		if err := retargetPromisesForPurgedContainer(tx, ew, attr, containerUUID, id, slug); err != nil {
+			return err
 		}
 
 		// Hard delete
@@ -687,6 +690,9 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 			return err
 		}
 		for _, task := range tasks {
+			if err := retargetPromisesForPurgedTask(tx, ew, attr, task.UUID, task.ID, task.Slug); err != nil {
+				return err
+			}
 			if _, err := tx.Exec("DELETE FROM tasks WHERE uuid = ?", task.UUID); err != nil {
 				return fmt.Errorf("failed to delete task: %w", err)
 			}
@@ -711,6 +717,9 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 			}
 		}
 		for _, container := range containers {
+			if err := retargetPromisesForPurgedContainer(tx, ew, attr, container.UUID, container.ID, container.Slug); err != nil {
+				return err
+			}
 			if _, err := tx.Exec("DELETE FROM containers WHERE uuid = ?", container.UUID); err != nil {
 				return fmt.Errorf("failed to delete container: %w", err)
 			}
@@ -732,12 +741,14 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 
 type recursiveContainerRow struct {
 	UUID  string
+	ID    string
 	Slug  string
 	Depth int
 }
 
 type recursiveTaskRow struct {
 	UUID            string
+	ID              string
 	Slug            string
 	AttachmentCount int64
 	Bytes           int64
@@ -768,14 +779,14 @@ func (cs *ContainerStore) recursiveDeleteImpactTx(tx *sql.Tx, containerUUID stri
 
 func recursiveDeleteContainersTx(tx *sql.Tx, containerUUID string) ([]recursiveContainerRow, error) {
 	rows, err := tx.Query(`
-		WITH RECURSIVE subtree(uuid, slug, depth) AS (
-			SELECT uuid, slug, 0 FROM containers WHERE uuid = ?
+		WITH RECURSIVE subtree(uuid, id, slug, depth) AS (
+			SELECT uuid, id, slug, 0 FROM containers WHERE uuid = ?
 			UNION ALL
-			SELECT c.uuid, c.slug, subtree.depth + 1
+			SELECT c.uuid, c.id, c.slug, subtree.depth + 1
 			  FROM containers c
 			  JOIN subtree ON c.parent_uuid = subtree.uuid
 		)
-		SELECT uuid, slug, depth FROM subtree ORDER BY depth DESC, slug ASC
+		SELECT uuid, id, slug, depth FROM subtree ORDER BY depth DESC, slug ASC
 	`, containerUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recursive containers: %w", err)
@@ -785,7 +796,7 @@ func recursiveDeleteContainersTx(tx *sql.Tx, containerUUID string) ([]recursiveC
 	out := []recursiveContainerRow{}
 	for rows.Next() {
 		var row recursiveContainerRow
-		if err := rows.Scan(&row.UUID, &row.Slug, &row.Depth); err != nil {
+		if err := rows.Scan(&row.UUID, &row.ID, &row.Slug, &row.Depth); err != nil {
 			return nil, fmt.Errorf("failed to scan recursive container: %w", err)
 		}
 		out = append(out, row)
@@ -806,11 +817,11 @@ func recursiveDeleteTasksTx(tx *sql.Tx, containerUUID string) ([]recursiveTaskRo
 			UNION ALL
 			SELECT c.uuid FROM containers c JOIN subtree ON c.parent_uuid = subtree.uuid
 		)
-		SELECT t.uuid, t.slug, COUNT(a.uuid), COALESCE(SUM(a.size_bytes), 0)
+		SELECT t.uuid, t.id, t.slug, COUNT(a.uuid), COALESCE(SUM(a.size_bytes), 0)
 		  FROM tasks t
 		  JOIN subtree ON t.project_uuid = subtree.uuid
 		  LEFT JOIN attachments a ON a.task_uuid = t.uuid
-		 GROUP BY t.uuid, t.slug
+	 GROUP BY t.uuid, t.id, t.slug
 		 ORDER BY t.id ASC
 	`, containerUUID)
 	if err != nil {
@@ -821,7 +832,7 @@ func recursiveDeleteTasksTx(tx *sql.Tx, containerUUID string) ([]recursiveTaskRo
 	out := []recursiveTaskRow{}
 	for rows.Next() {
 		var row recursiveTaskRow
-		if err := rows.Scan(&row.UUID, &row.Slug, &row.AttachmentCount, &row.Bytes); err != nil {
+		if err := rows.Scan(&row.UUID, &row.ID, &row.Slug, &row.AttachmentCount, &row.Bytes); err != nil {
 			return nil, fmt.Errorf("failed to scan recursive task: %w", err)
 		}
 		out = append(out, row)
