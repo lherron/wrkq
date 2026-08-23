@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/attribution"
+	wrkqdb "github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/store"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -86,6 +89,29 @@ func createTestDB(t *testing.T) *sql.DB {
 			deleted_by_principal_ref TEXT
 		);
 
+		CREATE TABLE promises (
+			uuid TEXT PRIMARY KEY,
+			id TEXT NOT NULL UNIQUE,
+			owner_principal_ref TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			review_question TEXT,
+			subject_task_uuid TEXT REFERENCES tasks(uuid) ON DELETE SET NULL,
+			subject_container_uuid TEXT REFERENCES containers(uuid) ON DELETE SET NULL,
+			review_at TEXT NOT NULL,
+			state TEXT NOT NULL,
+			closed_at TEXT,
+			last_reviewed_at TEXT,
+			last_review_note TEXT,
+			meta TEXT,
+			etag INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			created_by_principal_ref TEXT NOT NULL,
+			created_by_scope_ref TEXT,
+			updated_by_principal_ref TEXT NOT NULL,
+			updated_by_scope_ref TEXT
+		);
+
 		CREATE TABLE event_log (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
@@ -96,6 +122,13 @@ func createTestDB(t *testing.T) *sql.DB {
 			etag INTEGER,
 			payload TEXT
 		);
+
+		CREATE TABLE actors (id TEXT);
+		CREATE TABLE attachments (id TEXT);
+		CREATE TABLE evidence_items (id TEXT);
+		CREATE TABLE task_transitions (id TEXT);
+		CREATE TABLE comment_sequences (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
+		INSERT INTO comment_sequences (name, value) VALUES ('next_comment', 0);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -340,6 +373,92 @@ func TestRoundTrip(t *testing.T) {
 
 	if verifyResult.SnapshotRev != result.SnapshotRev {
 		t.Errorf("snapshot_rev mismatch: %s vs %s", verifyResult.SnapshotRev, result.SnapshotRev)
+	}
+}
+
+func TestPromiseExportImportRoundTripPreservesLastReviewFields(t *testing.T) {
+	openMigrated := func(name string) *wrkqdb.DB {
+		t.Helper()
+		database, err := wrkqdb.Open(filepath.Join(t.TempDir(), name+".db"))
+		if err != nil {
+			t.Fatalf("open %s database: %v", name, err)
+		}
+		if err := database.Migrate(); err != nil {
+			t.Fatalf("migrate %s database: %v", name, err)
+		}
+		t.Cleanup(func() { _ = database.Close() })
+		return database
+	}
+
+	source := openMigrated("source")
+	attr := attribution.Attribution{PrincipalRef: "agent:cody", ScopeRef: "agent:cody:project:wrkq:task:T-07489"}
+	s := store.New(source)
+	var containerUUID string
+	if err := source.QueryRow("SELECT uuid FROM containers WHERE kind = 'root'").Scan(&containerUUID); err != nil {
+		t.Fatalf("find root container: %v", err)
+	}
+	question := "What changed?"
+	promise, err := s.Promises.CreateWithAttribution(attr, store.PromiseCreateParams{
+		OwnerPrincipalRef: attr.PrincipalRef, Subject: "Review snapshot behavior",
+		ReviewQuestion: &question, SubjectContainerUUID: &containerUUID,
+		ReviewAt: "2000-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("create promise: %v", err)
+	}
+	note := "The snapshot must remember this review"
+	promise, err = s.Promises.RenewWithAttribution(attr, promise.UUID, store.PromiseReviewParams{
+		ReviewAt: "2099-01-01T00:00:00Z", Note: &note,
+	}, promise.ETag)
+	if err != nil {
+		t.Fatalf("renew promise: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "promises.json")
+	result, err := Export(source.DB, ExportOptions{OutputPath: outputPath, Canonical: true})
+	if err != nil {
+		t.Fatalf("export promises: %v", err)
+	}
+	if result.PromiseCount != 1 {
+		t.Fatalf("export promise count = %d, want 1", result.PromiseCount)
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if strings.Index(string(data), `"promises"`) < strings.Index(string(data), `"tasks"`) {
+		t.Fatalf("canonical top-level order places promises before tasks: %s", data)
+	}
+
+	target := createTestDB(t)
+	defer func() { _ = target.Close() }()
+	imported, err := Import(target, ImportOptions{InputPath: outputPath})
+	if err != nil {
+		t.Fatalf("import promises: %v", err)
+	}
+	if imported.PromiseCount != 1 {
+		t.Fatalf("import promise count = %d, want 1", imported.PromiseCount)
+	}
+	var reloadedID, reloadedContainer, reloadedReviewedAt, reloadedNote, reloadedReviewAt string
+	var reloadedETag int64
+	if err := target.QueryRow(`
+		SELECT id, subject_container_uuid, last_reviewed_at, last_review_note, review_at, etag
+		  FROM promises WHERE uuid = ?
+	`, promise.UUID).Scan(&reloadedID, &reloadedContainer, &reloadedReviewedAt, &reloadedNote, &reloadedReviewAt, &reloadedETag); err != nil {
+		t.Fatalf("read imported promise: %v", err)
+	}
+	if reloadedID != promise.ID || reloadedContainer != containerUUID ||
+		reloadedReviewedAt != *promise.LastReviewedAt || reloadedNote != note ||
+		reloadedReviewAt != promise.ReviewAt || reloadedETag != promise.ETag {
+		t.Fatalf("imported promise mismatch: id=%s container=%s reviewed=%s note=%s review_at=%s etag=%d",
+			reloadedID, reloadedContainer, reloadedReviewedAt, reloadedNote, reloadedReviewAt, reloadedETag)
+	}
+	var importedEvents int
+	if err := target.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_type = 'promise'").Scan(&importedEvents); err != nil {
+		t.Fatalf("count imported promise events: %v", err)
+	}
+	if importedEvents != 0 {
+		t.Fatalf("snapshot import replayed %d promise events, want 0", importedEvents)
 	}
 }
 

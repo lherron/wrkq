@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/webhooksub"
 )
@@ -163,6 +164,43 @@ type CampaignPayload struct {
 	NewCampaignState string  `json:"new_campaign_state"`
 }
 
+// PromiseProjection is the promise-specific resource projection carried by
+// promise webhooks. It deliberately does not reuse the task payload: promises
+// have principal-owned attention fields and may have no task or project.
+type PromiseProjection struct {
+	ID                string  `json:"id"`
+	UUID              string  `json:"uuid"`
+	OwnerPrincipalRef string  `json:"owner_principal_ref"`
+	Subject           string  `json:"subject"`
+	ReviewQuestion    *string `json:"review_question"`
+	ReviewAt          string  `json:"review_at"`
+	State             string  `json:"state"`
+	LastReviewedAt    *string `json:"last_reviewed_at"`
+	LastReviewNote    *string `json:"last_review_note"`
+	ETag              int64   `json:"etag"`
+}
+
+// PromiseSubjectRef identifies the live subject used to scope a promise
+// webhook. A standalone promise carries JSON null and has no dispatch target.
+type PromiseSubjectRef struct {
+	Type string `json:"type"`
+	UUID string `json:"uuid"`
+	ID   string `json:"id"`
+	Path string `json:"path"`
+}
+
+// PromisePayload is the typed promise webhook body defined by
+// WRKQ_PROMISES.md. Changes is the event delta, while Promise is the committed
+// post-mutation projection.
+type PromisePayload struct {
+	Event      string                 `json:"event"`
+	Promise    PromiseProjection      `json:"promise"`
+	SubjectRef *PromiseSubjectRef     `json:"subject_ref"`
+	Changes    map[string]interface{} `json:"changes"`
+	Actor      string                 `json:"actor"`
+	OccurredAt string                 `json:"occurred_at"`
+}
+
 type webhookTargetPayload interface {
 	webhookEvent() string
 	applyWebhookTemplate(string) string
@@ -185,6 +223,15 @@ func (p CampaignPayload) applyWebhookTemplate(raw string) string {
 	result := strings.ReplaceAll(raw, "{campaign_id}", p.CampaignID)
 	result = strings.ReplaceAll(result, "{campaign_uuid}", p.CampaignUUID)
 	return strings.ReplaceAll(result, "{campaign_path}", p.CampaignPath)
+}
+
+func (p PromisePayload) webhookEvent() string {
+	return p.Event
+}
+
+func (p PromisePayload) applyWebhookTemplate(raw string) string {
+	result := strings.ReplaceAll(raw, "{promise_id}", p.Promise.ID)
+	return strings.ReplaceAll(result, "{promise_uuid}", p.Promise.UUID)
 }
 
 // TaskInfo carries task metadata needed for webhook dispatch.
@@ -377,6 +424,86 @@ func DispatchCampaignTransition(
 	// committed event is the durable identity; this goroutine is only a
 	// best-effort hint and may be lost if the process exits.
 	go dispatchURLs(urls, payload)
+}
+
+// DispatchPromiseEvent resolves an attached promise through its subject's
+// container chain and delivers the typed promise projection. Standalone
+// promises intentionally return before subscription collection: the existing
+// webhook model has no global/principal scope for them.
+func DispatchPromiseEvent(
+	database *db.DB,
+	promise domain.Promise,
+	event string,
+	changes map[string]interface{},
+	metadata events.EventMetadata,
+	principalRef string,
+) {
+	containerUUID, subjectRef, err := lookupPromiseSubject(database, &promise)
+	if err != nil {
+		log.Printf("webhooks: lookup promise subject %s failed: %v", promise.ID, err)
+		return
+	}
+	if containerUUID == "" {
+		return
+	}
+	if changes == nil {
+		changes = map[string]interface{}{}
+	}
+	actor := strings.TrimSpace(principalRef)
+	if actor == "" {
+		actor = "system"
+	}
+	payload := PromisePayload{
+		Event: event,
+		Promise: PromiseProjection{
+			ID: promise.ID, UUID: promise.UUID,
+			OwnerPrincipalRef: promise.OwnerPrincipalRef,
+			Subject:           promise.Subject, ReviewQuestion: promise.ReviewQuestion,
+			ReviewAt: promise.ReviewAt, State: string(promise.State),
+			LastReviewedAt: promise.LastReviewedAt, LastReviewNote: promise.LastReviewNote,
+			ETag: promise.ETag,
+		},
+		SubjectRef: subjectRef,
+		Changes:    changes,
+		Actor:      actor,
+		OccurredAt: metadata.Timestamp,
+	}
+	urls, err := ResolveWebhookTargets(database, containerUUID, payload)
+	if err != nil {
+		log.Printf("webhooks: resolve targets for promise %s failed: %v", promise.ID, err)
+		return
+	}
+	dispatchURLs(urls, payload)
+}
+
+func lookupPromiseSubject(database *db.DB, promise *domain.Promise) (string, *PromiseSubjectRef, error) {
+	if promise.SubjectTaskUUID != nil {
+		var containerUUID, id, path string
+		err := database.QueryRow(`
+			SELECT t.project_uuid, t.id, COALESCE(cp.path || '/' || t.slug, t.slug)
+			  FROM tasks t
+			  LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+			 WHERE t.uuid = ?
+		`, *promise.SubjectTaskUUID).Scan(&containerUUID, &id, &path)
+		if err != nil {
+			return "", nil, err
+		}
+		return containerUUID, &PromiseSubjectRef{Type: "task", UUID: *promise.SubjectTaskUUID, ID: id, Path: path}, nil
+	}
+	if promise.SubjectContainerUUID != nil {
+		var id, path string
+		err := database.QueryRow(`
+			SELECT c.id, COALESCE(cp.path, c.slug)
+			  FROM containers c
+			  LEFT JOIN v_container_paths cp ON cp.uuid = c.uuid
+			 WHERE c.uuid = ?
+		`, *promise.SubjectContainerUUID).Scan(&id, &path)
+		if err != nil {
+			return "", nil, err
+		}
+		return *promise.SubjectContainerUUID, &PromiseSubjectRef{Type: "container", UUID: *promise.SubjectContainerUUID, ID: id, Path: path}, nil
+	}
+	return "", nil, nil
 }
 
 func parseLabels(raw *string) []string {
@@ -609,6 +736,10 @@ func subscriptionMatchesEvent(sub webhookSubscription, event string) bool {
 			if isContainerWebhookEvent(event) {
 				return true
 			}
+		case "promise", "promise.*":
+			if isPromiseWebhookEvent(event) {
+				return true
+			}
 		default:
 			if strings.EqualFold(allowed, event) {
 				return true
@@ -626,8 +757,12 @@ func isContainerWebhookEvent(event string) bool {
 	return strings.HasPrefix(event, "container.")
 }
 
+func isPromiseWebhookEvent(event string) bool {
+	return strings.HasPrefix(event, "promise.")
+}
+
 func isTaskWebhookEvent(event string) bool {
-	return !isWorkflowWebhookEvent(event) && !isContainerWebhookEvent(event)
+	return !isWorkflowWebhookEvent(event) && !isContainerWebhookEvent(event) && !isPromiseWebhookEvent(event)
 }
 
 func isValidWebhookURL(raw string) bool {

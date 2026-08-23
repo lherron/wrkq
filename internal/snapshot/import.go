@@ -58,6 +58,7 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 			SnapshotRev:    snap.Meta.SnapshotRev,
 			ContainerCount: len(snap.Containers),
 			TaskCount:      len(snap.Tasks),
+			PromiseCount:   len(snap.Promises),
 			CommentCount:   len(snap.Comments),
 			DryRun:         true,
 		}, nil
@@ -77,13 +78,17 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		}
 	}
 
-	// Import in dependency order: containers -> tasks -> comments
+	// Import in dependency order: containers -> tasks -> promises -> comments
 	if err := importContainers(tx, &snap); err != nil {
 		return nil, fmt.Errorf("failed to import containers: %w", err)
 	}
 
 	if err := importTasks(tx, &snap); err != nil {
 		return nil, fmt.Errorf("failed to import tasks: %w", err)
+	}
+
+	if err := importPromises(tx, &snap); err != nil {
+		return nil, fmt.Errorf("failed to import promises: %w", err)
 	}
 
 	if err := importComments(tx, &snap); err != nil {
@@ -105,6 +110,7 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		SnapshotRev:    snap.Meta.SnapshotRev,
 		ContainerCount: len(snap.Containers),
 		TaskCount:      len(snap.Tasks),
+		PromiseCount:   len(snap.Promises),
 		CommentCount:   len(snap.Comments),
 		DryRun:         false,
 	}, nil
@@ -199,6 +205,23 @@ func validateSnapshot(snap *Snapshot) error {
 		}
 	}
 
+	// Attached promises must reference a subject present in the same snapshot.
+	for uuid, promise := range snap.Promises {
+		if promise.SubjectTaskUUID != nil {
+			if _, ok := snap.Tasks[*promise.SubjectTaskUUID]; !ok {
+				return fmt.Errorf("promise %s references unknown task %s", uuid, *promise.SubjectTaskUUID)
+			}
+		}
+		if promise.SubjectContainerUUID != nil {
+			if _, ok := snap.Containers[*promise.SubjectContainerUUID]; !ok {
+				return fmt.Errorf("promise %s references unknown container %s", uuid, *promise.SubjectContainerUUID)
+			}
+		}
+		if promise.SubjectTaskUUID != nil && promise.SubjectContainerUUID != nil {
+			return fmt.Errorf("promise %s references both a task and container", uuid)
+		}
+	}
+
 	// Comments must reference valid tasks.
 	for uuid, comment := range snap.Comments {
 		if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
@@ -237,12 +260,20 @@ func isDatabaseEmpty(db *sql.DB) (bool, error) {
 		return false, nil
 	}
 
+	// Standalone promises make an otherwise root-only database non-empty.
+	if err := db.QueryRow("SELECT COUNT(*) FROM promises").Scan(&count); err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return false, nil
+	}
+
 	return true, nil
 }
 
 func truncateTables(tx *sql.Tx) error {
 	// Delete in reverse dependency order
-	tables := []string{"comments", "attachments", "tasks", "containers"}
+	tables := []string{"comments", "attachments", "promises", "tasks", "containers"}
 
 	for _, table := range tables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", table)); err != nil {
@@ -251,7 +282,7 @@ func truncateTables(tx *sql.Tx) error {
 	}
 
 	// Reset sequences
-	seqTables := []string{"container_seq", "task_seq", "attachment_seq"}
+	seqTables := []string{"container_seq", "task_seq", "promise_seq", "attachment_seq"}
 	for _, seq := range seqTables {
 		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", seq)); err != nil {
 			return fmt.Errorf("failed to reset %s: %w", seq, err)
@@ -482,6 +513,74 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	}
 
 	return nil
+}
+
+func importPromises(tx *sql.Tx, snap *Snapshot) error {
+	uuids := make([]string, 0, len(snap.Promises))
+	for uuid := range snap.Promises {
+		uuids = append(uuids, uuid)
+	}
+	sort.Strings(uuids)
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO promises (
+			uuid, id, owner_principal_ref, subject, review_question,
+			subject_task_uuid, subject_container_uuid, review_at, state,
+			closed_at, last_reviewed_at, last_review_note, meta, etag,
+			created_at, updated_at, created_by_principal_ref,
+			created_by_scope_ref, updated_by_principal_ref, updated_by_scope_ref
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(uuid) DO UPDATE SET
+			id = excluded.id,
+			owner_principal_ref = excluded.owner_principal_ref,
+			subject = excluded.subject,
+			review_question = excluded.review_question,
+			subject_task_uuid = excluded.subject_task_uuid,
+			subject_container_uuid = excluded.subject_container_uuid,
+			review_at = excluded.review_at,
+			state = excluded.state,
+			closed_at = excluded.closed_at,
+			last_reviewed_at = excluded.last_reviewed_at,
+			last_review_note = excluded.last_review_note,
+			meta = excluded.meta,
+			etag = excluded.etag,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at,
+			created_by_principal_ref = excluded.created_by_principal_ref,
+			created_by_scope_ref = excluded.created_by_scope_ref,
+			updated_by_principal_ref = excluded.updated_by_principal_ref,
+			updated_by_scope_ref = excluded.updated_by_scope_ref
+	`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, uuid := range uuids {
+		promise := snap.Promises[uuid]
+		if _, err := stmt.Exec(
+			uuid, promise.ID, promise.OwnerPrincipalRef, promise.Subject,
+			nullableSnapshotPointer(promise.ReviewQuestion),
+			nullableSnapshotPointer(promise.SubjectTaskUUID),
+			nullableSnapshotPointer(promise.SubjectContainerUUID),
+			promise.ReviewAt, promise.State, nullableSnapshotPointer(promise.ClosedAt),
+			nullableSnapshotPointer(promise.LastReviewedAt),
+			nullableSnapshotPointer(promise.LastReviewNote), nullableSnapshotPointer(promise.Meta),
+			promise.ETag, promise.CreatedAt, promise.UpdatedAt,
+			promise.CreatedByPrincipalRef, nullableSnapshotPointer(promise.CreatedByScopeRef),
+			promise.UpdatedByPrincipalRef, nullableSnapshotPointer(promise.UpdatedByScopeRef),
+		); err != nil {
+			return fmt.Errorf("failed to import promise %s: %w", uuid, err)
+		}
+	}
+	return nil
+}
+
+func nullableSnapshotPointer(value *string) interface{} {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 func importComments(tx *sql.Tx, snap *Snapshot) error {

@@ -4,12 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 // PromiseStore persists principal-owned attention promises. API-layer
@@ -88,6 +90,8 @@ func (ps *PromiseStore) CreateWithAttribution(attr attribution.Attribution, para
 	}
 
 	var created *domain.Promise
+	var webhookMetadata events.EventMetadata
+	var webhookChanges map[string]interface{}
 	err = ps.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		columns := "id, owner_principal_ref, subject, review_question, subject_task_uuid, subject_container_uuid, review_at, meta, created_by_principal_ref, created_by_scope_ref, updated_by_principal_ref, updated_by_scope_ref"
 		placeholders := "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
@@ -131,8 +135,13 @@ func (ps *PromiseStore) CreateWithAttribution(attr attribution.Attribution, para
 		if params.OnBehalfAssertedBy != nil {
 			payload["on_behalf_asserted_by"] = *params.OnBehalfAssertedBy
 		}
-		return logPromiseEvent(tx, ew, attr, created.UUID, "promise.created", created.ETag, payload)
+		webhookChanges = payload
+		webhookMetadata, err = logPromiseEvent(tx, ew, attr, created.UUID, "promise.created", created.ETag, payload)
+		return err
 	})
+	if err == nil && created != nil {
+		webhooks.DispatchPromiseEvent(ps.store.db, *created, "promise.created", webhookChanges, webhookMetadata, attr.PrincipalRef)
+	}
 	return created, err
 }
 
@@ -248,6 +257,7 @@ func (ps *PromiseStore) UpdateFieldsWithAttribution(attr attribution.Attribution
 	}
 
 	var newETag int64
+	var webhookMetadata events.EventMetadata
 	err := ps.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		current, err := getPromiseTx(tx, promiseUUID)
 		if err != nil {
@@ -276,8 +286,12 @@ func (ps *PromiseStore) UpdateFieldsWithAttribution(attr attribution.Attribution
 			return fmt.Errorf("failed to update promise: %w", err)
 		}
 		newETag = current.ETag + 1
-		return logPromiseEvent(tx, ew, attr, promiseUUID, "promise.updated", newETag, normalized)
+		webhookMetadata, err = logPromiseEvent(tx, ew, attr, promiseUUID, "promise.updated", newETag, normalized)
+		return err
 	})
+	if err == nil {
+		ps.dispatchPromiseWebhook(promiseUUID, "promise.updated", normalized, webhookMetadata, attr.PrincipalRef)
+	}
 	return newETag, err
 }
 
@@ -305,6 +319,9 @@ func (ps *PromiseStore) reviewWithAttribution(attr attribution.Attribution, prom
 		return nil, err
 	}
 	var reviewed *domain.Promise
+	var webhookMetadata events.EventMetadata
+	var webhookChanges map[string]interface{}
+	var webhookEvent string
 	err := ps.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		current, err := getPromiseTx(tx, promiseUUID)
 		if err != nil {
@@ -358,12 +375,18 @@ func (ps *PromiseStore) reviewWithAttribution(attr attribution.Attribution, prom
 			payload["closed_at"] = reviewedAt
 		}
 		newETag := current.ETag + 1
-		if err := logPromiseEvent(tx, ew, attr, promiseUUID, eventType, newETag, payload); err != nil {
+		webhookMetadata, err = logPromiseEvent(tx, ew, attr, promiseUUID, eventType, newETag, payload)
+		if err != nil {
 			return err
 		}
+		webhookChanges = payload
+		webhookEvent = eventType
 		reviewed, err = getPromiseTx(tx, promiseUUID)
 		return err
 	})
+	if err == nil && reviewed != nil {
+		webhooks.DispatchPromiseEvent(ps.store.db, *reviewed, webhookEvent, webhookChanges, webhookMetadata, attr.PrincipalRef)
+	}
 	return reviewed, err
 }
 
@@ -391,6 +414,8 @@ func (ps *PromiseStore) retargetWithAttribution(attr attribution.Attribution, pr
 		return nil, fmt.Errorf("promise may reference at most one task or container")
 	}
 	var updated *domain.Promise
+	var webhookMetadata events.EventMetadata
+	var webhookChanges map[string]interface{}
 	err := ps.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		current, err := getPromiseTx(tx, promiseUUID)
 		if err != nil {
@@ -415,12 +440,17 @@ func (ps *PromiseStore) retargetWithAttribution(attr attribution.Attribution, pr
 			"previous_subject_ref":   promiseSubjectRef(current),
 		}
 		newETag := current.ETag + 1
-		if err := logPromiseEvent(tx, ew, attr, promiseUUID, "promise.retargeted", newETag, payload); err != nil {
+		webhookMetadata, err = logPromiseEvent(tx, ew, attr, promiseUUID, "promise.retargeted", newETag, payload)
+		if err != nil {
 			return err
 		}
+		webhookChanges = payload
 		updated, err = getPromiseTx(tx, promiseUUID)
 		return err
 	})
+	if err == nil && updated != nil {
+		webhooks.DispatchPromiseEvent(ps.store.db, *updated, "promise.retargeted", webhookChanges, webhookMetadata, attr.PrincipalRef)
+	}
 	return updated, err
 }
 
@@ -430,7 +460,10 @@ func (ps *PromiseStore) PurgeWithAttribution(attr attribution.Attribution, promi
 	if err := requireAttribution(attr); err != nil {
 		return err
 	}
-	return ps.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+	var purged *domain.Promise
+	var webhookMetadata events.EventMetadata
+	changes := map[string]interface{}{}
+	err := ps.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		current, err := getPromiseTx(tx, promiseUUID)
 		if err != nil {
 			return err
@@ -438,12 +471,19 @@ func (ps *PromiseStore) PurgeWithAttribution(attr attribution.Attribution, promi
 		if err := checkETag(current.ETag, ifMatch); err != nil {
 			return err
 		}
-		if err := logPromiseEvent(tx, ew, attr, promiseUUID, "promise.purged", current.ETag, map[string]interface{}{"id": current.ID}); err != nil {
+		purged = current
+		changes = map[string]interface{}{"id": current.ID}
+		webhookMetadata, err = logPromiseEvent(tx, ew, attr, promiseUUID, "promise.purged", current.ETag, changes)
+		if err != nil {
 			return err
 		}
 		_, err = tx.Exec("DELETE FROM promises WHERE uuid = ?", promiseUUID)
 		return err
 	})
+	if err == nil && purged != nil {
+		webhooks.DispatchPromiseEvent(ps.store.db, *purged, "promise.purged", changes, webhookMetadata, attr.PrincipalRef)
+	}
+	return err
 }
 
 func (ps *PromiseStore) query(query string, args ...interface{}) ([]domain.Promise, error) {
@@ -491,13 +531,13 @@ func getPromiseTx(tx *sql.Tx, uuid string) (*domain.Promise, error) {
 	return promise, nil
 }
 
-func logPromiseEvent(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, promiseUUID, eventType string, etag int64, payload map[string]interface{}) error {
+func logPromiseEvent(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, promiseUUID, eventType string, etag int64, payload map[string]interface{}) (events.EventMetadata, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal %s payload: %w", eventType, err)
+		return events.EventMetadata{}, fmt.Errorf("failed to marshal %s payload: %w", eventType, err)
 	}
 	text := string(encoded)
-	if err := ew.LogEvent(tx, &domain.Event{
+	metadata, err := ew.LogEventReturning(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
 		ResourceType: "promise",
@@ -505,10 +545,20 @@ func logPromiseEvent(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution
 		EventType:    eventType,
 		ETag:         &etag,
 		Payload:      &text,
-	}); err != nil {
-		return fmt.Errorf("failed to log %s event: %w", eventType, err)
+	})
+	if err != nil {
+		return events.EventMetadata{}, fmt.Errorf("failed to log %s event: %w", eventType, err)
 	}
-	return nil
+	return metadata, nil
+}
+
+func (ps *PromiseStore) dispatchPromiseWebhook(promiseUUID, event string, changes map[string]interface{}, metadata events.EventMetadata, principalRef string) {
+	promise, err := ps.GetByUUID(promiseUUID)
+	if err != nil {
+		log.Printf("webhooks: read committed promise %s failed: %v", promiseUUID, err)
+		return
+	}
+	webhooks.DispatchPromiseEvent(ps.store.db, *promise, event, changes, metadata, principalRef)
 }
 
 func nullableStringValue(value *string) interface{} {
@@ -583,7 +633,7 @@ func retargetPromisesForPurge(tx *sql.Tx, ew *events.Writer, attr attribution.At
 				"slug": slug,
 			},
 		}
-		if err := logPromiseEvent(tx, ew, attr, item.uuid, "promise.retargeted", item.etag+1, payload); err != nil {
+		if _, err := logPromiseEvent(tx, ew, attr, item.uuid, "promise.retargeted", item.etag+1, payload); err != nil {
 			return err
 		}
 	}

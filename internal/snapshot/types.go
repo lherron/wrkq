@@ -19,9 +19,34 @@ type Snapshot struct {
 	Meta       Meta                      `json:"meta"`
 	Containers map[string]ContainerEntry `json:"containers,omitempty"`
 	Tasks      map[string]TaskEntry      `json:"tasks,omitempty"`
+	Promises   map[string]PromiseEntry   `json:"promises,omitempty"`
 	Comments   map[string]CommentEntry   `json:"comments,omitempty"`
 	Links      map[string]LinkEntry      `json:"links,omitempty"`
 	Events     map[string]EventEntry     `json:"events,omitempty"`
+}
+
+// PromiseEntry represents a principal-owned attention promise in the
+// snapshot. Keys under "promises" are UUIDs.
+type PromiseEntry struct {
+	ID                    string  `json:"id"`
+	OwnerPrincipalRef     string  `json:"owner_principal_ref"`
+	Subject               string  `json:"subject"`
+	ReviewQuestion        *string `json:"review_question,omitempty"`
+	SubjectTaskUUID       *string `json:"subject_task_uuid,omitempty"`
+	SubjectContainerUUID  *string `json:"subject_container_uuid,omitempty"`
+	ReviewAt              string  `json:"review_at"`
+	State                 string  `json:"state"`
+	ClosedAt              *string `json:"closed_at,omitempty"`
+	LastReviewedAt        *string `json:"last_reviewed_at,omitempty"`
+	LastReviewNote        *string `json:"last_review_note,omitempty"`
+	Meta                  *string `json:"meta,omitempty"`
+	ETag                  int64   `json:"etag"`
+	CreatedAt             string  `json:"created_at"`
+	UpdatedAt             string  `json:"updated_at"`
+	CreatedByPrincipalRef string  `json:"created_by_principal_ref"`
+	CreatedByScopeRef     *string `json:"created_by_scope_ref,omitempty"`
+	UpdatedByPrincipalRef string  `json:"updated_by_principal_ref"`
+	UpdatedByScopeRef     *string `json:"updated_by_scope_ref,omitempty"`
 }
 
 // Meta contains snapshot metadata.
@@ -145,6 +170,7 @@ type ExportResult struct {
 	SnapshotRev    string `json:"snapshot_rev"`
 	ContainerCount int    `json:"containers"`
 	TaskCount      int    `json:"tasks"`
+	PromiseCount   int    `json:"promises,omitempty"`
 	CommentCount   int    `json:"comments"`
 	LinkCount      int    `json:"links,omitempty"`
 	EventCount     int    `json:"events,omitempty"`
@@ -156,6 +182,7 @@ type ImportResult struct {
 	SnapshotRev    string `json:"snapshot_rev"`
 	ContainerCount int    `json:"containers"`
 	TaskCount      int    `json:"tasks"`
+	PromiseCount   int    `json:"promises,omitempty"`
 	CommentCount   int    `json:"comments"`
 	DryRun         bool   `json:"dry_run,omitempty"`
 }

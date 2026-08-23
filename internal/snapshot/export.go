@@ -70,6 +70,7 @@ func Export(db *sql.DB, opts ExportOptions) (*ExportResult, error) {
 		SnapshotRev:    snapshotRev,
 		ContainerCount: len(snap.Containers),
 		TaskCount:      len(snap.Tasks),
+		PromiseCount:   len(snap.Promises),
 		CommentCount:   len(snap.Comments),
 		LinkCount:      len(snap.Links),
 		EventCount:     len(snap.Events),
@@ -128,6 +129,7 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 		},
 		Containers: make(map[string]ContainerEntry),
 		Tasks:      make(map[string]TaskEntry),
+		Promises:   make(map[string]PromiseEntry),
 		Comments:   make(map[string]CommentEntry),
 		Links:      make(map[string]LinkEntry),
 	}
@@ -140,6 +142,11 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 	// Export tasks
 	if err := exportTasks(db, snap); err != nil {
 		return nil, fmt.Errorf("failed to export tasks: %w", err)
+	}
+
+	// Export promises after their optional task/container subjects.
+	if err := exportPromises(db, snap); err != nil {
+		return nil, fmt.Errorf("failed to export promises: %w", err)
 	}
 
 	// Export comments
@@ -155,6 +162,68 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 	}
 
 	return snap, nil
+}
+
+func exportPromises(db *sql.DB, snap *Snapshot) error {
+	rows, err := db.Query(`
+		SELECT uuid, id, owner_principal_ref, subject, review_question,
+		       subject_task_uuid, subject_container_uuid, review_at, state,
+		       closed_at, last_reviewed_at, last_review_note, meta, etag,
+		       created_at, updated_at, created_by_principal_ref,
+		       created_by_scope_ref, updated_by_principal_ref, updated_by_scope_ref
+		  FROM promises
+		 ORDER BY uuid
+	`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var uuid string
+		var entry PromiseEntry
+		var reviewQuestion, subjectTaskUUID, subjectContainerUUID sql.NullString
+		var closedAt, lastReviewedAt, lastReviewNote, meta sql.NullString
+		var createdByScopeRef, updatedByScopeRef sql.NullString
+		if err := rows.Scan(
+			&uuid, &entry.ID, &entry.OwnerPrincipalRef, &entry.Subject, &reviewQuestion,
+			&subjectTaskUUID, &subjectContainerUUID, &entry.ReviewAt, &entry.State,
+			&closedAt, &lastReviewedAt, &lastReviewNote, &meta, &entry.ETag,
+			&entry.CreatedAt, &entry.UpdatedAt, &entry.CreatedByPrincipalRef,
+			&createdByScopeRef, &entry.UpdatedByPrincipalRef, &updatedByScopeRef,
+		); err != nil {
+			return err
+		}
+		if reviewQuestion.Valid {
+			entry.ReviewQuestion = &reviewQuestion.String
+		}
+		if subjectTaskUUID.Valid {
+			entry.SubjectTaskUUID = &subjectTaskUUID.String
+		}
+		if subjectContainerUUID.Valid {
+			entry.SubjectContainerUUID = &subjectContainerUUID.String
+		}
+		if closedAt.Valid {
+			entry.ClosedAt = &closedAt.String
+		}
+		if lastReviewedAt.Valid {
+			entry.LastReviewedAt = &lastReviewedAt.String
+		}
+		if lastReviewNote.Valid {
+			entry.LastReviewNote = &lastReviewNote.String
+		}
+		if meta.Valid {
+			entry.Meta = &meta.String
+		}
+		if createdByScopeRef.Valid {
+			entry.CreatedByScopeRef = &createdByScopeRef.String
+		}
+		if updatedByScopeRef.Valid {
+			entry.UpdatedByScopeRef = &updatedByScopeRef.String
+		}
+		snap.Promises[uuid] = entry
+	}
+	return rows.Err()
 }
 
 func exportContainers(db *sql.DB, snap *Snapshot) error {

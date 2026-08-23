@@ -873,6 +873,65 @@ interface WrkqRelationAddParams {
 }
 ```
 
+#### Promise methods
+
+The first-class attention surface is published as `client.wrkq.promise.*` and
+forwards the complete `wrkq.promise.*` RPC family. Promise DTOs use the
+producer's camelCase wire shape. `subjectRef` is `null` for standalone promises;
+when present it identifies either a task or container. A subject-scoped `list`
+without `ownerPrincipalRef` deliberately returns matches for all owners.
+
+```text
+wrkq.promise.add
+wrkq.promise.show
+wrkq.promise.list
+wrkq.promise.ready
+wrkq.promise.edit
+wrkq.promise.renew
+wrkq.promise.resolve
+wrkq.promise.abandon
+wrkq.promise.attach
+wrkq.promise.detach
+wrkq.promise.delete
+```
+
+```ts
+type WrkqPromiseState = "open" | "resolved" | "abandoned";
+interface WrkqPromiseSubjectRef {
+  type: "task" | "container"; uuid: string; id: string; path: string;
+}
+interface WrkqPromise {
+  uuid: string; id: string; ownerPrincipalRef: string; subject: string;
+  reviewQuestion?: string; subjectRef: WrkqPromiseSubjectRef | null;
+  reviewAt: string; ready: boolean; readyFor?: string; state: WrkqPromiseState;
+  closedAt?: string; lastReviewedAt?: string; lastReviewNote?: string;
+  meta: Record<string, unknown>; etag: number;
+  createdAt: string; updatedAt: string;
+  createdByPrincipalRef: string; updatedByPrincipalRef: string;
+}
+interface WrkqPromiseAddParams {
+  ownerPrincipalRef?: string; onBehalf?: boolean; subject?: string;
+  reviewQuestion?: string; task?: string; container?: string;
+  reviewAt?: string; reviewIn?: string; meta?: Record<string, unknown>;
+  principalRef?: string;
+}
+interface WrkqPromiseListParams {
+  ownerPrincipalRef?: string; state?: WrkqPromiseState | "all";
+  task?: string; container?: string; principalRef?: string;
+}
+interface WrkqPromiseReviewParams {
+  promise: string; reviewAt?: string; reviewIn?: string; note?: string;
+  ifMatch?: number; principalRef?: string;
+}
+```
+
+`edit` carries optional `subject`, `reviewQuestion`, `reviewAt`/`reviewIn`,
+`meta`, `ifMatch`, and `principalRef`; `attach`/`detach` carry the promise plus
+optional task/container target and CAS; `delete` carries
+`mode?: "soft" | "abandon" | "purge"`. `list` and `ready` return
+`{items: WrkqPromise[]}`; all mutation methods and `show` return one
+`WrkqPromise`.
+
 #### Container/project methods
 
 Read + full mutation surface (container mutation shipped in T-04849 / gap1):

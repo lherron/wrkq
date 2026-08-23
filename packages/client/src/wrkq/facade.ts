@@ -64,6 +64,16 @@ import type {
   WrkqProjectListViewParams,
   WrkqProjectSetRootParams,
   WrkqProjectsListView,
+  WrkqPromise,
+  WrkqPromiseAddParams,
+  WrkqPromiseDeleteParams,
+  WrkqPromiseEditParams,
+  WrkqPromiseListParams,
+  WrkqPromiseListResult,
+  WrkqPromiseReadyParams,
+  WrkqPromiseRetargetParams,
+  WrkqPromiseReviewParams,
+  WrkqPromiseShowParams,
   WrkqSearchListView,
   WrkqSearchListViewParams,
   WrkqFindListView,
@@ -135,6 +145,20 @@ export interface WrkqRelationFacade {
   add(params: WrkqRelationAddParams): Promise<WrkqRelation>;
   list(params: WrkqRelationListParams): Promise<WrkqRelationListResult>;
   remove(params: WrkqRelationRemoveParams): Promise<WrkqRelation>;
+}
+
+export interface WrkqPromiseFacade {
+  add(params: WrkqPromiseAddParams): Promise<WrkqPromise>;
+  show(params: WrkqPromiseShowParams): Promise<WrkqPromise>;
+  list(params?: WrkqPromiseListParams): Promise<WrkqPromiseListResult>;
+  ready(params?: WrkqPromiseReadyParams): Promise<WrkqPromiseListResult>;
+  edit(params: WrkqPromiseEditParams): Promise<WrkqPromise>;
+  renew(params: WrkqPromiseReviewParams): Promise<WrkqPromise>;
+  resolve(params: WrkqPromiseReviewParams): Promise<WrkqPromise>;
+  abandon(params: WrkqPromiseReviewParams): Promise<WrkqPromise>;
+  attach(params: WrkqPromiseRetargetParams): Promise<WrkqPromise>;
+  detach(params: WrkqPromiseRetargetParams): Promise<WrkqPromise>;
+  delete(params: WrkqPromiseDeleteParams): Promise<WrkqPromise>;
 }
 
 export interface WrkqContainerFacade {
@@ -233,6 +257,7 @@ export interface WrkqFacade {
   readonly comment: WrkqCommentFacade;
   readonly attachment: WrkqAttachmentFacade;
   readonly relation: WrkqRelationFacade;
+  readonly promise: WrkqPromiseFacade;
   readonly container: WrkqContainerFacade;
   readonly project: WrkqProjectFacade;
   readonly webhook: WrkqWebhookFacade;

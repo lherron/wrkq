@@ -158,6 +158,7 @@ func TestResolveWebhookTargets_BareStringDefaultsToAllEvents(t *testing.T) {
 	// object-form subscriber narrowed to task-only.
 	rootJSON := `[` +
 		`"http://example.com/all",` +
+		`{"url":"http://example.com/star","events":["*"]},` +
 		`{"url":"http://example.com/task-only","events":["task.*"]}` +
 		`]`
 	if _, err := s.Containers.UpdateFields(actorUUID, root.UUID, map[string]interface{}{"webhook_urls": rootJSON}, 0); err != nil {
@@ -171,8 +172,8 @@ func TestResolveWebhookTargets_BareStringDefaultsToAllEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWebhookTargets(task) failed: %v", err)
 	}
-	// Task event reaches both subscribers.
-	if want := []string{"http://example.com/all", "http://example.com/task-only"}; !reflect.DeepEqual(taskURLs, want) {
+	// Task event reaches the bare/default-all, explicit star, and task subscribers.
+	if want := []string{"http://example.com/all", "http://example.com/star", "http://example.com/task-only"}; !reflect.DeepEqual(taskURLs, want) {
 		t.Fatalf("task event targets\nexpected: %v\nactual:   %v", want, taskURLs)
 	}
 
@@ -180,10 +181,18 @@ func TestResolveWebhookTargets_BareStringDefaultsToAllEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWebhookTargets(workflow) failed: %v", err)
 	}
-	// Workflow event reaches ONLY the bare-string (default-all) subscriber;
-	// the task-only object subscriber is excluded.
-	if want := []string{"http://example.com/all"}; !reflect.DeepEqual(workflowURLs, want) {
+	// Workflow event reaches the bare/default-all and explicit star subscribers;
+	// the task-only object subscriber remains excluded.
+	if want := []string{"http://example.com/all", "http://example.com/star"}; !reflect.DeepEqual(workflowURLs, want) {
 		t.Fatalf("workflow event targets\nexpected: %v\nactual:   %v", want, workflowURLs)
+	}
+
+	promiseURLs, err := webhooks.ResolveWebhookTargets(database, root.UUID, webhooks.PromisePayload{Event: "promise.renewed"})
+	if err != nil {
+		t.Fatalf("ResolveWebhookTargets(promise) failed: %v", err)
+	}
+	if want := []string{"http://example.com/all", "http://example.com/star"}; !reflect.DeepEqual(promiseURLs, want) {
+		t.Fatalf("promise event targets\nexpected: %v\nactual:   %v", want, promiseURLs)
 	}
 }
 

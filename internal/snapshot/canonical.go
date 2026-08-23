@@ -44,9 +44,9 @@ func ComputeSnapshotRev(data []byte) string {
 }
 
 // buildOrderedSnapshot creates an ordered map structure for canonical JSON.
-// Order: meta, containers, tasks, comments, links, events
+// Order: meta, containers, tasks, promises, comments, links, events
 func buildOrderedSnapshot(s *Snapshot) orderedMap {
-	result := make(orderedMap, 0, 6)
+	result := make(orderedMap, 0, 7)
 
 	// meta (always present)
 	result = append(result, keyValue{"meta", buildOrderedMeta(&s.Meta)})
@@ -59,6 +59,11 @@ func buildOrderedSnapshot(s *Snapshot) orderedMap {
 	// tasks (if non-empty)
 	if len(s.Tasks) > 0 {
 		result = append(result, keyValue{"tasks", buildOrderedTasks(s.Tasks)})
+	}
+
+	// promises (if non-empty)
+	if len(s.Promises) > 0 {
+		result = append(result, keyValue{"promises", buildOrderedPromises(s.Promises)})
 	}
 
 	// comments (if non-empty)
@@ -248,6 +253,63 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 		result = append(result, keyValue{"updated_by_principal_ref", t.UpdatedByPrincipalRef})
 	}
 
+	return result
+}
+
+func buildOrderedPromises(promises map[string]PromiseEntry) orderedMap {
+	uuids := make([]string, 0, len(promises))
+	for uuid := range promises {
+		uuids = append(uuids, uuid)
+	}
+	sort.Strings(uuids)
+
+	result := make(orderedMap, 0, len(promises))
+	for _, uuid := range uuids {
+		promise := promises[uuid]
+		result = append(result, keyValue{uuid, buildOrderedPromise(&promise)})
+	}
+	return result
+}
+
+func buildOrderedPromise(p *PromiseEntry) orderedMap {
+	result := make(orderedMap, 0, 20)
+	if p.ClosedAt != nil {
+		result = append(result, keyValue{"closed_at", *p.ClosedAt})
+	}
+	result = append(result, keyValue{"created_at", p.CreatedAt})
+	result = append(result, keyValue{"created_by_principal_ref", p.CreatedByPrincipalRef})
+	if p.CreatedByScopeRef != nil {
+		result = append(result, keyValue{"created_by_scope_ref", *p.CreatedByScopeRef})
+	}
+	result = append(result, keyValue{"etag", p.ETag})
+	result = append(result, keyValue{"id", p.ID})
+	if p.LastReviewNote != nil {
+		result = append(result, keyValue{"last_review_note", *p.LastReviewNote})
+	}
+	if p.LastReviewedAt != nil {
+		result = append(result, keyValue{"last_reviewed_at", *p.LastReviewedAt})
+	}
+	if p.Meta != nil {
+		result = append(result, keyValue{"meta", *p.Meta})
+	}
+	result = append(result, keyValue{"owner_principal_ref", p.OwnerPrincipalRef})
+	result = append(result, keyValue{"review_at", p.ReviewAt})
+	if p.ReviewQuestion != nil {
+		result = append(result, keyValue{"review_question", *p.ReviewQuestion})
+	}
+	result = append(result, keyValue{"state", p.State})
+	result = append(result, keyValue{"subject", p.Subject})
+	if p.SubjectContainerUUID != nil {
+		result = append(result, keyValue{"subject_container_uuid", *p.SubjectContainerUUID})
+	}
+	if p.SubjectTaskUUID != nil {
+		result = append(result, keyValue{"subject_task_uuid", *p.SubjectTaskUUID})
+	}
+	result = append(result, keyValue{"updated_at", p.UpdatedAt})
+	result = append(result, keyValue{"updated_by_principal_ref", p.UpdatedByPrincipalRef})
+	if p.UpdatedByScopeRef != nil {
+		result = append(result, keyValue{"updated_by_scope_ref", *p.UpdatedByScopeRef})
+	}
 	return result
 }
 
