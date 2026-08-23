@@ -1,0 +1,56 @@
+id: wrkq.promise.principal-attention
+kind: contract
+status: proposed
+owner_project: wrkq
+scope: promise ownership, temporal readiness, lifecycle, audit, and webhook projections
+predicate: >
+  A promise is one principal's commitment to revisit a required text subject,
+  optionally attached to at most one live task or container. It is not a task
+  deadline, campaign schedule, scheduler transition, or authority to execute
+  work. Readiness is derived only from `state = open` and canonical
+  `review_at <= server now`; the API is the normalization authority for absolute
+  and relative review inputs, stores second-precision UTC `...Z`, and no client
+  supplies the comparison clock. Once ready, the promise remains in its owner's
+  ready queue until that owner renews, resolves, or abandons it.
+
+  The caller principal is recorded exactly as creator/updater attribution. An
+  accepted promise for another owner requires an explicit on-behalf assertion at
+  creation, and afterward only `owner_principal_ref` may edit, attach, detach,
+  renew, resolve, abandon, or purge the promise. Every mutation uses optimistic
+  etag concurrency and appends a promise event. Event-log payloads are
+  task-shaped changed-fields maps; review events additionally carry the prior
+  and next review instants as applicable and the review note. Webhook bodies are
+  separately built typed promise projections under a distinct `promise` family:
+  attached promises route through the subject container's ancestor subscription
+  chain, while standalone promises have no subscription scope and emit no
+  webhook. A purged attached subject clears the typed reference and emits
+  `promise.retargeted` with the lost reference instead of silently rewriting
+  history.
+authority:
+  repo: wrkq
+  surface: promises schema, wrkq.promise RPC/API/CLI methods, promise event-log rows, and promise webhook projections
+consumers:
+  - wrkq principals reviewing their own commitments
+  - session context and subject views surfacing ready or attached promises
+  - container-scoped webhook subscribers
+  - "@wrkq/client"
+source:
+  - WRKQ_PROMISES.md
+  - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
+  - architecture/records/invariants/wrkq.mutation.caller-owned-confirmation.yaml
+  - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
+  - internal/domain/validation.go
+  - internal/store/tasks.go
+  - internal/webhooks/webhooks.go
+required_tests: []
+last_verified: null
+enforced_by: "planned promise implementation; promote to active only after live schema, authority, temporal, RPC/parity, event, and webhook guards exist"
+reopen_when:
+  - promise readiness is stored or scheduled instead of derived from canonical review_at and server time
+  - a non-owner can mutate or purge an accepted promise after creation
+  - promise readiness authorizes work execution or acquires task-deadline or campaign-schedule semantics
+  - event-log payloads become webhook projections or promise events are classified as task webhook events
+  - standalone promises gain container-scoped webhook delivery without acquiring an explicit subscription scope
+  - purging an attached subject silently clears the reference without a promise.retargeted event
+supersedes: []
+superseded_by: null
