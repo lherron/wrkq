@@ -1,6 +1,6 @@
 # wrkq Promises: Design Handoff
 
-Status: design handoff, not yet an implementation specification
+Status: design handoff with decisions closed 2026-08-23; ready to shape into an implementation specification
 
 Discussion date: 2026-08-23
 
@@ -283,6 +283,9 @@ CREATE TABLE promises (
     CHECK (state IN ('open', 'resolved', 'abandoned')),
   closed_at TEXT,
 
+  last_reviewed_at TEXT,
+  last_review_note TEXT,
+
   meta TEXT,
   etag INTEGER NOT NULL DEFAULT 1 CHECK (etag >= 1),
 
@@ -395,8 +398,22 @@ A renewal event should record the review itself, for example:
 ```
 
 The event-log index `(resource_type, resource_uuid, id DESC)` already supports a
-promise timeline. Do not add `last_reviewed_at` or `review_count` to the domain
-row unless a measured query justifies denormalizing them.
+promise timeline and remains the full review history. The row additionally
+carries `last_reviewed_at` and `last_review_note` (set by renew, resolve, and
+abandon) so `show` and the ready queue can print "last time you said: ..."
+without walking the event log. Do not add `review_count` or further
+denormalization unless a measured query justifies it.
+
+Event payloads follow the task-event shape: a full row snapshot plus a
+changed-fields delta. `promise.renewed`, `promise.resolved`, and
+`promise.abandoned` additionally carry `previous_review_at`, `next_review_at`
+(renew only), and `note`. Promise events flow through existing webhook
+subscriptions in the first release; no promise-specific exclusion.
+
+Purging an attached task or container sets the typed reference to null via the
+foreign key, but the purge path must also emit `promise.retargeted` carrying the
+lost reference (uuid, id, slug). A silent `SET NULL` would leave the history
+lying about when and why the link disappeared.
 
 The `event_log.resource_type` SQL `CHECK` currently excludes promises, so a
 migration will have to rebuild or otherwise widen that table consistently.
@@ -469,11 +486,22 @@ possible. Application validation can enforce today's supported grammar while
 leaving the column capable of accepting a future genuinely generic principal
 grammar.
 
-The current local-trust CLI also cannot cryptographically distinguish “Cody ran
-`--for lance` because Lance asked” from an unsolicited use of that flag. The
-agreed product behavior is still owner-authorized auto-acceptance. Stronger
-proof later requires the runtime to provide delegation or request provenance;
-the promise row should not invent a false `accepted_by` event.
+The current local-trust CLI cannot cryptographically distinguish “Cody ran
+`--for lance` because Lance asked” from an unsolicited use of that flag.
+Ruling (2026-08-23): creating for a different owner requires an explicit
+`--on-behalf` assertion in addition to `--for`. Without it the mutation is
+rejected before insertion (acceptance scenario 7). With it the promise is
+accepted immediately and the creator's assertion is recorded in the
+`promise.created` payload (`on_behalf_asserted_by: <creator principal>`). This
+keeps the audit honest about who claimed authority and is the hook a future
+runtime delegation/request provenance slots into; the promise row must not
+invent a false `accepted_by` event.
+
+The default owner is the caller principal (`WRKQ_PRINCIPAL_REF` /
+`--principal-ref`). `--for lance` is sugar for `agent:lance` under today's
+grammar. Generalizing the principal grammar beyond `agent:<id>` is separate
+work and not part of this campaign; the column stays grammar-agnostic with no
+new `agent:`-only SQL check.
 
 ## Proposed CLI
 
@@ -500,14 +528,17 @@ Exact flags remain provisional, but the intended flows are:
 
 ```bash
 wrkq promise add \
-  --for lance \
+  --for lance --on-behalf \
   --in 7d \
   --subject "Check the HRC envelope rollout" \
   --question "Has hrcchat migration progressed? What is the next rollout boundary?"
 ```
 
 Expected result: an accepted `PR-xxxxx` owned by `agent:lance`, created by the
-acting Cody principal.
+acting Cody principal with the on-behalf assertion recorded. `--in <duration>`
+and `--at <timestamp>` are alternatives; both use wrkq's existing timestamp
+parsing and store absolute UTC. Omitting `--for` makes the caller the owner and
+`--on-behalf` is then not required.
 
 ### Attach at creation
 
@@ -566,13 +597,27 @@ remains an absolute UTC timestamp.
 A storage-only implementation will repeat the original failure. At least one
 prominent consumer must make ready promises hard to overlook.
 
-Potential consumers:
+Ruling (2026-08-23) — mandatory for MVP:
 
 - `wrkq promise ready` for explicit review;
-- a promise section in `wrkq check` or another habitual CLI surface;
-- the Taskboard home/portfolio view;
-- a bounded daily digest;
-- agent-session priming that shows promises owned by the active principal.
+- a promise section in `wrkq check`;
+- the **session context-template** (the injected session-start context block,
+  not the priming prompt) shows ready promises for the session's principal:
+  compact lines with ID, subject, ready-for duration, and review question.
+  Sleeping promises and an empty block are omitted.
+- subject-side visibility: `wrkq cat T-xxxxx` and campaign/container show list
+  attached promises (owner, review_at, state) so an agent working a subject
+  learns someone is revisiting it.
+
+Session-surface scoping: a standalone promise has no project, so it is
+owner-global and appears in every session of that principal. An attached
+promise derives its project from its task or container and appears only in
+sessions scoped to that project. Mable started in `hrc-runtime` sees her global
+promises plus those attached to hrc-runtime subjects, never those attached to
+wrkq tasks.
+
+Deferred consumers: the Taskboard home/portfolio view and a bounded daily
+digest.
 
 For agents, a ready promise must initially be observable state, not automatic
 execution. A later runtime policy may choose to:
@@ -599,7 +644,8 @@ The smallest useful release includes:
 7. CLI create/show/list/ready/renew/resolve/abandon/attach behavior.
 8. RPC/API/client contracts required to keep the current remote-first CLI
    architecture intact.
-9. At least one prominent ready-attention surface.
+9. The ready-attention surfaces ruled mandatory above (`ready`, `check`,
+    session context-template, subject-side listing).
 10. Snapshot/export/import handling so promises are not lost in administrative
     lifecycle operations.
 
@@ -718,29 +764,38 @@ do not install a promise-capable CLI onto the shared host independently of the
 mini `wrkqd` deployment. Validate protocol changes against an isolated installed
 instance, then cut the daemon and clients forward in one coordinated window.
 
-## Open decisions for the next session
+## Decisions closed 2026-08-23
 
-The design is coherent enough to shape into a specification, but these details
-remain intentionally unsettled:
+Lance ruled on the previously open decisions in review with mable:
 
-1. What runtime evidence authorizes an agent's `--for lance` creation, beyond
-   the current local-trust model?
-2. Should the broader wrkq principal grammar be generalized beyond `agent:<id>`
-   as part of this work or handled separately?
-3. Which ready-attention surface is mandatory for MVP completion: CLI only,
-   Taskboard, session priming, or a digest?
-4. Should `turn into work` be a transactional convenience command or remain a
-   manual create/attach/renew sequence?
-5. Is `subject` the best persisted field name, or should the public API use
-   `title` while retaining subject terminology?
-6. Should terminal vocabulary remain `resolved`/`abandoned`, or align with
-   another wrkq lifecycle vocabulary?
-7. Should standalone promises optionally capture a project/context container?
-8. What exact event payload snapshot is required for durable audit and webhook
-   consumers?
-9. Should likely duplicate promises warn, error, or remain entirely permitted?
-10. Should promise events participate in existing webhook subscriptions in the
-    first release?
+1. **On-behalf authority**: explicit `--on-behalf` assertion, recorded in the
+   `promise.created` payload; rejected without it. See *Principal ownership*.
+2. **Principal grammar**: separate work. Owner defaults from the caller
+   principal; `--for lance` is sugar for `agent:lance`.
+3. **Mandatory attention surface**: `wrkq promise ready`, `wrkq check`
+   section, session context-template (not priming prompt), and subject-side
+   listing on task/container show. See *Attention surfaces*.
+4. **Turn into work**: manual `attach` + `renew`/`resolve` sequence; no
+   transactional verb in MVP.
+5. **Field name**: `subject` everywhere, storage and API.
+6. **Terminal vocabulary**: `resolved` / `abandoned`; deliberately not aligned
+   with task states.
+7. **Project context for standalone promises**: none; owner-global until usage
+   proves a need.
+8. **Event payload**: full row snapshot plus changed-fields delta, matching
+   task events; review verbs add previous/next `review_at` and `note`.
+9. **Duplicates**: fully permitted, no detection or warning.
+10. **Webhooks**: promise events flow through existing subscriptions in the
+    first release.
+11. **Last review on the row**: add nullable `last_reviewed_at` and
+    `last_review_note`.
+12. **Purge detach**: purge path emits `promise.retargeted` with the lost
+    reference; FK `SET NULL` alone is insufficient.
+13. **Subject-side visibility**: in MVP.
+
+Remaining for the implementer: exact flag names, output fingerprints, and the
+context-template integration point (which lives outside wrkq; wrkq supplies the
+scoped ready query).
 
 ## Guiding invariant
 
