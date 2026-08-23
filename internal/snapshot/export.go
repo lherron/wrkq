@@ -398,7 +398,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 
 func exportComments(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, task_uuid, created_by_principal_ref, body, meta, etag,
+		SELECT uuid, id, task_uuid, container_uuid, created_by_principal_ref, body, meta, etag,
 		       created_at, updated_at, deleted_at, deleted_by_principal_ref
 		FROM comments
 		WHERE deleted_at IS NULL
@@ -410,23 +410,29 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var uuid, id, taskUUID, body, createdAt string
+		var uuid, id, body, createdAt string
+		var taskUUID, containerUUID sql.NullString
 		var createdByPrincipal, meta, updatedAt, deletedAt, deletedByPrincipal sql.NullString
 		var etag int64
 
-		if err := rows.Scan(&uuid, &id, &taskUUID, &createdByPrincipal, &body, &meta, &etag,
+		if err := rows.Scan(&uuid, &id, &taskUUID, &containerUUID, &createdByPrincipal, &body, &meta, &etag,
 			&createdAt, &updatedAt, &deletedAt, &deletedByPrincipal); err != nil {
 			return err
 		}
 
 		entry := CommentEntry{
 			ID:        id,
-			TaskUUID:  taskUUID,
 			Body:      body,
 			ETag:      etag,
 			CreatedAt: createdAt,
 		}
 
+		if taskUUID.Valid {
+			entry.TaskUUID = taskUUID.String
+		}
+		if containerUUID.Valid {
+			entry.ContainerUUID = containerUUID.String
+		}
 		if createdByPrincipal.Valid {
 			entry.CreatedByPrincipalRef = createdByPrincipal.String
 		}

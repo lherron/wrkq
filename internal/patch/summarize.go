@@ -194,9 +194,10 @@ func enrichFromBase(detail *OpDetail, entityType, uuid string, base *snapshot.Sn
 	case "comments":
 		if comment, ok := base.Comments[uuid]; ok {
 			detail.ID = comment.ID
-			// Try to get task context
 			if task, ok := base.Tasks[comment.TaskUUID]; ok {
 				detail.Path = "on " + task.ID
+			} else if container, ok := base.Containers[comment.ContainerUUID]; ok {
+				detail.Path = "on " + container.ID
 			}
 		}
 	}

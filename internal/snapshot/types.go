@@ -107,7 +107,8 @@ type TaskEntry struct {
 // Keys under "comments" are UUIDs.
 type CommentEntry struct {
 	ID                    string `json:"id"`
-	TaskUUID              string `json:"task_uuid"`
+	TaskUUID              string `json:"task_uuid,omitempty"`
+	ContainerUUID         string `json:"container_uuid,omitempty"`
 	CreatedByPrincipalRef string `json:"created_by_principal_ref,omitempty"`
 	Body                  string `json:"body"`
 	Meta                  string `json:"meta,omitempty"`

@@ -65,10 +65,23 @@ func validateSnapshotInvariants(snap *snapshot.Snapshot) []string {
 		}
 	}
 
-	// 2. FK constraints - comments must reference valid tasks
+	// 2. FK constraints - comments must reference exactly one valid task or container
 	for uuid, comment := range snap.Comments {
-		if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
-			errors = append(errors, fmt.Sprintf("comment %s references unknown task %s", uuid, comment.TaskUUID))
+		hasTask := comment.TaskUUID != ""
+		hasContainer := comment.ContainerUUID != ""
+		if hasTask == hasContainer {
+			errors = append(errors, fmt.Sprintf("comment %s must reference exactly one task or container", uuid))
+			continue
+		}
+		if hasTask {
+			if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
+				errors = append(errors, fmt.Sprintf("comment %s references unknown task %s", uuid, comment.TaskUUID))
+			}
+		}
+		if hasContainer {
+			if _, ok := snap.Containers[comment.ContainerUUID]; !ok {
+				errors = append(errors, fmt.Sprintf("comment %s references unknown container %s", uuid, comment.ContainerUUID))
+			}
 		}
 	}
 

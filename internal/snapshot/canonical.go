@@ -333,6 +333,9 @@ func buildOrderedComment(c *CommentEntry) orderedMap {
 
 	// Fields in lexicographic order
 	result = append(result, keyValue{"body", c.Body})
+	if c.ContainerUUID != "" {
+		result = append(result, keyValue{"container_uuid", c.ContainerUUID})
+	}
 	result = append(result, keyValue{"created_at", c.CreatedAt})
 	if c.CreatedByPrincipalRef != "" {
 		result = append(result, keyValue{"created_by_principal_ref", c.CreatedByPrincipalRef})
@@ -348,7 +351,9 @@ func buildOrderedComment(c *CommentEntry) orderedMap {
 	if c.Meta != "" {
 		result = append(result, keyValue{"meta", c.Meta})
 	}
-	result = append(result, keyValue{"task_uuid", c.TaskUUID})
+	if c.TaskUUID != "" {
+		result = append(result, keyValue{"task_uuid", c.TaskUUID})
+	}
 	if c.UpdatedAt != "" {
 		result = append(result, keyValue{"updated_at", c.UpdatedAt})
 	}

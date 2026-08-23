@@ -78,7 +78,8 @@ func createTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE comments (
 			uuid TEXT PRIMARY KEY,
 			id TEXT NOT NULL UNIQUE,
-			task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE CASCADE,
+			task_uuid TEXT REFERENCES tasks(uuid) ON DELETE CASCADE,
+			container_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
 			created_by_principal_ref TEXT,
 			body TEXT NOT NULL,
 			meta TEXT,
@@ -86,7 +87,11 @@ func createTestDB(t *testing.T) *sql.DB {
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at TEXT,
 			deleted_at TEXT,
-			deleted_by_principal_ref TEXT
+			deleted_by_principal_ref TEXT,
+			CHECK (
+				(task_uuid IS NOT NULL AND container_uuid IS NULL) OR
+				(task_uuid IS NULL AND container_uuid IS NOT NULL)
+			)
 		);
 
 		CREATE TABLE promises (
@@ -301,6 +306,58 @@ func TestExport(t *testing.T) {
 	}
 	if strings.Contains(string(data), "\"actors\"") || strings.Contains(string(data), "actor_uuid") {
 		t.Errorf("snapshot must not contain actor scaffolding: %s", string(data))
+	}
+}
+
+func TestExportContainerComment(t *testing.T) {
+	db := createTestDB(t)
+	defer func() { _ = db.Close() }()
+	seedTestData(t, db)
+
+	_, err := db.Exec(`
+		INSERT INTO comments (uuid, id, container_uuid, created_by_principal_ref, body, etag, created_at)
+		VALUES ('container-comment-uuid', 'C-00002', 'container-uuid-1', 'agent:test-actor', 'Container comment', 1, '2025-01-02T00:00:00Z')
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert container comment: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "state.json")
+	_, err = Export(db, ExportOptions{
+		OutputPath: outputPath,
+		Canonical:  true,
+	})
+	if err != nil {
+		t.Fatalf("failed to export container comment: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read container-comment snapshot: %v", err)
+	}
+	var exported Snapshot
+	if err := json.Unmarshal(data, &exported); err != nil {
+		t.Fatalf("failed to decode container-comment snapshot: %v", err)
+	}
+	comment := exported.Comments["container-comment-uuid"]
+	if comment.TaskUUID != "" || comment.ContainerUUID != "container-uuid-1" {
+		t.Fatalf("exported comment subject = task %q, container %q", comment.TaskUUID, comment.ContainerUUID)
+	}
+
+	target := createTestDB(t)
+	defer func() { _ = target.Close() }()
+	if _, err := Import(target, ImportOptions{InputPath: outputPath}); err != nil {
+		t.Fatalf("failed to import container-comment snapshot: %v", err)
+	}
+	var importedTask sql.NullString
+	var importedContainer string
+	if err := target.QueryRow(`
+		SELECT task_uuid, container_uuid FROM comments WHERE uuid = 'container-comment-uuid'
+	`).Scan(&importedTask, &importedContainer); err != nil {
+		t.Fatalf("failed to read imported container comment: %v", err)
+	}
+	if importedTask.Valid || importedContainer != "container-uuid-1" {
+		t.Fatalf("imported comment subject = task %#v, container %q", importedTask, importedContainer)
 	}
 }
 

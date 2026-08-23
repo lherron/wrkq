@@ -222,10 +222,22 @@ func validateSnapshot(snap *Snapshot) error {
 		}
 	}
 
-	// Comments must reference valid tasks.
+	// Comments must reference exactly one valid task or container.
 	for uuid, comment := range snap.Comments {
-		if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
-			return fmt.Errorf("comment %s references unknown task %s", uuid, comment.TaskUUID)
+		hasTask := comment.TaskUUID != ""
+		hasContainer := comment.ContainerUUID != ""
+		if hasTask == hasContainer {
+			return fmt.Errorf("comment %s must reference exactly one task or container", uuid)
+		}
+		if hasTask {
+			if _, ok := snap.Tasks[comment.TaskUUID]; !ok {
+				return fmt.Errorf("comment %s references unknown task %s", uuid, comment.TaskUUID)
+			}
+		}
+		if hasContainer {
+			if _, ok := snap.Containers[comment.ContainerUUID]; !ok {
+				return fmt.Errorf("comment %s references unknown container %s", uuid, comment.ContainerUUID)
+			}
 		}
 	}
 
@@ -591,12 +603,13 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO comments (uuid, id, task_uuid, created_by_principal_ref, body, meta, etag,
+		INSERT INTO comments (uuid, id, task_uuid, container_uuid, created_by_principal_ref, body, meta, etag,
 		                      created_at, updated_at, deleted_at, deleted_by_principal_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
 			task_uuid = excluded.task_uuid,
+			container_uuid = excluded.container_uuid,
 			created_by_principal_ref = excluded.created_by_principal_ref,
 			body = excluded.body,
 			meta = excluded.meta,
@@ -631,7 +644,8 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 			deletedByPrincipal = comment.DeletedByPrincipalRef
 		}
 
-		if _, err := stmt.Exec(uuid, comment.ID, comment.TaskUUID, createdByPrincipal,
+		if _, err := stmt.Exec(uuid, comment.ID, nullableSnapshotString(comment.TaskUUID),
+			nullableSnapshotString(comment.ContainerUUID), createdByPrincipal,
 			comment.Body, meta, comment.ETag, comment.CreatedAt, updatedAt,
 			deletedAt, deletedByPrincipal); err != nil {
 			return fmt.Errorf("failed to import comment %s: %w", uuid, err)
@@ -651,6 +665,13 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	}
 
 	return nil
+}
+
+func nullableSnapshotString(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 // Verify checks that a snapshot file is canonical (round-trip deterministic).
