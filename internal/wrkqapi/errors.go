@@ -7,6 +7,7 @@ const (
 	CodeNotFound         = "WRKQ_NOT_FOUND"
 	CodeValidation       = "WRKQ_VALIDATION"
 	CodeConflict         = "WRKQ_CONFLICT"
+	CodeForbidden        = "WRKQ_FORBIDDEN"
 	CodePermissionDenied = "WRKQ_PERMISSION_DENIED"
 	CodeMigrationReq     = "WRKQ_DB_MIGRATION_REQUIRED"
 	CodeDBBusy           = "WRKQ_DB_BUSY"
@@ -90,6 +91,15 @@ func NewConflictError(msg string, data any) *DomainError {
 		msg = "conflict"
 	}
 	return newError(CodeConflict, msg, true, data, nil)
+}
+
+// NewForbiddenError reports an authenticated caller crossing a resource
+// ownership boundary (WRKQ_FORBIDDEN).
+func NewForbiddenError(msg string, data any) *DomainError {
+	if msg == "" {
+		msg = "forbidden"
+	}
+	return newError(CodeForbidden, msg, false, data, nil)
 }
 
 func NewAlreadyClaimedError(data any) *DomainError {

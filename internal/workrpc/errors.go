@@ -16,6 +16,7 @@ const (
 	CodeWRKQNotFound          = "WRKQ_NOT_FOUND"
 	CodeWRKQValidation        = "WRKQ_VALIDATION"
 	CodeWRKQConflict          = "WRKQ_CONFLICT"
+	CodeWRKQForbidden         = "WRKQ_FORBIDDEN"
 	CodeWRKQPermissionDenied  = "WRKQ_PERMISSION_DENIED"
 	CodeWRKQMigrationRequired = "WRKQ_DB_MIGRATION_REQUIRED"
 	CodeWRKQDBBusy            = "WRKQ_DB_BUSY"
@@ -30,6 +31,7 @@ var domainRPCCode = map[string]int{
 	CodeWRKQNotFound:                 -32004,
 	CodeWRKQValidation:               -32602,
 	CodeWRKQConflict:                 -32021,
+	CodeWRKQForbidden:                -32031,
 	CodeWRKQPermissionDenied:         -32022,
 	CodeWRKQMigrationRequired:        -32023,
 	CodeWRKQDBBusy:                   -32024,

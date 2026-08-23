@@ -22,6 +22,7 @@ func ErrorCodeCatalog() []string {
 		CodeWRKQNotFound,
 		CodeWRKQValidation,
 		CodeWRKQConflict,
+		CodeWRKQForbidden,
 		CodeWRKQPermissionDenied,
 		CodeWRKQMigrationRequired,
 		wrkqapi.CodeAlreadyClaimed,
@@ -75,6 +76,17 @@ var methodCatalog = []string{
 	"wrkq.task.acknowledge",
 	"wrkq.task.delete",
 	"wrkq.task.restore",
+	"wrkq.promise.add",
+	"wrkq.promise.show",
+	"wrkq.promise.list",
+	"wrkq.promise.ready",
+	"wrkq.promise.edit",
+	"wrkq.promise.renew",
+	"wrkq.promise.resolve",
+	"wrkq.promise.abandon",
+	"wrkq.promise.attach",
+	"wrkq.promise.detach",
+	"wrkq.promise.delete",
 	"wrkq.comment.add",
 	"wrkq.comment.list",
 	"wrkq.comment.show",
@@ -206,6 +218,17 @@ var dtoCatalog = []string{
 	"WrkqTaskCopyParams", // wrkq.task.copy request envelope (server-owned deep copy)
 	"WrkqTaskCopyResult", // wrkq.task.copy per-source outcome (legacy copyResult output shape)
 	"WrkqTaskClaim",
+	"WrkqPromise",
+	"WrkqPromiseSubjectRef",
+	"WrkqPromiseListResult",
+	"WrkqPromiseAddParams",
+	"WrkqPromiseShowParams",
+	"WrkqPromiseListParams",
+	"WrkqPromiseReadyParams",
+	"WrkqPromiseEditParams",
+	"WrkqPromiseReviewParams",
+	"WrkqPromiseRetargetParams",
+	"WrkqPromiseDeleteParams",
 	"WrkqTaskCatView",        // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
 	"WrkqContainerCatView",   // CLI compatibility projection (container cat)
 	"WrkqCommentCatView",     // CLI compatibility projection (comment cat)

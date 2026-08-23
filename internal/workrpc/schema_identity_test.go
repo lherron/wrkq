@@ -18,17 +18,16 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// preCutProtocolSchemaHash is the value computed before the package cut, on the
-// canonical tagged build. Do not "fix" this constant to match a new computed
-// value: a mismatch means the wire contract moved, which is a protocol change,
-// not a test failure.
-const preCutProtocolSchemaHash = "sha256:0a3a6c70d97d3ce38ccace1a33cc8b920990c7e757d709991f797cad011fd6f9"
+// pinnedProtocolSchemaHash is the intentional wire identity after adding the
+// wrkq.promise.* family. Update it only alongside an explicit protocol change;
+// an incidental mismatch remains a test failure.
+const pinnedProtocolSchemaHash = "sha256:e89dc1b8ba7dda9cc874b6441b8e618e3b50d2a63583f31322b82513af808ec3"
 
-func TestProtocolSchemaHashSurvivesPackageCut(t *testing.T) {
-	if got := ProtocolSchemaHash(); got != preCutProtocolSchemaHash {
+func TestProtocolSchemaHashPinned(t *testing.T) {
+	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
 		t.Fatalf("ProtocolSchemaHash changed:\n  want %s\n  got  %s\n"+
 			"A schema-reachable defined type changed package, name, field set, or json tag.",
-			preCutProtocolSchemaHash, got)
+			pinnedProtocolSchemaHash, got)
 	}
 }
 
@@ -41,9 +40,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 149},
-		{"errorCodes", len(ErrorCodeCatalog()), 24},
-		{"dtos", len(dtoCatalog), 94},
+		{"methods", len(MethodCatalog()), 160},
+		{"errorCodes", len(ErrorCodeCatalog()), 25},
+		{"dtos", len(dtoCatalog), 105},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

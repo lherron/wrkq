@@ -76,6 +76,34 @@ func TestProtocolSchemaHashIncludesActionClaimPredecessorShape(t *testing.T) {
 	}
 }
 
+func TestProtocolSchemaHashIncludesPromiseContracts(t *testing.T) {
+	for _, method := range []string{
+		"wrkq.promise.add", "wrkq.promise.show", "wrkq.promise.list", "wrkq.promise.ready",
+		"wrkq.promise.edit", "wrkq.promise.renew", "wrkq.promise.resolve", "wrkq.promise.abandon",
+		"wrkq.promise.attach", "wrkq.promise.detach", "wrkq.promise.delete",
+	} {
+		if !contains(methodCatalog, method) {
+			t.Errorf("%s missing from method catalog", method)
+		}
+	}
+	for name, fields := range map[string][]string{
+		"WrkqPromise":           {"OwnerPrincipalRef:ownerPrincipalRef:string:string", "SubjectRef:subjectRef:*wrkqapi.WrkqPromiseSubjectRef", "ReviewAt:reviewAt:string:string"},
+		"WrkqPromiseAddParams":  {"ReviewAt:reviewAt,omitempty:string:string", "ReviewIn:reviewIn,omitempty:string:string", "OnBehalf:onBehalf,omitempty:bool:bool"},
+		"WrkqPromiseEditParams": {"IfMatch:ifMatch,omitempty:int64:int64"},
+	} {
+		typ := dtoSchemaTypes[name]
+		if typ == nil {
+			t.Fatalf("%s missing from dtoSchemaTypes", name)
+		}
+		fingerprint := dtoSchemaFingerprint(name, typ)
+		for _, field := range fields {
+			if !strings.Contains(fingerprint, field) {
+				t.Errorf("%s schema missing %q:\n%s", name, field, fingerprint)
+			}
+		}
+	}
+}
+
 func TestProtocolSchemaHashIncludesWorkflowInstancesEnvelope(t *testing.T) {
 	typ := dtoSchemaTypes["WrkqWorkflowInstancesResult"]
 	if typ == nil {

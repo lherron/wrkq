@@ -53,6 +53,13 @@ func (a *API) HistoryListView(ctx context.Context, p HistoryListViewParams) (*Wr
 // path-resolution branch is a PINNED divergence: legacy advertises paths in help
 // but intentionally errors today.
 func (a *API) resolveLogResource(ctx context.Context, target string) (string, string, error) {
+	if strings.HasPrefix(target, "PR-") {
+		var uuid string
+		if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM promises WHERE id = ?", target).Scan(&uuid); err != nil {
+			return "", "", NewValidationError(fmt.Sprintf("promise not found: %s", target), nil)
+		}
+		return uuid, "promise", nil
+	}
 	if id.IsFriendlyID(target) {
 		prefix := target[:1]
 		switch prefix {
@@ -80,6 +87,9 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 		}
 		if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM containers WHERE uuid = ?", target).Scan(&count); err == nil && count > 0 {
 			return target, "container", nil
+		}
+		if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM promises WHERE uuid = ?", target).Scan(&count); err == nil && count > 0 {
+			return target, "promise", nil
 		}
 		return "", "", NewValidationError(fmt.Sprintf("UUID not found: %s", target), nil)
 	}

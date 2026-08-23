@@ -152,6 +152,39 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.task.restore", apiHandler(func(ctx context.Context, p wrkqapi.TaskRestoreParams) (any, error) {
 		return wq.TaskRestore(ctx, p)
 	}))
+	s.Register("wrkq.promise.add", apiHandler(func(ctx context.Context, p wrkqapi.PromiseAddParams) (any, error) {
+		return wq.PromiseAdd(ctx, p)
+	}))
+	s.Register("wrkq.promise.show", apiHandler(func(ctx context.Context, p wrkqapi.PromiseShowParams) (any, error) {
+		return wq.PromiseShow(ctx, p)
+	}))
+	s.Register("wrkq.promise.list", apiHandler(func(ctx context.Context, p wrkqapi.PromiseListParams) (any, error) {
+		return wq.PromiseList(ctx, p)
+	}))
+	s.Register("wrkq.promise.ready", apiHandler(func(ctx context.Context, p wrkqapi.PromiseReadyParams) (any, error) {
+		return wq.PromiseReady(ctx, p)
+	}))
+	s.Register("wrkq.promise.edit", apiHandler(func(ctx context.Context, p wrkqapi.PromiseEditParams) (any, error) {
+		return wq.PromiseEdit(ctx, p)
+	}))
+	s.Register("wrkq.promise.renew", apiHandler(func(ctx context.Context, p wrkqapi.PromiseReviewParams) (any, error) {
+		return wq.PromiseRenew(ctx, p)
+	}))
+	s.Register("wrkq.promise.resolve", apiHandler(func(ctx context.Context, p wrkqapi.PromiseReviewParams) (any, error) {
+		return wq.PromiseResolve(ctx, p)
+	}))
+	s.Register("wrkq.promise.abandon", apiHandler(func(ctx context.Context, p wrkqapi.PromiseReviewParams) (any, error) {
+		return wq.PromiseAbandon(ctx, p)
+	}))
+	s.Register("wrkq.promise.attach", apiHandler(func(ctx context.Context, p wrkqapi.PromiseRetargetParams) (any, error) {
+		return wq.PromiseAttach(ctx, p)
+	}))
+	s.Register("wrkq.promise.detach", apiHandler(func(ctx context.Context, p wrkqapi.PromiseRetargetParams) (any, error) {
+		return wq.PromiseDetach(ctx, p)
+	}))
+	s.Register("wrkq.promise.delete", apiHandler(func(ctx context.Context, p wrkqapi.PromiseDeleteParams) (any, error) {
+		return wq.PromiseDelete(ctx, p)
+	}))
 	s.Register("wrkq.comment.add", apiHandler(func(ctx context.Context, p wrkqapi.CommentAddParams) (any, error) {
 		return wq.CommentAdd(ctx, p)
 	}))
