@@ -2,16 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>AssociatedBundleIdentifiers</key>
-  <array>
-    <string>com.praesidium.AgentHost</string>
-  </array>
   <key>Label</key>
   <string>com.praesidium.llama-server</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/lherron/.local/bin/praesidium-launch</string>
     <string>/opt/homebrew/bin/llama-server</string>
     <string>--hf-repo</string>
     <string>Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M</string>
