@@ -517,17 +517,73 @@ The product noun should be singular in the command tree, following existing
 wrkq promise add
 wrkq promise list
 wrkq promise ready
-wrkq promise show
 wrkq promise edit
 wrkq promise renew
 wrkq promise resolve
 wrkq promise abandon
 wrkq promise attach
 wrkq promise detach
-wrkq promise history
 ```
 
-Exact flags remain provisional, but the intended flows are:
+There is no `promise show` or `promise history`. The root verbs already cover
+them and must accept `PR-xxxxx` selectors: `wrkq cat PR-00101` renders the
+promise (subject, question, owner, creator, review_at, ready-for duration,
+attachment, last review), and `wrkq log PR-00101` renders its event timeline
+with the existing `--oneline` / `--patch` modes.
+
+### Timestamp flags
+
+- `--review-at <timestamp>`: absolute, following the existing `--due-at` /
+  `--start-at` convention and parser.
+- `--in <duration>`: relative sugar (`7d`, `36h`), resolved at write time.
+- Exactly one of the two is required on `add` and `renew`.
+- Not `--by`: "by" is deadline language, and `review_at` is explicitly not a
+  deadline. Not `--at`: it collides with nothing but matches no existing flag.
+
+### Attachment flags
+
+`add` and `attach` accept at most one of `--task T-xxxxx` or
+`--container <path>`; `--campaign <path>` is an alias for `--container`.
+`detach` takes no target. Attaching to a task is as first-class as attaching
+to a campaign.
+
+### Standard CLI invariants
+
+Promise commands are ordinary wrkq commands and inherit every existing
+contract; none of these are promise-specific decisions:
+
+- **Remote-first**: every verb is an RPC-CLI command over `workrpc`; no
+  direct store access from the CLI. New methods register in the method
+  registry with JSON schemas and move the fail-closed protocol hash.
+- **Output modes**: `--output table|human|json|ndjson|porcelain|yaml|tsv|raw`,
+  `--json`, `--ndjson`, `--porcelain` via the shared render/encode helpers
+  (`encodeJSONIndent`, `isStdoutTTY`, the `render*` family) — no hand-rolled
+  printing. Non-TTY defaults: `list`/`ready` emit NDJSON; `add`/`renew`/
+  `resolve`/`abandon`/`attach`/`detach`/`edit` emit singleton JSON;
+  `cat PR-xxxxx --json` is array-shaped with `--one` for a bare object.
+- **Stable fingerprints**: JSON/porcelain shapes are recorded in the output
+  fingerprint tests and `cli_surface_manifest.json` is regenerated
+  (`gen-rpccli-surface-manifest`); surfaceguard baselines updated in the same
+  change.
+- **Errors**: RPC domain errors surface through `rpcMessage` with domain IDs
+  (e.g. `WRKQ_WRONG_STATE` for renew on a closed promise,
+  `WRKQ_FORBIDDEN` for `--for` without `--on-behalf`); exit codes follow the
+  existing table.
+- **Stdin conventions**: `-` and `@file` for `--subject`, `--question`,
+  `--note`; one stdin consumer per invocation.
+- **Principal flags**: `--principal-ref` / `--as` / `WRKQ_PRINCIPAL_REF`
+  supply the creator; owner defaults to creator.
+- **Concurrency**: mutations take `--etag` / `--if-match` like task `set`;
+  every mutation increments `etag`.
+- **Help and info**: usage text lives in the embedded `WRKQ-USAGE.md` and
+  `AGENT-WRKQ-USAGE.md` (served by `wrkq info` / `wrkq agent-info`), plus
+  cobra `--help`; the reference docs are generated from the same source, not
+  written twice.
+- **Selectors**: `PR-xxxxx` friendly IDs and UUIDs resolve through the
+  existing selector package; `cat`, `log`, `rm --purge` accept them.
+- **Snapshot**: promises participate in export/import with canonical ordering.
+
+Intended flows:
 
 ### Standalone capture
 
@@ -541,8 +597,7 @@ wrkq promise add \
 
 Expected result: an accepted `PR-xxxxx` owned by `agent:lance`, created by the
 acting Cody principal with the auto-accept assertion recorded. `--in <duration>`
-and `--at <timestamp>` are alternatives; both use wrkq's existing timestamp
-parsing and store absolute UTC. Omitting `--for` makes the caller the owner and
+and `--review-at <timestamp>` are alternatives; storage is absolute UTC. Omitting `--for` makes the caller the owner and
 `--on-behalf` is then not required. `--for lance` without `--on-behalf` is a
 request, not an accepted promise (deferred; rejected in MVP).
 
@@ -563,6 +618,7 @@ wrkq promise add \
 
 ```bash
 wrkq promise attach PR-00123 --campaign hrc/envelopes
+wrkq promise attach PR-00124 --task T-07412
 ```
 
 This preserves the promise ID, original subject text, and event history.
@@ -647,7 +703,8 @@ The smallest useful release includes:
 4. Absolute `review_at` storage and derived ready queries.
 5. Lifecycle actions: renew, resolve, and abandon.
 6. Append-only promise events.
-7. CLI create/show/list/ready/renew/resolve/abandon/attach behavior.
+7. CLI add/list/ready/renew/resolve/abandon/attach/detach/edit behavior, plus
+   `cat` and `log` accepting promise selectors.
 8. RPC/API/client contracts required to keep the current remote-first CLI
    architecture intact.
 9. The ready-attention surfaces ruled mandatory above (`ready`, `check`,
@@ -802,7 +859,12 @@ Lance ruled on the previously open decisions in review with mable:
     reference; FK `SET NULL` alone is insufficient.
 13. **Subject-side visibility**: in MVP.
 
-Remaining for the implementer: exact flag names, output fingerprints, and the
+14. **Flags**: `--review-at` absolute / `--in` relative (not `--by`, not
+    `--at`); attach targets `--task` or `--container` (`--campaign` alias).
+15. **No `show`/`history` subcommands**: root `cat` and `log` accept `PR-`
+    selectors.
+
+Remaining for the implementer: output fingerprints and the
 context-template integration point (which lives outside wrkq; wrkq supplies the
 scoped ready query).
 
