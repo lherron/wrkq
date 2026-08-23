@@ -599,8 +599,10 @@ with the existing `--oneline` / `--patch` modes.
 
 ### Timestamp flags
 
-- `--review-at <timestamp>`: absolute, following the existing `--due-at` /
-  `--start-at` convention and parser.
+- `--review-at <timestamp>`: absolute. The flag *name* follows the
+  `--due-at` / `--start-at` naming convention only; the CLI forwards the raw
+  string and the API normalizes it per *Temporal normalization*. It must NOT
+  use the `due_at`/`start_at` passthrough path.
 - `--in <duration>`: relative sugar (`7d`, `36h`), resolved at write time.
 - Exactly one of the two is required on `add` and `renew`.
 - Not `--by`: "by" is deadline language, and `review_at` is explicitly not a
@@ -716,9 +718,10 @@ wrkq promise abandon PR-00123 \
   --note "The migration direction was superseded."
 ```
 
-The final CLI should use wrkq's existing timestamp parsing conventions and
-machine-output defaults. Relative input such as `7d` is syntactic sugar; storage
-remains an absolute UTC timestamp.
+The final CLI uses wrkq's machine-output defaults. Timestamp handling is
+governed solely by *Temporal normalization*: the CLI never parses or formats
+`review_at`; relative `--in` is forwarded as a duration and resolved
+server-side; storage is canonical UTC `…Z`.
 
 ## Attention surfaces
 
@@ -938,8 +941,12 @@ Lance ruled on the previously open decisions in review with mable:
    with task states.
 7. **Project context for standalone promises**: none; owner-global until usage
    proves a need.
-8. **Event payload**: full row snapshot plus changed-fields delta, matching
-   task events; review verbs add previous/next `review_at` and `note`.
+8. **Event payload**: event-log rows carry a changed-fields map exactly as
+   task events do (`store/tasks.go` shape); review verbs add
+   `previous_review_at`, `next_review_at` (renew), and `note`. The full typed
+   projection exists only in the webhook body (see *Webhook producer
+   contract*), not in `event_log`. (Revised from "full row snapshot" after
+   daedalus flaw 3.)
 9. **Duplicates**: fully permitted, no detection or warning.
 10. **Webhooks**: attached promises deliver via the subject's container
     subscription chain under a new `promise` family with a typed payload;
