@@ -136,7 +136,30 @@ func (a *API) PromiseReady(ctx context.Context, p PromiseReadyParams) (*WrkqProm
 	if err != nil {
 		return nil, err
 	}
-	rows, err := a.store.Promises.Ready(owner)
+	var rows []domain.Promise
+	project := strings.TrimSpace(p.Project)
+	if project == "" && !p.IncludeGlobal {
+		rows, err = a.store.Promises.Ready(owner)
+	} else {
+		projectUUID := ""
+		if project != "" {
+			projectUUID, _, err = selectors.ResolveContainer(a.db, project)
+			if err != nil {
+				return nil, NewNotFoundError(project, "project")
+			}
+			var kind string
+			var topLevel bool
+			if err = a.db.QueryRowContext(ctx, `
+				SELECT c.kind, c.parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
+				  FROM containers c WHERE c.uuid = ?`, projectUUID).Scan(&kind, &topLevel); err != nil {
+				return nil, NewInternalError(err)
+			}
+			if kind != string(domain.ContainerKindProject) || !topLevel {
+				return nil, NewValidationError("promise ready project must be a top-level project", map[string]any{"field": "project"})
+			}
+		}
+		rows, err = a.store.Promises.ReadyScoped(owner, projectUUID, p.IncludeGlobal)
+	}
 	if err != nil {
 		return nil, mapPromiseStoreError(err, "")
 	}

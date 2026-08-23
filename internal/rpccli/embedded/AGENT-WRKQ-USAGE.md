@@ -66,6 +66,7 @@ wrkq promise add --task T-00001 --in 36h --question "What remains?"
 wrkq promise list
 wrkq promise list --task T-00001          # Cross-owner subject visibility
 wrkq promise ready --for lance
+wrkq promise ready --for lance --project wrkq --include-global
 wrkq promise renew PR-00001 --in 7d --note "Still active"
 wrkq promise resolve PR-00001 --note "Satisfied"
 wrkq promise abandon PR-00001 --note "Superseded"

@@ -158,6 +158,7 @@ func newPromiseAddCmd() *cobra.Command {
 
 func newPromiseListCmd(ready bool) *cobra.Command {
 	var owner, state, task, container, campaign string
+	var includeGlobal bool
 	var output promiseOutputFlags
 	use, short, method := "list", "List promises", "wrkq.promise.list"
 	if ready {
@@ -177,7 +178,15 @@ func newPromiseListCmd(ready bool) *cobra.Command {
 			if owner != "" {
 				params["ownerPrincipalRef"] = owner
 			}
-			if !ready {
+			if ready {
+				projectChanged := cmd.Flags().Changed("project")
+				if projectChanged {
+					params["project"] = sc.projectRoot()
+				}
+				if includeGlobal {
+					params["includeGlobal"] = true
+				}
+			} else {
 				container, err = promiseContainerAlias(container, campaign)
 				if err != nil {
 					return err
@@ -207,7 +216,9 @@ func newPromiseListCmd(ready bool) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&owner, "for", "", "Owner principal (bare agent slug or agent:<id>)")
-	if !ready {
+	if ready {
+		cmd.Flags().BoolVar(&includeGlobal, "include-global", false, "Include standalone owner-global promises")
+	} else {
 		cmd.Flags().StringVar(&state, "state", "", "Filter by open, resolved, abandoned, or all")
 		cmd.Flags().StringVar(&task, "task", "", "Filter by attached task")
 		cmd.Flags().StringVar(&container, "container", "", "Filter by attached container")

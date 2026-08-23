@@ -200,6 +200,47 @@ func (ps *PromiseStore) Ready(ownerPrincipalRef string) ([]domain.Promise, error
 		ORDER BY review_at, id`, ownerPrincipalRef)
 }
 
+// ReadyScoped returns ready promises for one owner within a session's project
+// attention scope. Attached promises derive their project through the subject's
+// container ancestry. Standalone promises are included only when requested.
+func (ps *PromiseStore) ReadyScoped(ownerPrincipalRef, projectUUID string, includeGlobal bool) ([]domain.Promise, error) {
+	if strings.TrimSpace(ownerPrincipalRef) == "" {
+		return nil, fmt.Errorf("owner_principal_ref is required")
+	}
+	includeGlobalValue := 0
+	if includeGlobal {
+		includeGlobalValue = 1
+	}
+	return ps.query(`WITH RECURSIVE container_projects(container_uuid, project_uuid) AS (
+		SELECT c.uuid, c.uuid
+		  FROM containers c
+		 WHERE c.kind = 'project'
+		   AND c.parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
+		UNION ALL
+		SELECT child.uuid, parent.project_uuid
+		  FROM containers child
+		  JOIN container_projects parent ON child.parent_uuid = parent.container_uuid
+	)
+	SELECT `+promiseColumns+` FROM promises
+	 WHERE owner_principal_ref = ? AND state = 'open'
+	   AND review_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
+	   AND (
+		(? = 1 AND subject_task_uuid IS NULL AND subject_container_uuid IS NULL)
+		OR subject_task_uuid IN (
+			SELECT t.uuid
+			  FROM tasks t
+			  JOIN container_projects cp ON cp.container_uuid = t.project_uuid
+			 WHERE cp.project_uuid = ?
+		)
+		OR subject_container_uuid IN (
+			SELECT cp.container_uuid
+			  FROM container_projects cp
+			 WHERE cp.project_uuid = ?
+		)
+	   )
+	 ORDER BY review_at, id`, ownerPrincipalRef, includeGlobalValue, projectUUID, projectUUID)
+}
+
 // readyAt is the deterministic seam used only by store tests. Production
 // callers use Ready so a client can never supply the authority clock.
 func (ps *PromiseStore) readyAt(ownerPrincipalRef, canonicalNow string) ([]domain.Promise, error) {

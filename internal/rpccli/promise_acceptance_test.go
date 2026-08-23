@@ -134,6 +134,8 @@ func TestPromiseAttentionSurfacesAndTreeRenderers(t *testing.T) {
 		return promise
 	}
 	ready := create("--task", f.residentID, "--review-at", "2000-01-01T00:00:00Z", "--subject", "Ready cross-owner leaf", "--for", "mable", "--on-behalf", "--json")
+	standaloneReady := create("--review-at", "2000-01-02T00:00:00Z", "--subject", "Ready owner-global promise", "--for", "mable", "--on-behalf", "--json")
+	otherProjectReady := create("--task", f.enrolledID, "--review-at", "2000-01-03T00:00:00Z", "--subject", "Ready other-project promise", "--for", "mable", "--on-behalf", "--json")
 	closed := create("--task", f.residentID, "--in", "7d", "--subject", "Closed leaf", "--json")
 	containerPromise := create("--container", f.campaignBUUID, "--in", "7d", "--subject", "Keeps empty container visible", "--json")
 	if out, err := runCampaignCLI(t, f.dbPath, "promise", "abandon", closed.ID, "--etag", "1", "--json"); err != nil {
@@ -141,8 +143,16 @@ func TestPromiseAttentionSurfacesAndTreeRenderers(t *testing.T) {
 	}
 
 	readyOut, err := runCampaignCLI(t, f.dbPath, "promise", "ready", "--for", "mable", "--ndjson")
-	if err != nil || !strings.Contains(readyOut, ready.ID) || !strings.Contains(readyOut, `"readyFor"`) {
+	if err != nil || !strings.Contains(readyOut, ready.ID) || !strings.Contains(readyOut, standaloneReady.ID) || !strings.Contains(readyOut, otherProjectReady.ID) || !strings.Contains(readyOut, `"readyFor"`) {
 		t.Fatalf("ready queue: %v\n%s", err, readyOut)
+	}
+	scopedOut, err := runCampaignCLI(t, f.dbPath, "promise", "ready", "--for", "mable", "--project", "campaign-cli-a", "--include-global", "--porcelain")
+	if err != nil || !strings.Contains(scopedOut, ready.ID) || !strings.Contains(scopedOut, standaloneReady.ID) || strings.Contains(scopedOut, otherProjectReady.ID) {
+		t.Fatalf("project-scoped ready queue with globals: %v\n%s", err, scopedOut)
+	}
+	projectOnlyOut, err := runCampaignCLI(t, f.dbPath, "promise", "ready", "--for", "mable", "--project", "campaign-cli-a", "--porcelain")
+	if err != nil || !strings.Contains(projectOnlyOut, ready.ID) || strings.Contains(projectOnlyOut, standaloneReady.ID) || strings.Contains(projectOnlyOut, otherProjectReady.ID) {
+		t.Fatalf("project-only ready queue: %v\n%s", err, projectOnlyOut)
 	}
 	checkOut, err := runCampaignCLI(t, f.dbPath, "check", "--for", "mable", "--json")
 	if err != nil || !strings.Contains(checkOut, ready.ID) {

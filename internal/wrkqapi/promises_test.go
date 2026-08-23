@@ -155,6 +155,63 @@ func TestPromiseListOwnerAndSubjectFilters(t *testing.T) {
 	}
 }
 
+func TestPromiseReadySessionProjectScopeAndOwnerGlobal(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	ctx := context.Background()
+	projectA := seedMonitorProject(t, s)
+	projectBContainer, err := s.Containers.Create(monitorSystemActor, store.ContainerCreateParams{Slug: "promise-ready-b", Kind: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := s.Containers.Create(monitorSystemActor, store.ContainerCreateParams{Slug: "nested", Kind: "directory", ParentUUID: &projectA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskA, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{Slug: "ready-a", Title: "ready-a", ProjectUUID: directory.UUID, State: "open", Priority: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskB, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{Slug: "ready-b", Title: "ready-b", ProjectUUID: projectBContainer.UUID, State: "open", Priority: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(subject, task string) WrkqPromise {
+		t.Helper()
+		promise, createErr := api.PromiseAdd(ctx, PromiseAddParams{
+			OwnerPrincipalRef: "agent:mable", OnBehalf: true, Subject: subject, Task: task,
+			ReviewAt: "2000-01-01T00:00:00Z", PrincipalRef: "agent:cody",
+		})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return *promise
+	}
+	attachedA := create("attached A", taskA.ID)
+	standalone := create("standalone", "")
+	attachedB := create("attached B", taskB.ID)
+
+	projectAReady, err := api.PromiseReady(ctx, PromiseReadyParams{
+		OwnerPrincipalRef: "agent:mable", Project: projectA, IncludeGlobal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, promise := range projectAReady.Items {
+		got[promise.ID] = true
+	}
+	if !got[attachedA.ID] || !got[standalone.ID] || got[attachedB.ID] || len(got) != 2 {
+		t.Fatalf("project A ready = %#v, want attached A plus standalone only", projectAReady.Items)
+	}
+
+	globalOnly, err := api.PromiseReady(ctx, PromiseReadyParams{
+		OwnerPrincipalRef: "agent:mable", IncludeGlobal: true,
+	})
+	if err != nil || len(globalOnly.Items) != 1 || globalOnly.Items[0].ID != standalone.ID {
+		t.Fatalf("global-only ready = %#v, err=%v", globalOnly, err)
+	}
+}
+
 func TestPromiseNonOwnerCannotMutateAnySurface(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	ctx := context.Background()

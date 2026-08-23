@@ -60,7 +60,11 @@ describe("wrkq.promise facade", () => {
     expect((await client.wrkq.promise.add(add)).id).toBe(PROMISE.id);
     await client.wrkq.promise.show({ promise: PROMISE.id });
     expect((await client.wrkq.promise.list({ task: "T-00001" })).items).toHaveLength(1);
-    await client.wrkq.promise.ready({ ownerPrincipalRef: "agent:cody" });
+    await client.wrkq.promise.ready({
+      ownerPrincipalRef: "agent:cody",
+      project: "wrkq",
+      includeGlobal: true,
+    });
     await client.wrkq.promise.edit(edit);
     await client.wrkq.promise.renew(renew);
     await client.wrkq.promise.resolve(resolve);
@@ -74,7 +78,10 @@ describe("wrkq.promise facade", () => {
       { method: "wrkq.promise.show", params: { promise: PROMISE.id } },
       // Subject-scoped list intentionally forwards no owner; the server returns all owners.
       { method: "wrkq.promise.list", params: { task: "T-00001" } },
-      { method: "wrkq.promise.ready", params: { ownerPrincipalRef: "agent:cody" } },
+      {
+        method: "wrkq.promise.ready",
+        params: { ownerPrincipalRef: "agent:cody", project: "wrkq", includeGlobal: true },
+      },
       { method: "wrkq.promise.edit", params: edit },
       { method: "wrkq.promise.renew", params: renew },
       { method: "wrkq.promise.resolve", params: resolve },

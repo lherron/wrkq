@@ -83,6 +83,8 @@ export interface WrkqPromiseListParams {
 
 export interface WrkqPromiseReadyParams {
   ownerPrincipalRef?: string;
+  project?: string;
+  includeGlobal?: boolean;
   principalRef?: string;
 }
 

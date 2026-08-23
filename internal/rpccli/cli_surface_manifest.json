@@ -2555,6 +2555,13 @@
                 "hidden": false
               },
               {
+                "name": "include-global",
+                "usage": "Include standalone owner-global promises",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
                 "name": "json",
                 "usage": "Output as JSON",
                 "type": "bool",

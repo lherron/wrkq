@@ -69,6 +69,8 @@ type PromiseListParams struct {
 
 type PromiseReadyParams struct {
 	OwnerPrincipalRef string `json:"ownerPrincipalRef,omitempty"`
+	Project           string `json:"project,omitempty"`
+	IncludeGlobal     bool   `json:"includeGlobal,omitempty"`
 	PrincipalRef      string `json:"principalRef,omitempty"`
 }
 

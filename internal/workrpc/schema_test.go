@@ -87,9 +87,10 @@ func TestProtocolSchemaHashIncludesPromiseContracts(t *testing.T) {
 		}
 	}
 	for name, fields := range map[string][]string{
-		"WrkqPromise":           {"OwnerPrincipalRef:ownerPrincipalRef:string:string", "SubjectRef:subjectRef:*wrkqapi.WrkqPromiseSubjectRef", "ReviewAt:reviewAt:string:string"},
-		"WrkqPromiseAddParams":  {"ReviewAt:reviewAt,omitempty:string:string", "ReviewIn:reviewIn,omitempty:string:string", "OnBehalf:onBehalf,omitempty:bool:bool"},
-		"WrkqPromiseEditParams": {"IfMatch:ifMatch,omitempty:int64:int64"},
+		"WrkqPromise":            {"OwnerPrincipalRef:ownerPrincipalRef:string:string", "SubjectRef:subjectRef:*wrkqapi.WrkqPromiseSubjectRef", "ReviewAt:reviewAt:string:string"},
+		"WrkqPromiseAddParams":   {"ReviewAt:reviewAt,omitempty:string:string", "ReviewIn:reviewIn,omitempty:string:string", "OnBehalf:onBehalf,omitempty:bool:bool"},
+		"WrkqPromiseReadyParams": {"Project:project,omitempty:string:string", "IncludeGlobal:includeGlobal,omitempty:bool:bool"},
+		"WrkqPromiseEditParams":  {"IfMatch:ifMatch,omitempty:int64:int64"},
 	} {
 		typ := dtoSchemaTypes[name]
 		if typ == nil {

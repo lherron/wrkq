@@ -919,6 +919,10 @@ interface WrkqPromiseListParams {
   ownerPrincipalRef?: string; state?: WrkqPromiseState | "all";
   task?: string; container?: string; principalRef?: string;
 }
+interface WrkqPromiseReadyParams {
+  ownerPrincipalRef?: string; project?: string; includeGlobal?: boolean;
+  principalRef?: string;
+}
 interface WrkqPromiseReviewParams {
   promise: string; reviewAt?: string; reviewIn?: string; note?: string;
   ifMatch?: number; principalRef?: string;
