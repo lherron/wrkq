@@ -277,7 +277,8 @@ CREATE TABLE promises (
   subject_container_uuid TEXT
     REFERENCES containers(uuid) ON DELETE SET NULL,
 
-  review_at TEXT NOT NULL,
+  review_at TEXT NOT NULL
+    CHECK (review_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z'),
 
   state TEXT NOT NULL DEFAULT 'open'
     CHECK (state IN ('open', 'resolved', 'abandoned')),
@@ -349,6 +350,32 @@ Standalone promises are global to the owner in this proposal.
 An optional context/project reference may become useful for filtering unattached
 promises, but actual use should prove that need before it becomes canonical.
 
+### Temporal normalization (binding)
+
+The ready predicate is a lexical text comparison, so it is only correct if
+every stored `review_at` and the comparison instant share one canonical form.
+This is NOT how `due_at`/`start_at` work today: `rpccli/touch.go` and
+`wrkqapi/tasks.go` forward those strings unchanged and `domain.ValidateTimestamp`
+is never called on that path. Promises must not inherit that behavior.
+
+Contract:
+
+- The API layer (`wrkqapi`), not the CLI, is the normalization authority.
+  `promise.add`, `promise.renew`, and `promise.edit` accept `reviewAt` as any
+  RFC3339 string with any offset, or `reviewIn` as a duration; the API parses
+  via `domain.ValidateTimestamp` (offset-aware), converts to UTC, and stores
+  exactly `YYYY-MM-DDTHH:MM:SSZ`. Invalid input fails with
+  `WRKQ_VALIDATION` before any write.
+- The SQL `CHECK` on `review_at` above rejects any non-canonical form at the
+  storage boundary, so a bypassing writer cannot corrupt ordering.
+- The ready predicate's `now` is produced by the same server-side formatter
+  (`strftime('%Y-%m-%dT%H:%M:%SZ','now')` or the Go equivalent), never a
+  client-supplied string.
+- Relative `--in` is resolved server-side against server `now`, so CLI clock
+  skew cannot shift `review_at`.
+- Acceptance test: `--review-at 2026-08-24T00:30:00+01:00` stores
+  `2026-08-23T23:30:00Z` and is ready at `23:30Z`, not at `00:30Z`.
+
 ### Why readiness is not stored
 
 The ready query is:
@@ -404,11 +431,35 @@ abandon) so `show` and the ready queue can print "last time you said: ..."
 without walking the event log. Do not add `review_count` or further
 denormalization unless a measured query justifies it.
 
-Event payloads follow the task-event shape: a full row snapshot plus a
-changed-fields delta. `promise.renewed`, `promise.resolved`, and
-`promise.abandoned` additionally carry `previous_review_at`, `next_review_at`
-(renew only), and `note`. Promise events flow through existing webhook
-subscriptions in the first release; no promise-specific exclusion.
+Event-log payloads follow the task-event shape: a changed-fields map, with
+`promise.renewed`, `promise.resolved`, and `promise.abandoned` additionally
+carrying `previous_review_at`, `next_review_at` (renew only), and `note`.
+
+### Webhook producer contract (binding)
+
+Webhook bodies are typed projections built separately from event-log rows;
+the existing code has no promise-compatible routing, family, or payload, so
+all three are specified here:
+
+- **Family**: a new `promise` event family. `subscriptionMatchesEvent` gains
+  `case "promise", "promise.*"`, and `isTaskWebhookEvent` is changed to
+  exclude `promise.*` so subscriptions narrowed to `task` never receive
+  promise events. Subscriptions with no event filter, or `*`, receive them.
+- **Routing**: subscriptions are container-scoped (ancestor-chain walk from a
+  container UUID). An attached promise routes through its subject's container
+  chain — the task's `project_uuid`/parent container, or the container itself.
+  A standalone promise has no container and therefore no subscription can be
+  in scope for it: it emits event-log rows only and no webhook. This is a
+  consequence of the subscription model, not an exclusion; it narrows the
+  earlier "flows through existing subscriptions" ruling to attached promises.
+  Attaching a standalone promise emits `promise.retargeted` into the new
+  subject's chain.
+- **Payload**: a `promise` typed projection — `event`, `promise` (id, uuid,
+  owner_principal_ref, subject, review_question, review_at, state,
+  last_reviewed_at, last_review_note, etag), `subject_ref` (`task`/`container`
+  id+path or null), `changes` (delta), `actor` (creator/updater principal),
+  `occurred_at`. It does not reuse the task payload struct and does not
+  require ticket/project fields.
 
 Purging an attached task or container sets the typed reference to null via the
 foreign key, but the purge path must also emit `promise.retargeted` carrying the
@@ -451,6 +502,20 @@ The promise belongs to Lance and appears in Lance's ready queue. Audit surfaces
 may say “recorded by Cody.” It is not a proposal awaiting acceptance because the
 owner explicitly authorized its creation.
 
+### Mutation authority (binding)
+
+Ownership is an authority boundary, not only attribution. For every mutation
+after creation — `edit`, `attach`, `detach`, `renew`, `resolve`, `abandon`,
+and `rm`/`rm --purge` — the API checks `caller principal == owner_principal_ref`
+before the store is touched and fails with `WRKQ_FORBIDDEN` otherwise. The
+creator of an on-behalf promise holds no standing authority over it after
+creation. Reads (`cat`, `log`, `list`, `ready --for`, `tree`) are not
+restricted. There is no delegated-mutation grant in the MVP; if an owner wants
+an agent to renew on their behalf, the agent must act as the owner's principal.
+Existing records `wrkq.attribution.caller-principal-exact` and
+`wrkq.mutation.caller-owned-confirmation` prove attribution and explicit
+intent; this rule adds the owner-permission check they do not provide.
+
 ### Assignment boundary
 
 The MVP should support owner-authorized creation, not arbitrary assignment.
@@ -461,6 +526,7 @@ The MVP should support owner-authorized creation, not arbitrary assignment.
 | Cody records Lance's promise at Lance's request | Accepted |
 | Cody records Cody's own promise | Accepted |
 | Cody unsolicitedly assigns Lance a promise | Rejected initially |
+| Cody (creator, not owner) renews/resolves/purges Lance's promise | Rejected (`WRKQ_FORBIDDEN`) |
 
 If cross-principal delegation is later needed, the honest concept is a
 **promise request**: another principal proposes a future attention commitment,
@@ -768,6 +834,25 @@ the typed reference to null while preserving the subject snapshot and events.
 Given Cody creates a promise owned by Cody to verify a rollout later, then the
 same data model and ready query work without a human-specific branch.
 
+### 8. Offset input normalizes to a correct instant
+
+Given `--review-at 2026-08-24T00:30:00+01:00`, the stored value is
+`2026-08-23T23:30:00Z`; the promise is absent from the ready query at
+`2026-08-23T23:29:59Z` and present at `2026-08-23T23:30:00Z`.
+
+### 9. Non-owner mutation is rejected
+
+Given Cody created a promise owned by Lance, when Cody attempts to renew,
+resolve, abandon, detach, or purge it, the call fails with `WRKQ_FORBIDDEN`
+before any write and the row and etag are unchanged.
+
+### 10. Webhook delivery follows the subject
+
+Given a promise attached to a task under a container with a webhook
+subscription filtered to `promise`, renewing it delivers a `promise`-family
+payload to that URL; a subscription filtered to `task` receives nothing; a
+standalone promise's renewal delivers to no URL.
+
 ### 7. Unauthorized assignment is rejected
 
 Given the acting principal lacks authority to create a promise for another
@@ -856,8 +941,10 @@ Lance ruled on the previously open decisions in review with mable:
 8. **Event payload**: full row snapshot plus changed-fields delta, matching
    task events; review verbs add previous/next `review_at` and `note`.
 9. **Duplicates**: fully permitted, no detection or warning.
-10. **Webhooks**: promise events flow through existing subscriptions in the
-    first release.
+10. **Webhooks**: attached promises deliver via the subject's container
+    subscription chain under a new `promise` family with a typed payload;
+    standalone promises have no subscription scope and emit event-log only
+    (narrowed after daedalus flaw 3).
 11. **Last review on the row**: add nullable `last_reviewed_at` and
     `last_review_note`.
 12. **Purge detach**: purge path emits `promise.retargeted` with the lost
@@ -869,6 +956,16 @@ Lance ruled on the previously open decisions in review with mable:
     `--at`); attach targets `--task` or `--container` (`--campaign` alias).
 15. **No `show`/`history` subcommands**: root `cat` and `log` accept `PR-`
     selectors.
+
+16. **Temporal normalization** (daedalus flaw 1): API normalizes `review_at`
+    to canonical UTC `…Z`; SQL CHECK enforces it; ready `now` is server-side.
+17. **Mutation authority** (daedalus flaw 2): only the owner principal may
+    mutate or purge a promise; `WRKQ_FORBIDDEN` otherwise.
+
+Operational note (daedalus, non-binding): snapshot export includes
+`event_log` but import does not replay it, so a state round-trip preserves
+the row's last-review fields but not the full review timeline. Accepted for
+MVP; timeline round-trip is not a promise-specific obligation.
 
 Remaining for the implementer: output fingerprints and the
 context-template integration point (which lives outside wrkq; wrkq supplies the
