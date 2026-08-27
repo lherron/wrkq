@@ -185,6 +185,60 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.promise.delete", apiHandler(func(ctx context.Context, p wrkqapi.PromiseDeleteParams) (any, error) {
 		return wq.PromiseDelete(ctx, p)
 	}))
+	// Collaboration ledger (T-07612 wave 1). wrkq owns rooms and envelopes;
+	// HRC is a consumer. envelope.present / envelope.pendingView /
+	// envelope.roundEnded are the HRC-FACING surface wave 3 calls.
+	s.Register("wrkq.room.say", apiHandler(func(ctx context.Context, p wrkqapi.RoomSayParams) (any, error) {
+		return wq.RoomSay(ctx, p)
+	}))
+	s.Register("wrkq.room.open", apiHandler(func(ctx context.Context, p wrkqapi.RoomOpenParams) (any, error) {
+		return wq.RoomOpen(ctx, p)
+	}))
+	s.Register("wrkq.room.show", apiHandler(func(ctx context.Context, p wrkqapi.RoomShowParams) (any, error) {
+		return wq.RoomShow(ctx, p)
+	}))
+	s.Register("wrkq.room.list", apiHandler(func(ctx context.Context, p wrkqapi.RoomListParams) (any, error) {
+		return wq.RoomList(ctx, p)
+	}))
+	s.Register("wrkq.room.logView", apiHandler(func(ctx context.Context, p wrkqapi.RoomLogViewParams) (any, error) {
+		return wq.RoomLogView(ctx, p)
+	}))
+	s.Register("wrkq.room.close", apiHandler(func(ctx context.Context, p wrkqapi.RoomLifecycleParams) (any, error) {
+		return wq.RoomClose(ctx, p)
+	}))
+	s.Register("wrkq.room.reopen", apiHandler(func(ctx context.Context, p wrkqapi.RoomLifecycleParams) (any, error) {
+		return wq.RoomReopen(ctx, p)
+	}))
+	s.Register("wrkq.room.join", apiHandler(func(ctx context.Context, p wrkqapi.RoomMemberParams) (any, error) {
+		return wq.RoomJoin(ctx, p)
+	}))
+	s.Register("wrkq.room.leave", apiHandler(func(ctx context.Context, p wrkqapi.RoomMemberParams) (any, error) {
+		return wq.RoomLeave(ctx, p)
+	}))
+	s.Register("wrkq.room.membersView", apiHandler(func(ctx context.Context, p wrkqapi.RoomMembersViewParams) (any, error) {
+		return wq.RoomMembersView(ctx, p)
+	}))
+	s.Register("wrkq.envelope.show", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeShowParams) (any, error) {
+		return wq.EnvelopeShow(ctx, p)
+	}))
+	s.Register("wrkq.envelope.inboxView", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeInboxViewParams) (any, error) {
+		return wq.EnvelopeInboxView(ctx, p)
+	}))
+	s.Register("wrkq.envelope.defer", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeDeferParams) (any, error) {
+		return wq.EnvelopeDefer(ctx, p)
+	}))
+	s.Register("wrkq.envelope.ack", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeAckParams) (any, error) {
+		return wq.EnvelopeAck(ctx, p)
+	}))
+	s.Register("wrkq.envelope.present", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopePresentParams) (any, error) {
+		return wq.EnvelopePresent(ctx, p)
+	}))
+	s.Register("wrkq.envelope.pendingView", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopePendingViewParams) (any, error) {
+		return wq.EnvelopePendingView(ctx, p)
+	}))
+	s.Register("wrkq.envelope.roundEnded", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeRoundParams) (any, error) {
+		return wq.EnvelopeRoundEnded(ctx, p)
+	}))
 	s.Register("wrkq.comment.add", apiHandler(func(ctx context.Context, p wrkqapi.CommentAddParams) (any, error) {
 		return wq.CommentAdd(ctx, p)
 	}))

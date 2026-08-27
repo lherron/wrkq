@@ -19,9 +19,10 @@ import (
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
 // pinnedProtocolSchemaHash is the intentional wire identity after adding the
-// project/include-global ready-promise session scope. Update it only alongside
-// an explicit protocol change; an incidental mismatch remains a test failure.
-const pinnedProtocolSchemaHash = "sha256:92c49c3453b05c5962853d7f2bfb658dd9787dd792e66c4260e80e1ba4655364"
+// wrkq collaboration ledger (rooms, envelopes, members, presentation receipts —
+// T-07612 wave 1). Update it only alongside an explicit protocol change; an
+// incidental mismatch remains a test failure.
+const pinnedProtocolSchemaHash = "sha256:f9e529dcb40a694516e1b4d6645103c302d4d798212c6ff86e7f1000f18a03d2"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -40,9 +41,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 160},
+		{"methods", len(MethodCatalog()), 177},
 		{"errorCodes", len(ErrorCodeCatalog()), 25},
-		{"dtos", len(dtoCatalog), 105},
+		{"dtos", len(dtoCatalog), 135},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

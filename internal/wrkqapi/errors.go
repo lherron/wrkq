@@ -110,6 +110,13 @@ func NewWrongStateError(data any) *DomainError {
 	return newError(CodeWrongState, "wrong_state", false, data, nil)
 }
 
+// NewWrongStateMessageError reports the same WRKQ_WRONG_STATE condition with a
+// message that says WHAT state refused the call. A caller that has to open the
+// data bag to learn "the room is closed" has been told nothing useful.
+func NewWrongStateMessageError(msg string, data any) *DomainError {
+	return newError(CodeWrongState, msg, false, data, nil)
+}
+
 func NewClaimSupersededError(data any) *DomainError {
 	return newError(CodeClaimSuperseded, "claim_superseded", false, data, nil)
 }
