@@ -165,6 +165,18 @@ replaces a `wrkqd` a running job still holds, `wrkq server status` reports
 `binaryStale`, and `wrkq server health` fails on it. On the canonical node,
 install and restart together.
 
+**When the commit carries a migration, `wrkqadm migrate` goes BETWEEN the two.**
+`wrkqd` refuses to start against an unmigrated database — it exits 1 with
+`requires migration: N pending migration(s)` — so install-then-restart boots out
+a working daemon and replaces it with one that will not come back, and launchd
+respawns into the same failure. The order is: `just install`,
+`wrkqadm migrate`, `wrkq server restart`. Take a file-level copy of the database
+first: a schema change on the canonical store costs a fraction of a second to
+back up and is the difference between a calm recovery and a gamble.
+`wrkq server restart` fails loudly here (`daemon did not answer after restart`,
+`last exit code = 1`) rather than reporting a live pid — and `last exit code = 1`
+distinguishes this from the codesigning kill, which is `-9`.
+
 `just install` publishes whatever is on disk, so it refuses a worktree with
 uncommitted tracked changes and names them, before it builds anything. Commit
 first, or install deliberately with `just install allow-dirty=1`. Untracked
