@@ -283,6 +283,7 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 		"envelope: " + envelope.ID,
 		"room: " + envelope.RoomKey + " (" + envelope.RoomKind + ")",
 		"from: " + envelopePartyLabel(envelope.From),
+		"reply_to: " + envelopeReplyToLabel(envelope),
 	}
 	if envelope.To != nil {
 		lines = append(lines, "to: "+envelopePartyLabel(*envelope.To))
@@ -346,13 +347,25 @@ func presentationSuffix(presentation envelopePresentationWire) string {
 	return " (" + strings.Join(parts, " ") + ")"
 }
 
+// wrkcInboxEnvelopeLines prints the sender as its replyTo token — the exact
+// --to that answers the envelope. A bare name in its place would resolve by the
+// room's shape and could address a seat that never asked (T-07638).
 func wrkcInboxEnvelopeLines(items []envelopeWire) []string {
 	lines := make([]string, 0, len(items))
 	for _, envelope := range items {
-		lines = append(lines, "  "+envelope.ID+"  "+envelopePartyLabel(envelope.From)+
+		lines = append(lines, "  "+envelope.ID+"  "+envelopeReplyToLabel(envelope)+
 			"  ["+envelope.State+"]  "+wrkcFirstLine(envelope.Body))
 	}
 	return lines
+}
+
+// envelopeReplyToLabel is the server-named reply hint, with the sender label as
+// the fallback for a ledger read that predates the field.
+func envelopeReplyToLabel(envelope envelopeWire) string {
+	if strings.TrimSpace(envelope.ReplyTo) != "" {
+		return envelope.ReplyTo
+	}
+	return envelopePartyLabel(envelope.From)
 }
 
 func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {

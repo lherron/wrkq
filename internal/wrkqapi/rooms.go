@@ -77,7 +77,7 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 			})
 	}
 
-	addressees, err := a.resolveAddressees(ctx, room, p.To, routed.impliedTo)
+	addressees, err := a.resolveAddressees(ctx, room, p.To, routed.impliedTo, senderScope, attr.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -511,10 +511,38 @@ func (a *API) ensureContainerRoom(attr attribution.Attribution, containerUUID st
 
 // ─── addressee resolution ─────────────────────────────────────────────────────
 
+// addresseeScope is the resolution context one say carries: the room, its
+// members, and the replier's own address. Bare-name resolution reads the
+// replier's standing obligations, so it needs to know who is speaking.
+type addresseeScope struct {
+	room             *roomState
+	members          []domain.RoomMember
+	replierScope     string
+	replierPrincipal string
+
+	obligations       []domain.Envelope
+	obligationsLoaded bool
+}
+
+// presentedObligations loads the replier's standing obligations in this room
+// once per say, and only when a bare name actually needs them.
+func (s *addresseeScope) presentedObligations(a *API) ([]domain.Envelope, error) {
+	if s.obligationsLoaded {
+		return s.obligations, nil
+	}
+	rows, err := a.store.Rooms.PresentedObligationsForReplier(s.room.row.UUID, s.replierScope, s.replierPrincipal)
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	s.obligations, s.obligationsLoaded = rows, true
+	return s.obligations, nil
+}
+
 // resolveAddressees resolves each --to token against the room per §4. A full
-// handle is taken verbatim; a bare name resolves by room kind; HRC birth
-// directives ride along verbatim in materialization_intent and are never parsed.
-func (a *API) resolveAddressees(ctx context.Context, room *roomState, to []string, implied string) ([]store.EnvelopeAddressee, error) {
+// handle is taken verbatim; a bare name resolves against the replier's standing
+// obligations first and by room kind last; HRC birth directives ride along
+// verbatim in materialization_intent and are never parsed.
+func (a *API) resolveAddressees(ctx context.Context, room *roomState, to []string, implied, replierScope, replierPrincipal string) ([]store.EnvelopeAddressee, error) {
 	tokens := make([]string, 0, len(to)+1)
 	for _, raw := range to {
 		for _, part := range strings.Split(raw, ",") {
@@ -534,10 +562,14 @@ func (a *API) resolveAddressees(ctx context.Context, room *roomState, to []strin
 	if err != nil {
 		return nil, NewInternalError(err)
 	}
+	resolution := &addresseeScope{
+		room: room, members: members,
+		replierScope: replierScope, replierPrincipal: replierPrincipal,
+	}
 	seen := map[string]bool{}
 	result := make([]store.EnvelopeAddressee, 0, len(tokens))
 	for _, token := range tokens {
-		addressee, rerr := a.resolveAddressee(ctx, room, members, token)
+		addressee, rerr := a.resolveAddressee(ctx, resolution, token)
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -551,7 +583,8 @@ func (a *API) resolveAddressees(ctx context.Context, room *roomState, to []strin
 	return result, nil
 }
 
-func (a *API) resolveAddressee(ctx context.Context, room *roomState, members []domain.RoomMember, token string) (*store.EnvelopeAddressee, error) {
+func (a *API) resolveAddressee(ctx context.Context, resolution *addresseeScope, token string) (*store.EnvelopeAddressee, error) {
+	room := resolution.room
 	// HRC birth directives (+node=, +model=) are stored verbatim and never
 	// parsed by wrkq: they are HRC's vocabulary, applied at kick.
 	handle := token
@@ -604,8 +637,23 @@ func (a *API) resolveAddressee(ctx context.Context, room *roomState, members []d
 	if err := validateBareAgentName(handle); err != nil {
 		return nil, NewValidationError(err.Error(), map[string]any{"field": "to", "to": token})
 	}
+
+	// The obligation wins over the room's shape. HRC's §7 reply line prints a
+	// bare name, and reply-is-ack keys on SCOPES (T-07628): if a bare reply
+	// resolved by room kind it would address a seat that never asked, leaving
+	// the real obligation to dead-letter while a correct answer sits in the room
+	// (T-07638). A supervisor at :primary and a coordinator at any other seat
+	// are both answered where they actually stand.
+	obligated, err := a.addresseeFromObligation(resolution, handle, intent)
+	if err != nil {
+		return nil, err
+	}
+	if obligated != nil {
+		return obligated, nil
+	}
+
 	matches := make([]domain.RoomMember, 0, 2)
-	for _, member := range members {
+	for _, member := range resolution.members {
 		if member.LeftAt != nil {
 			continue
 		}
@@ -618,7 +666,12 @@ func (a *API) resolveAddressee(ctx context.Context, room *roomState, members []d
 		for _, match := range matches {
 			refs = append(refs, match.MemberRef)
 		}
-		return nil, NewValidationError("ambiguous addressee "+handle+" in this room", map[string]any{
+		// Ambiguity ALWAYS refuses, and it refuses with the candidates IN the
+		// message: a refusal costs the caller one retry with a full handle, while
+		// a silently chosen seat costs a dead-lettered obligation nobody notices
+		// (T-07638).
+		return nil, NewValidationError("ambiguous addressee "+handle+" in this room: "+
+			strings.Join(refs, ", ")+" — address one of them by its full handle", map[string]any{
 			"field": "to", "to": token, "candidates": refs,
 		})
 	}
@@ -660,6 +713,55 @@ func (a *API) resolveAddressee(ctx context.Context, room *roomState, members []d
 		return nil, err
 	}
 	return &store.EnvelopeAddressee{ScopeRef: derived, PrincipalRef: principal, MaterializationIntent: intent}, nil
+}
+
+// addresseeFromObligation resolves a bare name to the seat that is waiting on
+// this replier: the most recently PRESENTED reply_required envelope in this room
+// sent by an agent of that name. Nil means no such obligation stands and the
+// caller falls through to membership, then to the room-derived default.
+func (a *API) addresseeFromObligation(resolution *addresseeScope, agentName string, intent *string) (*store.EnvelopeAddressee, error) {
+	obligations, err := resolution.presentedObligations(a)
+	if err != nil {
+		return nil, err
+	}
+	for index := range obligations {
+		envelope := &obligations[index]
+		if envelopeSenderAgentName(envelope) != agentName {
+			continue
+		}
+		if envelope.FromScopeRef == nil || strings.TrimSpace(*envelope.FromScopeRef) == "" {
+			// A scope-less sender (a human) is addressed as the principal it is.
+			return &store.EnvelopeAddressee{
+				PrincipalRef: envelope.FromPrincipalRef, MaterializationIntent: intent,
+			}, nil
+		}
+		addressee := &store.EnvelopeAddressee{
+			ScopeRef: *envelope.FromScopeRef, PrincipalRef: envelope.FromPrincipalRef,
+			MaterializationIntent: intent,
+		}
+		// The seat is the address, and the attribution derives from it: the
+		// principal a say was attributed to is never what the reply targets
+		// (T-07628).
+		if parsed, perr := scope.ParseScopeHandle(*envelope.FromScopeRef); perr == nil {
+			if principal, nerr := attribution.NormalizeCompat(parsed.AgentID); nerr == nil {
+				addressee.PrincipalRef = principal
+			}
+		}
+		return addressee, nil
+	}
+	return nil, nil
+}
+
+// envelopeSenderAgentName is the bare name an envelope's sender answers to: the
+// agent of its SEAT when it has one, else its principal.
+func envelopeSenderAgentName(envelope *domain.Envelope) string {
+	if envelope.FromScopeRef != nil && strings.TrimSpace(*envelope.FromScopeRef) != "" {
+		if parsed, err := scope.ParseScopeHandle(*envelope.FromScopeRef); err == nil {
+			return parsed.AgentID
+		}
+		return *envelope.FromScopeRef
+	}
+	return strings.TrimPrefix(envelope.FromPrincipalRef, "agent:")
 }
 
 func (a *API) deriveAddresseeScope(ctx context.Context, room *roomState, agentName string) (string, error) {
@@ -1764,6 +1866,7 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 		UUID: envelope.UUID, ID: envelope.ID, RoomUUID: envelope.RoomUUID,
 		RoomKey: room.key, RoomKind: string(room.row.Kind), GroupID: envelope.GroupID,
 		From:       WrkqEnvelopeParty{PrincipalRef: envelope.FromPrincipalRef, ScopeRef: envelope.FromScopeRef},
+		ReplyTo:    envelopeReplyTo(envelope),
 		Obligation: string(envelope.Obligation), Body: envelope.Body,
 		State: string(envelope.State), Terminal: domain.IsEnvelopeTerminal(envelope.State),
 		RoundCount: envelope.RoundCount, RetryAt: envelope.RetryAt,
@@ -1815,6 +1918,16 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 		return nil, NewInternalError(err)
 	}
 	return dto, nil
+}
+
+// envelopeReplyTo is the addressee token that answers one envelope: its sender's
+// SEAT, or the sender's principal when it has no seat. Consumers print it
+// verbatim rather than shortening it to a bare name (T-07638).
+func envelopeReplyTo(envelope *domain.Envelope) string {
+	if envelope.FromScopeRef != nil && strings.TrimSpace(*envelope.FromScopeRef) != "" {
+		return *envelope.FromScopeRef
+	}
+	return envelope.FromPrincipalRef
 }
 
 func presentationDTO(presentation *domain.EnvelopePresentation) *WrkqEnvelopePresentation {

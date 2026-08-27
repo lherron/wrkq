@@ -918,6 +918,35 @@ func (rs *RoomStore) DisposeEnvelopeWithAttribution(attr attribution.Attribution
 	return updated, err
 }
 
+// PresentedObligationsForReplier lists the PRESENTED reply_required envelopes in
+// one room that this replier owes an answer to, most recently presented first.
+// It is the evidence a bare `--to <name>` resolves against: the seat waiting on
+// the replier is the seat the reply belongs to, whatever scope that seat holds
+// (T-07638). The replier matches by SCOPE, exactly as reply-is-ack does; only a
+// scope-less party — a human, who has no scope — matches by principal.
+func (rs *RoomStore) PresentedObligationsForReplier(roomUUID, replierScopeRef, replierPrincipalRef string) ([]domain.Envelope, error) {
+	clauses := []string{
+		"room_uuid = ?",
+		"obligation = 'reply_required'",
+		"state = 'presented'",
+	}
+	args := []interface{}{roomUUID}
+	if strings.TrimSpace(replierScopeRef) != "" {
+		clauses = append(clauses, "to_scope_ref = ?")
+		args = append(args, replierScopeRef)
+	} else {
+		clauses = append(clauses, "to_scope_ref IS NULL AND to_principal_ref = ?")
+		args = append(args, replierPrincipalRef)
+	}
+	// "Most recent" is the most recent PRESENTATION, not the most recent send: a
+	// seat answers what it was last shown. An envelope in state presented always
+	// has a presentation row; the id tiebreak keeps the order total anyway.
+	return rs.queryEnvelopes("SELECT "+envelopeColumns+" FROM envelopes e WHERE "+
+		strings.Join(clauses, " AND ")+` ORDER BY (
+			SELECT MAX(p.presented_at) FROM envelope_presentations p WHERE p.envelope_uuid = e.uuid
+		) DESC, e.id DESC`, args...)
+}
+
 // AckSenderObligationsWithAttribution is the reply-is-ack rule: saying into a
 // room with --to X acks every PRESENTED reply_required envelope in that room
 // addressed to the replier's own scope and sent from X's scope. Both sides

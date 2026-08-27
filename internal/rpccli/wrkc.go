@@ -85,6 +85,7 @@ type envelopeWire struct {
 	GroupID               *string                    `json:"groupId,omitempty"`
 	From                  envelopePartyWire          `json:"from"`
 	To                    *envelopePartyWire         `json:"to"`
+	ReplyTo               string                     `json:"replyTo"`
 	Obligation            string                     `json:"obligation"`
 	Body                  string                     `json:"body"`
 	TaskID                *string                    `json:"taskId,omitempty"`
@@ -265,9 +266,14 @@ Saying with --to also ACKS your own standing obligations in this room from the
 same counterparty: for an agent, the reply IS the ack. To hold one back, defer
 it first.
 
-A bare name in --to resolves against the room (task room -> agent@project:T-xxx,
-campaign/project room -> agent@project:primary, ad-hoc room -> the member with
-that name). Use agent:<id> to address a scope-less principal such as a human.`,
+A bare name in --to resolves, in order: the seat that is WAITING on you — the
+sender of your most recently presented obligation in this room with that name —
+then the room's single member with that name, then the room's own shape (task
+room -> agent@project:T-xxx, campaign/project room -> agent@project:primary).
+Two members of that name and no obligation refuses and names them: reply to a
+seat that never asked and its obligation dead-letters unanswered. An envelope's
+replyTo is the exact token that answers it; a full handle always wins. Use
+agent:<id> to address a scope-less principal such as a human.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			claims := &stdinClaims{}

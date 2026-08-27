@@ -39,6 +39,7 @@ const ENVELOPE: WrkqEnvelope = {
   groupId: "EN-00001",
   from: { principalRef: "agent:clod", scopeRef: "clod@wrkq:T-07613" },
   to: { principalRef: "agent:cody", scopeRef: "cody@wrkq:T-07613" },
+  replyTo: "clod@wrkq:T-07613",
   obligation: "reply_required",
   body: "wave 1 is up",
   taskId: "T-07613",
@@ -204,7 +205,13 @@ describe("wrkq.envelope facade", () => {
     const round = { envelope: "EN-00001", maxRounds: 5, principalRef: "agent:hrc" };
 
     await client.wrkq.envelope.show(show);
-    expect((await client.wrkq.envelope.inboxView(inbox)).groups).toHaveLength(1);
+
+    // The inbox names the EXACT token that answers each obligation: HRC's §7
+    // reply line prints it verbatim rather than shortening it to a bare name,
+    // which resolves per room and can address a seat that never asked (T-07638).
+    const standingInbox = await client.wrkq.envelope.inboxView(inbox);
+    expect(standingInbox.groups).toHaveLength(1);
+    expect(standingInbox.groups[0]!.items[0]!.replyTo).toBe("clod@wrkq:T-07613");
     expect((await client.wrkq.envelope.defer(defer)).state).toBe("deferred");
     expect((await client.wrkq.envelope.ack(ack)).items).toHaveLength(1);
 

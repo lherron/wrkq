@@ -69,27 +69,33 @@ type WrkqEnvelopePresentation struct {
 // WrkqEnvelope is the stable envelope resource DTO. EN-xxxxx is an INTERNAL row
 // id: inbox/show/log surface it, the injected presentation never does.
 type WrkqEnvelope struct {
-	UUID                  string             `json:"uuid"`
-	ID                    string             `json:"id"`
-	RoomUUID              string             `json:"roomUuid"`
-	RoomKey               string             `json:"roomKey"`
-	RoomKind              string             `json:"roomKind"`
-	GroupID               *string            `json:"groupId,omitempty"`
-	From                  WrkqEnvelopeParty  `json:"from"`
-	To                    *WrkqEnvelopeParty `json:"to"`
-	Obligation            string             `json:"obligation"`
-	Body                  string             `json:"body"`
-	TaskID                *string            `json:"taskId,omitempty"`
-	State                 string             `json:"state"`
-	Terminal              bool               `json:"terminal"`
-	RoundCount            int64              `json:"roundCount"`
-	RetryAt               *string            `json:"retryAt,omitempty"`
-	DeferReason           *string            `json:"deferReason,omitempty"`
-	TerminalActor         *string            `json:"terminalActor,omitempty"`
-	Urgent                bool               `json:"urgent"`
-	MaterializationIntent *string            `json:"materializationIntent,omitempty"`
-	RespondToPrincipalRef *string            `json:"respondToPrincipalRef,omitempty"`
-	RetryPromiseID        *string            `json:"retryPromiseId,omitempty"`
+	UUID     string             `json:"uuid"`
+	ID       string             `json:"id"`
+	RoomUUID string             `json:"roomUuid"`
+	RoomKey  string             `json:"roomKey"`
+	RoomKind string             `json:"roomKind"`
+	GroupID  *string            `json:"groupId,omitempty"`
+	From     WrkqEnvelopeParty  `json:"from"`
+	To       *WrkqEnvelopeParty `json:"to"`
+	// ReplyTo is the exact --to token that answers THIS envelope: the sender's
+	// scope handle when it has one, else its scope-less principal. HRC's §7
+	// reply line prints it verbatim. A bare name must never be printed in its
+	// place: bare names resolve per room, and reply-is-ack keys on scopes, so a
+	// bare reply line can address a seat that never asked (T-07638).
+	ReplyTo               string  `json:"replyTo"`
+	Obligation            string  `json:"obligation"`
+	Body                  string  `json:"body"`
+	TaskID                *string `json:"taskId,omitempty"`
+	State                 string  `json:"state"`
+	Terminal              bool    `json:"terminal"`
+	RoundCount            int64   `json:"roundCount"`
+	RetryAt               *string `json:"retryAt,omitempty"`
+	DeferReason           *string `json:"deferReason,omitempty"`
+	TerminalActor         *string `json:"terminalActor,omitempty"`
+	Urgent                bool    `json:"urgent"`
+	MaterializationIntent *string `json:"materializationIntent,omitempty"`
+	RespondToPrincipalRef *string `json:"respondToPrincipalRef,omitempty"`
+	RetryPromiseID        *string `json:"retryPromiseId,omitempty"`
 	// IdempotencyKey is the SAY's key, carried by every envelope of a fan-out.
 	// Consumers dual-writing into another system correlate on it.
 	IdempotencyKey *string                    `json:"idempotencyKey,omitempty"`

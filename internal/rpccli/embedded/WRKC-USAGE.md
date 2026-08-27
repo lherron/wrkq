@@ -102,11 +102,29 @@ Humans are ordinary principals with no scope: `agent:lance` is a valid
 addressee, member, and caller. A scope-less principal is never kicked or
 summoned.
 
-A bare name in `--to` resolves against the room — task room →
-`agent@project:T-xxxxx`, campaign/project room → `agent@project:primary`, ad-hoc
-room → the member with that name. Use `agent:<id>` to address a scope-less
-principal that has not spoken in the room yet. HRC birth directives (`+node=`,
-`+model=`) ride along verbatim and are never parsed by wrkq.
+A full handle in `--to` is always taken verbatim. A bare name resolves in this
+order:
+
+1. **The seat waiting on you** — the sender of your most recently *presented*
+   `reply_required` envelope in this room with that name. A reply belongs to
+   whoever asked, whatever seat they asked from.
+2. **The room's single member of that name.**
+3. **The room's shape** — task room → `agent@project:T-xxxxx`, campaign/project
+   room → `agent@project:primary`. An ad-hoc room has no shape to fall back on
+   and refuses.
+
+Several members of that name and no obligation to settle it **refuses** and
+names every candidate: answering a seat that never asked leaves the real
+obligation to dead-letter unanswered, which costs far more than a retry with a
+full handle. Resolution reads the room and your *seat*; the principal a say is
+attributed to (`--as`) never moves it.
+
+Every envelope carries `replyTo` — the exact `--to` that answers it — and
+`wrkc inbox` and `wrkc show` print it. Prefer it over a bare name.
+
+Use `agent:<id>` to address a scope-less principal that has not spoken in the
+room yet. HRC birth directives (`+node=`, `+model=`) ride along verbatim and are
+never parsed by wrkq.
 
 ## Watching
 

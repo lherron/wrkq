@@ -220,6 +220,13 @@ export interface WrkqEnvelope {
   groupId?: string;
   from: WrkqEnvelopeParty;
   to: WrkqEnvelopeParty | null;
+  /**
+   * The exact `--to` token that answers THIS envelope: the sender's scope
+   * handle, or its principal when it has none. Print it verbatim. A bare name
+   * in its place resolves by the room's shape and can address a seat that never
+   * asked, dead-lettering the real obligation (T-07638).
+   */
+  replyTo: string;
   obligation: WrkqEnvelopeObligation;
   body: string;
   /** Set when the say routed via a task, even into a campaign room. */
