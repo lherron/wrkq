@@ -165,6 +165,12 @@ replaces a `wrkqd` a running job still holds, `wrkq server status` reports
 `binaryStale`, and `wrkq server health` fails on it. On the canonical node,
 install and restart together.
 
+`just install` publishes whatever is on disk, so it refuses a worktree with
+uncommitted tracked changes and names them, before it builds anything. Commit
+first, or install deliberately with `just install allow-dirty=1`. Untracked
+files never trip it, and neither does `packages/client/bun.lock`, which the
+install path rewrites itself.
+
 `health` resolves the daemon's token like the CLI transport does (`WRKQD_TOKEN`,
 else `WRKQD_TOKEN_FILE`); on a per-node-token daemon an unauthenticated caller
 gets `auth: unauthorized` alongside `status: ok`, since a 401 still proves the

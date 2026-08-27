@@ -13,6 +13,8 @@ info:
   @echo ""
   @echo "Key commands:"
   @echo "  just build     - Build wrkq, wrkf, wrkqadm, wrkqd binaries"
+  @echo "  just install   - Publish binaries + @wrkq/client (refuses a dirty"
+  @echo "                   worktree; override with allow-dirty=1)"
   @echo "  just test      - Run Go tests"
   @echo "  just lint      - Run golangci-lint"
   @echo "  just verify    - Run lint + test"
@@ -142,10 +144,68 @@ test-coverage:
   go tool cover -html=coverage.out -o coverage.html
 
 # Install CLI binaries to ~/.local/bin and, on producer nodes, publish @wrkq/client.
-# Pass no-sync=1 to skip syncing downstream consumer repos on a producer node.
-install no-sync="": build
+#
+#   just install                  # clean worktree required
+#   just install no-sync=1        # skip syncing downstream repos on a producer node
+#   just install allow-dirty=1    # install over uncommitted tracked changes
+#
+# Options are parsed here rather than declared as recipe parameters because just
+# binds `name=value` after a recipe name POSITIONALLY, not by name: with two
+# parameters, `just install allow-dirty=1` would silently land in the first one
+# and the flag would do nothing. Parsing the pairs ourselves keeps every option
+# order-independent and makes a typo an error instead of a no-op.
+install *flags:
   #!/usr/bin/env bash
   set -euo pipefail
+  allow_dirty=""
+  no_sync=""
+  for flag in {{flags}} ""; do
+    [ -n "$flag" ] || continue
+    case "$flag" in
+      allow-dirty=*) allow_dirty="${flag#allow-dirty=}" ;;
+      no-sync=*)     no_sync="${flag#no-sync=}" ;;
+      *)
+        echo "install: unknown option '$flag'" >&2
+        echo "         want: just install [no-sync=1] [allow-dirty=1]" >&2
+        exit 2
+        ;;
+    esac
+  done
+  # DIRTY-TREE GUARD (T-07631). `just install` publishes whatever is on disk:
+  # binaries to ~/.local/bin, and on a producer node @wrkq/client to the local
+  # registry every downstream repo then syncs from. Several implementation seats
+  # share this worktree, so an uncommitted tracked edit that rides along is often
+  # a *different* seat's half-finished fix — and once published, nothing records
+  # what actually shipped. Refuse before `just build`, so a refused install
+  # leaves the tree exactly as it found it.
+  #
+  # Untracked files are ignored: scratch files are not published. One tracked
+  # path is excluded because `just install` writes it itself —
+  # packages/client/bun.lock, rewritten by the `bun install` inside
+  # client-publish-dev. Without the exclusion a successful install could arm the
+  # guard against the next one over churn nobody authored.
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    dirty="$(git status --porcelain --untracked-files=no -- . ':(exclude)packages/client/bun.lock')"
+    if [ -n "$dirty" ]; then
+      if [ -z "$allow_dirty" ]; then
+        {
+          echo "✗ install refused: the worktree has uncommitted tracked changes."
+          printf '%s\n' "$dirty" | sed 's/^/    /'
+          echo ""
+          echo "  just install publishes whatever is on disk. In a worktree several seats"
+          echo "  share, the change that ships may not be yours."
+          echo ""
+          echo "  Commit (or stash) first, or install deliberately:"
+          echo "    just install allow-dirty=1"
+        } >&2
+        exit 1
+      fi
+      echo "⚠️  allow-dirty=1: installing uncommitted tracked changes"
+      printf '%s\n' "$dirty" | sed 's/^/    /'
+      echo ""
+    fi
+  fi
+  just build
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries
@@ -197,7 +257,7 @@ install no-sync="": build
   node_role="$(bash scripts/resolve-node-role.sh)"
   if [ "$node_role" = "producer" ]; then
     just client-publish-dev
-    if [ -z "{{ no-sync }}" ]; then
+    if [ -z "$no_sync" ]; then
       just sync-downstream
     else
       echo "[install] skipping downstream sync (no-sync=1)"
