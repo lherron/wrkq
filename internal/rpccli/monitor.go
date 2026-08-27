@@ -116,6 +116,7 @@ Subcommands:
 Examples:
   wrkq monitor watch T-04466 --state-only --until state=completed --timeout 30m
   wrkq monitor wait T-1 T-2 T-3 --until all-terminal --stall-after 30m
+  wrkq monitor wait EN-00012 --until terminal --timeout 10m
 
 Exit codes: 0=condition met, 1=timeout/stall, 2=selector error, 3=stream error.
 `,
@@ -135,7 +136,11 @@ func newMonitorWatchCmd() *cobra.Command {
 		Long: `Stream typed NDJSON events for watched tasks. Emits per-event lines and
 exactly one terminal line before exit. With no --until, follows indefinitely.
 
-Task selectors: T-XXXXX friendly IDs or container paths (e.g. inbox/my-task).
+Selectors: T-XXXXX friendly IDs or container paths (e.g. inbox/my-task), plus
+R-XXXXX rooms and EN-XXXXX envelopes. A task selector also carries that task's
+room, so state changes and the conversation stream on ONE selector; --state-only
+still emits only task lifecycle changes. An EN- selector that is a fan-out group
+head covers every envelope of that group.
 Invalid selectors fail with exit code 2 before any streaming.
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -172,7 +177,7 @@ Invalid selectors fail with exit code 2 before any streaming.
 				scoped = append(scoped, sc.selector(arg, false))
 			}
 			if len(args) == 0 && until != "" {
-				return monitorUsageError(errOut, errors.New("monitor watch --until requires at least one task selector"))
+				return monitorUsageError(errOut, errors.New("monitor watch --until requires at least one selector"))
 			}
 			timeout, err := parseMonitorDuration(timeoutStr, 0)
 			if err != nil {
@@ -211,7 +216,7 @@ Invalid selectors fail with exit code 2 before any streaming.
 			})
 		},
 	}
-	cmd.Flags().StringVar(&until, "until", "", "Condition: state=<s>[,<s>...] or all-terminal")
+	cmd.Flags().StringVar(&until, "until", "", "Condition: state=<s>[,<s>...], all-terminal, acked, or terminal")
 	cmd.Flags().StringVar(&timeoutStr, "timeout", "", "Maximum wait duration (e.g. 30m)")
 	cmd.Flags().StringVar(&stallAfterStr, "stall-after", "", "Exit after this duration with no new events")
 	cmd.Flags().BoolVar(&stateOnly, "state-only", false, "Only emit lifecycle state-change events")
@@ -234,6 +239,7 @@ func newMonitorWaitCmd() *cobra.Command {
 Shares the exact condition evaluator and exit-code contract with monitor watch --until.
 
 Useful for scripted sequencing: wrkq monitor wait T-00001 --until state=completed
+An envelope group waits with: wrkq monitor wait EN-00012 --until terminal
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(until) == "" {
@@ -257,7 +263,7 @@ Useful for scripted sequencing: wrkq monitor wait T-00001 --until state=complete
 				scoped = append(scoped, sc.selector(arg, false))
 			}
 			if len(args) == 0 {
-				return monitorUsageError(errOut, errors.New("monitor wait requires at least one task selector"))
+				return monitorUsageError(errOut, errors.New("monitor wait requires at least one selector"))
 			}
 			timeout, err := parseMonitorDuration(timeoutStr, 0)
 			if err != nil {
@@ -294,7 +300,7 @@ Useful for scripted sequencing: wrkq monitor wait T-00001 --until state=complete
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&until, "until", "", "Condition: state=<s>[,<s>...] or all-terminal")
+	cmd.Flags().StringVar(&until, "until", "", "Condition: state=<s>[,<s>...], all-terminal, acked, or terminal")
 	cmd.Flags().StringVar(&timeoutStr, "timeout", "", "Maximum wait duration (e.g. 30m)")
 	cmd.Flags().StringVar(&stallAfterStr, "stall-after", "", "Exit after this duration with no new events")
 	return cmd
@@ -639,11 +645,17 @@ func parseMonitorDuration(raw string, def time.Duration) (time.Duration, error) 
 
 func validateMonitorCondition(raw string) error {
 	raw = strings.TrimSpace(raw)
-	if raw == "all-terminal" {
+	switch raw {
+	case "all-terminal":
+		return nil
+	// Envelope conditions (T-07612 §3.4). terminal = acked|dead, so a
+	// dead-lettered obligation releases a waiter instead of hanging it. The
+	// SERVER owns the selector/condition agreement check.
+	case "acked", "terminal":
 		return nil
 	}
 	if !strings.HasPrefix(raw, "state=") {
-		return fmt.Errorf("invalid --until condition %q: expected state=<s>[,<s>...] or all-terminal", raw)
+		return fmt.Errorf("invalid --until condition %q: expected state=<s>[,<s>...], all-terminal, acked, or terminal", raw)
 	}
 
 	stateList := strings.TrimPrefix(raw, "state=")

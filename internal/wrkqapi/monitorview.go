@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/selectors"
 )
 
@@ -46,14 +47,16 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 		return &WrkqMonitorEventsView{Items: []WrkqMonitorEvent{}, HighWater: start}, nil
 	}
 
-	uuids, friendlyIDs, err := a.resolveMonitorSelectors(p.Tasks)
+	selected, err := a.resolveMonitorSelectors(p.Tasks)
 	if err != nil {
 		return nil, err
 	}
 
 	filter := monitorEventFilter{
-		taskUUIDs:       uuids,
-		taskFriendlyIDs: friendlyIDs,
+		taskUUIDs:       selected.taskUUIDs,
+		taskFriendlyIDs: selected.taskFriendlyIDs,
+		roomUUIDs:       selected.roomUUIDs,
+		envelopeUUIDs:   selected.envelopeUUIDs,
 		stateOnly:       p.StateOnly,
 		eventTypes:      p.EventTypes,
 	}
@@ -71,7 +74,7 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 
 	view := &WrkqMonitorEventsView{Items: []WrkqMonitorEvent{}, HighWater: p.Cursor}
 	for rows.Next() {
-		event, commentTaskUUID, commentTaskID, err := scanMonitorRow(rows)
+		event, commentTaskUUID, commentTaskID, collab, err := scanMonitorRow(rows)
 		if err != nil {
 			return nil, NewInternalError(err)
 		}
@@ -92,7 +95,7 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 			}
 		}
 
-		if !isMonitorEventIncluded(event, normalized) {
+		if !isMonitorEventIncluded(event, normalized, collab) {
 			continue
 		}
 
@@ -120,15 +123,38 @@ func (a *API) MonitorStateView(ctx context.Context, p MonitorStateViewParams) (*
 		return nil, NewValidationError(err.Error(), nil)
 	}
 
-	uuids, friendlyIDs, err := a.resolveMonitorSelectors(p.Tasks)
+	selected, err := a.resolveMonitorSelectors(p.Tasks)
 	if err != nil {
 		return nil, err
 	}
-	if len(uuids) == 0 {
+
+	// A condition and its selectors must agree about what is being watched:
+	// state=/all-terminal evaluate task lifecycle, acked/terminal evaluate
+	// envelope dispositions. Mixing them would make `unmet` meaningless.
+	if condition.isEnvelopeCondition() {
+		if len(selected.envelopeUUIDs) == 0 {
+			return nil, NewValidationError("monitor --until "+p.Condition+" requires at least one envelope selector (EN-xxxxx)", nil)
+		}
+		if selected.sawTaskSelector {
+			return nil, NewValidationError("monitor --until "+p.Condition+" does not accept task selectors", nil)
+		}
+		met, unmet, evalErr := a.evaluateEnvelopeCondition(ctx, condition, selected.envelopeUUIDs)
+		if evalErr != nil {
+			return nil, NewInternalError(evalErr)
+		}
+		if unmet == nil {
+			unmet = []string{}
+		}
+		return &WrkqMonitorStateView{Met: met, Unmet: unmet}, nil
+	}
+	if selected.sawEnvelopeSelector {
+		return nil, NewValidationError("monitor --until "+p.Condition+" does not accept envelope selectors; use --until acked or --until terminal", nil)
+	}
+	if len(selected.taskUUIDs) == 0 {
 		return nil, NewValidationError("monitor --until requires at least one task selector", nil)
 	}
 
-	met, unmet, evalErr := a.evaluateMonitorCondition(ctx, condition, uuids, friendlyIDs)
+	met, unmet, evalErr := a.evaluateMonitorCondition(ctx, condition, selected.taskUUIDs, selected.taskFriendlyIDs)
 	if evalErr != nil {
 
 		return nil, NewInternalError(evalErr)
@@ -192,12 +218,40 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 // matched by resource_uuid ∈ taskUUIDs; comment.* matched by payload.task_id ∈
 // taskUUIDs ∪ taskFriendlyIDs; stateOnly applies isMonitorStateChangeEvent; an
 // explicit eventTypes filter restricts to those event_type values.
-func isMonitorEventIncluded(event monitorRow, filter monitorEventFilter) bool {
+func isMonitorEventIncluded(event monitorRow, filter monitorEventFilter, collab monitorCollabRefs) bool {
 	if filter.stateOnly && !isMonitorStateChangeEvent(event) {
 		return false
 	}
 	if len(filter.eventTypes) > 0 && !containsMonitorString(filter.eventTypes, event.EventType) {
 		return false
+	}
+
+	// The collaboration ledger rides the SAME event stream as task.*/container.*,
+	// so a task room's key being the task id means one selector shows both the
+	// task's state changes and its conversation. --state-only keeps excluding
+	// them: isMonitorStateChangeEvent is task-only by construction.
+	if event.ResourceType == "room" {
+		if len(filter.roomUUIDs) == 0 && len(filter.taskUUIDs) == 0 &&
+			len(filter.taskFriendlyIDs) == 0 && len(filter.envelopeUUIDs) == 0 {
+			return true
+		}
+		return event.ResourceUUID != nil && containsMonitorString(filter.roomUUIDs, *event.ResourceUUID)
+	}
+	if event.ResourceType == "envelope" {
+		if len(filter.roomUUIDs) == 0 && len(filter.taskUUIDs) == 0 &&
+			len(filter.taskFriendlyIDs) == 0 && len(filter.envelopeUUIDs) == 0 {
+			return true
+		}
+		if event.ResourceUUID != nil && containsMonitorString(filter.envelopeUUIDs, *event.ResourceUUID) {
+			return true
+		}
+		if collab.roomUUID != "" && containsMonitorString(filter.roomUUIDs, collab.roomUUID) {
+			return true
+		}
+		// An envelope routed via a task is tagged with it even when strict
+		// campaign coalesce landed it in the campaign room, so watching the task
+		// still shows the traffic that came through it.
+		return collab.taskUUID != "" && containsMonitorString(filter.taskUUIDs, collab.taskUUID)
 	}
 
 	if event.ResourceType == "task" && strings.HasPrefix(event.EventType, "task.") {
@@ -250,6 +304,13 @@ func parseMonitorCondition(raw string) (monitorCondition, error) {
 		return monitorCondition{}, fmt.Errorf("--until condition is required")
 	case raw == "all-terminal":
 		return monitorCondition{kind: "all-terminal"}, nil
+	// Envelope conditions. terminal = acked|dead: `--wait` blocks until every
+	// envelope in the group is terminal, and dead is terminal — a dead-lettered
+	// obligation must release the waiter, not hang it.
+	case raw == "acked":
+		return monitorCondition{kind: "envelope-acked"}, nil
+	case raw == "terminal":
+		return monitorCondition{kind: "envelope-terminal"}, nil
 	case strings.HasPrefix(raw, "state="):
 		stateList := strings.TrimPrefix(raw, "state=")
 		if stateList == "" {
@@ -268,8 +329,48 @@ func parseMonitorCondition(raw string) (monitorCondition, error) {
 		}
 		return monitorCondition{kind: "state", states: allowed}, nil
 	default:
-		return monitorCondition{}, fmt.Errorf("invalid --until condition %q: expected state=<s>[,<s>...] or all-terminal", raw)
+		return monitorCondition{}, fmt.Errorf("invalid --until condition %q: expected state=<s>[,<s>...], all-terminal, acked, or terminal", raw)
 	}
+}
+
+// evaluateEnvelopeCondition evaluates acked/terminal over the selected
+// envelopes. An envelope that no longer exists is an error, matching the task
+// path's "one or more watched resources no longer exist".
+func (a *API) evaluateEnvelopeCondition(ctx context.Context, c monitorCondition, envelopeUUIDs []string) (bool, []string, error) {
+	query := "SELECT id, state FROM envelopes WHERE uuid IN (" +
+		monitorQuestionMarks(len(envelopeUUIDs)) + ") ORDER BY id"
+	rows, err := a.db.QueryContext(ctx, query, monitorStringsToInterfaces(envelopeUUIDs)...)
+	if err != nil {
+		return false, nil, fmt.Errorf("query envelope state: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	unmet := []string{}
+	seen := 0
+	for rows.Next() {
+		var friendlyID, state string
+		if err := rows.Scan(&friendlyID, &state); err != nil {
+			return false, nil, fmt.Errorf("scan envelope state: %w", err)
+		}
+		seen++
+		satisfied := false
+		switch c.kind {
+		case "envelope-acked":
+			satisfied = state == string(domain.EnvelopeStateAcked)
+		case "envelope-terminal":
+			satisfied = domain.IsEnvelopeTerminal(domain.EnvelopeState(state))
+		}
+		if !satisfied {
+			unmet = append(unmet, friendlyID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, nil, fmt.Errorf("iterate envelope state: %w", err)
+	}
+	if seen != len(envelopeUUIDs) {
+		return false, unmet, fmt.Errorf("one or more watched envelopes no longer exist")
+	}
+	return len(unmet) == 0, unmet, nil
 }
 
 func (c monitorCondition) satisfiedBy(state string) bool {
@@ -324,24 +425,90 @@ func (a *API) evaluateMonitorCondition(ctx context.Context, c monitorCondition, 
 // resolveMonitorSelectors resolves already-caller-scoped task selector strings to
 // (uuids, friendlyIDs). A bad selector returns WRKQ_VALIDATION (the legacy
 // exit-code-2 path). Empty/whitespace selectors are skipped.
-func (a *API) resolveMonitorSelectors(in []string) (uuids []string, friendlyIDs []string, err error) {
+func (a *API) resolveMonitorSelectors(in []string) (monitorSelectorSet, error) {
+	set := monitorSelectorSet{}
 	for _, selector := range in {
 		selector = strings.TrimSpace(selector)
 		if selector == "" {
 			continue
 		}
+
+		if kind, _, perr := id.Parse(selector); perr == nil {
+			switch kind {
+			case id.TypeRoom:
+				var roomUUID string
+				if err := a.db.QueryRow("SELECT uuid FROM rooms WHERE id = ? OR uuid = ?", selector, selector).Scan(&roomUUID); err != nil {
+					return monitorSelectorSet{}, NewValidationError(fmt.Sprintf("invalid room selector %q", selector), nil)
+				}
+				set.roomUUIDs = appendMonitorUnique(set.roomUUIDs, roomUUID)
+				continue
+			case id.TypeEnvelope:
+				// An EN- selector covers the envelope AND, when that id is a
+				// group head, every envelope the same say fanned out to. A
+				// sibling's id is nobody's group_id, so it selects only itself.
+				uuids, ids, err := a.resolveEnvelopeSelector(selector)
+				if err != nil {
+					return monitorSelectorSet{}, err
+				}
+				for index := range uuids {
+					set.envelopeUUIDs = appendMonitorUnique(set.envelopeUUIDs, uuids[index])
+					set.envelopeFriendlyIDs = appendMonitorUnique(set.envelopeFriendlyIDs, ids[index])
+				}
+				set.sawEnvelopeSelector = true
+				continue
+			}
+		}
+
 		uuid, friendlyID, rerr := selectors.ResolveTask(a.db, selector)
 		if rerr != nil {
-			return nil, nil, NewValidationError(fmt.Sprintf("invalid task selector %q: %s", selector, rerr.Error()), nil)
+			return monitorSelectorSet{}, NewValidationError(fmt.Sprintf("invalid task selector %q: %s", selector, rerr.Error()), nil)
 		}
-		if !containsMonitorString(uuids, uuid) {
-			uuids = append(uuids, uuid)
+		set.sawTaskSelector = true
+		set.taskUUIDs = appendMonitorUnique(set.taskUUIDs, uuid)
+		if friendlyID != "" {
+			set.taskFriendlyIDs = appendMonitorUnique(set.taskFriendlyIDs, friendlyID)
 		}
-		if friendlyID != "" && !containsMonitorString(friendlyIDs, friendlyID) {
-			friendlyIDs = append(friendlyIDs, friendlyID)
+		// The task's own room rides the same selector: §3.4's "state changes and
+		// the conversation on one selector".
+		var roomUUID string
+		if err := a.db.QueryRow("SELECT uuid FROM rooms WHERE task_uuid = ?", uuid).Scan(&roomUUID); err == nil {
+			set.roomUUIDs = appendMonitorUnique(set.roomUUIDs, roomUUID)
 		}
 	}
-	return uuids, friendlyIDs, nil
+	return set, nil
+}
+
+func (a *API) resolveEnvelopeSelector(selector string) ([]string, []string, error) {
+	rows, err := a.db.Query(`SELECT uuid, id FROM envelopes
+		 WHERE id = ? OR uuid = ? OR group_id = ? ORDER BY id`, selector, selector, selector)
+	if err != nil {
+		return nil, nil, NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	uuids := []string{}
+	ids := []string{}
+	for rows.Next() {
+		var uuid, friendlyID string
+		if err := rows.Scan(&uuid, &friendlyID); err != nil {
+			return nil, nil, NewInternalError(err)
+		}
+		uuids = append(uuids, uuid)
+		ids = append(ids, friendlyID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, NewInternalError(err)
+	}
+	if len(uuids) == 0 {
+		return nil, nil, NewValidationError(fmt.Sprintf("invalid envelope selector %q", selector), nil)
+	}
+	return uuids, ids, nil
+}
+
+func appendMonitorUnique(values []string, value string) []string {
+	if value == "" || containsMonitorString(values, value) {
+		return values
+	}
+	return append(values, value)
 }
 
 // monitorEventScanQuery is the legacy pollMonitorEvents query with a server cursor
@@ -353,6 +520,15 @@ const monitorEventScanQuery = `
 	           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
 	           WHEN 'container' THEN (SELECT id FROM containers WHERE uuid = e.resource_uuid)
 	           WHEN 'comment' THEN (SELECT id FROM comments WHERE uuid = e.resource_uuid)
+	           -- A derived room has no friendly id: its KEY is its work identity,
+	           -- so hydrate that instead of leaving the column blank.
+	           WHEN 'room' THEN (SELECT COALESCE(r.id, t.id, cp.path, c.slug)
+	                               FROM rooms r
+	                               LEFT JOIN tasks t ON t.uuid = r.task_uuid
+	                               LEFT JOIN containers c ON c.uuid = r.container_uuid
+	                               LEFT JOIN v_container_paths cp ON cp.uuid = r.container_uuid
+	                              WHERE r.uuid = e.resource_uuid)
+	           WHEN 'envelope' THEN (SELECT id FROM envelopes WHERE uuid = e.resource_uuid)
 	           ELSE NULL
 	       END as resource_id,
 	       CASE e.resource_type
@@ -362,7 +538,15 @@ const monitorEventScanQuery = `
 	       CASE e.resource_type
 	           WHEN 'comment' THEN (SELECT t.id FROM comments c JOIN tasks t ON t.uuid = c.task_uuid WHERE c.uuid = e.resource_uuid)
 	           ELSE NULL
-	       END as comment_task_id
+	       END as comment_task_id,
+	       CASE e.resource_type
+	           WHEN 'envelope' THEN (SELECT room_uuid FROM envelopes WHERE uuid = e.resource_uuid)
+	           ELSE NULL
+	       END as envelope_room_uuid,
+	       CASE e.resource_type
+	           WHEN 'envelope' THEN (SELECT task_uuid FROM envelopes WHERE uuid = e.resource_uuid)
+	           ELSE NULL
+	       END as envelope_task_uuid
 	FROM event_log e
 	WHERE e.id > ?
 	ORDER BY e.id ASC
@@ -385,9 +569,10 @@ const watchTailScanQuery = `
 	LIMIT ?
 `
 
-func scanMonitorRow(rows *sql.Rows) (monitorRow, string, string, error) {
+func scanMonitorRow(rows *sql.Rows) (monitorRow, string, string, monitorCollabRefs, error) {
 	var event monitorRow
 	var resourceID, commentTaskUUID, commentTaskID sql.NullString
+	var envelopeRoomUUID, envelopeTaskUUID sql.NullString
 	if err := rows.Scan(
 		&event.ID,
 		&event.Timestamp,
@@ -398,13 +583,19 @@ func scanMonitorRow(rows *sql.Rows) (monitorRow, string, string, error) {
 		&resourceID,
 		&commentTaskUUID,
 		&commentTaskID,
+		&envelopeRoomUUID,
+		&envelopeTaskUUID,
 	); err != nil {
-		return monitorRow{}, "", "", fmt.Errorf("scan monitor event: %w", err)
+		return monitorRow{}, "", "", monitorCollabRefs{}, fmt.Errorf("scan monitor event: %w", err)
 	}
 	if resourceID.Valid {
 		event.ResourceID = &resourceID.String
 	}
-	return event, valueOrEmptyString(commentTaskUUID), valueOrEmptyString(commentTaskID), nil
+	collab := monitorCollabRefs{
+		roomUUID: valueOrEmptyString(envelopeRoomUUID),
+		taskUUID: valueOrEmptyString(envelopeTaskUUID),
+	}
+	return event, valueOrEmptyString(commentTaskUUID), valueOrEmptyString(commentTaskID), collab, nil
 }
 
 func monitorPayloadTaskID(payload *string) string {

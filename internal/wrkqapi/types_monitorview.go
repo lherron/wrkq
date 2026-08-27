@@ -118,14 +118,46 @@ type monitorRow struct {
 	Payload      *string
 }
 
+// monitorCollabRefs carries the room/task an envelope event belongs to so a
+// room or task selector matches the conversation without the client parsing
+// payloads.
+type monitorCollabRefs struct {
+	roomUUID string
+	taskUUID string
+}
+
 type monitorEventFilter struct {
 	taskUUIDs       []string
 	taskFriendlyIDs []string
+	roomUUIDs       []string
+	envelopeUUIDs   []string
 	stateOnly       bool
 	eventTypes      []string
+}
+
+// monitorSelectorSet is the resolved selector inventory for one monitor call.
+// Task and collaboration selectors coexist deliberately: a task room's key IS
+// the task id, so `wrkq monitor watch T-07613` shows the task's state changes
+// and its conversation on ONE selector.
+type monitorSelectorSet struct {
+	taskUUIDs           []string
+	taskFriendlyIDs     []string
+	roomUUIDs           []string
+	envelopeUUIDs       []string
+	envelopeFriendlyIDs []string
+	// sawEnvelopeSelector records that the caller named an EN- selector, which
+	// is what makes an envelope --until condition legal.
+	sawEnvelopeSelector bool
+	sawTaskSelector     bool
 }
 
 type monitorCondition struct {
 	kind   string
 	states map[string]bool
+}
+
+// isEnvelopeCondition reports whether a condition evaluates envelope
+// dispositions rather than task lifecycle states.
+func (c monitorCondition) isEnvelopeCondition() bool {
+	return c.kind == "envelope-acked" || c.kind == "envelope-terminal"
 }
