@@ -120,6 +120,23 @@ function emitPrefixed(
 	for (const line of output.trimEnd().split("\n")) write(`[${prefix}] ${line}`);
 }
 
+/**
+ * The environment for a git spawn that means one specific repository.
+ *
+ * Git's GIT_* variables outrank every argument that identifies a repository —
+ * an ambient GIT_DIR beats cwd and beats `-C` — so anything launched from a git
+ * hook, which exports GIT_DIR, silently acts on the hook's repository instead
+ * (T-07635).
+ */
+function environmentWithoutGitOverrides(): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(process.env).filter(
+			(entry): entry is [string, string] =>
+				entry[1] !== undefined && !entry[0].startsWith("GIT_"),
+		),
+	);
+}
+
 const defaultRunner: SyncRunner = (consumer, command) => {
 	const result = spawnSync("bun", command, {
 		cwd: consumer.path,
@@ -135,10 +152,13 @@ const defaultRunner: SyncRunner = (consumer, command) => {
 };
 
 const defaultLockProbe: LockProbe = (consumer) => {
+	// Scrubbed, not inherited: an ambient GIT_DIR outranks cwd, so under a git
+	// hook this would report some other repository's lockfile as this one's
+	// (T-07635).
 	const result = spawnSync("git", ["status", "--porcelain", "--", "bun.lock"], {
 		cwd: consumer.path,
 		encoding: "utf8",
-		env: process.env,
+		env: environmentWithoutGitOverrides(),
 		stdio: "pipe",
 	});
 	if (result.status !== 0) return false;
