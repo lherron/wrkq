@@ -228,6 +228,13 @@ that a running job still holds, `wrkq server status` reports `binaryStale`, and
 `wrkq server health` fails on it. On the canonical node, install and restart
 together.
 
+`wrkq server health` resolves the daemon's token the way the CLI transport does
+(`WRKQD_TOKEN`, else `WRKQD_TOKEN_FILE`). On a node running per-node tokens an
+unauthenticated caller gets HTTP 401, which is reported as `auth:
+unauthorized` and is not a failure — the daemon answered, so liveness is proven
+and only the token is missing. Exit status stays reserved for a daemon that is
+down or one running an image the installed binary no longer matches.
+
 `wrkq server status` and `wrkq server health` probe the address the launchd job
 actually binds (its `--addr` argument or `WRKQD_ADDR`), not the `127.0.0.1:7171`
 default.

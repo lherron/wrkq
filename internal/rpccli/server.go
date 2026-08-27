@@ -265,16 +265,24 @@ func runServerStatus(cmd *cobra.Command, opts *serverOptions) error {
 
 func runServerHealth(cmd *cobra.Command, opts *serverOptions) error {
 	owner := detectWrkqLaunchdOwner()
-	if err := checkWrkqServerHealth(launchdProbeOptions(opts, owner), 2*time.Second); err != nil {
+	authorized, err := checkWrkqServerHealth(launchdProbeOptions(opts, owner), 2*time.Second)
+	if err != nil {
 		return err
 	}
 	if err := checkInstalledBinaryLoaded(owner); err != nil {
 		return err
 	}
+	payload := map[string]string{"status": "ok"}
+	if !authorized {
+		payload["auth"] = "unauthorized"
+	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"status": "ok"})
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(payload)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "ok")
+	if !authorized {
+		fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: the daemon answered but rejected this caller's token; health checked liveness only")
+	}
 	return nil
 }
 
@@ -732,20 +740,30 @@ func newServerHealthRequest(opts *serverOptions, timeout time.Duration) (*http.C
 	if err != nil {
 		return nil, nil, err
 	}
-	if opts.token != "" {
-		req.Header.Set("Authorization", "Bearer "+opts.token)
+	// A node running per-node bearer tokens rejects an absent or wrong token,
+	// so fall back to the same credential the CLI transport resolves.
+	token := opts.token
+	if token == "" {
+		token = remoteTokenFromEnv()
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return client, req, nil
 }
 
-func checkWrkqServerHealth(opts *serverOptions, timeout time.Duration) error {
+// checkWrkqServerHealth reports whether the daemon is serving. A 401 is not a
+// health failure: it proves the daemon answered and only says this caller holds
+// no usable token. Failing on it would report a healthy canonical daemon as
+// broken, and would mask the stale-binary signal behind the same exit code.
+func checkWrkqServerHealth(opts *serverOptions, timeout time.Duration) (authorized bool, err error) {
 	client, req, err := newServerHealthRequest(opts, timeout)
 	if err != nil {
-		return err
+		return false, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("wrkq server is not responsive at %s: %w", statusTarget(collectWrkqServerStatus(opts)), err)
+		return false, fmt.Errorf("wrkq server is not responsive at %s: %w", statusTarget(collectWrkqServerStatus(opts)), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized && opts.token == "" {
@@ -753,14 +771,18 @@ func checkWrkqServerHealth(opts *serverOptions, timeout time.Duration) error {
 		req.Header.Set("Authorization", "Bearer dev")
 		resp, err = client.Do(req)
 		if err != nil {
-			return fmt.Errorf("wrkq server is not responsive at %s: %w", statusTarget(collectWrkqServerStatus(opts)), err)
+			return false, fmt.Errorf("wrkq server is not responsive at %s: %w", statusTarget(collectWrkqServerStatus(opts)), err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("wrkq server health returned HTTP %d", resp.StatusCode)
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusUnauthorized:
+		return false, nil
+	default:
+		return false, fmt.Errorf("wrkq server health returned HTTP %d", resp.StatusCode)
 	}
-	return nil
 }
 
 func statusTarget(status serverRuntimeStatus) string {

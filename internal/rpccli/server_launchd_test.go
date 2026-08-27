@@ -2,6 +2,8 @@ package rpccli
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -322,5 +324,73 @@ func TestLaunchdFailureDetailNamesTheCodesigningKill(t *testing.T) {
 	detail := launchdFailureDetail(owner)
 	if !strings.Contains(detail, "OS_REASON_CODESIGNING") || !strings.Contains(detail, "code requirement") {
 		t.Fatalf("detail=%q want the codesigning explanation", detail)
+	}
+}
+
+func TestCheckWrkqServerHealthTreats401AsServing(t *testing.T) {
+	// The canonical node runs per-node bearer tokens, so an operator shell
+	// without one gets 401 from a perfectly healthy daemon. Failing on that
+	// reports a live daemon as broken and hides the stale-binary signal behind
+	// the same exit code.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	authorized, err := checkWrkqServerHealth(&serverOptions{addr: strings.TrimPrefix(server.URL, "http://")}, 2*time.Second)
+	if err != nil {
+		t.Fatalf("checkWrkqServerHealth: %v (a 401 proves the daemon answered)", err)
+	}
+	if authorized {
+		t.Fatal("authorized=true for a 401 response")
+	}
+}
+
+func TestCheckWrkqServerHealthAcceptsAuthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer node-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	authorized, err := checkWrkqServerHealth(&serverOptions{
+		addr:  strings.TrimPrefix(server.URL, "http://"),
+		token: "node-token",
+	}, 2*time.Second)
+	if err != nil || !authorized {
+		t.Fatalf("authorized=%v err=%v want authorized with no error", authorized, err)
+	}
+}
+
+func TestCheckWrkqServerHealthFailsOnServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := checkWrkqServerHealth(&serverOptions{addr: strings.TrimPrefix(server.URL, "http://")}, 2*time.Second); err == nil {
+		t.Fatal("expected an error for HTTP 500")
+	}
+}
+
+func TestServerHealthRequestFallsBackToTheTokenFile(t *testing.T) {
+	// A plain operator shell has no WRKQD_TOKEN; the daemon's token lives in
+	// the file the CLI transport already resolves.
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("WRKQD_TOKEN", "")
+	t.Setenv("WRKQD_TOKEN_FILE", tokenFile)
+
+	_, req, err := newServerHealthRequest(&serverOptions{addr: "127.0.0.1:7171"}, time.Second)
+	if err != nil {
+		t.Fatalf("newServerHealthRequest: %v", err)
+	}
+	if got, want := req.Header.Get("Authorization"), "Bearer file-token"; got != want {
+		t.Fatalf("Authorization=%q want %q", got, want)
 	}
 }

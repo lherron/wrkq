@@ -148,6 +148,7 @@ no partial JSON on failure. Add `--porcelain` for compact singleton JSON.
 ```bash
 wrkq server status        # pid, endpoint, launchd job, installed-vs-running binary
 wrkq server health        # fails if the daemon is down OR armed to die on respawn
+                          # (a 401 is liveness-only, not a failure: the daemon answered)
 wrkq server restart       # reload the launchd job, verified by a live answer
 ```
 
@@ -163,6 +164,11 @@ die at its next respawn, however much later. `just install` warns when it
 replaces a `wrkqd` a running job still holds, `wrkq server status` reports
 `binaryStale`, and `wrkq server health` fails on it. On the canonical node,
 install and restart together.
+
+`health` resolves the daemon's token like the CLI transport does (`WRKQD_TOKEN`,
+else `WRKQD_TOKEN_FILE`); on a per-node-token daemon an unauthenticated caller
+gets `auth: unauthorized` alongside `status: ok`, since a 401 still proves the
+daemon answered.
 
 ## Caller principal
 - Canonical caller authority is `agent:<id>`.
