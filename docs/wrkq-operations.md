@@ -213,6 +213,25 @@ wrkq server restart
 `-unsafe-no-token` allows a non-loopback listener without a bearer token —
 dev-only, never for a reachable deployment.
 
+On macOS, `wrkq server restart` reloads the launchd job (`bootout`, wait for the
+job to disappear, `bootstrap`) instead of `launchctl kickstart -k`, and reports
+success only after the daemon answers. launchd pins a code requirement to the
+cdhash of the binary present when the job was bootstrapped; `go build` re-signs
+adhoc on every build, so a rebuilt `wrkqd` fails the pinned requirement and
+every respawn inside the existing job is SIGKILLed with `OS_REASON_CODESIGNING`,
+writing nothing to the log. Only a bootout/bootstrap cycle re-derives it.
+
+That also means an install without a restart leaves a healthy-looking daemon
+armed to die on its next respawn — keepalive, a crash, a reboot, or anyone's
+restart, unbounded time later. `just install` warns when it replaces a `wrkqd`
+that a running job still holds, `wrkq server status` reports `binaryStale`, and
+`wrkq server health` fails on it. On the canonical node, install and restart
+together.
+
+`wrkq server status` and `wrkq server health` probe the address the launchd job
+actually binds (its `--addr` argument or `WRKQD_ADDR`), not the `127.0.0.1:7171`
+default.
+
 This environment runs `wrkqd` as a launchd service:
 `launchd/com.praesidium.wrkq-server.plist`, invoking `wrkq server serve`
 bound to `127.0.0.1:7171` with token `dev`. The claim-authority node identity

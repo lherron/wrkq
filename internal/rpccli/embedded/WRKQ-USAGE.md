@@ -144,6 +144,26 @@ singleton object, use `wrkq cat ID --json --one`. `--one` requires exactly one
 explicit selector and one resolved task or promise, refuses non-JSON output modes, and emits
 no partial JSON on failure. Add `--porcelain` for compact singleton JSON.
 
+## Daemon (`wrkq server`)
+```bash
+wrkq server status        # pid, endpoint, launchd job, installed-vs-running binary
+wrkq server health        # fails if the daemon is down OR armed to die on respawn
+wrkq server restart       # reload the launchd job, verified by a live answer
+```
+
+On macOS `restart` reloads the launchd job (`bootout`, wait for it to unload,
+`bootstrap`) rather than `kickstart -k`, and reports success only once the
+daemon answers. launchd pins a code requirement to the cdhash of the binary
+present at bootstrap; `go build` re-signs adhoc on every build, so a respawn of
+a rebuilt `wrkqd` inside the old job is SIGKILLed (`OS_REASON_CODESIGNING`) and
+logs nothing. Only a bootout/bootstrap cycle re-derives the requirement.
+
+An install without a restart therefore leaves a healthy-looking daemon armed to
+die at its next respawn, however much later. `just install` warns when it
+replaces a `wrkqd` a running job still holds, `wrkq server status` reports
+`binaryStale`, and `wrkq server health` fails on it. On the canonical node,
+install and restart together.
+
 ## Caller principal
 - Canonical caller authority is `agent:<id>`.
 - Use `--principal-ref agent:<id>` / `--as agent:<id>` or `WRKQ_PRINCIPAL_REF=agent:<id>`.

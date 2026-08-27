@@ -3234,7 +3234,7 @@
                 "name": "timeout-ms",
                 "usage": "Shutdown/startup timeout in milliseconds",
                 "type": "int",
-                "default": "5000",
+                "default": "30000",
                 "hidden": false
               }
             ]
@@ -3271,7 +3271,7 @@
                 "name": "timeout-ms",
                 "usage": "Startup timeout in milliseconds",
                 "type": "int",
-                "default": "5000",
+                "default": "30000",
                 "hidden": false
               }
             ]

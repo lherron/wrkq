@@ -173,6 +173,27 @@ install no-sync="": build
   fi
   echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkc info', 'wrkqadm version', and 'wrkqd --help' to verify"
   echo ""
+  # A rebuilt wrkqd carries a fresh adhoc cdhash, so a launchd job still running
+  # the previous image is armed to die on its next respawn (keepalive, crash,
+  # reboot, anyone's restart) with OS_REASON_CODESIGNING. Say so at install time:
+  # the operator who installs and the one who trips the respawn are often
+  # different people, hours apart.
+  if [ "$(uname -s)" = "Darwin" ]; then
+    label="${WRKQ_LAUNCHD_LABEL:-com.praesidium.wrkq-server}"
+    job_print="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null || true)"
+    job_pid="$(printf '%s\n' "$job_print" | awk -F'= ' '/^\tpid = /{print $2}')"
+    job_program="$(printf '%s\n' "$job_print" | awk -F'= ' '/^\tprogram = /{print $2}')"
+    if [ -n "$job_pid" ] && [ -n "$job_program" ]; then
+      disk_hash="$(codesign -dvvv "$job_program" 2>&1 | awk -F= '/^CDHash=/{print $2}')"
+      live_hash="$(codesign -dvvv "+$job_pid" 2>&1 | awk -F= '/^CDHash=/{print $2}')"
+      if [ -n "$disk_hash" ] && [ -n "$live_hash" ] && [ "$disk_hash" != "$live_hash" ]; then
+        echo "⚠️  launchd job $label (pid $job_pid) is still running the previous $job_program."
+        echo "    installed ${disk_hash:0:12} != running ${live_hash:0:12} — its next respawn will be SIGKILLed."
+        echo "    Restart it now:  wrkq server restart"
+        echo ""
+      fi
+    fi
+  fi
   node_role="$(bash scripts/resolve-node-role.sh)"
   if [ "$node_role" = "producer" ]; then
     just client-publish-dev

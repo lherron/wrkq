@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,6 +31,10 @@ type serverRuntimeStatus struct {
 	SocketResponsive   bool   `json:"socketResponsive,omitempty"`
 	LaunchdLabel       string `json:"launchdLabel,omitempty"`
 	LaunchdLoaded      bool   `json:"launchdLoaded"`
+	BinaryPath         string `json:"binaryPath,omitempty"`
+	BinaryCDHash       string `json:"binaryCDHash,omitempty"`
+	RunningCDHash      string `json:"runningCDHash,omitempty"`
+	BinaryStale        bool   `json:"binaryStale"`
 }
 
 type serverOptions struct {
@@ -45,13 +48,6 @@ type serverOptions struct {
 	unsafeNoToken bool
 	timeoutMS     int
 	force         bool
-}
-
-type launchdOwner struct {
-	label         string
-	domain        string
-	serviceTarget string
-	pid           *int
 }
 
 func newServerCmd() *cobra.Command {
@@ -116,14 +112,14 @@ func newServerCmd() *cobra.Command {
 
 	startCmd.Flags().BoolVar(&opts.foreground, "foreground", false, "Run in the foreground when launchd is not loaded")
 	startCmd.Flags().BoolVar(&opts.daemon, "daemon", false, "Run as a background process when launchd is not loaded")
-	startCmd.Flags().IntVar(&opts.timeoutMS, "timeout-ms", 5000, "Startup timeout in milliseconds")
+	startCmd.Flags().IntVar(&opts.timeoutMS, "timeout-ms", 30000, "Startup timeout in milliseconds")
 
 	stopCmd.Flags().IntVar(&opts.timeoutMS, "timeout-ms", 5000, "Shutdown timeout in milliseconds")
 	stopCmd.Flags().BoolVar(&opts.force, "force", false, "Escalate to SIGKILL if graceful shutdown times out")
 
 	restartCmd.Flags().BoolVar(&opts.foreground, "foreground", false, "Run in the foreground when launchd is not loaded")
 	restartCmd.Flags().BoolVar(&opts.daemon, "daemon", false, "Run as a background process when launchd is not loaded")
-	restartCmd.Flags().IntVar(&opts.timeoutMS, "timeout-ms", 5000, "Shutdown/startup timeout in milliseconds")
+	restartCmd.Flags().IntVar(&opts.timeoutMS, "timeout-ms", 30000, "Shutdown/startup timeout in milliseconds")
 	restartCmd.Flags().BoolVar(&opts.force, "force", false, "Escalate to SIGKILL if graceful shutdown times out")
 
 	statusCmd.Flags().BoolVar(&opts.json, "json", false, "Output as JSON")
@@ -141,11 +137,15 @@ func runServerStart(cmd *cobra.Command, opts *serverOptions) error {
 		return fmt.Errorf("daemon already running at %s (pid %s)", statusTarget(status), formatOptionalPID(status.PID))
 	}
 	if owner := detectWrkqLaunchdOwner(); owner != nil {
+		probe := launchdProbeOptions(opts, owner)
 		if err := launchctlKickstart(owner, false); err != nil {
 			return err
 		}
+		if err := waitForServerAnswer(probe, time.Duration(opts.timeoutMS)*time.Millisecond); err != nil {
+			return launchdLifecycleError("start", detectWrkqLaunchdOwner(), err)
+		}
 		if !isStdoutTTY(cmd.OutOrStdout()) {
-			return writeServerLifecycleJSON(cmd, "started", "launchd", collectWrkqServerStatus(opts))
+			return writeServerLifecycleJSON(cmd, "started", "launchd", collectWrkqServerStatus(probe))
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon started via launchd (%s)\n", owner.serviceTarget)
 		return nil
@@ -201,11 +201,18 @@ func runServerRestart(cmd *cobra.Command, opts *serverOptions) error {
 		return err
 	}
 	if owner := detectWrkqLaunchdOwner(); owner != nil {
-		if err := launchctlKickstart(owner, true); err != nil {
+		probe := launchdProbeOptions(opts, owner)
+		if err := restartLaunchdDaemon(cmd, owner); err != nil {
 			return err
 		}
+		// A live pid is not evidence of a working daemon: launchd SIGKILLs a
+		// respawn that fails the pinned code requirement, and the process dies
+		// before it can log. Report success only once it answers.
+		if err := waitForServerAnswer(probe, time.Duration(opts.timeoutMS)*time.Millisecond); err != nil {
+			return launchdLifecycleError("restart", detectWrkqLaunchdOwner(), err)
+		}
 		if !isStdoutTTY(cmd.OutOrStdout()) {
-			return writeServerLifecycleJSON(cmd, "restarted", "launchd", collectWrkqServerStatus(opts))
+			return writeServerLifecycleJSON(cmd, "restarted", "launchd", collectWrkqServerStatus(probe))
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon restarted via launchd (%s)\n", owner.serviceTarget)
 		return nil
@@ -228,6 +235,7 @@ func runServerRestart(cmd *cobra.Command, opts *serverOptions) error {
 
 func runServerStatus(cmd *cobra.Command, opts *serverOptions) error {
 	status := collectWrkqServerStatus(opts)
+	annotateBinaryIdentity(&status, detectWrkqLaunchdOwner())
 	if opts.json || !isStdoutTTY(cmd.OutOrStdout()) {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
@@ -245,11 +253,22 @@ func runServerStatus(cmd *cobra.Command, opts *serverOptions) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "  socket:      %s%s\n", status.SocketPath, responsiveSuffix(status.SocketResponsive))
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "  launchd:     %s\n", loadedNotLoaded(status.LaunchdLoaded))
+	if status.BinaryPath != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "  binary:      %s\n", status.BinaryPath)
+	}
+	if status.BinaryStale {
+		fmt.Fprintf(cmd.OutOrStdout(), "  ⚠️  installed binary (%s) is not the image the daemon is running (%s)\n", shortCDHash(status.BinaryCDHash), shortCDHash(status.RunningCDHash))
+		fmt.Fprintf(cmd.OutOrStdout(), "      launchd will SIGKILL the next respawn; run 'wrkq server restart'\n")
+	}
 	return nil
 }
 
 func runServerHealth(cmd *cobra.Command, opts *serverOptions) error {
-	if err := checkWrkqServerHealth(opts, 2*time.Second); err != nil {
+	owner := detectWrkqLaunchdOwner()
+	if err := checkWrkqServerHealth(launchdProbeOptions(opts, owner), 2*time.Second); err != nil {
+		return err
+	}
+	if err := checkInstalledBinaryLoaded(owner); err != nil {
 		return err
 	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
@@ -330,6 +349,9 @@ func collectWrkqServerStatus(opts *serverOptions) serverRuntimeStatus {
 	pid := readWrkqPIDFile(pidPath)
 	pidAlive := pid != nil && processAlive(*pid)
 	owner := detectWrkqLaunchdOwner()
+	if owner != nil {
+		opts = launchdProbeOptions(opts, owner)
+	}
 	if !pidAlive && owner != nil && owner.pid != nil {
 		pid = owner.pid
 		pidAlive = processAlive(*pid)
@@ -420,56 +442,110 @@ func wrkqLaunchdLabel() string {
 	return defaultWrkqLaunchdLabel
 }
 
-func detectWrkqLaunchdOwner() *launchdOwner {
-	if runtime.GOOS != "darwin" {
-		return nil
+// launchdProbeOptions resolves the endpoint the launchd job actually binds.
+// The canonical daemon binds a node address passed as --addr in its plist, so
+// probing the 127.0.0.1 default reports a healthy daemon as down and removes
+// the one signal that would catch a dead one.
+func launchdProbeOptions(opts *serverOptions, owner *launchdOwner) *serverOptions {
+	if owner == nil || opts.addr != "" || opts.unixPath != "" {
+		return opts
 	}
-	uid := os.Getuid()
-	label := wrkqLaunchdLabel()
-	domain := fmt.Sprintf("gui/%d", uid)
-	target := domain + "/" + label
-	out, err := exec.Command("launchctl", "print", target).CombinedOutput()
-	if err != nil {
-		return nil
+	addr, unixPath := owner.endpoint()
+	if addr == "" && unixPath == "" {
+		return opts
 	}
-	return &launchdOwner{
-		label:         label,
-		domain:        domain,
-		serviceTarget: target,
-		pid:           parseLaunchdPID(string(out)),
+	probe := *opts
+	probe.addr = addr
+	probe.unixPath = unixPath
+	return &probe
+}
+
+// restartLaunchdDaemon reloads the job rather than kickstarting it, so launchd
+// re-derives the code requirement from the binary that is on disk now. A
+// rebuilt wrkqd has a fresh adhoc cdhash and is SIGKILLed on every respawn
+// inside the existing job.
+func restartLaunchdDaemon(cmd *cobra.Command, owner *launchdOwner) error {
+	if owner.plistPath != "" {
+		return relaunchLaunchdJob(owner)
+	}
+	if identity := inspectLaunchdBinary(owner); identity.stale() {
+		return fmt.Errorf("launchd job %s reports no plist path, so it cannot be bootstrapped again, and %s (%s) is not the image the running daemon loaded (%s); kickstarting it would respawn into a SIGKILL. Reinstall the plist (just install-launchd), then retry", owner.serviceTarget, identity.path, shortCDHash(identity.onDisk), shortCDHash(identity.running))
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: launchd job %s reports no plist path; falling back to kickstart -k\n", owner.serviceTarget)
+	return launchctlKickstart(owner, true)
+}
+
+// waitForServerAnswer blocks until the daemon answers over its endpoint.
+func waitForServerAnswer(opts *serverOptions, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if serverAnswers(opts) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s waiting for the daemon to answer at %s", timeout, statusTarget(collectWrkqServerStatus(opts)))
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
-func parseLaunchdPID(output string) *int {
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "pid = ") {
-			continue
-		}
-		raw := strings.TrimSpace(strings.TrimPrefix(line, "pid = "))
-		pid, err := strconv.Atoi(raw)
-		if err == nil && pid > 0 {
-			return &pid
-		}
+// serverAnswers reports whether the daemon replied to an HTTP request at all.
+// A 401 still proves the process is alive and serving, which is what a
+// lifecycle command needs to verify; token correctness is `server health` work.
+func serverAnswers(opts *serverOptions) bool {
+	client, req, err := newServerHealthRequest(opts, 2*time.Second)
+	if err != nil {
+		return false
 	}
-	return nil
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
 }
 
-func launchctlKickstart(owner *launchdOwner, kill bool) error {
-	args := []string{"kickstart"}
-	if kill {
-		args = append(args, "-k")
+func launchdLifecycleError(action string, owner *launchdOwner, cause error) error {
+	return fmt.Errorf("daemon did not answer after %s: %w%s", action, cause, launchdFailureDetail(owner))
+}
+
+// annotateBinaryIdentity records whether the installed daemon binary is the
+// image the running daemon actually loaded.
+func annotateBinaryIdentity(status *serverRuntimeStatus, owner *launchdOwner) {
+	if owner == nil {
+		return
 	}
-	args = append(args, owner.serviceTarget)
-	out, err := exec.Command("launchctl", args...).CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(out))
-		if detail != "" {
-			return fmt.Errorf("launchctl kickstart failed: %s", detail)
-		}
-		return fmt.Errorf("launchctl kickstart failed: %w", err)
+	identity := inspectLaunchdBinary(owner)
+	status.BinaryPath = identity.path
+	status.BinaryCDHash = identity.onDisk
+	status.RunningCDHash = identity.running
+	status.BinaryStale = identity.stale()
+}
+
+// checkInstalledBinaryLoaded fails a daemon that is answering now but has been
+// armed to die on its next respawn by a rebuild underneath it.
+func checkInstalledBinaryLoaded(owner *launchdOwner) error {
+	if owner == nil {
+		return nil
 	}
-	return nil
+	identity := inspectLaunchdBinary(owner)
+	if !identity.stale() {
+		return nil
+	}
+	return fmt.Errorf("daemon is answering, but the installed %s (%s) is not the image it is running (%s): launchd will SIGKILL the next respawn for failing the pinned code requirement. Run 'wrkq server restart'", identity.path, shortCDHash(identity.onDisk), shortCDHash(identity.running))
+}
+
+func shortCDHash(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	if hash == "" {
+		return "unknown"
+	}
+	return hash
 }
 
 func daemonizeWrkqServer(opts *serverOptions, timeout time.Duration) error {
@@ -640,7 +716,7 @@ func isUnixSocketResponsive(path string, timeout time.Duration) bool {
 	return true
 }
 
-func checkWrkqServerHealth(opts *serverOptions, timeout time.Duration) error {
+func newServerHealthRequest(opts *serverOptions, timeout time.Duration) (*http.Client, *http.Request, error) {
 	client := &http.Client{Timeout: timeout}
 	url := "http://" + resolvedServerAddr(opts) + "/v1/health"
 	if opts.unixPath != "" {
@@ -654,10 +730,18 @@ func checkWrkqServerHealth(opts *serverOptions, timeout time.Duration) error {
 	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if opts.token != "" {
 		req.Header.Set("Authorization", "Bearer "+opts.token)
+	}
+	return client, req, nil
+}
+
+func checkWrkqServerHealth(opts *serverOptions, timeout time.Duration) error {
+	client, req, err := newServerHealthRequest(opts, timeout)
+	if err != nil {
+		return err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
