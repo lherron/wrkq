@@ -1894,7 +1894,7 @@
               },
               {
                 "name": "until",
-                "usage": "Condition: state=\u003cs\u003e[,\u003cs\u003e...] or all-terminal",
+                "usage": "Condition: state=\u003cs\u003e[,\u003cs\u003e...], all-terminal, acked, or terminal",
                 "type": "string",
                 "hidden": false
               }
@@ -1974,7 +1974,7 @@
               },
               {
                 "name": "until",
-                "usage": "Condition: state=\u003cs\u003e[,\u003cs\u003e...] or all-terminal",
+                "usage": "Condition: state=\u003cs\u003e[,\u003cs\u003e...], all-terminal, acked, or terminal",
                 "type": "string",
                 "hidden": false
               }

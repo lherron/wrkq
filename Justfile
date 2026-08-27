@@ -46,15 +46,16 @@ db-reset:
 
 # --- CLI tasks (Golang) ---
 
-# Build shipped CLI binaries (wrkq, wrkf, wrkqadm, wrkqd)
+# Build shipped CLI binaries (wrkq, wrkf, wrkc, wrkqadm, wrkqd)
 build:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building wrkq, wrkf, wrkqadm, and wrkqd binaries..."
+  echo "Building wrkq, wrkf, wrkc, wrkqadm, and wrkqd binaries..."
   rm -f bin/wrkq-rpccli bin/wrkq-legacy
   LDFLAGS="$(scripts/ldflags.sh)"
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkc ./cmd/wrkc
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
@@ -115,6 +116,7 @@ agent-build:
   export GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOFLAGS='-mod=vendor -p=1' CGO_CFLAGS='-O0 -g0'
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkc ./cmd/wrkc
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
@@ -147,17 +149,20 @@ install no-sync="": build
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries
-  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkqadm ~/.local/bin/wrkqd ~/.local/bin/wrkq-rpccli
+  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkc ~/.local/bin/wrkqadm ~/.local/bin/wrkqd ~/.local/bin/wrkq-rpccli
   cp bin/wrkq ~/.local/bin/wrkq
   cp bin/wrkf ~/.local/bin/wrkf
+  cp bin/wrkc ~/.local/bin/wrkc
   cp bin/wrkqadm ~/.local/bin/wrkqadm
   cp bin/wrkqd ~/.local/bin/wrkqd
   chmod +x ~/.local/bin/wrkq
   chmod +x ~/.local/bin/wrkf
+  chmod +x ~/.local/bin/wrkc
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
   echo "✓ Installed to ~/.local/bin/wrkq"
   echo "✓ Installed to ~/.local/bin/wrkf"
+  echo "✓ Installed to ~/.local/bin/wrkc"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo "✓ Installed to ~/.local/bin/wrkqd"
   echo ""
@@ -166,7 +171,7 @@ install no-sync="": build
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
   fi
-  echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkqadm version', and 'wrkqd --help' to verify"
+  echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkc info', 'wrkqadm version', and 'wrkqd --help' to verify"
   echo ""
   node_role="$(bash scripts/resolve-node-role.sh)"
   if [ "$node_role" = "producer" ]; then
@@ -226,6 +231,7 @@ install-system:
   LDFLAGS="$(scripts/ldflags.sh)"
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkc ./cmd/wrkc
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."

@@ -14,6 +14,9 @@ var wrkqUsageContent string
 //go:embed embedded/AGENT-WRKQ-USAGE.md
 var agentUsageContent string
 
+//go:embed embedded/WRKC-USAGE.md
+var wrkcUsageContent string
+
 func newUsageCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
