@@ -1,0 +1,50 @@
+id: wrkq.collaboration-ledger.authority
+kind: invariant
+status: active
+owner_project: wrkq
+scope: durable agent-collaboration rooms, envelopes, obligations, attendance, and their HRC/ACP consumer boundary
+predicate: >
+  wrkq is the sole durable authority for collaboration state that must survive
+  every agent runtime: work-keyed rooms, single-addressee envelopes, fan-out
+  groups, reply obligations, membership, attendance, and presentation receipts.
+  Task addressing coalesces strictly to the task's effective campaign when one
+  exists; campaign-adorned and project-kind containers resolve to their
+  respective rooms, while other container kinds are not room authorities. Every
+  mutation preserves wrkq.attribution.caller-principal-exact and human
+  participants use the existing scope-less agent:<id> principal grammar.
+
+  HRC owns execution state and actuation only: sessions, generations, runtimes,
+  runs, presentation formatting, kicker drive attempts, stop-hook enforcement,
+  and summon/placement. HRC consumes the wrkq ledger and may write its runtime
+  identifiers only as opaque presented_to join data; it holds no second durable
+  collaboration copy. wrkq never imports HRC, and wrkc must persist, read, and
+  monitor collaboration with every HRC daemon unavailable.
+
+  Cross-node collaboration travels through the shared canonical wrkqd ledger.
+  After the fleet-complete cutover, HRC federation retains birth, placement, and
+  summon authority but no durable message transport or message outbox authority.
+authority:
+  repo: wrkq
+  surface: room/envelope/member store transactions, wrkq workrpc methods, @wrkq/client, and wrkc
+enforced_by: T-07612 rev 2 ratified boundary plus its ledger/routing and consumer/cutover evidence bundles
+exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the collaboration mutation, routing, or consumer boundary"
+source:
+  - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
+  - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
+  - architecture/records/invariants/wrkq.campaign.canonical-portfolio-authority.yaml
+  - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
+required_tests:
+  - T-07612 ledger and routing bundle
+  - T-07612 consumer and cutover bundle
+last_verified:
+  date: 2026-08-27
+  evidence: Daedalus source-grounded architecture approval of T-07612 rev 2; implementation gates pending.
+reopen_when:
+  - any non-wrkq store becomes a durable room, envelope, obligation, membership, attendance, or presentation-receipt authority
+  - wrkq or wrkc acquires an HRC runtime dependency
+  - one envelope acquires multiple addressees or one addressee can disposition another addressee's fan-out sibling
+  - work-key routing stops strict campaign coalescing or project and campaign room authority diverges from canonical container state
+  - HRC federation regains a durable collaboration-message path after cutover
+  - the division between wrkq collaboration authority and HRC execution, presentation, or summon/placement authority changes
+supersedes: []
+superseded_by: null

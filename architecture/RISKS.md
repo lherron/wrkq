@@ -5,6 +5,24 @@
 Projection of active `accepted_risk` records under `architecture/records/risks/`.
 The YAML records are the source of truth; regenerate with `just architecture-records --write`.
 
+## wrkq.collaboration-ledger.at-least-once-presentation
+
+- **severity:** medium
+- **accepted_by:** Lance (2026-07-22)
+- **blast_radius:** A crash between presenting an envelope to an HRC runtime and durably recording that presentation can cause the same envelope to be presented again. Stable drive-attempt identity bounds turn starts, but it cannot make an agent's external side effects exactly-once; an agent may repeat work it completed before the crash.
+- **mitigation:** Envelope ids remain stable and visible through wrkc inbox/show/log, presentation state is durable in wrkq, and agents inspect the envelope before repeating an externally visible side effect. Duplicate presentation stays visible and recoverable rather than being silently treated as exactly-once delivery.
+- **review_trigger:** a duplicate presentation causes a repeated external side effect; presentation identity stops being visible through wrkc inbox/show/log; the crash window or drive-attempt protocol changes; exactly-once agent side effects become a requirement
+- **expiry:** none
+
+## wrkq.collaboration-ledger.same-uid-disposition-confusion
+
+- **severity:** medium
+- **accepted_by:** Lance (2026-07-22)
+- **blast_radius:** Processes operating under the same local OS user can assert another valid agent:<id> caller principal and may therefore acknowledge or defer an envelope as that principal. The ledger can preserve the asserted attribution but cannot prove which same-UID process supplied it.
+- **mitigation:** Keep the existing exact agent:<id> attribution and scope fields on every write, expose dispositions in the event ledger, and treat same-UID principal confusion as an operator trust boundary rather than claiming per-process authentication. This acceptance does not authorize a new principal kind or caller fallback.
+- **review_trigger:** a disposition is attributed to the wrong same-UID principal; wrkq moves to a multi-user or adversarial local trust boundary; per-process or per-principal authentication becomes available; operator acknowledgement authority changes
+- **expiry:** none
+
 ## wrkq.simple-task.v1.naive-supersede
 
 - **severity:** medium

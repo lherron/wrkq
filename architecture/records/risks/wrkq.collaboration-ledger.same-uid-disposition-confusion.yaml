@@ -1,0 +1,33 @@
+id: wrkq.collaboration-ledger.same-uid-disposition-confusion
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-07-22
+severity: medium
+blast_radius: >
+  Processes operating under the same local OS user can assert another valid
+  agent:<id> caller principal and may therefore acknowledge or defer an envelope
+  as that principal. The ledger can preserve the asserted attribution but cannot
+  prove which same-UID process supplied it.
+mitigation: >
+  Keep the existing exact agent:<id> attribution and scope fields on every write,
+  expose dispositions in the event ledger, and treat same-UID principal confusion
+  as an operator trust boundary rather than claiming per-process authentication.
+  This acceptance does not authorize a new principal kind or caller fallback.
+expiry: null
+review_trigger:
+  - a disposition is attributed to the wrong same-UID principal
+  - wrkq moves to a multi-user or adversarial local trust boundary
+  - per-process or per-principal authentication becomes available
+  - operator acknowledgement authority changes
+reopen_when:
+  - caller authentication or the agent:<id> principal grammar changes
+  - same-UID operation is no longer an accepted trust boundary
+source:
+  - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
+  - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
+  - wrkq:T-06810
+  - wrkq:T-07612
+supersedes: []
+superseded_by: null

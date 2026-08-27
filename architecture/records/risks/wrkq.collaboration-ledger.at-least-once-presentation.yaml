@@ -1,0 +1,33 @@
+id: wrkq.collaboration-ledger.at-least-once-presentation
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-07-22
+severity: medium
+blast_radius: >
+  A crash between presenting an envelope to an HRC runtime and durably recording
+  that presentation can cause the same envelope to be presented again. Stable
+  drive-attempt identity bounds turn starts, but it cannot make an agent's
+  external side effects exactly-once; an agent may repeat work it completed
+  before the crash.
+mitigation: >
+  Envelope ids remain stable and visible through wrkc inbox/show/log, presentation
+  state is durable in wrkq, and agents inspect the envelope before repeating an
+  externally visible side effect. Duplicate presentation stays visible and
+  recoverable rather than being silently treated as exactly-once delivery.
+expiry: null
+review_trigger:
+  - a duplicate presentation causes a repeated external side effect
+  - presentation identity stops being visible through wrkc inbox/show/log
+  - the crash window or drive-attempt protocol changes
+  - exactly-once agent side effects become a requirement
+reopen_when:
+  - presentation delivery guarantees change from at-least-once
+  - envelope or drive-attempt identity semantics change
+source:
+  - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
+  - wrkq:T-06810
+  - wrkq:T-07612
+supersedes: []
+superseded_by: null
