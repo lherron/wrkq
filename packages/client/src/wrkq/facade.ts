@@ -74,6 +74,30 @@ import type {
   WrkqPromiseRetargetParams,
   WrkqPromiseReviewParams,
   WrkqPromiseShowParams,
+  WrkqEnvelope,
+  WrkqEnvelopeAckParams,
+  WrkqEnvelopeDeferParams,
+  WrkqEnvelopeInboxView,
+  WrkqEnvelopeInboxViewParams,
+  WrkqEnvelopePendingView,
+  WrkqEnvelopePendingViewParams,
+  WrkqEnvelopePresentParams,
+  WrkqEnvelopePresentResult,
+  WrkqEnvelopeRoundParams,
+  WrkqEnvelopeShowParams,
+  WrkqRoom,
+  WrkqRoomLifecycleParams,
+  WrkqRoomListParams,
+  WrkqRoomListResult,
+  WrkqRoomLogView,
+  WrkqRoomLogViewParams,
+  WrkqRoomMemberParams,
+  WrkqRoomMembersView,
+  WrkqRoomMembersViewParams,
+  WrkqRoomOpenParams,
+  WrkqRoomSayParams,
+  WrkqRoomSayResult,
+  WrkqRoomShowParams,
   WrkqSearchListView,
   WrkqSearchListViewParams,
   WrkqFindListView,
@@ -252,12 +276,57 @@ export interface WrkqIndexFacade {
   resume(params?: WrkqIndexLifecycleParams): Promise<WrkqIndexStateResult>;
 }
 
+/**
+ * wrkq.room.* — the collaboration ledger's rooms. A room is a durable
+ * conversation keyed by a work identity, created lazily on the first `say`.
+ * Rooms are readable by any principal: membership is identity and attendance,
+ * never an ACL.
+ *
+ * Only `say({to})` fires. A say without `to` is a log entry and nobody is
+ * presented; there is no mute and no subscription. Following a room is arming
+ * `wrkq monitor watch <room-key>`, not a durable watch object.
+ */
+export interface WrkqRoomFacade {
+  say(params: WrkqRoomSayParams): Promise<WrkqRoomSayResult>;
+  open(params: WrkqRoomOpenParams): Promise<WrkqRoom>;
+  show(params: WrkqRoomShowParams): Promise<WrkqRoom>;
+  list(params?: WrkqRoomListParams): Promise<WrkqRoomListResult>;
+  logView(params: WrkqRoomLogViewParams): Promise<WrkqRoomLogView>;
+  close(params: WrkqRoomLifecycleParams): Promise<WrkqRoom>;
+  reopen(params: WrkqRoomLifecycleParams): Promise<WrkqRoom>;
+  join(params: WrkqRoomMemberParams): Promise<WrkqRoomMembersView>;
+  leave(params: WrkqRoomMemberParams): Promise<WrkqRoomMembersView>;
+  membersView(params: WrkqRoomMembersViewParams): Promise<WrkqRoomMembersView>;
+}
+
+/**
+ * wrkq.envelope.* — one object for chat and obligation, addressed to exactly
+ * one recipient.
+ *
+ * `present`, `pendingView`, and `roundEnded` are the HRC-FACING surface: the
+ * kicker's wake set, the stop-hook predicate, and the redelivery bound. Nothing
+ * else should call them. There is no agent-facing ack — for an agent the reply
+ * IS the ack — so `ack` here is the operator verb, intended for a human
+ * principal clearing dead mail.
+ */
+export interface WrkqEnvelopeFacade {
+  show(params: WrkqEnvelopeShowParams): Promise<WrkqEnvelope>;
+  inboxView(params?: WrkqEnvelopeInboxViewParams): Promise<WrkqEnvelopeInboxView>;
+  defer(params: WrkqEnvelopeDeferParams): Promise<WrkqEnvelope>;
+  ack(params: WrkqEnvelopeAckParams): Promise<WrkqRoomLogView>;
+  present(params: WrkqEnvelopePresentParams): Promise<WrkqEnvelopePresentResult>;
+  pendingView(params?: WrkqEnvelopePendingViewParams): Promise<WrkqEnvelopePendingView>;
+  roundEnded(params: WrkqEnvelopeRoundParams): Promise<WrkqEnvelope>;
+}
+
 export interface WrkqFacade {
   readonly task: WrkqTaskFacade;
   readonly comment: WrkqCommentFacade;
   readonly attachment: WrkqAttachmentFacade;
   readonly relation: WrkqRelationFacade;
   readonly promise: WrkqPromiseFacade;
+  readonly room: WrkqRoomFacade;
+  readonly envelope: WrkqEnvelopeFacade;
   readonly container: WrkqContainerFacade;
   readonly project: WrkqProjectFacade;
   readonly webhook: WrkqWebhookFacade;

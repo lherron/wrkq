@@ -1,0 +1,78 @@
+id: wrkq.collaboration-ledger.rooms-envelopes
+kind: contract
+status: proposed
+owner_project: wrkq
+scope: room, envelope, membership, and presentation-receipt storage plus the wrkq.room/wrkq.envelope RPC surface
+predicate: >
+  A room is a durable conversation keyed by a work identity and created lazily
+  on the first say. Campaign, task, and project rooms anchor on exactly one live
+  wrkq resource and carry no friendly id: their key IS the work identity, which
+  is what puts a task's state changes and its conversation on one monitor
+  selector. Ad-hoc rooms anchor on nothing, mint `R-\d{5}`, and auto-archive
+  after 24h idle through a lazy sweep on the routing and list paths, because
+  wrkq owns no scheduler. A room's effective state may be closed without a
+  stored transition when its work is terminal; an explicit reopen overrides that
+  derived closure, and the stored state stays separately readable so a caller
+  can tell the two apart.
+
+  An envelope is one object for chat and obligation addressed to exactly ONE
+  recipient, minted `EN-\d{5}` — not `EV-`, which evidence_items already owns
+  and exposes through wrkf.evidence.show. A multi-addressee say fans out to one
+  envelope per addressee in ONE transaction sharing a group id equal to the
+  first envelope's own id, so every lifecycle field is per envelope and one
+  recipient's reply, defer, round, or dead never disposes or pauses another's
+  obligation. The say's idempotency key rides every envelope of the fan-out and
+  is unique per (key, addressee), so a retried say rolls the whole group back
+  rather than half-writing it. Only an addressed envelope fires: an addressee-less
+  say is disposed at write, and a fyi envelope is acked at its OWN presentation.
+  A reply acks every presented reply_required envelope in that room addressed to
+  the replier's own scope from that counterparty and nothing else; deferred is
+  paused and never terminal, and a retry time is carried by a wrkq promise whose
+  expiry re-pends the envelope through a derived, event-free transition.
+
+  Membership is identity and attendance, never delivery and never an ACL, and is
+  sourced only from spoke, addressed, and joined — never derived from wrkq
+  fields. Attendance is the latest presentation receipt per member; scope-less
+  principals have none. Presentation receipts are the sole join between wrkq's
+  collaboration ledger and HRC's execution world, hold every HRC identifier as
+  an opaque string, and are exactly-once per drive attempt. Room, member, and
+  envelope activity rides the EXISTING wrkq event ledger, with member events
+  logged against their room; `--state-only` continues to exclude all of it.
+authority:
+  repo: wrkq
+  surface: rooms/envelopes/room_members/envelope_presentations schema, wrkq.room.* and wrkq.envelope.* RPC methods, room and envelope event-log rows, collaboration webhook projections, @wrkq/client, and wrkc
+consumers:
+  - agents saying and replying through wrkc
+  - "HRC's kicker, presentation, and stop-hook (wrkq.envelope.present / pendingView / roundEnded)"
+  - ACP timeline and mobile history surfaces through @wrkq/client
+  - container-scoped webhook subscribers waking on envelope.created
+  - "wrkq monitor watch|wait over R- and EN- selectors"
+source:
+  - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
+  - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
+  - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
+  - architecture/records/risks/wrkq.collaboration-ledger.at-least-once-presentation.yaml
+  - architecture/records/risks/wrkq.collaboration-ledger.same-uid-disposition-confusion.yaml
+  - internal/db/migrations/000052_rooms.sql
+  - internal/domain/rooms.go
+  - internal/store/rooms.go
+  - internal/wrkqapi/rooms.go
+  - internal/rpccli/wrkc.go
+required_tests:
+  - internal/wrkqapi/rooms_test.go
+  - internal/rpccli/wrkc_acceptance_test.go
+  - packages/client/test/room-contract.test.ts
+last_verified:
+  date: 2026-08-27
+  evidence: T-07613 wave 1 ledger and routing bundle green; promote to active when waves 2 and 3 prove the consumer side.
+enforced_by: "wave 1 ledger/routing bundle; promote to active only after the HRC consumer and ACP cutover guards exist"
+reopen_when:
+  - one envelope acquires multiple addressees, or a fan-out sibling's disposition can reach another sibling
+  - a derived room acquires a friendly id, or a room key stops being its work identity
+  - membership becomes derived from a wrkq field, or membership starts gating delivery or reads
+  - deferred becomes terminal, or a defer retry stops being carried by a wrkq promise
+  - a presentation receipt becomes anything other than opaque HRC join data, or stops being exactly-once per drive attempt
+  - room, member, or envelope activity leaves the shared wrkq event ledger for a separate stream
+  - the envelope id prefix changes, or EN- collides with another addressable wrkq id kind
+supersedes: []
+superseded_by: null

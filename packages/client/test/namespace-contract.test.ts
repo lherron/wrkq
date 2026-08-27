@@ -27,6 +27,8 @@ describe("public surface (runtime)", () => {
     // Business access is namespaced.
     expect(typeof client.wrkq.task.create).toBe("function");
     expect(typeof client.wrkq.promise.renew).toBe("function");
+    expect(typeof client.wrkq.room.say).toBe("function");
+    expect(typeof client.wrkq.envelope.pendingView).toBe("function");
     expect(typeof client.wrkq.container.taskCounts).toBe("function");
     expect(typeof client.wrkq.workflow.attach).toBe("function");
     expect(typeof client.wrkf.event.query).toBe("function");

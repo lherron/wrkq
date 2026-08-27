@@ -127,6 +127,327 @@ export interface WrkqPromiseListResult {
   items: WrkqPromise[];
 }
 
+// ── Collaboration ledger: rooms and envelopes ────────────────────────────────
+//
+// wrkq owns collaboration; HRC is a consumer (T-07612 §2). Every HRC identifier
+// carried here — node, runtimeId, hostSessionId, generation, runId — is an
+// OPAQUE STRING to wrkq. It never interprets one and never imports hrc.
+
+export type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
+export type WrkqRoomState = "open" | "closed" | "archived";
+export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
+export type WrkqEnvelopeState =
+  | "pending"
+  | "presented"
+  | "acked"
+  | "deferred"
+  | "dead";
+export type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
+
+export interface WrkqRoomWorkRef {
+  type: "task" | "container";
+  uuid: string;
+  id: string;
+  path: string;
+}
+
+/**
+ * The other room a task/campaign pair holds. A task that later joins a campaign
+ * routes new says to the campaign room while its own room stays readable —
+ * linked both ways, never merged.
+ */
+export interface WrkqRoomLink {
+  relation: string;
+  key: string;
+  uuid: string;
+  kind: WrkqRoomKind;
+}
+
+export interface WrkqRoom {
+  uuid: string;
+  /** Ad-hoc rooms only; a derived room's key IS its work identity. */
+  id?: string;
+  /** The room key: `T-xxxxx`, a container path, or `R-xxxxx`. */
+  key: string;
+  kind: WrkqRoomKind;
+  subject?: string;
+  /** The EFFECTIVE state a caller must obey. */
+  state: WrkqRoomState;
+  /**
+   * The durable column. When it differs from `state`, the closure is DERIVED
+   * (the task went terminal, the campaign closed) rather than explicit.
+   */
+  storedState: WrkqRoomState;
+  workRef: WrkqRoomWorkRef | null;
+  links: WrkqRoomLink[];
+  openedByPrincipalRef: string;
+  openedAt: string;
+  closedAt?: string;
+  lastActivityAt: string;
+  memberCount: number;
+  messageCount: number;
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One end of an envelope. `scopeRef` is absent for a scope-less principal. */
+export interface WrkqEnvelopeParty {
+  principalRef: string;
+  scopeRef?: string;
+}
+
+/** One presentation receipt: the join between wrkq and HRC's execution world. */
+export interface WrkqEnvelopePresentation {
+  memberRef: string;
+  node?: string;
+  runtimeId?: string;
+  hostSessionId?: string;
+  generation?: string;
+  runId?: string;
+  driveAttemptId?: string;
+  presentedAt: string;
+}
+
+export interface WrkqEnvelope {
+  uuid: string;
+  /** `EN-xxxxx`. An INTERNAL row id: the injected presentation never shows it. */
+  id: string;
+  roomUuid: string;
+  roomKey: string;
+  roomKind: WrkqRoomKind;
+  /** Shared by the envelopes one say fanned out to. */
+  groupId?: string;
+  from: WrkqEnvelopeParty;
+  to: WrkqEnvelopeParty | null;
+  obligation: WrkqEnvelopeObligation;
+  body: string;
+  /** Set when the say routed via a task, even into a campaign room. */
+  taskId?: string;
+  state: WrkqEnvelopeState;
+  /** acked | dead. `deferred` is paused, NEVER terminal. */
+  terminal: boolean;
+  roundCount: number;
+  retryAt?: string;
+  deferReason?: string;
+  terminalActor?: string;
+  urgent: boolean;
+  materializationIntent?: string;
+  respondToPrincipalRef?: string;
+  retryPromiseId?: string;
+  /** The SAY's key, carried by EVERY envelope of a fan-out. */
+  idempotencyKey?: string;
+  meta: Record<string, unknown>;
+  presentedTo: WrkqEnvelopePresentation[];
+  etag: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WrkqRoomMember {
+  memberRef: string;
+  memberPrincipalRef: string;
+  scoped: boolean;
+  source: WrkqRoomMemberSource;
+  joinedAt: string;
+  leftAt?: string;
+  /** Scope-less members have none: they are never presented through a runtime. */
+  attendance: WrkqEnvelopePresentation | null;
+}
+
+export interface WrkqRoomSayParams {
+  /** Routed per T-07612 §4: R-/EN-, T-, container, or agent@project[:task]. */
+  ref?: string;
+  body: string;
+  /** Fans out to one envelope per addressee. Only `to` fires. */
+  to?: string[];
+  fyi?: boolean;
+  subject?: string;
+  /** Force a fresh ad-hoc room instead of reusing the open pair room. */
+  new?: boolean;
+  urgent?: boolean;
+  respondTo?: string;
+  /** Also write the body as a wrkq comment on the room's task. */
+  record?: boolean;
+  idempotencyKey?: string;
+  meta?: Record<string, unknown>;
+  principalRef?: string;
+  /** The caller's own HRC session handle, when it has one. */
+  scopeRef?: string;
+}
+
+export interface WrkqRoomSayResult {
+  room: WrkqRoom;
+  /** The waitable handle; equals the envelope's own id for one addressee. */
+  groupId: string;
+  envelopes: WrkqEnvelope[];
+  /** Envelope ids this say discharged under reply-is-ack. */
+  acked: string[];
+  recordedCommentId?: string;
+}
+
+export interface WrkqRoomOpenParams {
+  members: string[];
+  subject: string;
+  task?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomShowParams {
+  room: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomListParams {
+  state?: WrkqRoomState | "all";
+  kind?: WrkqRoomKind;
+  /** "me" restricts to rooms the caller's own scope is an active member of. */
+  scope?: "me";
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomListResult {
+  items: WrkqRoom[];
+}
+
+export interface WrkqRoomLogViewParams {
+  room: string;
+  /** Narrow a campaign room to the traffic that came through one task. */
+  task?: string;
+  /** Return only the newest N messages, still oldest-first. */
+  limit?: number;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomLogView {
+  room: WrkqRoom;
+  items: WrkqEnvelope[];
+}
+
+export interface WrkqRoomLifecycleParams {
+  room: string;
+  ifMatch?: number;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomMemberParams {
+  room: string;
+  /** Omit on join/leave to mean the caller's own scope. */
+  member?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomMembersViewParams {
+  room: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqRoomMembersView {
+  room: WrkqRoom;
+  items: WrkqRoomMember[];
+}
+
+export interface WrkqEnvelopeShowParams {
+  envelope: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqEnvelopeInboxViewParams {
+  scopeRef?: string;
+  includeDead?: boolean;
+  principalRef?: string;
+}
+
+export interface WrkqEnvelopeInboxGroup {
+  room: WrkqRoom;
+  items: WrkqEnvelope[];
+}
+
+/** fyi is never listed here: it carries no obligation. */
+export interface WrkqEnvelopeInboxView {
+  scopeRef?: string;
+  principalRef: string;
+  groups: WrkqEnvelopeInboxGroup[];
+  deferred: WrkqEnvelope[];
+  dead: WrkqEnvelope[];
+}
+
+export interface WrkqEnvelopeDeferParams {
+  envelope: string;
+  reason: string;
+  /** Relative retry time resolved by the server; backed by a wrkq promise. */
+  retryAfter?: string;
+  retryAt?: string;
+  ifMatch?: number;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+/** OPERATOR-only. For an agent, the reply IS the ack. */
+export interface WrkqEnvelopeAckParams {
+  envelopes: string[];
+  note?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqEnvelopePresentParams {
+  envelope: string;
+  memberRef?: string;
+  node?: string;
+  runtimeId?: string;
+  hostSessionId?: string;
+  generation?: string;
+  runId?: string;
+  /** One drive attempt presents an envelope exactly once. */
+  driveAttemptId?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqEnvelopePresentResult {
+  envelope: WrkqEnvelope;
+  recorded: boolean;
+  /**
+   * The §7 `history:` cue decision, keyed to the RUNTIME and not the
+   * generation: /quit clears continuation without rotating the generation, so
+   * every post-quit runtime is cold and gets the cue.
+   */
+  historyHint: boolean;
+  messageCount: number;
+  lastMessageAt?: string;
+}
+
+export interface WrkqEnvelopePendingViewParams {
+  scopes?: string[];
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+/** The kicker wake set AND the stop-hook predicate in one read model. */
+export interface WrkqEnvelopePendingView {
+  items: WrkqEnvelope[];
+  /** Envelope ids that must be replied or deferred before a turn may end. */
+  blocking: string[];
+  /** How many due deferrals this read's sweep returned to pending. */
+  repended: number;
+}
+
+export interface WrkqEnvelopeRoundParams {
+  envelope: string;
+  maxRounds?: number;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
 // ── Task ─────────────────────────────────────────────────────────────────────
 
 export interface WrkqTaskCreateParams {

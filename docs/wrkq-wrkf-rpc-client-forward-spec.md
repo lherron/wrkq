@@ -936,6 +936,113 @@ optional task/container target and CAS; `delete` carries
 `{items: WrkqPromise[]}`; all mutation methods and `show` return one
 `WrkqPromise`.
 
+#### Room and envelope methods (collaboration ledger)
+
+The durable agent-collaboration surface is published as `client.wrkq.room.*` and
+`client.wrkq.envelope.*` and forwards the complete `wrkq.room.*` /
+`wrkq.envelope.*` RPC families (T-07612 rev 2, wave 1). wrkq owns collaboration;
+HRC is a consumer. Every HRC identifier the ledger stores — `node`, `runtimeId`,
+`hostSessionId`, `generation`, `runId`, `driveAttemptId` — is an OPAQUE STRING:
+wrkq never interprets one and never imports hrc.
+
+```text
+wrkq.room.say
+wrkq.room.open
+wrkq.room.show
+wrkq.room.list
+wrkq.room.logView
+wrkq.room.close
+wrkq.room.reopen
+wrkq.room.join
+wrkq.room.leave
+wrkq.room.membersView
+
+wrkq.envelope.show
+wrkq.envelope.inboxView
+wrkq.envelope.defer
+wrkq.envelope.ack
+wrkq.envelope.present         # HRC-facing
+wrkq.envelope.pendingView     # HRC-facing
+wrkq.envelope.roundEnded      # HRC-facing
+```
+
+Three of these are the HRC-facing surface and nothing else should call them:
+`present` records `presented_to` and emits `envelope.presented`; `pendingView` is
+the kicker's wake set AND the stop-hook predicate in one read model;
+`roundEnded` advances the redelivery bound. There is no agent-facing ack — for
+an agent the reply IS the ack — so `envelope.ack` is the OPERATOR verb, intended
+for a human principal clearing dead mail.
+
+```ts
+type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
+type WrkqRoomState = "open" | "closed" | "archived";
+type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
+type WrkqEnvelopeState = "pending" | "presented" | "acked" | "deferred" | "dead";
+type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
+
+interface WrkqRoom {
+  uuid: string; id?: string; key: string; kind: WrkqRoomKind;
+  subject?: string; state: WrkqRoomState; storedState: WrkqRoomState;
+  workRef: WrkqRoomWorkRef | null; links: WrkqRoomLink[];
+  openedByPrincipalRef: string; openedAt: string; closedAt?: string;
+  lastActivityAt: string; memberCount: number; messageCount: number;
+  etag: number; createdAt: string; updatedAt: string;
+}
+interface WrkqEnvelope {
+  uuid: string; id: string; roomUuid: string; roomKey: string;
+  roomKind: WrkqRoomKind; groupId?: string;
+  from: WrkqEnvelopeParty; to: WrkqEnvelopeParty | null;
+  obligation: WrkqEnvelopeObligation; body: string; taskId?: string;
+  state: WrkqEnvelopeState; terminal: boolean; roundCount: number;
+  retryAt?: string; deferReason?: string; terminalActor?: string;
+  urgent: boolean; materializationIntent?: string;
+  respondToPrincipalRef?: string; retryPromiseId?: string;
+  idempotencyKey?: string; meta: Record<string, unknown>;
+  presentedTo: WrkqEnvelopePresentation[];
+  etag: number; createdAt: string; updatedAt: string;
+}
+interface WrkqRoomSayResult {
+  room: WrkqRoom; groupId: string; envelopes: WrkqEnvelope[];
+  acked: string[]; recordedCommentId?: string;
+}
+interface WrkqEnvelopePresentResult {
+  envelope: WrkqEnvelope; recorded: boolean; historyHint: boolean;
+  messageCount: number; lastMessageAt?: string;
+}
+interface WrkqEnvelopePendingView {
+  items: WrkqEnvelope[]; blocking: string[]; repended: number;
+}
+```
+
+Contract points a consumer must not have to rediscover:
+
+- **`key` is the addressing token**, not `id`. A campaign, task, or project room
+  carries no friendly id at all: its key IS its work identity (`T-07613`, a
+  container path). Only ad-hoc rooms mint `R-\d{5}`.
+- **`id` on an envelope is `EN-\d{5}`, not `EV-`.** `EV-` is already owned by
+  `evidence_items` and is addressable through `wrkf.evidence.show`.
+- **`state` vs `storedState`.** `state` is the EFFECTIVE state a caller must
+  obey; when it differs from `storedState` the closure is DERIVED (the task went
+  terminal, the campaign closed) rather than explicit, and `reopen` overrides it.
+- **`groupId` equals the first envelope's own id**, so a single addressee groups
+  with itself and a fan-out shares one waitable handle. `wrkq monitor wait
+  <groupId> --until terminal` blocks on the whole group; `terminal` is
+  `acked | dead`, so a dead-lettered obligation releases a waiter.
+- **`idempotencyKey` rides EVERY envelope of a fan-out**, so a consumer
+  dual-writing into another system can correlate on any addressee's row. Its
+  uniqueness guard is per `(key, addressee)`: a retried say rolls the whole group
+  back rather than half-writing it.
+- **`to: null` means a log entry.** Only an addressed say fires.
+- **`historyHint` is keyed to the RUNTIME, not the generation.** `/quit` clears
+  continuation without rotating the generation, so every post-quit runtime is
+  cold and gets the cue.
+
+`say` returns `WrkqRoomSayResult`; `open`/`show`/`close`/`reopen` return one
+`WrkqRoom`; `list` returns `{items: WrkqRoom[]}`; `logView` returns
+`{room, items}`; `join`/`leave`/`membersView` return `{room, items}` of members
+with their source and latest attendance. `envelope.show`/`defer`/`roundEnded`
+return one `WrkqEnvelope`; `envelope.ack` returns `{room, items}`.
+
 #### Container/project methods
 
 Read + full mutation surface (container mutation shipped in T-04849 / gap1):

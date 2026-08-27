@@ -29,7 +29,7 @@
     "build": "bun x tsc -p tsconfig.build.json",
     "typecheck": "bun x tsc --noEmit",
     "test": "bun test",
-    "test:unit": "bun test test/fake-transport.test.ts test/namespace-contract.test.ts test/promise-contract.test.ts test/stdio-spawn.test.ts test/typed-comments.test.ts test/workflow-template-discontinue-contract.test.ts",
+    "test:unit": "bun test test/fake-transport.test.ts test/namespace-contract.test.ts test/promise-contract.test.ts test/room-contract.test.ts test/stdio-spawn.test.ts test/typed-comments.test.ts test/workflow-template-discontinue-contract.test.ts",
     "test:integration": "bun test test/lifecycle.integration.test.ts test/rpc-entrypoint-equivalence.integration.test.ts test/remote-locator.integration.test.ts"
   },
   "devDependencies": {
