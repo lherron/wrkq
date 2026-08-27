@@ -942,8 +942,8 @@ The durable agent-collaboration surface is published as `client.wrkq.room.*` and
 `client.wrkq.envelope.*` and forwards the complete `wrkq.room.*` /
 `wrkq.envelope.*` RPC families (T-07612 rev 2, wave 1). wrkq owns collaboration;
 HRC is a consumer. Every HRC identifier the ledger stores — `node`, `runtimeId`,
-`hostSessionId`, `generation`, `runId`, `driveAttemptId` — is an OPAQUE STRING:
-wrkq never interprets one and never imports hrc.
+`hostSessionId`, `generation`, `runId`, `driveAttemptId`, `deliveryOutcome` — is
+an OPAQUE STRING: wrkq never interprets one and never imports hrc.
 
 ```text
 wrkq.room.say
@@ -991,7 +991,7 @@ interface WrkqRoom {
 interface WrkqEnvelope {
   uuid: string; id: string; roomUuid: string; roomKey: string;
   roomKind: WrkqRoomKind; groupId?: string;
-  from: WrkqEnvelopeParty; to: WrkqEnvelopeParty | null;
+  from: WrkqEnvelopeParty; to: WrkqEnvelopeParty | null; replyTo: string;
   obligation: WrkqEnvelopeObligation; body: string; taskId?: string;
   state: WrkqEnvelopeState; terminal: boolean; roundCount: number;
   retryAt?: string; deferReason?: string; terminalActor?: string;
@@ -1037,6 +1037,27 @@ Contract points a consumer must not have to rediscover:
   uniqueness guard is per `(key, addressee)`: a retried say rolls the whole group
   back rather than half-writing it.
 - **`to: null` means a log entry.** Only an addressed say fires.
+- **`replyTo` is the exact `--to` token that answers an envelope** — the
+  sender's scope handle, or its principal when it has none. Print it VERBATIM in
+  a reply line. Do not shorten it to a bare name: a bare name resolves against
+  the ROOM, and reply-is-ack keys on scopes, so a shortened reply line can
+  address a seat that never asked and leave the real obligation to dead-letter
+  (T-07638). Server-side, a bare `--to <name>` now resolves in this order —
+  the sender of the replier's most recently PRESENTED obligation in that room
+  with that name, then the room's single member of that name, then the room's
+  shape (task room → `agent@project:T-xxx`, campaign/project room →
+  `agent@project:primary`). Several members of that name and no obligation to
+  settle it REFUSES with `WRKQ_VALIDATION`, naming every candidate in both the
+  message and `data.candidates`; it never silently picks. Resolution reads the
+  room and the caller's `scopeRef`, never the `principalRef` a say is
+  attributed to.
+- **`present` takes an optional `deliveryOutcome`** — HRC's own class for how
+  the delivery landed (`admitted_into_active_turn`, `presented_to_live_harness`,
+  `started_fresh_turn`, `kicker` today). It is stored on the `presented_to`
+  receipt and returned by `show`/`inboxView` on
+  `WrkqEnvelopePresentation.deliveryOutcome`; omitted, the receipt keeps it
+  null. wrkq holds the vocabulary opaquely and validates nothing, so HRC can add
+  a class without a wrkq change.
 - **`historyHint` is keyed to the RUNTIME, not the generation.** `/quit` clears
   continuation without rotating the generation, so every post-quit runtime is
   cold and gets the cue.

@@ -19,12 +19,13 @@ import (
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
 // pinnedProtocolSchemaHash is the intentional wire identity after adding
-// `replyTo` to WrkqEnvelope (T-07638), on top of `includeFyi` on
+// `replyTo` to WrkqEnvelope and `deliveryOutcome` to the presentation receipt
+// and its params (T-07638), on top of `includeFyi` on
 // wrkq.envelope.pendingView (T-07627) and the wrkq collaboration ledger (rooms,
 // envelopes, members, presentation receipts — T-07612 wave 1). Update it only
 // alongside an explicit protocol change; an incidental mismatch remains a test
 // failure.
-const pinnedProtocolSchemaHash = "sha256:962c98bc671d4a629d2af8d0d79b7cd59cc4554f765c8d8f4b8f851494ff3e86"
+const pinnedProtocolSchemaHash = "sha256:6202f288bc326de9372e68d6b027cd76a0f646d4c584b7981be2e20e630ad6aa"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

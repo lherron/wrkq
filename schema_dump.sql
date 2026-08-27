@@ -1454,7 +1454,7 @@ CREATE TABLE envelope_presentations (
   presented_at TEXT NOT NULL
     DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   presented_by_principal_ref TEXT NOT NULL
-);
+, delivery_outcome TEXT);
 CREATE INDEX envelope_presentations_envelope_idx
   ON envelope_presentations(envelope_uuid, presented_at);
 CREATE INDEX envelope_presentations_attendance_idx

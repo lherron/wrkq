@@ -63,7 +63,12 @@ type WrkqEnvelopePresentation struct {
 	Generation     *string `json:"generation,omitempty"`
 	RunID          *string `json:"runId,omitempty"`
 	DriveAttemptID *string `json:"driveAttemptId,omitempty"`
-	PresentedAt    string  `json:"presentedAt"`
+	// DeliveryOutcome is HRC's own class for HOW this delivery landed —
+	// admitted_into_active_turn, presented_to_live_harness, started_fresh_turn,
+	// kicker today. wrkq stores and returns it and never interprets it, so HRC
+	// can add a class without a wrkq change (T-07638).
+	DeliveryOutcome *string `json:"deliveryOutcome,omitempty"`
+	PresentedAt     string  `json:"presentedAt"`
 }
 
 // WrkqEnvelope is the stable envelope resource DTO. EN-xxxxx is an INTERNAL row
@@ -318,8 +323,11 @@ type EnvelopePresentParams struct {
 	Generation     string `json:"generation,omitempty"`
 	RunID          string `json:"runId,omitempty"`
 	DriveAttemptID string `json:"driveAttemptId,omitempty"`
-	PrincipalRef   string `json:"principalRef,omitempty"`
-	ScopeRef       string `json:"scopeRef,omitempty"`
+	// DeliveryOutcome is optional: HRC's class for how this delivery landed.
+	// Absent stays null on the receipt; wrkq never validates the vocabulary.
+	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
+	PrincipalRef    string `json:"principalRef,omitempty"`
+	ScopeRef        string `json:"scopeRef,omitempty"`
 }
 
 // EnvelopePendingViewParams asks for the obligations standing against one or

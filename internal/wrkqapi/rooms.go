@@ -1407,6 +1407,7 @@ func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*Wr
 		Node:      optionalString(p.Node), RuntimeID: optionalString(p.RuntimeID),
 		HostSessionID: optionalString(p.HostSessionID), Generation: optionalString(p.Generation),
 		RunID: optionalString(p.RunID), DriveAttemptID: optionalString(p.DriveAttemptID),
+		DeliveryOutcome: optionalString(p.DeliveryOutcome),
 	})
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Envelope)
@@ -1899,7 +1900,7 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 	}
 
 	rows, err := a.db.QueryContext(ctx, `SELECT member_ref, node, runtime_id, host_session_id,
-		 generation, run_id, drive_attempt_id, presented_at
+		 generation, run_id, drive_attempt_id, delivery_outcome, presented_at
 		 FROM envelope_presentations WHERE envelope_uuid = ? ORDER BY presented_at, uuid`, envelope.UUID)
 	if err != nil {
 		return nil, NewInternalError(err)
@@ -1908,7 +1909,8 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 	for rows.Next() {
 		var item WrkqEnvelopePresentation
 		if err := rows.Scan(&item.MemberRef, &item.Node, &item.RuntimeID, &item.HostSessionID,
-			&item.Generation, &item.RunID, &item.DriveAttemptID, &item.PresentedAt); err != nil {
+			&item.Generation, &item.RunID, &item.DriveAttemptID, &item.DeliveryOutcome,
+			&item.PresentedAt); err != nil {
 			return nil, NewInternalError(err)
 		}
 		item.PresentedAt = toRFC3339(item.PresentedAt)
@@ -1935,8 +1937,9 @@ func presentationDTO(presentation *domain.EnvelopePresentation) *WrkqEnvelopePre
 		MemberRef: presentation.MemberRef, Node: presentation.Node,
 		RuntimeID: presentation.RuntimeID, HostSessionID: presentation.HostSessionID,
 		Generation: presentation.Generation, RunID: presentation.RunID,
-		DriveAttemptID: presentation.DriveAttemptID,
-		PresentedAt:    toRFC3339(presentation.PresentedAt),
+		DriveAttemptID:  presentation.DriveAttemptID,
+		DeliveryOutcome: presentation.DeliveryOutcome,
+		PresentedAt:     toRFC3339(presentation.PresentedAt),
 	}
 }
 

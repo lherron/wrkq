@@ -82,8 +82,8 @@ const roomMemberColumns = `
 
 const envelopePresentationColumns = `
 	uuid, envelope_uuid, room_uuid, member_ref, node, runtime_id,
-	host_session_id, generation, run_id, drive_attempt_id, presented_at,
-	presented_by_principal_ref`
+	host_session_id, generation, run_id, drive_attempt_id, delivery_outcome,
+	presented_at, presented_by_principal_ref`
 
 // ─── rooms ────────────────────────────────────────────────────────────────────
 
@@ -1012,6 +1012,8 @@ type PresentationRecord struct {
 	Generation     *string
 	RunID          *string
 	DriveAttemptID *string
+	// DeliveryOutcome is HRC's steer class for this delivery, held opaquely.
+	DeliveryOutcome *string
 }
 
 // RecordPresentationWithAttribution writes presented_to, advances the envelope
@@ -1044,11 +1046,11 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 		}
 		if _, err := tx.Exec(`INSERT INTO envelope_presentations (
 			envelope_uuid, room_uuid, member_ref, node, runtime_id, host_session_id,
-			generation, run_id, drive_attempt_id, presented_by_principal_ref
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			generation, run_id, drive_attempt_id, delivery_outcome, presented_by_principal_ref
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			envelopeUUID, current.RoomUUID, record.MemberRef, record.Node, record.RuntimeID,
 			record.HostSessionID, record.Generation, record.RunID, record.DriveAttemptID,
-			attr.PrincipalRef); err != nil {
+			record.DeliveryOutcome, attr.PrincipalRef); err != nil {
 			return fmt.Errorf("failed to record presentation: %w", err)
 		}
 		recorded = true
@@ -1369,8 +1371,8 @@ func scanEnvelopePresentation(scanner collabScanner) (*domain.EnvelopePresentati
 		&presentation.UUID, &presentation.EnvelopeUUID, &presentation.RoomUUID,
 		&presentation.MemberRef, &presentation.Node, &presentation.RuntimeID,
 		&presentation.HostSessionID, &presentation.Generation, &presentation.RunID,
-		&presentation.DriveAttemptID, &presentation.PresentedAt,
-		&presentation.PresentedByPrincipalRef,
+		&presentation.DriveAttemptID, &presentation.DeliveryOutcome,
+		&presentation.PresentedAt, &presentation.PresentedByPrincipalRef,
 	)
 	return presentation, err
 }

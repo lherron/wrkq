@@ -2243,3 +2243,67 @@ func TestEnvelopeReplyToCarriesTheExactSenderScope(t *testing.T) {
 		t.Fatalf("scope-less sender replyTo = %q, want agent:lance", human.Envelopes[0].ReplyTo)
 	}
 }
+
+// TestPresentationDeliveryOutcomeRoundTripsAndDefaultsToNull covers the receipt's
+// newest opaque HRC field: a class HRC supplies rides through to show and to the
+// inbox view unchanged, and one it omits stays null rather than inventing a
+// default. wrkq validates no vocabulary here, so HRC can add a class without a
+// wrkq change.
+func TestPresentationDeliveryOutcomeRoundTripsAndDefaultsToNull(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	classified := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "classified",
+		To: []string{"mable@proj:primary"}, PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary"})
+	plain := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "unclassified",
+		To: []string{"mable@proj:primary"}, PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary"})
+
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: classified.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+		DeliveryOutcome: "admitted_into_active_turn",
+	}); err != nil {
+		t.Fatalf("present with a delivery outcome: %v", err)
+	}
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: plain.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present without a delivery outcome: %v", err)
+	}
+
+	shown, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: classified.Envelopes[0].ID})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if len(shown.PresentedTo) != 1 || shown.PresentedTo[0].DeliveryOutcome == nil ||
+		*shown.PresentedTo[0].DeliveryOutcome != "admitted_into_active_turn" {
+		t.Fatalf("receipt delivery outcome = %+v, want admitted_into_active_turn", shown.PresentedTo)
+	}
+	bare, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: plain.Envelopes[0].ID})
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if len(bare.PresentedTo) != 1 || bare.PresentedTo[0].DeliveryOutcome != nil {
+		t.Fatalf("omitted delivery outcome = %+v, want null", bare.PresentedTo)
+	}
+
+	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
+		ScopeRef: "mable@proj:primary", PrincipalRef: "agent:mable",
+	})
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	outcomes := map[string]*string{}
+	for _, group := range inbox.Groups {
+		for _, envelope := range group.Items {
+			if len(envelope.PresentedTo) == 1 {
+				outcomes[envelope.ID] = envelope.PresentedTo[0].DeliveryOutcome
+			}
+		}
+	}
+	if got := outcomes[classified.Envelopes[0].ID]; got == nil || *got != "admitted_into_active_turn" {
+		t.Fatalf("inbox delivery outcome = %v, want admitted_into_active_turn", got)
+	}
+	if got, ok := outcomes[plain.Envelopes[0].ID]; !ok || got != nil {
+		t.Fatalf("inbox delivery outcome for an omitted class = %v, want null", got)
+	}
+}

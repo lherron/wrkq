@@ -66,14 +66,15 @@ type envelopePartyWire struct {
 }
 
 type envelopePresentationWire struct {
-	MemberRef      string  `json:"memberRef"`
-	Node           *string `json:"node,omitempty"`
-	RuntimeID      *string `json:"runtimeId,omitempty"`
-	HostSessionID  *string `json:"hostSessionId,omitempty"`
-	Generation     *string `json:"generation,omitempty"`
-	RunID          *string `json:"runId,omitempty"`
-	DriveAttemptID *string `json:"driveAttemptId,omitempty"`
-	PresentedAt    string  `json:"presentedAt"`
+	MemberRef       string  `json:"memberRef"`
+	Node            *string `json:"node,omitempty"`
+	RuntimeID       *string `json:"runtimeId,omitempty"`
+	HostSessionID   *string `json:"hostSessionId,omitempty"`
+	Generation      *string `json:"generation,omitempty"`
+	RunID           *string `json:"runId,omitempty"`
+	DriveAttemptID  *string `json:"driveAttemptId,omitempty"`
+	DeliveryOutcome *string `json:"deliveryOutcome,omitempty"`
+	PresentedAt     string  `json:"presentedAt"`
 }
 
 type envelopeWire struct {

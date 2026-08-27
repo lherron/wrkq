@@ -206,6 +206,13 @@ export interface WrkqEnvelopePresentation {
   generation?: string;
   runId?: string;
   driveAttemptId?: string;
+  /**
+   * HRC's own class for HOW this delivery landed — `admitted_into_active_turn`,
+   * `presented_to_live_harness`, `started_fresh_turn`, `kicker` today. wrkq
+   * stores and returns it and never interprets it, so HRC can add a class
+   * without a wrkq change (T-07638).
+   */
+  deliveryOutcome?: string;
   presentedAt: string;
 }
 
@@ -422,6 +429,8 @@ export interface WrkqEnvelopePresentParams {
   runId?: string;
   /** One drive attempt presents an envelope exactly once. */
   driveAttemptId?: string;
+  /** Optional. HRC's class for how this delivery landed; absent stays null. */
+  deliveryOutcome?: string;
   principalRef?: string;
   scopeRef?: string;
 }

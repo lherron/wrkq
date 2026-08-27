@@ -149,16 +149,20 @@ type RoomMember struct {
 // EnvelopePresentation is the join between wrkq's collaboration ledger and
 // HRC's execution world. Every HRC identifier here is opaque to wrkq.
 type EnvelopePresentation struct {
-	UUID                    string  `json:"uuid" db:"uuid"`
-	EnvelopeUUID            string  `json:"envelope_uuid" db:"envelope_uuid"`
-	RoomUUID                string  `json:"room_uuid" db:"room_uuid"`
-	MemberRef               string  `json:"member_ref" db:"member_ref"`
-	Node                    *string `json:"node,omitempty" db:"node"`
-	RuntimeID               *string `json:"runtime_id,omitempty" db:"runtime_id"`
-	HostSessionID           *string `json:"host_session_id,omitempty" db:"host_session_id"`
-	Generation              *string `json:"generation,omitempty" db:"generation"`
-	RunID                   *string `json:"run_id,omitempty" db:"run_id"`
-	DriveAttemptID          *string `json:"drive_attempt_id,omitempty" db:"drive_attempt_id"`
+	UUID           string  `json:"uuid" db:"uuid"`
+	EnvelopeUUID   string  `json:"envelope_uuid" db:"envelope_uuid"`
+	RoomUUID       string  `json:"room_uuid" db:"room_uuid"`
+	MemberRef      string  `json:"member_ref" db:"member_ref"`
+	Node           *string `json:"node,omitempty" db:"node"`
+	RuntimeID      *string `json:"runtime_id,omitempty" db:"runtime_id"`
+	HostSessionID  *string `json:"host_session_id,omitempty" db:"host_session_id"`
+	Generation     *string `json:"generation,omitempty" db:"generation"`
+	RunID          *string `json:"run_id,omitempty" db:"run_id"`
+	DriveAttemptID *string `json:"drive_attempt_id,omitempty" db:"drive_attempt_id"`
+	// DeliveryOutcome is HRC's own classification of HOW this presentation was
+	// delivered. Like every other identifier on the receipt it is opaque: wrkq
+	// stores and returns it and never interprets or validates it (T-07638).
+	DeliveryOutcome         *string `json:"delivery_outcome,omitempty" db:"delivery_outcome"`
 	PresentedAt             string  `json:"presented_at" db:"presented_at"`
 	PresentedByPrincipalRef string  `json:"presented_by_principal_ref" db:"presented_by_principal_ref"`
 }

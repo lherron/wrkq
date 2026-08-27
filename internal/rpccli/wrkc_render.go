@@ -341,6 +341,11 @@ func presentationSuffix(presentation envelopePresentationWire) string {
 	if presentation.RuntimeID != nil {
 		parts = append(parts, "runtime="+*presentation.RuntimeID)
 	}
+	// HRC's own class for how the delivery landed; wrkq prints it and never
+	// interprets it.
+	if presentation.DeliveryOutcome != nil {
+		parts = append(parts, "delivery="+*presentation.DeliveryOutcome)
+	}
 	if len(parts) == 0 {
 		return ""
 	}
