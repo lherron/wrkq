@@ -1340,43 +1340,64 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 			scopes = append(scopes, normalized)
 		}
 	}
-	params := store.EnvelopeListParams{
-		Obligations: []domain.EnvelopeObligation{domain.EnvelopeObligationReplyRequired},
-		States:      []domain.EnvelopeState{domain.EnvelopeStatePending, domain.EnvelopeStatePresented},
-	}
+	addressee := store.EnvelopeListParams{}
 	if len(scopes) > 0 {
-		params.ToScopeRefs = scopes
+		addressee.ToScopeRefs = scopes
 	} else {
 		own, oerr := normalizeRoomScopeRef(p.ScopeRef)
 		if oerr != nil {
 			return nil, oerr
 		}
 		if own != "" {
-			params.ToScopeRef = own
+			addressee.ToScopeRef = own
 		} else {
-			params.ToPrincipalRef = attr.PrincipalRef
+			addressee.ToPrincipalRef = attr.PrincipalRef
 		}
 	}
 
-	rows, err := a.store.Rooms.ListEnvelopes(params)
-	if err != nil {
-		return nil, mapRoomStoreError(err, "")
-	}
+	params := addressee
+	params.Obligations = []domain.EnvelopeObligation{domain.EnvelopeObligationReplyRequired}
+	params.States = []domain.EnvelopeState{domain.EnvelopeStatePending, domain.EnvelopeStatePresented}
+
 	view := &WrkqEnvelopePendingView{Items: []WrkqEnvelope{}, Blocking: []string{}, Repended: repended}
-	for index := range rows {
-		state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
-		if serr != nil {
-			return nil, serr
+	collect := func(listParams store.EnvelopeListParams) error {
+		rows, lerr := a.store.Rooms.ListEnvelopes(listParams)
+		if lerr != nil {
+			return mapRoomStoreError(lerr, "")
 		}
-		dto, eerr := a.envelopeDTO(ctx, &rows[index], state)
-		if eerr != nil {
-			return nil, eerr
+		for index := range rows {
+			state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
+			if serr != nil {
+				return serr
+			}
+			dto, eerr := a.envelopeDTO(ctx, &rows[index], state)
+			if eerr != nil {
+				return eerr
+			}
+			view.Items = append(view.Items, *dto)
+			// The stop-hook refuses a turn end only for what was actually
+			// PRESENTED, left neither replied nor deferred, and OBLIGED: a fyi
+			// never reaches here presented, because presentation auto-acks it.
+			if rows[index].State == domain.EnvelopeStatePresented &&
+				rows[index].Obligation == domain.EnvelopeObligationReplyRequired {
+				view.Blocking = append(view.Blocking, rows[index].ID)
+			}
 		}
-		view.Items = append(view.Items, *dto)
-		// The stop-hook refuses a turn end only for what was actually PRESENTED
-		// and left neither replied nor deferred.
-		if rows[index].State == domain.EnvelopeStatePresented {
-			view.Blocking = append(view.Blocking, rows[index].ID)
+		return nil
+	}
+
+	if err := collect(params); err != nil {
+		return nil, err
+	}
+	if p.IncludeFyi {
+		// The opt-in half: a fyi carries no obligation, so it is only ever an
+		// item. Its auto-ack at presentation leaves `pending` as the only live
+		// fyi state, and it never blocks a turn end nor summons a runtime.
+		fyiParams := addressee
+		fyiParams.Obligations = []domain.EnvelopeObligation{domain.EnvelopeObligationFYI}
+		fyiParams.States = []domain.EnvelopeState{domain.EnvelopeStatePending}
+		if err := collect(fyiParams); err != nil {
+			return nil, err
 		}
 	}
 	return view, nil

@@ -315,6 +315,11 @@ export interface WrkqEnvelopeFacade {
   defer(params: WrkqEnvelopeDeferParams): Promise<WrkqEnvelope>;
   ack(params: WrkqEnvelopeAckParams): Promise<WrkqRoomLogView>;
   present(params: WrkqEnvelopePresentParams): Promise<WrkqEnvelopePresentResult>;
+  /**
+   * The kicker wake set and the stop-hook predicate. `includeFyi` additionally
+   * reports pending fyi envelopes in `items`; they never enter `blocking` and
+   * never summon, so a consumer presents them only into a live generation.
+   */
   pendingView(params?: WrkqEnvelopePendingViewParams): Promise<WrkqEnvelopePendingView>;
   roundEnded(params: WrkqEnvelopeRoundParams): Promise<WrkqEnvelope>;
 }

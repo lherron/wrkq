@@ -177,6 +177,8 @@ type WrkqEnvelopePresentResult struct {
 // one read model. Blocking counts only what refuses a turn end: presented
 // reply_required envelopes neither replied nor deferred.
 type WrkqEnvelopePendingView struct {
+	// Items is the wake set: standing reply_required envelopes, plus pending fyi
+	// envelopes when the caller asked for IncludeFyi.
 	Items []WrkqEnvelope `json:"items"`
 	// Blocking is the stop-hook predicate: envelope ids that must be replied or
 	// deferred before this scope's turn may end.
@@ -316,9 +318,14 @@ type EnvelopePresentParams struct {
 // EnvelopePendingViewParams asks for the obligations standing against one or
 // more scopes. Scopes empty defaults to the caller's own scope.
 type EnvelopePendingViewParams struct {
-	Scopes       []string `json:"scopes,omitempty"`
-	PrincipalRef string   `json:"principalRef,omitempty"`
-	ScopeRef     string   `json:"scopeRef,omitempty"`
+	Scopes []string `json:"scopes,omitempty"`
+	// IncludeFyi additionally reports pending fyi envelopes in Items. It is a
+	// request parameter, not a feature flag: the default read is the wake set
+	// and stays obligation-only. A fyi never enters Blocking and never summons;
+	// gating presentation to a live generation is the consumer's half of §5.
+	IncludeFyi   bool   `json:"includeFyi,omitempty"`
+	PrincipalRef string `json:"principalRef,omitempty"`
+	ScopeRef     string `json:"scopeRef,omitempty"`
 }
 
 // EnvelopeRoundParams records that a completed kicker turn presented an

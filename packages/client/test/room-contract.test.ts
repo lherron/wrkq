@@ -231,6 +231,34 @@ describe("wrkq.envelope facade", () => {
     ]);
   });
 
+  test("pendingView includeFyi forwards the opt-in and keeps fyi out of blocking", async () => {
+    const fyi: WrkqEnvelope = {
+      ...ENVELOPE,
+      uuid: "envelope-uuid-fyi",
+      id: "EN-00002",
+      groupId: "EN-00002",
+      obligation: "fyi",
+      body: "heads up",
+      state: "pending",
+    };
+    const transport = new FakeTransport().onResult("wrkq.envelope.pendingView", {
+      items: [ENVELOPE, fyi],
+      blocking: [ENVELOPE.id],
+      repended: 0,
+    });
+    const client = await createClient({ transport, autoInitialize: false });
+
+    const params = { scopes: ["cody@wrkq:T-07613"], includeFyi: true, principalRef: "agent:hrc" };
+    const view = await client.wrkq.envelope.pendingView(params);
+
+    expect(view.items.map((item) => item.obligation)).toEqual(["reply_required", "fyi"]);
+    // fyi carries no obligation, so it never refuses a turn end and never summons.
+    expect(view.blocking).toEqual([ENVELOPE.id]);
+    expect(transport.capturedRequests.map(({ method, params: sent }) => ({ method, params: sent }))).toEqual([
+      { method: "wrkq.envelope.pendingView", params },
+    ]);
+  });
+
   test("inboxView and pendingView default to empty parameter objects", async () => {
     const transport = new FakeTransport()
       .onResult("wrkq.envelope.inboxView", INBOX_VIEW)

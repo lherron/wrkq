@@ -1061,6 +1061,85 @@ func TestStopHookPredicateCountsOnlyPresentedObligations(t *testing.T) {
 	}
 }
 
+// TestPendingViewIncludeFyiIsOptInAndNeverBlocks proves T-07627: the default
+// read stays the obligation-only wake set, includeFyi additionally surfaces
+// pending fyi envelopes as ITEMS, and a fyi never enters the stop-hook
+// predicate. The presentation half is pinned too: presenting a fyi auto-acks
+// it, so it leaves the includeFyi read on its own.
+func TestPendingViewIncludeFyiIsOptInAndNeverBlocks(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	codySeat := "cody@proj:" + f.loneTaskID
+
+	ask := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "please reply", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	fyi := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "heads up", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod",
+	})
+
+	// Default: fyi is invisible, exactly as the wake set requires.
+	base, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+		Scopes: []string{codySeat}, PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("pendingView: %v", err)
+	}
+	if len(base.Items) != 1 || base.Items[0].ID != ask.Envelopes[0].ID {
+		t.Fatalf("default pendingView = %+v, want only the obligation", base.Items)
+	}
+
+	// Opt-in: the fyi joins items and stays out of blocking.
+	withFyi, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+		Scopes: []string{codySeat}, IncludeFyi: true, PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("pendingView includeFyi: %v", err)
+	}
+	ids := map[string]string{}
+	for _, item := range withFyi.Items {
+		ids[item.ID] = item.Obligation
+	}
+	if len(withFyi.Items) != 2 || ids[ask.Envelopes[0].ID] != "reply_required" || ids[fyi.Envelopes[0].ID] != "fyi" {
+		t.Fatalf("includeFyi items = %+v, want the obligation and the fyi", withFyi.Items)
+	}
+	for _, blocked := range withFyi.Blocking {
+		if blocked == fyi.Envelopes[0].ID {
+			t.Fatal("a fyi entered the stop-hook predicate; fyi never blocks a turn end")
+		}
+	}
+
+	// Presenting the obligation blocks; presenting the fyi auto-acks it, which
+	// is what retires it from the includeFyi read without any ack call.
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: ask.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present obligation: %v", err)
+	}
+	presentedFyi, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: fyi.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	})
+	if err != nil {
+		t.Fatalf("present fyi: %v", err)
+	}
+	if presentedFyi.Envelope.State != "acked" || !presentedFyi.Envelope.Terminal {
+		t.Fatalf("presented fyi = %s (terminal=%v), want an auto-ack", presentedFyi.Envelope.State, presentedFyi.Envelope.Terminal)
+	}
+
+	after, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+		Scopes: []string{codySeat}, IncludeFyi: true, PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("pendingView after presentation: %v", err)
+	}
+	if len(after.Items) != 1 || after.Items[0].ID != ask.Envelopes[0].ID {
+		t.Fatalf("an auto-acked fyi survived the includeFyi read: %+v", after.Items)
+	}
+	if len(after.Blocking) != 1 || after.Blocking[0] != ask.Envelopes[0].ID {
+		t.Fatalf("blocking = %v, want only the presented obligation", after.Blocking)
+	}
+}
+
 // ─── events ───────────────────────────────────────────────────────────────────
 
 // TestEventsEmittedForEachTransition proves §3.4: room, member, and envelope

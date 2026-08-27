@@ -428,12 +428,23 @@ export interface WrkqEnvelopePresentResult {
 
 export interface WrkqEnvelopePendingViewParams {
   scopes?: string[];
+  /**
+   * Additionally report pending `fyi` envelopes in `items`. A request
+   * parameter, not a feature flag: the default read is the wake set and stays
+   * obligation-only. A fyi never enters `blocking` and never summons — gating
+   * presentation to a live generation is the consumer's half of §5.
+   */
+  includeFyi?: boolean;
   principalRef?: string;
   scopeRef?: string;
 }
 
 /** The kicker wake set AND the stop-hook predicate in one read model. */
 export interface WrkqEnvelopePendingView {
+  /**
+   * Standing reply_required envelopes, plus pending `fyi` envelopes when the
+   * caller asked for `includeFyi`.
+   */
   items: WrkqEnvelope[];
   /** Envelope ids that must be replied or deferred before a turn may end. */
   blocking: string[];

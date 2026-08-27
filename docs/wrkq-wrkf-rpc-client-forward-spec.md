@@ -1009,6 +1009,10 @@ interface WrkqEnvelopePresentResult {
   envelope: WrkqEnvelope; recorded: boolean; historyHint: boolean;
   messageCount: number; lastMessageAt?: string;
 }
+interface WrkqEnvelopePendingViewParams {
+  scopes?: string[]; includeFyi?: boolean;
+  principalRef?: string; scopeRef?: string;
+}
 interface WrkqEnvelopePendingView {
   items: WrkqEnvelope[]; blocking: string[]; repended: number;
 }
@@ -1036,6 +1040,15 @@ Contract points a consumer must not have to rediscover:
 - **`historyHint` is keyed to the RUNTIME, not the generation.** `/quit` clears
   continuation without rotating the generation, so every post-quit runtime is
   cold and gets the cue.
+- **`pendingView` is obligation-only until you ask for `includeFyi`.** The
+  default read IS the wake set, so it filters to `reply_required` and a pending
+  `fyi` is invisible to it. `includeFyi: true` additionally reports pending
+  `fyi` envelopes in `items` — a request parameter, not a feature flag.
+  `blocking` and `repended` are unchanged: a fyi carries no obligation, so it
+  never refuses a turn end and is never in the wake set for summon purposes.
+  Presenting a fyi auto-acks it, which retires it from the read with no `ack`
+  call. Consumers gate on this themselves: present a fyi only into a LIVE
+  generation, otherwise leave it for the addressee's next attend.
 
 `say` returns `WrkqRoomSayResult`; `open`/`show`/`close`/`reopen` return one
 `WrkqRoom`; `list` returns `{items: WrkqRoom[]}`; `logView` returns
