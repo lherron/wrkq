@@ -136,13 +136,18 @@ type monitorEventFilter struct {
 	envelopeUUIDs   []string
 	stateOnly       bool
 	eventTypes      []string
+	// namedSelectors records that the caller named at least one selector, which
+	// is NOT the same as having resolved a uuid for it: a campaign room armed
+	// before its first say resolves to nothing yet.
+	namedSelectors bool
 }
 
 // hasSelectors reports whether the caller named ANY selector. Only a wholly
 // unselected feed (`wrkq monitor watch` with no arguments) emits every event;
-// naming a room or an envelope narrows task.*/comment.* too.
+// naming a room, an envelope, or a container narrows task.*/comment.* too — and
+// so does naming one whose room does not exist yet.
 func (f monitorEventFilter) hasSelectors() bool {
-	return len(f.taskUUIDs) > 0 || len(f.taskFriendlyIDs) > 0 ||
+	return f.namedSelectors || len(f.taskUUIDs) > 0 || len(f.taskFriendlyIDs) > 0 ||
 		len(f.roomUUIDs) > 0 || len(f.envelopeUUIDs) > 0
 }
 
@@ -160,6 +165,10 @@ type monitorSelectorSet struct {
 	// is what makes an envelope --until condition legal.
 	sawEnvelopeSelector bool
 	sawTaskSelector     bool
+	// sawAnySelector records that at least one non-empty selector was named,
+	// however it resolved. It is what tells an armed-but-unresolved feed from a
+	// deliberately unfiltered one.
+	sawAnySelector bool
 }
 
 type monitorCondition struct {

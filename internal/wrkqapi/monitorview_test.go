@@ -5,6 +5,7 @@ package wrkqapi
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -512,4 +513,107 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// TestMonitorEventsView_ContainerRoomKeySelector covers the §3.4 room-key feed:
+// following a room is arming `monitor watch <room-key>`, and a campaign/project
+// room's key IS its container path or P-xxxxx. Because every campaign task
+// coalesces into the campaign room (§4 rule 2), this is the feed a supervisor
+// actually arms — it used to fail as "invalid task selector".
+func TestMonitorEventsView_ContainerRoomKeySelector(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	// Traffic INTO the campaign room (a resident task coalesces into it) and
+	// unrelated churn on the lone task, which must not appear.
+	said := f.say(t, RoomSayParams{Ref: f.residentTaskID, Body: "campaign traffic", PrincipalRef: "agent:clod"})
+	if said.Room.Kind != "campaign" {
+		t.Fatalf("resident task routed to a %s room, want campaign", said.Room.Kind)
+	}
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")}}); err != nil {
+		t.Fatalf("update lone task: %v", err)
+	}
+	cm, err := f.api.CommentAdd(ctx, CommentAddParams{Task: f.loneTaskID, Body: "lone note"})
+	if err != nil {
+		t.Fatalf("comment add: %v", err)
+	}
+	if _, err := f.api.CommentDelete(ctx, CommentDeleteParams{ID: cm.ID}); err != nil {
+		t.Fatalf("comment delete: %v", err)
+	}
+
+	var campaignID string
+	if err := f.api.db.QueryRow("SELECT id FROM containers WHERE uuid = ?", f.campaignUUID).Scan(&campaignID); err != nil {
+		t.Fatalf("read campaign friendly id: %v", err)
+	}
+
+	// The path form and the P-xxxxx form must select the same room.
+	for _, selector := range []string{f.campaignPath, campaignID} {
+		t.Run(selector, func(t *testing.T) {
+			view, verr := f.api.MonitorEventsView(ctx, MonitorEventsViewParams{
+				Tasks: []string{selector}, Cursor: 0,
+			})
+			if verr != nil {
+				t.Fatalf("eventsView(%q): %v", selector, verr)
+			}
+			sawRoom, sawEnvelope := false, false
+			for _, e := range view.Items {
+				switch e.ResourceType {
+				case "room":
+					sawRoom = true
+				case "envelope":
+					sawEnvelope = true
+				default:
+					t.Errorf("room-key selector %q leaked a %s event (%s)", selector, e.ResourceType, e.EventType)
+				}
+			}
+			if !sawRoom || !sawEnvelope {
+				t.Errorf("room-key selector %q: sawRoom=%v sawEnvelope=%v, want both", selector, sawRoom, sawEnvelope)
+			}
+		})
+	}
+
+	// A plain container has no room, and refusing it must be the SAME typed
+	// refusal `wrkc say` gives, so watching and saying agree about what has one.
+	_, err = f.api.MonitorEventsView(ctx, MonitorEventsViewParams{Tasks: []string{f.plainContainerPath}, Cursor: 0})
+	de := assertDomainCode(t, "WRKQ_VALIDATION", err)
+	if !strings.Contains(de.Error(), "room_kind_unsupported") {
+		t.Fatalf("plain container refusal is not typed room_kind_unsupported: %v", de)
+	}
+}
+
+// TestMonitorEventsView_ArmedRoomBeforeFirstSay proves a campaign room armed
+// BEFORE it exists narrows the feed to nothing rather than degrading into the
+// unfiltered "emit everything" branch. A supervisor arms the feed before the
+// first say; selectors are re-resolved every poll, so the room starts matching
+// the moment it is opened.
+func TestMonitorEventsView_ArmedRoomBeforeFirstSay(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	// Churn that must NOT be emitted: nothing has been said in the campaign yet.
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")}}); err != nil {
+		t.Fatalf("update lone task: %v", err)
+	}
+
+	view, err := f.api.MonitorEventsView(ctx, MonitorEventsViewParams{
+		Tasks: []string{f.campaignPath}, Cursor: 0,
+	})
+	if err != nil {
+		t.Fatalf("eventsView on an unopened campaign room: %v", err)
+	}
+	if len(view.Items) != 0 {
+		t.Fatalf("armed-but-unopened room emitted %d events; a named selector must never read as an unfiltered feed", len(view.Items))
+	}
+
+	// Once the room exists the same selector starts matching, no re-arm needed.
+	f.say(t, RoomSayParams{Ref: f.residentTaskID, Body: "first say", PrincipalRef: "agent:clod"})
+	view, err = f.api.MonitorEventsView(ctx, MonitorEventsViewParams{
+		Tasks: []string{f.campaignPath}, Cursor: 0,
+	})
+	if err != nil {
+		t.Fatalf("eventsView after the first say: %v", err)
+	}
+	if len(view.Items) == 0 {
+		t.Fatal("the room opened, so the armed selector must now emit its events")
+	}
 }

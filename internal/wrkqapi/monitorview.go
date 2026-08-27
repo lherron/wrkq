@@ -59,6 +59,7 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 		envelopeUUIDs:   selected.envelopeUUIDs,
 		stateOnly:       p.StateOnly,
 		eventTypes:      p.EventTypes,
+		namedSelectors:  selected.sawAnySelector,
 	}
 
 	limit := p.Limit
@@ -442,9 +443,25 @@ func (a *API) resolveMonitorSelectors(in []string) (monitorSelectorSet, error) {
 		if selector == "" {
 			continue
 		}
+		// Any non-empty selector narrows the feed, even one that resolves to a
+		// room which does not exist yet. Recording it here (rather than
+		// inferring "unfiltered" from empty uuid lists downstream) is what stops
+		// an armed-but-not-yet-open room from degrading into "emit everything".
+		set.sawAnySelector = true
 
 		if kind, _, perr := id.Parse(selector); perr == nil {
 			switch kind {
+			case id.TypeContainer:
+				// §3.4: following a room is arming `monitor watch <room-key>`,
+				// and a campaign/project room's KEY is its container path or
+				// P-xxxxx. Every campaign task coalesces into the campaign room
+				// (§4 rule 2), so this is the feed a supervisor actually arms.
+				roomUUID, err := a.roomUUIDForContainerSelector(selector)
+				if err != nil {
+					return monitorSelectorSet{}, err
+				}
+				set.roomUUIDs = appendMonitorUnique(set.roomUUIDs, roomUUID)
+				continue
 			case id.TypeRoom:
 				var roomUUID string
 				if err := a.db.QueryRow("SELECT uuid FROM rooms WHERE id = ? OR uuid = ?", selector, selector).Scan(&roomUUID); err != nil {
@@ -471,6 +488,17 @@ func (a *API) resolveMonitorSelectors(in []string) (monitorSelectorSet, error) {
 
 		uuid, friendlyID, rerr := selectors.ResolveTask(a.db, selector)
 		if rerr != nil {
+			// A path selector is a task path OR a room key: `wrkq/rooms` names
+			// the campaign room, not a task. Tasks keep precedence, so this only
+			// runs once the task lookup has already missed.
+			if _, _, cerr := selectors.ResolveContainer(a.db, selector); cerr == nil {
+				roomUUID, err := a.roomUUIDForContainerSelector(selector)
+				if err != nil {
+					return monitorSelectorSet{}, err
+				}
+				set.roomUUIDs = appendMonitorUnique(set.roomUUIDs, roomUUID)
+				continue
+			}
 			return monitorSelectorSet{}, NewValidationError(fmt.Sprintf("invalid task selector %q: %s", selector, rerr.Error()), nil)
 		}
 		set.sawTaskSelector = true
@@ -486,6 +514,53 @@ func (a *API) resolveMonitorSelectors(in []string) (monitorSelectorSet, error) {
 		}
 	}
 	return set, nil
+}
+
+// roomUUIDForContainerSelector resolves a container path or P-xxxxx to that
+// container's room uuid. The kind gate is routeToContainerUUID's (§4 rule 3):
+// campaign-adorned → campaign room, project-kind → project room, anything else
+// is the same typed room_kind_unsupported refusal `wrkc say` gives, so watching
+// and saying agree about what has a room.
+//
+// It returns "" — not an error — when the container qualifies but its room has
+// not been opened yet: a supervisor arms the feed BEFORE the first say, and
+// selectors are re-resolved on every poll, so the room starts matching the
+// moment it exists. set.sawAnySelector keeps that empty result from reading as
+// an unfiltered feed.
+func (a *API) roomUUIDForContainerSelector(selector string) (string, error) {
+	containerUUID, _, err := selectors.ResolveContainer(a.db, selector)
+	if err != nil {
+		return "", NewValidationError(fmt.Sprintf("invalid container selector %q: %s", selector, err.Error()), nil)
+	}
+	var kind string
+	var campaignState sql.NullString
+	if err := a.db.QueryRow(
+		"SELECT kind, campaign_state FROM containers WHERE uuid = ?", containerUUID,
+	).Scan(&kind, &campaignState); err != nil {
+		if err == sql.ErrNoRows {
+			return "", NewValidationError(fmt.Sprintf("invalid container selector %q: container not found", selector), nil)
+		}
+		return "", NewInternalError(err)
+	}
+	isCampaign := campaignState.Valid && campaignState.String != ""
+	if !isCampaign && kind != string(domain.ContainerKindProject) {
+		return "", NewValidationError(
+			"room_kind_unsupported: only campaign-adorned and project containers have rooms",
+			map[string]any{
+				"reason": "room_kind_unsupported", "container": selector,
+				"kind": kind, "expected": "campaign-adorned container or project",
+			})
+	}
+	var roomUUID string
+	if err := a.db.QueryRow(
+		"SELECT uuid FROM rooms WHERE container_uuid = ?", containerUUID,
+	).Scan(&roomUUID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", NewInternalError(err)
+	}
+	return roomUUID, nil
 }
 
 func (a *API) resolveEnvelopeSelector(selector string) ([]string, []string, error) {
