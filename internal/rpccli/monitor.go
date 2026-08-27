@@ -136,6 +136,10 @@ func newMonitorWatchCmd() *cobra.Command {
 		Long: `Stream typed NDJSON events for watched tasks. Emits per-event lines and
 exactly one terminal line before exit. With no --until, follows indefinitely.
 
+The feed starts at the current high-water mark: it tails what happens NEXT. Use
+--since <id> to start from an earlier event (--since 0 replays the whole log) or
+--last N to replay the last N events before following.
+
 Selectors: T-XXXXX friendly IDs or container paths (e.g. inbox/my-task), plus
 R-XXXXX rooms and EN-XXXXX envelopes. A task selector also carries that task's
 room, so state changes and the conversation stream on ONE selector; --state-only
@@ -197,22 +201,29 @@ Invalid selectors fail with exit code 2 before any streaming.
 			// from actual row identity (COALESCE(MIN(id),0)-1 over the last N existing
 			// event_log rows) via eventsView lastN — gap-independent, not high_water-N.
 			startCursor := since
+			// With neither --since nor --last, the feed starts at the current
+			// high-water: `watch` is a tail of what happens NEXT, not a replay of
+			// the whole event log (T-07620). --since 0 stays an explicit "from the
+			// beginning", which is why this tests Changed rather than the value.
+			fromHighWater := !cmd.Flags().Changed("since")
 			if last > 0 {
 				c, err := cursorForLastEvents(cmd.Context(), tr, last)
 				if err != nil {
 					return monitorStreamError(errOut, out, err)
 				}
 				startCursor = c
+				fromHighWater = false
 			}
 
 			return monitorStreamUntil(cmd.Context(), tr, out, errOut, monitorStreamOpts{
-				scopedTasks: scoped,
-				stateOnly:   stateOnly,
-				eventTypes:  splitMonitorComma(eventType),
-				condition:   until,
-				timeout:     timeout,
-				stallAfter:  stallAfter,
-				startCursor: startCursor,
+				scopedTasks:   scoped,
+				stateOnly:     stateOnly,
+				eventTypes:    splitMonitorComma(eventType),
+				condition:     until,
+				timeout:       timeout,
+				stallAfter:    stallAfter,
+				startCursor:   startCursor,
+				fromHighWater: fromHighWater,
 			})
 		},
 	}
@@ -316,6 +327,10 @@ type monitorStreamOpts struct {
 	timeout     time.Duration
 	stallAfter  time.Duration
 	startCursor int64
+	// fromHighWater starts the feed at the current MAX(event_log.id) instead of
+	// startCursor: the no-flag `monitor watch` default (T-07620). A --until
+	// stream always starts there regardless.
+	fromHighWater bool
 }
 
 // monitorStreamUntil drives the event-streaming poll loop for `monitor watch`. It
@@ -362,16 +377,10 @@ func monitorStreamUntil(ctx context.Context, tr Transport, out io.Writer, errOut
 		}
 	}
 
-	// For the --until flow legacy starts the cursor at the current high-water so it
-	// only emits NEW events; for the unconditional follow it starts at startCursor.
-	cursor := opts.startCursor
-	if opts.condition != "" {
-		hw, err := monitorHighWater(ctx, tr)
-		if err != nil {
-			_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-			return monitorStreamErrorExit(errOut, err)
-		}
-		cursor = hw
+	cursor, err := monitorInitialCursor(ctx, tr, opts)
+	if err != nil {
+		_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
+		return monitorStreamErrorExit(errOut, err)
 	}
 
 	started := time.Now()
@@ -500,6 +509,18 @@ func monitorPollEvents(ctx context.Context, tr Transport, opts monitorStreamOpts
 		return nil, cursor, jerr
 	}
 	return res.Items, res.HighWater, nil
+}
+
+// monitorInitialCursor resolves the event id the stream starts AFTER. A --until
+// flow starts at the current high-water so it only emits NEW events; so does an
+// unconditional follow that named neither --since nor --last (T-07620: the
+// no-flag default is a tail, not a replay of the whole event log). An explicit
+// --since/--last starts at the cursor the caller asked for.
+func monitorInitialCursor(ctx context.Context, tr Transport, opts monitorStreamOpts) (int64, error) {
+	if opts.condition != "" || opts.fromHighWater {
+		return monitorHighWater(ctx, tr)
+	}
+	return opts.startCursor, nil
 }
 
 // monitorHighWater returns the current MAX(event_log.id) by reading a zero-cursor

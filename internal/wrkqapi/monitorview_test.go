@@ -227,9 +227,9 @@ func TestMonitorEventsView_CommentBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Adding a comment emits no event_log row; DELETING one emits a comment.deleted
-	// row whose payload.task_id is the task UUID. That is the comment.* event the
-	// monitor filter matches to the watched task (the backfill path the server owns).
+	// comment.created and comment.deleted both carry payload.task_id = the task
+	// UUID. That is what the monitor filter matches to the watched task (the
+	// backfill path the server owns when a payload lost its task_id).
 	cm, err := api.CommentAdd(context.Background(), CommentAddParams{Task: task.ID, Body: "a comment"})
 	if err != nil {
 		t.Fatalf("comment add: %v", err)
@@ -396,4 +396,120 @@ func TestHistoryTailView_WatchEventShape(t *testing.T) {
 	if !sawTask {
 		t.Fatal("expected the created task's event in the raw tail")
 	}
+}
+
+// TestMonitorEventsView_ForeignCommentExcluded is the T-07620 regression: the
+// comment→task hydration must IDENTIFY the event's task, never widen the
+// caller's selector set. Folding the row's own task into the filter made every
+// comment.* row in the log match every task selector, so a no-flag
+// `monitor watch T-xxxxx` replayed thousands of foreign comments.
+func TestMonitorEventsView_ForeignCommentExcluded(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	proj := seedMonitorProject(t, s)
+
+	watched, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
+		Slug: "watched", Title: "Watched", ProjectUUID: proj, State: "open", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("create watched: %v", err)
+	}
+	foreign, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
+		Slug: "foreign", Title: "Foreign", ProjectUUID: proj, State: "open", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("create foreign: %v", err)
+	}
+
+	// A comment.deleted row carries payload.task_id AND hydrates from the
+	// comments table, so it exercises both comment-matching paths.
+	for _, task := range []string{watched.ID, foreign.ID} {
+		cm, cerr := api.CommentAdd(context.Background(), CommentAddParams{Task: task, Body: "note on " + task})
+		if cerr != nil {
+			t.Fatalf("comment add on %s: %v", task, cerr)
+		}
+		if _, derr := api.CommentDelete(context.Background(), CommentDeleteParams{ID: cm.ID}); derr != nil {
+			t.Fatalf("comment delete on %s: %v", task, derr)
+		}
+	}
+
+	view, err := api.MonitorEventsView(context.Background(), MonitorEventsViewParams{
+		Tasks:  []string{watched.ID},
+		Cursor: 0,
+	})
+	if err != nil {
+		t.Fatalf("eventsView: %v", err)
+	}
+
+	sawWatchedComment := false
+	for _, e := range view.Items {
+		if e.ResourceType != "comment" {
+			continue
+		}
+		taskID := monitorPayloadTaskID(e.Payload)
+		if taskID == watched.UUID {
+			sawWatchedComment = true
+			continue
+		}
+		t.Errorf("foreign comment leaked into the watched-task feed: event %d payload %v", e.ID, deref(e.Payload))
+	}
+	if !sawWatchedComment {
+		t.Fatal("the watched task's own comment event must still be emitted")
+	}
+}
+
+// TestMonitorEventsView_RoomSelectorDoesNotLeakTasks proves a caller who named a
+// room has narrowed the feed: task.*/comment.* must not fall through to the
+// unfiltered "emit everything" branch just because no TASK selector was given
+// (T-07620). Only a wholly unselected feed emits every event.
+func TestMonitorEventsView_RoomSelectorDoesNotLeakTasks(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	proj := seedMonitorProject(t, s)
+
+	other, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
+		Slug: "other", Title: "Other", ProjectUUID: proj, State: "open", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	room, err := api.RoomOpen(context.Background(), RoomOpenParams{
+		Subject: "room-only selector", PrincipalRef: "agent:clod",
+	})
+	if err != nil {
+		t.Fatalf("room open: %v", err)
+	}
+	if room.ID == nil {
+		t.Fatal("an ad-hoc room must carry an R- id to be selectable")
+	}
+	// Churn on the OTHER task: its task.updated + comment.* rows must not appear
+	// in a room-scoped feed.
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{Task: other.ID, Patch: TaskPatch{State: strp("completed")}}); err != nil {
+		t.Fatalf("update other: %v", err)
+	}
+	cm, err := api.CommentAdd(context.Background(), CommentAddParams{Task: other.ID, Body: "other note"})
+	if err != nil {
+		t.Fatalf("comment add: %v", err)
+	}
+	if _, err := api.CommentDelete(context.Background(), CommentDeleteParams{ID: cm.ID}); err != nil {
+		t.Fatalf("comment delete: %v", err)
+	}
+
+	view, err := api.MonitorEventsView(context.Background(), MonitorEventsViewParams{
+		Tasks:  []string{*room.ID},
+		Cursor: 0,
+	})
+	if err != nil {
+		t.Fatalf("eventsView: %v", err)
+	}
+	for _, e := range view.Items {
+		if e.ResourceType == "task" || e.ResourceType == "comment" {
+			t.Errorf("room selector %s leaked a %s event (%s, id %d)", *room.ID, e.ResourceType, e.EventType, e.ID)
+		}
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

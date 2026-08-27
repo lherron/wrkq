@@ -80,14 +80,13 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 		}
 		view.HighWater = event.ID
 
-		normalized := filter
+		// The comment→task hydration IDENTIFIES the event's task; it must never
+		// be folded into the caller's selector set. Widening the filter with the
+		// row's own task made every comment in the log match every task selector
+		// (T-07620), so the refs ride alongside the filter instead.
 		if event.ResourceType == "comment" {
-			if commentTaskUUID != "" && !containsMonitorString(normalized.taskUUIDs, commentTaskUUID) {
-				normalized.taskUUIDs = append(append([]string{}, normalized.taskUUIDs...), commentTaskUUID)
-			}
-			if commentTaskID != "" && !containsMonitorString(normalized.taskFriendlyIDs, commentTaskID) {
-				normalized.taskFriendlyIDs = append(append([]string{}, normalized.taskFriendlyIDs...), commentTaskID)
-			}
+			collab.commentTaskUUID = commentTaskUUID
+			collab.commentTaskID = commentTaskID
 			if monitorPayloadTaskID(event.Payload) == "" && commentTaskUUID != "" {
 				payloadBytes, _ := json.Marshal(map[string]string{"task_id": commentTaskUUID})
 				payloadString := string(payloadBytes)
@@ -95,7 +94,7 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 			}
 		}
 
-		if !isMonitorEventIncluded(event, normalized, collab) {
+		if !isMonitorEventIncluded(event, filter, collab) {
 			continue
 		}
 
@@ -218,6 +217,11 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 // matched by resource_uuid ∈ taskUUIDs; comment.* matched by payload.task_id ∈
 // taskUUIDs ∪ taskFriendlyIDs; stateOnly applies isMonitorStateChangeEvent; an
 // explicit eventTypes filter restricts to those event_type values.
+//
+// "No selectors" means NO selector of any kind (T-07620): a caller who named a
+// room or an envelope has narrowed the feed, so task.*/comment.* must not fall
+// through to the unfiltered "emit everything" branch on the strength of the task
+// lists being empty.
 func isMonitorEventIncluded(event monitorRow, filter monitorEventFilter, collab monitorCollabRefs) bool {
 	if filter.stateOnly && !isMonitorStateChangeEvent(event) {
 		return false
@@ -231,15 +235,13 @@ func isMonitorEventIncluded(event monitorRow, filter monitorEventFilter, collab 
 	// task's state changes and its conversation. --state-only keeps excluding
 	// them: isMonitorStateChangeEvent is task-only by construction.
 	if event.ResourceType == "room" {
-		if len(filter.roomUUIDs) == 0 && len(filter.taskUUIDs) == 0 &&
-			len(filter.taskFriendlyIDs) == 0 && len(filter.envelopeUUIDs) == 0 {
+		if !filter.hasSelectors() {
 			return true
 		}
 		return event.ResourceUUID != nil && containsMonitorString(filter.roomUUIDs, *event.ResourceUUID)
 	}
 	if event.ResourceType == "envelope" {
-		if len(filter.roomUUIDs) == 0 && len(filter.taskUUIDs) == 0 &&
-			len(filter.taskFriendlyIDs) == 0 && len(filter.envelopeUUIDs) == 0 {
+		if !filter.hasSelectors() {
 			return true
 		}
 		if event.ResourceUUID != nil && containsMonitorString(filter.envelopeUUIDs, *event.ResourceUUID) {
@@ -255,18 +257,26 @@ func isMonitorEventIncluded(event monitorRow, filter monitorEventFilter, collab 
 	}
 
 	if event.ResourceType == "task" && strings.HasPrefix(event.EventType, "task.") {
-		if len(filter.taskUUIDs) == 0 && len(filter.taskFriendlyIDs) == 0 {
+		if !filter.hasSelectors() {
 			return true
 		}
 		return event.ResourceUUID != nil && containsMonitorString(filter.taskUUIDs, *event.ResourceUUID)
 	}
 
 	if event.ResourceType == "comment" && strings.HasPrefix(event.EventType, "comment.") {
-		if len(filter.taskUUIDs) == 0 && len(filter.taskFriendlyIDs) == 0 {
+		if !filter.hasSelectors() {
 			return true
 		}
-		taskID := monitorPayloadTaskID(event.Payload)
-		return containsMonitorString(filter.taskUUIDs, taskID) || containsMonitorString(filter.taskFriendlyIDs, taskID)
+		// The comment's task is the payload's task_id; a payload that lost it
+		// falls back to the hydrated comments-table refs. Both are matched
+		// AGAINST the selected tasks — a comment on an unselected task (or on a
+		// container, which carries no task_id at all) never matches.
+		if taskID := monitorPayloadTaskID(event.Payload); taskID != "" &&
+			(containsMonitorString(filter.taskUUIDs, taskID) || containsMonitorString(filter.taskFriendlyIDs, taskID)) {
+			return true
+		}
+		return containsMonitorString(filter.taskUUIDs, collab.commentTaskUUID) ||
+			containsMonitorString(filter.taskFriendlyIDs, collab.commentTaskID)
 	}
 
 	return false

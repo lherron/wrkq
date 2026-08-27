@@ -118,12 +118,15 @@ type monitorRow struct {
 	Payload      *string
 }
 
-// monitorCollabRefs carries the room/task an envelope event belongs to so a
-// room or task selector matches the conversation without the client parsing
-// payloads.
+// monitorCollabRefs carries the room/task an envelope event belongs to, and the
+// task a comment event belongs to, so a room or task selector matches the
+// conversation without the client parsing payloads. These are the event's OWN
+// refs: they are matched against the filter, never merged into it.
 type monitorCollabRefs struct {
-	roomUUID string
-	taskUUID string
+	roomUUID        string
+	taskUUID        string
+	commentTaskUUID string
+	commentTaskID   string
 }
 
 type monitorEventFilter struct {
@@ -133,6 +136,14 @@ type monitorEventFilter struct {
 	envelopeUUIDs   []string
 	stateOnly       bool
 	eventTypes      []string
+}
+
+// hasSelectors reports whether the caller named ANY selector. Only a wholly
+// unselected feed (`wrkq monitor watch` with no arguments) emits every event;
+// naming a room or an envelope narrows task.*/comment.* too.
+func (f monitorEventFilter) hasSelectors() bool {
+	return len(f.taskUUIDs) > 0 || len(f.taskFriendlyIDs) > 0 ||
+		len(f.roomUUIDs) > 0 || len(f.envelopeUUIDs) > 0
 }
 
 // monitorSelectorSet is the resolved selector inventory for one monitor call.
