@@ -1074,7 +1074,10 @@ func (a *API) EnvelopeShow(ctx context.Context, p EnvelopeShowParams) (*WrkqEnve
 }
 
 // EnvelopeInboxView lists the reply_required obligations standing against one
-// scope, grouped by room. fyi is never listed: it carries no obligation.
+// scope, grouped by room. fyi is never listed: it carries no obligation. An
+// obligation in a CLOSED room is still listed here — closure does not retire it
+// — even though `EnvelopePendingView` drops it; its group carries the closed
+// room state so a renderer can name the way out.
 func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) (*WrkqEnvelopeInboxView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1334,6 +1337,11 @@ func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*Wr
 // EnvelopePendingView is the HRC-facing read: the kicker's wake set AND the
 // stop-hook predicate in one call. Its sweep re-pends due deferrals, which is
 // the periodic-sweep half of §5's wake routing.
+//
+// Envelopes whose room reads closed or archived are excluded from BOTH items
+// and blocking: with no reply path there is nothing a turn could do about them.
+// They remain standing obligations in the ledger and in `EnvelopeInboxView`;
+// reopening the room brings them back to this read unchanged.
 func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewParams) (*WrkqEnvelopePendingView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1386,6 +1394,16 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 			state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
 			if serr != nil {
 				return serr
+			}
+			// An obligation in a closed or archived room gates NOTHING and wakes
+			// NOBODY. §3.1 refuses a say into such a room, so the addressee has no
+			// reply path and reply-is-ack is impossible; holding the seat on it
+			// would be a stall with no exit. The obligation is not retired — it
+			// stays pending/presented in the ledger and `wrkc inbox` still lists
+			// it under its closed room — it simply leaves this read. `wrkc reopen`
+			// restores the reply path and the envelope reappears here.
+			if state.effectiveState != domain.RoomStateOpen {
+				continue
 			}
 			dto, eerr := a.envelopeDTO(ctx, &rows[index], state)
 			if eerr != nil {

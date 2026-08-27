@@ -346,6 +346,15 @@ func presentationSuffix(presentation envelopePresentationWire) string {
 	return " (" + strings.Join(parts, " ") + ")"
 }
 
+func wrkcInboxEnvelopeLines(items []envelopeWire) []string {
+	lines := make([]string, 0, len(items))
+	for _, envelope := range items {
+		lines = append(lines, "  "+envelope.ID+"  "+envelopePartyLabel(envelope.From)+
+			"  ["+envelope.State+"]  "+wrkcFirstLine(envelope.Body))
+	}
+	return lines
+}
+
 func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 	scope := view.PrincipalRef
 	if view.ScopeRef != nil {
@@ -353,16 +362,29 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 	}
 	lines := []string{"inbox for " + scope}
 	total := 0
+	// A closed room's obligations are REAL and still listed, but they gate
+	// nothing: `wrkq.envelope.pendingView` drops them, because §3.1 refuses a say
+	// into a closed room and so leaves the addressee no reply path. They render
+	// in their own section with the way out, rather than sitting silently among
+	// the obligations that do hold the seat.
+	closed := []envelopeInboxGroupWire{}
 	for _, group := range view.Groups {
 		total += len(group.Items)
-		lines = append(lines, "", group.Room.Key+" ("+group.Room.Kind+")")
-		for _, envelope := range group.Items {
-			lines = append(lines, "  "+envelope.ID+"  "+envelopePartyLabel(envelope.From)+
-				"  ["+envelope.State+"]  "+wrkcFirstLine(envelope.Body))
+		if group.Room.State != "open" {
+			closed = append(closed, group)
+			continue
 		}
+		lines = append(lines, "", group.Room.Key+" ("+group.Room.Kind+")")
+		lines = append(lines, wrkcInboxEnvelopeLines(group.Items)...)
 	}
 	if total == 0 {
 		lines = append(lines, "", "no standing obligations")
+	}
+	for _, group := range closed {
+		lines = append(lines, "", "closed room: "+group.Room.Key+" ("+group.Room.Kind+
+			", "+group.Room.State+") — not gating your turn",
+			"  `wrkc reopen "+group.Room.Key+"` then reply, or `wrkc ack` (operator)")
+		lines = append(lines, wrkcInboxEnvelopeLines(group.Items)...)
 	}
 	if len(view.Deferred) > 0 {
 		lines = append(lines, "", "deferred")

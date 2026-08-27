@@ -1049,6 +1049,16 @@ Contract points a consumer must not have to rediscover:
   Presenting a fyi auto-acks it, which retires it from the read with no `ack`
   call. Consumers gate on this themselves: present a fyi only into a LIVE
   generation, otherwise leave it for the addressee's next attend.
+- **A closed room's mail leaves `pendingView` entirely.** An envelope whose room
+  `state` is `closed` or `archived` is absent from BOTH `items` and `blocking`,
+  so it neither wakes a runtime nor refuses a turn end. The reason is §3.1: a
+  closed room refuses a say, so the addressee has no reply path and reply-is-ack
+  is impossible — gating on it would hold the seat with no exit. `repended` is
+  unchanged. The obligation is NOT retired: it stays `pending`/`presented` in
+  the ledger and `inboxView` still lists it, in a group whose `room.state` is
+  the closed one — key off that to render it apart from the obligations that do
+  gate. `room.reopen` restores the reply path and the envelope reappears in
+  `pendingView` unchanged; there is no auto-ack and no auto-dead on closure.
 
 `say` returns `WrkqRoomSayResult`; `open`/`show`/`close`/`reopen` return one
 `WrkqRoom`; `list` returns `{items: WrkqRoom[]}`; `logView` returns

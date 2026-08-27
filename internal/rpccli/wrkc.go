@@ -678,7 +678,12 @@ func newWrkcInboxCmd() *cobra.Command {
 fyi is never listed: it carries no obligation and is acked at its own
 presentation. Deferred envelopes appear under their own heading with the time
 they come back. EN- ids are shown so you can tell an at-least-once
-re-presentation from something new.`,
+re-presentation from something new.
+
+An obligation whose room has since closed is still yours, but it gates nothing:
+a closed room refuses a say, so there is no reply to make and the stop hook lets
+the turn end. Those appear under a "closed room" heading — reopen the room to
+reply, or have an operator ack it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tr, _, closeFn, err := openMirror(cmd)

@@ -389,3 +389,54 @@ func TestWrkcSayRefusesWaitWithoutTo(t *testing.T) {
 		t.Fatalf("a refused --wait still wrote an envelope:\n%s", logOut)
 	}
 }
+
+// TestWrkcInboxSeparatesClosedRoomObligations proves the T-07633 rendering half:
+// an obligation whose room has closed is STILL the addressee's, so the inbox
+// keeps listing it — but under its own heading with the way out, because the
+// stop hook no longer holds the seat on it and a plain listing would read as a
+// turn-blocking obligation it is not.
+func TestWrkcInboxSeparatesClosedRoomObligations(t *testing.T) {
+	f := newWrkcFixture(t)
+	codySeat := "cody@wrkc-proj:" + f.taskID
+
+	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "answer me",
+		"--to", "cody", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
+	if err != nil {
+		t.Fatalf("wrkc say: %v\n%s", err, sayOut)
+	}
+	var said roomSayResultWire
+	if err := json.Unmarshal([]byte(sayOut), &said); err != nil {
+		t.Fatalf("decode say: %v\n%s", err, sayOut)
+	}
+	envelopeID := said.Envelopes[0].ID
+
+	// While the room is open it renders under the plain room heading.
+	openOut, err := runWrkc(t, f.dbPath, "agent:cody", "inbox", "--scope-ref", codySeat, "--output", "human")
+	if err != nil {
+		t.Fatalf("wrkc inbox: %v\n%s", err, openOut)
+	}
+	if strings.Contains(openOut, "closed room") || !strings.Contains(openOut, f.taskID+" (task)") {
+		t.Fatalf("open room inbox = %q", openOut)
+	}
+
+	if closeOut, cerr := runWrkc(t, f.dbPath, "agent:clod", "close", f.taskID, "--json"); cerr != nil {
+		t.Fatalf("wrkc close: %v\n%s", cerr, closeOut)
+	}
+
+	closedOut, err := runWrkc(t, f.dbPath, "agent:cody", "inbox", "--scope-ref", codySeat, "--output", "human")
+	if err != nil {
+		t.Fatalf("wrkc inbox after close: %v\n%s", err, closedOut)
+	}
+	if !strings.Contains(closedOut, "closed room: "+f.taskID) {
+		t.Fatalf("closed obligation lost its heading: %q", closedOut)
+	}
+	if !strings.Contains(closedOut, "`wrkc reopen "+f.taskID+"` then reply, or `wrkc ack` (operator)") {
+		t.Fatalf("closed obligation carries no way out: %q", closedOut)
+	}
+	if !strings.Contains(closedOut, envelopeID) {
+		t.Fatalf("closed obligation vanished from the inbox: %q", closedOut)
+	}
+	if strings.Contains(closedOut, "no standing obligations") {
+		t.Fatalf("a standing obligation was reported as none: %q", closedOut)
+	}
+}

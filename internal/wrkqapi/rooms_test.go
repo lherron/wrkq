@@ -1788,3 +1788,163 @@ func TestClosedRoomRefusalNamesTheStateInItsMessage(t *testing.T) {
 		t.Fatalf("refusal message does not name the room and its state: %q", de.Error())
 	}
 }
+
+// TestClosedRoomObligationsLeavePendingViewButStayInTheInbox proves T-07633: an
+// obligation in a closed room gates no turn and wakes no runtime, because §3.1
+// refuses a say into that room and so leaves the addressee NO reply path — the
+// stop hook would otherwise hold the seat on mail it cannot answer. The
+// obligation is not retired: it stays standing in the ledger and in the inbox,
+// under its closed room, and a reopen restores it to the read unchanged.
+func TestClosedRoomObligationsLeavePendingViewButStayInTheInbox(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	taskSeat := "cody@proj:" + f.loneTaskID
+	pairSeat := "cody@proj:primary"
+
+	inTask := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "please reply", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	// A sibling obligation for the SAME agent in a room that stays open: closure
+	// must be scoped to the closed room and nothing wider.
+	inPair := f.say(t, RoomSayParams{
+		Ref: pairSeat, Body: "still live", PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
+	})
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: inTask.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present task obligation: %v", err)
+	}
+
+	pending := func(t *testing.T) *WrkqEnvelopePendingView {
+		t.Helper()
+		view, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+			Scopes: []string{taskSeat, pairSeat}, PrincipalRef: "agent:hrc",
+		})
+		if err != nil {
+			t.Fatalf("pendingView: %v", err)
+		}
+		return view
+	}
+	has := func(view *WrkqEnvelopePendingView, id string) bool {
+		for _, item := range view.Items {
+			if item.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	blocks := func(view *WrkqEnvelopePendingView, id string) bool {
+		for _, blocked := range view.Blocking {
+			if blocked == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	open := pending(t)
+	if !has(open, inTask.Envelopes[0].ID) || !blocks(open, inTask.Envelopes[0].ID) {
+		t.Fatalf("an open room's presented obligation must gate: %+v", open)
+	}
+
+	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	closed := pending(t)
+	if has(closed, inTask.Envelopes[0].ID) {
+		t.Fatalf("a closed room's obligation stayed in the kicker wake set: %+v", closed.Items)
+	}
+	if blocks(closed, inTask.Envelopes[0].ID) {
+		t.Fatalf("a closed room's obligation still refuses a turn end: %v", closed.Blocking)
+	}
+	if !has(closed, inPair.Envelopes[0].ID) {
+		t.Fatalf("closing one room dropped an obligation in another: %+v", closed.Items)
+	}
+
+	// Still standing, still visible, and the group names the closure so a
+	// renderer can offer the way out.
+	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
+		ScopeRef: taskSeat, PrincipalRef: "agent:cody",
+	})
+	if err != nil {
+		t.Fatalf("inboxView: %v", err)
+	}
+	if len(inbox.Groups) != 1 || len(inbox.Groups[0].Items) != 1 ||
+		inbox.Groups[0].Items[0].ID != inTask.Envelopes[0].ID {
+		t.Fatalf("a closed room's obligation vanished from the inbox: %+v", inbox.Groups)
+	}
+	if inbox.Groups[0].Room.State != string(domain.RoomStateClosed) {
+		t.Fatalf("inbox group room state = %q, want closed", inbox.Groups[0].Room.State)
+	}
+	if inbox.Groups[0].Items[0].State != string(domain.EnvelopeStatePresented) {
+		t.Fatalf("closure retired the obligation: %q", inbox.Groups[0].Items[0].State)
+	}
+
+	// Reopen is the way back: nothing was mutated, so the envelope simply
+	// reappears in the read it left.
+	if _, err := f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	reopened := pending(t)
+	if !has(reopened, inTask.Envelopes[0].ID) || !blocks(reopened, inTask.Envelopes[0].ID) {
+		t.Fatalf("reopen did not restore the obligation to the read: %+v", reopened)
+	}
+}
+
+// TestDerivedClosureAlsoUngatesObligations pins the case T-07633 was actually
+// found in: nobody ran `wrkc close`. A supervisor completed the task, the room
+// read closed by derivation, and the worker's seat was held on mail it could no
+// longer answer. The predicate is the EFFECTIVE room state, so the derived
+// closure ungates exactly like the explicit one.
+func TestDerivedClosureAlsoUngatesObligations(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	seat := "cody@proj:" + f.loneTaskID
+
+	// A fan-out: both siblings live in the same room, so both leave together.
+	group := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "review this", To: []string{"cody", "mable"}, PrincipalRef: "agent:clod",
+	})
+	if len(group.Envelopes) != 2 {
+		t.Fatalf("fan-out = %d envelopes, want 2", len(group.Envelopes))
+	}
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{
+		Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")},
+	}); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	view, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+		Scopes: []string{seat, "mable@proj:" + f.loneTaskID}, PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("pendingView: %v", err)
+	}
+	if len(view.Items) != 0 || len(view.Blocking) != 0 {
+		t.Fatalf("a derived closure still gated: items=%+v blocking=%v", view.Items, view.Blocking)
+	}
+
+	// A fyi in the same room is excluded too: the includeFyi read is a wake set
+	// for a runtime that would have nothing to do there either.
+	fyiView, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+		Scopes: []string{seat}, IncludeFyi: true, PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("pendingView includeFyi: %v", err)
+	}
+	if len(fyiView.Items) != 0 {
+		t.Fatalf("includeFyi surfaced a closed room's mail: %+v", fyiView.Items)
+	}
+
+	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
+		ScopeRef: seat, PrincipalRef: "agent:cody",
+	})
+	if err != nil {
+		t.Fatalf("inboxView: %v", err)
+	}
+	if len(inbox.Groups) != 1 || inbox.Groups[0].Room.State != string(domain.RoomStateClosed) ||
+		inbox.Groups[0].Room.StoredState != string(domain.RoomStateOpen) {
+		t.Fatalf("inbox did not report the DERIVED closure: %+v", inbox.Groups)
+	}
+}

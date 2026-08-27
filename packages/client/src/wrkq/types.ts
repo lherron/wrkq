@@ -371,7 +371,13 @@ export interface WrkqEnvelopeInboxGroup {
   items: WrkqEnvelope[];
 }
 
-/** fyi is never listed here: it carries no obligation. */
+/**
+ * fyi is never listed here: it carries no obligation.
+ *
+ * An obligation in a CLOSED room is still listed — closure does not retire it —
+ * even though `pendingView` drops it. Key off `group.room.state !== "open"` to
+ * render it apart from the obligations that actually gate a turn.
+ */
 export interface WrkqEnvelopeInboxView {
   scopeRef?: string;
   principalRef: string;
@@ -439,7 +445,15 @@ export interface WrkqEnvelopePendingViewParams {
   scopeRef?: string;
 }
 
-/** The kicker wake set AND the stop-hook predicate in one read model. */
+/**
+ * The kicker wake set AND the stop-hook predicate in one read model.
+ *
+ * Envelopes whose room reads `closed` or `archived` are absent from BOTH
+ * `items` and `blocking`: a closed room refuses a say, so the addressee has no
+ * reply path and there is nothing a summoned turn could do. They are NOT
+ * retired — `inboxView` still lists them under their closed room — and
+ * reopening the room returns them to this read unchanged.
+ */
 export interface WrkqEnvelopePendingView {
   /**
    * Standing reply_required envelopes, plus pending `fyi` envelopes when the
