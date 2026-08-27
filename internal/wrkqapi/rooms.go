@@ -134,18 +134,27 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	}
 
 	// Reply is the ack: this say discharges the sender's own standing
-	// obligations in this room from each counterparty it addressed. Sibling
-	// envelopes of a fan-out addressed to other scopes are untouched, and a
-	// deferred envelope is excluded — defer first to hold one back.
+	// obligations in this room from each counterparty SEAT it addressed. The
+	// match is scope-to-scope; the principal a say was attributed to never
+	// enters it. Sibling envelopes of a fan-out addressed to other scopes are
+	// untouched, and a deferred envelope is excluded — defer first to hold one
+	// back.
 	acked := []string{}
 	seenCounterparty := map[string]bool{}
 	for _, addressee := range addressees {
-		if seenCounterparty[addressee.PrincipalRef] {
+		// A counterparty is an ADDRESS: its scope, or its principal only when it
+		// has no scope. Two seats of the same agent are two counterparties.
+		counterparty := addressee.ScopeRef
+		if counterparty == "" {
+			counterparty = addressee.PrincipalRef
+		}
+		if seenCounterparty[counterparty] {
 			continue
 		}
-		seenCounterparty[addressee.PrincipalRef] = true
+		seenCounterparty[counterparty] = true
 		rows, aerr := a.store.Rooms.AckSenderObligationsWithAttribution(
-			attr, room.row.UUID, senderScope, attr.PrincipalRef, addressee.PrincipalRef)
+			attr, room.row.UUID, senderScope, attr.PrincipalRef,
+			addressee.ScopeRef, addressee.PrincipalRef)
 		if aerr != nil {
 			return nil, mapRoomStoreError(aerr, "")
 		}
@@ -618,6 +627,14 @@ func (a *API) resolveAddressee(ctx context.Context, room *roomState, members []d
 		addressee := &store.EnvelopeAddressee{PrincipalRef: match.MemberPrincipalRef, MaterializationIntent: intent}
 		if match.Scoped {
 			addressee.ScopeRef = match.MemberRef
+			// A member IS a scope. The row's principal only records who last
+			// spoke from the seat, so the address — and the attribution written
+			// onto the envelope — derives from the seat itself (T-07628).
+			if parsed, perr := scope.ParseScopeHandle(match.MemberRef); perr == nil {
+				if principal, nerr := attribution.NormalizeCompat(parsed.AgentID); nerr == nil {
+					addressee.PrincipalRef = principal
+				}
+			}
 		}
 		return addressee, nil
 	}

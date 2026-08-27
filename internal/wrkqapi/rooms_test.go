@@ -653,6 +653,130 @@ func TestReplyAcksOwnObligationsOnlyAndDeferExcludesOne(t *testing.T) {
 	}
 }
 
+// TestReplyAcksBySeatEvenWhenTheMemberPrincipalDisagrees is the T-07628 rule: a
+// member IS a scope and its principal is attribution only, so ack matching keys
+// on SCOPES on both sides. A seat whose first say carried an `--as` disagreeing
+// with it still discharges every later obligation it sent, the member row's
+// principal follows the latest say, and a scope-less human keeps matching by
+// principal because it has no scope to match on.
+func TestReplyAcksBySeatEvenWhenTheMemberPrincipalDisagrees(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	clodSeat := "clod@proj:" + f.loneTaskID
+	codySeat := "cody@proj:" + f.loneTaskID
+	mableSeat := "mable@proj:" + f.loneTaskID
+
+	// clod's seat speaks first under the WRONG hat: the member row is minted
+	// (clodSeat -> agent:mable). This is the shape that dead-lettered EN-00027.
+	wrongHat := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "asked under the wrong --as", To: []string{"cody"},
+		PrincipalRef: "agent:mable", ScopeRef: clodSeat,
+	})
+	if principal := roomMemberPrincipal(t, f, clodSeat); principal != "agent:mable" {
+		t.Fatalf("member principal after the first say = %q, want agent:mable", principal)
+	}
+
+	// The same seat then speaks correctly. Attendance follows the latest say...
+	rightHat := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "asked under the right --as", To: []string{"cody"},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	if principal := roomMemberPrincipal(t, f, clodSeat); principal != "agent:clod" {
+		t.Fatalf("member principal after a later say = %q, want agent:clod", principal)
+	}
+
+	// ...and a fan-out from that seat gives mable a sibling obligation that
+	// cody's reply must not touch.
+	fanout := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "both of you", To: []string{"cody", "mable"},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	var codySibling, mableSibling string
+	for _, envelope := range fanout.Envelopes {
+		if envelope.To == nil || envelope.To.ScopeRef == nil {
+			t.Fatalf("fan-out envelope %s has no addressee scope", envelope.ID)
+		}
+		switch *envelope.To.ScopeRef {
+		case codySeat:
+			codySibling = envelope.ID
+		case mableSeat:
+			mableSibling = envelope.ID
+		}
+	}
+	if codySibling == "" || mableSibling == "" {
+		t.Fatalf("fan-out did not address both seats: %+v", fanout.Envelopes)
+	}
+
+	// A scope-less human asks cody too: it has no scope, so it keeps matching
+	// on its principal exactly as before.
+	human := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "Lance asks", To: []string{"cody"}, PrincipalRef: "agent:lance",
+	})
+
+	for _, envelopeID := range []string{
+		wrongHat.Envelopes[0].ID, rightHat.Envelopes[0].ID,
+		codySibling, mableSibling, human.Envelopes[0].ID,
+	} {
+		if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+			Envelope: envelopeID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+		}); err != nil {
+			t.Fatalf("present %s: %v", envelopeID, err)
+		}
+	}
+
+	// One correct reply to the seat discharges everything that seat sent,
+	// whatever principal each say was attributed to.
+	reply := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "answers", To: []string{"clod"},
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	acked := map[string]bool{}
+	for _, id := range reply.Acked {
+		acked[id] = true
+	}
+	if !acked[wrongHat.Envelopes[0].ID] {
+		t.Fatalf("reply left the obligation sent under a disagreeing --as standing: %v", reply.Acked)
+	}
+	if !acked[rightHat.Envelopes[0].ID] || !acked[codySibling] {
+		t.Fatalf("reply did not ack the seat's other obligations: %v", reply.Acked)
+	}
+	if acked[mableSibling] {
+		t.Fatal("reply acked a fan-out sibling addressed to another seat")
+	}
+	if acked[human.Envelopes[0].ID] {
+		t.Fatal("a reply to clod's seat acked the human's obligation")
+	}
+
+	// The human path is unchanged: a reply addressed to the scope-less
+	// principal still discharges what that principal sent.
+	humanReply := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "answering Lance", To: []string{"lance"},
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	if len(humanReply.Acked) != 1 || humanReply.Acked[0] != human.Envelopes[0].ID {
+		t.Fatalf("reply to a scope-less principal acked %v, want %s",
+			humanReply.Acked, human.Envelopes[0].ID)
+	}
+
+	// The seat is addressed as itself: the envelope carries the seat's own
+	// agent as attribution, never the principal frozen on the member row.
+	if to := reply.Envelopes[0].To; to == nil || to.ScopeRef == nil ||
+		*to.ScopeRef != clodSeat || to.PrincipalRef != "agent:clod" {
+		t.Fatalf("addressing the seat resolved to %+v, want %s/agent:clod", to, clodSeat)
+	}
+}
+
+func roomMemberPrincipal(t *testing.T, f *roomFixture, memberRef string) string {
+	t.Helper()
+	var principal string
+	if err := f.s.DB().QueryRow(
+		"SELECT member_principal_ref FROM room_members WHERE member_ref = ?", memberRef,
+	).Scan(&principal); err != nil {
+		t.Fatalf("read member %s: %v", memberRef, err)
+	}
+	return principal
+}
+
 // TestSayWithoutToIsALogEntry proves §5's only-`--to`-fires rule: a say with no
 // addressee is disposed at write and appears in nobody's inbox.
 func TestSayWithoutToIsALogEntry(t *testing.T) {

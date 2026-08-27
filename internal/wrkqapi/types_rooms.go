@@ -121,7 +121,8 @@ type WrkqRoomSayResult struct {
 	GroupID   string         `json:"groupId"`
 	Envelopes []WrkqEnvelope `json:"envelopes"`
 	// Acked lists the envelope ids this say discharged under reply-is-ack. Only
-	// the replier's OWN obligations from the same counterparty appear.
+	// the replier's OWN obligations from the same counterparty seat appear;
+	// matching is by scope, never by the principal a say was attributed to.
 	Acked []string `json:"acked"`
 	// RecordedCommentID is set when --record also wrote the body as a wrkq
 	// comment on the room's task. Rooms are talk; comments are record.

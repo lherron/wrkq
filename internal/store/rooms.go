@@ -920,10 +920,15 @@ func (rs *RoomStore) DisposeEnvelopeWithAttribution(attr attribution.Attribution
 
 // AckSenderObligationsWithAttribution is the reply-is-ack rule: saying into a
 // room with --to X acks every PRESENTED reply_required envelope in that room
-// addressed to the replier's own scope from X. Sibling envelopes in a fan-out
-// group addressed to OTHER scopes are untouched, and a deferred envelope is
-// deliberately excluded so `defer` before replying really does exclude it.
-func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attribution, roomUUID, replierScopeRef, replierPrincipalRef, counterpartyPrincipalRef string) ([]domain.Envelope, error) {
+// addressed to the replier's own scope and sent from X's scope. Both sides
+// match on the SCOPE, never on a principal: a member IS a scope and its
+// principal is attribution only, so a say that carried an --as disagreeing with
+// the seat can never silently break the ack (T-07628). Only a scope-less party
+// — a human such as agent:lance, who has no scope — matches by principal.
+// Sibling envelopes in a fan-out group addressed to OTHER scopes are untouched,
+// and a deferred envelope is deliberately excluded so `defer` before replying
+// really does exclude it.
+func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attribution, roomUUID, replierScopeRef, replierPrincipalRef, counterpartyScopeRef, counterpartyPrincipalRef string) ([]domain.Envelope, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
@@ -931,9 +936,15 @@ func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attrib
 		"room_uuid = ?",
 		"obligation = 'reply_required'",
 		"state = 'presented'",
-		"from_principal_ref = ?",
 	}
-	args := []interface{}{roomUUID, counterpartyPrincipalRef}
+	args := []interface{}{roomUUID}
+	if strings.TrimSpace(counterpartyScopeRef) != "" {
+		clauses = append(clauses, "from_scope_ref = ?")
+		args = append(args, counterpartyScopeRef)
+	} else {
+		clauses = append(clauses, "from_scope_ref IS NULL AND from_principal_ref = ?")
+		args = append(args, counterpartyPrincipalRef)
+	}
 	if strings.TrimSpace(replierScopeRef) != "" {
 		clauses = append(clauses, "to_scope_ref = ?")
 		args = append(args, replierScopeRef)
@@ -1193,6 +1204,19 @@ func upsertRoomMemberTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribut
 		return nil, fmt.Errorf("failed to read room member: %w", err)
 	}
 	if err == nil {
+		// Attendance stays current: the row's principal is whoever last SPOKE
+		// from this seat. It is attribution only — no address resolves through
+		// it — so refreshing it can never move an obligation (T-07628).
+		if seed.Source == domain.RoomMemberSourceSpoke &&
+			strings.TrimSpace(seed.MemberPrincipalRef) != "" &&
+			seed.MemberPrincipalRef != existing.MemberPrincipalRef {
+			if _, err := tx.Exec(`UPDATE room_members SET member_principal_ref = ?
+				WHERE room_uuid = ? AND member_ref = ?`,
+				seed.MemberPrincipalRef, roomUUID, seed.MemberRef); err != nil {
+				return nil, fmt.Errorf("failed to refresh room member principal: %w", err)
+			}
+			existing.MemberPrincipalRef = seed.MemberPrincipalRef
+		}
 		if existing.LeftAt == nil {
 			return existing, nil
 		}
