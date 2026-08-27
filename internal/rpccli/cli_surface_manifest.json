@@ -1955,7 +1955,7 @@
               },
               {
                 "name": "stall-after",
-                "usage": "Exit after this duration with no new events",
+                "usage": "Exit after this duration with no new events; applies with or without --until",
                 "type": "string",
                 "hidden": false
               },
@@ -1968,7 +1968,7 @@
               },
               {
                 "name": "timeout",
-                "usage": "Maximum wait duration (e.g. 30m)",
+                "usage": "Maximum follow duration (e.g. 30m); bounds the follow with or without --until",
                 "type": "string",
                 "hidden": false
               },

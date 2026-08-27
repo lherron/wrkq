@@ -118,7 +118,9 @@ Examples:
   wrkq monitor wait T-1 T-2 T-3 --until all-terminal --stall-after 30m
   wrkq monitor wait EN-00012 --until terminal --timeout 10m
 
-Exit codes: 0=condition met, 1=timeout/stall, 2=selector error, 3=stream error.
+Exit codes: 0=condition met, or a bounded follow with no --until ended on its
+--timeout/--stall-after clock; 1=--until left unmet by timeout/stall;
+2=selector error; 3=stream error.
 `,
 	}
 	monitor.AddCommand(newMonitorWatchCmd())
@@ -134,7 +136,8 @@ func newMonitorWatchCmd() *cobra.Command {
 		Use:   "watch [TASK...]",
 		Short: "Stream task events (Monitor feed)",
 		Long: `Stream typed NDJSON events for watched tasks. Emits per-event lines and
-exactly one terminal line before exit. With no --until, follows indefinitely.
+exactly one terminal line before exit. With no --until, follows until --timeout
+or --stall-after expires, if either is given, and otherwise indefinitely.
 
 The feed starts at the current high-water mark: it tails what happens NEXT. Use
 --since <id> to start from an earlier event (--since 0 replays the whole log) or
@@ -228,8 +231,8 @@ Invalid selectors fail with exit code 2 before any streaming.
 		},
 	}
 	cmd.Flags().StringVar(&until, "until", "", "Condition: state=<s>[,<s>...], all-terminal, acked, or terminal")
-	cmd.Flags().StringVar(&timeoutStr, "timeout", "", "Maximum wait duration (e.g. 30m)")
-	cmd.Flags().StringVar(&stallAfterStr, "stall-after", "", "Exit after this duration with no new events")
+	cmd.Flags().StringVar(&timeoutStr, "timeout", "", "Maximum follow duration (e.g. 30m); bounds the follow with or without --until")
+	cmd.Flags().StringVar(&stallAfterStr, "stall-after", "", "Exit after this duration with no new events; applies with or without --until")
 	cmd.Flags().BoolVar(&stateOnly, "state-only", false, "Only emit lifecycle state-change events")
 	cmd.Flags().BoolVar(&raw, "raw", false, "Raw wrkq watch behavior (whole-log unfiltered tail)")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as NDJSON")
@@ -333,16 +336,63 @@ type monitorStreamOpts struct {
 	fromHighWater bool
 }
 
-// monitorStreamUntil drives the event-streaming poll loop for `monitor watch`. It
-// polls wrkq.monitor.eventsView for the next bounded ASCENDING page, advances the
-// monotonic high-water cursor, emits per-event lines, and (when a --until condition
-// is set) re-evaluates wrkq.monitor.stateView each cycle, emitting exactly one
-// terminal line before exit. eventsView + stateView are TWO snapshots, so the
-// terminal evaluation is intentionally race-tolerant (a met condition may land
-// before the matching event is paged in; tests assert race-tolerantly).
+// monitorStreamUntil drives `monitor watch`: it runs the follow loop and owns the
+// stdout terminal line, the stderr lines, and the exit code. The loop itself lives
+// in monitorFollowLoop, which RETURNS its outcome instead of exiting, so both
+// clocks are reachable from tests.
+//
+// Exit contract (T-07621, mable ruling): --timeout / --stall-after bound ANY
+// follow, with or without --until. Expiry emits the existing terminal line
+// (result: timeout|stall). The exit code is 1 only when a --until condition was
+// given and is unmet; a bounded follow with no --until ended exactly as asked, so
+// it exits 0 with unmet: [].
 func monitorStreamUntil(ctx context.Context, tr Transport, out io.Writer, errOut io.Writer, opts monitorStreamOpts) error {
 	encoder := json.NewEncoder(out)
 
+	result, unmet, exitCode, err := monitorFollowLoop(ctx, tr, encoder, opts)
+	if err != nil {
+		if exitCode == 2 {
+			return monitorUsageError(errOut, err)
+		}
+		_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
+		return monitorStreamErrorExit(errOut, err)
+	}
+	if encErr := encoder.Encode(buildMonitorTerminalLine(result, unmet)); encErr != nil {
+		return monitorStreamErrorExit(errOut, encErr)
+	}
+	if exitCode != 0 {
+		monitorExit(errOut, exitCode, monitorUnmetError(result, opts.condition))
+	}
+	return nil
+}
+
+// monitorUnmetError is the stderr message for a --until stream that ended on a
+// clock instead of on its condition.
+func monitorUnmetError(result monitorTerminalResult, condition string) error {
+	if result == monitorResultStall {
+		return fmt.Errorf("monitor stalled waiting for %s", condition)
+	}
+	return fmt.Errorf("monitor timeout waiting for %s", condition)
+}
+
+// monitorClockExitCode maps an expired clock to its exit code: 1 when a --until
+// condition is unmet, 0 when the caller only asked for a bounded follow.
+func monitorClockExitCode(condition string) int {
+	if condition != "" {
+		return 1
+	}
+	return 0
+}
+
+// monitorFollowLoop is the event-streaming poll loop for `monitor watch`. It polls
+// wrkq.monitor.eventsView for the next bounded ASCENDING page, advances the
+// monotonic high-water cursor, emits per-event lines, and (when a --until condition
+// is set) re-evaluates wrkq.monitor.stateView each cycle. It returns
+// (result, unmet, exitCode, err) and NEVER writes the terminal line or exits;
+// monitorStreamUntil owns both. eventsView + stateView are TWO snapshots, so the
+// terminal evaluation is intentionally race-tolerant (a met condition may land
+// before the matching event is paged in; tests assert race-tolerantly).
+func monitorFollowLoop(ctx context.Context, tr Transport, encoder *json.Encoder, opts monitorStreamOpts) (monitorTerminalResult, []string, int, error) {
 	// Eager selector validation BEFORE any streaming, matching legacy
 	// resolveMonitorSelectors: the server resolves the scoped selectors and a bad
 	// one returns WRKQ_VALIDATION (exit 2). Legacy prints the raw error caller-side
@@ -351,11 +401,7 @@ func monitorStreamUntil(ctx context.Context, tr Transport, out io.Writer, errOut
 	// without emitting any events.
 	if len(opts.scopedTasks) > 0 {
 		if _, _, perr := monitorPollEvents(ctx, tr, opts, int64(1)<<62); perr != nil {
-			if monitorErrIsValidation(perr) {
-				return monitorUsageError(errOut, monitorStripError(perr))
-			}
-			_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-			return monitorStreamErrorExit(errOut, monitorStripError(perr))
+			return monitorResultError, nil, monitorErrExitCode(perr), monitorStripError(perr)
 		}
 	}
 
@@ -363,24 +409,16 @@ func monitorStreamUntil(ctx context.Context, tr Transport, out io.Writer, errOut
 	if opts.condition != "" {
 		met, unmet, code, err := monitorConditionSnapshot(ctx, tr, opts)
 		if err != nil {
-			if code == 2 {
-				return monitorUsageError(errOut, err)
-			}
-			_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-			return monitorStreamErrorExit(errOut, err)
+			return monitorResultError, nil, code, err
 		}
 		if met {
-			if encErr := encoder.Encode(buildMonitorTerminalLine(monitorResultMet, unmet)); encErr != nil {
-				return monitorStreamErrorExit(errOut, encErr)
-			}
-			return nil
+			return monitorResultMet, unmet, 0, nil
 		}
 	}
 
 	cursor, err := monitorInitialCursor(ctx, tr, opts)
 	if err != nil {
-		_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-		return monitorStreamErrorExit(errOut, err)
+		return monitorResultError, nil, 3, err
 	}
 
 	started := time.Now()
@@ -388,8 +426,7 @@ func monitorStreamUntil(ctx context.Context, tr Transport, out io.Writer, errOut
 	for {
 		events, nextCursor, err := monitorPollEvents(ctx, tr, opts, cursor)
 		if err != nil {
-			_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-			return monitorStreamErrorExit(errOut, monitorStripError(err))
+			return monitorResultError, nil, 3, monitorStripError(err)
 		}
 		cursor = nextCursor
 		for _, e := range events {
@@ -403,37 +440,30 @@ func monitorStreamUntil(ctx context.Context, tr Transport, out io.Writer, errOut
 				EventType:    e.EventType,
 				Payload:      e.Payload,
 			}); encErr != nil {
-				_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-				return monitorStreamErrorExit(errOut, encErr)
+				return monitorResultError, nil, 3, encErr
 			}
 			lastEvent = time.Now()
 		}
 
+		// unmet is the condition's snapshot when there is one; a plain follow has
+		// nothing to be unmet, so its terminal line carries unmet: [].
+		unmet := []string{}
 		if opts.condition != "" {
-			met, unmet, code, err := monitorConditionSnapshot(ctx, tr, opts)
+			met, snapshotUnmet, code, err := monitorConditionSnapshot(ctx, tr, opts)
 			if err != nil {
-				if code == 2 {
-					return monitorUsageError(errOut, err)
-				}
-				_ = encoder.Encode(buildMonitorTerminalLine(monitorResultError, nil))
-				return monitorStreamErrorExit(errOut, err)
+				return monitorResultError, nil, code, err
 			}
 			if met {
-				if encErr := encoder.Encode(buildMonitorTerminalLine(monitorResultMet, unmet)); encErr != nil {
-					return monitorStreamErrorExit(errOut, encErr)
-				}
-				return nil
+				return monitorResultMet, snapshotUnmet, 0, nil
 			}
-			if opts.timeout > 0 && time.Since(started) >= opts.timeout {
-				_ = encoder.Encode(buildMonitorTerminalLine(monitorResultTimeout, unmet))
-				monitorExit(errOut, 1, fmt.Errorf("monitor timeout waiting for %s", opts.condition))
-				return nil
-			}
-			if opts.stallAfter > 0 && time.Since(lastEvent) >= opts.stallAfter {
-				_ = encoder.Encode(buildMonitorTerminalLine(monitorResultStall, unmet))
-				monitorExit(errOut, 1, fmt.Errorf("monitor stalled waiting for %s", opts.condition))
-				return nil
-			}
+			unmet = snapshotUnmet
+		}
+		// Both clocks bound ANY follow, conditional or not (T-07621).
+		if opts.timeout > 0 && time.Since(started) >= opts.timeout {
+			return monitorResultTimeout, unmet, monitorClockExitCode(opts.condition), nil
+		}
+		if opts.stallAfter > 0 && time.Since(lastEvent) >= opts.stallAfter {
+			return monitorResultStall, unmet, monitorClockExitCode(opts.condition), nil
 		}
 		time.Sleep(monitorPollInterval)
 	}
@@ -595,13 +625,6 @@ func monitorErrExitCode(err error) int {
 		}
 	}
 	return 3
-}
-
-// monitorErrIsValidation reports whether an RPC error is a WRKQ_VALIDATION (the
-// legacy exit-code-2 selector/condition path).
-func monitorErrIsValidation(err error) bool {
-	re, ok := err.(*Error)
-	return ok && re.DomainID == "WRKQ_VALIDATION"
 }
 
 // monitorUsageError reproduces legacy's selector/usage failure stderr: the raw

@@ -211,10 +211,17 @@ wrkq watch --ndjson
 # Structured per-task monitor stream (built for the Claude Monitor tool)
 wrkq monitor watch T-04466 --state-only --until state=completed --timeout 30m
 wrkq monitor wait T-1 T-2 T-3 --until all-terminal --stall-after 30m
+
+# --timeout/--stall-after also bound a plain follow that named no --until,
+# which is the only in-CLI bound a room selector has.
+wrkq monitor watch P-00007 --timeout 30s
 ```
 
-`wrkq monitor` exit codes: `0` condition met, `1` timeout/stall, `2` selector
-error, `3` stream error.
+`wrkq monitor` exit codes: `0` condition met, or a bounded follow with no
+`--until` ended on its `--timeout`/`--stall-after` clock; `1` `--until` left
+unmet by timeout/stall; `2` selector error; `3` stream error. Every ending
+emits the same terminal line (`result: met|timeout|stall`), and a no-`--until`
+follow reports `unmet: []`.
 
 ## Search index
 
