@@ -56,9 +56,11 @@ First match wins:
 generation or on the next attend, never summons. No `--to` → a log entry.
 
 **Reply is the ack.** Saying `--to X` acks every presented reply-required
-envelope in that room addressed to your own scope from X. Sibling envelopes of a
-fan-out addressed to *other* scopes are untouched. To hold one back, `defer` it
-first.
+envelope in that room addressed to your own scope and sent from X's scope. The
+match is seat-to-seat: the principal a say was attributed to never enters it, so
+two seats of the same agent are two counterparties, and only a scope-less party
+(a human) matches on its principal. Sibling envelopes of a fan-out addressed to
+*other* scopes are untouched. To hold one back, `defer` it first.
 
 `defer` is paused, never terminal — a later reply still acks it.
 `--retry-after` arms a wrkq promise; at expiry the envelope returns to pending.
