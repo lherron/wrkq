@@ -17,7 +17,24 @@ export type SyncRunner = (
 	command: readonly string[],
 ) => { status: number | null; stderr?: string; stdout?: string };
 
+/**
+ * Reports whether a consumer checkout has an uncommitted bun.lock. Downstream
+ * sync deliberately leaves the lockfile dirty (T-07629): an install run here
+ * must not write git history in a repo it does not own, so the consumer repo's
+ * own agent commits it with their next landing.
+ */
+export type LockProbe = (consumer: ResolvedDownstreamConsumer) => boolean;
+
 export const syncCommand = ["run", "sync:wrkq", "--", "--pull"] as const;
+
+export function dirtyLockSummary(
+	directories: readonly string[],
+): readonly string[] {
+	return directories.map(
+		(directory) =>
+			`[sync-downstream] bun.lock updated in ${directory} — commit it with your next landing`,
+	);
+}
 
 export const downstreamConsumers: readonly DownstreamConsumer[] = [
 	{ directory: "hrc-runtime", label: "hrc-sync", packageName: "hrc-runtime" },
@@ -117,9 +134,21 @@ const defaultRunner: SyncRunner = (consumer, command) => {
 	};
 };
 
+const defaultLockProbe: LockProbe = (consumer) => {
+	const result = spawnSync("git", ["status", "--porcelain", "--", "bun.lock"], {
+		cwd: consumer.path,
+		encoding: "utf8",
+		env: process.env,
+		stdio: "pipe",
+	});
+	if (result.status !== 0) return false;
+	return (result.stdout ?? "").trim() !== "";
+};
+
 export async function syncDownstream(
 	root = process.env.WRKQ_DOWNSTREAM_ROOT ?? defaultDownstreamRoot,
 	runner: SyncRunner = defaultRunner,
+	lockProbe: LockProbe = defaultLockProbe,
 ): Promise<void> {
 	const consumers = downstreamConsumers.map((consumer) => ({
 		...consumer,
@@ -129,6 +158,7 @@ export async function syncDownstream(
 	// Validate the complete inventory before mutating any checkout.
 	await Promise.all(consumers.map(validateConsumer));
 
+	const dirty: string[] = [];
 	for (const consumer of consumers) {
 		const result = runner(consumer, syncCommand);
 		emitPrefixed(consumer.label, result.stdout, console.log);
@@ -139,7 +169,12 @@ export async function syncDownstream(
 				`"sync:wrkq --pull" failed with exit code ${result.status ?? "unknown"}`,
 			);
 		}
+		if (lockProbe(consumer)) dirty.push(consumer.directory);
 	}
+
+	// The sync never commits, so every lock it advanced is still dirty in a repo
+	// this install does not own. Name them so the drift is announced, not silent.
+	for (const line of dirtyLockSummary(dirty)) console.log(line);
 }
 
 if (import.meta.main) {
