@@ -274,15 +274,14 @@ func runServerHealth(cmd *cobra.Command, opts *serverOptions) error {
 	}
 	payload := map[string]string{"status": "ok"}
 	if !authorized {
+		// stderr, so it reaches a human whether stdout carries JSON or "ok".
 		payload["auth"] = "unauthorized"
+		fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: the daemon answered but rejected this caller's token; liveness and the installed-binary check ran, the daemon's own health response did not")
 	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(payload)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "ok")
-	if !authorized {
-		fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: the daemon answered but rejected this caller's token; health checked liveness only")
-	}
 	return nil
 }
 
