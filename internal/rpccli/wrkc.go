@@ -594,8 +594,8 @@ EN- ids are internal: inbox, show, and log surface them so an agent can tell
 }
 
 func newWrkcLsCmd() *cobra.Command {
-	var openOnly, dead, mine bool
-	var kind string
+	var openOnly, dead bool
+	var kind, scopeFilter string
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "ls",
@@ -638,8 +638,11 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 			if kind != "" {
 				params["kind"] = kind
 			}
-			if mine {
-				params["scope"] = "me"
+			if scopeFilter != "" {
+				if scopeFilter != "me" {
+					return fmt.Errorf("--scope accepts only \"me\"; rooms are readable by any principal, so this is a filter and not a permission boundary")
+				}
+				params["scope"] = scopeFilter
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.room.list", params)
 			if err != nil {
@@ -657,8 +660,9 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Only open rooms")
 	cmd.Flags().BoolVar(&dead, "dead", false, "List dead-lettered envelopes addressed to you")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by room kind: campaign, task, project, adhoc")
-	cmd.Flags().BoolVar(&mine, "scope", false, "Only rooms your own scope is a member of")
-	cmd.Flags().Lookup("scope").NoOptDefVal = "true"
+	// A value, not a boolean: `--scope me` is the §9.1 surface. No NoOptDefVal —
+	// that would make cobra read the value as a positional and reject it.
+	cmd.Flags().StringVar(&scopeFilter, "scope", "", "Restrict to rooms your own scope is a member of (only value: me)")
 	addPromiseOutputFlags(cmd, &output, true)
 	return cmd
 }

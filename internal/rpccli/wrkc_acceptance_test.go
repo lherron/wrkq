@@ -296,6 +296,49 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	}
 }
 
+// TestWrkcLsScopeIsAValueNotABoolean pins the §9.1 surface: `wrkc ls --scope me`
+// takes a value. It is a convenience filter, never a permission boundary —
+// rooms are readable by any principal — so the only accepted value is "me" and
+// anything else is refused rather than silently ignored.
+func TestWrkcLsScopeIsAValueNotABoolean(t *testing.T) {
+	f := newWrkcFixture(t)
+	if out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "hello",
+		"--to", "cody", "--scope-ref", "clod@wrkc-proj:"+f.taskID); err != nil {
+		t.Fatalf("seed say: %v\n%s", err, out)
+	}
+
+	mine, err := runWrkc(t, f.dbPath, "agent:clod", "ls", "--scope", "me",
+		"--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
+	if err != nil {
+		t.Fatalf("wrkc ls --scope me: %v\n%s", err, mine)
+	}
+	var rooms []roomWire
+	if err := json.Unmarshal([]byte(mine), &rooms); err != nil {
+		t.Fatalf("decode: %v\n%s", err, mine)
+	}
+	if len(rooms) != 1 || rooms[0].Key != f.taskID {
+		t.Fatalf("--scope me = %+v", rooms)
+	}
+
+	// A scope with no membership sees no rooms — a filter, not an error.
+	none, err := runWrkc(t, f.dbPath, "agent:fowler", "ls", "--scope", "me",
+		"--scope-ref", "fowler@wrkc-proj:primary", "--json")
+	if err != nil {
+		t.Fatalf("wrkc ls --scope me (non-member): %v\n%s", err, none)
+	}
+	var empty []roomWire
+	if err := json.Unmarshal([]byte(none), &empty); err != nil {
+		t.Fatalf("decode: %v\n%s", err, none)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("a non-member saw %d rooms via --scope me", len(empty))
+	}
+
+	if out, err := runWrkc(t, f.dbPath, "agent:clod", "ls", "--scope", "everyone"); err == nil {
+		t.Fatalf("--scope everyone was accepted:\n%s", out)
+	}
+}
+
 // TestWrkcSayHumanRenderingShowsTheReplyPath proves the default human output is
 // legible without a JSON decoder: the envelope id, who it went to, and the room.
 func TestWrkcSayHumanRenderingShowsTheReplyPath(t *testing.T) {
