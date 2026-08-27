@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 )
 
@@ -30,8 +32,11 @@ type roomFixture struct {
 	campaignUUID string // a campaign-adorned container under the project
 	campaignPath string
 
-	memberTaskID   string // a task inside the campaign
+	memberTaskID   string // a task ENROLLED in the campaign (campaign_uuid)
 	memberTaskUUID string
+
+	residentTaskID   string // a task RESIDENT in the campaign (project_uuid), no campaign_uuid
+	residentTaskUUID string
 
 	plainContainerPath string // a directory: has no room and must be refused
 }
@@ -70,6 +75,17 @@ func newRoomFixture(t *testing.T) *roomFixture {
 	if _, err := s.DB().Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", f.campaignUUID, f.memberTaskUUID); err != nil {
 		t.Fatalf("enroll member task: %v", err)
 	}
+
+	// A RESIDENT campaign member: it lives inside the campaign container and has
+	// no campaign_uuid at all. This is the COMMON membership form and the one a
+	// campaign_uuid-only coalesce silently misses.
+	resident, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
+		Slug: "resident", Title: "Resident", ProjectUUID: campaign.UUID, State: "open", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("create resident task: %v", err)
+	}
+	f.residentTaskID, f.residentTaskUUID = resident.ID, resident.UUID
 
 	plain, err := s.Containers.Create(monitorSystemActor, store.ContainerCreateParams{
 		Slug: "notes", Kind: "directory", ParentUUID: &f.proj,
@@ -176,6 +192,48 @@ func TestRoutingRule2_StrictCampaignCoalesce(t *testing.T) {
 	// No task room was created for the enrolled task — the coalesce is strict.
 	if room, err := f.s.Rooms.GetByTask(f.memberTaskUUID); err != nil || room != nil {
 		t.Fatalf("enrolled task got its own room (%v, err=%v); coalesce is not strict", room, err)
+	}
+
+	// RESIDENCY is the common membership form: a task inside the campaign
+	// container is a member without any campaign_uuid. A campaign_uuid-only
+	// coalesce gives it its own room and splits the campaign's conversation —
+	// which is exactly what the live smoke against the canonical ledger caught.
+	resident := f.say(t, RoomSayParams{Ref: f.residentTaskID, Body: "on the resident task", PrincipalRef: "agent:clod"})
+	if resident.Room.Kind != "campaign" {
+		t.Fatalf("RESIDENT campaign task routed to a %s room, want campaign", resident.Room.Kind)
+	}
+	if resident.Room.UUID != member.Room.UUID {
+		t.Fatalf("resident and enrolled members landed in different rooms (%s vs %s); one campaign has one room",
+			resident.Room.UUID, member.Room.UUID)
+	}
+	if resident.Envelopes[0].TaskID == nil || *resident.Envelopes[0].TaskID != f.residentTaskID {
+		t.Fatalf("resident envelope lost its task tag: %v", resident.Envelopes[0].TaskID)
+	}
+	if room, err := f.s.Rooms.GetByTask(f.residentTaskUUID); err != nil || room != nil {
+		t.Fatalf("resident task got its own room (%v, err=%v); coalesce is not strict", room, err)
+	}
+}
+
+// TestCoalesceIgnoresCampaignState proves rule 2 and rule 3 cannot disagree
+// about the same campaign. A campaign container routes to its campaign room
+// whatever its state, so gating the task-side coalesce on `active` would make
+// a completed campaign mint fresh task rooms for work whose conversation already
+// lives in the campaign room.
+func TestCoalesceIgnoresCampaignState(t *testing.T) {
+	f := newRoomFixture(t)
+
+	for _, state := range []string{"draft", "active", "completed", "cancelled"} {
+		if _, err := f.s.DB().Exec("UPDATE containers SET campaign_state = ? WHERE uuid = ?", state, f.campaignUUID); err != nil {
+			t.Fatalf("set campaign_state=%s: %v", state, err)
+		}
+		routed, err := f.api.routeToTaskUUID(context.Background(),
+			attribution.Attribution{PrincipalRef: "agent:clod"}, f.residentTaskUUID)
+		if err != nil {
+			t.Fatalf("route with campaign_state=%s: %v", state, err)
+		}
+		if routed.room.Kind != domain.RoomKindCampaign {
+			t.Fatalf("campaign_state=%s routed to a %s room, want campaign", state, routed.room.Kind)
+		}
 	}
 }
 

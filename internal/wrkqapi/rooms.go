@@ -275,17 +275,14 @@ func (a *API) routeToTask(ctx context.Context, attr attribution.Attribution, sel
 // routeToTaskUUID applies strict campaign coalesce: a task inside a campaign
 // talks in the campaign's room, tagged with the task it came through.
 func (a *API) routeToTaskUUID(ctx context.Context, attr attribution.Attribution, taskUUID string) (*routedSay, error) {
-	var campaignUUID sql.NullString
-	if err := a.db.QueryRowContext(ctx, "SELECT campaign_uuid FROM tasks WHERE uuid = ?", taskUUID).Scan(&campaignUUID); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, NewNotFoundError(taskUUID, "task")
-		}
-		return nil, NewInternalError(err)
+	campaignUUID, err := a.effectiveCampaignForTask(ctx, taskUUID)
+	if err != nil {
+		return nil, err
 	}
-	if campaignUUID.Valid && campaignUUID.String != "" {
-		room, err := a.ensureContainerRoom(attr, campaignUUID.String, domain.RoomKindCampaign)
-		if err != nil {
-			return nil, err
+	if campaignUUID != "" {
+		room, cerr := a.ensureContainerRoom(attr, campaignUUID, domain.RoomKindCampaign)
+		if cerr != nil {
+			return nil, cerr
 		}
 		return &routedSay{room: room, taskTagUUID: &taskUUID}, nil
 	}
@@ -294,6 +291,48 @@ func (a *API) routeToTaskUUID(ctx context.Context, attr attribution.Attribution,
 		return nil, err
 	}
 	return &routedSay{room: room, taskTagUUID: &taskUUID}, nil
+}
+
+// effectiveCampaignForTask answers "which campaign does this task belong to",
+// and it is the ONLY thing rule 2's strict coalesce may consult.
+//
+// Campaign membership in wrkq has two forms and RESIDENCY is the common one: a
+// task whose project_uuid IS the campaign container is a member without any
+// campaign_uuid ever being set. Enrolment (campaign_uuid) is the cross-project
+// form. Reading only campaign_uuid — as this did first — silently gave every
+// resident task its own room and split the campaign's conversation in two.
+// Resident wins over enrolled, matching store.campaignUUIDForTaskTx.
+//
+// Unlike that function this does NOT gate on campaign_state = active. A campaign
+// container routes to its campaign room under §4 rule 3 whatever its state, so
+// gating here would make `say T-xxxxx` and `say <campaign-path>` disagree about
+// the same room for the same campaign — and a completed campaign would start
+// minting fresh task rooms for work whose conversation already lives in the
+// campaign room. The campaign room reads derived-closed when the campaign is
+// closed, which is the correct refusal, arrived at by the correct route.
+func (a *API) effectiveCampaignForTask(ctx context.Context, taskUUID string) (string, error) {
+	var residentUUID string
+	var enrolledUUID, residentState, enrolledState sql.NullString
+	err := a.db.QueryRowContext(ctx, `
+		SELECT t.project_uuid, t.campaign_uuid, resident.campaign_state, enrolled.campaign_state
+		  FROM tasks t
+		  LEFT JOIN containers resident ON resident.uuid = t.project_uuid
+		  LEFT JOIN containers enrolled ON enrolled.uuid = t.campaign_uuid
+		 WHERE t.uuid = ?`, taskUUID).
+		Scan(&residentUUID, &enrolledUUID, &residentState, &enrolledState)
+	if err == sql.ErrNoRows {
+		return "", NewNotFoundError(taskUUID, "task")
+	}
+	if err != nil {
+		return "", NewInternalError(err)
+	}
+	if residentState.Valid && residentState.String != "" {
+		return residentUUID, nil
+	}
+	if enrolledUUID.Valid && enrolledUUID.String != "" && enrolledState.Valid && enrolledState.String != "" {
+		return enrolledUUID.String, nil
+	}
+	return "", nil
 }
 
 func (a *API) routeToContainer(ctx context.Context, attr attribution.Attribution, selector string) (*routedSay, error) {
@@ -1517,11 +1556,10 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 	case domain.RoomKindTask:
 		ref := &WrkqRoomWorkRef{Type: "task", UUID: *room.TaskUUID}
 		var taskState string
-		var campaignUUID sql.NullString
 		err := a.db.QueryRowContext(ctx, `
-			SELECT t.id, COALESCE(cp.path || '/' || t.slug, t.slug), t.state, t.campaign_uuid
+			SELECT t.id, COALESCE(cp.path || '/' || t.slug, t.slug), t.state
 			  FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
-			 WHERE t.uuid = ?`, *room.TaskUUID).Scan(&ref.ID, &ref.Path, &taskState, &campaignUUID)
+			 WHERE t.uuid = ?`, *room.TaskUUID).Scan(&ref.ID, &ref.Path, &taskState)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(*room.TaskUUID, "room task")
@@ -1532,10 +1570,16 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		state.key = ref.ID
 		state.workTerminal = isTerminalTaskState(taskState)
 		// A task that later joined a campaign keeps its own room readable and
-		// linked; new says route to the campaign room. Never merged.
-		if campaignUUID.Valid && campaignUUID.String != "" {
-			if linked, lerr := a.store.Rooms.GetByContainer(campaignUUID.String); lerr == nil && linked != nil {
-				key, kerr := a.containerRoomKey(ctx, campaignUUID.String)
+		// linked; new says route to the campaign room. Never merged. This uses
+		// the SAME membership predicate the routing does, so the link can never
+		// point somewhere routing would not go.
+		campaignUUID, cerr := a.effectiveCampaignForTask(ctx, *room.TaskUUID)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if campaignUUID != "" {
+			if linked, lerr := a.store.Rooms.GetByContainer(campaignUUID); lerr == nil && linked != nil {
+				key, kerr := a.containerRoomKey(ctx, campaignUUID)
 				if kerr != nil {
 					return nil, kerr
 				}
