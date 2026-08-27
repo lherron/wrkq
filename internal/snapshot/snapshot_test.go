@@ -131,6 +131,8 @@ func createTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE actors (id TEXT);
 		CREATE TABLE attachments (id TEXT);
 		CREATE TABLE evidence_items (id TEXT);
+		CREATE TABLE rooms (id TEXT);
+		CREATE TABLE envelopes (id TEXT);
 		CREATE TABLE task_transitions (id TEXT);
 		CREATE TABLE comment_sequences (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
 		INSERT INTO comment_sequences (name, value) VALUES ('next_comment', 0);

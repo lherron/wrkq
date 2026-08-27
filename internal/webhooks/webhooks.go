@@ -201,6 +201,38 @@ type PromisePayload struct {
 	OccurredAt string                 `json:"occurred_at"`
 }
 
+// EnvelopeProjection is the envelope-specific resource projection carried by
+// collaboration webhooks. envelope.created is the signal HRC's kicker wakes on
+// (T-07612 §10), so the projection carries the addressee and delivery intent
+// without the body: webhook targets are not a presentation surface.
+type EnvelopeProjection struct {
+	ID                    string  `json:"id"`
+	UUID                  string  `json:"uuid"`
+	RoomUUID              string  `json:"room_uuid"`
+	RoomKey               string  `json:"room_key"`
+	RoomKind              string  `json:"room_kind"`
+	GroupID               *string `json:"group_id"`
+	FromPrincipalRef      string  `json:"from_principal_ref"`
+	FromScopeRef          *string `json:"from_scope_ref"`
+	ToScopeRef            *string `json:"to_scope_ref"`
+	ToPrincipalRef        *string `json:"to_principal_ref"`
+	Obligation            string  `json:"obligation"`
+	State                 string  `json:"state"`
+	TaskID                *string `json:"task_id"`
+	Urgent                bool    `json:"urgent"`
+	MaterializationIntent *string `json:"materialization_intent"`
+	ETag                  int64   `json:"etag"`
+}
+
+// EnvelopePayload is the typed collaboration webhook body.
+type EnvelopePayload struct {
+	Event      string                 `json:"event"`
+	Envelope   EnvelopeProjection     `json:"envelope"`
+	Changes    map[string]interface{} `json:"changes"`
+	Actor      string                 `json:"actor"`
+	OccurredAt string                 `json:"occurred_at"`
+}
+
 type webhookTargetPayload interface {
 	webhookEvent() string
 	applyWebhookTemplate(string) string
@@ -232,6 +264,16 @@ func (p PromisePayload) webhookEvent() string {
 func (p PromisePayload) applyWebhookTemplate(raw string) string {
 	result := strings.ReplaceAll(raw, "{promise_id}", p.Promise.ID)
 	return strings.ReplaceAll(result, "{promise_uuid}", p.Promise.UUID)
+}
+
+func (p EnvelopePayload) webhookEvent() string {
+	return p.Event
+}
+
+func (p EnvelopePayload) applyWebhookTemplate(raw string) string {
+	result := strings.ReplaceAll(raw, "{envelope_id}", p.Envelope.ID)
+	result = strings.ReplaceAll(result, "{envelope_uuid}", p.Envelope.UUID)
+	return strings.ReplaceAll(result, "{room_key}", p.Envelope.RoomKey)
 }
 
 // TaskInfo carries task metadata needed for webhook dispatch.
@@ -474,6 +516,102 @@ func DispatchPromiseEvent(
 		return
 	}
 	dispatchURLs(urls, payload)
+}
+
+// DispatchEnvelopeEvent delivers the collaboration ledger's envelope events to
+// the webhook targets of the room's owning container. HRC's kicker wakes on
+// envelope.created for the scopes a node homes (T-07612 §10). An ad-hoc room has
+// no container, so — like a standalone promise — it has no dispatch target and
+// returns before subscription collection; the kicker's periodic sweep covers it.
+func DispatchEnvelopeEvent(
+	database *db.DB,
+	envelope domain.Envelope,
+	event string,
+	changes map[string]interface{},
+	principalRef string,
+) {
+	containerUUID, projection, err := lookupEnvelopeRoom(database, &envelope)
+	if err != nil {
+		log.Printf("webhooks: lookup envelope room %s failed: %v", envelope.ID, err)
+		return
+	}
+	if containerUUID == "" {
+		return
+	}
+	if changes == nil {
+		changes = map[string]interface{}{}
+	}
+	actor := strings.TrimSpace(principalRef)
+	if actor == "" {
+		actor = "system"
+	}
+	payload := EnvelopePayload{
+		Event:      event,
+		Envelope:   *projection,
+		Changes:    changes,
+		Actor:      actor,
+		OccurredAt: envelope.UpdatedAt,
+	}
+	urls, err := ResolveWebhookTargets(database, containerUUID, payload)
+	if err != nil {
+		log.Printf("webhooks: resolve targets for envelope %s failed: %v", envelope.ID, err)
+		return
+	}
+	dispatchURLs(urls, payload)
+}
+
+// lookupEnvelopeRoom resolves the container that owns an envelope's room and
+// builds the wire projection. A task room resolves through the task's project;
+// campaign and project rooms are the container themselves.
+func lookupEnvelopeRoom(database *db.DB, envelope *domain.Envelope) (string, *EnvelopeProjection, error) {
+	var roomID, roomKind sql.NullString
+	var roomTaskUUID, roomContainerUUID sql.NullString
+	err := database.QueryRow(`SELECT id, kind, task_uuid, container_uuid
+		 FROM rooms WHERE uuid = ?`, envelope.RoomUUID).
+		Scan(&roomID, &roomKind, &roomTaskUUID, &roomContainerUUID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	projection := &EnvelopeProjection{
+		ID: envelope.ID, UUID: envelope.UUID, RoomUUID: envelope.RoomUUID,
+		RoomKind: roomKind.String, GroupID: envelope.GroupID,
+		FromPrincipalRef: envelope.FromPrincipalRef, FromScopeRef: envelope.FromScopeRef,
+		ToScopeRef: envelope.ToScopeRef, ToPrincipalRef: envelope.ToPrincipalRef,
+		Obligation: string(envelope.Obligation), State: string(envelope.State),
+		Urgent: envelope.Urgent, MaterializationIntent: envelope.MaterializationIntent,
+		ETag: envelope.ETag,
+	}
+	projection.RoomKey = roomID.String
+
+	if envelope.TaskUUID != nil {
+		var taskID string
+		if err := database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", *envelope.TaskUUID).Scan(&taskID); err == nil {
+			projection.TaskID = &taskID
+		}
+	}
+
+	containerUUID := ""
+	switch {
+	case roomTaskUUID.Valid:
+		var projectUUID, taskID string
+		if err := database.QueryRow("SELECT project_uuid, id FROM tasks WHERE uuid = ?", roomTaskUUID.String).
+			Scan(&projectUUID, &taskID); err != nil {
+			return "", nil, err
+		}
+		containerUUID = projectUUID
+		projection.RoomKey = taskID
+	case roomContainerUUID.Valid:
+		var path sql.NullString
+		if err := database.QueryRow(`SELECT COALESCE(cp.path, c.slug)
+			 FROM containers c LEFT JOIN v_container_paths cp ON cp.uuid = c.uuid
+			 WHERE c.uuid = ?`, roomContainerUUID.String).Scan(&path); err != nil {
+			return "", nil, err
+		}
+		containerUUID = roomContainerUUID.String
+		projection.RoomKey = path.String
+	}
+	return containerUUID, projection, nil
 }
 
 func lookupPromiseSubject(database *db.DB, promise *domain.Promise) (string, *PromiseSubjectRef, error) {
@@ -740,6 +878,10 @@ func subscriptionMatchesEvent(sub webhookSubscription, event string) bool {
 			if isPromiseWebhookEvent(event) {
 				return true
 			}
+		case "envelope", "envelope.*", "room", "room.*", "collaboration":
+			if isCollaborationWebhookEvent(event) {
+				return true
+			}
 		default:
 			if strings.EqualFold(allowed, event) {
 				return true
@@ -761,8 +903,17 @@ func isPromiseWebhookEvent(event string) bool {
 	return strings.HasPrefix(event, "promise.")
 }
 
+// isCollaborationWebhookEvent covers the room/envelope/member ledger. It is the
+// class HRC subscribes to for the kicker wake on envelope.created.
+func isCollaborationWebhookEvent(event string) bool {
+	return strings.HasPrefix(event, "envelope.") ||
+		strings.HasPrefix(event, "room.") ||
+		strings.HasPrefix(event, "member.")
+}
+
 func isTaskWebhookEvent(event string) bool {
-	return !isWorkflowWebhookEvent(event) && !isContainerWebhookEvent(event) && !isPromiseWebhookEvent(event)
+	return !isWorkflowWebhookEvent(event) && !isContainerWebhookEvent(event) &&
+		!isPromiseWebhookEvent(event) && !isCollaborationWebhookEvent(event)
 }
 
 func isValidWebhookURL(raw string) bool {

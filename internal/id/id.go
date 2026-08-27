@@ -15,6 +15,8 @@ var (
 	handoffIDPattern    = regexp.MustCompile(`^H-\d{5}$`)
 	attachmentIDPattern = regexp.MustCompile(`^ATT-\d{5}$`)
 	promiseIDPattern    = regexp.MustCompile(`^PR-\d{5}$`)
+	roomIDPattern       = regexp.MustCompile(`^R-\d{5}$`)
+	envelopeIDPattern   = regexp.MustCompile(`^EN-\d{5}$`)
 	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	bareSeqPattern      = regexp.MustCompile(`^\d{1,5}$`)
 )
@@ -30,6 +32,8 @@ const (
 	TypeHandoff    Type = "handoff"
 	TypeAttachment Type = "attachment"
 	TypePromise    Type = "promise"
+	TypeRoom       Type = "room"
+	TypeEnvelope   Type = "envelope"
 )
 
 // FormatActor formats an actor friendly ID
@@ -67,6 +71,20 @@ func FormatPromise(seq int) string {
 	return fmt.Sprintf("PR-%05d", seq)
 }
 
+// FormatRoom formats an ad-hoc room friendly ID. Derived rooms (campaign,
+// task, project) carry no friendly ID: their key is the work identity itself.
+func FormatRoom(seq int) string {
+	return fmt.Sprintf("R-%05d", seq)
+}
+
+// FormatEnvelope formats an envelope friendly ID. The prefix is EN-, not EV-:
+// EV- is already owned by evidence_items (migration 000013) and is addressable
+// through wrkf.evidence.show, so an envelope minted as EV- would put two
+// addressable row kinds behind one id string.
+func FormatEnvelope(seq int) string {
+	return fmt.Sprintf("EN-%05d", seq)
+}
+
 // Parse parses an ID string and returns the type and sequence number
 func Parse(id string) (Type, int, error) {
 	id = strings.TrimSpace(id)
@@ -93,6 +111,12 @@ func Parse(id string) (Type, int, error) {
 	case promiseIDPattern.MatchString(id):
 		seq, _ := strconv.Atoi(id[3:])
 		return TypePromise, seq, nil
+	case envelopeIDPattern.MatchString(id):
+		seq, _ := strconv.Atoi(id[3:])
+		return TypeEnvelope, seq, nil
+	case roomIDPattern.MatchString(id):
+		seq, _ := strconv.Atoi(id[2:])
+		return TypeRoom, seq, nil
 	default:
 		return "", 0, fmt.Errorf("invalid friendly ID format: %s", id)
 	}

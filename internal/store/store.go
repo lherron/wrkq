@@ -20,6 +20,7 @@ type Store struct {
 	Containers *ContainerStore
 	Comments   *CommentStore
 	Promises   *PromiseStore
+	Rooms      *RoomStore
 }
 
 // New creates a new Store wrapping the given database connection.
@@ -29,6 +30,7 @@ func New(database *db.DB) *Store {
 	s.Containers = &ContainerStore{store: s}
 	s.Comments = &CommentStore{store: s}
 	s.Promises = &PromiseStore{store: s}
+	s.Rooms = &RoomStore{store: s}
 	return s
 }
 

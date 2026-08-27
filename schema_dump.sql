@@ -1211,11 +1211,262 @@ BEGIN
      SET id = 'PR-' || printf('%05d', last_insert_rowid())
    WHERE rowid = NEW.rowid;
 END;
+CREATE TABLE room_seq (
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+);
+CREATE TABLE envelope_seq (
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+);
+CREATE TABLE rooms (
+  uuid TEXT PRIMARY KEY
+       DEFAULT (
+         lower(
+           hex(randomblob(4)) || '-' ||
+           hex(randomblob(2)) || '-' ||
+           '4' || substr(hex(randomblob(2)),2) || '-' ||
+           substr('89ab', abs(random()) % 4 + 1, 1) ||
+             substr(hex(randomblob(2)),2) || '-' ||
+           hex(randomblob(6))
+         )
+       ),
+  id TEXT UNIQUE,
+
+  kind TEXT NOT NULL CHECK (kind IN ('campaign', 'task', 'project', 'adhoc')),
+
+  task_uuid TEXT REFERENCES tasks(uuid) ON DELETE CASCADE,
+  container_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
+
+  subject TEXT,
+
+  state TEXT NOT NULL DEFAULT 'open'
+    CHECK (state IN ('open', 'closed', 'archived')),
+  closed_at TEXT,
+  -- An explicit reopen overrides DERIVED closure (a task room whose task went
+  -- terminal, a campaign room whose campaign closed) until an explicit close.
+  reopened_at TEXT,
+
+  last_activity_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+
+  opened_by_principal_ref TEXT NOT NULL,
+  opened_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+
+  meta TEXT,
+  etag INTEGER NOT NULL DEFAULT 1 CHECK (etag >= 1),
+
+  created_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+
+  created_by_principal_ref TEXT NOT NULL,
+  created_by_scope_ref TEXT,
+  updated_by_principal_ref TEXT NOT NULL,
+  updated_by_scope_ref TEXT,
+
+  -- Exactly one work anchor for derived kinds; none for ad-hoc.
+  CHECK (
+    (kind = 'task'     AND task_uuid IS NOT NULL AND container_uuid IS NULL)
+    OR
+    (kind IN ('campaign', 'project')
+                       AND container_uuid IS NOT NULL AND task_uuid IS NULL)
+    OR
+    (kind = 'adhoc'    AND task_uuid IS NULL AND container_uuid IS NULL)
+  ),
+
+  CHECK (kind = 'adhoc' OR subject IS NULL),
+
+  CHECK (
+    (state = 'open' AND closed_at IS NULL)
+    OR
+    (state IN ('closed', 'archived') AND closed_at IS NOT NULL)
+  )
+);
+CREATE UNIQUE INDEX rooms_task_idx
+  ON rooms(task_uuid) WHERE task_uuid IS NOT NULL;
+CREATE UNIQUE INDEX rooms_container_idx
+  ON rooms(container_uuid) WHERE container_uuid IS NOT NULL;
+CREATE INDEX rooms_adhoc_idle_idx
+  ON rooms(last_activity_at) WHERE kind = 'adhoc' AND state = 'open';
+CREATE TRIGGER rooms_ai_friendly
+AFTER INSERT ON rooms
+WHEN NEW.kind = 'adhoc' AND (NEW.id IS NULL OR NEW.id = '')
+BEGIN
+  INSERT INTO room_seq (id) VALUES (NULL);
+  UPDATE rooms
+     SET id = 'R-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TABLE envelopes (
+  uuid TEXT PRIMARY KEY
+       DEFAULT (
+         lower(
+           hex(randomblob(4)) || '-' ||
+           hex(randomblob(2)) || '-' ||
+           '4' || substr(hex(randomblob(2)),2) || '-' ||
+           substr('89ab', abs(random()) % 4 + 1, 1) ||
+             substr(hex(randomblob(2)),2) || '-' ||
+           hex(randomblob(6))
+         )
+       ),
+  id TEXT UNIQUE,
+
+  room_uuid TEXT NOT NULL REFERENCES rooms(uuid) ON DELETE CASCADE,
+  -- Shared by the envelopes one `say` fanned out to; equals the envelope's own
+  -- id for a single addressee. Recipients never see the group.
+  group_id TEXT,
+
+  from_principal_ref TEXT NOT NULL,
+  from_scope_ref TEXT,
+
+  -- Addressee: a scope handle (agent@project:task) for scoped members, or NULL
+  -- with to_principal_ref set for scope-less principals (humans). Both NULL for
+  -- obligation 'none' (a log entry).
+  to_scope_ref TEXT,
+  to_principal_ref TEXT,
+
+  obligation TEXT NOT NULL
+    CHECK (obligation IN ('reply_required', 'fyi', 'none')),
+
+  body TEXT NOT NULL CHECK (length(trim(body)) > 0),
+
+  -- Set when the say routed via a task, even into a campaign room.
+  task_uuid TEXT REFERENCES tasks(uuid) ON DELETE SET NULL,
+
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending', 'presented', 'acked', 'deferred', 'dead')),
+  round_count INTEGER NOT NULL DEFAULT 0 CHECK (round_count >= 0),
+  retry_at TEXT,
+  defer_reason TEXT,
+  terminal_actor TEXT,
+  terminal_at TEXT,
+
+  -- Delivery intent HRC actuates; wrkq stores it and does not interpret it.
+  urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+  materialization_intent TEXT,
+  respond_to_principal_ref TEXT,
+
+  -- Promise backing `defer --retry-after`.
+  retry_promise_uuid TEXT REFERENCES promises(uuid) ON DELETE SET NULL,
+
+  idempotency_key TEXT,
+  meta TEXT,
+  etag INTEGER NOT NULL DEFAULT 1 CHECK (etag >= 1),
+
+  created_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  updated_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+
+  created_by_principal_ref TEXT NOT NULL,
+  created_by_scope_ref TEXT,
+  updated_by_principal_ref TEXT NOT NULL,
+  updated_by_scope_ref TEXT,
+
+  -- An addressee is required by every firing obligation and forbidden without.
+  CHECK (
+    (obligation = 'none'
+       AND to_scope_ref IS NULL AND to_principal_ref IS NULL)
+    OR
+    (obligation IN ('reply_required', 'fyi')
+       AND to_principal_ref IS NOT NULL)
+  ),
+
+  CHECK (
+    (state = 'deferred' AND defer_reason IS NOT NULL)
+    OR state <> 'deferred'
+  )
+);
+CREATE INDEX envelopes_room_idx ON envelopes(room_uuid, id);
+CREATE INDEX envelopes_group_idx ON envelopes(group_id) WHERE group_id IS NOT NULL;
+CREATE INDEX envelopes_task_idx ON envelopes(task_uuid) WHERE task_uuid IS NOT NULL;
+CREATE INDEX envelopes_obligation_idx
+  ON envelopes(to_scope_ref, state)
+  WHERE obligation = 'reply_required';
+CREATE INDEX envelopes_retry_idx
+  ON envelopes(retry_at) WHERE state = 'deferred' AND retry_at IS NOT NULL;
+CREATE UNIQUE INDEX envelopes_idempotency_idx
+  ON envelopes(idempotency_key, COALESCE(to_principal_ref, ''))
+  WHERE idempotency_key IS NOT NULL;
+CREATE TRIGGER envelopes_ai_friendly
+AFTER INSERT ON envelopes
+WHEN NEW.id IS NULL OR NEW.id = ''
+BEGIN
+  INSERT INTO envelope_seq (id) VALUES (NULL);
+  UPDATE envelopes
+     SET id = 'EN-' || printf('%05d', last_insert_rowid())
+   WHERE rowid = NEW.rowid;
+END;
+CREATE TABLE room_members (
+  uuid TEXT PRIMARY KEY
+       DEFAULT (
+         lower(
+           hex(randomblob(4)) || '-' ||
+           hex(randomblob(2)) || '-' ||
+           '4' || substr(hex(randomblob(2)),2) || '-' ||
+           substr('89ab', abs(random()) % 4 + 1, 1) ||
+             substr(hex(randomblob(2)),2) || '-' ||
+           hex(randomblob(6))
+         )
+       ),
+  room_uuid TEXT NOT NULL REFERENCES rooms(uuid) ON DELETE CASCADE,
+
+  -- The member address: a scope handle, or the bare principal when scope-less.
+  member_ref TEXT NOT NULL,
+  member_principal_ref TEXT NOT NULL,
+  scoped INTEGER NOT NULL DEFAULT 1 CHECK (scoped IN (0, 1)),
+
+  source TEXT NOT NULL CHECK (source IN ('spoke', 'addressed', 'joined')),
+
+  joined_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  left_at TEXT,
+
+  UNIQUE (room_uuid, member_ref)
+);
+CREATE INDEX room_members_ref_idx ON room_members(member_ref) WHERE left_at IS NULL;
+CREATE INDEX room_members_active_idx ON room_members(room_uuid) WHERE left_at IS NULL;
+CREATE TABLE envelope_presentations (
+  uuid TEXT PRIMARY KEY
+       DEFAULT (
+         lower(
+           hex(randomblob(4)) || '-' ||
+           hex(randomblob(2)) || '-' ||
+           '4' || substr(hex(randomblob(2)),2) || '-' ||
+           substr('89ab', abs(random()) % 4 + 1, 1) ||
+             substr(hex(randomblob(2)),2) || '-' ||
+           hex(randomblob(6))
+         )
+       ),
+  envelope_uuid TEXT NOT NULL REFERENCES envelopes(uuid) ON DELETE CASCADE,
+  -- Denormalized so attendance per (room, member) is one index seek.
+  room_uuid TEXT NOT NULL REFERENCES rooms(uuid) ON DELETE CASCADE,
+  member_ref TEXT NOT NULL,
+
+  node TEXT,
+  runtime_id TEXT,
+  host_session_id TEXT,
+  generation TEXT,
+  run_id TEXT,
+  drive_attempt_id TEXT,
+
+  presented_at TEXT NOT NULL
+    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  presented_by_principal_ref TEXT NOT NULL
+);
+CREATE INDEX envelope_presentations_envelope_idx
+  ON envelope_presentations(envelope_uuid, presented_at);
+CREATE INDEX envelope_presentations_attendance_idx
+  ON envelope_presentations(room_uuid, member_ref, presented_at DESC);
+CREATE UNIQUE INDEX envelope_presentations_attempt_idx
+  ON envelope_presentations(envelope_uuid, drive_attempt_id)
+  WHERE drive_attempt_id IS NOT NULL;
 CREATE TABLE event_log (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   actor_uuid    TEXT,
-  resource_type TEXT CHECK (resource_type IN ('task','container','attachment','actor','config','system','comment','handoff','promise')),
+  resource_type TEXT CHECK (resource_type IN ('task','container','attachment','actor','config','system','comment','handoff','promise','room','envelope')),
   resource_uuid TEXT,
   event_type    TEXT NOT NULL,
   etag          INTEGER,
