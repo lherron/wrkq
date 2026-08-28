@@ -725,6 +725,35 @@ func (rs *RoomStore) CountEnvelopes(params EnvelopeListParams) (int, error) {
 	return len(rows), nil
 }
 
+// BirthEnvelope returns the BIRTH ENVELOPE of a target scope: the envelope with
+// the lowest ledger sequence addressed to that scope whose obligation is
+// `reply_required`, in ANY state. fyi rows never summon and are outside the
+// domain, and a log entry has no addressee at all, so neither can ever be the
+// birth envelope. Nil means no firing obligation has ever been addressed to the
+// scope.
+//
+// The read is state-INDEPENDENT on purpose (T-07655): HRC's registry host reads
+// it to designate, once, the node a virgin scope is born on, and that answer has
+// to stay re-derivable after the mail that caused the birth is disposed.
+func (rs *RoomStore) BirthEnvelope(scopeRef string) (*domain.Envelope, error) {
+	scopeRef = strings.TrimSpace(scopeRef)
+	if scopeRef == "" {
+		return nil, fmt.Errorf("birth envelope requires a target scope")
+	}
+	rows, err := rs.ListEnvelopes(EnvelopeListParams{
+		ToScopeRef:  scopeRef,
+		Obligations: []domain.EnvelopeObligation{domain.EnvelopeObligationReplyRequired},
+		Limit:       1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
 // RependDueDeferrals returns deferred envelopes whose retry time has arrived to
 // pending so the kicker's next sweep re-drives them, and resolves the promise
 // that was carrying the deferral. This is a DERIVED transition back to the

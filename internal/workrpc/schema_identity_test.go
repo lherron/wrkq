@@ -18,8 +18,11 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after the T-07612
-// rev 3 amendment removed the room lifecycle (T-07642): WrkqRoom drops `state`,
+// pinnedProtocolSchemaHash is the intentional wire identity after T-07655 added
+// the birth-envelope read model — `wrkq.envelope.birthEnvelope` with
+// WrkqEnvelopeBirthEnvelopeParams and WrkqEnvelopeBirth — which HRC's registry
+// host reads to designate a virgin scope's birth node. That sits on top of the
+// T-07612 rev 3 amendment which removed the room lifecycle (T-07642): WrkqRoom drops `state`,
 // `storedState`, and `closedAt` for the `work`/`activity`/`labels` projections,
 // WrkqRoomSayResult gains the stale `notice`, WrkqRoomListParams trades `state`
 // for `all`, and wrkq.room.hide/unhide join the catalog with
@@ -27,7 +30,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:fc72e5eee0a4eb5ca152e2e5ae16a77af4376bfe45c2084b098dd1a10c57d94b"
+const pinnedProtocolSchemaHash = "sha256:62d9cbf58ae2b1a7f9fd32a50805d098351aec629633d4b272d4282faa265f7b"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -46,9 +49,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 179},
+		{"methods", len(MethodCatalog()), 180},
 		{"errorCodes", len(ErrorCodeCatalog()), 25},
-		{"dtos", len(dtoCatalog), 136},
+		{"dtos", len(dtoCatalog), 138},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

@@ -106,6 +106,7 @@ var methodCatalog = []string{
 	"wrkq.envelope.present",
 	"wrkq.envelope.pendingView",
 	"wrkq.envelope.roundEnded",
+	"wrkq.envelope.birthEnvelope",
 	"wrkq.comment.add",
 	"wrkq.comment.list",
 	"wrkq.comment.show",
@@ -273,6 +274,8 @@ var dtoCatalog = []string{
 	"WrkqRoomMemberParams",
 	"WrkqRoomMembersViewParams",
 	"WrkqEnvelopeShowParams",
+	"WrkqEnvelopeBirthEnvelopeParams",
+	"WrkqEnvelopeBirth", // birth envelope read model: lowest-seq reply_required to one scope, any state (T-07655)
 	"WrkqEnvelopeInboxViewParams",
 	"WrkqEnvelopeDeferParams",
 	"WrkqEnvelopeAckParams",

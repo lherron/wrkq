@@ -404,6 +404,27 @@ export interface WrkqRoomMembersView {
   items: WrkqRoomMember[];
 }
 
+/**
+ * The BIRTH ENVELOPE request. It carries the TARGET scope and nothing else: the
+ * sender is read off the ledger row, so a caller cannot steer which node a
+ * virgin scope is born on (T-07655).
+ */
+export interface WrkqEnvelopeBirthEnvelopeParams {
+  scopeRef: string;
+}
+
+/**
+ * The birth envelope of a target scope: the lowest-seq `reply_required`
+ * envelope addressed to it, in ANY state. `null` means nothing has ever fired
+ * at the scope — fyi never summons and is outside the domain.
+ */
+export interface WrkqEnvelopeBirth {
+  envelopeId: string;
+  /** The envelope's ledger ordinal, the number its `EN-` id is minted from. */
+  seq: number;
+  from: WrkqEnvelopeParty;
+}
+
 export interface WrkqEnvelopeShowParams {
   envelope: string;
   principalRef?: string;

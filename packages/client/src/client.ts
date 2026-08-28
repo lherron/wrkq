@@ -181,6 +181,7 @@ class WorkClientImpl implements WorkClient {
       present: (p) => this.call("wrkq.envelope.present", p),
       pendingView: (p) => this.call("wrkq.envelope.pendingView", p ?? {}),
       roundEnded: (p) => this.call("wrkq.envelope.roundEnded", p),
+      birthEnvelope: (p) => this.call("wrkq.envelope.birthEnvelope", p),
     },
     container: {
       create: (p) => this.call("wrkq.container.create", p),

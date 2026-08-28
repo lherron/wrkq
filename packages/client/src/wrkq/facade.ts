@@ -85,6 +85,8 @@ import type {
   WrkqEnvelopePresentResult,
   WrkqEnvelopeRoundParams,
   WrkqEnvelopeShowParams,
+  WrkqEnvelopeBirthEnvelopeParams,
+  WrkqEnvelopeBirth,
   WrkqRoom,
   WrkqRoomLabelParams,
   WrkqRoomListParams,
@@ -329,6 +331,12 @@ export interface WrkqEnvelopeFacade {
    */
   pendingView(params?: WrkqEnvelopePendingViewParams): Promise<WrkqEnvelopePendingView>;
   roundEnded(params: WrkqEnvelopeRoundParams): Promise<WrkqEnvelope>;
+  /**
+   * The birth envelope of one target scope — HRC's registry host reads it to
+   * designate, once, the node a virgin scope is born on. `null` when nothing
+   * has ever fired at the scope.
+   */
+  birthEnvelope(params: WrkqEnvelopeBirthEnvelopeParams): Promise<WrkqEnvelopeBirth | null>;
 }
 
 export interface WrkqFacade {

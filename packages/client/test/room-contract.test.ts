@@ -188,7 +188,12 @@ describe("wrkq.envelope facade", () => {
       .onResult("wrkq.envelope.ack", LOG_VIEW)
       .onResult("wrkq.envelope.present", PRESENT_RESULT)
       .onResult("wrkq.envelope.pendingView", PENDING_VIEW)
-      .onResult("wrkq.envelope.roundEnded", { ...ENVELOPE, roundCount: 1 });
+      .onResult("wrkq.envelope.roundEnded", { ...ENVELOPE, roundCount: 1 })
+      .onResult("wrkq.envelope.birthEnvelope", {
+        envelopeId: "EN-00001",
+        seq: 1,
+        from: { principalRef: "agent:clod", scopeRef: "clod@wrkq:T-07613" },
+      });
     const client = await createClient({ transport, autoInitialize: false });
 
     const show = { envelope: "EN-00001" };
@@ -212,6 +217,10 @@ describe("wrkq.envelope facade", () => {
     };
     const pending = { scopes: ["cody@wrkq:T-07613"], principalRef: "agent:hrc" };
     const round = { envelope: "EN-00001", maxRounds: 5, principalRef: "agent:hrc" };
+    // The birth-envelope request carries the TARGET and nothing else: the
+    // sender comes off the ledger row, so a caller cannot steer which node a
+    // virgin scope is born on (T-07655).
+    const birth = { scopeRef: "cody@wrkq:T-07613" };
 
     await client.wrkq.envelope.show(show);
 
@@ -237,6 +246,10 @@ describe("wrkq.envelope facade", () => {
 
     expect((await client.wrkq.envelope.roundEnded(round)).roundCount).toBe(1);
 
+    const born = await client.wrkq.envelope.birthEnvelope(birth);
+    expect(born?.envelopeId).toBe("EN-00001");
+    expect(born?.from.scopeRef).toBe("clod@wrkq:T-07613");
+
     expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
       { method: "wrkq.envelope.show", params: show },
       { method: "wrkq.envelope.inboxView", params: inbox },
@@ -245,7 +258,18 @@ describe("wrkq.envelope facade", () => {
       { method: "wrkq.envelope.present", params: present },
       { method: "wrkq.envelope.pendingView", params: pending },
       { method: "wrkq.envelope.roundEnded", params: round },
+      { method: "wrkq.envelope.birthEnvelope", params: birth },
     ]);
+  });
+
+  test("birthEnvelope is null when nothing ever fired at the scope", async () => {
+    // A scope that has only ever been sent fyi has no birth envelope: fyi never
+    // summons, so there is nothing to designate a birth node from and the
+    // registry falls back to today's tier 5 rather than inventing a home.
+    const transport = new FakeTransport().onResult("wrkq.envelope.birthEnvelope", null);
+    const client = await createClient({ transport, autoInitialize: false });
+
+    expect(await client.wrkq.envelope.birthEnvelope({ scopeRef: "cody@wrkq:T-07613" })).toBeNull();
   });
 
   test("pendingView includeFyi forwards the opt-in and keeps fyi out of blocking", async () => {

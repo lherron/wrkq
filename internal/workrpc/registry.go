@@ -248,6 +248,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.envelope.roundEnded", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeRoundParams) (any, error) {
 		return wq.EnvelopeRoundEnded(ctx, p)
 	}))
+	s.Register("wrkq.envelope.birthEnvelope", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeBirthEnvelopeParams) (any, error) {
+		return wq.EnvelopeBirthEnvelope(ctx, p)
+	}))
 	s.Register("wrkq.comment.add", apiHandler(func(ctx context.Context, p wrkqapi.CommentAddParams) (any, error) {
 		return wq.CommentAdd(ctx, p)
 	}))

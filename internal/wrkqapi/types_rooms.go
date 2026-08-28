@@ -379,3 +379,20 @@ type EnvelopeRoundParams struct {
 	PrincipalRef string `json:"principalRef,omitempty"`
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }
+
+// EnvelopeBirthEnvelopeParams asks for the birth envelope of ONE target scope.
+// It carries the target and nothing else: the sender is read from the ledger,
+// never supplied by the caller (T-07655).
+type EnvelopeBirthEnvelopeParams struct {
+	ScopeRef string `json:"scopeRef"`
+}
+
+// WrkqEnvelopeBirth is the birth envelope of a target scope — the lowest-seq
+// `reply_required` envelope addressed to it, in any state. A null result means
+// nothing has ever fired at the scope.
+type WrkqEnvelopeBirth struct {
+	EnvelopeID string `json:"envelopeId"`
+	// Seq is the envelope's ledger ordinal, the number its EN- id is minted from.
+	Seq  int64             `json:"seq"`
+	From WrkqEnvelopeParty `json:"from"`
+}

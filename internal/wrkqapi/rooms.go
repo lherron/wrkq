@@ -1197,6 +1197,43 @@ func (a *API) EnvelopeShow(ctx context.Context, p EnvelopeShowParams) (*WrkqEnve
 	return a.envelopeDTO(ctx, envelope, state)
 }
 
+// EnvelopeBirthEnvelope returns the BIRTH ENVELOPE of one target scope: the
+// lowest-seq `reply_required` envelope addressed to it, in any state, or nil
+// when nothing has ever fired at it. fyi never summons and is outside the
+// domain.
+//
+// This is HRC's tier-5 birth designation input (T-07655). The params carry the
+// TARGET and nothing else — the sender comes off the ledger row, so a caller
+// cannot steer which node a virgin scope is born on.
+func (a *API) EnvelopeBirthEnvelope(ctx context.Context, p EnvelopeBirthEnvelopeParams) (*WrkqEnvelopeBirth, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	target, err := normalizeRoomScopeRef(p.ScopeRef)
+	if err != nil {
+		return nil, err
+	}
+	if target == "" {
+		return nil, NewValidationError("birthEnvelope requires a target scope handle", map[string]any{"field": "scopeRef", "scopeRef": p.ScopeRef})
+	}
+	envelope, err := a.store.Rooms.BirthEnvelope(target)
+	if err != nil {
+		return nil, mapRoomStoreError(err, target)
+	}
+	if envelope == nil {
+		return nil, nil
+	}
+	_, seq, err := id.Parse(envelope.ID)
+	if err != nil {
+		return nil, NewInternalError(fmt.Errorf("birth envelope %s has no ledger ordinal: %w", envelope.ID, err))
+	}
+	return &WrkqEnvelopeBirth{
+		EnvelopeID: envelope.ID,
+		Seq:        int64(seq),
+		From:       WrkqEnvelopeParty{PrincipalRef: envelope.FromPrincipalRef, ScopeRef: envelope.FromScopeRef},
+	}, nil
+}
+
 // EnvelopeInboxView lists the reply_required obligations standing against one
 // scope, grouped by room. fyi is never listed: it carries no obligation. Every
 // group is a real obligation that gates and wakes: there is no room projection
