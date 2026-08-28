@@ -249,8 +249,39 @@ install *flags:
       if [ -n "$disk_hash" ] && [ -n "$live_hash" ] && [ "$disk_hash" != "$live_hash" ]; then
         echo "⚠️  launchd job $label (pid $job_pid) is still running the previous $job_program."
         echo "    installed ${disk_hash:0:12} != running ${live_hash:0:12} — its next respawn will be SIGKILLed."
-        echo "    Restart it now:  wrkq server restart"
-        echo ""
+        # T-07649: an install that stops here leaves the daemon armed to die, and a
+        # restart run BEFORE the install is silently self-defeating (it boots the
+        # old image, then the copy lands underneath it). So the install finishes
+        # the job itself — unless the new binary carries a migration the live
+        # database has not applied, in which case the restarted daemon would
+        # refuse to start (exit 1: requires migration) and launchd would respawn
+        # into the same failure. Then the order is install → migrate → restart,
+        # and a human takes the middle step with a database backup in hand.
+        job_db="$(printf '%s\n' "$job_print" | awk -F'=> ' '/WRKQ_DB_PATH => /{print $2}' | head -1)"
+        job_db="${job_db:-${WRKQ_DB_PATH:-}}"
+        pending=""
+        if [ -n "$job_db" ] && [ -f "$job_db" ]; then
+          pending="$(~/.local/bin/wrkqadm --db "$job_db" migrate --dry-run 2>/dev/null | awk '/^Total: [1-9]/{print}')"
+        fi
+        if [ -n "$pending" ]; then
+          echo "    The new wrkqd carries a migration the live database has not applied ($pending)."
+          echo "    NOT restarting: an unmigrated daemon exits 1 on start and launchd respawns into the same failure."
+          echo "    Back up $job_db, then:  wrkqadm --db $job_db migrate  &&  wrkq server restart"
+          echo ""
+        elif [ -z "$job_db" ]; then
+          echo "    Could not resolve the job's WRKQ_DB_PATH to check for pending migrations."
+          echo "    Restart it now:  wrkq server restart   (after 'wrkqadm migrate' if this commit carries one)"
+          echo ""
+        else
+          echo "    No pending migrations — restarting the job now so the install lands live."
+          if ~/.local/bin/wrkq server restart; then
+            echo "✓ wrkqd restarted on the installed image"
+          else
+            echo "❌ wrkq server restart FAILED — the daemon may be down or armed; run 'wrkq server health' now"
+            exit 1
+          fi
+          echo ""
+        fi
       fi
     fi
   fi
