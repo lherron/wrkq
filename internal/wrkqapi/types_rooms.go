@@ -108,7 +108,6 @@ type WrkqEnvelope struct {
 	RetryAt               *string `json:"retryAt,omitempty"`
 	DeferReason           *string `json:"deferReason,omitempty"`
 	TerminalActor         *string `json:"terminalActor,omitempty"`
-	Urgent                bool    `json:"urgent"`
 	MaterializationIntent *string `json:"materializationIntent,omitempty"`
 	RespondToPrincipalRef *string `json:"respondToPrincipalRef,omitempty"`
 	RetryPromiseID        *string `json:"retryPromiseId,omitempty"`
@@ -227,7 +226,6 @@ type RoomSayParams struct {
 	FYI            bool           `json:"fyi,omitempty"`
 	Subject        string         `json:"subject,omitempty"`
 	New            bool           `json:"new,omitempty"`
-	Urgent         bool           `json:"urgent,omitempty"`
 	RespondTo      string         `json:"respondTo,omitempty"`
 	Record         bool           `json:"record,omitempty"`
 	IdempotencyKey string         `json:"idempotencyKey,omitempty"`

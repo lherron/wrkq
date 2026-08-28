@@ -1003,7 +1003,7 @@ interface WrkqEnvelope {
   obligation: WrkqEnvelopeObligation; body: string; taskId?: string;
   state: WrkqEnvelopeState; terminal: boolean; roundCount: number;
   retryAt?: string; deferReason?: string; terminalActor?: string;
-  urgent: boolean; materializationIntent?: string;
+  materializationIntent?: string;
   respondToPrincipalRef?: string; retryPromiseId?: string;
   idempotencyKey?: string; meta: Record<string, unknown>;
   presentedTo: WrkqEnvelopePresentation[];

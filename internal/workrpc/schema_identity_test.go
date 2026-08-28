@@ -31,7 +31,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:ad2359842d7c4ac568ccbfb33850cf0a43cf256cd099ce0abce8348e639da8fa"
+const pinnedProtocolSchemaHash = "sha256:3cb63e1e5c56043a02eb7b65557a356a8306417847b109426ee75a319501cc2f"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

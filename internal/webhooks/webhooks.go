@@ -219,7 +219,6 @@ type EnvelopeProjection struct {
 	Obligation            string  `json:"obligation"`
 	State                 string  `json:"state"`
 	TaskID                *string `json:"task_id"`
-	Urgent                bool    `json:"urgent"`
 	MaterializationIntent *string `json:"materialization_intent"`
 	ETag                  int64   `json:"etag"`
 }
@@ -579,7 +578,7 @@ func lookupEnvelopeRoom(database *db.DB, envelope *domain.Envelope) (string, *En
 		FromPrincipalRef: envelope.FromPrincipalRef, FromScopeRef: envelope.FromScopeRef,
 		ToScopeRef: envelope.ToScopeRef, ToPrincipalRef: envelope.ToPrincipalRef,
 		Obligation: string(envelope.Obligation), State: string(envelope.State),
-		Urgent: envelope.Urgent, MaterializationIntent: envelope.MaterializationIntent,
+		MaterializationIntent: envelope.MaterializationIntent,
 		ETag: envelope.ETag,
 	}
 	projection.RoomKey = roomID.String

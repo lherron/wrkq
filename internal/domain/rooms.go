@@ -140,7 +140,6 @@ type Envelope struct {
 	DeferReason           *string            `json:"defer_reason,omitempty" db:"defer_reason"`
 	TerminalActor         *string            `json:"terminal_actor,omitempty" db:"terminal_actor"`
 	TerminalAt            *string            `json:"terminal_at,omitempty" db:"terminal_at"`
-	Urgent                bool               `json:"urgent" db:"urgent"`
 	MaterializationIntent *string            `json:"materialization_intent,omitempty" db:"materialization_intent"`
 	RespondToPrincipalRef *string            `json:"respond_to_principal_ref,omitempty" db:"respond_to_principal_ref"`
 	RetryPromiseUUID      *string            `json:"retry_promise_uuid,omitempty" db:"retry_promise_uuid"`

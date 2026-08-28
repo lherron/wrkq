@@ -262,9 +262,6 @@ func wrkcEnvelopeTranscriptLines(envelope envelopeWire) []string {
 		header += " → " + envelopePartyLabel(*envelope.To)
 	}
 	header += "  " + envelope.Obligation + "/" + envelope.State + "  " + envelope.ID
-	if envelope.Urgent {
-		header += " urgent"
-	}
 	lines := []string{header}
 	if envelope.DeferReason != nil {
 		deferred := "  deferred: " + *envelope.DeferReason

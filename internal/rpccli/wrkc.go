@@ -97,7 +97,6 @@ type envelopeWire struct {
 	RetryAt               *string                    `json:"retryAt,omitempty"`
 	DeferReason           *string                    `json:"deferReason,omitempty"`
 	TerminalActor         *string                    `json:"terminalActor,omitempty"`
-	Urgent                bool                       `json:"urgent"`
 	MaterializationIntent *string                    `json:"materializationIntent,omitempty"`
 	RespondToPrincipalRef *string                    `json:"respondToPrincipalRef,omitempty"`
 	RetryPromiseID        *string                    `json:"retryPromiseId,omitempty"`
@@ -240,7 +239,7 @@ func wrkcParams(cmd *cobra.Command) (map[string]any, error) {
 
 func newWrkcSayCmd() *cobra.Command {
 	var to []string
-	var fyi, newRoom, urgent, record bool
+	var fyi, newRoom, record bool
 	var subject, respondTo, idempotencyKey, timeout, message string
 	var wait bool
 	var output promiseOutputFlags
@@ -338,9 +337,6 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if newRoom {
 				params["new"] = true
 			}
-			if urgent {
-				params["urgent"] = true
-			}
 			if record {
 				params["record"] = true
 			}
@@ -377,7 +373,6 @@ agent:<id> to address a scope-less principal such as a human.`,
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until every envelope in the group is terminal, then print each reply")
 	cmd.Flags().StringVar(&timeout, "timeout", "", "Maximum --wait duration (e.g. 10m)")
-	cmd.Flags().BoolVar(&urgent, "urgent", false, "Delivery intent stored for HRC to actuate; wrkq does not know what steer is")
 	cmd.Flags().StringVar(&respondTo, "respond-to", "", "Principal the reply should be addressed to")
 	cmd.Flags().BoolVar(&record, "record", false, "Also write the body as a wrkq comment on the room's task")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key for this say; carried by every envelope of the fan-out")

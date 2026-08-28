@@ -105,7 +105,7 @@ on — and answering it is an ordinary say.
 
 ```bash
 wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--subject s] [--new]
-                        [--wait [--timeout d]] [--urgent] [--respond-to p]
+                        [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
 wrkc open <scope>... -s <subject> [--task T-x]
 wrkc log <room> [--task T-x] [--limit n]

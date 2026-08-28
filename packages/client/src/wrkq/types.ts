@@ -269,7 +269,6 @@ export interface WrkqEnvelope {
   retryAt?: string;
   deferReason?: string;
   terminalActor?: string;
-  urgent: boolean;
   materializationIntent?: string;
   respondToPrincipalRef?: string;
   retryPromiseId?: string;
@@ -303,7 +302,6 @@ export interface WrkqRoomSayParams {
   subject?: string;
   /** Force a fresh ad-hoc room instead of reusing the open pair room. */
   new?: boolean;
-  urgent?: boolean;
   respondTo?: string;
   /** Also write the body as a wrkq comment on the room's task. */
   record?: boolean;

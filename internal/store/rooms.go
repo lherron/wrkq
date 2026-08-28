@@ -60,7 +60,7 @@ const roomColumns = `
 const envelopeColumns = `
 	uuid, id, room_uuid, group_id, from_principal_ref, from_scope_ref,
 	to_scope_ref, to_principal_ref, obligation, body, task_uuid, state,
-	round_count, retry_at, defer_reason, terminal_actor, terminal_at, urgent,
+	round_count, retry_at, defer_reason, terminal_actor, terminal_at,
 	materialization_intent, respond_to_principal_ref, retry_promise_uuid,
 	idempotency_key, meta, etag, created_at, updated_at,
 	created_by_principal_ref, created_by_scope_ref,
@@ -475,7 +475,6 @@ type EnvelopeCreateParams struct {
 	Obligation            domain.EnvelopeObligation
 	Body                  string
 	TaskUUID              *string
-	Urgent                bool
 	RespondToPrincipalRef *string
 	IdempotencyKey        *string
 	Meta                  *string
@@ -541,20 +540,16 @@ func (rs *RoomStore) CreateEnvelopesWithAttribution(attr attribution.Attribution
 				idempotencyKey = *params.IdempotencyKey
 			}
 
-			urgent := 0
-			if params.Urgent {
-				urgent = 1
-			}
 			res, err := tx.Exec(`INSERT INTO envelopes (
 				id, room_uuid, from_principal_ref, from_scope_ref, to_scope_ref,
-				to_principal_ref, obligation, body, task_uuid, state, urgent,
+				to_principal_ref, obligation, body, task_uuid, state,
 				materialization_intent, respond_to_principal_ref, idempotency_key,
 				meta, terminal_actor, terminal_at,
 				created_by_principal_ref, created_by_scope_ref,
 				updated_by_principal_ref, updated_by_scope_ref
-			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				params.RoomUUID, params.FromPrincipalRef, params.FromScopeRef, toScope,
-				toPrincipal, params.Obligation, params.Body, params.TaskUUID, state, urgent,
+				toPrincipal, params.Obligation, params.Body, params.TaskUUID, state,
 				intent, params.RespondToPrincipalRef, idempotencyKey, params.Meta,
 				terminalActor, terminalAt,
 				attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr))
@@ -1210,9 +1205,6 @@ func envelopeEventPayload(envelope *domain.Envelope) map[string]interface{} {
 	if envelope.TaskUUID != nil {
 		payload["task_uuid"] = *envelope.TaskUUID
 	}
-	if envelope.Urgent {
-		payload["urgent"] = true
-	}
 	if envelope.MaterializationIntent != nil {
 		payload["materialization_intent"] = *envelope.MaterializationIntent
 	}
@@ -1342,7 +1334,7 @@ func scanEnvelope(scanner collabScanner) (*domain.Envelope, error) {
 		&envelope.ToPrincipalRef, &envelope.Obligation, &envelope.Body,
 		&envelope.TaskUUID, &envelope.State, &envelope.RoundCount,
 		&envelope.RetryAt, &envelope.DeferReason, &envelope.TerminalActor,
-		&envelope.TerminalAt, &envelope.Urgent, &envelope.MaterializationIntent,
+		&envelope.TerminalAt, &envelope.MaterializationIntent,
 		&envelope.RespondToPrincipalRef, &envelope.RetryPromiseUUID,
 		&envelope.IdempotencyKey, &envelope.Meta, &envelope.ETag,
 		&envelope.CreatedAt, &envelope.UpdatedAt,

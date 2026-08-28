@@ -1343,7 +1343,6 @@ CREATE TABLE envelopes (
   terminal_at TEXT,
 
   -- Delivery intent HRC actuates; wrkq stores it and does not interpret it.
-  urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
   materialization_intent TEXT,
   respond_to_principal_ref TEXT,
 

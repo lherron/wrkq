@@ -47,7 +47,6 @@ const ENVELOPE: WrkqEnvelope = {
   state: "presented",
   terminal: false,
   roundCount: 0,
-  urgent: false,
   idempotencyKey: "acp:hrc-message:m-1",
   meta: {},
   presentedTo: [
