@@ -18,8 +18,9 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after T-07655 added
-// the birth-envelope read model — `wrkq.envelope.birthEnvelope` with
+// pinnedProtocolSchemaHash is the intentional wire identity after T-07673 added
+// side-effect-free `preview` plus opaque `inputId` to envelope presentation.
+// That sits on top of T-07655's birth-envelope read model — `wrkq.envelope.birthEnvelope` with
 // WrkqEnvelopeBirthEnvelopeParams and WrkqEnvelopeBirth — which HRC's registry
 // host reads to designate a virgin scope's birth node. That sits on top of the
 // T-07612 rev 3 amendment which removed the room lifecycle (T-07642): WrkqRoom drops `state`,
@@ -30,7 +31,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:62d9cbf58ae2b1a7f9fd32a50805d098351aec629633d4b272d4282faa265f7b"
+const pinnedProtocolSchemaHash = "sha256:ad2359842d7c4ac568ccbfb33850cf0a43cf256cd099ce0abce8348e639da8fa"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

@@ -181,6 +181,9 @@ type EnvelopePresentation struct {
 	Generation     *string `json:"generation,omitempty" db:"generation"`
 	RunID          *string `json:"run_id,omitempty" db:"run_id"`
 	DriveAttemptID *string `json:"drive_attempt_id,omitempty" db:"drive_attempt_id"`
+	// InputID is the broker input that accepted this presentation. It is opaque
+	// execution-world join data, just like the runtime and drive-attempt ids.
+	InputID *string `json:"input_id,omitempty" db:"input_id"`
 	// DeliveryOutcome is HRC's own classification of HOW this presentation was
 	// delivered. Like every other identifier on the receipt it is opaque: wrkq
 	// stores and returns it and never interprets or validates it (T-07638).

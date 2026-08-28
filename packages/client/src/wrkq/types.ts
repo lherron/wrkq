@@ -228,6 +228,8 @@ export interface WrkqEnvelopePresentation {
   generation?: string;
   runId?: string;
   driveAttemptId?: string;
+  /** Broker input that accepted this presentation; opaque to wrkq. */
+  inputId?: string;
   /**
    * HRC's own class for HOW this delivery landed — `admitted_into_active_turn`,
    * `presented_to_live_harness`, `started_fresh_turn`, `kicker` today. wrkq
@@ -479,6 +481,8 @@ export interface WrkqEnvelopeAckParams {
 
 export interface WrkqEnvelopePresentParams {
   envelope: string;
+  /** Compute the presentation projection without writing a receipt or advancing state. */
+  preview?: boolean;
   memberRef?: string;
   node?: string;
   runtimeId?: string;
@@ -487,6 +491,8 @@ export interface WrkqEnvelopePresentParams {
   runId?: string;
   /** One drive attempt presents an envelope exactly once. */
   driveAttemptId?: string;
+  /** Broker input that accepted this presentation; ignored when previewing. */
+  inputId?: string;
   /** Optional. HRC's class for how this delivery landed; absent stays null. */
   deliveryOutcome?: string;
   principalRef?: string;

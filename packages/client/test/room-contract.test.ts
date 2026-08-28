@@ -56,6 +56,7 @@ const ENVELOPE: WrkqEnvelope = {
       node: "mini",
       runtimeId: "runtime-A",
       generation: "49",
+      inputId: "input-A",
       deliveryOutcome: "admitted_into_active_turn",
       presentedAt: "2026-08-27T00:05:00Z",
     },
@@ -211,6 +212,8 @@ describe("wrkq.envelope facade", () => {
       runtimeId: "runtime-A",
       generation: "49",
       driveAttemptId: "drive-1",
+      preview: false,
+      inputId: "input-A",
       // HRC's own class for how the delivery landed, held opaquely by wrkq.
       deliveryOutcome: "admitted_into_active_turn",
       principalRef: "agent:hrc",
@@ -237,6 +240,7 @@ describe("wrkq.envelope facade", () => {
     const presented = await client.wrkq.envelope.present(present);
     expect(presented.historyHint).toBe(true);
     expect(presented.recorded).toBe(true);
+    expect(presented.envelope.presentedTo[0]!.inputId).toBe("input-A");
     expect(presented.envelope.presentedTo[0]!.deliveryOutcome).toBe("admitted_into_active_turn");
 
     // One read model serves both the kicker wake set and the stop-hook predicate.

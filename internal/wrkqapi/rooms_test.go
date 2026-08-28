@@ -4,6 +4,7 @@ package wrkqapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,6 +15,46 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 )
+
+func databaseRowsSnapshot(t *testing.T, database interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}, query string, args ...any) string {
+	t.Helper()
+	rows, err := database.Query(query, args...)
+	if err != nil {
+		t.Fatalf("snapshot query: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("snapshot columns: %v", err)
+	}
+	result := make([][]any, 0)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		dest := make([]any, len(columns))
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			t.Fatalf("snapshot scan: %v", err)
+		}
+		for i, value := range values {
+			if raw, ok := value.([]byte); ok {
+				values[i] = string(raw)
+			}
+		}
+		result = append(result, values)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("snapshot rows: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("snapshot marshal: %v", err)
+	}
+	return string(encoded)
+}
 
 // Test bundle 1 of T-07612 §15: the ledger and its routing table. Every case
 // here is a behavioral claim about the collaboration ledger ALONE — no HRC
@@ -1308,6 +1349,125 @@ func TestPresentationReceiptAndHistoryHintKeyedToRuntime(t *testing.T) {
 		receipt.Generation == nil || *receipt.Generation != "49" {
 		t.Fatalf("receipt lost HRC identifiers: %+v", receipt)
 	}
+}
+
+// TestPresentationPreviewIsSideEffectFreeAndMatchesCommit proves the split
+// presentation contract: preview computes the complete projection without
+// touching the envelope row, presentation rows, event ledger, or fyi state.
+func TestPresentationPreviewIsSideEffectFreeAndMatchesCommit(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	// Ensure the room has history worth cueing before the target fyi arrives.
+	f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "earlier context", PrincipalRef: "agent:clod",
+	})
+	fyi := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "preview me", To: []string{"cody"}, FYI: true,
+		PrincipalRef: "agent:clod",
+	})
+	envelopeUUID := fyi.Envelopes[0].UUID
+	rowBefore := databaseRowsSnapshot(t, f.s.DB(), "SELECT * FROM envelopes WHERE uuid = ?", envelopeUUID)
+	eventsBefore := databaseRowsSnapshot(t, f.s.DB(), "SELECT * FROM event_log WHERE resource_uuid = ? ORDER BY id", envelopeUUID)
+
+	params := EnvelopePresentParams{
+		Envelope: fyi.Envelopes[0].ID, Preview: true, PrincipalRef: "agent:hrc",
+		RuntimeID: "runtime-preview", DriveAttemptID: "drive-preview", InputID: "ignored-preview-input",
+	}
+	preview, err := f.api.EnvelopePresent(ctx, params)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if preview.Recorded {
+		t.Fatal("preview reported a durable presentation")
+	}
+	if preview.Envelope.State != "pending" || preview.Envelope.Terminal || len(preview.Envelope.PresentedTo) != 0 {
+		t.Fatalf("preview mutated its result envelope: %+v", preview.Envelope)
+	}
+	if got := databaseRowsSnapshot(t, f.s.DB(), "SELECT * FROM envelopes WHERE uuid = ?", envelopeUUID); got != rowBefore {
+		t.Fatalf("preview changed the envelope row:\nbefore %s\nafter  %s", rowBefore, got)
+	}
+	if got := databaseRowsSnapshot(t, f.s.DB(), "SELECT * FROM event_log WHERE resource_uuid = ? ORDER BY id", envelopeUUID); got != eventsBefore {
+		t.Fatalf("preview changed the envelope event ledger:\nbefore %s\nafter  %s", eventsBefore, got)
+	}
+	var receiptCount int
+	if err := f.s.DB().QueryRow("SELECT COUNT(*) FROM envelope_presentations WHERE envelope_uuid = ?", envelopeUUID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count preview receipts: %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("preview wrote %d presentation receipts", receiptCount)
+	}
+
+	params.Preview = false
+	params.InputID = "input-accepted-1"
+	committed, err := f.api.EnvelopePresent(ctx, params)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if !committed.Recorded || committed.Envelope.State != "acked" || !committed.Envelope.Terminal {
+		t.Fatalf("committed fyi was not recorded and auto-acked: %+v", committed)
+	}
+	if preview.HistoryHint != committed.HistoryHint || preview.MessageCount != committed.MessageCount ||
+		(preview.LastMessage == nil) != (committed.LastMessage == nil) ||
+		(preview.LastMessage != nil && *preview.LastMessage != *committed.LastMessage) {
+		t.Fatalf("preview projection differs from commit: preview=%+v commit=%+v", preview, committed)
+	}
+	if len(committed.Envelope.PresentedTo) != 1 || committed.Envelope.PresentedTo[0].InputID == nil ||
+		*committed.Envelope.PresentedTo[0].InputID != "input-accepted-1" {
+		t.Fatalf("commit receipt lost inputId: %+v", committed.Envelope.PresentedTo)
+	}
+
+	repeated, err := f.api.EnvelopePresent(ctx, params)
+	if err != nil {
+		t.Fatalf("repeat commit: %v", err)
+	}
+	if repeated.Recorded || len(repeated.Envelope.PresentedTo) != 1 {
+		t.Fatalf("drive-attempt retry duplicated the receipt: %+v", repeated)
+	}
+}
+
+func TestPresentationInputIDIsOptionalAndDeliveryOutcomeRemainsOpaque(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	withInput := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "with input", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	withoutInput := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "without input", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	first, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: withInput.Envelopes[0].ID, PrincipalRef: "agent:hrc", InputID: "in-1",
+		DeliveryOutcome: "future-harness-class",
+	})
+	if err != nil {
+		t.Fatalf("present with inputId: %v", err)
+	}
+	second, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: withoutInput.Envelopes[0].ID, PrincipalRef: "agent:hrc",
+		DeliveryOutcome: "admitted_into_active_turn",
+	})
+	if err != nil {
+		t.Fatalf("present without inputId: %v", err)
+	}
+	firstReceipt := first.Envelope.PresentedTo[0]
+	if firstReceipt.InputID == nil || *firstReceipt.InputID != "in-1" ||
+		firstReceipt.DeliveryOutcome == nil || *firstReceipt.DeliveryOutcome != "future-harness-class" {
+		t.Fatalf("opaque receipt fields were not preserved: %+v", firstReceipt)
+	}
+	if second.Envelope.PresentedTo[0].InputID != nil {
+		t.Fatalf("absent inputId became present: %+v", second.Envelope.PresentedTo[0])
+	}
+}
+
+func TestPresentationPreviewStillRequiresMemberRefWithoutAddressee(t *testing.T) {
+	f := newRoomFixture(t)
+	logEntry := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "unaddressed", PrincipalRef: "agent:clod",
+	})
+	_, err := f.api.EnvelopePresent(context.Background(), EnvelopePresentParams{
+		Envelope: logEntry.Envelopes[0].ID, Preview: true, PrincipalRef: "agent:hrc",
+	})
+	_ = assertDomainCode(t, CodeValidation, err)
 }
 
 // TestPresentationIsExactlyOncePerDriveAttempt proves the at-least-once

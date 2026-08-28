@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/store"
 )
@@ -145,6 +146,27 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 		*said.Envelopes[0].To.ScopeRef != codySeat {
 		t.Fatalf("bare --to did not resolve to the task seat: %+v", said.Envelopes[0].To)
 	}
+	// HRC's receipt data must survive the wrkc wire model used by log/show.
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open for presentation: %v", err)
+	}
+	envelope, err := store.New(database).Rooms.GetEnvelope(envelopeID)
+	if err != nil {
+		_ = database.Close()
+		t.Fatalf("resolve envelope for presentation: %v", err)
+	}
+	inputID := "wrkc-input-1"
+	if _, _, err := store.New(database).Rooms.RecordPresentationWithAttribution(
+		attribution.Attribution{PrincipalRef: "agent:hrc"}, envelope.UUID,
+		store.PresentationRecord{MemberRef: codySeat, InputID: &inputID},
+	); err != nil {
+		_ = database.Close()
+		t.Fatalf("record presentation: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close presentation database: %v", err)
+	}
 
 	// log renders a transcript in the human mode and envelopes in JSON.
 	logOut, err := runWrkc(t, f.dbPath, "agent:clod", "log", f.taskID, "--json")
@@ -157,6 +179,10 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	}
 	if len(logged) != 1 || logged[0].Body != "first message" {
 		t.Fatalf("log = %+v", logged)
+	}
+	if len(logged[0].PresentedTo) != 1 || logged[0].PresentedTo[0].InputID == nil ||
+		*logged[0].PresentedTo[0].InputID != inputID {
+		t.Fatalf("log receipt lost inputId: %+v", logged[0].PresentedTo)
 	}
 
 	// show dispatches on the selector shape: EN- is an envelope, anything else

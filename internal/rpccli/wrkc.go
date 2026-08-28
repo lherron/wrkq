@@ -73,6 +73,7 @@ type envelopePresentationWire struct {
 	Generation      *string `json:"generation,omitempty"`
 	RunID           *string `json:"runId,omitempty"`
 	DriveAttemptID  *string `json:"driveAttemptId,omitempty"`
+	InputID         *string `json:"inputId,omitempty"`
 	DeliveryOutcome *string `json:"deliveryOutcome,omitempty"`
 	PresentedAt     string  `json:"presentedAt"`
 }

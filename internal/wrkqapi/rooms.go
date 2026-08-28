@@ -1421,10 +1421,10 @@ func (a *API) EnvelopeAck(ctx context.Context, p EnvelopeAckParams) (*WrkqRoomLo
 	return view, nil
 }
 
-// EnvelopePresent is the HRC-facing write. HRC calls it at presentation to
-// record presented_to and emit envelope.presented; wrkq answers with the §7
-// `history:` cue decision, keyed to the RUNTIME so a post-/quit runtime that
-// shares its generation still reads as cold.
+// EnvelopePresent is the HRC-facing presentation projection and receipt write.
+// Preview returns the same projection without mutating the ledger; commit
+// records presented_to and emits envelope.presented. The §7 `history:` cue is
+// keyed to the RUNTIME so a post-/quit runtime sharing its generation is cold.
 func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*WrkqEnvelopePresentResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1461,15 +1461,19 @@ func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*Wr
 		historyHint = !seen
 	}
 
-	updated, recorded, err := a.store.Rooms.RecordPresentationWithAttribution(attr, envelope.UUID, store.PresentationRecord{
-		MemberRef: memberRef,
-		Node:      optionalString(p.Node), RuntimeID: optionalString(p.RuntimeID),
-		HostSessionID: optionalString(p.HostSessionID), Generation: optionalString(p.Generation),
-		RunID: optionalString(p.RunID), DriveAttemptID: optionalString(p.DriveAttemptID),
-		DeliveryOutcome: optionalString(p.DeliveryOutcome),
-	})
-	if err != nil {
-		return nil, mapRoomStoreError(err, p.Envelope)
+	updated := envelope
+	recorded := false
+	if !p.Preview {
+		updated, recorded, err = a.store.Rooms.RecordPresentationWithAttribution(attr, envelope.UUID, store.PresentationRecord{
+			MemberRef: memberRef,
+			Node:      optionalString(p.Node), RuntimeID: optionalString(p.RuntimeID),
+			HostSessionID: optionalString(p.HostSessionID), Generation: optionalString(p.Generation),
+			RunID: optionalString(p.RunID), DriveAttemptID: optionalString(p.DriveAttemptID),
+			InputID: optionalString(p.InputID), DeliveryOutcome: optionalString(p.DeliveryOutcome),
+		})
+		if err != nil {
+			return nil, mapRoomStoreError(err, p.Envelope)
+		}
 	}
 
 	state, err := a.loadRoomState(ctx, updated.RoomUUID)
@@ -2029,7 +2033,7 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 	}
 
 	rows, err := a.db.QueryContext(ctx, `SELECT member_ref, node, runtime_id, host_session_id,
-		 generation, run_id, drive_attempt_id, delivery_outcome, presented_at
+		 generation, run_id, drive_attempt_id, input_id, delivery_outcome, presented_at
 		 FROM envelope_presentations WHERE envelope_uuid = ? ORDER BY presented_at, uuid`, envelope.UUID)
 	if err != nil {
 		return nil, NewInternalError(err)
@@ -2038,7 +2042,7 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 	for rows.Next() {
 		var item WrkqEnvelopePresentation
 		if err := rows.Scan(&item.MemberRef, &item.Node, &item.RuntimeID, &item.HostSessionID,
-			&item.Generation, &item.RunID, &item.DriveAttemptID, &item.DeliveryOutcome,
+			&item.Generation, &item.RunID, &item.DriveAttemptID, &item.InputID, &item.DeliveryOutcome,
 			&item.PresentedAt); err != nil {
 			return nil, NewInternalError(err)
 		}
@@ -2066,7 +2070,7 @@ func presentationDTO(presentation *domain.EnvelopePresentation) *WrkqEnvelopePre
 		MemberRef: presentation.MemberRef, Node: presentation.Node,
 		RuntimeID: presentation.RuntimeID, HostSessionID: presentation.HostSessionID,
 		Generation: presentation.Generation, RunID: presentation.RunID,
-		DriveAttemptID:  presentation.DriveAttemptID,
+		DriveAttemptID: presentation.DriveAttemptID, InputID: presentation.InputID,
 		DeliveryOutcome: presentation.DeliveryOutcome,
 		PresentedAt:     toRFC3339(presentation.PresentedAt),
 	}

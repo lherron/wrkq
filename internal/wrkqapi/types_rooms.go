@@ -73,6 +73,7 @@ type WrkqEnvelopePresentation struct {
 	Generation     *string `json:"generation,omitempty"`
 	RunID          *string `json:"runId,omitempty"`
 	DriveAttemptID *string `json:"driveAttemptId,omitempty"`
+	InputID        *string `json:"inputId,omitempty"`
 	// DeliveryOutcome is HRC's own class for HOW this delivery landed —
 	// admitted_into_active_turn, presented_to_live_harness, started_fresh_turn,
 	// kicker today. wrkq stores and returns it and never interprets it, so HRC
@@ -344,6 +345,7 @@ type EnvelopeAckParams struct {
 // identifier here as an opaque string and never resolves it back to a runtime.
 type EnvelopePresentParams struct {
 	Envelope       string `json:"envelope"`
+	Preview        bool   `json:"preview,omitempty"`
 	MemberRef      string `json:"memberRef,omitempty"`
 	Node           string `json:"node,omitempty"`
 	RuntimeID      string `json:"runtimeId,omitempty"`
@@ -351,6 +353,8 @@ type EnvelopePresentParams struct {
 	Generation     string `json:"generation,omitempty"`
 	RunID          string `json:"runId,omitempty"`
 	DriveAttemptID string `json:"driveAttemptId,omitempty"`
+	// InputID is the accepted broker input; wrkq stores it opaquely on commit.
+	InputID string `json:"inputId,omitempty"`
 	// DeliveryOutcome is optional: HRC's class for how this delivery landed.
 	// Absent stays null on the receipt; wrkq never validates the vocabulary.
 	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
