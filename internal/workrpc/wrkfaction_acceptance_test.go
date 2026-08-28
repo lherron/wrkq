@@ -172,7 +172,7 @@ func TestWrkfActionStart_DefaultV5WithV1DiscontinuedAndExplicitRefsRemainAuthori
 			"ref": "wrkq-simple-task@1", "principal_ref": "agent:curator",
 		}),
 		mkRPC("install-v5", "wrkq.workflow.attach", map[string]any{
-			"task": v5InstallTask, "workflow": "wrkq-simple-task@5", "principal_ref": actActor,
+			"task": v5InstallTask, "workflow": "wrkq-simple-task@5", "actor": actActor,
 		}),
 		mkRPC("default", "wrkf.action.start", map[string]any{
 			"task": defaultTask, "action": "implement", "principal_ref": actActor,

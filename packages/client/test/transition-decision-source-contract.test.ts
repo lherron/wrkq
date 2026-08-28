@@ -42,9 +42,13 @@ describe("T-05619 canonical wrkf transition decision contract", () => {
     expect(decisionExists, `${decisionPath} should hold the canonical evaluator`).toBe(true);
 
     const source = decisionExists ? readRepoFile(decisionPath) : "";
-    expect(source).toContain("type TransitionDecisionInput");
-    expect(source).toContain("type TransitionDecision");
-    expect(source).toContain("type TransitionFollowUp");
+    // The decision types live beside the evaluator (T-07619): the contract is
+    // one evaluator API, not one file.
+    const typesPath = "internal/workflow/types_transition_decision.go";
+    const declarations = existsSync(join(repoRoot, typesPath)) ? readRepoFile(typesPath) : source;
+    expect(declarations).toContain("type TransitionDecisionInput");
+    expect(declarations).toContain("type TransitionDecision");
+    expect(declarations).toContain("type TransitionFollowUp");
     expect(source).toMatch(/func\s+\(s \*Service\)\s+EvaluateTransitionDecision\s*\(/);
 
     const body = functionBody(source, "(s *Service) EvaluateTransitionDecision");

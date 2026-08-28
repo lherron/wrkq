@@ -1222,6 +1222,23 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 			return fmt.Errorf("cannot purge task %s: it is referenced by the caused_by lineage of %d surviving task(s); clear those references first", slug, causedByReferrers)
 		}
 
+		// Guard the room (T-07641): rooms.task_uuid cascades on delete, so a
+		// purge would silently destroy the task's conversation, every envelope
+		// in it, its members and receipts — including reply_required obligations
+		// presented to another seat. Talk outlives the runtime that carried it;
+		// it must outlive the task row too. Archive instead (rm without --purge).
+		var roomCount, envelopeCount int
+		if err := tx.QueryRow(
+			`SELECT COUNT(r.uuid), COUNT(e.uuid) FROM rooms r
+			 LEFT JOIN envelopes e ON e.room_uuid = r.uuid
+			 WHERE r.task_uuid = ?`, taskUUID,
+		).Scan(&roomCount, &envelopeCount); err != nil {
+			return fmt.Errorf("failed to check task room: %w", err)
+		}
+		if roomCount > 0 {
+			return fmt.Errorf("cannot purge task %s: it has a room with %d envelope(s); a purge would destroy the conversation and every live obligation in it — archive it instead (rm without --purge)", slug, envelopeCount)
+		}
+
 		// Capture webhook payload info before deletion
 		info, err := webhooks.LookupTaskInfoWith(tx, taskUUID)
 		if err != nil {

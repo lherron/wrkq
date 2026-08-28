@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -476,6 +477,52 @@ func TestTaskStore_Purge(t *testing.T) {
 	_ = database.QueryRow("SELECT COUNT(*) FROM event_log WHERE resource_uuid = ? AND event_type = 'task.purged'", taskResult.UUID).Scan(&eventCount)
 	if eventCount != 1 {
 		t.Errorf("expected 1 task.purged event, got %d", eventCount)
+	}
+}
+
+// TestTaskStore_PurgeRefusesTaskWithRoom (T-07641): a task that owns a room is
+// never hard-purged, because rooms.task_uuid cascades and would take the
+// conversation, envelopes and live obligations with it.
+func TestTaskStore_PurgeRefusesTaskWithRoom(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	containerUUID := setupTestContainer(t, database, actorUUID)
+	s := New(database)
+
+	taskResult, err := s.Tasks.Create(actorUUID, CreateParams{
+		Slug: "purge-room", Title: "Purge Room", ProjectUUID: containerUUID, State: "open", Priority: 3,
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO rooms (id, kind, task_uuid, opened_by_principal_ref, created_by_principal_ref, updated_by_principal_ref) VALUES ('T-TEST', 'task', ?, 'agent:test', 'agent:test', 'agent:test')`,
+		taskResult.UUID,
+	); err != nil {
+		t.Fatalf("seed room: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO envelopes (id, room_uuid, from_principal_ref, to_principal_ref, obligation, body, created_by_principal_ref, updated_by_principal_ref)
+		 SELECT 'EN-TEST', uuid, 'agent:a', 'agent:b', 'reply_required', 'hi', 'agent:a', 'agent:a' FROM rooms WHERE id = 'T-TEST'`,
+	); err != nil {
+		t.Fatalf("seed envelope: %v", err)
+	}
+
+	_, err = s.Tasks.Purge(actorUUID, taskResult.UUID, 0)
+	if err == nil {
+		t.Fatal("expected purge to be refused for a task with a room")
+	}
+	if !strings.Contains(err.Error(), "has a room with 1 envelope") {
+		t.Fatalf("unexpected refusal text: %v", err)
+	}
+	var rooms, envs int
+	_ = database.QueryRow("SELECT COUNT(*) FROM rooms WHERE task_uuid = ?", taskResult.UUID).Scan(&rooms)
+	_ = database.QueryRow("SELECT COUNT(*) FROM envelopes WHERE id = 'EN-TEST'").Scan(&envs)
+	if rooms != 1 || envs != 1 {
+		t.Fatalf("room/envelope must survive a refused purge: rooms=%d envelopes=%d", rooms, envs)
+	}
+	if _, err := s.Tasks.GetByUUID(taskResult.UUID); err != nil {
+		t.Fatalf("task must survive a refused purge: %v", err)
 	}
 }
 

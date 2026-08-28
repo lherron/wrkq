@@ -3,8 +3,10 @@
 package workrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/wrkfapi"
@@ -45,6 +47,9 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("rpc.initialize", HandlerFunc(func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var params struct {
 			ProtocolVersion string `json:"protocolVersion"`
+			// Client identity is informational (name/version); declared so the
+			// strict decoder (T-07647) accepts what every client already sends.
+			Client json.RawMessage `json:"client"`
 		}
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err
@@ -703,8 +708,17 @@ func decodeParams(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return NewValidationError("invalid params", nil)
+	// T-07647: an unknown key is a misspelled selector, and a misspelled
+	// selector silently answers a DIFFERENT question (an empty wake set for the
+	// kicker, a stranded obligation for the stop hook). Refuse it by name.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		msg := "invalid params"
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
+			msg = "invalid params: " + strings.TrimPrefix(err.Error(), "json: ")
+		}
+		return NewValidationError(msg, nil)
 	}
 	return nil
 }
