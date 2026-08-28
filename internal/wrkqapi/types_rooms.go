@@ -22,28 +22,38 @@ type WrkqRoomLink struct {
 	Kind     string `json:"kind"`
 }
 
-// WrkqRoom is the stable room resource DTO. State is the EFFECTIVE state a
-// caller must obey; StoredState is the durable column, so a derived closure
-// (task went terminal, campaign closed) is distinguishable from an explicit one.
+// WrkqRoom is the stable room resource DTO. A room carries NO lifecycle state:
+// Work and Activity are READ-TIME PROJECTIONS a consumer may render and must
+// never gate on, because a say into any room a caller can resolve always
+// writes. Labels holds the operator discovery labels (`hidden` today), which
+// change the default listing and nothing else.
 type WrkqRoom struct {
-	UUID                 string           `json:"uuid"`
-	ID                   *string          `json:"id,omitempty"`
-	Key                  string           `json:"key"`
-	Kind                 string           `json:"kind"`
-	Subject              *string          `json:"subject,omitempty"`
-	State                string           `json:"state"`
-	StoredState          string           `json:"storedState"`
+	UUID    string  `json:"uuid"`
+	ID      *string `json:"id,omitempty"`
+	Key     string  `json:"key"`
+	Kind    string  `json:"kind"`
+	Subject *string `json:"subject,omitempty"`
+	// Work is "open" or "terminal", derived from the task/campaign state. An
+	// ad-hoc room anchors on no work and is always "open".
+	Work string `json:"work"`
+	// Activity is "stale", "active", or "quiet", by FIRST MATCH over
+	// LastActivityAt: stale iff Work is terminal and the last activity is older
+	// than 4h, else active under 24h, else quiet. Exactly one value, always.
+	Activity             string           `json:"activity"`
+	Labels               []string         `json:"labels"`
 	WorkRef              *WrkqRoomWorkRef `json:"workRef"`
 	Links                []WrkqRoomLink   `json:"links"`
 	OpenedByPrincipalRef string           `json:"openedByPrincipalRef"`
 	OpenedAt             string           `json:"openedAt"`
-	ClosedAt             *string          `json:"closedAt,omitempty"`
-	LastActivityAt       string           `json:"lastActivityAt"`
-	MemberCount          int              `json:"memberCount"`
-	MessageCount         int              `json:"messageCount"`
-	ETag                 int64            `json:"etag"`
-	CreatedAt            string           `json:"createdAt"`
-	UpdatedAt            string           `json:"updatedAt"`
+	// LastActivityAt is the activity clock: max(openedAt, newest envelope,
+	// newest member join). openedAt always exists, so it is defined for every
+	// room including one that has never carried a message.
+	LastActivityAt string `json:"lastActivityAt"`
+	MemberCount    int    `json:"memberCount"`
+	MessageCount   int    `json:"messageCount"`
+	ETag           int64  `json:"etag"`
+	CreatedAt      string `json:"createdAt"`
+	UpdatedAt      string `json:"updatedAt"`
 }
 
 // WrkqEnvelopeParty is one end of an envelope. ScopeRef is absent for a
@@ -138,6 +148,11 @@ type WrkqRoomSayResult struct {
 	// RecordedCommentID is set when --record also wrote the body as a wrkq
 	// comment on the room's task. Rooms are talk; comments are record.
 	RecordedCommentID *string `json:"recordedCommentId,omitempty"`
+	// Notice is §5's advisory: set when the say landed in a room whose activity
+	// read `stale`. It is never an error and there is no override flag, because
+	// there is nothing to override — the say already wrote. A CLI prints it to
+	// stderr; a programmatic consumer may ignore it.
+	Notice *string `json:"notice,omitempty"`
 }
 
 type WrkqRoomListResult struct {
@@ -240,7 +255,10 @@ type RoomShowParams struct {
 // RoomListParams selects rooms. Scope "me" restricts to rooms the caller's own
 // scope is a member of; rooms are otherwise readable by any principal.
 type RoomListParams struct {
-	State        string `json:"state,omitempty"`
+	// All includes rooms the default listing omits — activity `stale` and rooms
+	// carrying the `hidden` label. Listing is DISCOVERY: what it omits is still
+	// fully addressable, and its obligations still gate and wake.
+	All          bool   `json:"all,omitempty"`
 	Kind         string `json:"kind,omitempty"`
 	Scope        string `json:"scope,omitempty"`
 	PrincipalRef string `json:"principalRef,omitempty"`
@@ -255,9 +273,19 @@ type RoomLogViewParams struct {
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }
 
+// RoomLifecycleParams is retained ONLY by the close/reopen burn-in shims, which
+// accept it and refuse with room_lifecycle_removed. Wave 5 deletes both.
 type RoomLifecycleParams struct {
 	Room         string `json:"room"`
 	IfMatch      int64  `json:"ifMatch,omitempty"`
+	PrincipalRef string `json:"principalRef,omitempty"`
+	ScopeRef     string `json:"scopeRef,omitempty"`
+}
+
+// RoomLabelParams sets or clears the `hidden` discovery label. Any principal
+// may call it: what a listing shows is not an ownership boundary.
+type RoomLabelParams struct {
+	Room         string `json:"room"`
 	PrincipalRef string `json:"principalRef,omitempty"`
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }

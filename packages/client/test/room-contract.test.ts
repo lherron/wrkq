@@ -16,8 +16,9 @@ const ROOM: WrkqRoom = {
   uuid: "room-uuid",
   key: "T-07613",
   kind: "task",
-  state: "open",
-  storedState: "open",
+  work: "open",
+  activity: "active",
+  labels: [],
   workRef: { type: "task", uuid: "task-uuid", id: "T-07613", path: "wrkq/rooms/wave1" },
   links: [],
   openedByPrincipalRef: "agent:clod",
@@ -113,8 +114,8 @@ describe("wrkq.room facade", () => {
       .onResult("wrkq.room.show", ROOM)
       .onResult("wrkq.room.list", { items: [ROOM] })
       .onResult("wrkq.room.logView", LOG_VIEW)
-      .onResult("wrkq.room.close", { ...ROOM, state: "closed", storedState: "closed" })
-      .onResult("wrkq.room.reopen", ROOM)
+      .onResult("wrkq.room.hide", { ...ROOM, labels: ["hidden"] })
+      .onResult("wrkq.room.unhide", ROOM)
       .onResult("wrkq.room.join", MEMBERS_VIEW)
       .onResult("wrkq.room.leave", MEMBERS_VIEW)
       .onResult("wrkq.room.membersView", MEMBERS_VIEW);
@@ -135,7 +136,7 @@ describe("wrkq.room facade", () => {
     };
     const show = { room: "T-07613" };
     const logView = { room: "T-07613", task: "T-07613", limit: 20 };
-    const close = { room: "T-07613", ifMatch: 1 };
+    const label = { room: "T-07613" };
     const member = { room: "T-07613", member: "mable@wrkq:primary" };
 
     const said = await client.wrkq.room.say(say);
@@ -143,10 +144,15 @@ describe("wrkq.room facade", () => {
     expect(said.envelopes[0]?.idempotencyKey).toBe("acp:hrc-message:m-1");
     await client.wrkq.room.open(open);
     await client.wrkq.room.show(show);
-    expect((await client.wrkq.room.list({ scope: "me", scopeRef: "cody@wrkq:T-07613" })).items).toHaveLength(1);
+    expect((await client.wrkq.room.list({ all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" })).items).toHaveLength(1);
     expect((await client.wrkq.room.logView(logView)).items).toHaveLength(1);
-    expect((await client.wrkq.room.close(close)).state).toBe("closed");
-    await client.wrkq.room.reopen({ room: "T-07613" });
+
+    // hide/unhide is a DISCOVERY label, not a lifecycle: it moves `labels`, and
+    // work/activity — the two read-time projections — are untouched by it.
+    const hidden = await client.wrkq.room.hide(label);
+    expect(hidden.labels).toEqual(["hidden"]);
+    expect(hidden.work).toBe("open");
+    expect((await client.wrkq.room.unhide(label)).labels).toEqual([]);
     await client.wrkq.room.join(member);
     await client.wrkq.room.leave(member);
     await client.wrkq.room.membersView(show);
@@ -155,10 +161,10 @@ describe("wrkq.room facade", () => {
       { method: "wrkq.room.say", params: say },
       { method: "wrkq.room.open", params: open },
       { method: "wrkq.room.show", params: show },
-      { method: "wrkq.room.list", params: { scope: "me", scopeRef: "cody@wrkq:T-07613" } },
+      { method: "wrkq.room.list", params: { all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" } },
       { method: "wrkq.room.logView", params: logView },
-      { method: "wrkq.room.close", params: close },
-      { method: "wrkq.room.reopen", params: { room: "T-07613" } },
+      { method: "wrkq.room.hide", params: label },
+      { method: "wrkq.room.unhide", params: label },
       { method: "wrkq.room.join", params: member },
       { method: "wrkq.room.leave", params: member },
       { method: "wrkq.room.membersView", params: show },

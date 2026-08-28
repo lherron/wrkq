@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
@@ -50,13 +51,6 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		return nil, NewValidationError("--fyi requires --to; a say without an addressee is a log entry", map[string]any{"field": "to"})
 	}
 
-	// Idle ad-hoc rooms archive lazily on the routing path: wrkq owns no
-	// scheduler, so the sweep rides the traffic that would otherwise revive a
-	// stale pair room.
-	if _, err := a.store.Rooms.ArchiveIdleAdhocRooms(attr, domain.AdhocRoomIdleTTL); err != nil {
-		return nil, NewInternalError(err)
-	}
-
 	routed, err := a.routeSay(ctx, attr, senderScope, p, body)
 	if err != nil {
 		return nil, err
@@ -66,16 +60,11 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if err != nil {
 		return nil, err
 	}
-	if room.effectiveState != domain.RoomStateOpen {
-		return nil, NewWrongStateMessageError(
-			"room "+room.key+" is "+string(room.effectiveState)+"; reopen it before saying into it",
-			map[string]any{
-				"room":        room.key,
-				"state":       string(room.effectiveState),
-				"storedState": string(room.row.State),
-				"reason":      roomClosureReason(room),
-			})
-	}
+	// §5: a say into a STALE room writes and carries an advisory notice. There is
+	// no room state that can refuse it — agent-to-agent traffic is never blocked
+	// — so the notice is computed here, BEFORE the write makes the room active
+	// again, and is never an error and never overridable.
+	notice := staleRoomNotice(room)
 
 	addressees, err := a.resolveAddressees(ctx, room, p.To, routed.impliedTo, senderScope, attr.PrincipalRef)
 	if err != nil {
@@ -163,7 +152,7 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		}
 	}
 
-	result := &WrkqRoomSayResult{Acked: acked}
+	result := &WrkqRoomSayResult{Acked: acked, Notice: notice}
 	refreshed, err := a.loadRoomState(ctx, room.row.UUID)
 	if err != nil {
 		return nil, err
@@ -317,8 +306,8 @@ func (a *API) routeToTaskUUID(ctx context.Context, attr attribution.Attribution,
 // gating here would make `say T-xxxxx` and `say <campaign-path>` disagree about
 // the same room for the same campaign — and a completed campaign would start
 // minting fresh task rooms for work whose conversation already lives in the
-// campaign room. The campaign room reads derived-closed when the campaign is
-// closed, which is the correct refusal, arrived at by the correct route.
+// campaign room. A closed campaign's room reads `work: terminal`, which is
+// information on the receipt and never a refusal.
 func (a *API) effectiveCampaignForTask(ctx context.Context, taskUUID string) (string, error) {
 	var residentUUID string
 	var enrolledUUID, residentState, enrolledState sql.NullString
@@ -428,7 +417,11 @@ func (a *API) routeToHandle(ctx context.Context, attr attribution.Attribution, s
 			map[string]any{"field": "scopeRef", "target": targetHandle})
 	}
 	if !p.New {
-		existing, ferr := a.store.Rooms.FindAdhocPairRoom(senderScope, targetHandle)
+		// §4: reuse the exact-pair room whose activity reads `active`, else open a
+		// new one. Reuse keys on the SAME projection `wrkc show` prints; there is
+		// no lifecycle left to key on.
+		existing, ferr := a.store.Rooms.FindAdhocPairRoom(
+			senderScope, targetHandle, roomActiveSince(time.Now().UTC()))
 		if ferr != nil {
 			return nil, NewInternalError(ferr)
 		}
@@ -923,14 +916,8 @@ func (a *API) RoomList(ctx context.Context, p RoomListParams) (*WrkqRoomListResu
 	if err != nil {
 		return nil, err
 	}
-	if _, err := a.store.Rooms.ArchiveIdleAdhocRooms(attr, domain.AdhocRoomIdleTTL); err != nil {
-		return nil, NewInternalError(err)
-	}
 
 	params := store.RoomListParams{}
-	if trimmed := strings.TrimSpace(p.State); trimmed != "" && trimmed != "all" {
-		params.State = domain.RoomState(trimmed)
-	}
 	if trimmed := strings.TrimSpace(p.Kind); trimmed != "" {
 		params.Kind = domain.RoomKind(trimmed)
 	}
@@ -957,6 +944,13 @@ func (a *API) RoomList(ctx context.Context, p RoomListParams) (*WrkqRoomListResu
 		dto, derr := a.roomDTO(ctx, state)
 		if derr != nil {
 			return nil, derr
+		}
+		// Discovery, and ONLY discovery: the default listing drops what has gone
+		// stale or been hidden. Neither omission touches say, delivery, or
+		// obligations — `--all` is the whole ledger, one flag away.
+		if !p.All && (dto.Activity == string(domain.RoomActivityStale) ||
+			domain.RoomHasLabel(state.row.Labels, domain.RoomLabelHidden)) {
+			continue
 		}
 		result.Items = append(result.Items, *dto)
 	}
@@ -1009,17 +1003,44 @@ func (a *API) RoomLogView(ctx context.Context, p RoomLogViewParams) (*WrkqRoomLo
 	return view, nil
 }
 
-// RoomClose refuses further talk in a room. RoomReopen is its explicit inverse
-// and also clears a derived closure.
+// RoomClose and RoomReopen are REMOVED. Rooms have no lifecycle that can gate
+// traffic (T-07612 rev 3), so there is nothing left for either verb to do. They
+// stay registered for one burn-in window returning a typed, named refusal —
+// old clients get `room_lifecycle_removed` rather than a bare method-not-found
+// — and wave 5 deletes them.
 func (a *API) RoomClose(ctx context.Context, p RoomLifecycleParams) (*WrkqRoom, error) {
-	return a.roomSetState(ctx, p, domain.RoomStateClosed)
+	return nil, roomLifecycleRemoved(ctx, "close", p.Room)
 }
 
 func (a *API) RoomReopen(ctx context.Context, p RoomLifecycleParams) (*WrkqRoom, error) {
-	return a.roomSetState(ctx, p, domain.RoomStateOpen)
+	return nil, roomLifecycleRemoved(ctx, "reopen", p.Room)
 }
 
-func (a *API) roomSetState(ctx context.Context, p RoomLifecycleParams, state domain.RoomState) (*WrkqRoom, error) {
+func roomLifecycleRemoved(ctx context.Context, verb, room string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return NewValidationError(
+		"room_lifecycle_removed: rooms have no lifecycle, so there is nothing to "+verb+
+			"; a say into any room you can resolve always writes",
+		map[string]any{
+			"reason": "room_lifecycle_removed", "verb": verb, "room": room,
+			"replacement": "wrkc hide|unhide changes the default listing only",
+		})
+}
+
+// RoomHide removes a room from the DEFAULT listing. RoomUnhide is its inverse.
+// The label is not an ACL and not a gate: any principal may set it, the room
+// still accepts says, and its obligations gate and wake unchanged.
+func (a *API) RoomHide(ctx context.Context, p RoomLabelParams) (*WrkqRoom, error) {
+	return a.roomSetLabel(ctx, p, true)
+}
+
+func (a *API) RoomUnhide(ctx context.Context, p RoomLabelParams) (*WrkqRoom, error) {
+	return a.roomSetLabel(ctx, p, false)
+}
+
+func (a *API) roomSetLabel(ctx context.Context, p RoomLabelParams, on bool) (*WrkqRoom, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1031,7 +1052,8 @@ func (a *API) roomSetState(ctx context.Context, p RoomLifecycleParams, state dom
 	if err != nil {
 		return nil, err
 	}
-	if _, err := a.store.Rooms.SetStateWithAttribution(attr, current.row.UUID, state, p.IfMatch); err != nil {
+	if _, err := a.store.Rooms.SetRoomLabelWithAttribution(
+		attr, current.row.UUID, domain.RoomLabelHidden, on); err != nil {
 		return nil, mapRoomStoreError(err, p.Room)
 	}
 	refreshed, err := a.loadRoomState(ctx, current.row.UUID)
@@ -1176,10 +1198,10 @@ func (a *API) EnvelopeShow(ctx context.Context, p EnvelopeShowParams) (*WrkqEnve
 }
 
 // EnvelopeInboxView lists the reply_required obligations standing against one
-// scope, grouped by room. fyi is never listed: it carries no obligation. An
-// obligation in a CLOSED room is still listed here — closure does not retire it
-// — even though `EnvelopePendingView` drops it; its group carries the closed
-// room state so a renderer can name the way out.
+// scope, grouped by room. fyi is never listed: it carries no obligation. Every
+// group is a real obligation that gates and wakes: there is no room projection
+// that excuses one. A group whose room reads `work: terminal` is INFORMATION a
+// renderer may lead with, not a different class of mail.
 func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) (*WrkqEnvelopeInboxView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1441,10 +1463,11 @@ func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*Wr
 // stop-hook predicate in one call. Its sweep re-pends due deferrals, which is
 // the periodic-sweep half of §5's wake routing.
 //
-// Envelopes whose room reads closed or archived are excluded from BOTH items
-// and blocking: with no reply path there is nothing a turn could do about them.
-// They remain standing obligations in the ledger and in `EnvelopeInboxView`;
-// reopening the room brings them back to this read unchanged.
+// The read is UNIFORM over rooms: an obligation wakes and gates whatever its
+// room's work, activity, or hidden label says. T-07633 excluded a closed room's
+// mail here, which was correct only while a closed room refused a say; with the
+// gate gone the addressee always has a reply path, and excluding its mail would
+// silently strand a supervisor's follow-up on completed work (T-07642).
 func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewParams) (*WrkqEnvelopePendingView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1497,16 +1520,6 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 			state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
 			if serr != nil {
 				return serr
-			}
-			// An obligation in a closed or archived room gates NOTHING and wakes
-			// NOBODY. §3.1 refuses a say into such a room, so the addressee has no
-			// reply path and reply-is-ack is impossible; holding the seat on it
-			// would be a stall with no exit. The obligation is not retired — it
-			// stays pending/presented in the ledger and `wrkc inbox` still lists
-			// it under its closed room — it simply leaves this read. `wrkc reopen`
-			// restores the reply path and the envelope reappears here.
-			if state.effectiveState != domain.RoomStateOpen {
-				continue
 			}
 			dto, eerr := a.envelopeDTO(ctx, &rows[index], state)
 			if eerr != nil {
@@ -1620,11 +1633,18 @@ func envelopePrincipal(envelope *domain.Envelope, attr attribution.Attribution) 
 // roomState carries a room row plus everything the DTO and the say gate need,
 // resolved once per call.
 type roomState struct {
-	row            *domain.Room
-	key            string
-	workRef        *WrkqRoomWorkRef
-	effectiveState domain.RoomState
-	workTerminal   bool
+	row     *domain.Room
+	key     string
+	workRef *WrkqRoomWorkRef
+	// work and activity are the two read-time projections. Neither is stored and
+	// neither gates: they are computed here once per call and only ever read.
+	work         domain.RoomWork
+	activity     domain.RoomActivity
+	lastActivity string
+	// workState and workTerminalAt name the terminal transition the stale notice
+	// quotes back ("task completed 2026-08-27").
+	workState      string
+	workTerminalAt string
 	memberCount    int
 	messageCount   int
 	lastMessageAt  string
@@ -1715,10 +1735,12 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 	case domain.RoomKindTask:
 		ref := &WrkqRoomWorkRef{Type: "task", UUID: *room.TaskUUID}
 		var taskState string
+		var terminalAt sql.NullString
 		err := a.db.QueryRowContext(ctx, `
-			SELECT t.id, COALESCE(cp.path || '/' || t.slug, t.slug), t.state
+			SELECT t.id, COALESCE(cp.path || '/' || t.slug, t.slug), t.state,
+			       COALESCE(t.completed_at, t.archived_at, t.deleted_at, t.updated_at)
 			  FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
-			 WHERE t.uuid = ?`, *room.TaskUUID).Scan(&ref.ID, &ref.Path, &taskState)
+			 WHERE t.uuid = ?`, *room.TaskUUID).Scan(&ref.ID, &ref.Path, &taskState, &terminalAt)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(*room.TaskUUID, "room task")
@@ -1727,7 +1749,11 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		}
 		state.workRef = ref
 		state.key = ref.ID
-		state.workTerminal = isTerminalTaskState(taskState)
+		state.workState = taskState
+		state.workTerminalAt = terminalAt.String
+		if isTerminalTaskState(taskState) {
+			state.work = domain.RoomWorkTerminal
+		}
 		// A task that later joined a campaign keeps its own room readable and
 		// linked; new says route to the campaign room. Never merged. This uses
 		// the SAME membership predicate the routing does, so the link can never
@@ -1750,10 +1776,12 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 	case domain.RoomKindCampaign, domain.RoomKindProject:
 		ref := &WrkqRoomWorkRef{Type: "container", UUID: *room.ContainerUUID}
 		var campaignState sql.NullString
+		var containerUpdatedAt string
 		err := a.db.QueryRowContext(ctx, `
-			SELECT c.id, COALESCE(v.path, c.slug), c.campaign_state
+			SELECT c.id, COALESCE(v.path, c.slug), c.campaign_state, c.updated_at
 			  FROM containers c LEFT JOIN v_container_paths v ON v.uuid = c.uuid
-			 WHERE c.uuid = ?`, *room.ContainerUUID).Scan(&ref.ID, &ref.Path, &campaignState)
+			 WHERE c.uuid = ?`, *room.ContainerUUID).
+			Scan(&ref.ID, &ref.Path, &campaignState, &containerUpdatedAt)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(*room.ContainerUUID, "room container")
@@ -1763,9 +1791,11 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		state.workRef = ref
 		state.key = ref.Path
 		if campaignState.Valid {
+			state.workState = campaignState.String
 			switch campaignState.String {
 			case "completed", "cancelled":
-				state.workTerminal = true
+				state.work = domain.RoomWorkTerminal
+				state.workTerminalAt = containerUpdatedAt
 			}
 		}
 	default:
@@ -1776,11 +1806,17 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		}
 	}
 
-	state.effectiveState = domain.EffectiveRoomState(room.State, room.Kind, room.ReopenedAt, state.workTerminal)
+	// An ad-hoc room anchors on no work, so it is never terminal.
+	if state.work == "" {
+		state.work = domain.RoomWorkOpen
+	}
 
+	var newestJoin sql.NullString
 	if err := a.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM room_members WHERE room_uuid = ? AND left_at IS NULL", room.UUID).
-		Scan(&state.memberCount); err != nil {
+		`SELECT
+		   (SELECT COUNT(*) FROM room_members WHERE room_uuid = ? AND left_at IS NULL),
+		   (SELECT MAX(joined_at) FROM room_members WHERE room_uuid = ?)`,
+		room.UUID, room.UUID).Scan(&state.memberCount, &newestJoin); err != nil {
 		return nil, NewInternalError(err)
 	}
 	var lastMessage sql.NullString
@@ -1792,7 +1828,69 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 	if lastMessage.Valid {
 		state.lastMessageAt = lastMessage.String
 	}
+
+	// The activity clock is TOTAL: opened_at always exists, so a room with no
+	// envelope and no join beyond its own still classifies.
+	state.lastActivity = domain.RoomLastActivity(
+		toRFC3339(room.OpenedAt), toRFC3339(state.lastMessageAt), toRFC3339(newestJoin.String))
+	state.activity = domain.RoomActivityFor(state.work, parseRoomTimestamp(state.lastActivity), time.Now().UTC())
 	return state, nil
+}
+
+// parseRoomTimestamp reads a stored wrkq timestamp. An unparseable one reads as
+// the zero time, which classifies the room as quiet rather than crashing a list.
+func parseRoomTimestamp(value string) time.Time {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC()
+		}
+	}
+	return time.Time{}
+}
+
+// roomActiveSince is the `active` cutoff the store's pair-room reuse compares
+// against, in the ledger's own timestamp format.
+func roomActiveSince(now time.Time) string {
+	return now.Add(-domain.RoomActiveWithin).Format("2006-01-02T15:04:05Z")
+}
+
+// staleRoomNotice is §5: advisory, never an error, and only for a room whose
+// activity reads `stale`. It quotes the terminal transition and the age of the
+// last activity so a supervisor can tell "this seat moved on" from "this seat
+// is live", without ever being refused.
+func staleRoomNotice(room *roomState) *string {
+	if room.activity != domain.RoomActivityStale {
+		return nil
+	}
+	work := "work"
+	if room.workRef != nil {
+		work = room.workRef.Type
+	}
+	when := room.workTerminalAt
+	if len(when) >= 10 {
+		when = when[:10]
+	}
+	notice := "room " + room.key + " — " + work + " " + room.workState
+	if when != "" {
+		notice += " " + when
+	}
+	notice += ", last activity " + humanRoomAge(time.Since(parseRoomTimestamp(room.lastActivity)))
+	return &notice
+}
+
+// humanRoomAge renders an age at the coarsest unit that still says something:
+// a notice reading "6h ago" is read; one reading "6h11m47s ago" is skimmed.
+func humanRoomAge(age time.Duration) string {
+	switch {
+	case age < time.Minute:
+		return "just now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+	case age < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(age.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(age.Hours()/24))
+	}
 }
 
 func (a *API) containerRoomKey(ctx context.Context, containerUUID string) (string, error) {
@@ -1814,26 +1912,20 @@ func isTerminalTaskState(state string) bool {
 	}
 }
 
-func roomClosureReason(state *roomState) string {
-	if state.row.State != domain.RoomStateOpen {
-		return "explicit"
-	}
-	if state.workTerminal {
-		return "work_terminal"
-	}
-	return "open"
-}
-
 func (a *API) roomDTO(ctx context.Context, state *roomState) (*WrkqRoom, error) {
 	_ = ctx
 	room := state.row
+	labels := room.Labels
+	if labels == nil {
+		labels = []string{}
+	}
 	dto := &WrkqRoom{
 		UUID: room.UUID, ID: room.ID, Key: state.key, Kind: string(room.Kind),
-		Subject: room.Subject, State: string(state.effectiveState),
-		StoredState: string(room.State), WorkRef: state.workRef, Links: state.links,
+		Subject: room.Subject, Work: string(state.work), Activity: string(state.activity),
+		Labels: labels, WorkRef: state.workRef, Links: state.links,
 		OpenedByPrincipalRef: room.OpenedByPrincipalRef, OpenedAt: toRFC3339(room.OpenedAt),
-		ClosedAt: room.ClosedAt, LastActivityAt: toRFC3339(room.LastActivityAt),
-		MemberCount: state.memberCount, MessageCount: state.messageCount,
+		LastActivityAt: state.lastActivity,
+		MemberCount:    state.memberCount, MessageCount: state.messageCount,
 		ETag: room.ETag, CreatedAt: toRFC3339(room.CreatedAt), UpdatedAt: toRFC3339(room.UpdatedAt),
 	}
 	if dto.Links == nil {
@@ -2015,10 +2107,6 @@ func mapRoomStoreError(err error, selector string) error {
 			selector = envelopeMissing.Selector
 		}
 		return NewNotFoundError(selector, "envelope")
-	}
-	var closed *store.RoomClosedError
-	if errors.As(err, &closed) {
-		return NewWrongStateError(map[string]any{"room": closed.RoomKey, "state": string(closed.State)})
 	}
 	var wrongState *store.EnvelopeWrongStateError
 	if errors.As(err, &wrongState) {

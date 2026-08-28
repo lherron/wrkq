@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
@@ -352,11 +353,11 @@ func TestAdhocPairRoomReuseNewAndThirdMember(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("invite third member: %v", err)
 	}
-	// The most recent pair room is `forced`; close it so the only candidate left
-	// is the widened group room, and prove the group room is not reused.
-	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: *forced.Room.ID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("close forced room: %v", err)
-	}
+	// The most recent pair room is `forced`; age it past the 24h `active` window
+	// so the only remaining pair candidate is quiet, and prove neither the
+	// widened group room nor the quiet pair room is reused. Reuse keys on
+	// ACTIVITY now: there is no closed state left to key on.
+	backdateRoom(t, f, forced.Room.UUID, 30*time.Hour)
 	fresh := f.say(t, RoomSayParams{
 		Ref: sender.Ref, Body: "four", PrincipalRef: sender.PrincipalRef, ScopeRef: sender.ScopeRef,
 	})
@@ -364,82 +365,287 @@ func TestAdhocPairRoomReuseNewAndThirdMember(t *testing.T) {
 		t.Fatal("a widened group room was reused as a pair room")
 	}
 	if fresh.Room.UUID == forced.Room.UUID {
-		t.Fatal("a closed room was reused")
+		t.Fatal("a pair room whose activity had gone quiet was reused")
 	}
 }
 
-// ─── closure ──────────────────────────────────────────────────────────────────
+// backdateRoom ages every timestamp the activity clock folds — opened_at, the
+// room's envelopes, and its member joins — so a test can reach `quiet` or
+// `stale` without a clock injection. The projection reads stored timestamps, so
+// this is the same arithmetic production does.
+func backdateRoom(t *testing.T, f *roomFixture, roomUUID string, age time.Duration) {
+	t.Helper()
+	stamp := time.Now().UTC().Add(-age).Format("2006-01-02T15:04:05Z")
+	for _, statement := range []string{
+		"UPDATE rooms SET opened_at = ?, last_activity_at = ? WHERE uuid = ?",
+		"UPDATE envelopes SET created_at = ? WHERE room_uuid = ?",
+		"UPDATE room_members SET joined_at = ? WHERE room_uuid = ?",
+	} {
+		args := []interface{}{stamp, roomUUID}
+		if strings.Count(statement, "?") == 3 {
+			args = []interface{}{stamp, stamp, roomUUID}
+		}
+		if _, err := f.s.DB().Exec(statement, args...); err != nil {
+			t.Fatalf("backdate room: %v", err)
+		}
+	}
+}
 
-// TestClosedRoomRefusesSay proves both closure paths refuse a say with a typed
-// error naming the state: an explicit close, and the DERIVED closure a task room
-// inherits when its task goes terminal. Reopen clears the derived one.
-func TestClosedRoomRefusesSay(t *testing.T) {
+// roomActivity is the projection under test, read back through the public DTO.
+func roomActivity(t *testing.T, f *roomFixture, selector string) *WrkqRoom {
+	t.Helper()
+	room, err := f.api.RoomShow(context.Background(), RoomShowParams{Room: selector})
+	if err != nil {
+		t.Fatalf("RoomShow(%s): %v", selector, err)
+	}
+	return room
+}
+
+// ─── reachability ─────────────────────────────────────────────────────────────
+
+// TestSayIntoATerminalTaskRoomAlwaysWrites is the headline of the rev-3
+// amendment and the live regression it fixes: a supervisor messaging the seat on
+// a task it just completed. There is no room state that can refuse; the room
+// only reports what it has become.
+func TestSayIntoATerminalTaskRoomAlwaysWrites(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
 
 	opened := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "open for business", PrincipalRef: "agent:clod"})
-	if opened.Room.State != "open" {
-		t.Fatalf("new task room state = %s", opened.Room.State)
+	if opened.Room.Work != "open" || opened.Room.Activity != "active" {
+		t.Fatalf("new task room = work %s / activity %s, want open/active", opened.Room.Work, opened.Room.Activity)
+	}
+	if opened.Notice != nil {
+		t.Fatalf("an open room carried a stale notice: %q", *opened.Notice)
 	}
 
-	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("RoomClose: %v", err)
-	}
-	_, err := f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "after close", PrincipalRef: "agent:clod"})
-	de := assertDomainCode(t, CodeWrongState, err)
-	if !strings.Contains(fmt.Sprint(de.Data()), "closed") {
-		t.Fatalf("closed-room refusal does not name the state: %v", de.Data())
-	}
-
-	if _, err := f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("RoomReopen: %v", err)
-	}
-	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "after reopen", PrincipalRef: "agent:clod"})
-
-	// Derived closure: complete the task and the room reads closed without a
-	// stored transition. The stored state stays open, which is how a caller can
-	// tell the two apart.
-	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")}}); err != nil {
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{
+		Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")},
+	}); err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
-	// An explicit reopen is still in force from above, so clear it first.
-	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("close before derived check: %v", err)
+
+	// Terminal but still fresh: no refusal AND no notice. The notice is about
+	// staleness, not about terminality.
+	fresh := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "grading follow-up", PrincipalRef: "agent:clod"})
+	if fresh.Room.Work != "terminal" || fresh.Room.Activity != "active" {
+		t.Fatalf("terminal-but-fresh room = work %s / activity %s", fresh.Room.Work, fresh.Room.Activity)
 	}
-	shown, err := f.api.RoomShow(ctx, RoomShowParams{Room: f.loneTaskID})
-	if err != nil {
-		t.Fatalf("RoomShow: %v", err)
+	if fresh.Notice != nil {
+		t.Fatalf("a terminal room under 4h carried a notice: %q", *fresh.Notice)
 	}
-	if shown.State != "closed" {
-		t.Fatalf("terminal task's room state = %s, want closed", shown.State)
+
+	// Past the 4h stale clock the say STILL writes and gains an advisory.
+	backdateRoom(t, f, fresh.Room.UUID, 6*time.Hour)
+	if got := roomActivity(t, f, f.loneTaskID).Activity; got != "stale" {
+		t.Fatalf("terminal room quiet 6h = activity %s, want stale", got)
+	}
+	stale := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "still here?", PrincipalRef: "agent:clod"})
+	if len(stale.Envelopes) != 1 {
+		t.Fatalf("say into a stale room wrote %d envelopes, want 1", len(stale.Envelopes))
+	}
+	if stale.Notice == nil {
+		t.Fatal("say into a stale room carried no notice")
+	}
+	for _, want := range []string{f.loneTaskID, "task completed", "last activity"} {
+		if !strings.Contains(*stale.Notice, want) {
+			t.Fatalf("stale notice %q does not name %q", *stale.Notice, want)
+		}
+	}
+	// The say itself refreshes the clock, so the room is active again.
+	if got := roomActivity(t, f, f.loneTaskID).Activity; got != "active" {
+		t.Fatalf("after a say the room = activity %s, want active", got)
 	}
 }
 
-// TestDerivedClosureFromTerminalTaskNeedsNoStoredTransition isolates the derived
-// half: a task room whose task completed reads closed while its STORED state is
-// still open, and reopen overrides it.
-func TestDerivedClosureFromTerminalTaskNeedsNoStoredTransition(t *testing.T) {
+// TestRoomLifecycleVerbsRefuseWithANamedError proves the burn-in shim: an old
+// client calling close or reopen gets `room_lifecycle_removed` by name rather
+// than a bare method-not-found, and nothing is mutated.
+func TestRoomLifecycleVerbsRefuseWithANamedError(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
 	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "hello", PrincipalRef: "agent:clod"})
 
-	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{Task: f.loneTaskID, Patch: TaskPatch{State: strp("cancelled")}}); err != nil {
-		t.Fatalf("cancel task: %v", err)
+	for verb, call := range map[string]func() (*WrkqRoom, error){
+		"close":  func() (*WrkqRoom, error) { return f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID}) },
+		"reopen": func() (*WrkqRoom, error) { return f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID}) },
+	} {
+		_, err := call()
+		de := assertDomainCode(t, CodeValidation, err)
+		if !strings.Contains(de.Error(), "room_lifecycle_removed") {
+			t.Fatalf("%s refusal does not name the removal: %q", verb, de.Error())
+		}
+		if fmt.Sprint(de.Data()) == "" || !strings.Contains(fmt.Sprint(de.Data()), "room_lifecycle_removed") {
+			t.Fatalf("%s refusal data does not carry the reason: %v", verb, de.Data())
+		}
 	}
-	shown, err := f.api.RoomShow(ctx, RoomShowParams{Room: f.loneTaskID})
+
+	// The say path is untouched by the refusal.
+	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "still fine", PrincipalRef: "agent:clod"})
+}
+
+// TestHideAffectsTheDefaultListingAndNothingElse pins the label's whole reach:
+// it changes what `RoomList` shows by default and never touches say, delivery,
+// or obligations.
+func TestHideAffectsTheDefaultListingAndNothingElse(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "hello", PrincipalRef: "agent:clod"})
+
+	listed := func(t *testing.T, all bool) bool {
+		t.Helper()
+		result, err := f.api.RoomList(ctx, RoomListParams{All: all, PrincipalRef: "agent:clod"})
+		if err != nil {
+			t.Fatalf("RoomList: %v", err)
+		}
+		for _, room := range result.Items {
+			if room.Key == f.loneTaskID {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !listed(t, false) {
+		t.Fatal("an active room is missing from the default listing")
+	}
+	hidden, err := f.api.RoomHide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:mable"})
 	if err != nil {
-		t.Fatalf("RoomShow: %v", err)
+		t.Fatalf("RoomHide: %v", err)
 	}
-	if shown.State != "closed" || shown.StoredState != "open" {
-		t.Fatalf("derived closure = state %s / stored %s, want closed/open", shown.State, shown.StoredState)
+	if !domain.RoomHasLabel(hidden.Labels, domain.RoomLabelHidden) {
+		t.Fatalf("hide did not set the label: %+v", hidden.Labels)
 	}
-	if _, err := f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "after terminal", PrincipalRef: "agent:clod"}); err == nil {
-		t.Fatal("say into a derived-closed room succeeded")
+	if listed(t, false) {
+		t.Fatal("a hidden room is still in the default listing")
 	}
-	if _, err := f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("RoomReopen: %v", err)
+	if !listed(t, true) {
+		t.Fatal("--all did not show a hidden room")
 	}
-	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "reopened deliberately", PrincipalRef: "agent:clod"})
+
+	// Hidden changes nothing about reachability: the say writes and the
+	// obligation gates.
+	said := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "still reachable", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	seat := "cody@proj:" + f.loneTaskID
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: said.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present: %v", err)
+	}
+	view, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
+		Scopes: []string{seat}, PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("pendingView: %v", err)
+	}
+	if len(view.Blocking) != 1 || view.Blocking[0] != said.Envelopes[0].ID {
+		t.Fatalf("a hidden room's obligation stopped gating: %v", view.Blocking)
+	}
+
+	unhidden, err := f.api.RoomUnhide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:mable"})
+	if err != nil {
+		t.Fatalf("RoomUnhide: %v", err)
+	}
+	if domain.RoomHasLabel(unhidden.Labels, domain.RoomLabelHidden) {
+		t.Fatalf("unhide left the label: %+v", unhidden.Labels)
+	}
+	if !listed(t, false) {
+		t.Fatal("unhide did not restore the room to the default listing")
+	}
+}
+
+// TestDefaultListingOmitsStaleRoomsButKeepsThemAddressable separates DISCOVERY
+// from reachability: a stale room leaves the default listing and stays fully
+// addressable by key.
+func TestDefaultListingOmitsStaleRoomsButKeepsThemAddressable(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	said := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "hello", PrincipalRef: "agent:clod"})
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{
+		Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")},
+	}); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	backdateRoom(t, f, said.Room.UUID, 6*time.Hour)
+
+	def, err := f.api.RoomList(ctx, RoomListParams{PrincipalRef: "agent:clod"})
+	if err != nil {
+		t.Fatalf("RoomList: %v", err)
+	}
+	for _, room := range def.Items {
+		if room.Key == f.loneTaskID {
+			t.Fatalf("a stale room is in the default listing: %+v", room)
+		}
+	}
+	all, err := f.api.RoomList(ctx, RoomListParams{All: true, PrincipalRef: "agent:clod"})
+	if err != nil {
+		t.Fatalf("RoomList --all: %v", err)
+	}
+	found := false
+	for _, room := range all.Items {
+		if room.Key == f.loneTaskID {
+			found = true
+			if room.Activity != "stale" || room.Work != "terminal" {
+				t.Fatalf("--all room = work %s / activity %s", room.Work, room.Activity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("--all did not show the stale room")
+	}
+	// Addressable is the point: the listing omitted it, the ledger did not.
+	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "reachable anyway", PrincipalRef: "agent:clod"})
+}
+
+// TestActivityIsTotalForAMessagelessRoom is the totality half of the projection:
+// a room opened explicitly and never spoken in still classifies, because the
+// clock folds opened_at.
+func TestActivityIsTotalForAMessagelessRoom(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	room, err := f.api.RoomOpen(ctx, RoomOpenParams{
+		Members: []string{"cody@proj:primary"}, Subject: "sidebar",
+		PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
+	})
+	if err != nil {
+		t.Fatalf("RoomOpen: %v", err)
+	}
+	if room.MessageCount != 0 {
+		t.Fatalf("a fresh RoomOpen room already has %d messages", room.MessageCount)
+	}
+	if room.Work != "open" || room.Activity != "active" || room.LastActivityAt == "" {
+		t.Fatalf("message-less room = work %s / activity %s / last %q",
+			room.Work, room.Activity, room.LastActivityAt)
+	}
+
+	// And it is REUSABLE as the pair room while active, which is exactly the
+	// case a `MAX(envelopes.created_at)`-only clock leaves undefined.
+	reused := f.say(t, RoomSayParams{
+		Ref: "cody@proj:primary", Body: "first word here",
+		PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
+	})
+	if reused.Room.UUID != room.UUID {
+		t.Fatalf("an active message-less pair room was not reused: %s then %s", room.UUID, reused.Room.UUID)
+	}
+
+	// Aged past the active window it stops being reusable, with no auto-archive
+	// and no state change anywhere.
+	backdateRoom(t, f, room.UUID, 30*time.Hour)
+	if got := roomActivity(t, f, *room.ID).Activity; got != "quiet" {
+		t.Fatalf("a 30h-idle ad-hoc room = activity %s, want quiet", got)
+	}
+	fresh := f.say(t, RoomSayParams{
+		Ref: "cody@proj:primary", Body: "much later",
+		PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
+	})
+	if fresh.Room.UUID == room.UUID {
+		t.Fatal("a quiet pair room was reused")
+	}
+	// The old room is untouched and still says-able by key.
+	f.say(t, RoomSayParams{Ref: *room.ID, Body: "back to the old one", PrincipalRef: "agent:clod"})
 }
 
 // ─── fan-out isolation ────────────────────────────────────────────────────────
@@ -1291,11 +1497,11 @@ func TestEventsEmittedForEachTransition(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ack: %v", err)
 	}
-	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("close: %v", err)
+	if _, err := f.api.RoomHide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
+		t.Fatalf("hide: %v", err)
 	}
-	if _, err := f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("reopen: %v", err)
+	if _, err := f.api.RoomUnhide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
+		t.Fatalf("unhide: %v", err)
 	}
 	if _, err := f.api.RoomLeave(ctx, RoomMemberParams{
 		Room: f.loneTaskID, Member: codySeat, PrincipalRef: "agent:cody",
@@ -1326,12 +1532,19 @@ func TestEventsEmittedForEachTransition(t *testing.T) {
 		t.Fatalf("iterate events: %v", err)
 	}
 	for _, want := range []string{
-		"room.opened", "room.closed", "room.reopened",
+		"room.opened", "room.hidden", "room.unhidden",
 		"envelope.created", "envelope.presented", "envelope.deferred", "envelope.acked",
 		"member.joined", "member.left",
 	} {
 		if !seen[want] {
 			t.Errorf("no %s event was emitted", want)
+		}
+	}
+	// The lifecycle events are GONE, not merely unused: a consumer keying on one
+	// would be waiting forever, so nothing may emit them.
+	for _, gone := range []string{"room.closed", "room.reopened", "room.archived"} {
+		if seen[gone] {
+			t.Errorf("%s was emitted; room lifecycle events are removed", gone)
 		}
 	}
 }
@@ -1772,30 +1985,12 @@ func TestScopeRefToleratesTheRuntimeLaneSuffix(t *testing.T) {
 	}
 }
 
-// TestClosedRoomRefusalNamesTheStateInItsMessage proves the refusal is legible
-// without opening the data bag: "wrong_state" alone tells a caller nothing.
-func TestClosedRoomRefusalNamesTheStateInItsMessage(t *testing.T) {
-	f := newRoomFixture(t)
-	ctx := context.Background()
-
-	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "open", PrincipalRef: "agent:clod"})
-	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	_, err := f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "after", PrincipalRef: "agent:clod"})
-	de := assertDomainCode(t, CodeWrongState, err)
-	if !strings.Contains(de.Error(), f.loneTaskID) || !strings.Contains(de.Error(), "closed") {
-		t.Fatalf("refusal message does not name the room and its state: %q", de.Error())
-	}
-}
-
-// TestClosedRoomObligationsLeavePendingViewButStayInTheInbox proves T-07633: an
-// obligation in a closed room gates no turn and wakes no runtime, because §3.1
-// refuses a say into that room and so leaves the addressee NO reply path — the
-// stop hook would otherwise hold the seat on mail it cannot answer. The
-// obligation is not retired: it stays standing in the ledger and in the inbox,
-// under its closed room, and a reopen restores it to the read unchanged.
-func TestClosedRoomObligationsLeavePendingViewButStayInTheInbox(t *testing.T) {
+// TestObligationsGateUniformlyWhateverTheRoomProjection is T-07633 INVERTED
+// (T-07642). T-07633 dropped a closed room's mail from pendingView because a
+// closed room refused a say and the seat had no reply path. The gate is gone, so
+// the reason is gone: every standing obligation wakes and gates, whatever its
+// room's work, activity, or hidden label reads.
+func TestObligationsGateUniformlyWhateverTheRoomProjection(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
 	taskSeat := "cody@proj:" + f.loneTaskID
@@ -1804,8 +1999,6 @@ func TestClosedRoomObligationsLeavePendingViewButStayInTheInbox(t *testing.T) {
 	inTask := f.say(t, RoomSayParams{
 		Ref: f.loneTaskID, Body: "please reply", To: []string{"cody"}, PrincipalRef: "agent:clod",
 	})
-	// A sibling obligation for the SAME agent in a room that stays open: closure
-	// must be scoped to the closed room and nothing wider.
 	inPair := f.say(t, RoomSayParams{
 		Ref: pairSeat, Body: "still live", PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
 	})
@@ -1842,28 +2035,39 @@ func TestClosedRoomObligationsLeavePendingViewButStayInTheInbox(t *testing.T) {
 		return false
 	}
 
-	open := pending(t)
-	if !has(open, inTask.Envelopes[0].ID) || !blocks(open, inTask.Envelopes[0].ID) {
-		t.Fatalf("an open room's presented obligation must gate: %+v", open)
+	live := pending(t)
+	if !has(live, inTask.Envelopes[0].ID) || !blocks(live, inTask.Envelopes[0].ID) {
+		t.Fatalf("an open room's presented obligation must gate: %+v", live)
 	}
 
-	if _, err := f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("close: %v", err)
+	// Terminal work, gone stale, and hidden — every projection that used to
+	// excuse an obligation, all at once.
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{
+		Task: f.loneTaskID, Patch: TaskPatch{State: strp("completed")},
+	}); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	backdateRoom(t, f, inTask.Room.UUID, 6*time.Hour)
+	if _, err := f.api.RoomHide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:mable"}); err != nil {
+		t.Fatalf("hide: %v", err)
+	}
+	if got := roomActivity(t, f, f.loneTaskID); got.Work != "terminal" || got.Activity != "stale" {
+		t.Fatalf("fixture room = work %s / activity %s, want terminal/stale", got.Work, got.Activity)
 	}
 
-	closed := pending(t)
-	if has(closed, inTask.Envelopes[0].ID) {
-		t.Fatalf("a closed room's obligation stayed in the kicker wake set: %+v", closed.Items)
+	after := pending(t)
+	if !has(after, inTask.Envelopes[0].ID) {
+		t.Fatalf("a terminal/stale/hidden room's obligation left the kicker wake set: %+v", after.Items)
 	}
-	if blocks(closed, inTask.Envelopes[0].ID) {
-		t.Fatalf("a closed room's obligation still refuses a turn end: %v", closed.Blocking)
+	if !blocks(after, inTask.Envelopes[0].ID) {
+		t.Fatalf("a terminal/stale/hidden room's obligation stopped refusing a turn end: %v", after.Blocking)
 	}
-	if !has(closed, inPair.Envelopes[0].ID) {
-		t.Fatalf("closing one room dropped an obligation in another: %+v", closed.Items)
+	if !has(after, inPair.Envelopes[0].ID) {
+		t.Fatalf("an unrelated room's obligation was dropped: %+v", after.Items)
 	}
 
-	// Still standing, still visible, and the group names the closure so a
-	// renderer can offer the way out.
+	// The inbox lists it as an ordinary obligation and reports the projection as
+	// information, not as a heading with a way out.
 	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
 		ScopeRef: taskSeat, PrincipalRef: "agent:cody",
 	})
@@ -1872,37 +2076,34 @@ func TestClosedRoomObligationsLeavePendingViewButStayInTheInbox(t *testing.T) {
 	}
 	if len(inbox.Groups) != 1 || len(inbox.Groups[0].Items) != 1 ||
 		inbox.Groups[0].Items[0].ID != inTask.Envelopes[0].ID {
-		t.Fatalf("a closed room's obligation vanished from the inbox: %+v", inbox.Groups)
+		t.Fatalf("the obligation vanished from the inbox: %+v", inbox.Groups)
 	}
-	if inbox.Groups[0].Room.State != string(domain.RoomStateClosed) {
-		t.Fatalf("inbox group room state = %q, want closed", inbox.Groups[0].Room.State)
+	if inbox.Groups[0].Room.Work != "terminal" {
+		t.Fatalf("inbox group room work = %q, want terminal", inbox.Groups[0].Room.Work)
 	}
 	if inbox.Groups[0].Items[0].State != string(domain.EnvelopeStatePresented) {
-		t.Fatalf("closure retired the obligation: %q", inbox.Groups[0].Items[0].State)
+		t.Fatalf("the projection retired the obligation: %q", inbox.Groups[0].Items[0].State)
 	}
 
-	// Reopen is the way back: nothing was mutated, so the envelope simply
-	// reappears in the read it left.
-	if _, err := f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID, PrincipalRef: "agent:clod"}); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	reopened := pending(t)
-	if !has(reopened, inTask.Envelopes[0].ID) || !blocks(reopened, inTask.Envelopes[0].ID) {
-		t.Fatalf("reopen did not restore the obligation to the read: %+v", reopened)
+	// And the reply path the carve-out assumed was missing is right there.
+	replied := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "on it", To: []string{"clod"},
+		PrincipalRef: "agent:cody", ScopeRef: taskSeat,
+	})
+	if len(replied.Acked) != 1 || replied.Acked[0] != inTask.Envelopes[0].ID {
+		t.Fatalf("reply-is-ack did not discharge the obligation: %v", replied.Acked)
 	}
 }
 
-// TestDerivedClosureAlsoUngatesObligations pins the case T-07633 was actually
-// found in: nobody ran `wrkc close`. A supervisor completed the task, the room
-// read closed by derivation, and the worker's seat was held on mail it could no
-// longer answer. The predicate is the EFFECTIVE room state, so the derived
-// closure ungates exactly like the explicit one.
-func TestDerivedClosureAlsoUngatesObligations(t *testing.T) {
+// TestTerminalWorkKeepsItsFanoutGating is the case T-07633 was found in, with
+// the ruling reversed: a supervisor completes a task, and BOTH siblings of the
+// fan-out stay standing against their seats. Reachability into finished work is
+// intended, not a leak.
+func TestTerminalWorkKeepsItsFanoutGating(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
 	seat := "cody@proj:" + f.loneTaskID
 
-	// A fan-out: both siblings live in the same room, so both leave together.
 	group := f.say(t, RoomSayParams{
 		Ref: f.loneTaskID, Body: "review this", To: []string{"cody", "mable"}, PrincipalRef: "agent:clod",
 	})
@@ -1921,20 +2122,28 @@ func TestDerivedClosureAlsoUngatesObligations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pendingView: %v", err)
 	}
-	if len(view.Items) != 0 || len(view.Blocking) != 0 {
-		t.Fatalf("a derived closure still gated: items=%+v blocking=%v", view.Items, view.Blocking)
+	if len(view.Items) != 2 {
+		t.Fatalf("terminal work dropped its obligations: %+v", view.Items)
 	}
 
-	// A fyi in the same room is excluded too: the includeFyi read is a wake set
-	// for a runtime that would have nothing to do there either.
+	// The includeFyi read is uniform too.
+	fyi := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "heads up", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod",
+	})
 	fyiView, err := f.api.EnvelopePendingView(ctx, EnvelopePendingViewParams{
 		Scopes: []string{seat}, IncludeFyi: true, PrincipalRef: "agent:hrc",
 	})
 	if err != nil {
 		t.Fatalf("pendingView includeFyi: %v", err)
 	}
-	if len(fyiView.Items) != 0 {
-		t.Fatalf("includeFyi surfaced a closed room's mail: %+v", fyiView.Items)
+	found := false
+	for _, item := range fyiView.Items {
+		if item.ID == fyi.Envelopes[0].ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("includeFyi dropped a terminal room's fyi: %+v", fyiView.Items)
 	}
 
 	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
@@ -1943,9 +2152,8 @@ func TestDerivedClosureAlsoUngatesObligations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inboxView: %v", err)
 	}
-	if len(inbox.Groups) != 1 || inbox.Groups[0].Room.State != string(domain.RoomStateClosed) ||
-		inbox.Groups[0].Room.StoredState != string(domain.RoomStateOpen) {
-		t.Fatalf("inbox did not report the DERIVED closure: %+v", inbox.Groups)
+	if len(inbox.Groups) != 1 || inbox.Groups[0].Room.Work != "terminal" {
+		t.Fatalf("inbox did not report work: terminal as information: %+v", inbox.Groups)
 	}
 }
 

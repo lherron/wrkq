@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/store"
@@ -71,6 +72,44 @@ func runWrkcInput(t *testing.T, dbPath, principal, input string, args ...string)
 	cmd.SetErr(&output)
 	err := cmd.Execute()
 	return output.String(), err
+}
+
+// runWrkcSplit keeps the two streams apart, which is the whole point of §5's
+// advisory: the notice must ride stderr so a piped --json read stays parseable.
+func runWrkcSplit(t *testing.T, dbPath, principal string, args ...string) (string, string, error) {
+	t.Helper()
+	cmd := NewWrkcRootCmd()
+	cmd.SetArgs(append([]string{"--db", dbPath, "--principal-ref", principal}, args...))
+	cmd.SetIn(strings.NewReader(""))
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := cmd.Execute()
+	return stdout.String(), stderr.String(), err
+}
+
+// backdateWrkcRoom ages every timestamp the activity clock folds, so a test can
+// reach `stale` without a clock injection.
+func backdateWrkcRoom(t *testing.T, dbPath, roomUUID string, age time.Duration) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	stamp := time.Now().UTC().Add(-age).Format("2006-01-02T15:04:05Z")
+	for _, statement := range []struct {
+		sql  string
+		args []interface{}
+	}{
+		{"UPDATE rooms SET opened_at = ?, last_activity_at = ? WHERE uuid = ?", []interface{}{stamp, stamp, roomUUID}},
+		{"UPDATE envelopes SET created_at = ? WHERE room_uuid = ?", []interface{}{stamp, roomUUID}},
+		{"UPDATE room_members SET joined_at = ? WHERE room_uuid = ?", []interface{}{stamp, roomUUID}},
+	} {
+		if _, err := database.Exec(statement.sql, statement.args...); err != nil {
+			t.Fatalf("backdate room: %v", err)
+		}
+	}
 }
 
 // TestWrkcFullSurfaceWithNoHRCDaemon walks the §9.1 verb list end to end against
@@ -227,21 +266,43 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 		t.Fatalf("ack = %+v", acked)
 	}
 
-	// close / reopen
-	closeOut, err := runWrkc(t, f.dbPath, "agent:clod", "close", f.taskID, "--json")
+	// hide / unhide: a listing label, never a gate. There is no close and no
+	// reopen — the verbs are gone from the CLI entirely.
+	hideOut, err := runWrkc(t, f.dbPath, "agent:clod", "hide", f.taskID, "--json")
 	if err != nil {
-		t.Fatalf("wrkc close: %v\n%s", err, closeOut)
+		t.Fatalf("wrkc hide: %v\n%s", err, hideOut)
 	}
-	var closed roomWire
-	if err := json.Unmarshal([]byte(closeOut), &closed); err != nil || closed.State != "closed" {
-		t.Fatalf("close = %+v err=%v", closed, err)
+	var hidden roomWire
+	if err := json.Unmarshal([]byte(hideOut), &hidden); err != nil {
+		t.Fatalf("decode hide: %v\n%s", err, hideOut)
 	}
-	if _, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "after close"); err == nil {
-		t.Fatal("say into a closed room succeeded")
+	if len(hidden.Labels) != 1 || hidden.Labels[0] != "hidden" {
+		t.Fatalf("hide = %+v", hidden.Labels)
 	}
-	reopenOut, err := runWrkc(t, f.dbPath, "agent:clod", "reopen", f.taskID, "--json")
-	if err != nil {
-		t.Fatalf("wrkc reopen: %v\n%s", err, reopenOut)
+	if out, serr := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "hidden rooms still take talk"); serr != nil {
+		t.Fatalf("say into a hidden room was refused: %v\n%s", serr, out)
+	}
+	lsOut, lerr := runWrkc(t, f.dbPath, "agent:clod", "ls", "--output", "raw")
+	if lerr != nil {
+		t.Fatalf("wrkc ls: %v\n%s", lerr, lsOut)
+	}
+	if strings.Contains(lsOut, f.taskID) {
+		t.Fatalf("a hidden room is in the default listing: %q", lsOut)
+	}
+	allOut, aerr := runWrkc(t, f.dbPath, "agent:clod", "ls", "--all", "--output", "raw")
+	if aerr != nil {
+		t.Fatalf("wrkc ls --all: %v\n%s", aerr, allOut)
+	}
+	if !strings.Contains(allOut, f.taskID) {
+		t.Fatalf("--all did not show the hidden room: %q", allOut)
+	}
+	if unhideOut, uerr := runWrkc(t, f.dbPath, "agent:clod", "unhide", f.taskID, "--json"); uerr != nil {
+		t.Fatalf("wrkc unhide: %v\n%s", uerr, unhideOut)
+	}
+	for _, gone := range []string{"close", "reopen"} {
+		if out, cerr := runWrkc(t, f.dbPath, "agent:clod", gone, f.taskID); cerr == nil {
+			t.Fatalf("wrkc %s still exists: %s", gone, out)
+		}
 	}
 
 	// join / invite / leave
@@ -390,12 +451,11 @@ func TestWrkcSayRefusesWaitWithoutTo(t *testing.T) {
 	}
 }
 
-// TestWrkcInboxSeparatesClosedRoomObligations proves the T-07633 rendering half:
-// an obligation whose room has closed is STILL the addressee's, so the inbox
-// keeps listing it — but under its own heading with the way out, because the
-// stop hook no longer holds the seat on it and a plain listing would read as a
-// turn-blocking obligation it is not.
-func TestWrkcInboxSeparatesClosedRoomObligations(t *testing.T) {
+// TestWrkcInboxListsEveryObligationUniformly is the T-07633 rendering half
+// INVERTED (T-07642). There is no "closed room" section and no reopen hint: an
+// obligation on terminal work gates like any other, so it renders in the plain
+// list with `work terminal` as context.
+func TestWrkcInboxListsEveryObligationUniformly(t *testing.T) {
 	f := newWrkcFixture(t)
 	codySeat := "cody@wrkc-proj:" + f.taskID
 
@@ -410,33 +470,91 @@ func TestWrkcInboxSeparatesClosedRoomObligations(t *testing.T) {
 	}
 	envelopeID := said.Envelopes[0].ID
 
-	// While the room is open it renders under the plain room heading.
 	openOut, err := runWrkc(t, f.dbPath, "agent:cody", "inbox", "--scope-ref", codySeat, "--output", "human")
 	if err != nil {
 		t.Fatalf("wrkc inbox: %v\n%s", err, openOut)
 	}
-	if strings.Contains(openOut, "closed room") || !strings.Contains(openOut, f.taskID+" (task)") {
+	if !strings.Contains(openOut, f.taskID+" (task)") {
 		t.Fatalf("open room inbox = %q", openOut)
 	}
 
-	if closeOut, cerr := runWrkc(t, f.dbPath, "agent:clod", "close", f.taskID, "--json"); cerr != nil {
-		t.Fatalf("wrkc close: %v\n%s", cerr, closeOut)
+	completeWrkcTask(t, f)
+
+	terminalOut, err := runWrkc(t, f.dbPath, "agent:cody", "inbox", "--scope-ref", codySeat, "--output", "human")
+	if err != nil {
+		t.Fatalf("wrkc inbox after completion: %v\n%s", err, terminalOut)
+	}
+	for _, gone := range []string{"closed room", "wrkc reopen", "not gating your turn"} {
+		if strings.Contains(terminalOut, gone) {
+			t.Fatalf("inbox still renders the removed carve-out (%q): %q", gone, terminalOut)
+		}
+	}
+	if !strings.Contains(terminalOut, "work terminal; replying still works") {
+		t.Fatalf("inbox does not report terminal work as context: %q", terminalOut)
+	}
+	if !strings.Contains(terminalOut, envelopeID) {
+		t.Fatalf("the obligation vanished from the inbox: %q", terminalOut)
+	}
+	if strings.Contains(terminalOut, "no standing obligations") {
+		t.Fatalf("a standing obligation was reported as none: %q", terminalOut)
+	}
+}
+
+// TestWrkcSayIntoAStaleRoomWritesAndNoticesOnStderr is §5 end to end: the say
+// succeeds, stdout stays a clean machine read, and the advisory rides stderr.
+func TestWrkcSayIntoAStaleRoomWritesAndNoticesOnStderr(t *testing.T) {
+	f := newWrkcFixture(t)
+
+	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "first", "--json")
+	if err != nil {
+		t.Fatalf("wrkc say: %v\n%s", err, sayOut)
+	}
+	var said roomSayResultWire
+	if err := json.Unmarshal([]byte(sayOut), &said); err != nil {
+		t.Fatalf("decode say: %v\n%s", err, sayOut)
+	}
+	completeWrkcTask(t, f)
+	backdateWrkcRoom(t, f.dbPath, said.Room.UUID, 6*time.Hour)
+
+	showOut, _, err := runWrkcSplit(t, f.dbPath, "agent:clod", "show", f.taskID, "--output", "human")
+	if err != nil {
+		t.Fatalf("wrkc show: %v\n%s", err, showOut)
+	}
+	if !strings.Contains(showOut, "work: terminal") || !strings.Contains(showOut, "activity: stale") {
+		t.Fatalf("wrkc show does not print the projections: %q", showOut)
 	}
 
-	closedOut, err := runWrkc(t, f.dbPath, "agent:cody", "inbox", "--scope-ref", codySeat, "--output", "human")
+	stdout, stderr, err := runWrkcSplit(t, f.dbPath, "agent:clod", "say", f.taskID, "still here?", "--json")
 	if err != nil {
-		t.Fatalf("wrkc inbox after close: %v\n%s", err, closedOut)
+		t.Fatalf("say into a stale room was refused: %v\n%s\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(closedOut, "closed room: "+f.taskID) {
-		t.Fatalf("closed obligation lost its heading: %q", closedOut)
+	var late roomSayResultWire
+	if err := json.Unmarshal([]byte(stdout), &late); err != nil {
+		t.Fatalf("the notice contaminated stdout: %v\n%s", err, stdout)
 	}
-	if !strings.Contains(closedOut, "`wrkc reopen "+f.taskID+"` then reply, or `wrkc ack` (operator)") {
-		t.Fatalf("closed obligation carries no way out: %q", closedOut)
+	if len(late.Envelopes) != 1 {
+		t.Fatalf("stale say wrote %d envelopes, want 1", len(late.Envelopes))
 	}
-	if !strings.Contains(closedOut, envelopeID) {
-		t.Fatalf("closed obligation vanished from the inbox: %q", closedOut)
+	if !strings.HasPrefix(strings.TrimSpace(stderr), "notice: room "+f.taskID) {
+		t.Fatalf("stale notice is not on stderr: %q", stderr)
 	}
-	if strings.Contains(closedOut, "no standing obligations") {
-		t.Fatalf("a standing obligation was reported as none: %q", closedOut)
+	if !strings.Contains(stderr, "task completed") || !strings.Contains(stderr, "last activity") {
+		t.Fatalf("stale notice does not name the transition and the age: %q", stderr)
+	}
+}
+
+// completeWrkcTask drives the fixture's task terminal, which is what turns its
+// room's `work` projection to terminal.
+func completeWrkcTask(t *testing.T, f wrkcFixture) {
+	t.Helper()
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.Exec(
+		"UPDATE tasks SET state = 'completed', completed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE uuid = ?",
+		f.taskUUID); err != nil {
+		t.Fatalf("complete task: %v", err)
 	}
 }

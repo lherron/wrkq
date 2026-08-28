@@ -86,7 +86,7 @@ import type {
   WrkqEnvelopeRoundParams,
   WrkqEnvelopeShowParams,
   WrkqRoom,
-  WrkqRoomLifecycleParams,
+  WrkqRoomLabelParams,
   WrkqRoomListParams,
   WrkqRoomListResult,
   WrkqRoomLogView,
@@ -292,8 +292,15 @@ export interface WrkqRoomFacade {
   show(params: WrkqRoomShowParams): Promise<WrkqRoom>;
   list(params?: WrkqRoomListParams): Promise<WrkqRoomListResult>;
   logView(params: WrkqRoomLogViewParams): Promise<WrkqRoomLogView>;
-  close(params: WrkqRoomLifecycleParams): Promise<WrkqRoom>;
-  reopen(params: WrkqRoomLifecycleParams): Promise<WrkqRoom>;
+  /**
+   * Set / clear the `hidden` discovery label. It changes what the DEFAULT
+   * `list` returns and nothing else: a hidden room accepts says, delivers, and
+   * gates turns exactly like any other. `close` and `reopen` are REMOVED —
+   * rooms have no lifecycle, and the RPCs refuse with `room_lifecycle_removed`
+   * for one burn-in window.
+   */
+  hide(params: WrkqRoomLabelParams): Promise<WrkqRoom>;
+  unhide(params: WrkqRoomLabelParams): Promise<WrkqRoom>;
   join(params: WrkqRoomMemberParams): Promise<WrkqRoomMembersView>;
   leave(params: WrkqRoomMemberParams): Promise<WrkqRoomMembersView>;
   membersView(params: WrkqRoomMembersViewParams): Promise<WrkqRoomMembersView>;

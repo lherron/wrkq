@@ -134,7 +134,20 @@ export interface WrkqPromiseListResult {
 // OPAQUE STRING to wrkq. It never interprets one and never imports hrc.
 
 export type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
-export type WrkqRoomState = "open" | "closed" | "archived";
+/**
+ * A room's WORK, projected at read time from the task/campaign it is keyed by.
+ * Ad-hoc rooms anchor on no work and are always `open`. It NEVER gates: a say
+ * into any room you can resolve writes.
+ */
+export type WrkqRoomWork = "open" | "terminal";
+
+/**
+ * A room's ACTIVITY, projected at read time by FIRST MATCH over
+ * `lastActivityAt`: `stale` iff work is terminal and the last activity is older
+ * than 4h, else `active` under 24h, else `quiet`. Single-valued and total —
+ * every room has exactly one value at every instant.
+ */
+export type WrkqRoomActivity = "active" | "quiet" | "stale";
 export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
 export type WrkqEnvelopeState =
   | "pending"
@@ -171,18 +184,27 @@ export interface WrkqRoom {
   key: string;
   kind: WrkqRoomKind;
   subject?: string;
-  /** The EFFECTIVE state a caller must obey. */
-  state: WrkqRoomState;
   /**
-   * The durable column. When it differs from `state`, the closure is DERIVED
-   * (the task went terminal, the campaign closed) rather than explicit.
+   * READ-TIME PROJECTIONS. Render them; never gate on them. A room has no
+   * lifecycle state, so nothing here can refuse a say, exclude an obligation
+   * from `pendingView`, or stop the stop hook from holding a seat.
    */
-  storedState: WrkqRoomState;
+  work: WrkqRoomWork;
+  activity: WrkqRoomActivity;
+  /**
+   * Operator discovery labels (`hidden` today). A label changes what the
+   * DEFAULT `room.list` returns and nothing else; any principal may set it.
+   */
+  labels: string[];
   workRef: WrkqRoomWorkRef | null;
   links: WrkqRoomLink[];
   openedByPrincipalRef: string;
   openedAt: string;
-  closedAt?: string;
+  /**
+   * The activity clock: `max(openedAt, newest envelope, newest member join)`.
+   * `openedAt` always exists, so it is defined for every room including one
+   * that has never carried a message.
+   */
   lastActivityAt: string;
   memberCount: number;
   messageCount: number;
@@ -298,6 +320,12 @@ export interface WrkqRoomSayResult {
   /** Envelope ids this say discharged under reply-is-ack. */
   acked: string[];
   recordedCommentId?: string;
+  /**
+   * Set when the say landed in a room whose activity read `stale`. Advisory
+   * only: the say already wrote, it is never an error, and there is no override
+   * flag because there is nothing to override. `wrkc` prints it to stderr.
+   */
+  notice?: string;
 }
 
 export interface WrkqRoomOpenParams {
@@ -315,7 +343,12 @@ export interface WrkqRoomShowParams {
 }
 
 export interface WrkqRoomListParams {
-  state?: WrkqRoomState | "all";
+  /**
+   * Include what the default listing omits: `activity: "stale"` rooms and rooms
+   * carrying the `hidden` label. Listing is DISCOVERY — everything it omits is
+   * still addressable, and its obligations still gate and wake.
+   */
+  all?: boolean;
   kind?: WrkqRoomKind;
   /** "me" restricts to rooms the caller's own scope is an active member of. */
   scope?: "me";
@@ -342,9 +375,12 @@ export interface WrkqRoomLogView {
   items: WrkqEnvelope[];
 }
 
-export interface WrkqRoomLifecycleParams {
+/**
+ * Sets or clears the `hidden` discovery label. Any principal may call it: what
+ * a listing shows is not an ownership boundary.
+ */
+export interface WrkqRoomLabelParams {
   room: string;
-  ifMatch?: number;
   principalRef?: string;
   scopeRef?: string;
 }
@@ -388,9 +424,10 @@ export interface WrkqEnvelopeInboxGroup {
 /**
  * fyi is never listed here: it carries no obligation.
  *
- * An obligation in a CLOSED room is still listed — closure does not retire it —
- * even though `pendingView` drops it. Key off `group.room.state !== "open"` to
- * render it apart from the obligations that actually gate a turn.
+ * Every group is a live obligation that gates its addressee's turn: no room
+ * projection excuses one. A group whose `room.work` is `"terminal"` is CONTEXT
+ * worth rendering — the seat that asked may have moved on — not a separate
+ * class of mail.
  */
 export interface WrkqEnvelopeInboxView {
   scopeRef?: string;
@@ -464,11 +501,10 @@ export interface WrkqEnvelopePendingViewParams {
 /**
  * The kicker wake set AND the stop-hook predicate in one read model.
  *
- * Envelopes whose room reads `closed` or `archived` are absent from BOTH
- * `items` and `blocking`: a closed room refuses a say, so the addressee has no
- * reply path and there is nothing a summoned turn could do. They are NOT
- * retired — `inboxView` still lists them under their closed room — and
- * reopening the room returns them to this read unchanged.
+ * The read is UNIFORM over rooms: an obligation wakes and gates whatever its
+ * room's `work`, `activity`, or `hidden` label says. Rooms have no lifecycle
+ * that can refuse a say, so the addressee always has a reply path — excluding
+ * such mail would silently strand a follow-up on finished work (T-07642).
  */
 export interface WrkqEnvelopePendingView {
   /**

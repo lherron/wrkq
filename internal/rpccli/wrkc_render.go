@@ -90,15 +90,16 @@ func renderWrkcRoomSingleton(cmd *cobra.Command, raw json.RawMessage, flags prom
 }
 
 func wrkcRoomDetailLines(room roomWire) []string {
+	// work and activity are PROJECTIONS, printed as information. Neither can
+	// refuse a say, so neither is followed by a "way out" hint.
 	lines := []string{
 		"room: " + room.Key,
 		"kind: " + room.Kind,
-		"state: " + room.State,
+		"work: " + room.Work,
+		"activity: " + room.Activity,
 	}
-	if room.State != room.StoredState {
-		// A derived closure is not the same fact as an explicit one, and the
-		// difference decides whether `wrkc reopen` is the right move.
-		lines = append(lines, "stored_state: "+room.StoredState+" (state is derived from the work)")
+	if len(room.Labels) > 0 {
+		lines = append(lines, "labels: "+strings.Join(room.Labels, ", ")+" (affects `wrkc ls` only)")
 	}
 	if room.ID != nil {
 		lines = append(lines, "id: "+*room.ID)
@@ -107,7 +108,7 @@ func wrkcRoomDetailLines(room roomWire) []string {
 		lines = append(lines, "subject: "+*room.Subject)
 	}
 	if room.WorkRef != nil {
-		lines = append(lines, "work: "+room.WorkRef.Type+":"+room.WorkRef.ID+" ("+room.WorkRef.Path+")")
+		lines = append(lines, "work_ref: "+room.WorkRef.Type+":"+room.WorkRef.ID+" ("+room.WorkRef.Path+")")
 	}
 	for _, link := range room.Links {
 		lines = append(lines, "linked ("+link.Relation+"): "+link.Key)
@@ -155,7 +156,7 @@ func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, flags promiseOutputFl
 }
 
 func wrkcRoomTable(rooms []roomWire) ([]string, [][]string) {
-	headers := []string{"Room", "Kind", "State", "Subject", "Members", "Messages", "LastActivity"}
+	headers := []string{"Room", "Kind", "Work", "Activity", "Subject", "Members", "Messages", "LastActivity"}
 	rows := make([][]string, 0, len(rooms))
 	for _, room := range rooms {
 		subject := ""
@@ -163,7 +164,7 @@ func wrkcRoomTable(rooms []roomWire) ([]string, [][]string) {
 			subject = *room.Subject
 		}
 		rows = append(rows, []string{
-			room.Key, room.Kind, room.State, subject,
+			room.Key, room.Kind, room.Work, room.Activity, subject,
 			fmt.Sprint(room.MemberCount), fmt.Sprint(room.MessageCount), room.LastActivityAt,
 		})
 	}
@@ -241,7 +242,7 @@ func wrkcEnvelopeTable(envelopes []envelopeWire) ([]string, [][]string) {
 func renderWrkcTranscript(cmd *cobra.Command, view roomLogViewWire) error {
 	renderer := render.NewRenderer(cmd.OutOrStdout(), render.Options{})
 	lines := []string{
-		fmt.Sprintf("%s (%s · %s · %d messages)", view.Room.Key, view.Room.Kind, view.Room.State, view.Room.MessageCount),
+		fmt.Sprintf("%s (%s · %s · %d messages)", view.Room.Key, view.Room.Kind, view.Room.Activity, view.Room.MessageCount),
 	}
 	if view.Room.Subject != nil {
 		lines = append(lines, "subject: "+*view.Room.Subject)
@@ -380,29 +381,21 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 	}
 	lines := []string{"inbox for " + scope}
 	total := 0
-	// A closed room's obligations are REAL and still listed, but they gate
-	// nothing: `wrkq.envelope.pendingView` drops them, because §3.1 refuses a say
-	// into a closed room and so leaves the addressee no reply path. They render
-	// in their own section with the way out, rather than sitting silently among
-	// the obligations that do hold the seat.
-	closed := []envelopeInboxGroupWire{}
+	// Every group here is a live obligation that gates this turn: there is no
+	// room projection that excuses one (T-07642 reverted the closed-room
+	// carve-out). Terminal work is annotated as CONTEXT — the seat that asked
+	// may have moved on — and answering it is an ordinary say.
 	for _, group := range view.Groups {
 		total += len(group.Items)
-		if group.Room.State != "open" {
-			closed = append(closed, group)
-			continue
+		heading := group.Room.Key + " (" + group.Room.Kind + ")"
+		if group.Room.Work == "terminal" {
+			heading += " — work terminal; replying still works"
 		}
-		lines = append(lines, "", group.Room.Key+" ("+group.Room.Kind+")")
+		lines = append(lines, "", heading)
 		lines = append(lines, wrkcInboxEnvelopeLines(group.Items)...)
 	}
 	if total == 0 {
 		lines = append(lines, "", "no standing obligations")
-	}
-	for _, group := range closed {
-		lines = append(lines, "", "closed room: "+group.Room.Key+" ("+group.Room.Kind+
-			", "+group.Room.State+") — not gating your turn",
-			"  `wrkc reopen "+group.Room.Key+"` then reply, or `wrkc ack` (operator)")
-		lines = append(lines, wrkcInboxEnvelopeLines(group.Items)...)
 	}
 	if len(view.Deferred) > 0 {
 		lines = append(lines, "", "deferred")

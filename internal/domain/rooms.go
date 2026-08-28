@@ -18,16 +18,37 @@ const (
 	RoomKindAdhoc    RoomKind = "adhoc"
 )
 
-// RoomState is the durable room lifecycle. A derived room may also read as
-// closed without a stored transition when its work goes terminal; see
-// EffectiveRoomState.
-type RoomState string
+// RoomWork is the read-time projection of the work a derived room is keyed by.
+// It is NEVER stored and NEVER gates: a say into a terminal room writes.
+type RoomWork string
 
 const (
-	RoomStateOpen     RoomState = "open"
-	RoomStateClosed   RoomState = "closed"
-	RoomStateArchived RoomState = "archived"
+	RoomWorkOpen     RoomWork = "open"
+	RoomWorkTerminal RoomWork = "terminal"
 )
+
+// RoomActivity is the read-time liveness projection. It is single-valued and
+// total: every room has exactly one value at every instant, and every consumer
+// — default listing, pair-room reuse, the stale notice — reads that one value.
+type RoomActivity string
+
+const (
+	RoomActivityActive RoomActivity = "active"
+	RoomActivityQuiet  RoomActivity = "quiet"
+	RoomActivityStale  RoomActivity = "stale"
+)
+
+// RoomStaleAfter and RoomActiveWithin are the two clocks of the activity
+// projection (T-07612 rev 3 §3.1).
+const (
+	RoomStaleAfter   = 4 * time.Hour
+	RoomActiveWithin = 24 * time.Hour
+)
+
+// RoomLabelHidden removes a room from the DEFAULT listing and nothing else. It
+// is a label, not a state: a hidden room accepts says, and its obligations gate
+// and wake exactly like any other room's.
+const RoomLabelHidden = "hidden"
 
 // EnvelopeObligation is what a say asks of its addressee. Only reply_required
 // fires the kicker; fyi presents into a live generation or waits for the next
@@ -63,10 +84,6 @@ const (
 	RoomMemberSourceJoined    RoomMemberSource = "joined"
 )
 
-// AdhocRoomIdleTTL is the idle window after which an open ad-hoc room
-// auto-archives (T-07612 §3.1, open item closed at 24h).
-const AdhocRoomIdleTTL = 24 * time.Hour
-
 // DefaultEnvelopeMaxRounds bounds kicker-driven redelivery before an envelope
 // dead-letters visibly. Carried from T-06810's wave-2 freeze ruling: only a
 // still-presented envelope advanced by a completed kicker turn counts, and the
@@ -75,27 +92,30 @@ const DefaultEnvelopeMaxRounds = 5
 
 // Room is a durable conversation. Derived rooms anchor on exactly one live
 // wrkq resource; ad-hoc rooms anchor on nothing and mint an R- id.
+//
+// A room carries NO lifecycle state. `work` and `activity` are computed at read
+// time from the work and from LastActivity, and neither can refuse a say. The
+// `state`, `closed_at`, and `reopened_at` columns survive the rev-3 amendment
+// unread until wave 5 drops them, which is why they are not scanned here.
 type Room struct {
-	UUID                  string    `json:"uuid" db:"uuid"`
-	ID                    *string   `json:"id,omitempty" db:"id"`
-	Kind                  RoomKind  `json:"kind" db:"kind"`
-	TaskUUID              *string   `json:"task_uuid,omitempty" db:"task_uuid"`
-	ContainerUUID         *string   `json:"container_uuid,omitempty" db:"container_uuid"`
-	Subject               *string   `json:"subject,omitempty" db:"subject"`
-	State                 RoomState `json:"state" db:"state"`
-	ClosedAt              *string   `json:"closed_at,omitempty" db:"closed_at"`
-	ReopenedAt            *string   `json:"reopened_at,omitempty" db:"reopened_at"`
-	LastActivityAt        string    `json:"last_activity_at" db:"last_activity_at"`
-	OpenedByPrincipalRef  string    `json:"opened_by_principal_ref" db:"opened_by_principal_ref"`
-	OpenedAt              string    `json:"opened_at" db:"opened_at"`
-	Meta                  *string   `json:"meta,omitempty" db:"meta"`
-	ETag                  int64     `json:"etag" db:"etag"`
-	CreatedAt             string    `json:"created_at" db:"created_at"`
-	UpdatedAt             string    `json:"updated_at" db:"updated_at"`
-	CreatedByPrincipalRef string    `json:"created_by_principal_ref" db:"created_by_principal_ref"`
-	CreatedByScopeRef     *string   `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
-	UpdatedByPrincipalRef string    `json:"updated_by_principal_ref" db:"updated_by_principal_ref"`
-	UpdatedByScopeRef     *string   `json:"updated_by_scope_ref,omitempty" db:"updated_by_scope_ref"`
+	UUID                  string   `json:"uuid" db:"uuid"`
+	ID                    *string  `json:"id,omitempty" db:"id"`
+	Kind                  RoomKind `json:"kind" db:"kind"`
+	TaskUUID              *string  `json:"task_uuid,omitempty" db:"task_uuid"`
+	ContainerUUID         *string  `json:"container_uuid,omitempty" db:"container_uuid"`
+	Subject               *string  `json:"subject,omitempty" db:"subject"`
+	LastActivityAt        string   `json:"last_activity_at" db:"last_activity_at"`
+	OpenedByPrincipalRef  string   `json:"opened_by_principal_ref" db:"opened_by_principal_ref"`
+	OpenedAt              string   `json:"opened_at" db:"opened_at"`
+	Labels                []string `json:"labels" db:"-"`
+	Meta                  *string  `json:"meta,omitempty" db:"meta"`
+	ETag                  int64    `json:"etag" db:"etag"`
+	CreatedAt             string   `json:"created_at" db:"created_at"`
+	UpdatedAt             string   `json:"updated_at" db:"updated_at"`
+	CreatedByPrincipalRef string   `json:"created_by_principal_ref" db:"created_by_principal_ref"`
+	CreatedByScopeRef     *string  `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
+	UpdatedByPrincipalRef string   `json:"updated_by_principal_ref" db:"updated_by_principal_ref"`
+	UpdatedByScopeRef     *string  `json:"updated_by_scope_ref,omitempty" db:"updated_by_scope_ref"`
 }
 
 // Envelope is one object for chat and obligation, addressed to exactly one
@@ -177,16 +197,6 @@ func ValidateRoomKind(kind RoomKind) error {
 	}
 }
 
-// ValidateRoomState validates the stored room lifecycle vocabulary.
-func ValidateRoomState(state RoomState) error {
-	switch state {
-	case RoomStateOpen, RoomStateClosed, RoomStateArchived:
-		return nil
-	default:
-		return fmt.Errorf("invalid room state %q: must be one of: open, closed, archived", state)
-	}
-}
-
 // ValidateEnvelopeObligation validates the stored obligation vocabulary.
 func ValidateEnvelopeObligation(obligation EnvelopeObligation) error {
 	switch obligation {
@@ -214,23 +224,49 @@ func IsEnvelopeTerminal(state EnvelopeState) bool {
 	return state == EnvelopeStateAcked || state == EnvelopeStateDead
 }
 
-// EffectiveRoomState resolves the room state a caller sees. A stored non-open
-// state always wins. Otherwise a derived room reads as closed once its work is
-// terminal — a task room's task completed/cancelled/archived/deleted, a
-// campaign room's campaign completed/cancelled — unless an explicit reopen has
-// overridden that closure. The task room's key IS the task id, so the closure
-// signal already rides the same monitor selector as the conversation.
-func EffectiveRoomState(stored RoomState, kind RoomKind, reopenedAt *string, workTerminal bool) RoomState {
-	if stored != RoomStateOpen {
-		return stored
+// RoomActivityFor classifies a room by FIRST MATCH, so the three labels are
+// mutually exclusive by construction and every room has exactly one:
+//
+//  1. stale  — terminal work whose last activity is older than RoomStaleAfter
+//  2. active — anything whose last activity is younger than RoomActiveWithin
+//  3. quiet  — everything else
+//
+// It is total because lastActivity is total: RoomLastActivity folds opened_at,
+// which every room has, so a room with no envelope still classifies.
+func RoomActivityFor(work RoomWork, lastActivity, now time.Time) RoomActivity {
+	age := now.Sub(lastActivity)
+	switch {
+	case work == RoomWorkTerminal && age > RoomStaleAfter:
+		return RoomActivityStale
+	case age < RoomActiveWithin:
+		return RoomActivityActive
+	default:
+		return RoomActivityQuiet
 	}
-	if kind == RoomKindAdhoc || kind == RoomKindProject {
-		return RoomStateOpen
+}
+
+// RoomLastActivity is the room's activity clock: the maximum of when it was
+// opened, when its newest envelope was written, and when its newest member
+// joined. opened_at always exists, so the value is defined for every room
+// including an explicit RoomOpen room that has never carried a message.
+func RoomLastActivity(openedAt, newestEnvelopeAt, newestJoinAt string) string {
+	latest := openedAt
+	for _, candidate := range []string{newestEnvelopeAt, newestJoinAt} {
+		if candidate > latest {
+			latest = candidate
+		}
 	}
-	if workTerminal && reopenedAt == nil {
-		return RoomStateClosed
+	return latest
+}
+
+// RoomHasLabel reports whether a room carries an operator label.
+func RoomHasLabel(labels []string, label string) bool {
+	for _, candidate := range labels {
+		if candidate == label {
+			return true
+		}
 	}
-	return RoomStateOpen
+	return false
 }
 
 // NormalizeRoomSubject trims an ad-hoc room subject and derives one from the

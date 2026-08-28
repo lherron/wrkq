@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
@@ -36,18 +35,6 @@ func (e *EnvelopeNotFoundError) Error() string {
 	return fmt.Sprintf("envelope not found: %s", e.Selector)
 }
 
-// RoomClosedError is the typed refusal a say gets from a room that is no longer
-// accepting talk. It names the state so the caller can tell an explicit close
-// from a derived one.
-type RoomClosedError struct {
-	RoomKey string
-	State   domain.RoomState
-}
-
-func (e *RoomClosedError) Error() string {
-	return fmt.Sprintf("room %s is %s; reopen it before saying into it", e.RoomKey, e.State)
-}
-
 // EnvelopeWrongStateError identifies a disposition verb attempted on an
 // envelope that has already reached a terminal state.
 type EnvelopeWrongStateError struct {
@@ -60,9 +47,12 @@ func (e *EnvelopeWrongStateError) Error() string {
 	return fmt.Sprintf("cannot %s envelope %s in state %s", e.Verb, e.Envelope, e.State)
 }
 
+// roomColumns deliberately omits state / closed_at / reopened_at: rooms have no
+// lifecycle after the T-07612 rev 3 amendment, and reading a column nothing may
+// act on is how a dropped gate grows back. Wave 5 drops them from the schema.
 const roomColumns = `
-	uuid, id, kind, task_uuid, container_uuid, subject, state, closed_at,
-	reopened_at, last_activity_at, opened_by_principal_ref, opened_at, meta,
+	uuid, id, kind, task_uuid, container_uuid, subject,
+	last_activity_at, opened_by_principal_ref, opened_at, meta,
 	etag, created_at, updated_at,
 	created_by_principal_ref, created_by_scope_ref,
 	updated_by_principal_ref, updated_by_scope_ref`
@@ -139,10 +129,7 @@ func (rs *RoomStore) CreateWithAttribution(attr attribution.Attribution, params 
 			return fmt.Errorf("failed to read created room: %w", err)
 		}
 
-		payload := map[string]interface{}{
-			"kind":  string(created.Kind),
-			"state": string(created.State),
-		}
+		payload := map[string]interface{}{"kind": string(created.Kind)}
 		if created.ID != nil {
 			payload["id"] = *created.ID
 		}
@@ -206,21 +193,34 @@ func (rs *RoomStore) getByAnchor(column, value string) (*domain.Room, error) {
 	return room, nil
 }
 
-// FindAdhocPairRoom returns the open ad-hoc room whose ACTIVE member set is
-// exactly the supplied pair. A third member joining makes it a group room, so
-// it stops matching and the next unsolicited pair say opens a fresh one.
-func (rs *RoomStore) FindAdhocPairRoom(memberA, memberB string) (*domain.Room, error) {
+// FindAdhocPairRoom returns the ad-hoc room whose ACTIVE member set is exactly
+// the supplied pair and whose activity reads `active`. A third member joining
+// makes it a group room, so it stops matching and the next unsolicited pair say
+// opens a fresh one; a pair room that has gone quiet does the same, which is
+// what replaced the idle auto-archive the rev-3 amendment removed.
+//
+// activeSince is the `active` cutoff (now − RoomActiveWithin). The clock is the
+// SAME three-way max the read-time projection uses — opened_at folded with the
+// newest envelope and the newest join — so a room this reuses is a room
+// `wrkc show` calls active, and a RoomOpen room with no envelope at all is
+// reusable for its first 24h.
+func (rs *RoomStore) FindAdhocPairRoom(memberA, memberB, activeSince string) (*domain.Room, error) {
 	room, err := scanRoom(rs.store.db.QueryRow(`
 		SELECT `+roomColumns+` FROM rooms r
-		 WHERE r.kind = 'adhoc' AND r.state = 'open'
+		 WHERE r.kind = 'adhoc'
 		   AND (SELECT COUNT(*) FROM room_members m
 		         WHERE m.room_uuid = r.uuid AND m.left_at IS NULL) = 2
 		   AND EXISTS (SELECT 1 FROM room_members m
 		                WHERE m.room_uuid = r.uuid AND m.left_at IS NULL AND m.member_ref = ?)
 		   AND EXISTS (SELECT 1 FROM room_members m
 		                WHERE m.room_uuid = r.uuid AND m.left_at IS NULL AND m.member_ref = ?)
+		   AND MAX(
+		         r.opened_at,
+		         COALESCE((SELECT MAX(e.created_at) FROM envelopes e WHERE e.room_uuid = r.uuid), ''),
+		         COALESCE((SELECT MAX(m.joined_at) FROM room_members m WHERE m.room_uuid = r.uuid), '')
+		       ) > ?
 		 ORDER BY r.last_activity_at DESC, r.id DESC
-		 LIMIT 1`, memberA, memberB))
+		 LIMIT 1`, memberA, memberB, activeSince))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -233,7 +233,6 @@ func (rs *RoomStore) FindAdhocPairRoom(memberA, memberB string) (*domain.Room, e
 // RoomListParams selects rooms without imposing read restrictions: rooms are
 // readable by any principal and membership is not an ACL.
 type RoomListParams struct {
-	State     domain.RoomState
 	Kind      domain.RoomKind
 	MemberRef string
 }
@@ -242,13 +241,6 @@ type RoomListParams struct {
 func (rs *RoomStore) List(params RoomListParams) ([]domain.Room, error) {
 	clauses := []string{"1 = 1"}
 	args := []interface{}{}
-	if params.State != "" {
-		if err := domain.ValidateRoomState(params.State); err != nil {
-			return nil, err
-		}
-		clauses = append(clauses, "r.state = ?")
-		args = append(args, params.State)
-	}
 	if params.Kind != "" {
 		if err := domain.ValidateRoomKind(params.Kind); err != nil {
 			return nil, err
@@ -265,21 +257,19 @@ func (rs *RoomStore) List(params RoomListParams) ([]domain.Room, error) {
 		strings.Join(clauses, " AND ")+" ORDER BY r.last_activity_at DESC, r.uuid", args...)
 }
 
-// SetStateWithAttribution applies close / reopen / archive and emits the
-// matching room event. Reopen also clears a DERIVED closure by stamping
-// reopened_at, so a task room outlives its task's terminal transition.
-func (rs *RoomStore) SetStateWithAttribution(attr attribution.Attribution, roomUUID string, state domain.RoomState, ifMatch int64) (*domain.Room, error) {
+// SetRoomLabelWithAttribution sets or clears an operator label on a room and
+// emits room.hidden / room.unhidden. A label is not a state: it changes what the
+// DEFAULT listing shows and nothing else — the room still accepts says, and its
+// obligations gate and wake unchanged. Any principal may set it; discovery is
+// not an ownership boundary.
+func (rs *RoomStore) SetRoomLabelWithAttribution(attr attribution.Attribution, roomUUID, label string, on bool) (*domain.Room, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateRoomState(state); err != nil {
-		return nil, err
+	eventType := "room.unhidden"
+	if on {
+		eventType = "room.hidden"
 	}
-	eventType := map[domain.RoomState]string{
-		domain.RoomStateOpen:     "room.reopened",
-		domain.RoomStateClosed:   "room.closed",
-		domain.RoomStateArchived: "room.archived",
-	}[state]
 
 	var updated *domain.Room
 	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
@@ -287,31 +277,22 @@ func (rs *RoomStore) SetStateWithAttribution(attr attribution.Attribution, roomU
 		if err != nil {
 			return err
 		}
-		if err := checkETag(current.ETag, ifMatch); err != nil {
-			return err
+		if domain.RoomHasLabel(current.Labels, label) == on {
+			updated = current
+			return nil
 		}
-		now, err := serverNowTx(tx)
+		meta, err := roomMetaWithLabel(current.Meta, label, on)
 		if err != nil {
 			return err
 		}
-		var closedAt interface{}
-		var reopenedAt interface{} = current.ReopenedAt
-		if state == domain.RoomStateOpen {
-			reopenedAt = now
-		} else {
-			closedAt = now
-		}
 		if _, err := tx.Exec(`UPDATE rooms
-			SET state = ?, closed_at = ?, reopened_at = ?, etag = etag + 1,
+			SET meta = ?, etag = etag + 1,
 			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 			    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-			WHERE uuid = ?`, state, closedAt, reopenedAt, attr.PrincipalRef, scopeSQL(attr), roomUUID); err != nil {
-			return fmt.Errorf("failed to set room state: %w", err)
+			WHERE uuid = ?`, meta, attr.PrincipalRef, scopeSQL(attr), roomUUID); err != nil {
+			return fmt.Errorf("failed to set room label: %w", err)
 		}
-		payload := map[string]interface{}{
-			"state":          string(state),
-			"previous_state": string(current.State),
-		}
+		payload := map[string]interface{}{"label": label}
 		if _, err := logRoomEvent(tx, ew, attr, roomUUID, eventType, current.ETag+1, payload); err != nil {
 			return err
 		}
@@ -321,66 +302,48 @@ func (rs *RoomStore) SetStateWithAttribution(attr attribution.Attribution, roomU
 	return updated, err
 }
 
-// ArchiveIdleAdhocRooms archives every open ad-hoc room idle beyond the TTL and
-// emits room.archived for each. It is a lazy sweep run by the read and routing
-// paths rather than a daemon: wrkq owns no scheduler.
-func (rs *RoomStore) ArchiveIdleAdhocRooms(attr attribution.Attribution, ttl time.Duration) (int, error) {
-	if err := requireAttribution(attr); err != nil {
-		return 0, err
-	}
-	cutoff := time.Now().UTC().Add(-ttl).Format("2006-01-02T15:04:05Z")
-
-	archived := 0
-	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		rows, err := tx.Query(`SELECT uuid, etag FROM rooms
-			 WHERE kind = 'adhoc' AND state = 'open' AND last_activity_at <= ?
-			 ORDER BY uuid`, cutoff)
-		if err != nil {
-			return fmt.Errorf("failed to find idle ad-hoc rooms: %w", err)
-		}
-		type idle struct {
-			uuid string
-			etag int64
-		}
-		var stale []idle
-		for rows.Next() {
-			var item idle
-			if err := rows.Scan(&item.uuid, &item.etag); err != nil {
-				_ = rows.Close()
-				return fmt.Errorf("failed to scan idle ad-hoc room: %w", err)
-			}
-			stale = append(stale, item)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-
-		for _, item := range stale {
-			if _, err := tx.Exec(`UPDATE rooms
-				SET state = 'archived',
-				    closed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-				    etag = etag + 1,
-				    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-				    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-				WHERE uuid = ?`, attr.PrincipalRef, scopeSQL(attr), item.uuid); err != nil {
-				return fmt.Errorf("failed to archive idle ad-hoc room: %w", err)
-			}
-			payload := map[string]interface{}{
-				"state":          "archived",
-				"previous_state": "open",
-				"reason":         "idle",
-			}
-			if _, err := logRoomEvent(tx, ew, attr, item.uuid, "room.archived", item.etag+1, payload); err != nil {
-				return err
-			}
-			archived++
-		}
+// roomLabelsFromMeta reads the operator labels out of a room's meta blob. Room
+// labels ride meta rather than a column of their own: `hidden` is the only one
+// the rev-3 amendment mints, and it changes no query plan worth an index.
+func roomLabelsFromMeta(meta *string) []string {
+	if meta == nil || strings.TrimSpace(*meta) == "" {
 		return nil
-	})
-	return archived, err
+	}
+	var decoded struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.Unmarshal([]byte(*meta), &decoded); err != nil {
+		return nil
+	}
+	return decoded.Labels
+}
+
+func roomMetaWithLabel(meta *string, label string, on bool) (string, error) {
+	decoded := map[string]interface{}{}
+	if meta != nil && strings.TrimSpace(*meta) != "" {
+		if err := json.Unmarshal([]byte(*meta), &decoded); err != nil {
+			return "", fmt.Errorf("failed to parse room meta: %w", err)
+		}
+	}
+	labels := []string{}
+	for _, existing := range roomLabelsFromMeta(meta) {
+		if existing != label {
+			labels = append(labels, existing)
+		}
+	}
+	if on {
+		labels = append(labels, label)
+	}
+	if len(labels) == 0 {
+		delete(decoded, "labels")
+	} else {
+		decoded["labels"] = labels
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode room meta: %w", err)
+	}
+	return string(encoded), nil
 }
 
 // ─── members ──────────────────────────────────────────────────────────────────
@@ -1328,13 +1291,16 @@ func scanRoom(scanner collabScanner) (*domain.Room, error) {
 	room := &domain.Room{}
 	err := scanner.Scan(
 		&room.UUID, &room.ID, &room.Kind, &room.TaskUUID, &room.ContainerUUID,
-		&room.Subject, &room.State, &room.ClosedAt, &room.ReopenedAt,
-		&room.LastActivityAt, &room.OpenedByPrincipalRef, &room.OpenedAt,
-		&room.Meta, &room.ETag, &room.CreatedAt, &room.UpdatedAt,
+		&room.Subject, &room.LastActivityAt, &room.OpenedByPrincipalRef,
+		&room.OpenedAt, &room.Meta, &room.ETag, &room.CreatedAt, &room.UpdatedAt,
 		&room.CreatedByPrincipalRef, &room.CreatedByScopeRef,
 		&room.UpdatedByPrincipalRef, &room.UpdatedByScopeRef,
 	)
-	return room, err
+	if err != nil {
+		return room, err
+	}
+	room.Labels = roomLabelsFromMeta(room.Meta)
+	return room, nil
 }
 
 func scanEnvelope(scanner collabScanner) (*domain.Envelope, error) {

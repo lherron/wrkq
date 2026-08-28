@@ -31,13 +31,13 @@ type roomWire struct {
 	Key                  string         `json:"key"`
 	Kind                 string         `json:"kind"`
 	Subject              *string        `json:"subject,omitempty"`
-	State                string         `json:"state"`
-	StoredState          string         `json:"storedState"`
+	Work                 string         `json:"work"`
+	Activity             string         `json:"activity"`
+	Labels               []string       `json:"labels"`
 	WorkRef              *roomWorkRef   `json:"workRef"`
 	Links                []roomLinkWire `json:"links"`
 	OpenedByPrincipalRef string         `json:"openedByPrincipalRef"`
 	OpenedAt             string         `json:"openedAt"`
-	ClosedAt             *string        `json:"closedAt,omitempty"`
 	LastActivityAt       string         `json:"lastActivityAt"`
 	MemberCount          int            `json:"memberCount"`
 	MessageCount         int            `json:"messageCount"`
@@ -124,6 +124,7 @@ type roomSayResultWire struct {
 	Envelopes         []envelopeWire `json:"envelopes"`
 	Acked             []string       `json:"acked"`
 	RecordedCommentID *string        `json:"recordedCommentId,omitempty"`
+	Notice            *string        `json:"notice,omitempty"`
 }
 
 type roomLogViewWire struct {
@@ -164,9 +165,11 @@ a project, or an ad-hoc pair. An envelope is one message in a room, addressed to
 exactly one recipient. Talk survives every runtime that carried it, so context
 is PULLED from the room rather than remembered by a session.
 
-Two rules worth knowing before you use it:
+Three rules worth knowing before you use it:
   · Only --to fires. A say without --to is a log entry; nobody is presented.
   · Rooms are talk; comments are record. --record is the only bridge.
+  · A say is never refused for what a room IS. There is no close and no reopen:
+    a room you can resolve always accepts talk, and a stale one only says so.
 
 wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 		SilenceUsage:  true,
@@ -186,8 +189,8 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 	root.AddCommand(newWrkcLsCmd())
 	root.AddCommand(newWrkcInboxCmd())
 	root.AddCommand(newWrkcDeferCmd())
-	root.AddCommand(newWrkcLifecycleCmd("close"))
-	root.AddCommand(newWrkcLifecycleCmd("reopen"))
+	root.AddCommand(newWrkcVisibilityCmd("hide"))
+	root.AddCommand(newWrkcVisibilityCmd("unhide"))
 	root.AddCommand(newWrkcJoinCmd())
 	root.AddCommand(newWrkcLeaveCmd())
 	root.AddCommand(newWrkcInviteCmd())
@@ -343,6 +346,11 @@ agent:<id> to address a scope-less principal such as a human.`,
 			var result roomSayResultWire
 			if err := json.Unmarshal(raw, &result); err != nil {
 				return err
+			}
+			// §5's advisory rides stderr so it never contaminates a piped
+			// --output raw/json read. It is never an error: the say wrote.
+			if result.Notice != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), "notice: "+*result.Notice)
 			}
 			if wait {
 				return wrkcWaitForGroup(cmd, tr, result, timeout, output)
@@ -601,7 +609,7 @@ EN- ids are internal: inbox, show, and log surface them so an agent can tell
 }
 
 func newWrkcLsCmd() *cobra.Command {
-	var openOnly, dead bool
+	var all, dead bool
 	var kind, scopeFilter string
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
@@ -610,6 +618,11 @@ func newWrkcLsCmd() *cobra.Command {
 		Long: `List rooms. Rooms are readable by any principal: membership is identity and
 attendance, never an ACL, so --scope me is a convenience filter and not a
 permission boundary.
+
+This is DISCOVERY, not reachability. The default omits rooms whose activity is
+stale (terminal work, quiet more than 4h) and rooms carrying the hidden label;
+--all shows every room. Everything omitted is still fully addressable — say into
+it by key and it writes — and its obligations still gate and wake.
 
 --dead lists dead-lettered envelopes addressed to you instead of rooms. An
 envelope dead-letters when kicker-driven redelivery is exhausted without a reply
@@ -637,10 +650,8 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 				}
 				return renderWrkcEnvelopes(cmd, view.Dead, output, false)
 			}
-			if openOnly {
-				params["state"] = "open"
-			} else {
-				params["state"] = "all"
+			if all {
+				params["all"] = true
 			}
 			if kind != "" {
 				params["kind"] = kind
@@ -664,7 +675,7 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 			return renderWrkcRooms(cmd, result.Items, output)
 		},
 	}
-	cmd.Flags().BoolVar(&openOnly, "open", false, "Only open rooms")
+	cmd.Flags().BoolVar(&all, "all", false, "Include stale and hidden rooms")
 	cmd.Flags().BoolVar(&dead, "dead", false, "List dead-lettered envelopes addressed to you")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by room kind: campaign, task, project, adhoc")
 	// A value, not a boolean: `--scope me` is the §9.1 surface. No NoOptDefVal —
@@ -687,10 +698,10 @@ presentation. Deferred envelopes appear under their own heading with the time
 they come back. EN- ids are shown so you can tell an at-least-once
 re-presentation from something new.
 
-An obligation whose room has since closed is still yours, but it gates nothing:
-a closed room refuses a say, so there is no reply to make and the stop hook lets
-the turn end. Those appear under a "closed room" heading — reopen the room to
-reply, or have an operator ack it.`,
+Every obligation here gates your turn and wakes you, whatever its room looks
+like: there is no room state that excuses one. A group whose work has gone
+terminal is marked as such for context — the seat that asked may have moved on —
+and answering it is a normal say.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tr, _, closeFn, err := openMirror(cmd)
@@ -810,23 +821,20 @@ answering first.`,
 	return cmd
 }
 
-func newWrkcLifecycleCmd(verb string) *cobra.Command {
-	var ifMatch, etag int64
+func newWrkcVisibilityCmd(verb string) *cobra.Command {
 	var output promiseOutputFlags
-	short := "Close a room to further talk"
-	long := `Close a room. Closed rooms refuse a say with a typed error naming the state.
+	short := "Hide a room from the default listing"
+	long := "Hide a room from the default `wrkc ls`.\n\n" + `This is a LABEL, not a state. A hidden room still accepts says, still delivers,
+and its obligations still gate your turn and wake the kicker — it simply stops
+appearing in a listing that has no --all. Any principal may set it: what a
+listing shows is not an ownership boundary.
 
-A derived room also READS as closed once its work is terminal — a task room whose
-task completed, a campaign room whose campaign closed — without a stored
-transition. The signal already rides the same monitor selector as the
-conversation, because a task room's key IS the task id.`
-	method := "wrkq.room.close"
-	if verb == "reopen" {
-		short = "Reopen a closed room"
-		long = `Reopen a room. This is the explicit inverse of close, and it also clears a
-DERIVED closure: a task room outlives its task's terminal transition once you
-have deliberately reopened it.`
-		method = "wrkq.room.reopen"
+There is no close and no reopen. A room you can resolve always accepts talk.`
+	method := "wrkq.room.hide"
+	if verb == "unhide" {
+		short = "Return a room to the default listing"
+		long = "Clear the hidden label, returning the room to the default `wrkc ls`."
+		method = "wrkq.room.unhide"
 	}
 	cmd := &cobra.Command{
 		Use:   verb + " <room>",
@@ -844,13 +852,6 @@ have deliberately reopened it.`
 				return err
 			}
 			params["room"] = args[0]
-			match, err := promiseIfMatch(cmd, ifMatch, etag)
-			if err != nil {
-				return err
-			}
-			if match > 0 {
-				params["ifMatch"] = match
-			}
 			raw, err := tr.Call(cmd.Context(), method, params)
 			if err != nil {
 				return err
@@ -858,7 +859,6 @@ have deliberately reopened it.`
 			return renderWrkcRoomSingleton(cmd, raw, output)
 		},
 	}
-	addPromiseETagFlags(cmd, &ifMatch, &etag)
 	addPromiseOutputFlags(cmd, &output, false)
 	return cmd
 }

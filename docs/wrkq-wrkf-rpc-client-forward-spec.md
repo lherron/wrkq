@@ -951,8 +951,10 @@ wrkq.room.open
 wrkq.room.show
 wrkq.room.list
 wrkq.room.logView
-wrkq.room.close
-wrkq.room.reopen
+wrkq.room.hide                # discovery label only
+wrkq.room.unhide
+wrkq.room.close               # REMOVED; refuses room_lifecycle_removed (burn-in)
+wrkq.room.reopen              # REMOVED; refuses room_lifecycle_removed (burn-in)
 wrkq.room.join
 wrkq.room.leave
 wrkq.room.membersView
@@ -975,18 +977,24 @@ for a human principal clearing dead mail.
 
 ```ts
 type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
-type WrkqRoomState = "open" | "closed" | "archived";
+type WrkqRoomWork = "open" | "terminal";
+type WrkqRoomActivity = "active" | "quiet" | "stale";
 type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
 type WrkqEnvelopeState = "pending" | "presented" | "acked" | "deferred" | "dead";
 type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
 
 interface WrkqRoom {
   uuid: string; id?: string; key: string; kind: WrkqRoomKind;
-  subject?: string; state: WrkqRoomState; storedState: WrkqRoomState;
+  subject?: string; work: WrkqRoomWork; activity: WrkqRoomActivity;
+  labels: string[];
   workRef: WrkqRoomWorkRef | null; links: WrkqRoomLink[];
-  openedByPrincipalRef: string; openedAt: string; closedAt?: string;
+  openedByPrincipalRef: string; openedAt: string;
   lastActivityAt: string; memberCount: number; messageCount: number;
   etag: number; createdAt: string; updatedAt: string;
+}
+interface WrkqRoomListParams {
+  all?: boolean; kind?: WrkqRoomKind; scope?: "me";
+  principalRef?: string; scopeRef?: string;
 }
 interface WrkqEnvelope {
   uuid: string; id: string; roomUuid: string; roomKey: string;
@@ -1003,7 +1011,7 @@ interface WrkqEnvelope {
 }
 interface WrkqRoomSayResult {
   room: WrkqRoom; groupId: string; envelopes: WrkqEnvelope[];
-  acked: string[]; recordedCommentId?: string;
+  acked: string[]; recordedCommentId?: string; notice?: string;
 }
 interface WrkqEnvelopePresentResult {
   envelope: WrkqEnvelope; recorded: boolean; historyHint: boolean;
@@ -1025,9 +1033,32 @@ Contract points a consumer must not have to rediscover:
   container path). Only ad-hoc rooms mint `R-\d{5}`.
 - **`id` on an envelope is `EN-\d{5}`, not `EV-`.** `EV-` is already owned by
   `evidence_items` and is addressable through `wrkf.evidence.show`.
-- **`state` vs `storedState`.** `state` is the EFFECTIVE state a caller must
-  obey; when it differs from `storedState` the closure is DERIVED (the task went
-  terminal, the campaign closed) rather than explicit, and `reopen` overrides it.
+- **A room has NO lifecycle state, and nothing about a room can refuse a say.**
+  A say into any room the caller can resolve writes — terminal work, stale
+  activity, and the `hidden` label included. `room.close` and `room.reopen` are
+  REMOVED; for one burn-in window they answer `WRKQ_VALIDATION` with
+  `data.reason: "room_lifecycle_removed"` so an old client gets a name rather
+  than a method-not-found, and wave 5 deletes them.
+- **`work` and `activity` are READ-TIME PROJECTIONS.** Render them; never gate
+  on them. `work` is `open | terminal` from the task/campaign the room is keyed
+  by (ad-hoc rooms are always `open`). `lastActivityAt` is the activity clock —
+  `max(openedAt, newest envelope createdAt, newest member joinedAt)` — so it is
+  defined for every room, including one opened explicitly and never spoken in.
+  `activity` is single-valued and total by FIRST MATCH: `stale` iff `work` is
+  `terminal` and `lastActivityAt` is older than 4h, else `active` under 24h,
+  else `quiet`. Every consumer keys on that one value: `room.list` omits `stale`
+  unless `all: true`, ad-hoc pair-room reuse takes the `active` pair room, and
+  `say` returns its `notice` iff the room read `stale`.
+- **`notice` on a say result is advisory, never an error.** It is set when the
+  say landed in a `stale` room and names the terminal transition and the age of
+  the last activity. The say already wrote; there is no override flag because
+  there is nothing to override. `wrkc` prints it to stderr so a piped machine
+  read stays clean.
+- **`labels` holds discovery labels; `hidden` is the only one minted.**
+  `room.hide` / `room.unhide` set and clear it, callable by ANY principal — what
+  a listing shows is not an ownership boundary. It removes the room from the
+  default `room.list` and changes nothing else: the room accepts says, delivers,
+  and gates turns exactly as before.
 - **`groupId` equals the first envelope's own id**, so a single addressee groups
   with itself and a fan-out shares one waitable handle. `wrkq monitor wait
   <groupId> --until terminal` blocks on the whole group; `terminal` is
@@ -1070,18 +1101,16 @@ Contract points a consumer must not have to rediscover:
   Presenting a fyi auto-acks it, which retires it from the read with no `ack`
   call. Consumers gate on this themselves: present a fyi only into a LIVE
   generation, otherwise leave it for the addressee's next attend.
-- **A closed room's mail leaves `pendingView` entirely.** An envelope whose room
-  `state` is `closed` or `archived` is absent from BOTH `items` and `blocking`,
-  so it neither wakes a runtime nor refuses a turn end. The reason is §3.1: a
-  closed room refuses a say, so the addressee has no reply path and reply-is-ack
-  is impossible — gating on it would hold the seat with no exit. `repended` is
-  unchanged. The obligation is NOT retired: it stays `pending`/`presented` in
-  the ledger and `inboxView` still lists it, in a group whose `room.state` is
-  the closed one — key off that to render it apart from the obligations that do
-  gate. `room.reopen` restores the reply path and the envelope reappears in
-  `pendingView` unchanged; there is no auto-ack and no auto-dead on closure.
+- **`pendingView` is UNIFORM over rooms.** An obligation wakes and gates
+  whatever its room's `work`, `activity`, or `hidden` label says. T-07633
+  excluded a closed room's mail from both `items` and `blocking`; T-07642
+  REVERTED that carve-out with the gate it depended on — the addressee always
+  has a reply path now, so excluding the mail would silently strand a
+  supervisor's follow-up on finished work. `inboxView` is unchanged and lists
+  every standing obligation; a group whose `room.work` is `"terminal"` is
+  CONTEXT worth rendering, not a separate class of mail.
 
-`say` returns `WrkqRoomSayResult`; `open`/`show`/`close`/`reopen` return one
+`say` returns `WrkqRoomSayResult`; `open`/`show`/`hide`/`unhide` return one
 `WrkqRoom`; `list` returns `{items: WrkqRoom[]}`; `logView` returns
 `{room, items}`; `join`/`leave`/`membersView` return `{room, items}` of members
 with their source and latest attendance. `envelope.show`/`defer`/`roundEnded`

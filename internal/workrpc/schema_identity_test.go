@@ -18,14 +18,16 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after adding
-// `replyTo` to WrkqEnvelope and `deliveryOutcome` to the presentation receipt
-// and its params (T-07638), on top of `includeFyi` on
-// wrkq.envelope.pendingView (T-07627) and the wrkq collaboration ledger (rooms,
-// envelopes, members, presentation receipts — T-07612 wave 1). Update it only
-// alongside an explicit protocol change; an incidental mismatch remains a test
-// failure.
-const pinnedProtocolSchemaHash = "sha256:6202f288bc326de9372e68d6b027cd76a0f646d4c584b7981be2e20e630ad6aa"
+// pinnedProtocolSchemaHash is the intentional wire identity after the T-07612
+// rev 3 amendment removed the room lifecycle (T-07642): WrkqRoom drops `state`,
+// `storedState`, and `closedAt` for the `work`/`activity`/`labels` projections,
+// WrkqRoomSayResult gains the stale `notice`, WrkqRoomListParams trades `state`
+// for `all`, and wrkq.room.hide/unhide join the catalog with
+// WrkqRoomLabelParams. That sits on top of `replyTo` and `deliveryOutcome`
+// (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
+// only alongside an explicit protocol change; an incidental mismatch remains a
+// test failure.
+const pinnedProtocolSchemaHash = "sha256:fc72e5eee0a4eb5ca152e2e5ae16a77af4376bfe45c2084b098dd1a10c57d94b"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -44,9 +46,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 177},
+		{"methods", len(MethodCatalog()), 179},
 		{"errorCodes", len(ErrorCodeCatalog()), 25},
-		{"dtos", len(dtoCatalog), 135},
+		{"dtos", len(dtoCatalog), 136},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

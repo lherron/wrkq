@@ -10,28 +10,52 @@ never remembered by a session — which is the whole point: a session that ends,
 
 `wrkc` has no HRC dependency. Every verb works with every HRC daemon down.
 
-## The two rules
+## The three rules
 
 1. **Only `--to` fires.** A say without `--to` is a log entry; nobody is
    presented. There is no mute and no subscription.
 2. **Rooms are talk; comments are record.** `--record` is the only bridge, and
    it is explicit.
+3. **A say is never refused for what a room IS.** There is no close and no
+   reopen. A room you can resolve always accepts talk, and its obligations
+   always gate your turn and wake you.
 
 ## Rooms
 
-| kind | key | closes |
+| kind | key | anchored on |
 | --- | --- | --- |
-| campaign | the campaign container (`P-xxxxx` or path) | with the campaign |
-| task | `T-xxxxx`, only for a task **not** in a campaign | task terminal |
-| project | the project container id/path | never (standing) |
-| ad-hoc | `R-xxxxx` | explicit `close`; auto-archive after 24h idle |
+| campaign | the campaign container (`P-xxxxx` or path) | the campaign |
+| task | `T-xxxxx`, only for a task **not** in a campaign | the task |
+| project | the project container id/path | the project |
+| ad-hoc | `R-xxxxx` | nothing |
 
 Rooms are created lazily on the first `say`. They are readable by any principal:
 membership is identity and attendance, never an ACL.
 
-A derived room also *reads* as closed once its work is terminal, without a stored
-transition. `wrkc show` prints `stored_state` when the two differ, and
-`wrkc reopen` overrides a derived closure deliberately.
+### Projections: `work` and `activity`
+
+A room has **no lifecycle state**. `wrkc show` prints two values computed at read
+time, and neither can refuse anything:
+
+- **`work`** — `open` or `terminal`, from the task or campaign it is keyed by.
+  An ad-hoc room anchors on nothing and is always `open`.
+- **`activity`** — first match wins over `last_activity`
+  (`max(opened, newest message, newest join)`):
+  `stale` if work is terminal and last activity is older than 4h, else `active`
+  under 24h, else `quiet`.
+
+Everything reads that one value. `wrkc ls` omits `stale`; `--all` shows every
+room. A say into a `stale` room writes and prints a one-line **notice** on
+stderr naming the terminal transition and the age — never an error, and there is
+no override flag, because the say already happened.
+
+`wrkc hide|unhide <room>` sets a `hidden` label. It is a label, not a state: it
+removes the room from the default `wrkc ls` and changes nothing else. Any
+principal may set it.
+
+Terminal work stays reachable on purpose. Messaging the seat on a completed task
+— a grading follow-up, a late question — is intended, and that seat is summoned
+for it exactly as it would be on live work.
 
 ## Routing: `wrkc say <ref>`
 
@@ -72,6 +96,11 @@ disposes another's obligation.
 `ack` is operator-only, for a human clearing dead mail
 (`wrkc ack EN-00042 --as agent:lance`). Agents do not ack; they reply or defer.
 
+Obligations are **uniform**: one addressed to you gates your turn and wakes you
+whatever its room's `work`, `activity`, or `hidden` label says. `wrkc inbox`
+marks a group whose work has gone terminal — the seat that asked may have moved
+on — and answering it is an ordinary say.
+
 ## Verbs
 
 ```bash
@@ -81,10 +110,10 @@ wrkc say <ref> [body|-] [--to a,b] [--fyi] [--subject s] [--new]
 wrkc open <scope>... -s <subject> [--task T-x]
 wrkc log <room> [--task T-x] [--limit n]
 wrkc show <EN-xxxxx|room>
-wrkc ls [--open] [--dead] [--scope] [--kind k]
+wrkc ls [--all] [--dead] [--scope me] [--kind k]
 wrkc inbox [--dead]
 wrkc defer <EN-xxxxx> --reason <t> [--retry-after d]
-wrkc close|reopen <room>
+wrkc hide|unhide <room>
 wrkc join|leave <room>
 wrkc invite <room> <scope>
 wrkc members <room>

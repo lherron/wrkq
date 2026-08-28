@@ -203,11 +203,20 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.room.logView", apiHandler(func(ctx context.Context, p wrkqapi.RoomLogViewParams) (any, error) {
 		return wq.RoomLogView(ctx, p)
 	}))
+	// close/reopen are REMOVED (T-07642). They stay registered for one burn-in
+	// window so an old client gets the named `room_lifecycle_removed` refusal
+	// instead of a bare method-not-found; wave 5 deletes them.
 	s.Register("wrkq.room.close", apiHandler(func(ctx context.Context, p wrkqapi.RoomLifecycleParams) (any, error) {
 		return wq.RoomClose(ctx, p)
 	}))
 	s.Register("wrkq.room.reopen", apiHandler(func(ctx context.Context, p wrkqapi.RoomLifecycleParams) (any, error) {
 		return wq.RoomReopen(ctx, p)
+	}))
+	s.Register("wrkq.room.hide", apiHandler(func(ctx context.Context, p wrkqapi.RoomLabelParams) (any, error) {
+		return wq.RoomHide(ctx, p)
+	}))
+	s.Register("wrkq.room.unhide", apiHandler(func(ctx context.Context, p wrkqapi.RoomLabelParams) (any, error) {
+		return wq.RoomUnhide(ctx, p)
 	}))
 	s.Register("wrkq.room.join", apiHandler(func(ctx context.Context, p wrkqapi.RoomMemberParams) (any, error) {
 		return wq.RoomJoin(ctx, p)
