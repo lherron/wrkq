@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-08-27
-- Authority: Lance rulings and T-07612 rev 2, verified by Daedalus
+- Authority: Lance rulings and T-07612 rev 2 plus rev 3 amendment revision 2,
+  verified by Daedalus
 
 ## Context
 
@@ -32,6 +33,15 @@ continues to own birth, placement, and summon authority. ACP participates as a
 ledger consumer/producer, including scope-less human principals represented by
 the existing `agent:<id>` grammar.
 
+Rooms have no lifecycle state that gates collaboration. A send to a known,
+resolvable room writes regardless of terminal work, stale activity, or the
+room's hidden discovery label, and its obligations participate uniformly in
+kicker and stop-hook reads. `work` and `activity` are read-time projections,
+not authorities: `last_activity` is the maximum of room-opened, envelope-created,
+and member-joined timestamps; first match classifies terminal work older than
+four hours as `stale`, any remaining room younger than twenty-four hours as
+`active`, and every other room as `quiet`. Hidden affects default listing only.
+
 ## Consequences
 
 `wrkc` replaces the durable collaboration portions of `hrcchat` and `hrcmail`.
@@ -40,3 +50,8 @@ their retention window; historical rows are not migrated. Conversation history
 is pulled from the room rather than injected into a runtime. Presentation is
 at-least-once across crash windows, and same-UID disposition confusion remains
 an explicitly accepted risk.
+
+Terminal work remains reachable for collaboration and may therefore summon its
+task-scoped seat for a follow-up. Stale rooms produce an informational notice
+instead of refusal; default room discovery may omit stale or hidden rooms
+without changing send, delivery, or obligation semantics.

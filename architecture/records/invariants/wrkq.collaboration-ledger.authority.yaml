@@ -13,6 +13,16 @@ predicate: >
   mutation preserves wrkq.attribution.caller-principal-exact and human
   participants use the existing scope-less agent:<id> principal grammar.
 
+  Rooms have no collaboration lifecycle that can gate traffic. A say into a
+  known, resolvable room is never refused because its work is terminal, its
+  activity is stale, or it carries the hidden discovery label; obligations in
+  every such room enter the same kicker and stop-hook reads. Work and activity
+  are read-time projections only. last_activity is the maximum of room opened,
+  envelope created, and member joined timestamps, and activity is the first
+  matching value: stale for terminal work older than four hours, active when
+  younger than twenty-four hours, and quiet otherwise. The hidden label affects
+  default listing only.
+
   HRC owns execution state and actuation only: sessions, generations, runtimes,
   runs, presentation formatting, kicker drive attempts, stop-hook enforcement,
   and summon/placement. HRC consumes the wrkq ledger and may write its runtime
@@ -26,7 +36,7 @@ predicate: >
 authority:
   repo: wrkq
   surface: room/envelope/member store transactions, wrkq workrpc methods, @wrkq/client, and wrkc
-enforced_by: T-07612 rev 2 ratified boundary plus its ledger/routing and consumer/cutover evidence bundles
+enforced_by: T-07612 rev 2 ratified boundary, its rev 3 amendment revision 2, and the amended ledger/routing and consumer/cutover evidence bundles
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the collaboration mutation, routing, or consumer boundary"
 source:
   - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
@@ -46,5 +56,7 @@ reopen_when:
   - work-key routing stops strict campaign coalescing or project and campaign room authority diverges from canonical container state
   - HRC federation regains a durable collaboration-message path after cutover
   - the division between wrkq collaboration authority and HRC execution, presentation, or summon/placement authority changes
+  - room work, activity, or visibility becomes a send gate or excludes an addressed obligation from the uniform kicker and stop-hook reads
+  - room activity ceases to be one total, first-match projection over the specified last_activity clock
 supersedes: []
 superseded_by: null
