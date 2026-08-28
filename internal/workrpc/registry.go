@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/lherron/wrkq/internal/wrkqapi"
 )
@@ -52,7 +53,7 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 			// strict decoder (T-07647) accepts what every client already sends.
 			Client json.RawMessage `json:"client"`
 		}
-		if err := decodeParams(raw, &params); err != nil {
+		if err := decodeParams(ctx, raw, &params); err != nil {
 			return nil, err
 		}
 		if params.ProtocolVersion != ProtocolVersion {
@@ -665,7 +666,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 func historyListViewHandler(wq *wrkqapi.API) HandlerFunc {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var p wrkqapi.HistoryListViewParams
-		if err := decodeParams(raw, &p); err != nil {
+		if err := decodeParams(ctx, raw, &p); err != nil {
 			return nil, err
 		}
 		var probe struct {
@@ -688,7 +689,7 @@ func historyListViewHandler(wq *wrkqapi.API) HandlerFunc {
 func apiHandler[P any](fn func(context.Context, P) (any, error)) HandlerFunc {
 	return func(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 		var params P
-		if err := decodeParams(raw, &params); err != nil {
+		if err := decodeParams(ctx, raw, &params); err != nil {
 			return nil, err
 		}
 		result, err := fn(ctx, params)
@@ -705,7 +706,7 @@ func obligationStatusHandler(fn func(context.Context, wrkfapi.ObligationStatusPa
 	})
 }
 
-func decodeParams(raw json.RawMessage, out any) error {
+func decodeParams(ctx context.Context, raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
 	}
@@ -719,7 +720,11 @@ func decodeParams(raw json.RawMessage, out any) error {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			log.Printf("workrpc: params for %T carry %s (accepted; T-07647 audit)", out, strings.TrimPrefix(err.Error(), "json: "))
+			caller := "local"
+			if node, ok := nodeauth.FromContext(ctx); ok {
+				caller = "node=" + node
+			}
+			log.Printf("workrpc: params for %T from %s carry %s (accepted; T-07647 audit)", out, caller, strings.TrimPrefix(err.Error(), "json: "))
 		} else {
 			return NewValidationError("invalid params", nil)
 		}
