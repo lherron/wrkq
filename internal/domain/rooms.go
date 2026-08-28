@@ -85,10 +85,12 @@ const (
 )
 
 // DefaultEnvelopeMaxRounds bounds kicker-driven redelivery before an envelope
-// dead-letters visibly. Carried from T-06810's wave-2 freeze ruling: only a
-// still-presented envelope advanced by a completed kicker turn counts, and the
-// fifth round lands in dead. Clear-inbox no-op turns never advance it.
-const DefaultEnvelopeMaxRounds = 5
+// dead-letters visibly. Carried from T-06810's wave-2 freeze ruling, lowered
+// 5→3 by Lance's 2026-08-28 ruling (T-07612 erratum): on the 1/2/4/8/16-minute
+// floor five failed turns cost 31 minutes and each re-presentation costs a turn.
+// Only a still-presented envelope advanced by a completed kicker turn counts,
+// and the third round lands in dead. Clear-inbox no-op turns never advance it.
+const DefaultEnvelopeMaxRounds = 3
 
 // Room is a durable conversation. Derived rooms anchor on exactly one live
 // wrkq resource; ad-hoc rooms anchor on nothing and mint an R- id.

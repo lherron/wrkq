@@ -21,7 +21,7 @@ import (
 )
 
 // envelopeMaxRoundsEnv is the operational bound carried from T-06810's wave-2
-// freeze ruling (default 5, env-overridable for burn-in tuning). It moves to
+// freeze ruling (default 3 since the 2026-08-28 erratum, env-overridable for burn-in tuning). It moves to
 // wrkq with the ledger it bounds; it is not a feature flag and gates no code
 // path, only how many kicker-driven turns an undisposed obligation survives.
 const envelopeMaxRoundsEnv = "WRKQ_ENVELOPE_MAX_ROUNDS"
