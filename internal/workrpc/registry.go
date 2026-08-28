@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -708,17 +709,25 @@ func decodeParams(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
 	}
-	// T-07647: an unknown key is a misspelled selector, and a misspelled
-	// selector silently answers a DIFFERENT question (an empty wake set for the
-	// kicker, a stranded obligation for the stop hook). Refuse it by name.
+	// T-07647: an unknown key is usually a misspelled selector, and a misspelled
+	// selector silently answers a DIFFERENT question. Refusing outright (be9e8ca)
+	// took the HRC kicker down fleet-wide within minutes — its ledger tail sends
+	// a key no server struct declares — so unknown keys are now NAMED in the
+	// server log and then accepted leniently. Refusal returns once every
+	// consumer's params have been audited against the Go structs.
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
-		msg := "invalid params"
 		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			msg = "invalid params: " + strings.TrimPrefix(err.Error(), "json: ")
+			log.Printf("workrpc: params for %T carry %s (accepted; T-07647 audit)", out, strings.TrimPrefix(err.Error(), "json: "))
+		} else {
+			return NewValidationError("invalid params", nil)
 		}
-		return NewValidationError(msg, nil)
+	} else {
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return NewValidationError("invalid params", nil)
 	}
 	return nil
 }
