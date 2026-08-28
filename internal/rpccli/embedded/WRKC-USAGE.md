@@ -104,7 +104,7 @@ on — and answering it is an ordinary say.
 ## Verbs
 
 ```bash
-wrkc say <ref> [body|-] [--to a,b] [--fyi] [--subject s] [--new]
+wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--subject s] [--new]
                         [--wait [--timeout d]] [--urgent] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
 wrkc open <scope>... -s <subject> [--task T-x]

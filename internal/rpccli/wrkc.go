@@ -240,11 +240,11 @@ func wrkcParams(cmd *cobra.Command) (map[string]any, error) {
 func newWrkcSayCmd() *cobra.Command {
 	var to []string
 	var fyi, newRoom, urgent, record bool
-	var subject, respondTo, idempotencyKey, timeout string
+	var subject, respondTo, idempotencyKey, timeout, message string
 	var wait bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
-		Use:   "say <ref> [body|-]",
+		Use:   "say <ref> [body|-] [-m body]",
 		Short: "Say something in a room",
 		Long: `Say something in the room the ref routes to.
 
@@ -282,7 +282,18 @@ agent:<id> to address a scope-less principal such as a human.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			claims := &stdinClaims{}
 			body := ""
-			if len(args) > 1 {
+			if message != "" && len(args) > 1 {
+				return errors.New("say takes the body either positionally or with -m, not both")
+			}
+			if message != "" {
+				// T-07624: -m/--message is the wrkq reflex (comment add -m, touch -d);
+				// the positional body stays canonical.
+				value, err := readTextValue(message, "body", cmd.InOrStdin(), claims)
+				if err != nil {
+					return err
+				}
+				body = value
+			} else if len(args) > 1 {
 				value, err := readTextValue(args[1], "body", cmd.InOrStdin(), claims)
 				if err != nil {
 					return err
@@ -361,6 +372,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 	cmd.Flags().StringSliceVar(&to, "to", nil, "Addressees (repeatable or comma-separated); fans out one envelope each")
 	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation; presented into a live generation or on the next attend, never summons")
 	cmd.Flags().StringVar(&subject, "subject", "", "Subject for a new ad-hoc room")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Body (literal, @file, or - for stdin); alias for the positional body")
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until every envelope in the group is terminal, then print each reply")
 	cmd.Flags().StringVar(&timeout, "timeout", "", "Maximum --wait duration (e.g. 10m)")
