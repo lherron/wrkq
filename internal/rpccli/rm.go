@@ -261,7 +261,19 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 		}
 	}
 
+	// A refused removal must say why (T-07641 follow-up): the store's reason —
+	// a room that would be destroyed, a caused_by lineage — is the operator's
+	// only cue toward the alternative, and machine modes were exiting 1 with
+	// `[]` and nothing on stderr.
 	if result.Failed > 0 {
+		errOut := cmd.ErrOrStderr()
+		for _, ie := range result.Errors {
+			label := ie.Item
+			if tgt, ok := targetsByKey[ie.Item]; ok && tgt.ID != "" {
+				label = tgt.ID
+			}
+			fmt.Fprintf(errOut, "Error: %s: %s\n", label, ie.Error)
+		}
 		if f.continueOnError {
 			os.Exit(5) // Partial success
 		}
