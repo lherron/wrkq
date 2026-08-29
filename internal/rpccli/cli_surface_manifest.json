@@ -3348,7 +3348,7 @@
           },
           {
             "name": "campaign",
-            "usage": "Enroll in an active campaign by ID or path (empty string unenrolls)",
+            "usage": "Enroll in a draft or active campaign by ID or path; the task keeps its own project (empty string unenrolls)",
             "type": "string",
             "hidden": false
           },
@@ -3568,6 +3568,12 @@
           {
             "name": "assignee",
             "usage": "Assignee principal ref or bare agent slug",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "campaign",
+            "usage": "Enroll the new task in a draft or active campaign by ID or path (the task keeps its own project)",
             "type": "string",
             "hidden": false
           },

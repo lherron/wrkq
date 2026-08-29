@@ -51,12 +51,14 @@ func TestWebhookMutationDTOFingerprint(t *testing.T) {
 func TestCatViewDTOFingerprint(t *testing.T) {
 	got := strings.Join([]string{
 		dtoFingerprint(reflect.TypeOf(WrkqTaskCatView{})),
+		dtoFingerprint(reflect.TypeOf(CatViewCampaign{})),
 		dtoFingerprint(reflect.TypeOf(CatViewComment{})),
 		dtoFingerprint(reflect.TypeOf(CatViewRelation{})),
 		dtoFingerprint(reflect.TypeOf(CatViewBlocker{})),
 	}, "\n")
 
-	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,outcome,omitempty,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty,promises}\n" +
+	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,campaign,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,outcome,omitempty,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty,promises}\n" +
+		"CatViewCampaign{id,path,membership}\n" +
 		"CatViewComment{id,created_at,body,principal_ref,omitempty}\n" +
 		"CatViewRelation{direction,kind,task_id,task_uuid,task_slug,task_title,created_at,created_by_id}\n" +
 		"CatViewBlocker{id,state}"

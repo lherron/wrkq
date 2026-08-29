@@ -21,6 +21,20 @@ predicate: >
   WRKQ_PROJECT_ROOT, ASP_PROJECT, or --project — project-root scoping is caller
   semantics, not a server read-model concern. There is exactly ONE implementation
   of this transform; rpccli may wrap it but must not fork it.
+
+  CONTAINER-SELECTOR ABSOLUTE FALLBACK (T-07701). A container selector naming a
+  campaign may resolve to a container in ANOTHER project, so the caller layer
+  MAY apply a narrow fallback: resolve the SCOPED form first, and only when that
+  does not resolve, re-resolve the RAW selector as an absolute path. The
+  fallback is a fallback, never an exemption — scoped-first is mandatory, a
+  selector that resolves under the caller's own root always wins, and the error
+  surfaced for a genuinely missing path still names the SCOPED path. It applies
+  only to a multi-segment selector whose first segment names a top-level
+  container of kind `project`, so a bare slug is never silently re-pointed at
+  another project's container. It lives in the one rpccli scoper wrapper
+  (`containerSelectorWithAbsoluteFallback`), not in internal/projectroot, and
+  never in an RPC method: the server still receives one already-resolved
+  selector and still reads no project-root env or flag.
 authority:
   repo: wrkq
   surface: production internal/rpccli caller layer over the JSON-RPC boundary
@@ -28,16 +42,18 @@ enforced_by: internal/projectroot (single source of truth) + rpccli scoper call 
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site"
 source:
   - internal/projectroot/projectroot.go      # the one transform + ResolveProjectFlag
-  - internal/rpccli/scope.go                  # mirror scoper, built in openMirror
+  - internal/rpccli/scope.go                  # mirror scoper, built in openMirror; containerSelectorWithAbsoluteFallback
 required_tests:
   - internal/projectroot/projectroot_test.go            # TestTransform (pure transform guard)
   - internal/rpccli/parity_test.go                      # production contract pr/* (WRKQ_PROJECT_ROOT, ASP_PROJECT, --project; ls + read selectors + mutations)
   - internal/rpccli/importguard_test.go                 # TestCoreRuleImportGuard + TestLegacyCLIPackageRemoved
+  - internal/rpccli/campaign_acceptance_test.go          # TestCampaignSelectorAbsoluteFallback (scoped-first, absolute fallback, bare slug never re-pointed)
 last_verified:
   date: 2026-07-21
   evidence: "T-06762 removed the legacy transform wrappers; rpccli project-root parity and no-regrowth guards plus full verify green."
 reopen_when:
   - a new path/selector-taking mirror command bypasses the scoper
+  - the container-selector absolute fallback widens beyond project-rooted multi-segment selectors
   - the project-root precedence or exemption rules change
   - an RPC method begins reading project-root env/flags directly
 supersedes: []

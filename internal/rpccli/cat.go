@@ -354,6 +354,7 @@ type catTask struct {
 	ArtifactDir           string          `json:"artifact_dir"`
 	ProjectID             string          `json:"project_id"`
 	ProjectUUID           string          `json:"project_uuid"`
+	Campaign              *catCampaign    `json:"campaign,omitempty"`
 	RequestedByProjectID  *string         `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID     *string         `json:"assigned_project_id,omitempty"`
 	Slug                  string          `json:"slug"`
@@ -395,6 +396,14 @@ type catTask struct {
 	Promises              []promiseWire   `json:"promises"`
 }
 
+// catCampaign mirrors wrkqapi.CatViewCampaign: the task's effective campaign
+// membership, absent when the task is in no campaign.
+type catCampaign struct {
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	Membership string `json:"membership"`
+}
+
 type catComment struct {
 	ID           string `json:"id"`
 	CreatedAt    string `json:"created_at"`
@@ -433,6 +442,9 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			fmt.Fprintf(w, "artifact_dir: %s\n", t.ArtifactDir)
 			fmt.Fprintf(w, "project_id: %s\n", t.ProjectID)
 			fmt.Fprintf(w, "project_uuid: %s\n", t.ProjectUUID)
+			if t.Campaign != nil {
+				fmt.Fprintf(w, "campaign: %s %s %s\n", t.Campaign.ID, t.Campaign.Path, t.Campaign.Membership)
+			}
 			if t.RequestedByProjectID != nil {
 				fmt.Fprintf(w, "requested_by_project_id: %s\n", *t.RequestedByProjectID)
 			}

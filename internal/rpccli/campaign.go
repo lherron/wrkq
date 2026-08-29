@@ -214,7 +214,7 @@ func runCampaignContentMutation(
 	if err != nil {
 		return err
 	}
-	params["container"] = sc.selector(ref, false)
+	params["container"] = sc.containerSelectorWithAbsoluteFallback(cmd.Context(), tr, ref)
 	if ifMatch != 0 {
 		params["expectEtag"] = ifMatch
 	}
@@ -260,7 +260,7 @@ func runCampaignTransitionMutation(
 	if err != nil {
 		return err
 	}
-	params := map[string]any{"container": sc.selector(ref, false)}
+	params := map[string]any{"container": sc.containerSelectorWithAbsoluteFallback(cmd.Context(), tr, ref)}
 	for key, value := range extra {
 		params[key] = value
 	}

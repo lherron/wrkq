@@ -18,7 +18,13 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after T-07699
+// pinnedProtocolSchemaHash is the intentional wire identity after T-07701 made
+// cross-project campaign enrolment visible and reachable: WrkqTaskCatView gains
+// the optional `campaign` object (CatViewCampaign: id/path/membership) and
+// WrkqTaskCreateParams gains `campaign`, so create is a full campaign admission
+// path. Both are ADDITIVE fields on existing DTOs — no method joins or leaves
+// the catalog, so the cardinality pins below are unchanged by it. That sits on
+// top of T-07699, which
 // removed room subjects, wrkq.room.open, and WrkqRoomOpenParams. That sits on
 // top of T-07673's side-effect-free `preview` plus opaque `inputId` on envelope
 // presentation.
@@ -33,7 +39,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:b47841f2f6d6622f7e35a9656cd35f270b85fe4cae33a45b986e7836e91106d5"
+const pinnedProtocolSchemaHash = "sha256:a9498ec23d87e6b344375b50ad50afe036aa41ec14600109ef4b5e87030a384c"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

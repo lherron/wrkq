@@ -29,6 +29,7 @@ type touchResult struct {
 func newTouchCmd() *cobra.Command {
 	var title, description, specification, state, kind, parentTask, assignee, labels, meta string
 	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID, causedBy string
+	var campaign string
 	var priority int
 	var asJSON bool
 
@@ -45,7 +46,8 @@ func newTouchCmd() *cobra.Command {
 				state: state, priority: priority, kind: kind, parentTask: parentTask,
 				assignee: assignee, requestedBy: requestedBy, assignedProject: assignedProject,
 				resolution: resolution, labels: labels, meta: meta, metaFile: metaFile,
-				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, causedBy: causedBy, json: asJSON,
+				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, causedBy: causedBy,
+				campaign: campaign, json: asJSON,
 				labelsSet: cmd.Flags().Changed("labels"),
 			})
 		},
@@ -67,6 +69,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Initial task due date")
 	cmd.Flags().StringVar(&startAt, "start-at", "", "Initial task start date")
 	cmd.Flags().StringVar(&forceUUID, "force-uuid", "", "Force specific UUID instead of auto-generating (must be valid UUIDv4)")
+	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll the new task in a draft or active campaign by ID or path (the task keeps its own project)")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Causal lineage: comma-separated task IDs whose work caused this defect/rework (e.g. T-00012,T-00034)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	return cmd
@@ -75,7 +78,7 @@ func newTouchCmd() *cobra.Command {
 type touchOpts struct {
 	title, description, specification, state, kind, parentTask, assignee string
 	requestedBy, assignedProject, resolution, labels, meta, metaFile     string
-	dueAt, startAt, forceUUID, causedBy                                  string
+	dueAt, startAt, forceUUID, causedBy, campaign                        string
 	priority                                                             int
 	json                                                                 bool
 	labelsSet                                                            bool
@@ -108,6 +111,13 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 	parentTask := ""
 	if o.parentTask != "" {
 		parentTask = sc.selector(o.parentTask, false)
+	}
+	// --campaign is a CONTAINER selector: scoped under the caller's project root
+	// first, absolute-path fallback second, so a cross-project slot is one
+	// command instead of touch-then-set (T-07701).
+	campaign := ""
+	if strings.TrimSpace(o.campaign) != "" {
+		campaign = sc.containerSelectorWithAbsoluteFallback(cmd.Context(), tr, strings.TrimSpace(o.campaign))
 	}
 	description := ""
 	if o.description != "" {
@@ -191,6 +201,9 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		}
 		if toks := splitCausedBy(o.causedBy); len(toks) > 0 {
 			params["causedBy"] = toks
+		}
+		if campaign != "" {
+			params["campaign"] = campaign
 		}
 
 		raw, err := tr.Call(cmd.Context(), "wrkq.task.create", params)

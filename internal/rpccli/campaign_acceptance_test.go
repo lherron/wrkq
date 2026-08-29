@@ -691,3 +691,180 @@ func TestCampaignSelectorGrammarIsUniform(t *testing.T) {
 		}
 	}
 }
+
+// TestCampaignSelectorAbsoluteFallback pins the scoped-first / absolute-fallback
+// container-selector rule (wrkq.project-root.caller-semantics, T-07701). From a
+// FOREIGN project root a campaign was previously reachable only by its P- id:
+// every path form was prefixed with the caller's root and missed.
+func TestCampaignSelectorAbsoluteFallback(t *testing.T) {
+	withRootB := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("ASP_PROJECT", "")
+		t.Setenv("WRKQ_PROJECT_ROOT", "campaign-cli-b")
+	}
+
+	t.Run("absolute path resolves from a foreign root", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		withRootB(t)
+		if out, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", "campaign-cli-a/wave-a"); err != nil {
+			t.Fatalf("absolute campaign path failed: %v\n%s", err, out)
+		}
+		if got := campaignUUIDForTask(t, f.dbPath, f.enrolledUUID); !got.Valid || got.String != f.campaignAUUID {
+			t.Fatalf("enrollment = %v, want %s", got, f.campaignAUUID)
+		}
+	})
+
+	t.Run("scoped first: a missing path errors with the SCOPED path", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		withRootB(t)
+		_, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", "campaign-cli-b/nope")
+		if err == nil {
+			t.Fatal("missing campaign path unexpectedly succeeded")
+		}
+		if !strings.Contains(err.Error(), "campaign-cli-b/nope") {
+			t.Fatalf("error = %q; want it to name the scoped path campaign-cli-b/nope", err)
+		}
+	})
+
+	t.Run("a bare slug is never re-pointed at another project", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		withRootB(t)
+		_, err := runCampaignCLI(t, f.dbPath, "set", f.enrolledID, "--campaign", "wave-a")
+		if err == nil {
+			t.Fatal("bare foreign slug unexpectedly resolved across projects")
+		}
+		if !strings.Contains(err.Error(), "campaign-cli-b/wave-a") {
+			t.Fatalf("error = %q; want the scoped path campaign-cli-b/wave-a", err)
+		}
+		if got := campaignUUIDForTask(t, f.dbPath, f.enrolledUUID); got.Valid {
+			t.Fatalf("bare slug enrolled the task in %s", got.String)
+		}
+	})
+}
+
+// TestTouchCampaignEnrollsAtCreate pins `wrkq touch --campaign`: a cross-project
+// slot is ONE command, and create is a full campaign admission path (T-07701).
+func TestTouchCampaignEnrollsAtCreate(t *testing.T) {
+	t.Run("enrolls a task resident in another project", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		t.Setenv("ASP_PROJECT", "")
+		t.Setenv("WRKQ_PROJECT_ROOT", "campaign-cli-b")
+		out, err := runCampaignCLI(t, f.dbPath, "touch", "slot", "--title", "Slot",
+			"--campaign", "campaign-cli-a/wave-a", "--json")
+		if err != nil {
+			t.Fatalf("touch --campaign failed: %v\n%s", err, out)
+		}
+		var created []struct {
+			ID   string `json:"id"`
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(out), &created); err != nil || len(created) != 1 {
+			t.Fatalf("decode touch output %q: %v", out, err)
+		}
+		if created[0].Path != "campaign-cli-b/slot" {
+			t.Fatalf("created path = %q; the task must keep its OWN project", created[0].Path)
+		}
+		database, derr := db.Open(f.dbPath)
+		if derr != nil {
+			t.Fatalf("open fixture DB: %v", derr)
+		}
+		defer func() { _ = database.Close() }()
+		var campaignUUID sql.NullString
+		if err := database.QueryRow(
+			"SELECT campaign_uuid FROM tasks WHERE id = ?", created[0].ID,
+		).Scan(&campaignUUID); err != nil {
+			t.Fatalf("read created task: %v", err)
+		}
+		if !campaignUUID.Valid || campaignUUID.String != f.campaignAUUID {
+			t.Fatalf("created enrollment = %v, want %s", campaignUUID, f.campaignAUUID)
+		}
+	})
+
+	t.Run("a terminal campaign rejects the create outright", func(t *testing.T) {
+		f := newCampaignCLIFixture(t)
+		t.Setenv("ASP_PROJECT", "")
+		t.Setenv("WRKQ_PROJECT_ROOT", "campaign-cli-b")
+		if out, err := runCampaignCLI(t, f.dbPath, "campaign", "close", f.campaignAUUID, "--state", "cancelled"); err != nil {
+			t.Fatalf("close campaign A: %v\n%s", err, out)
+		}
+		out, err := runCampaignCLI(t, f.dbPath, "touch", "late-slot", "--title", "Late",
+			"--campaign", f.campaignAUUID, "--json")
+		if err == nil {
+			t.Fatalf("create into a terminal campaign succeeded: %s", out)
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "draft or active") {
+			t.Fatalf("error = %q; want the shared admission rejection", err)
+		}
+		database, derr := db.Open(f.dbPath)
+		if derr != nil {
+			t.Fatalf("open fixture DB: %v", derr)
+		}
+		defer func() { _ = database.Close() }()
+		var count int
+		if err := database.QueryRow("SELECT COUNT(*) FROM tasks WHERE slug = 'late-slot'").Scan(&count); err != nil {
+			t.Fatalf("count late slots: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("rejected create left %d task(s) behind; the insert must roll back", count)
+		}
+	})
+}
+
+// TestCatShowsEffectiveCampaignMembership pins the cat/show projection that made
+// enrolment visible at all (T-07701): before it, a task could be enrolled and no
+// reader of the task could tell.
+func TestCatShowsEffectiveCampaignMembership(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open fixture DB: %v", err)
+	}
+	if _, err := database.Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", f.campaignAUUID, f.enrolledUUID); err != nil {
+		t.Fatalf("seed enrollment: %v", err)
+	}
+	_ = database.Close()
+
+	for _, tc := range []struct {
+		name, taskID, wantPath, wantMembership string
+	}{
+		{"resident member", f.residentID, "campaign-cli-a/wave-a", "resident"},
+		{"enrolled cross-project member", f.enrolledID, "campaign-cli-a/wave-a", "enrolled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runCampaignCLI(t, f.dbPath, "cat", tc.taskID, "--output", "raw")
+			if err != nil {
+				t.Fatalf("cat: %v\n%s", err, out)
+			}
+			want := "campaign: " + campaignFriendlyID(t, f.dbPath, f.campaignAUUID) +
+				" " + tc.wantPath + " " + tc.wantMembership
+			if !strings.Contains(out, want) {
+				t.Fatalf("cat output missing %q:\n%s", want, out)
+			}
+		})
+	}
+
+	t.Run("a task in no campaign prints no campaign line", func(t *testing.T) {
+		f2 := newCampaignCLIFixture(t)
+		out, err := runCampaignCLI(t, f2.dbPath, "cat", f2.enrolledID, "--output", "raw")
+		if err != nil {
+			t.Fatalf("cat: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "campaign:") {
+			t.Fatalf("non-member cat output carries a campaign line:\n%s", out)
+		}
+	})
+}
+
+func campaignFriendlyID(t *testing.T, dbPath, containerUUID string) string {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open fixture DB: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var id string
+	if err := database.QueryRow("SELECT id FROM containers WHERE uuid = ?", containerUUID).Scan(&id); err != nil {
+		t.Fatalf("read campaign id: %v", err)
+	}
+	return id
+}

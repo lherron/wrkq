@@ -24,6 +24,7 @@ type WrkqTaskCatView struct {
 	ArtifactDir           string            `json:"artifact_dir"`
 	ProjectID             string            `json:"project_id"`
 	ProjectUUID           string            `json:"project_uuid"`
+	Campaign              *CatViewCampaign  `json:"campaign,omitempty"`
 	RequestedByProjectID  *string           `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID     *string           `json:"assigned_project_id,omitempty"`
 	Slug                  string            `json:"slug"`
@@ -65,6 +66,21 @@ type WrkqTaskCatView struct {
 	Comments              []CatViewComment  `json:"comments,omitempty"`
 	Relations             []CatViewRelation `json:"relations,omitempty"`
 	Promises              []WrkqPromise     `json:"promises"`
+}
+
+// CatViewCampaign is the task's EFFECTIVE campaign membership under
+// wrkq.campaign.canonical-portfolio-authority: resident (the task's own
+// container IS the campaign) or enrolled (tasks.campaign_uuid, the
+// cross-project form). Residency wins. Omitted entirely when the task is in no
+// campaign, so a non-member's cat output is byte-identical to before.
+//
+// This is the one deliberate addition to the T-05090 "reproduce cat only"
+// rule: campaign membership had no cat surface at all, which made cross-project
+// enrolment write-only (T-07701).
+type CatViewCampaign struct {
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	Membership string `json:"membership"`
 }
 
 type CatViewComment struct {

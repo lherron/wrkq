@@ -222,6 +222,9 @@ func buildOrderedTask(t *TaskEntry) orderedMap {
 	if t.DueAt != "" {
 		result = append(result, keyValue{"due_at", t.DueAt})
 	}
+	if t.CampaignUUID != "" {
+		result = append(result, keyValue{"campaign_uuid", t.CampaignUUID})
+	}
 	result = append(result, keyValue{"etag", t.ETag})
 	result = append(result, keyValue{"id", t.ID})
 	if len(t.Labels) > 0 {

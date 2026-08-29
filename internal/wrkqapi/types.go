@@ -130,6 +130,7 @@ type TaskCreateParams struct {
 	DueAt                string         `json:"dueAt,omitempty"`
 	StartAt              string         `json:"startAt,omitempty"`
 	CausedBy             []string       `json:"causedBy,omitempty"`
+	Campaign             string         `json:"campaign,omitempty"`
 	ForceUUID            string         `json:"forceUuid,omitempty"`
 	PrincipalRef         string         `json:"principalRef,omitempty"`
 	Actor                string         `json:"actor,omitempty"`

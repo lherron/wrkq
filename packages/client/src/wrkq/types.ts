@@ -556,6 +556,8 @@ export interface WrkqTaskCreateParams {
   labels?: string[];
   meta?: Record<string, unknown>;
   riskClass?: WrkqRiskClass;
+  /** Campaign ID/path to enroll the new task in; the task keeps its own project. */
+  campaign?: string;
   principalRef?: string;
   idempotencyKey?: string;
 }

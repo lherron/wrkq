@@ -79,6 +79,7 @@ type TaskEntry struct {
 	Slug                  string   `json:"slug"`
 	Title                 string   `json:"title"`
 	ProjectUUID           string   `json:"project_uuid"`
+	CampaignUUID          string   `json:"campaign_uuid,omitempty"`
 	RequestedByProjectID  string   `json:"requested_by_project_id,omitempty"`
 	AssignedProjectID     string   `json:"assigned_project_id,omitempty"`
 	AcknowledgedAt        string   `json:"acknowledged_at,omitempty"`

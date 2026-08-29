@@ -211,7 +211,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Update assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Update task resolution")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
-	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in an active campaign by ID or path (empty string unenrolls)")
+	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in a draft or active campaign by ID or path; the task keeps its own project (empty string unenrolls)")
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = cmd.Flags().MarkHidden("batch-size") // Accepted for compatibility; it has no behavior.
 	_ = batchSize                            // Legacy accepts --batch-size but does not apply batching.
@@ -388,9 +388,11 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 	// scoping as task refs and --parent-task. Without this a bare campaign slug
 	// resolved for `campaign convert|close` (which scope it) but not here
 	// (T-06823). Container IDs, UUIDs, and already-rooted paths pass through.
+	// A campaign in ANOTHER project is addressable by absolute path through the
+	// scoped-first fallback (T-07701).
 	if raw, ok := opts.patch["campaign"].(string); ok {
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
-			scoped := sc.selector(trimmed, false)
+			scoped := sc.containerSelectorWithAbsoluteFallback(cmd.Context(), tr, trimmed)
 			opts.patch["campaign"] = scoped
 			if _, present := opts.dryFields["campaign"]; present {
 				opts.dryFields["campaign"] = scoped

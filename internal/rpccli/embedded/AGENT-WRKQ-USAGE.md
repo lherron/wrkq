@@ -56,6 +56,27 @@ wrkq projects                          # List all projects
 wrkq ls --project other inbox          # Work in different project
 ```
 
+## Campaign Membership
+A task belongs to a campaign in one of two ways. **Resident**: it lives inside
+the campaign container, so it is a member with nothing else set. **Enrolled**:
+it lives somewhere else entirely — including another project — and
+`wrkq set T-00001 --campaign P-00452` (or `wrkq touch <path> --campaign P-00452`
+at creation) records the membership. Enrollment is how a campaign holds a slot
+whose work belongs to another project: the task keeps its own path, project,
+and agent home, while the campaign owns its room, portfolio rollup and close
+guard. `wrkq cat` prints the effective membership as
+`campaign: <id> <path> resident|enrolled`.
+
+```bash
+wrkq touch other/inbox/slot -t "Slot" --campaign P-00452  # create enrolled, in another project
+wrkq set T-00001 --campaign P-00452                       # enroll an existing task
+wrkq set T-00001 --campaign ""                            # unenroll
+wrkq find --campaign P-00452 --state all                  # resident + enrolled members
+```
+A campaign in another project is addressable by its `P-` id from anywhere, or by
+absolute path (`otherproject/campaign-slug`) — a path is tried under your own
+project root first.
+
 ## Search Freshness: run `wrkq index update` before search when freshness matters
 
 ## Promises

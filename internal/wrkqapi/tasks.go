@@ -144,6 +144,18 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		causedByRefs = refs
 	}
 
+	// Campaign ENROLMENT at create time. Resolution is deliberately the same
+	// selectors.ResolveContainer the task-update path uses, with no project
+	// constraint: a campaign may enroll a task resident in any project.
+	var campaignUUID *string
+	if strings.TrimSpace(p.Campaign) != "" {
+		uuid, _, cerr := selectors.ResolveContainer(a.db, p.Campaign)
+		if cerr != nil {
+			return nil, NewNotFoundError(p.Campaign, "campaign")
+		}
+		campaignUUID = &uuid
+	}
+
 	attr, aerr := a.attributionFor(p.PrincipalRef)
 	if aerr != nil {
 		return nil, aerr
@@ -169,6 +181,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		StartAt:              p.StartAt,
 		RiskClass:            riskClass,
 		CausedBy:             causedByRefs,
+		CampaignUUID:         campaignUUID,
 		Via:                  "rpc",
 	})
 	if err != nil {

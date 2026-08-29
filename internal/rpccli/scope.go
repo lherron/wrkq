@@ -1,7 +1,9 @@
 package rpccli
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/projectroot"
@@ -57,4 +59,46 @@ func (s *scoper) path(raw string, defaultToRoot bool) string {
 // mirroring legacy normalizeProjectRoot(app.Config).
 func (s *scoper) projectRoot() string {
 	return projectroot.Normalize(s.cfg)
+}
+
+// containerSelectorWithAbsoluteFallback scopes a CONTAINER selector under the
+// caller's project root FIRST, and only when that scoped form does not resolve
+// does it fall back to the raw selector as an ABSOLUTE path rooted at a
+// registered project.
+//
+// Scoped-first is what keeps wrkq.project-root.caller-semantics intact: a
+// selector that resolves under the caller's own root always wins, and the error
+// a caller sees for a genuinely missing path still names the SCOPED path. The
+// fallback exists because a campaign in ANOTHER project was otherwise reachable
+// only by its P- id — `--campaign alpha/camp1` from project root `beta` became
+// `beta/alpha/camp1` with no way to write an absolute path (T-07701).
+//
+// The fallback is deliberately narrow. It requires a multi-segment selector
+// whose FIRST segment names a top-level container of kind `project`, so a bare
+// slug (`camp1`) is never silently re-pointed at another project's container.
+func (s *scoper) containerSelectorWithAbsoluteFallback(ctx context.Context, tr Transport, raw string) string {
+	scoped := s.selector(raw, false)
+	token := strings.TrimPrefix(strings.TrimPrefix(raw, "c:"), "t:")
+	if scoped == raw || !strings.Contains(token, "/") {
+		return scoped
+	}
+	if _, err := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": scoped}); err == nil {
+		return scoped
+	}
+	if _, err := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": raw}); err != nil {
+		return scoped
+	}
+	rawProject, err := tr.Call(ctx, "wrkq.container.show", map[string]string{
+		"path": strings.SplitN(token, "/", 2)[0],
+	})
+	if err != nil {
+		return scoped
+	}
+	var project struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(rawProject, &project); err != nil || project.Kind != "project" {
+		return scoped
+	}
+	return raw
 }

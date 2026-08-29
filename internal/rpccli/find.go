@@ -118,7 +118,7 @@ func newFindCmd() *cobra.Command {
 				params["reverse"] = true
 			}
 			if campaign != "" {
-				params["campaign"] = campaign
+				params["campaign"] = sc.containerSelectorWithAbsoluteFallback(cmd.Context(), tr, campaign)
 			}
 
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.findListView", params)

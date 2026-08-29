@@ -52,6 +52,7 @@ type CreateParams struct {
 	DueAt                string
 	StartAt              string
 	CausedBy             []CausedByRef // ordered, de-duplicated causal lineage edges
+	CampaignUUID         *string       // optional campaign ENROLMENT at create time (cross-project membership)
 	Via                  string        // origin.via for webhooks; defaults to "cli"
 	CreatorScopeRef      string        // full praesidium scopeRef of the creating agent; stored as created_by_scope_ref
 }
@@ -330,8 +331,19 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		if err != nil {
 			return fmt.Errorf("failed to get task UUID: %w", err)
 		}
+		// Enrolment is staged before validation so create is a full admission
+		// path: wrkq.campaign.canonical-portfolio-authority requires create to
+		// be gated for RESIDENT and ENROLLED members alike, and the shared
+		// validator rejecting inside this transaction rolls the insert back.
+		if params.CampaignUUID != nil {
+			if _, err := tx.Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", *params.CampaignUUID, uuid); err != nil {
+				return fmt.Errorf("failed to enroll task in campaign: %w", err)
+			}
+		}
 		if err := validateEffectiveMembershipTx(tx, campaignValidation{
-			taskUUIDs: []string{uuid}, residentAdmission: true,
+			taskUUIDs:         []string{uuid},
+			residentAdmission: true,
+			enrollmentChange:  params.CampaignUUID != nil,
 		}); err != nil {
 			return err
 		}

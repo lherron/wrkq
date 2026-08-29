@@ -282,7 +282,7 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 
 func exportTasks(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id,
+		SELECT uuid, id, slug, title, project_uuid, campaign_uuid, requested_by_project_id,
 		       assigned_project_id, acknowledged_at, resolution,
 		       workflow_preset, preset_version, phase, risk_class,
 		       state, priority,
@@ -303,6 +303,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var description string
 		var specification string
 		var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
+		var campaignUUID sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var workflowPreset, phase, riskClass sql.NullString
 		var presetVersion sql.NullInt64
@@ -310,7 +311,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var priority int
 		var etag int64
 
-		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &requestedBy,
+		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &requestedBy,
 			&assignedProject, &acknowledgedAt, &resolution,
 			&workflowPreset, &presetVersion, &phase, &riskClass,
 			&state, &priority,
@@ -338,6 +339,9 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 			entry.UpdatedByPrincipalRef = updatedByPrincipal.String
 		}
 
+		if campaignUUID.Valid {
+			entry.CampaignUUID = campaignUUID.String
+		}
 		if requestedBy.Valid {
 			entry.RequestedByProjectID = requestedBy.String
 		}

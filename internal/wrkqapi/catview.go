@@ -81,6 +81,11 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	var taskPath string
 	_ = tx.QueryRowContext(ctx, "SELECT path FROM v_task_paths WHERE uuid = ?", taskUUID).Scan(&taskPath)
 
+	campaign, cerr := catViewCampaign(ctx, tx, taskUUID, projectUUID)
+	if cerr != nil {
+		return nil, cerr
+	}
+
 	var parentTaskID *string
 	if parentTaskUUID != nil {
 		var ptID string
@@ -115,6 +120,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		ArtifactDir:           taskArtifactDir(id),
 		ProjectID:             projectID,
 		ProjectUUID:           projectUUID,
+		Campaign:              campaign,
 		RequestedByProjectID:  requestedBy,
 		AssignedProjectID:     assignedProject,
 		Slug:                  slug,
@@ -192,6 +198,47 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		return nil, err
 	}
 	view.Promises = promises
+	return view, nil
+}
+
+// catViewCampaign resolves the task's effective campaign membership with the
+// SAME resident-or-enrolled rule the room router (effectiveCampaignForTask) and
+// the portfolio aggregate use: residency wins over enrolment, and campaign_state
+// is NOT consulted, so a member of a completed campaign still reads as a member.
+// Returns nil for a task in no campaign — cat omits the field entirely.
+func catViewCampaign(ctx context.Context, tx *sql.Tx, taskUUID, projectUUID string) (*CatViewCampaign, error) {
+	var enrolledUUID, residentState, enrolledState sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT t.campaign_uuid, resident.campaign_state, enrolled.campaign_state
+		  FROM tasks t
+		  LEFT JOIN containers resident ON resident.uuid = t.project_uuid
+		  LEFT JOIN containers enrolled ON enrolled.uuid = t.campaign_uuid
+		 WHERE t.uuid = ?`, taskUUID).Scan(&enrolledUUID, &residentState, &enrolledState); err != nil {
+		return nil, NewInternalError(err)
+	}
+
+	var membership, campaignUUID string
+	switch {
+	case residentState.Valid:
+		membership, campaignUUID = "resident", projectUUID
+	case enrolledUUID.Valid && enrolledState.Valid:
+		membership, campaignUUID = "enrolled", enrolledUUID.String
+	default:
+		return nil, nil
+	}
+
+	view := &CatViewCampaign{Membership: membership}
+	err := tx.QueryRowContext(ctx, `
+		SELECT c.id, COALESCE(cp.path, c.slug)
+		  FROM containers c
+		  LEFT JOIN v_container_paths cp ON cp.uuid = c.uuid
+		 WHERE c.uuid = ?`, campaignUUID).Scan(&view.ID, &view.Path)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
 	return view, nil
 }
 

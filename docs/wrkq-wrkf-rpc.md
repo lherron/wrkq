@@ -565,6 +565,15 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > hint** (meaningful on the canonical host, not a remote-filesystem guarantee).
 > The projection includes nullable `outcome`, which raw `cat` renders as a
 > front-matter block and the styled card renders as its own section.
+> It also carries the optional `campaign: { id, path, membership }` object — the
+> task's EFFECTIVE campaign membership under
+> `wrkq.campaign.canonical-portfolio-authority`, `membership` being `resident`
+> (the task's container IS the campaign) or `enrolled` (`tasks.campaign_uuid`,
+> the cross-project form). Residency wins; campaign state is not consulted, so a
+> member of a completed campaign still reads as a member. The key is omitted
+> entirely for a task in no campaign, so a non-member's projection is unchanged.
+> Raw `cat` renders it as the front-matter line
+> `campaign: <id> <path> <membership>` directly after `project_uuid`.
 > Do not add its projection fields to `wrkq.task.show`. Registering it changes
 > the method catalog and `protocolSchemaHash`.
 >
@@ -620,6 +629,7 @@ interface WrkqTaskCreateParams {
   dueAt?: string;
   startAt?: string;
   causedBy?: string[];   // causal lineage: friendly task IDs (^T-[0-9]{5}$), ordered + de-duplicated server-side
+  campaign?: string;  // campaign ENROLMENT at create time: container selector, no project constraint
   forceUuid?: string; // lowercase UUIDv4, mirrors `wrkq touch --force-uuid`
   idempotencyKey?: string;
 }

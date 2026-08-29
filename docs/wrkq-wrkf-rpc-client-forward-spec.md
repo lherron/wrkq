@@ -605,6 +605,7 @@ interface WrkqTaskCreateParams {
   parentTask?: string;
   labels?: string[];
   meta?: Record<string, unknown>;
+  campaign?: string;  // campaign ENROLMENT at create time: container selector, no project constraint
   idempotencyKey?: string;
 }
 

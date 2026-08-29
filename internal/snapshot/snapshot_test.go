@@ -10,6 +10,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/attribution"
 	wrkqdb "github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -51,6 +52,7 @@ func createTestDB(t *testing.T) *sql.DB {
 			slug TEXT NOT NULL,
 			title TEXT NOT NULL,
 			project_uuid TEXT NOT NULL REFERENCES containers(uuid),
+			campaign_uuid TEXT REFERENCES containers(uuid),
 			requested_by_project_id TEXT,
 			assigned_project_id TEXT,
 			acknowledged_at TEXT,
@@ -671,5 +673,89 @@ func TestFormatTimestamp(t *testing.T) {
 
 	if formatted != "2025-01-15T10:30:00Z" {
 		t.Errorf("expected 2025-01-15T10:30:00Z, got %s", formatted)
+	}
+}
+
+// TestSnapshotPreservesCampaignEnrollment pins that cross-project campaign
+// ENROLMENT survives a snapshot round-trip. Before T-07701 the task tuple
+// carried no campaign column at all, so a restore silently unenrolled every
+// enrolled member and the campaign lost its cross-project slots.
+func TestSnapshotPreservesCampaignEnrollment(t *testing.T) {
+	openMigrated := func(name string) *wrkqdb.DB {
+		t.Helper()
+		database, err := wrkqdb.Open(filepath.Join(t.TempDir(), name+".db"))
+		if err != nil {
+			t.Fatalf("open %s database: %v", name, err)
+		}
+		if err := database.Migrate(); err != nil {
+			t.Fatalf("migrate %s database: %v", name, err)
+		}
+		t.Cleanup(func() { _ = database.Close() })
+		return database
+	}
+
+	source := openMigrated("source")
+	var rootUUID string
+	if err := source.QueryRow("SELECT uuid FROM containers WHERE kind = 'root'").Scan(&rootUUID); err != nil {
+		t.Fatalf("find root container: %v", err)
+	}
+	attr := attribution.Attribution{PrincipalRef: "agent:clod", ScopeRef: "agent:clod:project:wrkq:task:T-07701"}
+	s := store.New(source)
+
+	project, err := s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
+		Slug: "alpha", Title: "alpha", ParentUUID: &rootUUID, Kind: "project",
+	})
+	if err != nil {
+		t.Fatalf("create project container: %v", err)
+	}
+	campaign, err := s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
+		Slug: "camp", Title: "camp", ParentUUID: &project.UUID,
+	})
+	if err != nil {
+		t.Fatalf("create campaign container: %v", err)
+	}
+	if _, err := source.Exec(
+		"UPDATE containers SET campaign_state = 'active' WHERE uuid = ?", campaign.UUID,
+	); err != nil {
+		t.Fatalf("adorn campaign: %v", err)
+	}
+	created, err := s.Tasks.CreateWithAttribution(attr, store.CreateParams{
+		Slug: "enrolled-slot", Title: "enrolled slot", ProjectUUID: project.UUID,
+		State: domain.StateOpen, Priority: 3, CampaignUUID: &campaign.UUID,
+	})
+	if err != nil {
+		t.Fatalf("create enrolled task: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "state.json")
+	if _, err := Export(source.DB, ExportOptions{OutputPath: outputPath, Canonical: true}); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+
+	// The export must CARRY the enrolment, not just re-derive it on read.
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if !strings.Contains(string(data), `"campaign_uuid": "`+campaign.UUID+`"`) &&
+		!strings.Contains(string(data), `"campaign_uuid":"`+campaign.UUID+`"`) {
+		t.Fatalf("exported snapshot does not carry campaign_uuid %s: %s", campaign.UUID, data)
+	}
+
+	// Import into the plain-schema fixture DB: the migrated-target path cannot
+	// round-trip containers at all (T-07498), so this proves the task tuple.
+	target := createTestDB(t)
+	defer func() { _ = target.Close() }()
+	if _, err := Import(target, ImportOptions{InputPath: outputPath}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var restored sql.NullString
+	if err := target.QueryRow(
+		"SELECT campaign_uuid FROM tasks WHERE uuid = ?", created.UUID,
+	).Scan(&restored); err != nil {
+		t.Fatalf("read restored task: %v", err)
+	}
+	if !restored.Valid || restored.String != campaign.UUID {
+		t.Fatalf("restored campaign_uuid = %v, want %s", restored, campaign.UUID)
 	}
 }

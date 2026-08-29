@@ -405,19 +405,20 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, requested_by_project_id,
+		INSERT INTO tasks (uuid, id, slug, title, project_uuid, campaign_uuid, requested_by_project_id,
 		                   assigned_project_id, acknowledged_at, resolution,
 		                   workflow_preset, preset_version, phase, risk_class,
 		                   state, priority,
 		                   start_at, due_at, labels, description, specification, etag,
 		                   created_at, updated_at, completed_at, archived_at,
 		                   created_by_principal_ref, updated_by_principal_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(uuid) DO UPDATE SET
 			id = excluded.id,
 			slug = excluded.slug,
 			title = excluded.title,
 			project_uuid = excluded.project_uuid,
+			campaign_uuid = excluded.campaign_uuid,
 			requested_by_project_id = excluded.requested_by_project_id,
 			assigned_project_id = excluded.assigned_project_id,
 			acknowledged_at = excluded.acknowledged_at,
@@ -450,6 +451,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		task := snap.Tasks[uuid]
 
 		var startAt, dueAt, labels, completedAt, archivedAt interface{}
+		var campaignUUID interface{}
 		var requestedBy, assignedProject, acknowledgedAt, resolution interface{}
 		var workflowPreset, presetVersion, phase, riskClass interface{}
 		var createdByPrincipal, updatedByPrincipal interface{}
@@ -458,6 +460,9 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		}
 		if task.UpdatedByPrincipalRef != "" {
 			updatedByPrincipal = task.UpdatedByPrincipalRef
+		}
+		if task.CampaignUUID != "" {
+			campaignUUID = task.CampaignUUID
 		}
 		if task.RequestedByProjectID != "" {
 			requestedBy = task.RequestedByProjectID
@@ -514,7 +519,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		}
 
 		if _, err := stmt.Exec(uuid, task.ID, task.Slug, task.Title, task.ProjectUUID,
-			requestedBy, assignedProject, acknowledgedAt, resolution,
+			campaignUUID, requestedBy, assignedProject, acknowledgedAt, resolution,
 			workflowPreset, presetVersion, phase, riskClass,
 			task.State, task.Priority,
 			startAt, dueAt, labels, description, specification, task.ETag,
