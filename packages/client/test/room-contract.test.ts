@@ -70,6 +70,8 @@ const SAY_RESULT: WrkqRoomSayResult = {
   groupId: "EN-00001",
   envelopes: [ENVELOPE],
   acked: [],
+  notices: ["this looks like T-07613 work"],
+  notice: "this looks like T-07613 work",
 };
 
 const LOG_VIEW: WrkqRoomLogView = { room: ROOM, items: [ENVELOPE] };
@@ -136,6 +138,7 @@ describe("wrkq.room facade", () => {
     const said = await client.wrkq.room.say(say);
     expect(said.groupId).toBe("EN-00001");
     expect(said.envelopes[0]?.idempotencyKey).toBe("acp:hrc-message:m-1");
+    expect(said.notices).toEqual(["this looks like T-07613 work"]);
     await client.wrkq.room.show(show);
     expect((await client.wrkq.room.list({ all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" })).items).toHaveLength(1);
     expect((await client.wrkq.room.logView(logView)).items).toHaveLength(1);

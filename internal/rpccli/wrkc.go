@@ -123,6 +123,7 @@ type roomSayResultWire struct {
 	Envelopes         []envelopeWire `json:"envelopes"`
 	Acked             []string       `json:"acked"`
 	RecordedCommentID *string        `json:"recordedCommentId,omitempty"`
+	Notices           []string       `json:"notices,omitempty"`
 	Notice            *string        `json:"notice,omitempty"`
 }
 
@@ -350,9 +351,14 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if err := json.Unmarshal(raw, &result); err != nil {
 				return err
 			}
-			// §5's advisory rides stderr so it never contaminates a piped
-			// --output raw/json read. It is never an error: the say wrote.
-			if result.Notice != nil {
+			// Advisories ride stderr so they never contaminate a piped raw/json
+			// read. They are never errors: the say already wrote.
+			if len(result.Notices) > 0 {
+				for _, notice := range result.Notices {
+					fmt.Fprintln(cmd.ErrOrStderr(), "notice: "+notice)
+				}
+			} else if result.Notice != nil {
+				// Compatibility with a server from before the notices array.
 				fmt.Fprintln(cmd.ErrOrStderr(), "notice: "+*result.Notice)
 			}
 			if wait {

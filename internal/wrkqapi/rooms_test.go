@@ -499,6 +499,136 @@ func TestSayIntoATerminalTaskRoomAlwaysWrites(t *testing.T) {
 	}
 }
 
+// TestPairRoomSayNotices pins T-07700's two advisory-only triggers. Every case
+// exercises RoomSay itself so a notice can never become a content refusal or a
+// persisted ledger field by accident.
+func TestPairRoomSayNotices(t *testing.T) {
+	type observed struct {
+		result  *WrkqRoomSayResult
+		firstID string
+	}
+	type resultCheck func(*testing.T, *roomFixture, string, string, string) observed
+	tests := []struct {
+		name string
+		run  resultCheck
+		want func(*roomFixture, string, string) []string
+	}{
+		{
+			name: "resolvable task mention fires",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				return observed{result: f.say(t, RoomSayParams{Ref: roomID, Body: "see " + f.loneTaskID,
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})}
+			},
+			want: func(f *roomFixture, _, _ string) []string {
+				return []string{"this looks like " + f.loneTaskID + " work — say into " + f.loneTaskID + " so a reply here does not cross-discharge it"}
+			},
+		},
+		{
+			name: "unresolvable task mention is silent",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				return observed{result: f.say(t, RoomSayParams{Ref: roomID, Body: "see T-99999",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})}
+			},
+			want: func(_ *roomFixture, _, _ string) []string { return nil },
+		},
+		{
+			name: "stacked obligation fires",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				first := f.say(t, RoomSayParams{Ref: roomID, Body: "first topic",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				second := f.say(t, RoomSayParams{Ref: roomID, Body: "second topic",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				return observed{result: second, firstID: first.Envelopes[0].ID}
+			},
+			want: func(_ *roomFixture, firstID, targetSeat string) []string {
+				return []string{targetSeat + " still owes you a reply here (" + firstID + "); one reply acks both — put a second topic on its task"}
+			},
+		},
+		{
+			name: "stacked obligation is silent after ack",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				ctx := context.Background()
+				first := f.say(t, RoomSayParams{Ref: roomID, Body: "first topic",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+					Envelope: first.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-pair-notice",
+				}); err != nil {
+					t.Fatalf("present first obligation: %v", err)
+				}
+				reply := f.say(t, RoomSayParams{Ref: roomID, Body: "answer",
+					To: []string{senderSeat}, PrincipalRef: "agent:cody", ScopeRef: targetSeat})
+				if len(reply.Acked) != 1 || reply.Acked[0] != first.Envelopes[0].ID {
+					t.Fatalf("reply acked %v, want [%s]", reply.Acked, first.Envelopes[0].ID)
+				}
+				return observed{result: f.say(t, RoomSayParams{Ref: roomID, Body: "next topic",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})}
+			},
+			want: func(_ *roomFixture, _, _ string) []string { return nil },
+		},
+		{
+			name: "fyi never fires stacked obligation",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				f.say(t, RoomSayParams{Ref: roomID, Body: "first topic",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				return observed{result: f.say(t, RoomSayParams{Ref: roomID, Body: "just fyi", To: []string{targetSeat}, FYI: true,
+					PrincipalRef: "agent:clod", ScopeRef: senderSeat})}
+			},
+			want: func(_ *roomFixture, _, _ string) []string { return nil },
+		},
+		{
+			name: "non adhoc room is silent",
+			run: func(t *testing.T, f *roomFixture, _, senderSeat, targetSeat string) observed {
+				f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "first topic", To: []string{targetSeat},
+					PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				return observed{result: f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "see " + f.loneTaskID, To: []string{targetSeat},
+					PrincipalRef: "agent:clod", ScopeRef: senderSeat})}
+			},
+			want: func(_ *roomFixture, _, _ string) []string { return nil },
+		},
+		{
+			name: "task mention and stacked obligation both fire",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				first := f.say(t, RoomSayParams{Ref: roomID, Body: "first topic",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				second := f.say(t, RoomSayParams{Ref: roomID, Body: "see " + f.loneTaskID,
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})
+				return observed{result: second, firstID: first.Envelopes[0].ID}
+			},
+			want: func(f *roomFixture, firstID, targetSeat string) []string {
+				return []string{
+					"this looks like " + f.loneTaskID + " work — say into " + f.loneTaskID + " so a reply here does not cross-discharge it",
+					targetSeat + " still owes you a reply here (" + firstID + "); one reply acks both — put a second topic on its task",
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRoomFixture(t)
+			targetSeat := "cody@proj:primary"
+			senderSeat := "clod@proj:primary"
+			opened := f.say(t, RoomSayParams{Ref: senderSeat, Body: "pair opener",
+				PrincipalRef: "agent:cody", ScopeRef: targetSeat})
+			if opened.Room.ID == nil {
+				t.Fatal("pair opener did not mint an ad-hoc room id")
+			}
+			got := tc.run(t, f, *opened.Room.ID, senderSeat, targetSeat)
+			want := tc.want(f, got.firstID, targetSeat)
+			if fmt.Sprint(got.result.Notices) != fmt.Sprint(want) {
+				t.Fatalf("notices = %q, want %q", got.result.Notices, want)
+			}
+			if len(got.result.Notices) == 0 {
+				if got.result.Notice != nil {
+					t.Fatalf("legacy notice = %q with no notices", *got.result.Notice)
+				}
+			} else if got.result.Notice == nil || *got.result.Notice != got.result.Notices[0] {
+				t.Fatalf("legacy notice = %v, want first notice %q", got.result.Notice, got.result.Notices[0])
+			}
+		})
+	}
+}
+
 // TestRoomLifecycleVerbsRefuseWithANamedError proves the burn-in shim: an old
 // client calling close or reopen gets `room_lifecycle_removed` by name rather
 // than a bare method-not-found, and nothing is mutated.

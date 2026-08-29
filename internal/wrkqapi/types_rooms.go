@@ -147,10 +147,11 @@ type WrkqRoomSayResult struct {
 	// RecordedCommentID is set when --record also wrote the body as a wrkq
 	// comment on the room's task. Rooms are talk; comments are record.
 	RecordedCommentID *string `json:"recordedCommentId,omitempty"`
-	// Notice is §5's advisory: set when the say landed in a room whose activity
-	// read `stale`. It is never an error and there is no override flag, because
-	// there is nothing to override — the say already wrote. A CLI prints it to
-	// stderr; a programmatic consumer may ignore it.
+	// Notices are advisory only: the say already wrote, they are never errors,
+	// and there is no override flag. A CLI prints each to stderr; a programmatic
+	// consumer may ignore them.
+	Notices []string `json:"notices,omitempty"`
+	// Notice mirrors the first Notices entry for one compatibility release.
 	Notice *string `json:"notice,omitempty"`
 }
 

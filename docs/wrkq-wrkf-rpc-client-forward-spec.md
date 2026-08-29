@@ -1011,7 +1011,8 @@ interface WrkqEnvelope {
 }
 interface WrkqRoomSayResult {
   room: WrkqRoom; groupId: string; envelopes: WrkqEnvelope[];
-  acked: string[]; recordedCommentId?: string; notice?: string;
+  acked: string[]; recordedCommentId?: string;
+  notices?: string[]; notice?: string;
 }
 interface WrkqEnvelopePresentResult {
   envelope: WrkqEnvelope; recorded: boolean; historyHint: boolean;
@@ -1052,12 +1053,13 @@ Contract points a consumer must not have to rediscover:
   `terminal` and `lastActivityAt` is older than 4h, else `active` under 24h,
   else `quiet`. Every consumer keys on that one value: `room.list` omits `stale`
   unless `all: true`, ad-hoc pair-room reuse takes the `active` pair room, and
-  `say` returns its `notice` iff the room read `stale`.
-- **`notice` on a say result is advisory, never an error.** It is set when the
-  say landed in a `stale` room and names the terminal transition and the age of
-  the last activity. The say already wrote; there is no override flag because
-  there is nothing to override. `wrkc` prints it to stderr so a piped machine
-  read stays clean.
+  `say` includes a stale-room entry in its `notices` iff the room read `stale`.
+- **`notices` on a say result are advisory, never errors.** They include the
+  stale-room notice and, for an ad-hoc pair room, warn when the body names live
+  task ids or the addressee already owes the sender a non-terminal reply. The
+  say already wrote; there is no override flag because there is nothing to
+  override. `notice` mirrors the first entry for one compatibility release.
+  `wrkc` prints every entry to stderr so a piped machine read stays clean.
 - **`labels` holds discovery labels; `hidden` is the only one minted.**
   `room.hide` / `room.unhide` set and clear it, callable by ANY principal — what
   a listing shows is not an ownership boundary. It removes the room from the

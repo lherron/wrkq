@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -64,12 +65,17 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	// no room state that can refuse it — agent-to-agent traffic is never blocked
 	// — so the notice is computed here, BEFORE the write makes the room active
 	// again, and is never an error and never overridable.
-	notice := staleRoomNotice(room)
+	notices := []string{}
+	if notice := staleRoomNotice(room); notice != nil {
+		notices = append(notices, *notice)
+	}
 
 	addressees, err := a.resolveAddressees(ctx, room, p.To, routed.impliedTo, senderScope, attr.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
+	pairNotices := a.pairRoomSayNotices(room, body, addressees, senderScope, attr.PrincipalRef, p.FYI)
+	notices = append(notices, pairNotices...)
 	obligation := domain.EnvelopeObligationNone
 	switch {
 	case len(addressees) > 0 && p.FYI:
@@ -151,7 +157,10 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		}
 	}
 
-	result := &WrkqRoomSayResult{Acked: acked, Notice: notice}
+	result := &WrkqRoomSayResult{Acked: acked, Notices: notices}
+	if len(notices) > 0 {
+		result.Notice = &result.Notices[0]
+	}
 	refreshed, err := a.loadRoomState(ctx, room.row.UUID)
 	if err != nil {
 		return nil, err
@@ -191,6 +200,61 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		result.RecordedCommentID = &comment.ID
 	}
 	return result, nil
+}
+
+var taskMentionPattern = regexp.MustCompile(`\bT-\d{5}\b`)
+
+// pairRoomSayNotices delivers doctrine at the point where a pair room can
+// silently cross-discharge two topics. The result is advice only: these reads
+// do not introduce a content validation path, an override, or persisted state.
+func (a *API) pairRoomSayNotices(room *roomState, body string, addressees []store.EnvelopeAddressee, senderScope, senderPrincipal string, fyi bool) []string {
+	if room.row.Kind != domain.RoomKindAdhoc || len(addressees) == 0 {
+		return nil
+	}
+
+	notices := []string{}
+	mentioned := make([]string, 0)
+	seen := map[string]bool{}
+	for _, taskID := range taskMentionPattern.FindAllString(body, -1) {
+		if seen[taskID] {
+			continue
+		}
+		seen[taskID] = true
+		var live int
+		if err := a.db.QueryRow(`SELECT 1 FROM tasks
+			WHERE id = ? AND state != 'deleted' AND deleted_at IS NULL`, taskID).Scan(&live); err == nil {
+			mentioned = append(mentioned, taskID)
+		}
+	}
+	if len(mentioned) == 1 {
+		taskID := mentioned[0]
+		notices = append(notices, "this looks like "+taskID+" work — say into "+taskID+" so a reply here does not cross-discharge it")
+	} else if len(mentioned) > 1 {
+		tasks := strings.Join(mentioned, ", ")
+		notices = append(notices, "this looks like "+tasks+" work — say into those task rooms so a reply here does not cross-discharge them")
+	}
+
+	if fyi {
+		return notices
+	}
+	for _, addressee := range addressees {
+		standing, err := a.store.Rooms.StandingObligationFromSender(
+			room.row.UUID, senderScope, senderPrincipal, addressee.ScopeRef, addressee.PrincipalRef)
+		if err != nil {
+			// Advice must never add a refusal path. If this best-effort read
+			// fails, RoomSay still writes and returns successfully.
+			continue
+		}
+		if standing == nil {
+			continue
+		}
+		seat := addressee.ScopeRef
+		if seat == "" {
+			seat = addressee.PrincipalRef
+		}
+		notices = append(notices, seat+" still owes you a reply here ("+standing.ID+"); one reply acks both — put a second topic on its task")
+	}
+	return notices
 }
 
 // routedSay is the outcome of the §4 routing table for one say.

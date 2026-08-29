@@ -319,10 +319,11 @@ export interface WrkqRoomSayResult {
   acked: string[];
   recordedCommentId?: string;
   /**
-   * Set when the say landed in a room whose activity read `stale`. Advisory
-   * only: the say already wrote, it is never an error, and there is no override
-   * flag because there is nothing to override. `wrkc` prints it to stderr.
+   * Advisory notices. The say already wrote; notices are never errors and have
+   * no override flag. `wrkc` prints each to stderr.
    */
+  notices?: string[];
+  /** The first `notices` entry, retained for one compatibility release. */
   notice?: string;
 }
 

@@ -929,6 +929,39 @@ func (rs *RoomStore) PresentedObligationsForReplier(roomUUID, replierScopeRef, r
 		) DESC, e.id DESC`, args...)
 }
 
+// StandingObligationFromSender returns the oldest non-terminal reply_required
+// envelope one addressee still holds from one sender in a room. Pair-room say
+// notices use this read before creating the next envelope so the envelope being
+// written can never diagnose itself as a stack.
+func (rs *RoomStore) StandingObligationFromSender(roomUUID, senderScopeRef, senderPrincipalRef, addresseeScopeRef, addresseePrincipalRef string) (*domain.Envelope, error) {
+	clauses := []string{
+		"room_uuid = ?",
+		"obligation = 'reply_required'",
+		"state NOT IN ('acked', 'dead')",
+	}
+	args := []interface{}{roomUUID}
+	if strings.TrimSpace(senderScopeRef) != "" {
+		clauses = append(clauses, "from_scope_ref = ?")
+		args = append(args, senderScopeRef)
+	} else {
+		clauses = append(clauses, "from_scope_ref IS NULL AND from_principal_ref = ?")
+		args = append(args, senderPrincipalRef)
+	}
+	if strings.TrimSpace(addresseeScopeRef) != "" {
+		clauses = append(clauses, "to_scope_ref = ?")
+		args = append(args, addresseeScopeRef)
+	} else {
+		clauses = append(clauses, "to_scope_ref IS NULL AND to_principal_ref = ?")
+		args = append(args, addresseePrincipalRef)
+	}
+	rows, err := rs.queryEnvelopes("SELECT "+envelopeColumns+" FROM envelopes WHERE "+
+		strings.Join(clauses, " AND ")+" ORDER BY id LIMIT 1", args...)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
 // AckSenderObligationsWithAttribution is the reply-is-ack rule: saying into a
 // room with --to X acks every PRESENTED reply_required envelope in that room
 // addressed to the replier's own scope and sent from X's scope. Both sides
