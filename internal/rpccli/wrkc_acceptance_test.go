@@ -325,10 +325,13 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	if unhideOut, uerr := runWrkc(t, f.dbPath, "agent:clod", "unhide", f.taskID, "--json"); uerr != nil {
 		t.Fatalf("wrkc unhide: %v\n%s", uerr, unhideOut)
 	}
-	for _, gone := range []string{"close", "reopen"} {
+	for _, gone := range []string{"close", "reopen", "open"} {
 		if out, cerr := runWrkc(t, f.dbPath, "agent:clod", gone, f.taskID); cerr == nil {
 			t.Fatalf("wrkc %s still exists: %s", gone, out)
 		}
+	}
+	if out, serr := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "no topic flag", "--subject", "x"); serr == nil {
+		t.Fatalf("wrkc say --subject still exists: %s", out)
 	}
 
 	// join / invite / leave
@@ -356,21 +359,6 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	}
 	if !left {
 		t.Fatalf("leave did not record a departure: %+v", afterLeave.Items)
-	}
-
-	// open an explicit ad-hoc room
-	openOut, err := runWrkc(t, f.dbPath, "agent:clod", "open",
-		"cody@wrkc-proj:primary", "mable@wrkc-proj:primary",
-		"-s", "sidebar", "--scope-ref", "clod@wrkc-proj:primary", "--json")
-	if err != nil {
-		t.Fatalf("wrkc open: %v\n%s", err, openOut)
-	}
-	var adhoc roomWire
-	if err := json.Unmarshal([]byte(openOut), &adhoc); err != nil {
-		t.Fatalf("decode open: %v\n%s", err, openOut)
-	}
-	if adhoc.Kind != "adhoc" || adhoc.ID == nil || !strings.HasPrefix(*adhoc.ID, "R-") {
-		t.Fatalf("open = %+v", adhoc)
 	}
 
 	// info is local and needs neither a database nor a daemon.
@@ -457,6 +445,60 @@ func TestWrkcLogTranscriptRendersBodies(t *testing.T) {
 	}
 	if !strings.Contains(out, "(log entry)") {
 		t.Fatalf("a say without --to is not marked as a log entry:\n%s", out)
+	}
+}
+
+func TestWrkcAdhocListShowAndLogRenderPairIdentity(t *testing.T) {
+	f := newWrkcFixture(t)
+	senderSeat := "clod@wrkc-proj:primary"
+	targetSeat := "cody@wrkc-proj:primary"
+	body := strings.Repeat("界", 81) + " hidden tail"
+
+	create := func(extra ...string) roomWire {
+		t.Helper()
+		args := []string{"say", targetSeat, body, "--to", targetSeat, "--scope-ref", senderSeat, "--json"}
+		args = append(args, extra...)
+		out, err := runWrkc(t, f.dbPath, "agent:clod", args...)
+		if err != nil {
+			t.Fatalf("create pair room: %v\n%s", err, out)
+		}
+		var result roomSayResultWire
+		if err := json.Unmarshal([]byte(out), &result); err != nil {
+			t.Fatalf("decode pair room: %v\n%s", err, out)
+		}
+		return result.Room
+	}
+	first := create()
+	second := create("--new")
+	if first.ID == nil || second.ID == nil || *first.ID == *second.ID {
+		t.Fatalf("fresh pair rooms = %v and %v", first.ID, second.ID)
+	}
+
+	listed, err := runWrkc(t, f.dbPath, "agent:clod", "ls", "--kind", "adhoc", "--output", "table")
+	if err != nil {
+		t.Fatalf("wrkc ls pair rooms: %v\n%s", err, listed)
+	}
+	for _, want := range []string{*first.ID, *second.ID, "Members", "Last activity", "Last", senderSeat, targetSeat} {
+		if !strings.Contains(listed, want) {
+			t.Fatalf("wrkc ls omitted %q:\n%s", want, listed)
+		}
+	}
+	if strings.Contains(listed, "Subject") || strings.Contains(listed, "hidden tail") {
+		t.Fatalf("wrkc ls retained subject or failed the 80-rune clip:\n%s", listed)
+	}
+
+	shown, err := runWrkc(t, f.dbPath, "agent:clod", "show", *first.ID, "--output", "human")
+	if err != nil {
+		t.Fatalf("wrkc show pair room: %v\n%s", err, shown)
+	}
+	logged, err := runWrkc(t, f.dbPath, "agent:clod", "log", *first.ID, "--output", "human")
+	if err != nil {
+		t.Fatalf("wrkc log pair room: %v\n%s", err, logged)
+	}
+	for name, output := range map[string]string{"show": shown, "log": logged} {
+		if !strings.Contains(output, "members: "+senderSeat+", "+targetSeat) || strings.Contains(output, "subject:") {
+			t.Fatalf("wrkc %s did not render pair identity:\n%s", name, output)
+		}
 	}
 }
 

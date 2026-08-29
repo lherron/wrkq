@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -107,7 +106,6 @@ type Room struct {
 	Kind                  RoomKind `json:"kind" db:"kind"`
 	TaskUUID              *string  `json:"task_uuid,omitempty" db:"task_uuid"`
 	ContainerUUID         *string  `json:"container_uuid,omitempty" db:"container_uuid"`
-	Subject               *string  `json:"subject,omitempty" db:"subject"`
 	LastActivityAt        string   `json:"last_activity_at" db:"last_activity_at"`
 	OpenedByPrincipalRef  string   `json:"opened_by_principal_ref" db:"opened_by_principal_ref"`
 	OpenedAt              string   `json:"opened_at" db:"opened_at"`
@@ -254,7 +252,7 @@ func RoomActivityFor(work RoomWork, lastActivity, now time.Time) RoomActivity {
 // RoomLastActivity is the room's activity clock: the maximum of when it was
 // opened, when its newest envelope was written, and when its newest member
 // joined. opened_at always exists, so the value is defined for every room
-// including an explicit RoomOpen room that has never carried a message.
+// including a store-created room that has never carried a message.
 func RoomLastActivity(openedAt, newestEnvelopeAt, newestJoinAt string) string {
 	latest := openedAt
 	for _, candidate := range []string{newestEnvelopeAt, newestJoinAt} {
@@ -273,21 +271,4 @@ func RoomHasLabel(labels []string, label string) bool {
 		}
 	}
 	return false
-}
-
-// NormalizeRoomSubject trims an ad-hoc room subject and derives one from the
-// first body line when the caller supplied none.
-func NormalizeRoomSubject(subject, body string) string {
-	if trimmed := strings.TrimSpace(subject); trimmed != "" {
-		return trimmed
-	}
-	for _, line := range strings.Split(body, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			if len(trimmed) > 120 {
-				return trimmed[:120]
-			}
-			return trimmed
-		}
-	}
-	return ""
 }

@@ -198,9 +198,6 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.room.say", apiHandler(func(ctx context.Context, p wrkqapi.RoomSayParams) (any, error) {
 		return wq.RoomSay(ctx, p)
 	}))
-	s.Register("wrkq.room.open", apiHandler(func(ctx context.Context, p wrkqapi.RoomOpenParams) (any, error) {
-		return wq.RoomOpen(ctx, p)
-	}))
 	s.Register("wrkq.room.show", apiHandler(func(ctx context.Context, p wrkqapi.RoomShowParams) (any, error) {
 		return wq.RoomShow(ctx, p)
 	}))

@@ -28,11 +28,10 @@ type WrkqRoomLink struct {
 // writes. Labels holds the operator discovery labels (`hidden` today), which
 // change the default listing and nothing else.
 type WrkqRoom struct {
-	UUID    string  `json:"uuid"`
-	ID      *string `json:"id,omitempty"`
-	Key     string  `json:"key"`
-	Kind    string  `json:"kind"`
-	Subject *string `json:"subject,omitempty"`
+	UUID string  `json:"uuid"`
+	ID   *string `json:"id,omitempty"`
+	Key  string  `json:"key"`
+	Kind string  `json:"kind"`
 	// Work is "open" or "terminal", derived from the task/campaign state. An
 	// ad-hoc room anchors on no work and is always "open".
 	Work string `json:"work"`
@@ -224,7 +223,6 @@ type RoomSayParams struct {
 	Body           string         `json:"body"`
 	To             []string       `json:"to,omitempty"`
 	FYI            bool           `json:"fyi,omitempty"`
-	Subject        string         `json:"subject,omitempty"`
 	New            bool           `json:"new,omitempty"`
 	RespondTo      string         `json:"respondTo,omitempty"`
 	Record         bool           `json:"record,omitempty"`
@@ -234,15 +232,6 @@ type RoomSayParams struct {
 	// ScopeRef is the caller's HRC session handle when it has one. wrkq parses it
 	// only as a scope handle and is otherwise opaque to it.
 	ScopeRef string `json:"scopeRef,omitempty"`
-}
-
-// RoomOpenParams opens an explicit ad-hoc or group room.
-type RoomOpenParams struct {
-	Members      []string `json:"members"`
-	Subject      string   `json:"subject"`
-	Task         string   `json:"task,omitempty"`
-	PrincipalRef string   `json:"principalRef,omitempty"`
-	ScopeRef     string   `json:"scopeRef,omitempty"`
 }
 
 type RoomShowParams struct {

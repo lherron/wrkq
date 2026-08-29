@@ -43,7 +43,6 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqEnvelopePresentResult":       dtoType[wrkqapi.WrkqEnvelopePresentResult](),
 	"WrkqEnvelopePendingView":         dtoType[wrkqapi.WrkqEnvelopePendingView](),
 	"WrkqRoomSayParams":               dtoType[wrkqapi.RoomSayParams](),
-	"WrkqRoomOpenParams":              dtoType[wrkqapi.RoomOpenParams](),
 	"WrkqRoomShowParams":              dtoType[wrkqapi.RoomShowParams](),
 	"WrkqRoomListParams":              dtoType[wrkqapi.RoomListParams](),
 	"WrkqRoomLogViewParams":           dtoType[wrkqapi.RoomLogViewParams](),

@@ -110,7 +110,6 @@ describe("wrkq.room facade", () => {
   test("forwards the complete room RPC family with typed results", async () => {
     const transport = new FakeTransport()
       .onResult("wrkq.room.say", SAY_RESULT)
-      .onResult("wrkq.room.open", ROOM)
       .onResult("wrkq.room.show", ROOM)
       .onResult("wrkq.room.list", { items: [ROOM] })
       .onResult("wrkq.room.logView", LOG_VIEW)
@@ -129,11 +128,6 @@ describe("wrkq.room facade", () => {
       principalRef: "agent:clod",
       scopeRef: "clod@wrkq:T-07613",
     };
-    const open = {
-      members: ["cody@wrkq:primary"],
-      subject: "sidebar",
-      principalRef: "agent:clod",
-    };
     const show = { room: "T-07613" };
     const logView = { room: "T-07613", task: "T-07613", limit: 20 };
     const label = { room: "T-07613" };
@@ -142,7 +136,6 @@ describe("wrkq.room facade", () => {
     const said = await client.wrkq.room.say(say);
     expect(said.groupId).toBe("EN-00001");
     expect(said.envelopes[0]?.idempotencyKey).toBe("acp:hrc-message:m-1");
-    await client.wrkq.room.open(open);
     await client.wrkq.room.show(show);
     expect((await client.wrkq.room.list({ all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" })).items).toHaveLength(1);
     expect((await client.wrkq.room.logView(logView)).items).toHaveLength(1);
@@ -159,7 +152,6 @@ describe("wrkq.room facade", () => {
 
     expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
       { method: "wrkq.room.say", params: say },
-      { method: "wrkq.room.open", params: open },
       { method: "wrkq.room.show", params: show },
       { method: "wrkq.room.list", params: { all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" } },
       { method: "wrkq.room.logView", params: logView },

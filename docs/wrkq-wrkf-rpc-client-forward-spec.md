@@ -947,7 +947,6 @@ an OPAQUE STRING: wrkq never interprets one and never imports hrc.
 
 ```text
 wrkq.room.say
-wrkq.room.open
 wrkq.room.show
 wrkq.room.list
 wrkq.room.logView
@@ -985,7 +984,7 @@ type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
 
 interface WrkqRoom {
   uuid: string; id?: string; key: string; kind: WrkqRoomKind;
-  subject?: string; work: WrkqRoomWork; activity: WrkqRoomActivity;
+  work: WrkqRoomWork; activity: WrkqRoomActivity;
   labels: string[];
   workRef: WrkqRoomWorkRef | null; links: WrkqRoomLink[];
   openedByPrincipalRef: string; openedAt: string;
@@ -1027,6 +1026,10 @@ interface WrkqEnvelopePendingView {
 ```
 
 Contract points a consumer must not have to rediscover:
+
+- **An ad-hoc room's identity is its active member set; a topic is a task.**
+  `wrkq.room.say` lazily creates or reuses the pair channel. There is no
+  `wrkq.room.open`, no room subject, and no alternate topic-shaped room name.
 
 - **`key` is the addressing token**, not `id`. A campaign, task, or project room
   carries no friendly id at all: its key IS its work identity (`T-07613`, a

@@ -641,21 +641,30 @@ func TestDefaultListingOmitsStaleRoomsButKeepsThemAddressable(t *testing.T) {
 }
 
 // TestActivityIsTotalForAMessagelessRoom is the totality half of the projection:
-// a room opened explicitly and never spoken in still classifies, because the
-// clock folds opened_at.
+// a store-created room with no envelope still classifies, because the clock
+// folds opened_at. The public surface creates pair rooms lazily through say.
 func TestActivityIsTotalForAMessagelessRoom(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
 
-	room, err := f.api.RoomOpen(ctx, RoomOpenParams{
-		Members: []string{"cody@proj:primary"}, Subject: "sidebar",
+	created, err := f.s.Rooms.CreateWithAttribution(attribution.Attribution{
 		PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
+	}, store.RoomCreateParams{
+		Kind: domain.RoomKindAdhoc,
+		Members: []store.RoomMemberSeed{
+			{MemberRef: "clod@proj:primary", MemberPrincipalRef: "agent:clod", Scoped: true, Source: domain.RoomMemberSourceSpoke},
+			{MemberRef: "cody@proj:primary", MemberPrincipalRef: "agent:cody", Scoped: true, Source: domain.RoomMemberSourceAddressed},
+		},
 	})
 	if err != nil {
-		t.Fatalf("RoomOpen: %v", err)
+		t.Fatalf("create message-less room: %v", err)
+	}
+	room, err := f.api.RoomShow(ctx, RoomShowParams{Room: *created.ID})
+	if err != nil {
+		t.Fatalf("RoomShow: %v", err)
 	}
 	if room.MessageCount != 0 {
-		t.Fatalf("a fresh RoomOpen room already has %d messages", room.MessageCount)
+		t.Fatalf("a fresh store-created room already has %d messages", room.MessageCount)
 	}
 	if room.Work != "open" || room.Activity != "active" || room.LastActivityAt == "" {
 		t.Fatalf("message-less room = work %s / activity %s / last %q",

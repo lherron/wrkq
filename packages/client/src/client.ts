@@ -163,7 +163,6 @@ class WorkClientImpl implements WorkClient {
     },
     room: {
       say: (p) => this.call("wrkq.room.say", p),
-      open: (p) => this.call("wrkq.room.open", p),
       show: (p) => this.call("wrkq.room.show", p),
       list: (p) => this.call("wrkq.room.list", p ?? {}),
       logView: (p) => this.call("wrkq.room.logView", p),

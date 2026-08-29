@@ -51,7 +51,7 @@ func (e *EnvelopeWrongStateError) Error() string {
 // lifecycle after the T-07612 rev 3 amendment, and reading a column nothing may
 // act on is how a dropped gate grows back. Wave 5 drops them from the schema.
 const roomColumns = `
-	uuid, id, kind, task_uuid, container_uuid, subject,
+	uuid, id, kind, task_uuid, container_uuid,
 	last_activity_at, opened_by_principal_ref, opened_at, meta,
 	etag, created_at, updated_at,
 	created_by_principal_ref, created_by_scope_ref,
@@ -83,7 +83,6 @@ type RoomCreateParams struct {
 	Kind          domain.RoomKind
 	TaskUUID      *string
 	ContainerUUID *string
-	Subject       *string
 	Members       []RoomMemberSeed
 }
 
@@ -111,11 +110,11 @@ func (rs *RoomStore) CreateWithAttribution(attr attribution.Attribution, params 
 		// trigger fires on NULL. A derived room's key IS its work identity, and
 		// SQLite lets the UNIQUE index hold as many NULLs as there are of them.
 		res, err := tx.Exec(`INSERT INTO rooms (
-			kind, task_uuid, container_uuid, subject, opened_by_principal_ref,
+			kind, task_uuid, container_uuid, opened_by_principal_ref,
 			created_by_principal_ref, created_by_scope_ref,
 			updated_by_principal_ref, updated_by_scope_ref
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			params.Kind, params.TaskUUID, params.ContainerUUID, params.Subject,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			params.Kind, params.TaskUUID, params.ContainerUUID,
 			attr.PrincipalRef, attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr))
 		if err != nil {
 			return fmt.Errorf("failed to create room: %w", err)
@@ -138,9 +137,6 @@ func (rs *RoomStore) CreateWithAttribution(attr attribution.Attribution, params 
 		}
 		if created.ContainerUUID != nil {
 			payload["container_uuid"] = *created.ContainerUUID
-		}
-		if created.Subject != nil {
-			payload["subject"] = *created.Subject
 		}
 		if _, err := logRoomEvent(tx, ew, attr, created.UUID, "room.opened", created.ETag, payload); err != nil {
 			return err
@@ -202,8 +198,7 @@ func (rs *RoomStore) getByAnchor(column, value string) (*domain.Room, error) {
 // activeSince is the `active` cutoff (now − RoomActiveWithin). The clock is the
 // SAME three-way max the read-time projection uses — opened_at folded with the
 // newest envelope and the newest join — so a room this reuses is a room
-// `wrkc show` calls active, and a RoomOpen room with no envelope at all is
-// reusable for its first 24h.
+// `wrkc show` calls active, including a store-created room with no envelope.
 func (rs *RoomStore) FindAdhocPairRoom(memberA, memberB, activeSince string) (*domain.Room, error) {
 	room, err := scanRoom(rs.store.db.QueryRow(`
 		SELECT `+roomColumns+` FROM rooms r
@@ -1314,7 +1309,7 @@ func scanRoom(scanner collabScanner) (*domain.Room, error) {
 	room := &domain.Room{}
 	err := scanner.Scan(
 		&room.UUID, &room.ID, &room.Kind, &room.TaskUUID, &room.ContainerUUID,
-		&room.Subject, &room.LastActivityAt, &room.OpenedByPrincipalRef,
+		&room.LastActivityAt, &room.OpenedByPrincipalRef,
 		&room.OpenedAt, &room.Meta, &room.ETag, &room.CreatedAt, &room.UpdatedAt,
 		&room.CreatedByPrincipalRef, &room.CreatedByScopeRef,
 		&room.UpdatedByPrincipalRef, &room.UpdatedByScopeRef,

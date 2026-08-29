@@ -27,6 +27,31 @@ func TestMethodCatalogMatchesRegistry(t *testing.T) {
 	}
 }
 
+func TestRoomOpenIsMethodNotFound(t *testing.T) {
+	srv := NewRegistry(nil, RegistryOptions{})
+	initialized, ok := srv.HandleRequest(t.Context(), Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`0`),
+		Method:  "rpc.initialize",
+		Params:  json.RawMessage(`{"protocolVersion":"2026-06-30"}`),
+	})
+	if !ok || initialized.Error != nil {
+		t.Fatalf("initialize response = (%#v, %v)", initialized, ok)
+	}
+	response, ok := srv.HandleRequest(t.Context(), Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "wrkq.room.open",
+		Params:  json.RawMessage(`{"members":["cody@wrkq:primary"]}`),
+	})
+	if !ok || response.Error == nil {
+		t.Fatalf("wrkq.room.open response = (%#v, %v), want method-not-found", response, ok)
+	}
+	if response.Error.Code != -32601 || response.Error.Message != "method not found" {
+		t.Fatalf("wrkq.room.open error = %#v, want -32601 method not found", response.Error)
+	}
+}
+
 func TestCancellationNotificationAccepted(t *testing.T) {
 	var output bytes.Buffer
 	srv := NewServer(&output)

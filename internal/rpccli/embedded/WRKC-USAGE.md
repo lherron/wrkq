@@ -31,6 +31,7 @@ never remembered by a session — which is the whole point: a session that ends,
 
 Rooms are created lazily on the first `say`. They are readable by any principal:
 membership is identity and attendance, never an ACL.
+An ad-hoc room's identity is its members; a topic is a task — say into it.
 
 ### Projections: `work` and `activity`
 
@@ -106,10 +107,9 @@ on — and answering it is an ordinary say.
 ## Verbs
 
 ```bash
-wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--subject s] [--new]
+wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--new]
                         [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
-wrkc open <scope>... -s <subject> [--task T-x]
 wrkc log <room> [--task T-x] [--limit n]
 wrkc show <EN-xxxxx|room>
 wrkc ls [--all] [--dead] [--scope me] [--kind k]

@@ -51,7 +51,7 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		return nil, NewValidationError("--fyi requires --to; a say without an addressee is a log entry", map[string]any{"field": "to"})
 	}
 
-	routed, err := a.routeSay(ctx, attr, senderScope, p, body)
+	routed, err := a.routeSay(ctx, attr, senderScope, p)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ type routedSay struct {
 }
 
 // routeSay implements T-07612 §4 exactly, first match wins.
-func (a *API) routeSay(ctx context.Context, attr attribution.Attribution, senderScope string, p RoomSayParams, body string) (*routedSay, error) {
+func (a *API) routeSay(ctx context.Context, attr attribution.Attribution, senderScope string, p RoomSayParams) (*routedSay, error) {
 	ref := strings.TrimSpace(p.Ref)
 
 	// 4. An agent handle with no ref at all is not a thing: without a ref there
@@ -246,7 +246,7 @@ func (a *API) routeSay(ctx context.Context, attr attribution.Attribution, sender
 	// 4. An agent handle. A bare token with no "@" is a path, not a handle:
 	// every §4 rule-4 example carries the project segment.
 	if strings.Contains(ref, "@") {
-		return a.routeToHandle(ctx, attr, senderScope, ref, p, body)
+		return a.routeToHandle(ctx, attr, senderScope, ref, p)
 	}
 
 	// 3. A container path (projects are containers in wrkq, so this single rule
@@ -375,7 +375,7 @@ func (a *API) routeToContainerUUID(ctx context.Context, attr attribution.Attribu
 
 // routeToHandle is §4 rule 4: the room is derived from the work context of the
 // two parties, and the TARGET wins.
-func (a *API) routeToHandle(ctx context.Context, attr attribution.Attribution, senderScope, ref string, p RoomSayParams, body string) (*routedSay, error) {
+func (a *API) routeToHandle(ctx context.Context, attr attribution.Attribution, senderScope, ref string, p RoomSayParams) (*routedSay, error) {
 	target, err := scope.ParseScopeHandle(ref)
 	if err != nil {
 		return nil, NewValidationError("invalid agent handle: "+err.Error(), map[string]any{"field": "ref", "ref": ref})
@@ -432,10 +432,8 @@ func (a *API) routeToHandle(ctx context.Context, attr attribution.Attribution, s
 	if perr != nil {
 		return nil, NewValidationError("invalid agent handle: "+perr.Error(), map[string]any{"field": "ref"})
 	}
-	subject := domain.NormalizeRoomSubject(p.Subject, body)
 	room, cerr := a.store.Rooms.CreateWithAttribution(attr, store.RoomCreateParams{
-		Kind:    domain.RoomKindAdhoc,
-		Subject: optionalString(subject),
+		Kind: domain.RoomKindAdhoc,
 		Members: []store.RoomMemberSeed{
 			{MemberRef: senderScope, MemberPrincipalRef: attr.PrincipalRef, Scoped: true, Source: domain.RoomMemberSourceSpoke},
 			{MemberRef: targetHandle, MemberPrincipalRef: targetPrincipal, Scoped: true, Source: domain.RoomMemberSourceAddressed},
@@ -841,57 +839,6 @@ func validateBareAgentName(name string) error {
 }
 
 // ─── room verbs ───────────────────────────────────────────────────────────────
-
-// RoomOpen opens an explicit ad-hoc or group room with named members.
-func (a *API) RoomOpen(ctx context.Context, p RoomOpenParams) (*WrkqRoom, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	attr, err := a.attributionFor(p.PrincipalRef)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(p.Subject) == "" {
-		return nil, NewValidationError("open requires a subject", map[string]any{"field": "subject"})
-	}
-	senderScope, err := normalizeRoomScopeRef(p.ScopeRef)
-	if err != nil {
-		return nil, err
-	}
-
-	seeds := []store.RoomMemberSeed{}
-	if senderScope != "" {
-		seeds = append(seeds, store.RoomMemberSeed{
-			MemberRef: senderScope, MemberPrincipalRef: attr.PrincipalRef,
-			Scoped: true, Source: domain.RoomMemberSourceJoined,
-		})
-	} else {
-		seeds = append(seeds, store.RoomMemberSeed{
-			MemberRef: attr.PrincipalRef, MemberPrincipalRef: attr.PrincipalRef,
-			Scoped: false, Source: domain.RoomMemberSourceJoined,
-		})
-	}
-	for _, raw := range p.Members {
-		seed, serr := memberSeedFor(raw, domain.RoomMemberSourceJoined)
-		if serr != nil {
-			return nil, serr
-		}
-		seeds = append(seeds, *seed)
-	}
-
-	subject := strings.TrimSpace(p.Subject)
-	room, err := a.store.Rooms.CreateWithAttribution(attr, store.RoomCreateParams{
-		Kind: domain.RoomKindAdhoc, Subject: &subject, Members: seeds,
-	})
-	if err != nil {
-		return nil, mapRoomStoreError(err, "")
-	}
-	state, err := a.loadRoomState(ctx, room.UUID)
-	if err != nil {
-		return nil, err
-	}
-	return a.roomDTO(ctx, state)
-}
 
 // RoomShow returns one room. Rooms are readable by any principal: membership is
 // identity, never an ACL.
@@ -1961,7 +1908,7 @@ func (a *API) roomDTO(ctx context.Context, state *roomState) (*WrkqRoom, error) 
 	}
 	dto := &WrkqRoom{
 		UUID: room.UUID, ID: room.ID, Key: state.key, Kind: string(room.Kind),
-		Subject: room.Subject, Work: string(state.work), Activity: string(state.activity),
+		Work: string(state.work), Activity: string(state.activity),
 		Labels: labels, WorkRef: state.workRef, Links: state.links,
 		OpenedByPrincipalRef: room.OpenedByPrincipalRef, OpenedAt: toRFC3339(room.OpenedAt),
 		LastActivityAt: state.lastActivity,

@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 )
 
@@ -472,11 +474,11 @@ func TestMonitorEventsView_RoomSelectorDoesNotLeakTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create other: %v", err)
 	}
-	room, err := api.RoomOpen(context.Background(), RoomOpenParams{
-		Subject: "room-only selector", PrincipalRef: "agent:clod",
+	room, err := s.Rooms.CreateWithAttribution(attribution.Attribution{PrincipalRef: "agent:clod"}, store.RoomCreateParams{
+		Kind: domain.RoomKindAdhoc,
 	})
 	if err != nil {
-		t.Fatalf("room open: %v", err)
+		t.Fatalf("create room-only selector: %v", err)
 	}
 	if room.ID == nil {
 		t.Fatal("an ad-hoc room must carry an R- id to be selectable")

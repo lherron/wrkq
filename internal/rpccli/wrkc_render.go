@@ -62,7 +62,7 @@ func renderWrkcSayResult(cmd *cobra.Command, result roomSayResultWire, flags pro
 	return renderer.RenderList(lines)
 }
 
-func renderWrkcRoomSingleton(cmd *cobra.Command, raw json.RawMessage, flags promiseOutputFlags) error {
+func renderWrkcRoomSingleton(cmd *cobra.Command, raw json.RawMessage, flags promiseOutputFlags, identity *wrkcAdhocIdentity) error {
 	var room roomWire
 	if err := json.Unmarshal(raw, &room); err != nil {
 		return err
@@ -83,13 +83,13 @@ func renderWrkcRoomSingleton(cmd *cobra.Command, raw json.RawMessage, flags prom
 	case "raw":
 		return renderer.RenderList([]string{room.Key})
 	case "tsv":
-		headers, rows := wrkcRoomTable([]roomWire{room})
+		headers, rows := wrkcRoomTable([]roomWire{room}, wrkcIdentityMap(room, identity))
 		return renderer.RenderTSV(headers, rows)
 	}
-	return renderer.RenderList(wrkcRoomDetailLines(room))
+	return renderer.RenderList(wrkcRoomDetailLines(room, identity))
 }
 
-func wrkcRoomDetailLines(room roomWire) []string {
+func wrkcRoomDetailLines(room roomWire, identity *wrkcAdhocIdentity) []string {
 	// work and activity are PROJECTIONS, printed as information. Neither can
 	// refuse a say, so neither is followed by a "way out" hint.
 	lines := []string{
@@ -104,8 +104,8 @@ func wrkcRoomDetailLines(room roomWire) []string {
 	if room.ID != nil {
 		lines = append(lines, "id: "+*room.ID)
 	}
-	if room.Subject != nil {
-		lines = append(lines, "subject: "+*room.Subject)
+	if room.Kind == "adhoc" && identity != nil {
+		lines = append(lines, "members: "+strings.Join(identity.Members, ", "))
 	}
 	if room.WorkRef != nil {
 		lines = append(lines, "work_ref: "+room.WorkRef.Type+":"+room.WorkRef.ID+" ("+room.WorkRef.Path+")")
@@ -113,8 +113,10 @@ func wrkcRoomDetailLines(room roomWire) []string {
 	for _, link := range room.Links {
 		lines = append(lines, "linked ("+link.Relation+"): "+link.Key)
 	}
+	if room.Kind != "adhoc" || identity == nil {
+		lines = append(lines, fmt.Sprintf("members: %d", room.MemberCount))
+	}
 	lines = append(lines,
-		fmt.Sprintf("members: %d", room.MemberCount),
 		fmt.Sprintf("messages: %d", room.MessageCount),
 		"last_activity: "+room.LastActivityAt,
 		"opened_by: "+room.OpenedByPrincipalRef,
@@ -123,7 +125,7 @@ func wrkcRoomDetailLines(room roomWire) []string {
 	return lines
 }
 
-func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, flags promiseOutputFlags) error {
+func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, identities map[string]wrkcAdhocIdentity, flags promiseOutputFlags) error {
 	mode, stable, err := resolvePromiseOutputMode(cmd, flags, true)
 	if err != nil {
 		return err
@@ -148,27 +150,37 @@ func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, flags promiseOutputFl
 		}
 		return renderer.RenderList(keys)
 	}
-	headers, rows := wrkcRoomTable(rooms)
+	headers, rows := wrkcRoomTable(rooms, identities)
 	if mode == "tsv" {
 		return renderer.RenderTSV(headers, rows)
 	}
 	return renderer.RenderTable(headers, rows)
 }
 
-func wrkcRoomTable(rooms []roomWire) ([]string, [][]string) {
-	headers := []string{"Room", "Kind", "Work", "Activity", "Subject", "Members", "Messages", "LastActivity"}
+func wrkcRoomTable(rooms []roomWire, identities map[string]wrkcAdhocIdentity) ([]string, [][]string) {
+	headers := []string{"Room", "Kind", "Work", "Activity", "Members", "Messages", "Last activity", "Last"}
 	rows := make([][]string, 0, len(rooms))
 	for _, room := range rooms {
-		subject := ""
-		if room.Subject != nil {
-			subject = *room.Subject
+		members := fmt.Sprint(room.MemberCount)
+		last := ""
+		if room.Kind == "adhoc" {
+			identity := identities[room.Key]
+			members = strings.Join(identity.Members, ", ")
+			last = identity.Last
 		}
 		rows = append(rows, []string{
-			room.Key, room.Kind, room.Work, room.Activity, subject,
-			fmt.Sprint(room.MemberCount), fmt.Sprint(room.MessageCount), room.LastActivityAt,
+			room.Key, room.Kind, room.Work, room.Activity, members,
+			fmt.Sprint(room.MessageCount), room.LastActivityAt, last,
 		})
 	}
 	return headers, rows
+}
+
+func wrkcIdentityMap(room roomWire, identity *wrkcAdhocIdentity) map[string]wrkcAdhocIdentity {
+	if identity == nil {
+		return nil
+	}
+	return map[string]wrkcAdhocIdentity{room.Key: *identity}
 }
 
 // renderWrkcEnvelopes renders a set of envelopes. `singleton` is the SHAPE
@@ -239,13 +251,13 @@ func wrkcEnvelopeTable(envelopes []envelopeWire) ([]string, [][]string) {
 	return headers, rows
 }
 
-func renderWrkcTranscript(cmd *cobra.Command, view roomLogViewWire) error {
+func renderWrkcTranscript(cmd *cobra.Command, view roomLogViewWire, identity *wrkcAdhocIdentity) error {
 	renderer := render.NewRenderer(cmd.OutOrStdout(), render.Options{})
 	lines := []string{
 		fmt.Sprintf("%s (%s · %s · %d messages)", view.Room.Key, view.Room.Kind, view.Room.Activity, view.Room.MessageCount),
 	}
-	if view.Room.Subject != nil {
-		lines = append(lines, "subject: "+*view.Room.Subject)
+	if view.Room.Kind == "adhoc" && identity != nil {
+		lines = append(lines, "members: "+strings.Join(identity.Members, ", "))
 	}
 	for _, envelope := range view.Items {
 		lines = append(lines, "")

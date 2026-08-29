@@ -96,7 +96,6 @@ import type {
   WrkqRoomMemberParams,
   WrkqRoomMembersView,
   WrkqRoomMembersViewParams,
-  WrkqRoomOpenParams,
   WrkqRoomSayParams,
   WrkqRoomSayResult,
   WrkqRoomShowParams,
@@ -290,7 +289,6 @@ export interface WrkqIndexFacade {
  */
 export interface WrkqRoomFacade {
   say(params: WrkqRoomSayParams): Promise<WrkqRoomSayResult>;
-  open(params: WrkqRoomOpenParams): Promise<WrkqRoom>;
   show(params: WrkqRoomShowParams): Promise<WrkqRoom>;
   list(params?: WrkqRoomListParams): Promise<WrkqRoomListResult>;
   logView(params: WrkqRoomLogViewParams): Promise<WrkqRoomLogView>;

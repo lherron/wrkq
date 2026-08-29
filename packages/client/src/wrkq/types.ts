@@ -183,7 +183,6 @@ export interface WrkqRoom {
   /** The room key: `T-xxxxx`, a container path, or `R-xxxxx`. */
   key: string;
   kind: WrkqRoomKind;
-  subject?: string;
   /**
    * READ-TIME PROJECTIONS. Render them; never gate on them. A room has no
    * lifecycle state, so nothing here can refuse a say, exclude an obligation
@@ -299,7 +298,6 @@ export interface WrkqRoomSayParams {
   /** Fans out to one envelope per addressee. Only `to` fires. */
   to?: string[];
   fyi?: boolean;
-  subject?: string;
   /** Force a fresh ad-hoc room instead of reusing the open pair room. */
   new?: boolean;
   respondTo?: string;
@@ -326,14 +324,6 @@ export interface WrkqRoomSayResult {
    * flag because there is nothing to override. `wrkc` prints it to stderr.
    */
   notice?: string;
-}
-
-export interface WrkqRoomOpenParams {
-  members: string[];
-  subject: string;
-  task?: string;
-  principalRef?: string;
-  scopeRef?: string;
 }
 
 export interface WrkqRoomShowParams {

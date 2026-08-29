@@ -30,7 +30,6 @@ type roomWire struct {
 	ID                   *string        `json:"id,omitempty"`
 	Key                  string         `json:"key"`
 	Kind                 string         `json:"kind"`
-	Subject              *string        `json:"subject,omitempty"`
 	Work                 string         `json:"work"`
 	Activity             string         `json:"activity"`
 	Labels               []string       `json:"labels"`
@@ -183,7 +182,6 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 	root.PersistentFlags().String("scope-ref", "", "Caller scope handle (defaults to $HRC_SESSION_REF)")
 
 	root.AddCommand(newWrkcSayCmd())
-	root.AddCommand(newWrkcOpenCmd())
 	root.AddCommand(newWrkcLogCmd())
 	root.AddCommand(newWrkcShowCmd())
 	root.AddCommand(newWrkcLsCmd())
@@ -240,7 +238,7 @@ func wrkcParams(cmd *cobra.Command) (map[string]any, error) {
 func newWrkcSayCmd() *cobra.Command {
 	var to []string
 	var fyi, newRoom, record bool
-	var subject, respondTo, idempotencyKey, timeout, message string
+	var respondTo, idempotencyKey, timeout, message string
 	var wait bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
@@ -331,9 +329,6 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if fyi {
 				params["fyi"] = true
 			}
-			if subject != "" {
-				params["subject"] = subject
-			}
 			if newRoom {
 				params["new"] = true
 			}
@@ -368,7 +363,6 @@ agent:<id> to address a scope-less principal such as a human.`,
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, "Addressees (repeatable or comma-separated); fans out one envelope each")
 	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation; still injected into a seated addressee (drives a turn there), never births an unborn seat, never gates")
-	cmd.Flags().StringVar(&subject, "subject", "", "Subject for a new ad-hoc room")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Body (literal, @file, or - for stdin); alias for the positional body")
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until every envelope in the group is terminal, then print each reply")
@@ -465,49 +459,6 @@ func wrkcCollectReplies(cmd *cobra.Command, tr Transport, result roomSayResultWi
 
 // ─── room verbs ───────────────────────────────────────────────────────────────
 
-func newWrkcOpenCmd() *cobra.Command {
-	var subject, task string
-	var output promiseOutputFlags
-	cmd := &cobra.Command{
-		Use:   "open <scope>...",
-		Short: "Open an explicit ad-hoc or group room",
-		Long: `Open an ad-hoc room with named members and a subject.
-
-Use this when the conversation has no work identity to key on. Talk that belongs
-to a task, campaign, or project should just say into that work instead — an
-ad-hoc room auto-archives after 24h idle, and work rooms do not.`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(subject) == "" {
-				return errors.New("open requires --subject")
-			}
-			tr, _, closeFn, err := openMirror(cmd)
-			if err != nil {
-				return err
-			}
-			defer closeFn()
-			params, err := wrkcParams(cmd)
-			if err != nil {
-				return err
-			}
-			params["members"] = args
-			params["subject"] = subject
-			if task != "" {
-				params["task"] = task
-			}
-			raw, err := tr.Call(cmd.Context(), "wrkq.room.open", params)
-			if err != nil {
-				return err
-			}
-			return renderWrkcRoomSingleton(cmd, raw, output)
-		},
-	}
-	cmd.Flags().StringVarP(&subject, "subject", "s", "", "Room subject (required)")
-	cmd.Flags().StringVar(&task, "task", "", "Task this room is about")
-	addPromiseOutputFlags(cmd, &output, false)
-	return cmd
-}
-
 func newWrkcLogCmd() *cobra.Command {
 	var task string
 	var limit int
@@ -552,8 +503,13 @@ In a campaign room, --task narrows to the traffic that came through one task.`,
 			if err != nil {
 				return err
 			}
+			var identity *wrkcAdhocIdentity
 			if mode == "human" || mode == "table" {
-				return renderWrkcTranscript(cmd, view)
+				identity, err = loadWrkcAdhocIdentity(cmd.Context(), tr, params, view.Room, false)
+				if err != nil {
+					return err
+				}
+				return renderWrkcTranscript(cmd, view, identity)
 			}
 			return renderWrkcEnvelopesMode(cmd, view.Items, mode, stable, false)
 		},
@@ -609,7 +565,22 @@ EN- ids are internal: inbox, show, and log surface them so an agent can tell
 			if err != nil {
 				return err
 			}
-			return renderWrkcRoomSingleton(cmd, raw, output)
+			var room roomWire
+			if err := json.Unmarshal(raw, &room); err != nil {
+				return err
+			}
+			mode, _, err := resolvePromiseOutputMode(cmd, output, false)
+			if err != nil {
+				return err
+			}
+			var identity *wrkcAdhocIdentity
+			if mode == "human" || mode == "table" || mode == "tsv" {
+				identity, err = loadWrkcAdhocIdentity(cmd.Context(), tr, params, room, false)
+				if err != nil {
+					return err
+				}
+			}
+			return renderWrkcRoomSingleton(cmd, raw, output, identity)
 		},
 	}
 	addPromiseOutputFlags(cmd, &output, false)
@@ -680,7 +651,18 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 			if err := json.Unmarshal(raw, &result); err != nil {
 				return err
 			}
-			return renderWrkcRooms(cmd, result.Items, output)
+			mode, _, err := resolvePromiseOutputMode(cmd, output, true)
+			if err != nil {
+				return err
+			}
+			var identities map[string]wrkcAdhocIdentity
+			if mode == "human" || mode == "table" || mode == "tsv" {
+				identities, err = loadWrkcAdhocIdentities(cmd.Context(), tr, params, result.Items)
+				if err != nil {
+					return err
+				}
+			}
+			return renderWrkcRooms(cmd, result.Items, identities, output)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Include stale and hidden rooms")
@@ -864,7 +846,7 @@ There is no close and no reopen. A room you can resolve always accepts talk.`
 			if err != nil {
 				return err
 			}
-			return renderWrkcRoomSingleton(cmd, raw, output)
+			return renderWrkcRoomSingleton(cmd, raw, output, nil)
 		},
 	}
 	addPromiseOutputFlags(cmd, &output, false)
