@@ -50,9 +50,11 @@ const (
 // and wake exactly like any other room's.
 const RoomLabelHidden = "hidden"
 
-// EnvelopeObligation is what a say asks of its addressee. Only reply_required
-// fires the kicker; fyi presents into a live generation or waits for the next
-// attend; none is a log entry with no addressee.
+// EnvelopeObligation is what a say asks of its addressee. The axis is
+// summon-vs-inject, not wake-vs-no-wake: only reply_required BIRTHS an unborn
+// seat and gates a turn end; fyi is still injected into a seated addressee
+// (it drives a turn on a live seat, auto-acked at presentation) but never
+// births one and never gates; none is a log entry with no addressee.
 type EnvelopeObligation string
 
 const (

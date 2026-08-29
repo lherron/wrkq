@@ -76,8 +76,10 @@ First match wins:
 
 ## Obligations
 
-`--to X` → reply required. `--to X --fyi` → no obligation, presented into a live
-generation or on the next attend, never summons. No `--to` → a log entry.
+`--to X` → reply required: births X's seat if unborn, injects, gates X's turn end
+until X replies. `--to X --fyi` → no obligation: still INJECTED into X's seat if
+one is live (it drives a turn there), but never births an unborn seat and never
+gates. No `--to` → a log entry, nobody is presented.
 
 **Reply is the ack.** Saying `--to X` acks every presented reply-required
 envelope in that room addressed to your own scope and sent from X's scope. The

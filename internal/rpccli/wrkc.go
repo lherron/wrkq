@@ -367,7 +367,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 		},
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, "Addressees (repeatable or comma-separated); fans out one envelope each")
-	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation; presented into a live generation or on the next attend, never summons")
+	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation; still injected into a seated addressee (drives a turn there), never births an unborn seat, never gates")
 	cmd.Flags().StringVar(&subject, "subject", "", "Subject for a new ad-hoc room")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Body (literal, @file, or - for stdin); alias for the positional body")
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
