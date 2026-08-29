@@ -692,8 +692,8 @@ func validateMonitorCondition(raw string) error {
 	switch raw {
 	case "all-terminal":
 		return nil
-	// Envelope conditions (T-07612 §3.4). terminal = acked|dead, so a
-	// dead-lettered obligation releases a waiter instead of hanging it. The
+	// Envelope conditions (T-07612 rev 5.1). terminal = acked|failed, so a
+	// failed obligation releases a waiter instead of hanging it. The
 	// SERVER owns the selector/condition agreement check.
 	case "acked", "terminal":
 		return nil

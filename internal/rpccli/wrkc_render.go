@@ -125,7 +125,7 @@ func wrkcRoomDetailLines(room roomWire, identity *wrkcAdhocIdentity) []string {
 	return lines
 }
 
-func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, identities map[string]wrkcAdhocIdentity, flags promiseOutputFlags) error {
+func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, identities map[string]wrkcAdhocIdentity, sentFailed int, flags promiseOutputFlags) error {
 	mode, stable, err := resolvePromiseOutputMode(cmd, flags, true)
 	if err != nil {
 		return err
@@ -153,6 +153,9 @@ func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, identities map[string
 	headers, rows := wrkcRoomTable(rooms, identities)
 	if mode == "tsv" {
 		return renderer.RenderTSV(headers, rows)
+	}
+	if _, err := fmt.Fprintf(out, "sent, failed: %d\n\n", sentFailed); err != nil {
+		return err
 	}
 	return renderer.RenderTable(headers, rows)
 }
@@ -236,7 +239,7 @@ func renderWrkcEnvelopesMode(cmd *cobra.Command, envelopes []envelopeWire, mode 
 }
 
 func wrkcEnvelopeTable(envelopes []envelopeWire) ([]string, [][]string) {
-	headers := []string{"ID", "Room", "From", "To", "Obligation", "State", "Rounds", "Created"}
+	headers := []string{"ID", "Room", "From", "To", "Obligation", "State", "Created"}
 	rows := make([][]string, 0, len(envelopes))
 	for _, envelope := range envelopes {
 		target := ""
@@ -245,7 +248,7 @@ func wrkcEnvelopeTable(envelopes []envelopeWire) ([]string, [][]string) {
 		}
 		rows = append(rows, []string{
 			envelope.ID, envelope.RoomKey, envelopePartyLabel(envelope.From), target,
-			envelope.Obligation, envelope.State, fmt.Sprint(envelope.RoundCount), envelope.CreatedAt,
+			envelope.Obligation, envelopeStateLabel(envelope), envelope.CreatedAt,
 		})
 	}
 	return headers, rows
@@ -273,7 +276,7 @@ func wrkcEnvelopeTranscriptLines(envelope envelopeWire) []string {
 	} else {
 		header += " → " + envelopePartyLabel(*envelope.To)
 	}
-	header += "  " + envelope.Obligation + "/" + envelope.State + "  " + envelope.ID
+	header += "  " + envelope.Obligation + "/" + envelopeStateLabel(envelope) + "  " + envelope.ID
 	lines := []string{header}
 	if envelope.DeferReason != nil {
 		deferred := "  deferred: " + *envelope.DeferReason
@@ -302,8 +305,7 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 	}
 	lines = append(lines,
 		"obligation: "+envelope.Obligation,
-		"state: "+envelope.State,
-		fmt.Sprintf("rounds: %d", envelope.RoundCount),
+		"state: "+envelopeStateLabel(envelope),
 	)
 	if envelope.GroupID != nil {
 		lines = append(lines, "group: "+*envelope.GroupID)
@@ -420,13 +422,30 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+"  ("+retry+")"+reason)
 		}
 	}
-	if len(view.Dead) > 0 {
-		lines = append(lines, "", "dead")
-		for _, envelope := range view.Dead {
-			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+"  "+wrkcFirstLine(envelope.Body))
+	if len(view.Failed) > 0 {
+		lines = append(lines, "", "failed")
+		for _, envelope := range view.Failed {
+			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+"  "+envelopeStateLabel(envelope)+"  "+wrkcFirstLine(envelope.Body))
+		}
+	}
+	if len(view.SentFailed) > 0 {
+		lines = append(lines, "", "sent, failed")
+		for _, envelope := range view.SentFailed {
+			target := ""
+			if envelope.To != nil {
+				target = "  → " + envelopePartyLabel(*envelope.To)
+			}
+			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+target+"  "+envelopeStateLabel(envelope))
 		}
 	}
 	return render.NewRenderer(cmd.OutOrStdout(), render.Options{}).RenderList(lines)
+}
+
+func envelopeStateLabel(envelope envelopeWire) string {
+	if envelope.State == "failed" && envelope.FailureReason != nil {
+		return "failed (" + *envelope.FailureReason + ")"
+	}
+	return envelope.State
 }
 
 func renderWrkcMembers(cmd *cobra.Command, view roomMembersViewWire, flags promiseOutputFlags) error {

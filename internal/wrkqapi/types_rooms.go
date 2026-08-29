@@ -103,7 +103,7 @@ type WrkqEnvelope struct {
 	TaskID                *string `json:"taskId,omitempty"`
 	State                 string  `json:"state"`
 	Terminal              bool    `json:"terminal"`
-	RoundCount            int64   `json:"roundCount"`
+	FailureReason         *string `json:"failureReason,omitempty"`
 	RetryAt               *string `json:"retryAt,omitempty"`
 	DeferReason           *string `json:"deferReason,omitempty"`
 	TerminalActor         *string `json:"terminalActor,omitempty"`
@@ -179,13 +179,15 @@ type WrkqEnvelopeInboxGroup struct {
 
 // WrkqEnvelopeInboxView lists reply_required envelopes addressed to one scope.
 // fyi is never listed: it carries no obligation. Deferred envelopes get their
-// own heading with their retry time.
+// own heading with their retry time. Failed contains failed obligations
+// addressed to the caller when requested; SentFailed is always sender-side.
 type WrkqEnvelopeInboxView struct {
 	ScopeRef     *string                  `json:"scopeRef,omitempty"`
 	PrincipalRef string                   `json:"principalRef"`
 	Groups       []WrkqEnvelopeInboxGroup `json:"groups"`
 	Deferred     []WrkqEnvelope           `json:"deferred"`
-	Dead         []WrkqEnvelope           `json:"dead"`
+	Failed       []WrkqEnvelope           `json:"failed"`
+	SentFailed   []WrkqEnvelope           `json:"sentFailed"`
 }
 
 // WrkqEnvelopePresentResult is what HRC gets back after recording a
@@ -302,9 +304,9 @@ type EnvelopeShowParams struct {
 
 // EnvelopeInboxViewParams defaults to the caller's own scope.
 type EnvelopeInboxViewParams struct {
-	ScopeRef     string `json:"scopeRef,omitempty"`
-	IncludeDead  bool   `json:"includeDead,omitempty"`
-	PrincipalRef string `json:"principalRef,omitempty"`
+	ScopeRef      string `json:"scopeRef,omitempty"`
+	IncludeFailed bool   `json:"includeFailed,omitempty"`
+	PrincipalRef  string `json:"principalRef,omitempty"`
 }
 
 // EnvelopeDeferParams pauses one obligation. RetryAfter is a relative duration
@@ -320,7 +322,7 @@ type EnvelopeDeferParams struct {
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }
 
-// EnvelopeAckParams is the OPERATOR-only ack used to clear dead mail. There is
+// EnvelopeAckParams is the OPERATOR-only ack used to clear failed mail. There is
 // no agent-facing ack: for an agent, the reply IS the ack.
 type EnvelopeAckParams struct {
 	Envelopes    []string `json:"envelopes"`
@@ -363,11 +365,11 @@ type EnvelopePendingViewParams struct {
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }
 
-// EnvelopeRoundParams records that a completed kicker turn presented an
-// envelope and ended without disposition. MaxRounds overrides the default bound.
-type EnvelopeRoundParams struct {
+// EnvelopeFailParams is the HRC-facing unsuccessful terminal transition.
+type EnvelopeFailParams struct {
 	Envelope     string `json:"envelope"`
-	MaxRounds    int64  `json:"maxRounds,omitempty"`
+	Reason       string `json:"reason"`
+	Runtime      string `json:"runtime,omitempty"`
 	PrincipalRef string `json:"principalRef,omitempty"`
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }

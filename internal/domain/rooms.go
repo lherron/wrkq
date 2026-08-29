@@ -71,7 +71,18 @@ const (
 	EnvelopeStatePresented EnvelopeState = "presented"
 	EnvelopeStateAcked     EnvelopeState = "acked"
 	EnvelopeStateDeferred  EnvelopeState = "deferred"
-	EnvelopeStateDead      EnvelopeState = "dead"
+	EnvelopeStateFailed    EnvelopeState = "failed"
+)
+
+// EnvelopeFailureReason classifies why an obligation ended without a reply,
+// defer, or operator ack. legacy is migration-only; live callers never write it.
+type EnvelopeFailureReason string
+
+const (
+	EnvelopeFailureRuntimeTerminated EnvelopeFailureReason = "runtime_terminated"
+	EnvelopeFailureIgnored           EnvelopeFailureReason = "ignored"
+	EnvelopeFailureUndeliverable     EnvelopeFailureReason = "undeliverable"
+	EnvelopeFailureLegacy            EnvelopeFailureReason = "legacy"
 )
 
 // RoomMemberSource records how a member came to be in the room. There is no
@@ -84,14 +95,6 @@ const (
 	RoomMemberSourceAddressed RoomMemberSource = "addressed"
 	RoomMemberSourceJoined    RoomMemberSource = "joined"
 )
-
-// DefaultEnvelopeMaxRounds bounds kicker-driven redelivery before an envelope
-// dead-letters visibly. Carried from T-06810's wave-2 freeze ruling, lowered
-// 5→3 by Lance's 2026-08-28 ruling (T-07612 erratum): on the 1/2/4/8/16-minute
-// floor five failed turns cost 31 minutes and each re-presentation costs a turn.
-// Only a still-presented envelope advanced by a completed kicker turn counts,
-// and the third round lands in dead. Clear-inbox no-op turns never advance it.
-const DefaultEnvelopeMaxRounds = 3
 
 // Room is a durable conversation. Derived rooms anchor on exactly one live
 // wrkq resource; ad-hoc rooms anchor on nothing and mint an R- id.
@@ -123,35 +126,35 @@ type Room struct {
 // Envelope is one object for chat and obligation, addressed to exactly one
 // recipient. `--to a,b` fans out to one envelope per addressee sharing GroupID.
 type Envelope struct {
-	UUID                  string             `json:"uuid" db:"uuid"`
-	ID                    string             `json:"id" db:"id"`
-	RoomUUID              string             `json:"room_uuid" db:"room_uuid"`
-	GroupID               *string            `json:"group_id,omitempty" db:"group_id"`
-	FromPrincipalRef      string             `json:"from_principal_ref" db:"from_principal_ref"`
-	FromScopeRef          *string            `json:"from_scope_ref,omitempty" db:"from_scope_ref"`
-	ToScopeRef            *string            `json:"to_scope_ref,omitempty" db:"to_scope_ref"`
-	ToPrincipalRef        *string            `json:"to_principal_ref,omitempty" db:"to_principal_ref"`
-	Obligation            EnvelopeObligation `json:"obligation" db:"obligation"`
-	Body                  string             `json:"body" db:"body"`
-	TaskUUID              *string            `json:"task_uuid,omitempty" db:"task_uuid"`
-	State                 EnvelopeState      `json:"state" db:"state"`
-	RoundCount            int64              `json:"round_count" db:"round_count"`
-	RetryAt               *string            `json:"retry_at,omitempty" db:"retry_at"`
-	DeferReason           *string            `json:"defer_reason,omitempty" db:"defer_reason"`
-	TerminalActor         *string            `json:"terminal_actor,omitempty" db:"terminal_actor"`
-	TerminalAt            *string            `json:"terminal_at,omitempty" db:"terminal_at"`
-	MaterializationIntent *string            `json:"materialization_intent,omitempty" db:"materialization_intent"`
-	RespondToPrincipalRef *string            `json:"respond_to_principal_ref,omitempty" db:"respond_to_principal_ref"`
-	RetryPromiseUUID      *string            `json:"retry_promise_uuid,omitempty" db:"retry_promise_uuid"`
-	IdempotencyKey        *string            `json:"idempotency_key,omitempty" db:"idempotency_key"`
-	Meta                  *string            `json:"meta,omitempty" db:"meta"`
-	ETag                  int64              `json:"etag" db:"etag"`
-	CreatedAt             string             `json:"created_at" db:"created_at"`
-	UpdatedAt             string             `json:"updated_at" db:"updated_at"`
-	CreatedByPrincipalRef string             `json:"created_by_principal_ref" db:"created_by_principal_ref"`
-	CreatedByScopeRef     *string            `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
-	UpdatedByPrincipalRef string             `json:"updated_by_principal_ref" db:"updated_by_principal_ref"`
-	UpdatedByScopeRef     *string            `json:"updated_by_scope_ref,omitempty" db:"updated_by_scope_ref"`
+	UUID                  string                 `json:"uuid" db:"uuid"`
+	ID                    string                 `json:"id" db:"id"`
+	RoomUUID              string                 `json:"room_uuid" db:"room_uuid"`
+	GroupID               *string                `json:"group_id,omitempty" db:"group_id"`
+	FromPrincipalRef      string                 `json:"from_principal_ref" db:"from_principal_ref"`
+	FromScopeRef          *string                `json:"from_scope_ref,omitempty" db:"from_scope_ref"`
+	ToScopeRef            *string                `json:"to_scope_ref,omitempty" db:"to_scope_ref"`
+	ToPrincipalRef        *string                `json:"to_principal_ref,omitempty" db:"to_principal_ref"`
+	Obligation            EnvelopeObligation     `json:"obligation" db:"obligation"`
+	Body                  string                 `json:"body" db:"body"`
+	TaskUUID              *string                `json:"task_uuid,omitempty" db:"task_uuid"`
+	State                 EnvelopeState          `json:"state" db:"state"`
+	FailureReason         *EnvelopeFailureReason `json:"failure_reason,omitempty" db:"failure_reason"`
+	RetryAt               *string                `json:"retry_at,omitempty" db:"retry_at"`
+	DeferReason           *string                `json:"defer_reason,omitempty" db:"defer_reason"`
+	TerminalActor         *string                `json:"terminal_actor,omitempty" db:"terminal_actor"`
+	TerminalAt            *string                `json:"terminal_at,omitempty" db:"terminal_at"`
+	MaterializationIntent *string                `json:"materialization_intent,omitempty" db:"materialization_intent"`
+	RespondToPrincipalRef *string                `json:"respond_to_principal_ref,omitempty" db:"respond_to_principal_ref"`
+	RetryPromiseUUID      *string                `json:"retry_promise_uuid,omitempty" db:"retry_promise_uuid"`
+	IdempotencyKey        *string                `json:"idempotency_key,omitempty" db:"idempotency_key"`
+	Meta                  *string                `json:"meta,omitempty" db:"meta"`
+	ETag                  int64                  `json:"etag" db:"etag"`
+	CreatedAt             string                 `json:"created_at" db:"created_at"`
+	UpdatedAt             string                 `json:"updated_at" db:"updated_at"`
+	CreatedByPrincipalRef string                 `json:"created_by_principal_ref" db:"created_by_principal_ref"`
+	CreatedByScopeRef     *string                `json:"created_by_scope_ref,omitempty" db:"created_by_scope_ref"`
+	UpdatedByPrincipalRef string                 `json:"updated_by_principal_ref" db:"updated_by_principal_ref"`
+	UpdatedByScopeRef     *string                `json:"updated_by_scope_ref,omitempty" db:"updated_by_scope_ref"`
 }
 
 // RoomMember is identity + attendance in a room, never delivery and never an
@@ -215,17 +218,28 @@ func ValidateEnvelopeObligation(obligation EnvelopeObligation) error {
 func ValidateEnvelopeState(state EnvelopeState) error {
 	switch state {
 	case EnvelopeStatePending, EnvelopeStatePresented, EnvelopeStateAcked,
-		EnvelopeStateDeferred, EnvelopeStateDead:
+		EnvelopeStateDeferred, EnvelopeStateFailed:
 		return nil
 	default:
-		return fmt.Errorf("invalid envelope state %q: must be one of: pending, presented, acked, deferred, dead", state)
+		return fmt.Errorf("invalid envelope state %q: must be one of: pending, presented, acked, deferred, failed", state)
+	}
+}
+
+// ValidateEnvelopeFailureReason validates the stored failure classification.
+func ValidateEnvelopeFailureReason(reason EnvelopeFailureReason) error {
+	switch reason {
+	case EnvelopeFailureRuntimeTerminated, EnvelopeFailureIgnored,
+		EnvelopeFailureUndeliverable, EnvelopeFailureLegacy:
+		return nil
+	default:
+		return fmt.Errorf("invalid envelope failure reason %q: must be one of: runtime_terminated, ignored, undeliverable, legacy", reason)
 	}
 }
 
 // IsEnvelopeTerminal reports whether an envelope has reached a disposition no
 // further delivery can change. deferred is paused, never terminal.
 func IsEnvelopeTerminal(state EnvelopeState) bool {
-	return state == EnvelopeStateAcked || state == EnvelopeStateDead
+	return state == EnvelopeStateAcked || state == EnvelopeStateFailed
 }
 
 // RoomActivityFor classifies a room by FIRST MATCH, so the three labels are

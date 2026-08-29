@@ -194,7 +194,7 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	// Collaboration ledger (T-07612 wave 1). wrkq owns rooms and envelopes;
 	// HRC is a consumer. envelope.present / envelope.pendingView /
-	// envelope.roundEnded are the HRC-FACING surface wave 3 calls.
+	// envelope.fail are the HRC-facing delivery lifecycle calls.
 	s.Register("wrkq.room.say", apiHandler(func(ctx context.Context, p wrkqapi.RoomSayParams) (any, error) {
 		return wq.RoomSay(ctx, p)
 	}))
@@ -249,8 +249,8 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.envelope.pendingView", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopePendingViewParams) (any, error) {
 		return wq.EnvelopePendingView(ctx, p)
 	}))
-	s.Register("wrkq.envelope.roundEnded", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeRoundParams) (any, error) {
-		return wq.EnvelopeRoundEnded(ctx, p)
+	s.Register("wrkq.envelope.fail", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeFailParams) (any, error) {
+		return wq.EnvelopeFail(ctx, p)
 	}))
 	s.Register("wrkq.envelope.birthEnvelope", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeBirthEnvelopeParams) (any, error) {
 		return wq.EnvelopeBirthEnvelope(ctx, p)

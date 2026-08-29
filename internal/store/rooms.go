@@ -47,6 +47,17 @@ func (e *EnvelopeWrongStateError) Error() string {
 	return fmt.Sprintf("cannot %s envelope %s in state %s", e.Verb, e.Envelope, e.State)
 }
 
+// EnvelopeRuntimeMismatchError identifies a fail call whose runtime does not
+// own the envelope's newest presentation receipt.
+type EnvelopeRuntimeMismatchError struct {
+	Envelope string
+	Runtime  string
+}
+
+func (e *EnvelopeRuntimeMismatchError) Error() string {
+	return fmt.Sprintf("cannot fail envelope %s from runtime %s: newest presentation belongs to another runtime", e.Envelope, e.Runtime)
+}
+
 // roomColumns deliberately omits state / closed_at / reopened_at: rooms have no
 // lifecycle after the T-07612 rev 3 amendment, and reading a column nothing may
 // act on is how a dropped gate grows back. Wave 5 drops them from the schema.
@@ -60,7 +71,7 @@ const roomColumns = `
 const envelopeColumns = `
 	uuid, id, room_uuid, group_id, from_principal_ref, from_scope_ref,
 	to_scope_ref, to_principal_ref, obligation, body, task_uuid, state,
-	round_count, retry_at, defer_reason, terminal_actor, terminal_at,
+	failure_reason, retry_at, defer_reason, terminal_actor, terminal_at,
 	materialization_intent, respond_to_principal_ref, retry_promise_uuid,
 	idempotency_key, meta, etag, created_at, updated_at,
 	created_by_principal_ref, created_by_scope_ref,
@@ -620,9 +631,11 @@ func (rs *RoomStore) GetEnvelope(selector string) (*domain.Envelope, error) {
 // EnvelopeListParams selects envelopes for `wrkc log`, `wrkc inbox`, and the
 // HRC-facing wake set.
 type EnvelopeListParams struct {
-	RoomUUID   string
-	GroupID    string
-	ToScopeRef string
+	RoomUUID         string
+	GroupID          string
+	FromScopeRef     string
+	FromPrincipalRef string
+	ToScopeRef       string
 	// ToScopeRefs is the multi-scope form the kicker uses to ask for every
 	// scope one node homes in a single call.
 	ToScopeRefs      []string
@@ -647,6 +660,14 @@ func (rs *RoomStore) ListEnvelopes(params EnvelopeListParams) ([]domain.Envelope
 	if params.GroupID != "" {
 		clauses = append(clauses, "group_id = ?")
 		args = append(args, params.GroupID)
+	}
+	if params.FromScopeRef != "" {
+		clauses = append(clauses, "from_scope_ref = ?")
+		args = append(args, params.FromScopeRef)
+	}
+	if params.FromPrincipalRef != "" {
+		clauses = append(clauses, "from_principal_ref = ?")
+		args = append(args, params.FromPrincipalRef)
 	}
 	if params.ToScopeRef != "" {
 		clauses = append(clauses, "to_scope_ref = ?")
@@ -834,7 +855,6 @@ func (rs *RoomStore) DisposeEnvelopeWithAttribution(attr attribution.Attribution
 	eventType := map[domain.EnvelopeState]string{
 		domain.EnvelopeStateAcked:    "envelope.acked",
 		domain.EnvelopeStateDeferred: "envelope.deferred",
-		domain.EnvelopeStateDead:     "envelope.dead",
 	}[disposition.State]
 	if eventType == "" {
 		return nil, fmt.Errorf("envelope disposition %q is not a terminal or paused state", disposition.State)
@@ -937,7 +957,7 @@ func (rs *RoomStore) StandingObligationFromSender(roomUUID, senderScopeRef, send
 	clauses := []string{
 		"room_uuid = ?",
 		"obligation = 'reply_required'",
-		"state NOT IN ('acked', 'dead')",
+		"state NOT IN ('acked', 'failed')",
 	}
 	args := []interface{}{roomUUID}
 	if strings.TrimSpace(senderScopeRef) != "" {
@@ -1133,16 +1153,15 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 	return updated, recorded, err
 }
 
-// RecordRoundWithAttribution advances the round counter for an envelope a
-// completed kicker turn presented but left undisposed, dead-lettering it
-// visibly at the bound. Only a still-presented envelope advances: a clear-inbox
-// no-op turn and an acked or deferred envelope never do.
-func (rs *RoomStore) RecordRoundWithAttribution(attr attribution.Attribution, envelopeUUID string, maxRounds int64) (*domain.Envelope, error) {
+// FailEnvelopeWithAttribution ends one obligation unsuccessfully. When runtime
+// is supplied it must own the newest presentation receipt; repeating the same
+// (envelope, runtime) failure is an idempotent read of the terminal row.
+func (rs *RoomStore) FailEnvelopeWithAttribution(attr attribution.Attribution, envelopeUUID string, reason domain.EnvelopeFailureReason, runtime string) (*domain.Envelope, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
-	if maxRounds <= 0 {
-		maxRounds = domain.DefaultEnvelopeMaxRounds
+	if err := domain.ValidateEnvelopeFailureReason(reason); err != nil {
+		return nil, err
 	}
 
 	var updated *domain.Envelope
@@ -1151,40 +1170,52 @@ func (rs *RoomStore) RecordRoundWithAttribution(attr attribution.Attribution, en
 		if err != nil {
 			return err
 		}
-		if current.State != domain.EnvelopeStatePresented {
+		runtime = strings.TrimSpace(runtime)
+		if runtime != "" {
+			var newest sql.NullString
+			err := tx.QueryRow(`SELECT runtime_id FROM envelope_presentations
+				WHERE envelope_uuid = ? ORDER BY presented_at DESC, rowid DESC LIMIT 1`, envelopeUUID).Scan(&newest)
+			if err == sql.ErrNoRows {
+				return &EnvelopeRuntimeMismatchError{Envelope: current.ID, Runtime: runtime}
+			}
+			if err != nil {
+				return fmt.Errorf("failed to read newest envelope presentation: %w", err)
+			}
+			if !newest.Valid || newest.String != runtime {
+				return &EnvelopeRuntimeMismatchError{Envelope: current.ID, Runtime: runtime}
+			}
+		}
+		if current.State == domain.EnvelopeStateFailed {
 			updated = current
 			return nil
 		}
-		nextRound := current.RoundCount + 1
-		nextState := domain.EnvelopeStatePresented
-		eventType := ""
-		var terminalActor, terminalAt interface{}
-		if nextRound >= maxRounds {
-			nextState = domain.EnvelopeStateDead
-			eventType = "envelope.dead"
-			terminalActor = attr.PrincipalRef
-			now, nerr := serverNowTx(tx)
-			if nerr != nil {
-				return nerr
-			}
-			terminalAt = now
+		if domain.IsEnvelopeTerminal(current.State) {
+			return &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: "fail"}
+		}
+		if current.State != domain.EnvelopeStatePending && current.State != domain.EnvelopeStatePresented {
+			return &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: "fail"}
+		}
+		now, err := serverNowTx(tx)
+		if err != nil {
+			return err
 		}
 		if _, err := tx.Exec(`UPDATE envelopes
-			SET round_count = ?, state = ?, terminal_actor = ?, terminal_at = ?,
+			SET state = 'failed', failure_reason = ?, terminal_actor = ?, terminal_at = ?,
 			    etag = etag + 1,
 			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 			    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-			WHERE uuid = ?`, nextRound, nextState, terminalActor, terminalAt,
+			WHERE uuid = ?`, reason, attr.PrincipalRef, now,
 			attr.PrincipalRef, scopeSQL(attr), envelopeUUID); err != nil {
-			return fmt.Errorf("failed to advance envelope round: %w", err)
+			return fmt.Errorf("failed to fail envelope: %w", err)
 		}
-		if eventType != "" {
-			if _, err := logEnvelopeEvent(tx, ew, attr, envelopeUUID, eventType, current.ETag+1, map[string]interface{}{
-				"state": string(nextState), "round_count": nextRound,
-				"max_rounds": maxRounds, "room_uuid": current.RoomUUID,
-			}); err != nil {
-				return err
-			}
+		payload := map[string]interface{}{
+			"state": "failed", "reason": string(reason), "room_uuid": current.RoomUUID,
+		}
+		if runtime != "" {
+			payload["runtime_id"] = runtime
+		}
+		if _, err := logEnvelopeEvent(tx, ew, attr, envelopeUUID, "envelope.failed", current.ETag+1, payload); err != nil {
+			return err
 		}
 		updated, err = getEnvelopeTx(tx, envelopeUUID)
 		return err
@@ -1360,7 +1391,7 @@ func scanEnvelope(scanner collabScanner) (*domain.Envelope, error) {
 		&envelope.UUID, &envelope.ID, &envelope.RoomUUID, &envelope.GroupID,
 		&envelope.FromPrincipalRef, &envelope.FromScopeRef, &envelope.ToScopeRef,
 		&envelope.ToPrincipalRef, &envelope.Obligation, &envelope.Body,
-		&envelope.TaskUUID, &envelope.State, &envelope.RoundCount,
+		&envelope.TaskUUID, &envelope.State, &envelope.FailureReason,
 		&envelope.RetryAt, &envelope.DeferReason, &envelope.TerminalActor,
 		&envelope.TerminalAt, &envelope.MaterializationIntent,
 		&envelope.RespondToPrincipalRef, &envelope.RetryPromiseUUID,

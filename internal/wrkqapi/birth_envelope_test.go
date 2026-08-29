@@ -71,9 +71,12 @@ func TestBirthEnvelopeIsTheLowestSeqReplyRequiredWhateverItsState(t *testing.T) 
 
 	// State-independence: dispose the birth envelope every terminal way and the
 	// answer must not move. A designation taken today must be re-derivable.
-	for _, state := range []string{"presented", "acked", "deferred", "dead"} {
+	for _, state := range []string{"presented", "acked", "deferred", "failed"} {
 		if _, err := f.s.DB().Exec(
-			"UPDATE envelopes SET state = ?, defer_reason = 'test' WHERE id = ?", state, first.Envelopes[0].ID,
+			`UPDATE envelopes SET state = ?,
+			 defer_reason = CASE WHEN ? = 'deferred' THEN 'test' ELSE NULL END,
+			 failure_reason = CASE WHEN ? = 'failed' THEN 'legacy' ELSE NULL END
+			 WHERE id = ?`, state, state, state, first.Envelopes[0].ID,
 		); err != nil {
 			t.Fatalf("force state %s: %v", state, err)
 		}

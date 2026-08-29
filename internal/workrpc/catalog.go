@@ -104,7 +104,7 @@ var methodCatalog = []string{
 	"wrkq.envelope.ack",
 	"wrkq.envelope.present",
 	"wrkq.envelope.pendingView",
-	"wrkq.envelope.roundEnded",
+	"wrkq.envelope.fail",
 	"wrkq.envelope.birthEnvelope",
 	"wrkq.comment.add",
 	"wrkq.comment.list",
@@ -279,7 +279,7 @@ var dtoCatalog = []string{
 	"WrkqEnvelopeAckParams",
 	"WrkqEnvelopePresentParams",
 	"WrkqEnvelopePendingViewParams",
-	"WrkqEnvelopeRoundParams",
+	"WrkqEnvelopeFailParams",
 	"WrkqTaskCatView",        // CLI compatibility projection (cat --json); nested CatView* structs are part of this DTO
 	"WrkqContainerCatView",   // CLI compatibility projection (container cat)
 	"WrkqCommentCatView",     // CLI compatibility projection (comment cat)

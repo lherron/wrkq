@@ -26,7 +26,7 @@ mental model is an **attention lease**.
 
 HRC recently gained a durable embedded-envelope communication mechanism,
 exposed through `hrcmail`. The current HRC contracts model durable envelopes
-with states including `pending`, `presented`, `acked`, `deferred`, and `dead`.
+with states including `pending`, `presented`, `acked`, `deferred`, and `failed`.
 They distinguish request and conversational payloads, target a session, and can
 carry a reply schema. The mailbox is deliberately separate from existing
 `hrcchat` history today.

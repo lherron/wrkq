@@ -315,9 +315,8 @@ func parseMonitorCondition(raw string) (monitorCondition, error) {
 		return monitorCondition{}, fmt.Errorf("--until condition is required")
 	case raw == "all-terminal":
 		return monitorCondition{kind: "all-terminal"}, nil
-	// Envelope conditions. terminal = acked|dead: `--wait` blocks until every
-	// envelope in the group is terminal, and dead is terminal — a dead-lettered
-	// obligation must release the waiter, not hang it.
+	// Envelope conditions. terminal = acked|failed: `--wait` blocks until every
+	// envelope in the group is terminal, and failure must release the waiter.
 	case raw == "acked":
 		return monitorCondition{kind: "envelope-acked"}, nil
 	case raw == "terminal":

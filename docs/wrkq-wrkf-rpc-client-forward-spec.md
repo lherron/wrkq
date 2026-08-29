@@ -965,22 +965,24 @@ wrkq.envelope.defer
 wrkq.envelope.ack
 wrkq.envelope.present         # HRC-facing
 wrkq.envelope.pendingView     # HRC-facing
-wrkq.envelope.roundEnded      # HRC-facing
+wrkq.envelope.fail            # HRC-facing
 ```
 
 Three of these are the HRC-facing surface and nothing else should call them:
 `present` records `presented_to` and emits `envelope.presented`; `pendingView` is
-the kicker's wake set AND the stop-hook predicate in one read model;
-`roundEnded` advances the redelivery bound. There is no agent-facing ack — for
+the kicker's wake set AND the stop-hook predicate in one read model; `fail`
+records `failed{reason}` and emits `envelope.failed`. There is no agent-facing ack — for
 an agent the reply IS the ack — so `envelope.ack` is the OPERATOR verb, intended
-for a human principal clearing dead mail.
+for a human principal clearing failed mail.
 
 ```ts
 type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
 type WrkqRoomWork = "open" | "terminal";
 type WrkqRoomActivity = "active" | "quiet" | "stale";
 type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
-type WrkqEnvelopeState = "pending" | "presented" | "acked" | "deferred" | "dead";
+type WrkqEnvelopeState = "pending" | "presented" | "acked" | "deferred" | "failed";
+type WrkqEnvelopeFailureReason =
+  | "runtime_terminated" | "ignored" | "undeliverable" | "legacy";
 type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
 
 interface WrkqRoom {
@@ -1001,7 +1003,8 @@ interface WrkqEnvelope {
   roomKind: WrkqRoomKind; groupId?: string;
   from: WrkqEnvelopeParty; to: WrkqEnvelopeParty | null; replyTo: string;
   obligation: WrkqEnvelopeObligation; body: string; taskId?: string;
-  state: WrkqEnvelopeState; terminal: boolean; roundCount: number;
+  state: WrkqEnvelopeState; terminal: boolean;
+  failureReason?: WrkqEnvelopeFailureReason;
   retryAt?: string; deferReason?: string; terminalActor?: string;
   materializationIntent?: string;
   respondToPrincipalRef?: string; retryPromiseId?: string;
@@ -1024,6 +1027,11 @@ interface WrkqEnvelopePendingViewParams {
 }
 interface WrkqEnvelopePendingView {
   items: WrkqEnvelope[]; blocking: string[]; repended: number;
+}
+interface WrkqEnvelopeFailParams {
+  envelope: string;
+  reason: Exclude<WrkqEnvelopeFailureReason, "legacy">;
+  runtime?: string; principalRef?: string; scopeRef?: string;
 }
 ```
 
@@ -1068,7 +1076,7 @@ Contract points a consumer must not have to rediscover:
 - **`groupId` equals the first envelope's own id**, so a single addressee groups
   with itself and a fan-out shares one waitable handle. `wrkq monitor wait
   <groupId> --until terminal` blocks on the whole group; `terminal` is
-  `acked | dead`, so a dead-lettered obligation releases a waiter.
+  `acked | failed`, so a failed obligation releases a waiter.
 - **`idempotencyKey` rides EVERY envelope of a fan-out**, so a consumer
   dual-writing into another system can correlate on any addressee's row. Its
   uniqueness guard is per `(key, addressee)`: a retried say rolls the whole group
@@ -1078,7 +1086,7 @@ Contract points a consumer must not have to rediscover:
   sender's scope handle, or its principal when it has none. Print it VERBATIM in
   a reply line. Do not shorten it to a bare name: a bare name resolves against
   the ROOM, and reply-is-ack keys on scopes, so a shortened reply line can
-  address a seat that never asked and leave the real obligation to dead-letter
+  address a seat that never asked and leave the real obligation to fail
   (T-07638). Server-side, a bare `--to <name>` now resolves in this order —
   the sender of the replier's most recently PRESENTED obligation in that room
   with that name, then the room's single member of that name, then the room's
@@ -1088,6 +1096,18 @@ Contract points a consumer must not have to rediscover:
   message and `data.candidates`; it never silently picks. Resolution reads the
   room and the caller's `scopeRef`, never the `principalRef` a say is
   attributed to.
+- **`fail` is first-terminal-wins and idempotent per `(envelope, runtime)`.**
+  It refuses an acked envelope and a runtime that does not own the newest
+  receipt. It writes `terminalActor`, returns the row unchanged on a duplicate,
+  and emits `envelope.failed` with `{reason, runtime_id}` once.
+- **A presented obligation is bound to its presenting runtime.** Its body is
+  pushed once on the common path and it is never presented across runtimes.
+  Runtime termination fails it as `runtime_terminated`; one same-runtime
+  pointer reminder may end as `ignored`. Defer is the explicit hold: its retry
+  preserves `presentedTo`, survives rotation, and is delivered as a pointer.
+- **`inboxView.sentFailed` is the sender-side failure queue.** It is returned
+  without an opt-in; `includeFailed` additionally returns failed obligations
+  addressed to the caller in `failed`.
 - **`present` takes an optional `deliveryOutcome`** — HRC's own class for how
   the delivery landed (`admitted_into_active_turn`, `presented_to_live_harness`,
   `started_fresh_turn`, `kicker` today). It is stored on the `presented_to`
@@ -1119,7 +1139,7 @@ Contract points a consumer must not have to rediscover:
 `say` returns `WrkqRoomSayResult`; `open`/`show`/`hide`/`unhide` return one
 `WrkqRoom`; `list` returns `{items: WrkqRoom[]}`; `logView` returns
 `{room, items}`; `join`/`leave`/`membersView` return `{room, items}` of members
-with their source and latest attendance. `envelope.show`/`defer`/`roundEnded`
+with their source and latest attendance. `envelope.show`/`defer`/`fail`
 return one `WrkqEnvelope`; `envelope.ack` returns `{room, items}`.
 
 #### Container/project methods

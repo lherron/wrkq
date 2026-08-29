@@ -92,7 +92,7 @@ type envelopeWire struct {
 	TaskID                *string                    `json:"taskId,omitempty"`
 	State                 string                     `json:"state"`
 	Terminal              bool                       `json:"terminal"`
-	RoundCount            int64                      `json:"roundCount"`
+	FailureReason         *string                    `json:"failureReason,omitempty"`
 	RetryAt               *string                    `json:"retryAt,omitempty"`
 	DeferReason           *string                    `json:"deferReason,omitempty"`
 	TerminalActor         *string                    `json:"terminalActor,omitempty"`
@@ -147,7 +147,8 @@ type envelopeInboxViewWire struct {
 	PrincipalRef string                   `json:"principalRef"`
 	Groups       []envelopeInboxGroupWire `json:"groups"`
 	Deferred     []envelopeWire           `json:"deferred"`
-	Dead         []envelopeWire           `json:"dead"`
+	Failed       []envelopeWire           `json:"failed"`
+	SentFailed   []envelopeWire           `json:"sentFailed"`
 }
 
 // ─── root ─────────────────────────────────────────────────────────────────────
@@ -263,7 +264,7 @@ Routing (first match wins):
 
 Only --to fires. Without it this is a log entry and nobody is presented.
 --to a,b fans out to one envelope per addressee sharing a group id, so one
-recipient's reply, defer, or dead never disposes another's obligation.
+recipient's reply, defer, or failure never disposes another's obligation.
 
 Saying with --to also ACKS your own standing obligations in this room from the
 same counterparty: for an agent, the reply IS the ack. To hold one back, defer
@@ -274,7 +275,7 @@ sender of your most recently presented obligation in this room with that name �
 then the room's single member with that name, then the room's own shape (task
 room -> agent@project:T-xxx, campaign/project room -> agent@project:primary).
 Two members of that name and no obligation refuses and names them: reply to a
-seat that never asked and its obligation dead-letters unanswered. An envelope's
+seat that never asked and its obligation can fail unanswered. An envelope's
 replyTo is the exact token that answers it; a full handle always wins. Use
 agent:<id> to address a scope-less principal such as a human.`,
 		Args: cobra.RangeArgs(1, 2),
@@ -402,6 +403,18 @@ func wrkcWaitForGroup(cmd *cobra.Command, tr Transport, result roomSayResultWire
 	if terminal != monitorResultMet {
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrkc say --wait ended %s; still open: %s\n",
 			terminal, strings.Join(unmet, ", "))
+		return fmt.Errorf("wrkc say --wait ended %s", terminal)
+	}
+
+	failures, err := wrkcCollectGroupFailures(cmd, tr, result)
+	if err != nil {
+		return err
+	}
+	if len(failures) > 0 {
+		for _, failure := range failures {
+			fmt.Fprintln(cmd.OutOrStdout(), failure)
+		}
+		return errors.New("one or more envelopes failed")
 	}
 
 	replies, err := wrkcCollectReplies(cmd, tr, result)
@@ -412,6 +425,42 @@ func wrkcWaitForGroup(cmd *cobra.Command, tr Transport, result roomSayResultWire
 		return renderWrkcSayResult(cmd, result, output)
 	}
 	return renderWrkcEnvelopes(cmd, replies, output, false)
+}
+
+func wrkcCollectGroupFailures(cmd *cobra.Command, tr Transport, result roomSayResultWire) ([]string, error) {
+	params, err := wrkcParams(cmd)
+	if err != nil {
+		return nil, err
+	}
+	params["room"] = result.Room.Key
+	raw, err := tr.Call(cmd.Context(), "wrkq.room.logView", params)
+	if err != nil {
+		return nil, err
+	}
+	var view roomLogViewWire
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return nil, err
+	}
+	wanted := map[string]bool{}
+	for _, envelope := range result.Envelopes {
+		wanted[envelope.ID] = true
+	}
+	failures := []string{}
+	for _, envelope := range view.Items {
+		if !wanted[envelope.ID] || envelope.State != "failed" {
+			continue
+		}
+		member := envelope.ID
+		if envelope.To != nil {
+			member = envelopePartyLabel(*envelope.To)
+		}
+		reason := "unknown"
+		if envelope.FailureReason != nil {
+			reason = *envelope.FailureReason
+		}
+		failures = append(failures, member+" failed:"+reason)
+	}
+	return failures, nil
 }
 
 // wrkcCollectReplies reads back the room and returns the envelopes each
@@ -594,12 +643,12 @@ EN- ids are internal: inbox, show, and log surface them so an agent can tell
 }
 
 func newWrkcLsCmd() *cobra.Command {
-	var all, dead bool
+	var all, failed bool
 	var kind, scopeFilter string
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "ls",
-		Short: "List rooms, or dead mail",
+		Short: "List rooms, or failed mail",
 		Long: `List rooms. Rooms are readable by any principal: membership is identity and
 attendance, never an ACL, so --scope me is a convenience filter and not a
 permission boundary.
@@ -609,9 +658,8 @@ stale (terminal work, quiet more than 4h) and rooms carrying the hidden label;
 --all shows every room. Everything omitted is still fully addressable — say into
 it by key and it writes — and its obligations still gate and wake.
 
---dead lists dead-lettered envelopes addressed to you instead of rooms. An
-envelope dead-letters when kicker-driven redelivery is exhausted without a reply
-or a defer; it is visible, never silent, and an operator ack clears it.`,
+--failed lists failed envelopes addressed to you instead of rooms. A failure is
+terminal and carries its reason; an operator ack can clear it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tr, _, closeFn, err := openMirror(cmd)
@@ -623,8 +671,8 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 			if err != nil {
 				return err
 			}
-			if dead {
-				params["includeDead"] = true
+			if failed {
+				params["includeFailed"] = true
 				raw, cerr := tr.Call(cmd.Context(), "wrkq.envelope.inboxView", params)
 				if cerr != nil {
 					return cerr
@@ -633,7 +681,7 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 				if err := json.Unmarshal(raw, &view); err != nil {
 					return err
 				}
-				return renderWrkcEnvelopes(cmd, view.Dead, output, false)
+				return renderWrkcEnvelopes(cmd, view.Failed, output, false)
 			}
 			if all {
 				params["all"] = true
@@ -657,6 +705,18 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 			if err := json.Unmarshal(raw, &result); err != nil {
 				return err
 			}
+			inboxParams, err := wrkcParams(cmd)
+			if err != nil {
+				return err
+			}
+			inboxRaw, err := tr.Call(cmd.Context(), "wrkq.envelope.inboxView", inboxParams)
+			if err != nil {
+				return err
+			}
+			var inbox envelopeInboxViewWire
+			if err := json.Unmarshal(inboxRaw, &inbox); err != nil {
+				return err
+			}
 			mode, _, err := resolvePromiseOutputMode(cmd, output, true)
 			if err != nil {
 				return err
@@ -668,11 +728,11 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 					return err
 				}
 			}
-			return renderWrkcRooms(cmd, result.Items, identities, output)
+			return renderWrkcRooms(cmd, result.Items, identities, len(inbox.SentFailed), output)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "Include stale and hidden rooms")
-	cmd.Flags().BoolVar(&dead, "dead", false, "List dead-lettered envelopes addressed to you")
+	cmd.Flags().BoolVar(&failed, "failed", false, "List failed envelopes addressed to you")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by room kind: campaign, task, project, adhoc")
 	// A value, not a boolean: `--scope me` is the §9.1 surface. No NoOptDefVal —
 	// that would make cobra read the value as a positional and reject it.
@@ -682,7 +742,7 @@ or a defer; it is visible, never silent, and an operator ack clears it.`,
 }
 
 func newWrkcInboxCmd() *cobra.Command {
-	var includeDead bool
+	var includeFailed bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "inbox",
@@ -692,7 +752,10 @@ func newWrkcInboxCmd() *cobra.Command {
 fyi is never listed: it carries no obligation and is acked at its own
 presentation. Deferred envelopes appear under their own heading with the time
 they come back. EN- ids are shown so you can tell an at-least-once
-re-presentation from something new.
+delivery duplicate from something new. A presented obligation belongs to that
+runtime: it is never presented across runtimes, and a runtime ending undisposed
+fails it. One pointer reminder may occur inside the same runtime; defer with a
+reason to hold the obligation across rotation.
 
 Every obligation here gates your turn and wakes you, whatever its room looks
 like: there is no room state that excuses one. A group whose work has gone
@@ -709,8 +772,8 @@ and answering it is a normal say.`,
 			if err != nil {
 				return err
 			}
-			if includeDead {
-				params["includeDead"] = true
+			if includeFailed {
+				params["includeFailed"] = true
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.envelope.inboxView", params)
 			if err != nil {
@@ -735,11 +798,12 @@ and answering it is a normal say.`,
 				flat = append(flat, group.Items...)
 			}
 			flat = append(flat, view.Deferred...)
-			flat = append(flat, view.Dead...)
+			flat = append(flat, view.Failed...)
+			flat = append(flat, view.SentFailed...)
 			return renderWrkcEnvelopesMode(cmd, flat, mode, stable, false)
 		},
 	}
-	cmd.Flags().BoolVar(&includeDead, "dead", false, "Also list dead-lettered envelopes")
+	cmd.Flags().BoolVar(&includeFailed, "failed", false, "Also list failed envelopes addressed to you")
 	addPromiseOutputFlags(cmd, &output, true)
 	return cmd
 }
@@ -979,7 +1043,7 @@ func newWrkcAckCmd() *cobra.Command {
 		Use:   "ack <EN-xxxxx>...",
 		Short: "Operator-only: clear envelopes without replying",
 		Long: `Clear envelopes without replying. This is an OPERATOR verb, intended for a human
-principal (wrkc ack EN-00042 --as agent:lance) clearing dead mail.
+principal (wrkc ack EN-00042 --as agent:lance) clearing failed mail.
 
 Agents do not ack: for an agent the reply IS the ack. If you are an agent and you
 want to put something down, defer it with a reason.`,

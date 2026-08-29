@@ -58,7 +58,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqEnvelopeAckParams":           dtoType[wrkqapi.EnvelopeAckParams](),
 	"WrkqEnvelopePresentParams":       dtoType[wrkqapi.EnvelopePresentParams](),
 	"WrkqEnvelopePendingViewParams":   dtoType[wrkqapi.EnvelopePendingViewParams](),
-	"WrkqEnvelopeRoundParams":         dtoType[wrkqapi.EnvelopeRoundParams](),
+	"WrkqEnvelopeFailParams":          dtoType[wrkqapi.EnvelopeFailParams](),
 	"WrkqContainerCatView":            dtoType[wrkqapi.WrkqContainerCatView](),
 	"WrkqCommentCatView":              dtoType[wrkqapi.WrkqCommentCatView](),
 	"WrkqCommentListView":             dtoType[wrkqapi.WrkqCommentListView](),

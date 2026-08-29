@@ -19,7 +19,12 @@ const ROOM: WrkqRoom = {
   work: "open",
   activity: "active",
   labels: [],
-  workRef: { type: "task", uuid: "task-uuid", id: "T-07613", path: "wrkq/rooms/wave1" },
+  workRef: {
+    type: "task",
+    uuid: "task-uuid",
+    id: "T-07613",
+    path: "wrkq/rooms/wave1",
+  },
   links: [],
   openedByPrincipalRef: "agent:clod",
   openedAt: "2026-08-27T00:00:00Z",
@@ -46,7 +51,6 @@ const ENVELOPE: WrkqEnvelope = {
   taskId: "T-07613",
   state: "presented",
   terminal: false,
-  roundCount: 0,
   idempotencyKey: "acp:hrc-message:m-1",
   meta: {},
   presentedTo: [
@@ -93,7 +97,8 @@ const INBOX_VIEW: WrkqEnvelopeInboxView = {
   principalRef: "agent:cody",
   groups: [{ room: ROOM, items: [ENVELOPE] }],
   deferred: [],
-  dead: [],
+  failed: [],
+  sentFailed: [],
 };
 const PRESENT_RESULT: WrkqEnvelopePresentResult = {
   envelope: ENVELOPE,
@@ -140,7 +145,15 @@ describe("wrkq.room facade", () => {
     expect(said.envelopes[0]?.idempotencyKey).toBe("acp:hrc-message:m-1");
     expect(said.notices).toEqual(["this looks like T-07613 work"]);
     await client.wrkq.room.show(show);
-    expect((await client.wrkq.room.list({ all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" })).items).toHaveLength(1);
+    expect(
+      (
+        await client.wrkq.room.list({
+          all: true,
+          scope: "me",
+          scopeRef: "cody@wrkq:T-07613",
+        })
+      ).items,
+    ).toHaveLength(1);
     expect((await client.wrkq.room.logView(logView)).items).toHaveLength(1);
 
     // hide/unhide is a DISCOVERY label, not a lifecycle: it moves `labels`, and
@@ -153,10 +166,18 @@ describe("wrkq.room facade", () => {
     await client.wrkq.room.leave(member);
     await client.wrkq.room.membersView(show);
 
-    expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
+    expect(
+      transport.capturedRequests.map(({ method, params }) => ({
+        method,
+        params,
+      })),
+    ).toEqual([
       { method: "wrkq.room.say", params: say },
       { method: "wrkq.room.show", params: show },
-      { method: "wrkq.room.list", params: { all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" } },
+      {
+        method: "wrkq.room.list",
+        params: { all: true, scope: "me", scopeRef: "cody@wrkq:T-07613" },
+      },
       { method: "wrkq.room.logView", params: logView },
       { method: "wrkq.room.hide", params: label },
       { method: "wrkq.room.unhide", params: label },
@@ -167,10 +188,14 @@ describe("wrkq.room facade", () => {
   });
 
   test("list defaults to an empty parameter object", async () => {
-    const transport = new FakeTransport().onResult("wrkq.room.list", { items: [] });
+    const transport = new FakeTransport().onResult("wrkq.room.list", {
+      items: [],
+    });
     const client = await createClient({ transport, autoInitialize: false });
     await client.wrkq.room.list();
-    expect(transport.capturedRequests.map((request) => request.params)).toEqual([{}]);
+    expect(transport.capturedRequests.map((request) => request.params)).toEqual(
+      [{}],
+    );
   });
 });
 
@@ -183,7 +208,12 @@ describe("wrkq.envelope facade", () => {
       .onResult("wrkq.envelope.ack", LOG_VIEW)
       .onResult("wrkq.envelope.present", PRESENT_RESULT)
       .onResult("wrkq.envelope.pendingView", PENDING_VIEW)
-      .onResult("wrkq.envelope.roundEnded", { ...ENVELOPE, roundCount: 1 })
+      .onResult("wrkq.envelope.fail", {
+        ...ENVELOPE,
+        state: "failed",
+        terminal: true,
+        failureReason: "runtime_terminated",
+      })
       .onResult("wrkq.envelope.birthEnvelope", {
         envelopeId: "EN-00001",
         seq: 1,
@@ -192,14 +222,18 @@ describe("wrkq.envelope facade", () => {
     const client = await createClient({ transport, autoInitialize: false });
 
     const show = { envelope: "EN-00001" };
-    const inbox = { scopeRef: "cody@wrkq:T-07613", includeDead: true };
+    const inbox = { scopeRef: "cody@wrkq:T-07613", includeFailed: true };
     const defer = {
       envelope: "EN-00001",
       reason: "after the build",
       retryAfter: "2h",
       scopeRef: "cody@wrkq:T-07613",
     };
-    const ack = { envelopes: ["EN-00001"], note: "handled", principalRef: "agent:lance" };
+    const ack = {
+      envelopes: ["EN-00001"],
+      note: "handled",
+      principalRef: "agent:lance",
+    };
     const present = {
       envelope: "EN-00001",
       node: "mini",
@@ -212,8 +246,16 @@ describe("wrkq.envelope facade", () => {
       deliveryOutcome: "admitted_into_active_turn",
       principalRef: "agent:hrc",
     };
-    const pending = { scopes: ["cody@wrkq:T-07613"], principalRef: "agent:hrc" };
-    const round = { envelope: "EN-00001", maxRounds: 5, principalRef: "agent:hrc" };
+    const pending = {
+      scopes: ["cody@wrkq:T-07613"],
+      principalRef: "agent:hrc",
+    };
+    const fail = {
+      envelope: "EN-00001",
+      reason: "runtime_terminated" as const,
+      runtime: "runtime-A",
+      principalRef: "agent:hrc",
+    };
     // The birth-envelope request carries the TARGET and nothing else: the
     // sender comes off the ledger row, so a caller cannot steer which node a
     // virgin scope is born on (T-07655).
@@ -226,7 +268,9 @@ describe("wrkq.envelope facade", () => {
     // which resolves per room and can address a seat that never asked (T-07638).
     const standingInbox = await client.wrkq.envelope.inboxView(inbox);
     expect(standingInbox.groups).toHaveLength(1);
-    expect(standingInbox.groups[0]!.items[0]!.replyTo).toBe("clod@wrkq:T-07613");
+    expect(standingInbox.groups[0]!.items[0]!.replyTo).toBe(
+      "clod@wrkq:T-07613",
+    );
     expect((await client.wrkq.envelope.defer(defer)).state).toBe("deferred");
     expect((await client.wrkq.envelope.ack(ack)).items).toHaveLength(1);
 
@@ -235,27 +279,36 @@ describe("wrkq.envelope facade", () => {
     expect(presented.historyHint).toBe(true);
     expect(presented.recorded).toBe(true);
     expect(presented.envelope.presentedTo[0]!.inputId).toBe("input-A");
-    expect(presented.envelope.presentedTo[0]!.deliveryOutcome).toBe("admitted_into_active_turn");
+    expect(presented.envelope.presentedTo[0]!.deliveryOutcome).toBe(
+      "admitted_into_active_turn",
+    );
 
     // One read model serves both the kicker wake set and the stop-hook predicate.
     const standing = await client.wrkq.envelope.pendingView(pending);
     expect(standing.items).toHaveLength(1);
     expect(standing.blocking).toEqual(["EN-00001"]);
 
-    expect((await client.wrkq.envelope.roundEnded(round)).roundCount).toBe(1);
+    expect((await client.wrkq.envelope.fail(fail)).failureReason).toBe(
+      "runtime_terminated",
+    );
 
     const born = await client.wrkq.envelope.birthEnvelope(birth);
     expect(born?.envelopeId).toBe("EN-00001");
     expect(born?.from.scopeRef).toBe("clod@wrkq:T-07613");
 
-    expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
+    expect(
+      transport.capturedRequests.map(({ method, params }) => ({
+        method,
+        params,
+      })),
+    ).toEqual([
       { method: "wrkq.envelope.show", params: show },
       { method: "wrkq.envelope.inboxView", params: inbox },
       { method: "wrkq.envelope.defer", params: defer },
       { method: "wrkq.envelope.ack", params: ack },
       { method: "wrkq.envelope.present", params: present },
       { method: "wrkq.envelope.pendingView", params: pending },
-      { method: "wrkq.envelope.roundEnded", params: round },
+      { method: "wrkq.envelope.fail", params: fail },
       { method: "wrkq.envelope.birthEnvelope", params: birth },
     ]);
   });
@@ -264,10 +317,17 @@ describe("wrkq.envelope facade", () => {
     // A scope that has only ever been sent fyi has no birth envelope: fyi never
     // summons, so there is nothing to designate a birth node from and the
     // registry falls back to today's tier 5 rather than inventing a home.
-    const transport = new FakeTransport().onResult("wrkq.envelope.birthEnvelope", null);
+    const transport = new FakeTransport().onResult(
+      "wrkq.envelope.birthEnvelope",
+      null,
+    );
     const client = await createClient({ transport, autoInitialize: false });
 
-    expect(await client.wrkq.envelope.birthEnvelope({ scopeRef: "cody@wrkq:T-07613" })).toBeNull();
+    expect(
+      await client.wrkq.envelope.birthEnvelope({
+        scopeRef: "cody@wrkq:T-07613",
+      }),
+    ).toBeNull();
   });
 
   test("pendingView includeFyi forwards the opt-in and keeps fyi out of blocking", async () => {
@@ -280,22 +340,35 @@ describe("wrkq.envelope facade", () => {
       body: "heads up",
       state: "pending",
     };
-    const transport = new FakeTransport().onResult("wrkq.envelope.pendingView", {
-      items: [ENVELOPE, fyi],
-      blocking: [ENVELOPE.id],
-      repended: 0,
-    });
+    const transport = new FakeTransport().onResult(
+      "wrkq.envelope.pendingView",
+      {
+        items: [ENVELOPE, fyi],
+        blocking: [ENVELOPE.id],
+        repended: 0,
+      },
+    );
     const client = await createClient({ transport, autoInitialize: false });
 
-    const params = { scopes: ["cody@wrkq:T-07613"], includeFyi: true, principalRef: "agent:hrc" };
+    const params = {
+      scopes: ["cody@wrkq:T-07613"],
+      includeFyi: true,
+      principalRef: "agent:hrc",
+    };
     const view = await client.wrkq.envelope.pendingView(params);
 
-    expect(view.items.map((item) => item.obligation)).toEqual(["reply_required", "fyi"]);
+    expect(view.items.map((item) => item.obligation)).toEqual([
+      "reply_required",
+      "fyi",
+    ]);
     // fyi carries no obligation, so it never refuses a turn end and never summons.
     expect(view.blocking).toEqual([ENVELOPE.id]);
-    expect(transport.capturedRequests.map(({ method, params: sent }) => ({ method, params: sent }))).toEqual([
-      { method: "wrkq.envelope.pendingView", params },
-    ]);
+    expect(
+      transport.capturedRequests.map(({ method, params: sent }) => ({
+        method,
+        params: sent,
+      })),
+    ).toEqual([{ method: "wrkq.envelope.pendingView", params }]);
   });
 
   test("inboxView and pendingView default to empty parameter objects", async () => {
@@ -305,6 +378,8 @@ describe("wrkq.envelope facade", () => {
     const client = await createClient({ transport, autoInitialize: false });
     await client.wrkq.envelope.inboxView();
     await client.wrkq.envelope.pendingView();
-    expect(transport.capturedRequests.map((request) => request.params)).toEqual([{}, {}]);
+    expect(transport.capturedRequests.map((request) => request.params)).toEqual(
+      [{}, {}],
+    );
   });
 });

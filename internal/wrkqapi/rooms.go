@@ -7,9 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +18,6 @@ import (
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 )
-
-// envelopeMaxRoundsEnv is the operational bound carried from T-06810's wave-2
-// freeze ruling (default 3 since the 2026-08-28 erratum, env-overridable for burn-in tuning). It moves to
-// wrkq with the ledger it bounds; it is not a feature flag and gates no code
-// path, only how many kicker-driven turns an undisposed obligation survives.
-const envelopeMaxRoundsEnv = "WRKQ_ENVELOPE_MAX_ROUNDS"
 
 // ─── say ──────────────────────────────────────────────────────────────────────
 
@@ -695,7 +687,7 @@ func (a *API) resolveAddressee(ctx context.Context, resolution *addresseeScope, 
 	// The obligation wins over the room's shape. HRC's §7 reply line prints a
 	// bare name, and reply-is-ack keys on SCOPES (T-07628): if a bare reply
 	// resolved by room kind it would address a seat that never asked, leaving
-	// the real obligation to dead-letter while a correct answer sits in the room
+	// the real obligation to fail while a correct answer sits in the room
 	// (T-07638). A supervisor at :primary and a coordinator at any other seat
 	// are both answered where they actually stand.
 	obligated, err := a.addresseeFromObligation(resolution, handle, intent)
@@ -722,7 +714,7 @@ func (a *API) resolveAddressee(ctx context.Context, resolution *addresseeScope, 
 		}
 		// Ambiguity ALWAYS refuses, and it refuses with the candidates IN the
 		// message: a refusal costs the caller one retry with a full handle, while
-		// a silently chosen seat costs a dead-lettered obligation nobody notices
+		// a silently chosen seat costs a failed obligation nobody notices
 		// (T-07638).
 		return nil, NewValidationError("ambiguous addressee "+handle+" in this room: "+
 			strings.Join(refs, ", ")+" — address one of them by its full handle", map[string]any{
@@ -1272,7 +1264,10 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 		base.ToPrincipalRef = attr.PrincipalRef
 	}
 
-	view := &WrkqEnvelopeInboxView{PrincipalRef: attr.PrincipalRef, Groups: []WrkqEnvelopeInboxGroup{}, Deferred: []WrkqEnvelope{}, Dead: []WrkqEnvelope{}}
+	view := &WrkqEnvelopeInboxView{
+		PrincipalRef: attr.PrincipalRef, Groups: []WrkqEnvelopeInboxGroup{},
+		Deferred: []WrkqEnvelope{}, Failed: []WrkqEnvelope{}, SentFailed: []WrkqEnvelope{},
+	}
 	if target != "" {
 		view.ScopeRef = &target
 	}
@@ -1318,13 +1313,23 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	if err != nil {
 		return nil, err
 	}
-	if p.IncludeDead {
-		dead := base
-		dead.States = []domain.EnvelopeState{domain.EnvelopeStateDead}
-		view.Dead, err = a.envelopeListDTO(ctx, dead)
+	if p.IncludeFailed {
+		failed := base
+		failed.States = []domain.EnvelopeState{domain.EnvelopeStateFailed}
+		view.Failed, err = a.envelopeListDTO(ctx, failed)
 		if err != nil {
 			return nil, err
 		}
+	}
+	sent := store.EnvelopeListParams{States: []domain.EnvelopeState{domain.EnvelopeStateFailed}}
+	if target != "" {
+		sent.FromScopeRef = target
+	} else {
+		sent.FromPrincipalRef = attr.PrincipalRef
+	}
+	view.SentFailed, err = a.envelopeListDTO(ctx, sent)
+	if err != nil {
+		return nil, err
 	}
 	return view, nil
 }
@@ -1383,7 +1388,7 @@ func (a *API) EnvelopeDefer(ctx context.Context, p EnvelopeDeferParams) (*WrkqEn
 }
 
 // EnvelopeAck is the OPERATOR-only ack, intended for humans such as agent:lance
-// clearing dead mail. There is no agent-facing ack: for an agent the reply IS
+// clearing failed mail. There is no agent-facing ack: for an agent the reply IS
 // the ack, which is why this accepts ANY principal and refuses nothing on
 // identity — the surface it is reachable from is the control.
 func (a *API) EnvelopeAck(ctx context.Context, p EnvelopeAckParams) (*WrkqRoomLogView, error) {
@@ -1605,10 +1610,9 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 	return view, nil
 }
 
-// EnvelopeRoundEnded records that a completed kicker turn presented an envelope
-// and ended without disposition. Only a still-presented envelope advances, so a
-// clear-inbox no-op turn never burns a round.
-func (a *API) EnvelopeRoundEnded(ctx context.Context, p EnvelopeRoundParams) (*WrkqEnvelope, error) {
+// EnvelopeFail is the HRC-facing unsuccessful terminal transition. legacy is
+// migration-only; live failures must name a current operational reason.
+func (a *API) EnvelopeFail(ctx context.Context, p EnvelopeFailParams) (*WrkqEnvelope, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1620,11 +1624,20 @@ func (a *API) EnvelopeRoundEnded(ctx context.Context, p EnvelopeRoundParams) (*W
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Envelope)
 	}
-	maxRounds := p.MaxRounds
-	if maxRounds <= 0 {
-		maxRounds = configuredEnvelopeMaxRounds()
+	reason := domain.EnvelopeFailureReason(strings.TrimSpace(p.Reason))
+	if err := domain.ValidateEnvelopeFailureReason(reason); err != nil {
+		return nil, NewValidationError(err.Error(), map[string]any{"field": "reason", "reason": p.Reason})
 	}
-	updated, err := a.store.Rooms.RecordRoundWithAttribution(attr, envelope.UUID, maxRounds)
+	if reason == domain.EnvelopeFailureLegacy {
+		return nil, NewValidationError("legacy is migration-only and cannot be written by envelope.fail", map[string]any{"field": "reason", "reason": p.Reason})
+	}
+	if reason == domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStateFailed {
+		return nil, NewWrongStateError(map[string]any{"envelope": envelope.ID, "state": string(envelope.State), "verb": "fail"})
+	}
+	if reason != domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
+		return nil, NewWrongStateError(map[string]any{"envelope": envelope.ID, "state": string(envelope.State), "verb": "fail"})
+	}
+	updated, err := a.store.Rooms.FailEnvelopeWithAttribution(attr, envelope.UUID, reason, p.Runtime)
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Envelope)
 	}
@@ -1633,15 +1646,6 @@ func (a *API) EnvelopeRoundEnded(ctx context.Context, p EnvelopeRoundParams) (*W
 		return nil, err
 	}
 	return a.envelopeDTO(ctx, updated, state)
-}
-
-func configuredEnvelopeMaxRounds() int64 {
-	if raw := strings.TrimSpace(os.Getenv(envelopeMaxRoundsEnv)); raw != "" {
-		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
-			return parsed
-		}
-	}
-	return domain.DefaultEnvelopeMaxRounds
 }
 
 // requireEnvelopeAddressee enforces the T-06810 hygiene rule carried by §6: the
@@ -2013,7 +2017,7 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 		ReplyTo:    envelopeReplyTo(envelope),
 		Obligation: string(envelope.Obligation), Body: envelope.Body,
 		State: string(envelope.State), Terminal: domain.IsEnvelopeTerminal(envelope.State),
-		RoundCount: envelope.RoundCount, RetryAt: envelope.RetryAt,
+		RetryAt:     envelope.RetryAt,
 		DeferReason: envelope.DeferReason, TerminalActor: envelope.TerminalActor,
 		MaterializationIntent: envelope.MaterializationIntent,
 		RespondToPrincipalRef: envelope.RespondToPrincipalRef,
@@ -2022,6 +2026,10 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 		PresentedTo:           []WrkqEnvelopePresentation{},
 		ETag:                  envelope.ETag, CreatedAt: toRFC3339(envelope.CreatedAt),
 		UpdatedAt: toRFC3339(envelope.UpdatedAt),
+	}
+	if envelope.FailureReason != nil {
+		reason := string(*envelope.FailureReason)
+		dto.FailureReason = &reason
 	}
 	if envelope.Meta != nil {
 		dto.Meta = parseMeta(*envelope.Meta)
@@ -2163,6 +2171,12 @@ func mapRoomStoreError(err error, selector string) error {
 	if errors.As(err, &wrongState) {
 		return NewWrongStateError(map[string]any{
 			"envelope": wrongState.Envelope, "state": string(wrongState.State), "verb": wrongState.Verb,
+		})
+	}
+	var runtimeMismatch *store.EnvelopeRuntimeMismatchError
+	if errors.As(err, &runtimeMismatch) {
+		return NewConflictError("envelope runtime does not own the newest presentation", map[string]any{
+			"envelope": runtimeMismatch.Envelope, "runtime": runtimeMismatch.Runtime,
 		})
 	}
 	var mismatch *domain.ETagMismatchError

@@ -884,13 +884,11 @@ func TestFanoutWritesOneEnvelopePerAddresseeSharingAGroup(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("defer sibling 0: %v", err)
 	}
-	// 2. dead-letter another by exhausting its rounds
-	for round := 0; round < 5; round++ {
-		if _, err := f.api.EnvelopeRoundEnded(ctx, EnvelopeRoundParams{
-			Envelope: result.Envelopes[1].ID, MaxRounds: 5, PrincipalRef: "agent:hrc",
-		}); err != nil {
-			t.Fatalf("round %d: %v", round, err)
-		}
+	// 2. fail another
+	if _, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: result.Envelopes[1].ID, Reason: "ignored", Runtime: "rt-1", PrincipalRef: "agent:hrc",
+	}); err != nil {
+		t.Fatalf("fail sibling 1: %v", err)
 	}
 	// 3. operator-ack the third
 	if _, err := f.api.EnvelopeAck(ctx, EnvelopeAckParams{
@@ -901,7 +899,7 @@ func TestFanoutWritesOneEnvelopePerAddresseeSharingAGroup(t *testing.T) {
 
 	want := map[string]string{
 		result.Envelopes[0].ID: "deferred",
-		result.Envelopes[1].ID: "dead",
+		result.Envelopes[1].ID: "failed",
 		result.Envelopes[2].ID: "acked",
 	}
 	for envelopeID, wantState := range want {
@@ -1053,7 +1051,7 @@ func TestReplyAcksBySeatEvenWhenTheMemberPrincipalDisagrees(t *testing.T) {
 	mableSeat := "mable@proj:" + f.loneTaskID
 
 	// clod's seat speaks first under the WRONG hat: the member row is minted
-	// (clodSeat -> agent:mable). This is the shape that dead-lettered EN-00027.
+	// (clodSeat -> agent:mable). This is the shape that failed EN-00027.
 	wrongHat := f.say(t, RoomSayParams{
 		Ref: f.loneTaskID, Body: "asked under the wrong --as", To: []string{"cody"},
 		PrincipalRef: "agent:mable", ScopeRef: clodSeat,
@@ -1311,6 +1309,10 @@ func TestDeferWithRetryIsPromiseBackedAndRepends(t *testing.T) {
 	if len(swept.Items) != 1 || swept.Items[0].State != "pending" {
 		t.Fatalf("re-pended envelope = %+v, want one pending item", swept.Items)
 	}
+	if len(swept.Items[0].PresentedTo) != 1 || swept.Items[0].PresentedTo[0].RuntimeID == nil ||
+		*swept.Items[0].PresentedTo[0].RuntimeID != "rt-1" {
+		t.Fatalf("defer retry cleared presented_to: %+v", swept.Items[0].PresentedTo)
+	}
 	// A re-pended envelope is not yet presented, so it does not block a turn end.
 	if len(swept.Blocking) != 0 {
 		t.Fatalf("a re-pended (unpresented) envelope blocks the stop hook: %v", swept.Blocking)
@@ -1358,11 +1360,9 @@ func TestDeferredEnvelopeStillAckableByALaterReply(t *testing.T) {
 	}
 }
 
-// TestRoundsDeadLetterVisiblyAndNoOpTurnsDoNotAdvance carries T-06810's backstop
-// unchanged: only a still-PRESENTED envelope advances on a completed kicker
-// turn, exhaustion lands in a visible dead state, and a clear-inbox no-op turn
-// never burns a round.
-func TestRoundsDeadLetterVisiblyAndNoOpTurnsDoNotAdvance(t *testing.T) {
+// TestEnvelopeFailIsTerminalVisibleAndIdempotentPerRuntime pins rev 5.1's
+// unsuccessful terminal transition, including its rejection rules.
+func TestEnvelopeFailIsTerminalVisibleAndIdempotentPerRuntime(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
 
@@ -1371,51 +1371,70 @@ func TestRoundsDeadLetterVisiblyAndNoOpTurnsDoNotAdvance(t *testing.T) {
 	})
 	envelopeID := ask.Envelopes[0].ID
 
-	// A pending (never presented) envelope does not advance: that is the
-	// clear-inbox no-op turn.
-	noop, err := f.api.EnvelopeRoundEnded(ctx, EnvelopeRoundParams{Envelope: envelopeID, PrincipalRef: "agent:hrc"})
-	if err != nil {
-		t.Fatalf("no-op round: %v", err)
-	}
-	if noop.RoundCount != 0 || noop.State != "pending" {
-		t.Fatalf("a no-op turn advanced rounds: %+v", noop)
-	}
-
 	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
 		Envelope: envelopeID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
 	}); err != nil {
 		t.Fatalf("present: %v", err)
 	}
-	for round := 1; round <= 5; round++ {
-		got, rerr := f.api.EnvelopeRoundEnded(ctx, EnvelopeRoundParams{
-			Envelope: envelopeID, MaxRounds: 5, PrincipalRef: "agent:hrc",
-		})
-		if rerr != nil {
-			t.Fatalf("round %d: %v", round, rerr)
-		}
-		if got.RoundCount != int64(round) {
-			t.Fatalf("round %d recorded count %d", round, got.RoundCount)
-		}
-		wantState := "presented"
-		if round == 5 {
-			wantState = "dead"
-		}
-		if got.State != wantState {
-			t.Fatalf("after round %d state = %s, want %s", round, got.State, wantState)
-		}
+	if _, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: envelopeID, Reason: "runtime_terminated", Runtime: "rt-other", PrincipalRef: "agent:hrc",
+	}); err == nil {
+		t.Fatal("fail from a runtime that does not own the newest receipt succeeded")
 	}
-	// Dead is terminal and visible: it shows up under the dead heading.
+	failed, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: envelopeID, Reason: "runtime_terminated", Runtime: "rt-1", PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	if failed.State != "failed" || !failed.Terminal || failed.FailureReason == nil || *failed.FailureReason != "runtime_terminated" {
+		t.Fatalf("failed envelope = %+v", failed)
+	}
+	etag := failed.ETag
+	repeat, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: envelopeID, Reason: "runtime_terminated", Runtime: "rt-1", PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("repeat fail: %v", err)
+	}
+	if repeat.ETag != etag {
+		t.Fatalf("idempotent fail advanced etag: %d -> %d", etag, repeat.ETag)
+	}
+	var failureEvents int
+	var failurePayload string
+	if err := f.s.DB().QueryRow(`SELECT COUNT(*), COALESCE(MAX(payload), '') FROM event_log
+		WHERE resource_uuid = ? AND event_type = 'envelope.failed'`, failed.UUID).Scan(&failureEvents, &failurePayload); err != nil {
+		t.Fatalf("read failure event: %v", err)
+	}
+	if failureEvents != 1 || !strings.Contains(failurePayload, `"reason":"runtime_terminated"`) ||
+		!strings.Contains(failurePayload, `"runtime_id":"rt-1"`) {
+		t.Fatalf("failure events = %d payload %s", failureEvents, failurePayload)
+	}
+	if _, err := f.api.EnvelopeAck(ctx, EnvelopeAckParams{Envelopes: []string{envelopeID}, PrincipalRef: "agent:lance"}); err == nil {
+		t.Fatal("ack overwrote a failed envelope")
+	}
+
+	// Failed is terminal and visible on both recipient and sender sides.
 	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
-		PrincipalRef: "agent:cody", ScopeRef: "cody@proj:" + f.loneTaskID, IncludeDead: true,
+		PrincipalRef: "agent:cody", ScopeRef: "cody@proj:" + f.loneTaskID, IncludeFailed: true,
 	})
 	if err != nil {
 		t.Fatalf("inbox: %v", err)
 	}
-	if len(inbox.Dead) != 1 || inbox.Dead[0].ID != envelopeID {
-		t.Fatalf("dead-lettered envelope is not visible: %+v", inbox.Dead)
+	if len(inbox.Failed) != 1 || inbox.Failed[0].ID != envelopeID {
+		t.Fatalf("failed envelope is not visible: %+v", inbox.Failed)
 	}
 	if len(inbox.Groups) != 0 {
-		t.Fatalf("a dead envelope still stands as an obligation: %+v", inbox.Groups)
+		t.Fatalf("a failed envelope still stands as an obligation: %+v", inbox.Groups)
+	}
+	sender, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
+		PrincipalRef: "agent:clod",
+	})
+	if err != nil {
+		t.Fatalf("sender inbox: %v", err)
+	}
+	if len(sender.SentFailed) != 1 || sender.SentFailed[0].ID != envelopeID {
+		t.Fatalf("sent failure is not visible: %+v", sender.SentFailed)
 	}
 }
 
@@ -1889,7 +1908,7 @@ func TestMonitorWatchTaskSelectorCarriesItsConversation(t *testing.T) {
 
 // TestMonitorWaitUntilTerminalOverAGroup proves the §5 `--wait` mechanism: an
 // EN- selector that is a fan-out group head evaluates over the WHOLE group, and
-// terminal counts dead so a dead-lettered obligation releases the waiter rather
+// terminal counts failed so a failed obligation releases the waiter rather
 // than hanging it.
 func TestMonitorWaitUntilTerminalOverAGroup(t *testing.T) {
 	f := newRoomFixture(t)
@@ -1910,7 +1929,7 @@ func TestMonitorWaitUntilTerminalOverAGroup(t *testing.T) {
 		t.Fatalf("group terminal snapshot = %+v, want unmet for both members", snapshot)
 	}
 
-	// Dispose one by reply-is-ack and one by dead-letter; terminal covers both.
+	// Dispose one by reply-is-ack and one by failure; terminal covers both.
 	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
 		Envelope: group.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
 	}); err != nil {
@@ -1925,12 +1944,10 @@ func TestMonitorWaitUntilTerminalOverAGroup(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("present 2: %v", err)
 	}
-	for round := 0; round < 5; round++ {
-		if _, err := f.api.EnvelopeRoundEnded(ctx, EnvelopeRoundParams{
-			Envelope: group.Envelopes[1].ID, MaxRounds: 5, PrincipalRef: "agent:hrc",
-		}); err != nil {
-			t.Fatalf("round: %v", err)
-		}
+	if _, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: group.Envelopes[1].ID, Reason: "ignored", Runtime: "rt-2", PrincipalRef: "agent:hrc",
+	}); err != nil {
+		t.Fatalf("fail: %v", err)
 	}
 
 	met, err := f.api.MonitorStateView(ctx, MonitorStateViewParams{Tasks: []string{head}, Condition: "terminal"})
@@ -1938,15 +1955,15 @@ func TestMonitorWaitUntilTerminalOverAGroup(t *testing.T) {
 		t.Fatalf("stateView after disposal: %v", err)
 	}
 	if !met.Met {
-		t.Fatalf("group not terminal after ack+dead: %+v", met)
+		t.Fatalf("group not terminal after ack+failed: %+v", met)
 	}
-	// acked is STRICTER than terminal: the dead sibling keeps it unmet.
+	// acked is STRICTER than terminal: the failed sibling keeps it unmet.
 	ackedOnly, err := f.api.MonitorStateView(ctx, MonitorStateViewParams{Tasks: []string{head}, Condition: "acked"})
 	if err != nil {
 		t.Fatalf("stateView acked: %v", err)
 	}
 	if ackedOnly.Met {
-		t.Fatal("--until acked was met with a dead-lettered member")
+		t.Fatal("--until acked was met with a failed member")
 	}
 
 	// A sibling's own id is nobody's group id, so it selects only itself.

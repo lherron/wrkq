@@ -150,11 +150,9 @@ export type WrkqRoomWork = "open" | "terminal";
 export type WrkqRoomActivity = "active" | "quiet" | "stale";
 export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
 export type WrkqEnvelopeState =
-  | "pending"
-  | "presented"
-  | "acked"
-  | "deferred"
-  | "dead";
+  "pending" | "presented" | "acked" | "deferred" | "failed";
+export type WrkqEnvelopeFailureReason =
+  "runtime_terminated" | "ignored" | "undeliverable" | "legacy";
 export type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
 
 export interface WrkqRoomWorkRef {
@@ -254,7 +252,7 @@ export interface WrkqEnvelope {
    * The exact `--to` token that answers THIS envelope: the sender's scope
    * handle, or its principal when it has none. Print it verbatim. A bare name
    * in its place resolves by the room's shape and can address a seat that never
-   * asked, dead-lettering the real obligation (T-07638).
+   * asked, leaving the real obligation to fail unanswered (T-07638).
    */
   replyTo: string;
   obligation: WrkqEnvelopeObligation;
@@ -262,9 +260,9 @@ export interface WrkqEnvelope {
   /** Set when the say routed via a task, even into a campaign room. */
   taskId?: string;
   state: WrkqEnvelopeState;
-  /** acked | dead. `deferred` is paused, NEVER terminal. */
+  /** acked | failed. `deferred` is paused, NEVER terminal. */
   terminal: boolean;
-  roundCount: number;
+  failureReason?: WrkqEnvelopeFailureReason;
   retryAt?: string;
   deferReason?: string;
   terminalActor?: string;
@@ -424,7 +422,7 @@ export interface WrkqEnvelopeShowParams {
 
 export interface WrkqEnvelopeInboxViewParams {
   scopeRef?: string;
-  includeDead?: boolean;
+  includeFailed?: boolean;
   principalRef?: string;
 }
 
@@ -446,7 +444,8 @@ export interface WrkqEnvelopeInboxView {
   principalRef: string;
   groups: WrkqEnvelopeInboxGroup[];
   deferred: WrkqEnvelope[];
-  dead: WrkqEnvelope[];
+  failed: WrkqEnvelope[];
+  sentFailed: WrkqEnvelope[];
 }
 
 export interface WrkqEnvelopeDeferParams {
@@ -534,9 +533,10 @@ export interface WrkqEnvelopePendingView {
   repended: number;
 }
 
-export interface WrkqEnvelopeRoundParams {
+export interface WrkqEnvelopeFailParams {
   envelope: string;
-  maxRounds?: number;
+  reason: Exclude<WrkqEnvelopeFailureReason, "legacy">;
+  runtime?: string;
   principalRef?: string;
   scopeRef?: string;
 }
@@ -604,9 +604,9 @@ export interface WrkqTaskUpdateParams {
     riskClass?: WrkqRiskClass;
     assigneePrincipalRef?: string | null;
     dueAt?: string | null;
-		startAt?: string | null;
-		/** Campaign ID/path to enroll; empty string unenrolls. */
-		campaign?: string;
+    startAt?: string | null;
+    /** Campaign ID/path to enroll; empty string unenrolls. */
+    campaign?: string;
   };
   /** CAS precondition; see docs/wrkq-wrkf-rpc.md §8.1. */
   expectEtag?: number;
@@ -743,8 +743,8 @@ export interface WrkqTask {
   id: string;
   slug: string;
   title: string;
-	projectUuid: string;
-	campaignUuid?: string;
+  projectUuid: string;
+  campaignUuid?: string;
   path: string;
   state: WrkqTaskState;
   priority: number;
@@ -1110,7 +1110,8 @@ export interface WrkqWebhookMutateParams {
  * narrowed to event classes ("task" | "workflow" | "container", "*" / "all") or
  * exact event names. A list written as bare URLs stays bare on the wire.
  */
-export type WrkqWebhookSubscription = string | { url: string; events?: string[] };
+export type WrkqWebhookSubscription =
+  string | { url: string; events?: string[] };
 
 /**
  * The legacy MUTATION RESULT for wrkq.webhook.add / remove, in MAP-ALPHABETICAL

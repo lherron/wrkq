@@ -83,7 +83,7 @@ import type {
   WrkqEnvelopePendingViewParams,
   WrkqEnvelopePresentParams,
   WrkqEnvelopePresentResult,
-  WrkqEnvelopeRoundParams,
+  WrkqEnvelopeFailParams,
   WrkqEnvelopeShowParams,
   WrkqEnvelopeBirthEnvelopeParams,
   WrkqEnvelopeBirth,
@@ -195,21 +195,27 @@ export interface WrkqContainerFacade {
   campaignActivate(
     params: WrkqContainerCampaignActivateParams,
   ): Promise<WrkqCampaignTransitionResult>;
-  campaignUpdate(params: WrkqContainerCampaignUpdateParams): Promise<WrkqContainer>;
+  campaignUpdate(
+    params: WrkqContainerCampaignUpdateParams,
+  ): Promise<WrkqContainer>;
   campaignClose(
     params: WrkqContainerCampaignCloseParams,
   ): Promise<WrkqCampaignTransitionResult>;
   campaignPortfolio(
     params?: WrkqContainerCampaignPortfolioParams,
   ): Promise<WrkqCampaignPortfolio>;
-  timelineView(params: WrkqContainerTimelineViewParams): Promise<WrkqContainerTimelineView>;
+  timelineView(
+    params: WrkqContainerTimelineViewParams,
+  ): Promise<WrkqContainerTimelineView>;
   delete(params: WrkqContainerDeleteParams): Promise<WrkqContainerDeleteResult>;
   deleteRecursive(
     params: WrkqContainerDeleteRecursiveParams,
   ): Promise<WrkqContainerDeleteRecursiveResult>;
   show(params: WrkqContainerShowParams): Promise<WrkqContainer>;
   list(params?: WrkqContainerListParams): Promise<WrkqContainerListResult>;
-  taskCounts(params?: WrkqContainerTaskCountsParams): Promise<WrkqContainerTaskCounts>;
+  taskCounts(
+    params?: WrkqContainerTaskCountsParams,
+  ): Promise<WrkqContainerTaskCounts>;
 }
 
 /** Top-level project discovery and host-portable checkout-root registry. */
@@ -231,11 +237,21 @@ export interface WrkqWebhookFacade {
 
 export interface WrkqWorkflowFacade {
   attach(params: WrkqWorkflowAttachParams): Promise<WrkqWorkflowAttachResult>;
-  inspect(params: WrkqWorkflowInspectParams): Promise<WrkqWorkflowInspectResult>;
-  instances(params: WrkqWorkflowInstancesParams): Promise<WrkqWorkflowInstancesResult>;
-  timeline(params: WrkqWorkflowTimelineParams): Promise<WrkqWorkflowTimelineResult>;
-  refresh(params: WrkqWorkflowRefreshParams): Promise<WrkqWorkflowInspectResult>;
-  syncMeta(params?: WrkqWorkflowSyncMetaParams): Promise<WrkqWorkflowSyncMetaResult>;
+  inspect(
+    params: WrkqWorkflowInspectParams,
+  ): Promise<WrkqWorkflowInspectResult>;
+  instances(
+    params: WrkqWorkflowInstancesParams,
+  ): Promise<WrkqWorkflowInstancesResult>;
+  timeline(
+    params: WrkqWorkflowTimelineParams,
+  ): Promise<WrkqWorkflowTimelineResult>;
+  refresh(
+    params: WrkqWorkflowRefreshParams,
+  ): Promise<WrkqWorkflowInspectResult>;
+  syncMeta(
+    params?: WrkqWorkflowSyncMetaParams,
+  ): Promise<WrkqWorkflowSyncMetaResult>;
 }
 
 /** Admin namespace placeholder; legacy actor admin methods were removed in T-05381. */
@@ -310,31 +326,39 @@ export interface WrkqRoomFacade {
  * wrkq.envelope.* — one object for chat and obligation, addressed to exactly
  * one recipient.
  *
- * `present`, `pendingView`, and `roundEnded` are the HRC-FACING surface: the
- * kicker's wake set, the stop-hook predicate, and the redelivery bound. Nothing
+ * `present`, `pendingView`, and `fail` are the HRC-FACING surface: the
+ * kicker's wake set, the stop-hook predicate, and unsuccessful termination. Nothing
  * else should call them. There is no agent-facing ack — for an agent the reply
  * IS the ack — so `ack` here is the operator verb, intended for a human
- * principal clearing dead mail.
+ * principal clearing failed mail.
  */
 export interface WrkqEnvelopeFacade {
   show(params: WrkqEnvelopeShowParams): Promise<WrkqEnvelope>;
-  inboxView(params?: WrkqEnvelopeInboxViewParams): Promise<WrkqEnvelopeInboxView>;
+  inboxView(
+    params?: WrkqEnvelopeInboxViewParams,
+  ): Promise<WrkqEnvelopeInboxView>;
   defer(params: WrkqEnvelopeDeferParams): Promise<WrkqEnvelope>;
   ack(params: WrkqEnvelopeAckParams): Promise<WrkqRoomLogView>;
-  present(params: WrkqEnvelopePresentParams): Promise<WrkqEnvelopePresentResult>;
+  present(
+    params: WrkqEnvelopePresentParams,
+  ): Promise<WrkqEnvelopePresentResult>;
   /**
    * The kicker wake set and the stop-hook predicate. `includeFyi` additionally
    * reports pending fyi envelopes in `items`; they never enter `blocking` and
    * never summon, so a consumer presents them only into a live generation.
    */
-  pendingView(params?: WrkqEnvelopePendingViewParams): Promise<WrkqEnvelopePendingView>;
-  roundEnded(params: WrkqEnvelopeRoundParams): Promise<WrkqEnvelope>;
+  pendingView(
+    params?: WrkqEnvelopePendingViewParams,
+  ): Promise<WrkqEnvelopePendingView>;
+  fail(params: WrkqEnvelopeFailParams): Promise<WrkqEnvelope>;
   /**
    * The birth envelope of one target scope — HRC's registry host reads it to
    * designate, once, the node a virgin scope is born on. `null` when nothing
    * has ever fired at the scope.
    */
-  birthEnvelope(params: WrkqEnvelopeBirthEnvelopeParams): Promise<WrkqEnvelopeBirth | null>;
+  birthEnvelope(
+    params: WrkqEnvelopeBirthEnvelopeParams,
+  ): Promise<WrkqEnvelopeBirth | null>;
 }
 
 export interface WrkqFacade {

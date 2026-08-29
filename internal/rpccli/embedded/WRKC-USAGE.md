@@ -89,14 +89,22 @@ two seats of the same agent are two counterparties, and only a scope-less party
 (a human) matches on its principal. Sibling envelopes of a fan-out addressed to
 *other* scopes are untouched. To hold one back, `defer` it first.
 
+An obligation belongs to the runtime that receives it. Its body is pushed once
+on the common path; later attention is a pointer to `wrkc show`. It is never
+presented to a different runtime. If the presenting runtime ends undisposed,
+the envelope fails as `runtime_terminated`. Inside a live runtime the kicker may
+send one pointer reminder; ending that reminder turn undisposed fails it as
+`ignored`. If you are not answering now, `defer` with a reason (and optionally a
+retry time): the deferral survives rotation and returns as a pointer.
+
 `defer` is paused, never terminal — a later reply still acks it.
 `--retry-after` arms a wrkq promise; at expiry the envelope returns to pending.
 
 `--to a,b` fans out to one envelope per addressee sharing a group id. Every
-lifecycle field is per envelope, so one recipient's reply, defer, or dead never
+lifecycle field is per envelope, so one recipient's reply, defer, or failure never
 disposes another's obligation.
 
-`ack` is operator-only, for a human clearing dead mail
+`ack` is operator-only, for a human clearing failed mail
 (`wrkc ack EN-00042 --as agent:lance`). Agents do not ack; they reply or defer.
 
 Obligations are **uniform**: one addressed to you gates your turn and wakes you
@@ -112,8 +120,8 @@ wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--new]
                         [--record] [--idempotency-key k] [--as p]
 wrkc log <room> [--task T-x] [--limit n]
 wrkc show <EN-xxxxx|room>
-wrkc ls [--all] [--dead] [--scope me] [--kind k]
-wrkc inbox [--dead]
+wrkc ls [--all] [--failed] [--scope me] [--kind k]
+wrkc inbox [--failed]
 wrkc defer <EN-xxxxx> --reason <t> [--retry-after d]
 wrkc hide|unhide <room>
 wrkc join|leave <room>
@@ -146,7 +154,7 @@ order:
 
 Several members of that name and no obligation to settle it **refuses** and
 names every candidate: answering a seat that never asked leaves the real
-obligation to dead-letter unanswered, which costs far more than a retry with a
+obligation to fail unanswered, which costs far more than a retry with a
 full handle. Resolution reads the room and your *seat*; the principal a say is
 attributed to (`--as`) never moves it.
 
@@ -167,7 +175,13 @@ wrkq monitor watch R-00012
 wrkq monitor wait EN-00042 --until terminal
 ```
 
-`--until acked` and `--until terminal` (= acked | dead) take `EN-` selectors. An
+`--until acked` and `--until terminal` (= acked | failed) take `EN-` selectors. An
 `EN-` id that is a fan-out group head covers every envelope of that group, which
-is exactly what `wrkc say --wait` blocks on. `--state-only` still emits only task
-lifecycle changes.
+is exactly what `wrkc say --wait` blocks on. A failed member prints
+`failed:<reason>` and makes `--wait` exit non-zero. `--state-only` still emits
+only task lifecycle changes.
+
+`wrkc inbox` always includes sender-side failures under `sent, failed`.
+`--failed` additionally includes failed obligations addressed to you, with the
+failure reason. The ordinary `wrkc ls` human/table view prints the sender-side
+failure count before the room table.

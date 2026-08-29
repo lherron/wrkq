@@ -1335,8 +1335,9 @@ CREATE TABLE envelopes (
   task_uuid TEXT REFERENCES tasks(uuid) ON DELETE SET NULL,
 
   state TEXT NOT NULL DEFAULT 'pending'
-    CHECK (state IN ('pending', 'presented', 'acked', 'deferred', 'dead')),
-  round_count INTEGER NOT NULL DEFAULT 0 CHECK (round_count >= 0),
+    CHECK (state IN ('pending', 'presented', 'acked', 'deferred', 'failed')),
+  failure_reason TEXT
+    CHECK (failure_reason IN ('runtime_terminated', 'ignored', 'undeliverable', 'legacy')),
   retry_at TEXT,
   defer_reason TEXT,
   terminal_actor TEXT,
@@ -1375,6 +1376,11 @@ CREATE TABLE envelopes (
   CHECK (
     (state = 'deferred' AND defer_reason IS NOT NULL)
     OR state <> 'deferred'
+  ),
+
+  CHECK (
+    (state = 'failed' AND failure_reason IS NOT NULL)
+    OR (state <> 'failed' AND failure_reason IS NULL)
   )
 );
 CREATE INDEX envelopes_room_idx ON envelopes(room_uuid, id);

@@ -24,7 +24,10 @@ import { StdioTransport } from "./stdio-transport.js";
 import type { JsonRpcRequest, Transport } from "./transport.js";
 import type { WrkqFacade } from "./wrkq/facade.js";
 import type { WrkfFacade } from "./wrkf/facade.js";
-import type { WrkfActionClaimResult, WrkfActionNextResult } from "./wrkf/types.js";
+import type {
+  WrkfActionClaimResult,
+  WrkfActionNextResult,
+} from "./wrkf/types.js";
 
 const MAX_TEMPLATE_BODY_BYTES = 1 << 20;
 const MAX_TEMPLATE_DIFF_BODY_BYTES = 2 << 20;
@@ -35,7 +38,9 @@ function templateBodyBytes(body: string): number {
 
 function assertTemplateBody(body: string, sourceName = "template body"): void {
   if (templateBodyBytes(body) > MAX_TEMPLATE_BODY_BYTES) {
-    throw new RangeError(`${sourceName} exceeds ${MAX_TEMPLATE_BODY_BYTES}-byte template body limit`);
+    throw new RangeError(
+      `${sourceName} exceeds ${MAX_TEMPLATE_BODY_BYTES}-byte template body limit`,
+    );
   }
 }
 
@@ -88,7 +93,10 @@ class WorkClientImpl implements WorkClient {
   private readonly clientInfo: { name: string; version: string };
   private idSeq = 0;
 
-  constructor(transport: Transport, clientInfo?: { name: string; version: string }) {
+  constructor(
+    transport: Transport,
+    clientInfo?: { name: string; version: string },
+  ) {
     this.transport = transport;
     this.clientInfo = clientInfo ?? DEFAULT_CLIENT_INFO;
   }
@@ -117,7 +125,8 @@ class WorkClientImpl implements WorkClient {
 
   readonly wrkq: WrkqFacade = {
     task: {
-      create: async (p) => this.call("wrkq.task.create", rejectLegacyActorAttribution(p)),
+      create: async (p) =>
+        this.call("wrkq.task.create", rejectLegacyActorAttribution(p)),
       show: (p) => this.call("wrkq.task.show", p),
       list: (p) => this.call("wrkq.task.list", p ?? {}),
       findListView: (p) => this.call("wrkq.task.findListView", p ?? {}),
@@ -179,7 +188,7 @@ class WorkClientImpl implements WorkClient {
       ack: (p) => this.call("wrkq.envelope.ack", p),
       present: (p) => this.call("wrkq.envelope.present", p),
       pendingView: (p) => this.call("wrkq.envelope.pendingView", p ?? {}),
-      roundEnded: (p) => this.call("wrkq.envelope.roundEnded", p),
+      fail: (p) => this.call("wrkq.envelope.fail", p),
       birthEnvelope: (p) => this.call("wrkq.envelope.birthEnvelope", p),
     },
     container: {
@@ -189,7 +198,8 @@ class WorkClientImpl implements WorkClient {
       campaignActivate: (p) => this.call("wrkq.container.campaignActivate", p),
       campaignUpdate: (p) => this.call("wrkq.container.campaignUpdate", p),
       campaignClose: (p) => this.call("wrkq.container.campaignClose", p),
-      campaignPortfolio: (p) => this.call("wrkq.container.campaignPortfolio", p ?? {}),
+      campaignPortfolio: (p) =>
+        this.call("wrkq.container.campaignPortfolio", p ?? {}),
       timelineView: (p) => this.call("wrkq.container.timelineView", p),
       delete: (p) => this.call("wrkq.container.delete", p),
       deleteRecursive: (p) => this.call("wrkq.container.deleteRecursive", p),
@@ -245,8 +255,13 @@ class WorkClientImpl implements WorkClient {
       diff: (p) => {
         assertTemplateBody(p.oldBody, p.oldSourceName);
         assertTemplateBody(p.newBody, p.newSourceName);
-        if (templateBodyBytes(p.oldBody) + templateBodyBytes(p.newBody) > MAX_TEMPLATE_DIFF_BODY_BYTES) {
-          throw new RangeError(`template diff bodies exceed ${MAX_TEMPLATE_DIFF_BODY_BYTES}-byte aggregate limit`);
+        if (
+          templateBodyBytes(p.oldBody) + templateBodyBytes(p.newBody) >
+          MAX_TEMPLATE_DIFF_BODY_BYTES
+        ) {
+          throw new RangeError(
+            `template diff bodies exceed ${MAX_TEMPLATE_DIFF_BODY_BYTES}-byte aggregate limit`,
+          );
         }
         return this.call("wrkf.workflow.diff", p);
       },
@@ -367,7 +382,9 @@ function rejectLegacyActorAttribution<T>(params: T): T {
     typeof params === "object" &&
     Object.prototype.hasOwnProperty.call(params, "actor")
   ) {
-    throw new Error("actor is no longer accepted for wrkq caller attribution; use principalRef");
+    throw new Error(
+      "actor is no longer accepted for wrkq caller attribution; use principalRef",
+    );
   }
   return params;
 }
@@ -376,9 +393,13 @@ function rejectLegacyActorAttribution<T>(params: T): T {
  * Construct a unified client. By default spawns `wrkq rpc --stdio` and runs
  * `rpc.initialize` before resolving. Pass `transport` to inject a fake.
  */
-export async function createClient(opts: CreateClientOptions = {}): Promise<WorkClient> {
+export async function createClient(
+  opts: CreateClientOptions = {},
+): Promise<WorkClient> {
   if (Object.prototype.hasOwnProperty.call(opts, "actor")) {
-    throw new Error("actor is no longer accepted for caller authority; use principalRef");
+    throw new Error(
+      "actor is no longer accepted for caller authority; use principalRef",
+    );
   }
   const transport =
     opts.transport ??
