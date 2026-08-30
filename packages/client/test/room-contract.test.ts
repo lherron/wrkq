@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { createClient } from "../src/client";
+import { createClient, type WorkClient } from "../src/client";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type {
   WrkqEnvelope,
   WrkqEnvelopeMemberPage,
+  WrkqEnvelopeMemberPageParams,
   WrkqEnvelopeInboxView,
   WrkqEnvelopePendingView,
   WrkqEnvelopePresentResult,
@@ -12,6 +13,49 @@ import type {
   WrkqRoomMembersView,
   WrkqRoomSayResult,
 } from "../src/wrkq/types";
+
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends
+  (<Value>() => Value extends Right ? 1 : 2)
+    ? true
+    : false;
+type Expect<Value extends true> = Value;
+
+type _MemberPageFacadeParamIdentity = Expect<
+  Equal<
+    Parameters<WorkClient["wrkq"]["envelope"]["memberPage"]>[0],
+    WrkqEnvelopeMemberPageParams
+  >
+>;
+
+// Compile-time acceptance coverage. TypeScript rejects an unused expected-error
+// directive, so these guards fail if the public type admits neither or both
+// cursors.
+function _memberPageCursorXor(params: WrkqEnvelopeMemberPageParams) {
+  const beforeOnly: WrkqEnvelopeMemberPageParams = {
+    memberRef: "cody@wrkq:T-07723",
+    beforeMessageSeq: 10,
+    limit: 25,
+  };
+  const afterOnly: WrkqEnvelopeMemberPageParams = {
+    memberRef: "cody@wrkq:T-07723",
+    afterMessageSeq: 10,
+    limit: 25,
+  };
+  // @ts-expect-error exactly one cursor is required
+  const neither: WrkqEnvelopeMemberPageParams = {
+    memberRef: "cody@wrkq:T-07723",
+    limit: 25,
+  };
+  // @ts-expect-error beforeMessageSeq and afterMessageSeq are exclusive
+  const both: WrkqEnvelopeMemberPageParams = {
+    memberRef: "cody@wrkq:T-07723",
+    beforeMessageSeq: 10,
+    afterMessageSeq: 10,
+    limit: 25,
+  };
+  return { params, beforeOnly, afterOnly, neither, both };
+}
 
 const ROOM: WrkqRoom = {
   uuid: "room-uuid",

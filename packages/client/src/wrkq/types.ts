@@ -422,13 +422,9 @@ export interface WrkqEnvelopeShowParams {
   scopeRef?: string;
 }
 
-export interface WrkqEnvelopeMemberPageParams {
+interface WrkqEnvelopeMemberPageSharedParams {
   /** Exact stored scope handle, or a scope-less `agent:<id>` principal. */
   memberRef: string;
-  /** Exclusive reverse-history position. Mutually exclusive with `afterMessageSeq`. */
-  beforeMessageSeq?: number;
-  /** Exclusive forward-catch-up position. Mutually exclusive with `beforeMessageSeq`. */
-  afterMessageSeq?: number;
   /** Required bounded page size, from 1 through 500. */
   limit: number;
   /** Fence follow-up reads against collaboration-ledger replacement. */
@@ -436,6 +432,20 @@ export interface WrkqEnvelopeMemberPageParams {
   principalRef?: string;
   scopeRef?: string;
 }
+
+export type WrkqEnvelopeMemberPageParams = WrkqEnvelopeMemberPageSharedParams &
+  (
+    | {
+        /** Exclusive reverse-history position. */
+        beforeMessageSeq: number;
+        afterMessageSeq?: never;
+      }
+    | {
+        /** Exclusive forward-catch-up position. */
+        beforeMessageSeq?: never;
+        afterMessageSeq: number;
+      }
+  );
 
 export interface WrkqEnvelopeMemberPage {
   ledgerIncarnation: string;
