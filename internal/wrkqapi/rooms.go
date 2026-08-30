@@ -61,6 +61,9 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if notice := staleRoomNotice(room); notice != nil {
 		notices = append(notices, *notice)
 	}
+	if routed.notice != "" {
+		notices = append(notices, routed.notice)
+	}
 
 	addressees, err := a.resolveAddressees(ctx, room, p.To, routed.impliedTo, senderScope, attr.PrincipalRef)
 	if err != nil {
@@ -258,6 +261,9 @@ type routedSay struct {
 	// impliedTo is the addressee a target-handle ref implies when the caller
 	// named no --to.
 	impliedTo string
+	// notice is advisory text the routing itself wants surfaced (never an
+	// error): a pair room opened by a scope-less caller.
+	notice string
 }
 
 // routeSay implements T-07612 §4 exactly, first match wins.
@@ -465,23 +471,33 @@ func (a *API) routeToHandle(ctx context.Context, attr attribution.Attribution, s
 		}
 	}
 
-	// Neither task-scoped → an ad-hoc pair room.
+	// Neither task-scoped → an ad-hoc pair room. The sender's member ref is its
+	// seat when it has one; a scope-less caller (a human, or a seat that forgot
+	// HRC_SESSION_REF) is admitted as the principal it is — the same rule
+	// resolveAddressees applies on the reply side — with an advisory notice. A
+	// say is never refused for who the caller is (Lance ruling 2026-08-29);
+	// the old hard refusal here broke every human→:primary ingress (Discord
+	// #hcs → vesta@hcs:primary, 2026-08-30).
+	senderMember := senderScope
+	senderScoped := true
+	routingNotice := ""
 	if senderScope == "" {
-		return nil, NewValidationError(
-			"an ad-hoc pair room needs the caller's own scope; set HRC_SESSION_REF or address a task, campaign, or project",
-			map[string]any{"field": "scopeRef", "target": targetHandle})
+		senderMember = attr.PrincipalRef
+		senderScoped = false
+		routingNotice = "no caller scope: pair room keyed on principal " + attr.PrincipalRef +
+			"; a seat should set HRC_SESSION_REF so its pair rooms follow the seat, not the principal"
 	}
 	if !p.New {
 		// §4: reuse the exact-pair room whose activity reads `active`, else open a
 		// new one. Reuse keys on the SAME projection `wrkc show` prints; there is
 		// no lifecycle left to key on.
 		existing, ferr := a.store.Rooms.FindAdhocPairRoom(
-			senderScope, targetHandle, roomActiveSince(time.Now().UTC()))
+			senderMember, targetHandle, roomActiveSince(time.Now().UTC()))
 		if ferr != nil {
 			return nil, NewInternalError(ferr)
 		}
 		if existing != nil {
-			return &routedSay{room: existing, impliedTo: targetHandle}, nil
+			return &routedSay{room: existing, impliedTo: targetHandle, notice: routingNotice}, nil
 		}
 	}
 	targetPrincipal, perr := attribution.NormalizeCompat(target.AgentID)
@@ -491,14 +507,14 @@ func (a *API) routeToHandle(ctx context.Context, attr attribution.Attribution, s
 	room, cerr := a.store.Rooms.CreateWithAttribution(attr, store.RoomCreateParams{
 		Kind: domain.RoomKindAdhoc,
 		Members: []store.RoomMemberSeed{
-			{MemberRef: senderScope, MemberPrincipalRef: attr.PrincipalRef, Scoped: true, Source: domain.RoomMemberSourceSpoke},
+			{MemberRef: senderMember, MemberPrincipalRef: attr.PrincipalRef, Scoped: senderScoped, Source: domain.RoomMemberSourceSpoke},
 			{MemberRef: targetHandle, MemberPrincipalRef: targetPrincipal, Scoped: true, Source: domain.RoomMemberSourceAddressed},
 		},
 	})
 	if cerr != nil {
 		return nil, mapRoomStoreError(cerr, ref)
 	}
-	return &routedSay{room: room, impliedTo: targetHandle}, nil
+	return &routedSay{room: room, impliedTo: targetHandle, notice: routingNotice}, nil
 }
 
 // taskScopedID returns the task selector when a scope handle's task segment is

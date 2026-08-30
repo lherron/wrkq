@@ -2831,3 +2831,49 @@ func TestPresentationDeliveryOutcomeRoundTripsAndDefaultsToNull(t *testing.T) {
 		t.Fatalf("inbox delivery outcome for an omitted class = %v, want null", got)
 	}
 }
+
+// TestAdhocPairRoomScopelessSenderKeysOnPrincipal: a caller with no HRC scope
+// (a human via Discord ingress, or a seat that forgot HRC_SESSION_REF) still
+// opens a pair room with a bare seat — the 2026-08-30 regression was a hard
+// refusal here that broke Lance → vesta@hcs:primary. The room is keyed on the
+// principal as an unscoped member, reused on the next say, and the say carries
+// an advisory notice instead of an error (a say is never refused for who the
+// caller is).
+func TestAdhocPairRoomScopelessSenderKeysOnPrincipal(t *testing.T) {
+	f := newRoomFixture(t)
+	human := RoomSayParams{Ref: "vesta@proj:primary", Body: "Hi", PrincipalRef: "agent:lance"}
+
+	first := f.say(t, human)
+	if first.Room.Kind != string(domain.RoomKindAdhoc) {
+		t.Fatalf("expected adhoc pair room, got %s", first.Room.Kind)
+	}
+	var noticed bool
+	for _, n := range first.Notices {
+		if strings.Contains(n, "no caller scope") {
+			noticed = true
+		}
+	}
+	if !noticed {
+		t.Fatalf("expected a no-caller-scope notice, got %v", first.Notices)
+	}
+	second := f.say(t, RoomSayParams{Ref: human.Ref, Body: "again", PrincipalRef: human.PrincipalRef})
+	if second.Room.UUID != first.Room.UUID {
+		t.Fatalf("scope-less pair room not reused: %s then %s", first.Room.UUID, second.Room.UUID)
+	}
+	members, err := f.api.RoomMembersView(context.Background(), RoomMembersViewParams{Room: *first.Room.ID, PrincipalRef: "agent:lance"})
+	if err != nil {
+		t.Fatalf("members: %v", err)
+	}
+	var sawPrincipal bool
+	for _, m := range members.Items {
+		if m.MemberRef == "agent:lance" {
+			sawPrincipal = true
+			if m.Scoped {
+				t.Fatal("scope-less sender recorded as a scoped member")
+			}
+		}
+	}
+	if !sawPrincipal {
+		t.Fatalf("principal not a member: %+v", members.Items)
+	}
+}
