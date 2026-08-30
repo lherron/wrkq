@@ -13,9 +13,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newCatCmd mirrors `wrkq cat`. RPC-backed via the server-owned wrkq.task.catView
-// compatibility projection (one consistent snapshot per task). The CLI re-renders
-// that projection into legacy `cat` output for every exposed render mode:
+// newCatCmd mirrors `wrkq cat`. RPC-backed via the server-owned task, container,
+// and promise read projections. The CLI re-renders those projections into the
+// established `cat` output modes:
 //
 //	json (non-TTY default + --json, indented; +--porcelain → compact),
 //	json object (--json --one, exactly one explicit selector; +--porcelain → compact),
@@ -31,8 +31,8 @@ func newCatCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "cat <path|id>...",
 		Aliases: []string{"show"},
-		Short:   "Print one or more tasks or promises",
-		Long: `Print one or more tasks.
+		Short:   "Print one or more tasks, containers, or promises",
+		Long: `Print one or more tasks, containers, or promises.
 
 JSON output is always array-shaped for compatibility, even with one selector.
 Singleton automation should use --json --one, which asserts exactly one explicit
@@ -81,43 +81,51 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 
 	includeComments := !excludeComments
 	objs := make([]json.RawMessage, 0, len(args))
-	promiseIndexes := make(map[int]bool)
+	kinds := make([]catResourceKind, 0, len(args))
 	for _, ref := range args {
-		// Legacy: applyProjectRootToSelector(arg, false) before resolving the task.
+		// Apply project-root caller semantics once before probing resource types.
 		sref := sc.selector(ref, false)
 		var raw json.RawMessage
 		var err error
-		promiseSelector := strings.HasPrefix(strings.ToUpper(strings.TrimSpace(ref)), "PR-")
-		if promiseSelector {
+		explicitPromiseSelector := strings.HasPrefix(strings.ToUpper(strings.TrimSpace(ref)), "PR-")
+		kind := catResourceTask
+		if explicitPromiseSelector {
 			raw, err = tr.Call(cmd.Context(), "wrkq.promise.show", map[string]any{"promise": ref})
+			kind = catResourcePromise
 		} else {
 			raw, err = tr.Call(cmd.Context(), "wrkq.task.catView",
 				map[string]any{"task": sref, "includeComments": includeComments})
 			if isNotFound(err) {
 				raw, err = tr.Call(cmd.Context(), "wrkq.promise.show", map[string]any{"promise": ref})
-				promiseSelector = err == nil
+				if err == nil {
+					kind = catResourcePromise
+				} else if isNotFound(err) {
+					raw, err = tr.Call(cmd.Context(), "wrkq.container.catView",
+						map[string]string{"container": sref})
+					if err == nil {
+						kind = catResourceContainer
+					}
+				}
 			}
 		}
 		if err != nil {
 			if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-				if promiseSelector {
+				if explicitPromiseSelector {
 					return fmt.Errorf("promise not found: %s", ref)
 				}
 				return fmt.Errorf("task not found: %s", sref)
 			}
 			return err
 		}
-		if promiseSelector {
-			promiseIndexes[len(objs)] = true
-		}
 		objs = append(objs, raw)
+		kinds = append(kinds, kind)
 	}
 
 	out := cmd.OutOrStdout()
 	// --pretty forces the styled card (overriding an explicit machine mode and the
 	// non-TTY JSON default); on a TTY it is the default, matching legacy.
 	if pretty || (mode == "raw" && !stable && style.ColorEnabled) {
-		return writeCatMixed(out, objs, promiseIndexes, noFrontmatter, excludeComments, true)
+		return writeCatMixed(out, objs, kinds, noFrontmatter, excludeComments, true)
 	}
 	switch mode {
 	case "json":
@@ -128,16 +136,25 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 	case "ndjson":
 		return writeCatNDJSON(out, objs)
 	default: // "raw"
-		return writeCatMixed(out, objs, promiseIndexes, noFrontmatter, excludeComments, false)
+		return writeCatMixed(out, objs, kinds, noFrontmatter, excludeComments, false)
 	}
 }
 
-func writeCatMixed(w io.Writer, objs []json.RawMessage, promiseIndexes map[int]bool, noFrontmatter, excludeComments, styled bool) error {
+type catResourceKind uint8
+
+const (
+	catResourceTask catResourceKind = iota
+	catResourceContainer
+	catResourcePromise
+)
+
+func writeCatMixed(w io.Writer, objs []json.RawMessage, kinds []catResourceKind, noFrontmatter, excludeComments, styled bool) error {
 	for index, obj := range objs {
 		if index > 0 {
 			fmt.Fprintln(w)
 		}
-		if promiseIndexes[index] {
+		switch kinds[index] {
+		case catResourcePromise:
 			promise, err := decodePromise(obj)
 			if err != nil {
 				return err
@@ -145,14 +162,22 @@ func writeCatMixed(w io.Writer, objs []json.RawMessage, promiseIndexes map[int]b
 			if err := renderPromiseDetail(w, promise); err != nil {
 				return err
 			}
-			continue
-		}
-		if styled {
-			if err := writeCatStyled(w, []json.RawMessage{obj}, noFrontmatter, excludeComments); err != nil {
+		case catResourceContainer:
+			var container containerCatModel
+			if err := json.Unmarshal(obj, &container); err != nil {
 				return err
 			}
-		} else if err := writeCatRaw(w, []json.RawMessage{obj}, noFrontmatter, excludeComments); err != nil {
-			return err
+			if err := renderContainerMarkdown(w, &container, noFrontmatter); err != nil {
+				return err
+			}
+		case catResourceTask:
+			if styled {
+				if err := writeCatStyled(w, []json.RawMessage{obj}, noFrontmatter, excludeComments); err != nil {
+					return err
+				}
+			} else if err := writeCatRaw(w, []json.RawMessage{obj}, noFrontmatter, excludeComments); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

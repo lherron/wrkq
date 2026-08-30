@@ -79,6 +79,10 @@ func TestCatOneLocalAndAuthenticatedRemoteCLIParity(t *testing.T) {
 	if err := database.QueryRow("SELECT id FROM tasks WHERE uuid = ?", secondUUID).Scan(&secondID); err != nil {
 		t.Fatalf("fetch second task id: %v", err)
 	}
+	var containerID string
+	if err := database.QueryRow("SELECT id FROM containers WHERE uuid = ?", seedProject).Scan(&containerID); err != nil {
+		t.Fatalf("fetch project container id: %v", err)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -125,6 +129,11 @@ func TestCatOneLocalAndAuthenticatedRemoteCLIParity(t *testing.T) {
 	}{
 		{name: "legacy-one-array", args: []string{"cat", firstID, "--json"}, wantSuccess: true},
 		{name: "legacy-many-array", args: []string{"cat", firstID, secondID, "--json"}, wantSuccess: true},
+		{name: "container-array", args: []string{"cat", containerID, "--json"}, wantSuccess: true},
+		{name: "container-one-object", args: []string{"cat", containerID, "--json", "--one"}, wantSuccess: true},
+		{name: "container-ndjson", args: []string{"cat", containerID, "--ndjson"}, wantSuccess: true},
+		{name: "container-raw", args: []string{"cat", containerID, "--output", "raw"}, wantSuccess: true},
+		{name: "mixed-task-container", args: []string{"cat", firstID, containerID, "--json"}, wantSuccess: true},
 		{name: "one-object", args: []string{"cat", firstID, "--json", "--one"}, wantSuccess: true},
 		{name: "one-object-output-json", args: []string{"cat", firstID, "--output", "json", "--one"}, wantSuccess: true},
 		{name: "one-object-compact", args: []string{"cat", firstID, "--json", "--one", "--porcelain"}, wantSuccess: true},
@@ -156,7 +165,7 @@ func TestCatOneLocalAndAuthenticatedRemoteCLIParity(t *testing.T) {
 				if local.errText != "" {
 					t.Fatalf("unexpected error: %s", local.errText)
 				}
-				assertCatSuccessShape(t, tc.name, local.stdout, firstID, secondID)
+				assertCatSuccessShape(t, tc.name, local.stdout, firstID, secondID, containerID)
 				return
 			}
 			if local.stdout != "" {
@@ -175,6 +184,7 @@ func TestCatHelpLeadsSingletonAutomationToOne(t *testing.T) {
 		t.Fatalf("cat --help: %s", result.errText)
 	}
 	for _, want := range []string{
+		"tasks, containers, or promises",
 		"JSON output is always array-shaped",
 		"wrkq cat T-00001 --json --one",
 		"--one",
@@ -210,7 +220,7 @@ func runCatOneTestCLI(t *testing.T, locator string, args []string) catOneCLIResu
 	return result
 }
 
-func assertCatSuccessShape(t *testing.T, name, output, firstID, secondID string) {
+func assertCatSuccessShape(t *testing.T, name, output, firstID, secondID, containerID string) {
 	t.Helper()
 	switch name {
 	case "legacy-one-array":
@@ -228,6 +238,36 @@ func assertCatSuccessShape(t *testing.T, name, output, firstID, secondID string)
 		}
 		if len(rows) != 2 || rows[0]["id"] != firstID || rows[1]["id"] != secondID {
 			t.Fatalf("legacy many shape/order = %#v", rows)
+		}
+	case "container-array":
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(output), &rows); err != nil {
+			t.Fatalf("decode container array: %v\n%s", err, output)
+		}
+		if len(rows) != 1 || rows[0]["id"] != containerID || rows[0]["kind"] != "project" {
+			t.Fatalf("container array shape = %#v", rows)
+		}
+	case "container-one-object", "container-ndjson":
+		var row map[string]any
+		if err := json.Unmarshal([]byte(output), &row); err != nil {
+			t.Fatalf("decode container object: %v\n%s", err, output)
+		}
+		if row["id"] != containerID || row["path"] != "rpccli-test-proj" || row["kind"] != "project" {
+			t.Fatalf("container object shape = %#v", row)
+		}
+	case "container-raw":
+		for _, want := range []string{"id: " + containerID, "path: rpccli-test-proj", "kind: project"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("container raw output missing %q:\n%s", want, output)
+			}
+		}
+	case "mixed-task-container":
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(output), &rows); err != nil {
+			t.Fatalf("decode mixed array: %v\n%s", err, output)
+		}
+		if len(rows) != 2 || rows[0]["id"] != firstID || rows[1]["id"] != containerID {
+			t.Fatalf("mixed task/container shape/order = %#v", rows)
 		}
 	default:
 		var row map[string]any

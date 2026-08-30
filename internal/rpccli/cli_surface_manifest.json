@@ -428,7 +428,7 @@
         "aliases": [
           "show"
         ],
-        "short": "Print one or more tasks or promises",
+        "short": "Print one or more tasks, containers, or promises",
         "hidden": false,
         "available": true,
         "flags": [

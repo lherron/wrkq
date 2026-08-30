@@ -63,14 +63,23 @@ new RPC surface anyway).
 - The CLI owns byte rendering: the mirror wraps per-task objects into the legacy
   indented JSON array.
 - The additive `wrkq cat ID --json --one` CLI-only surface unwraps exactly one
-  `catView` object after asserting one explicit selector and one resolved task.
+  compatibility projection object after asserting one explicit selector and one
+  resolved task, container, or promise.
   Legacy `cat ... --json` stays array-shaped for one or many selectors. `--one`
   accepts explicit JSON only (`--json` or `--output json`), with optional
   `--porcelain` compaction, and refuses other render modes before transport or
   output. No RPC method, DTO, catalog, or protocol fingerprint changes.
+- Root `wrkq cat` resolves non-promise selectors in task → promise → container
+  order. A valid container reuses the existing `wrkq.container.catView`
+  projection: structured modes retain root cat's array/NDJSON/`--one` wrappers,
+  while raw/TTY modes reuse the container markdown renderer. Mixed resource
+  selectors retain input order. An all-resource miss preserves the historical
+  `task not found` error, and explicit `PR-` misses preserve `promise not found`.
+  This is CLI-only composition over existing projections; it does not alter a
+  method, DTO, catalog, or protocol fingerprint.
 
-**catView contract green ≠ cat command parity green.** Every exposed `cat`
-render mode is now byte-parity proven on the SAME catView projection: `--json`
+**catView contract green ≠ cat command parity green.** For tasks, every exposed
+`cat` render mode is byte-parity proven on the SAME task catView projection: `--json`
 (indented array + non-TTY default), `--json --porcelain` (compact array),
 `--ndjson` (one compact object per line), and `raw` markdown front-matter
 (`--output raw` / `--porcelain` / TTY default), including `--no-frontmatter`,
@@ -85,7 +94,7 @@ projection (T-05090), so its fingerprint pin is unchanged.
 |---|---|---|
 | `ack` | `rpc-backed` | **Proven parity** (production contract tests, 6 cases): RPC-backed via composition — `wrkq.task.show` to classify already-acked skips + not-found, then `wrkq.task.acknowledge` for the durable mutation (server stays authoritative for the force/terminal gate, attribution, etag). Output + error wording reproduced byte-for-byte; durable snapshot verified. |
 | `stat` | `rpc-backed` | **Proven parity** (production contract tests, 6 cases): first RPC-backed READ command. Re-projects `wrkq.task.show` (falling back to `wrkq.container.show`) into the legacy stat metadata shape. Byte-identical stdout incl. UUIDs (copy-fixture), plus error parity (`path not found`). |
-| `cat` | `rpc-backed` | **Legacy render modes plus explicit singleton JSON proven**: `--json` remains an array byte-for-byte for one/many selectors; `--ndjson`, `--json --porcelain`, and raw markdown retain their established rendering. Additive `ID --json --one` emits one bare `catView` object, requires one explicit selector/result, allows `--porcelain` compaction, and refuses zero/multiple shell-expanded selectors, not-found/unmatched selectors, and non-JSON output without partial stdout. Local and authenticated `rpc://` CLI paths are identical. All modes render the SAME server-owned `wrkq.task.catView` compat projection — CLI-side byte rendering only; no RPC method/DTO/catalog/fingerprint change. |
+| `cat` | `rpc-backed` | **Tasks, containers, promises, legacy render modes, and explicit singleton JSON proven**: non-`PR-` selectors resolve task → promise → container through the existing compatibility projections; mixed resources retain input order. `--json` remains an array for one/many selectors; `--ndjson`, `--json --porcelain`, and raw markdown retain their established rendering. Additive `ID --json --one` emits one bare projection object, requires one explicit selector/result, allows `--porcelain` compaction, and refuses zero/multiple shell-expanded selectors, not-found/unmatched selectors, and non-JSON output without partial stdout. Local and authenticated `rpc://` CLI paths are identical. This is CLI-side composition/rendering only; no RPC method/DTO/catalog/fingerprint change. |
 | `touch` | `rpc-backed` | **Full exposed create surface parity proven** (production contract tests: basic/flags/default-title/description-file/stdin-description/meta-file/date-routing-resolution/force-uuid/duplicate-errors) via `wrkq.task.create`, re-projected to the legacy touchResult array. The mirror owns legacy `@file` / `-` body reads and caller-host artifact-dir creation (TestTouchCreatesArtifactDirParity), and sends `metaRaw` so JSON metadata bytes are stored in legacy order instead of being re-marshaled. The server now owns create-time `dueAt`/`startAt`/`requestedBy`/`assignedProject`/`resolution`/`forceUuid` params and validates resolution/UUID before write. |
 | `set` | `rpc-backed` | **Field-update parity widened** (production contract tests: state/multi-field/dry-run-json/if-match-ok/description-file/stdin-refs/meta-file/slug-assignee/routing-resolution-cp/parent-task/parent-clear/parent-dry-run-json/bulk-flags) via `wrkq.task.update` patch. The mirror owns stdin ref expansion, legacy `@file` / `-` body reads, dry-run rendering, `--if-match` CAS forwarding, `--continue-on-error` exit taxonomy, caller-side slug/assignee normalization for dry-run parity, raw JSON metadata preservation via `metaRaw`, and legacy bulk execution flags (`--jobs`, `--ordered`; `--batch-size` is parsed and unused like legacy). The server owns patch handling for slug, parent set/clear with default kind transitions, requested/assigned project, resolution, CP/session/run fields, and assignee normalization. |
 | `claim` | `rpc-backed` | Atomic remote-only task holdership via `wrkq.task.claim`. The server derives `claimed_node` from authenticated per-node token context, assigns a monotonic generation and one-time token, and returns distinct already-claimed/wrong-state errors. `--take-over` confirmation and `--yes` are caller-owned. No TTL or lease. |

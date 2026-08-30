@@ -67,6 +67,7 @@ wrkq tree myproject -L 2          # max depth 2
 
 # Container detail / update
 wrkq container cat myproject
+wrkq cat P-00001                 # root cat also resolves container IDs/paths
 wrkq container set myproject --webhook-url http://127.0.0.1:18451/api/webhooks/wrkq
 
 # Register a checkout root on a top-level project (paths under $HOME stored as ~/...)
@@ -85,7 +86,7 @@ wrkq touch myproject/implement-feature \
 # Create a subtask
 wrkq touch myproject/sub-piece --parent-task T-00001
 
-# Read a task (TTY: markdown + front matter + comments; piped: JSON)
+# Read a task, container, or promise (TTY: human/raw detail; piped: JSON)
 wrkq cat myproject/implement-feature
 wrkq cat T-00001 --output raw       # markdown in pipelines
 wrkq cat T-00001 --exclude-comments
