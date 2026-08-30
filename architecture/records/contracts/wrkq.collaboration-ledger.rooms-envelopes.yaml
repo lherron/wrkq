@@ -26,7 +26,8 @@ predicate: >
   `hidden` label, settable by any principal, removes a room from the default
   listing only.
 
-  An envelope is one object for chat and obligation addressed to exactly ONE
+  An envelope is one object for chat and, when reply_required, obligation,
+  addressed to exactly ONE
   recipient, minted `EN-\d{5}` — not `EV-`, which evidence_items already owns
   and exposes through wrkf.evidence.show. A multi-addressee say fans out to one
   envelope per addressee in ONE transaction sharing a group id equal to the
@@ -34,15 +35,18 @@ predicate: >
   recipient's reply, defer, round, or dead never disposes or pauses another's
   obligation. The say's idempotency key rides every envelope of the fan-out and
   is unique per (key, addressee), so a retried say rolls the whole group back
-  rather than half-writing it. Only an addressed envelope fires: an addressee-less
-  say is disposed at write, and a fyi envelope is acked at its OWN presentation.
-  A reply acks every presented reply_required envelope in that room addressed to
-  the replier's own scope from that counterparty and nothing else; deferred is
-  paused and never terminal, and a retry time is carried by a wrkq promise whose
-  expiry re-pends the envelope through a derived, event-free transition. The
-  kicker wake set and the stop-hook predicate are uniform over rooms: an
-  addressed obligation wakes and gates whatever its room's work, activity, or
-  hidden label reads.
+  rather than half-writing it. The live vocabulary is exactly none, notify, and
+  reply_required. An addressee-less none say is disposed at write. Addressed
+  notify and reply_required envelopes both birth an unborn scope and wake a
+  seated one; notify owes nothing and is acked at its OWN presentation, while
+  reply_required advances to presented and remains owed. A reply acks every
+  presented reply_required envelope in that room addressed to the replier's own
+  scope from that counterparty and nothing else; deferred is paused and never
+  terminal, and a retry time is carried by a wrkq promise whose expiry re-pends
+  the envelope through a derived, event-free transition. The summon set and the
+  stop-hook predicate are uniform over rooms: addressed notify and
+  reply_required envelopes summon whatever the room's work, activity, or hidden
+  label reads, while only reply_required gates turn end.
 
   Membership is identity and attendance, never delivery and never an ACL, and is
   sourced only from spoke, addressed, and joined — never derived from wrkq
@@ -62,6 +66,7 @@ consumers:
   - container-scoped webhook subscribers waking on envelope.created
   - "wrkq monitor watch|wait over R- and EN- selectors"
 source:
+  - wrkq:T-07746
   - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
   - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
@@ -83,7 +88,7 @@ enforced_by: "wave 1 ledger/routing bundle; promote to active only after the HRC
 reopen_when:
   - one envelope acquires multiple addressees, or a fan-out sibling's disposition can reach another sibling
   - a derived room acquires a friendly id, or a room key stops being its work identity
-  - a room property becomes a send gate, or an addressed obligation is excluded from the kicker or stop-hook reads
+  - a room property becomes a send gate, notify or reply_required is excluded from summon, or reply_required is excluded from the stop-hook read
   - room activity ceases to be one total, first-match projection over max(opened_at, newest envelope, newest member join)
   - membership becomes derived from a wrkq field, or membership starts gating delivery or reads
   - deferred becomes terminal, or a defer retry stops being carried by a wrkq promise
