@@ -1,0 +1,54 @@
+id: wrkq.collaboration-ledger.bounded-observation
+kind: contract
+status: active
+owner_project: wrkq
+scope: member-scoped collaboration-envelope reverse history and forward catch-up reads consumed through @wrkq/client
+predicate: >
+  wrkq exposes one authority-owned bounded member-scoped envelope-page contract
+  with exactly one exclusive beforeMessageSeq or afterMessageSeq position. It
+  applies exact principal and scope membership before ordering and limiting,
+  reads at most limit plus one matching rows through an index-backed query with
+  a maximum limit of 500, and returns chronological envelopes with exact
+  hasMoreBefore and hasMoreAfter state.
+
+  The response carries the durable collaboration-ledger incarnation and current
+  head message sequence from the same read transaction as the page. Follow-up
+  reads assert the expected incarnation; replacement is typed cursor_invalid
+  with no envelopes. Reverse pages have no gaps or duplicates, and forward
+  consumers drain every bounded page before advancing or waiting so a burst
+  larger than one page cannot skip its oldest unseen envelope. Existing newest
+  room-history callers remain behavior-compatible.
+
+  The typed WorkClient and wrkq-lib port consume this producer contract directly.
+  ACP does not materialize all room history or filter an unbounded room set in
+  memory, and this observation surface does not transfer collaboration authority
+  out of wrkq.
+authority:
+  repo: wrkq
+  surface: member-scoped envelope repository query, wrkq workrpc method, @wrkq/client, and wrkq-lib collaboration port
+consumers:
+  - ACP mobile timeline history, snapshot, and forward catch-up projection
+  - future bounded collaboration observers using the typed client
+source:
+  - wrkq:T-07723
+  - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
+  - internal/domain/rooms.go
+  - internal/store/rooms.go
+  - internal/wrkqapi/rooms.go
+  - packages/client/src/wrkq/types.ts
+required_tests:
+  - before/after boundary, limit-one, exact-member filter-before-limit, cross-room ordering, and unrelated-noise gates
+  - indexed query-plan and limit-plus-one materialization evidence
+  - multi-page forward burst, incarnation replacement, typed-client, and no-all-history-fallback gates
+last_verified:
+  date: 2026-08-29
+  evidence: P-00454 rev 4 design approval; implementation gates pending.
+reopen_when:
+  - member filtering moves after ordering or limiting
+  - page admission exceeds limit plus one matching rows or the maximum limit changes
+  - before or after positions cease to be exclusive, or forward consumers may advance over an unprocessed page
+  - incarnation, head, and page cease to share one transaction or replacement can return envelopes
+  - ACP regains an all-history materialization or client-side member-filtering path
+  - the typed producer/client method or envelope-page DTO changes
+supersedes: []
+superseded_by: null
