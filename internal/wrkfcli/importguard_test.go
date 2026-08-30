@@ -51,7 +51,7 @@ func TestLegacyDirectDBBootstrapCannotRegrow(t *testing.T) {
 }
 
 // TestCommandAdapterImportGuard freezes the remote migration boundary: durable
-// command behavior crosses only internal/workrpc/client. watch.go retains the
+// command behavior crosses only pkg/client. watch.go retains the
 // ratified workflow import because its bounded poll loop evaluates local watch
 // predicates; evidence exec's local os/exec path needs no durable package.
 func TestCommandAdapterImportGuard(t *testing.T) {
@@ -71,7 +71,7 @@ func TestCommandAdapterImportGuard(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, importPath := range imports {
-			if importPath == "github.com/lherron/wrkq/internal/workrpc/client" {
+			if importPath == "github.com/lherron/wrkq/pkg/client" {
 				foundClient = true
 			}
 			if name == "watch.go" && importPath == "github.com/lherron/wrkq/internal/workflow" {
@@ -83,11 +83,11 @@ func TestCommandAdapterImportGuard(t *testing.T) {
 		}
 	}
 	if !foundClient {
-		t.Fatal("wrkf command adapters no longer import internal/workrpc/client; durable behavior must retain the shared transport boundary")
+		t.Fatal("wrkf command adapters no longer import pkg/client; durable behavior must retain the shared transport boundary")
 	}
 	if len(violations) > 0 {
 		sort.Strings(violations)
-		t.Fatalf("wrkf command adapter import guard failed:\n%s\nroute durable behavior through internal/workrpc/client; only watch.go may import workflow for client-owned predicate evaluation", strings.Join(violations, "\n"))
+		t.Fatalf("wrkf command adapter import guard failed:\n%s\nroute durable behavior through pkg/client; only watch.go may import workflow for client-owned predicate evaluation", strings.Join(violations, "\n"))
 	}
 }
 

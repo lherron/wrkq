@@ -53,7 +53,7 @@ authority:
   repo: wrkq
   surface: production wrkq CLI config/bootstrap, workrpc transport, and wrkqd remote surface
 enforced_by: >
-  Locator parsing and shared workrpc/client transport selection; wrkq/wrkf initialize validation of
+  Locator parsing and shared pkg/client transport selection; wrkq/wrkf initialize validation of
   protocol version, schema hash, and required method/capability surface before
   business dispatch; daemon and bootstrap migration-readiness refusal before RPC
   exposure; nodeauth token-to-node resolution, shared-token supersession, and
@@ -63,8 +63,10 @@ exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser, tra
 source:
   - docs/rpc-cli-cutover-plan.md
   - internal/config/config.go
-  - internal/workrpc/client/transport.go
-  - internal/workrpc/client/local.go
+  - pkg/client/transport.go
+  - pkg/client/local.go
+  - pkg/client/client.go
+  - pkg/client/live_contract_test.go
   - internal/wrkfcli/transport.go
   - internal/wrkfcli/importguard_test.go
   - internal/rpccli/transport.go

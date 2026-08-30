@@ -13,7 +13,7 @@ import (
 // exactly what a stale WRKQD_TOKEN injected by a repo-local .env.local cost on
 // 2026-07-25, while a valid WRKQD_TOKEN_FILE sat unused.
 //
-// This lives in package workrpc, not workrpc/client, so the direct client
+// This lives in package workrpc, not pkg/client, so the direct client
 // transport and the stdio-forwarding path share one source of truth (client
 // imports workrpc, so the reverse would cycle).
 //

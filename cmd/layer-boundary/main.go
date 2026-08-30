@@ -79,6 +79,7 @@ func liveConfig() layerguard.Config {
 				Forbidden: []string{module + "/internal/workrpc"},
 				Except: []string{
 					module + "/internal/workrpc",
+					module + "/pkg/client",
 					module + "/internal/rpccli",
 					module + "/internal/wrkqd",
 					module + "/internal/wrkfcli",

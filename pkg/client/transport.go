@@ -1,7 +1,6 @@
-// Package client provides the transport-independent client side of the shared
-// wrkq/wrkf workrpc protocol. Command packages own locator selection and
-// presentation; this package owns framing, lifecycle, authentication, and
-// initialize compatibility checks.
+// Package client provides the public Go client and transport-independent client
+// side of the shared wrkq/wrkf workrpc protocol. It owns framing, lifecycle,
+// authentication, initialize compatibility checks, and typed wrkq helpers.
 package client
 
 import (

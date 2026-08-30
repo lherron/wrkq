@@ -4,12 +4,12 @@ import (
 	"context"
 
 	"github.com/lherron/wrkq/internal/config"
-	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 
 // Keep the existing rpccli names as compatibility aliases while protocol
-// machinery is shared with wrkfcli from internal/workrpc/client.
+// machinery is shared with wrkfcli from pkg/client.
 type Transport = workrpcclient.Transport
 type Error = workrpcclient.Error
 

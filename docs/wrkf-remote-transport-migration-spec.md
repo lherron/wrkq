@@ -20,7 +20,7 @@ This spec migrates the wrkf CLI to the same transport seam wrkq uses, adds the s
 
 ## 3. D1 — Transport seam: share rpccli's, do not fork
 
-**Decision (ratified):** extract the `Transport` interface plus the Remote/InProcess/Subprocess implementations from `internal/rpccli` into **`internal/workrpc/client`** — it is workrpc protocol machinery and that location fits the existing layerguard `workrpc-ownership` exception. Move only protocol/client machinery (`Transport`, `Error`, conn, transports, initialize validation); Cobra/presentation stays outside. wrkfcli constructs it with `RegistryOptions{Entrypoint: "wrkf"}` for the local InProcess registry label; a remote wrkqd is the unified registry and is never required to report entrypoint wrkf.
+**Decision (ratified):** extract the `Transport` interface plus the Remote/InProcess/Subprocess implementations from `internal/rpccli` into one shared workrpc client package. It was first housed at `internal/workrpc/client`; T-07732 later moved that same implementation to the public import path **`github.com/lherron/wrkq/pkg/client`** without changing the wire protocol. Move only protocol/client machinery (`Transport`, `Error`, conn, transports, initialize validation); Cobra/presentation stays outside. wrkfcli constructs it with `RegistryOptions{Entrypoint: "wrkf"}` for the local InProcess registry label; a remote wrkqd is the unified registry and is never required to report entrypoint wrkf.
 
 **Initialize client profile:** the handshake is parameterized per client. Today it hardcodes `capabilities.wrkq` + `wrkq.task.show` as the probe (`internal/rpccli/transport.go:154-172`); the wrkf profile requires `capabilities.wrkf` + a minimal wrkf method instead.
 
@@ -97,9 +97,9 @@ Both conditions' behaviors receive ordinary unit coverage within their implement
 - `wrkf task attach/refresh/inspect/instances/timeline` route to
   `wrkq.workflow.*` (task-side, D2); the list command is
   `wrkq.workflow.instances`, never `wrkf.task.instances`.
-- Guards (S6): importguard on wrkf command paths permits the shared `internal/workrpc/client` package and forbids direct bootstrap/db/workflow imports (sanctioned local-execution carve-outs: evidence exec, watch loop); entrypoint-equivalence extension; golden-parity suite as CI guard.
+- Guards (S6): importguard on wrkf command paths permits the shared `pkg/client` package and forbids direct bootstrap/db/workflow imports (sanctioned local-execution carve-outs: evidence exec, watch loop); entrypoint-equivalence extension; golden-parity suite as CI guard.
 - S6 enforcement keeps local registry/database construction inside
-  `internal/workrpc/client`, gives `watch.go` the sole workflow-import carve-out,
+  `pkg/client`, gives `watch.go` the sole workflow-import carve-out,
   exercises the guard's direct-store red control, freezes representative local
   read/validate/mutate/hook output bytes, extends entrypoint equivalence through
   `workflow.install`, and advances the evidenced surfaceguard baseline.

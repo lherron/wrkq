@@ -51,6 +51,7 @@ authority:
   surface: shared wrkq/wrkf JSON-RPC (stdio)
 consumers:
   - "@wrkq/client"               # packages/client — owns its own compatibility obligation + tests
+  - "github.com/lherron/wrkq/pkg/client" # public Go client — owns transport compatibility + typed helpers
 source:
   - internal/wrkfapi/errors.go            # WRKF_NOT_FOUND, WRKF_VALIDATION, WRKF_STALE_REVISION, …
   - internal/workrpc/errors.go            # maps typed codes onto JSON-RPC
@@ -58,8 +59,10 @@ source:
   - internal/workrpc/codec_contract_test.go
   - internal/workrpc/entrypoint_equivalence_test.go
   - internal/workrpc/registry.go
-  - internal/workrpc/client/transport.go
-  - internal/workrpc/client/local.go
+  - pkg/client/transport.go
+  - pkg/client/local.go
+  - pkg/client/client.go
+  - pkg/client/live_contract_test.go
   - internal/workrpc/workflow_discontinued_acceptance_test.go
   - internal/workrpc/project_root_test.go
   - internal/workrpc/instance_cancel_acceptance_test.go

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/config"
-	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 

@@ -14,7 +14,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
-	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/lherron/wrkq/internal/wrkfapi"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 

@@ -14,9 +14,9 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/scope"
-	workrpcclient "github.com/lherron/wrkq/internal/workrpc/client"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 	"github.com/lherron/wrkq/internal/wrkqapi"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 
