@@ -3,6 +3,7 @@ import { createClient } from "../src/client";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type {
   WrkqEnvelope,
+  WrkqEnvelopeMemberPage,
   WrkqEnvelopeInboxView,
   WrkqEnvelopePendingView,
   WrkqEnvelopePresentResult,
@@ -39,6 +40,7 @@ const ROOM: WrkqRoom = {
 const ENVELOPE: WrkqEnvelope = {
   uuid: "envelope-uuid",
   id: "EN-00001",
+  messageSeq: 1,
   roomUuid: ROOM.uuid,
   roomKey: ROOM.key,
   roomKind: "task",
@@ -79,6 +81,13 @@ const SAY_RESULT: WrkqRoomSayResult = {
 };
 
 const LOG_VIEW: WrkqRoomLogView = { room: ROOM, items: [ENVELOPE] };
+const MEMBER_PAGE: WrkqEnvelopeMemberPage = {
+  ledgerIncarnation: "ledger-1",
+  headMessageSeq: 1,
+  hasMoreBefore: false,
+  hasMoreAfter: false,
+  items: [ENVELOPE],
+};
 const MEMBERS_VIEW: WrkqRoomMembersView = {
   room: ROOM,
   items: [
@@ -203,6 +212,7 @@ describe("wrkq.envelope facade", () => {
   test("forwards the complete envelope RPC family, HRC-facing verbs included", async () => {
     const transport = new FakeTransport()
       .onResult("wrkq.envelope.show", ENVELOPE)
+      .onResult("wrkq.envelope.memberPage", MEMBER_PAGE)
       .onResult("wrkq.envelope.inboxView", INBOX_VIEW)
       .onResult("wrkq.envelope.defer", { ...ENVELOPE, state: "deferred" })
       .onResult("wrkq.envelope.ack", LOG_VIEW)
@@ -222,6 +232,12 @@ describe("wrkq.envelope facade", () => {
     const client = await createClient({ transport, autoInitialize: false });
 
     const show = { envelope: "EN-00001" };
+    const memberPage = {
+      memberRef: "cody@wrkq:T-07613",
+      beforeMessageSeq: 2,
+      limit: 1,
+      expectedLedgerIncarnation: "ledger-1",
+    };
     const inbox = { scopeRef: "cody@wrkq:T-07613", includeFailed: true };
     const defer = {
       envelope: "EN-00001",
@@ -262,6 +278,7 @@ describe("wrkq.envelope facade", () => {
     const birth = { scopeRef: "cody@wrkq:T-07613" };
 
     await client.wrkq.envelope.show(show);
+    expect((await client.wrkq.envelope.memberPage(memberPage)).items[0]?.messageSeq).toBe(1);
 
     // The inbox names the EXACT token that answers each obligation: HRC's §7
     // reply line prints it verbatim rather than shortening it to a bare name,
@@ -303,6 +320,7 @@ describe("wrkq.envelope facade", () => {
       })),
     ).toEqual([
       { method: "wrkq.envelope.show", params: show },
+      { method: "wrkq.envelope.memberPage", params: memberPage },
       { method: "wrkq.envelope.inboxView", params: inbox },
       { method: "wrkq.envelope.defer", params: defer },
       { method: "wrkq.envelope.ack", params: ack },

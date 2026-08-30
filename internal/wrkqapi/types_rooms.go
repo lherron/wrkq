@@ -84,14 +84,17 @@ type WrkqEnvelopePresentation struct {
 // WrkqEnvelope is the stable envelope resource DTO. EN-xxxxx is an INTERNAL row
 // id: inbox/show/log surface it, the injected presentation never does.
 type WrkqEnvelope struct {
-	UUID     string             `json:"uuid"`
-	ID       string             `json:"id"`
-	RoomUUID string             `json:"roomUuid"`
-	RoomKey  string             `json:"roomKey"`
-	RoomKind string             `json:"roomKind"`
-	GroupID  *string            `json:"groupId,omitempty"`
-	From     WrkqEnvelopeParty  `json:"from"`
-	To       *WrkqEnvelopeParty `json:"to"`
+	UUID string `json:"uuid"`
+	ID   string `json:"id"`
+	// MessageSeq is the numeric EN- suffix: the durable collaboration-ledger
+	// ordinal used by exclusive member-page cursors.
+	MessageSeq int64              `json:"messageSeq"`
+	RoomUUID   string             `json:"roomUuid"`
+	RoomKey    string             `json:"roomKey"`
+	RoomKind   string             `json:"roomKind"`
+	GroupID    *string            `json:"groupId,omitempty"`
+	From       WrkqEnvelopeParty  `json:"from"`
+	To         *WrkqEnvelopeParty `json:"to"`
 	// ReplyTo is the exact --to token that answers THIS envelope: the sender's
 	// scope handle when it has one, else its scope-less principal. HRC's §7
 	// reply line prints it verbatim. A bare name must never be printed in its
@@ -164,6 +167,16 @@ type WrkqRoomListResult struct {
 type WrkqRoomLogView struct {
 	Room  WrkqRoom       `json:"room"`
 	Items []WrkqEnvelope `json:"items"`
+}
+
+// WrkqEnvelopeMemberPage is one bounded chronological cross-room page for an
+// exact active room member. Head and incarnation share the page transaction.
+type WrkqEnvelopeMemberPage struct {
+	LedgerIncarnation string         `json:"ledgerIncarnation"`
+	HeadMessageSeq    int64          `json:"headMessageSeq"`
+	HasMoreBefore     bool           `json:"hasMoreBefore"`
+	HasMoreAfter      bool           `json:"hasMoreAfter"`
+	Items             []WrkqEnvelope `json:"items"`
 }
 
 type WrkqRoomMembersView struct {
@@ -262,6 +275,19 @@ type RoomLogViewParams struct {
 	Limit        int    `json:"limit,omitempty"`
 	PrincipalRef string `json:"principalRef,omitempty"`
 	ScopeRef     string `json:"scopeRef,omitempty"`
+}
+
+// EnvelopeMemberPageParams selects exactly one exclusive cursor direction.
+// Limit is required and bounded to 1..500. ExpectedLedgerIncarnation is
+// optional on the first read and required by consumers on follow-up reads.
+type EnvelopeMemberPageParams struct {
+	MemberRef                 string `json:"memberRef"`
+	BeforeMessageSeq          *int64 `json:"beforeMessageSeq,omitempty"`
+	AfterMessageSeq           *int64 `json:"afterMessageSeq,omitempty"`
+	Limit                     int    `json:"limit"`
+	ExpectedLedgerIncarnation string `json:"expectedLedgerIncarnation,omitempty"`
+	PrincipalRef              string `json:"principalRef,omitempty"`
+	ScopeRef                  string `json:"scopeRef,omitempty"`
 }
 
 // RoomLifecycleParams is retained ONLY by the close/reopen burn-in shims, which

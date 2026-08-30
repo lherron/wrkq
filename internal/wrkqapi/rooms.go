@@ -1005,6 +1005,73 @@ func (a *API) RoomLogView(ctx context.Context, p RoomLogViewParams) (*WrkqRoomLo
 	return view, nil
 }
 
+// EnvelopeMemberPage returns one bounded chronological cross-room page for an
+// exact active member. This is the authority-owned history/catch-up contract;
+// consumers never list rooms or materialize all histories to reproduce it.
+func (a *API) EnvelopeMemberPage(ctx context.Context, p EnvelopeMemberPageParams) (*WrkqEnvelopeMemberPage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if (p.BeforeMessageSeq == nil) == (p.AfterMessageSeq == nil) {
+		return nil, NewValidationError("exactly one of beforeMessageSeq or afterMessageSeq is required", map[string]any{
+			"fields": []string{"beforeMessageSeq", "afterMessageSeq"},
+		})
+	}
+	if (p.BeforeMessageSeq != nil && *p.BeforeMessageSeq < 0) ||
+		(p.AfterMessageSeq != nil && *p.AfterMessageSeq < 0) {
+		return nil, NewValidationError("message sequence must be non-negative", map[string]any{
+			"fields": []string{"beforeMessageSeq", "afterMessageSeq"},
+		})
+	}
+	if p.Limit < 1 || p.Limit > 500 {
+		return nil, NewValidationError("limit must be between 1 and 500", map[string]any{
+			"field": "limit", "minimum": 1, "maximum": 500,
+		})
+	}
+	memberRef, memberPrincipalRef, err := normalizeEnvelopePageMember(p.MemberRef)
+	if err != nil {
+		return nil, err
+	}
+	page, err := a.store.Rooms.MemberEnvelopePage(ctx, store.MemberEnvelopePageParams{
+		MemberRef: memberRef, MemberPrincipalRef: memberPrincipalRef,
+		BeforeMessageSeq: p.BeforeMessageSeq, AfterMessageSeq: p.AfterMessageSeq,
+		Limit: p.Limit, ExpectedLedgerIncarnation: strings.TrimSpace(p.ExpectedLedgerIncarnation),
+	})
+	if err != nil {
+		return nil, mapRoomStoreError(err, "")
+	}
+	result := &WrkqEnvelopeMemberPage{
+		LedgerIncarnation: page.LedgerIncarnation,
+		HeadMessageSeq:    page.HeadMessageSeq,
+		HasMoreBefore:     page.HasMoreBefore,
+		HasMoreAfter:      page.HasMoreAfter,
+		Items:             make([]WrkqEnvelope, 0, len(page.Items)),
+	}
+	rooms := map[string]*roomState{}
+	for index := range page.Items {
+		item := &page.Items[index]
+		state := rooms[item.Envelope.RoomUUID]
+		if state == nil {
+			state, err = a.loadRoomState(ctx, item.Envelope.RoomUUID)
+			if err != nil {
+				return nil, err
+			}
+			rooms[item.Envelope.RoomUUID] = state
+		}
+		dto, err := a.envelopeDTO(ctx, &item.Envelope, state)
+		if err != nil {
+			return nil, err
+		}
+		// The repository owns cursor identity; asserting the same ordinal parsed
+		// by the ordinary envelope DTO catches any future EN id divergence.
+		if dto.MessageSeq != item.MessageSeq {
+			return nil, NewInternalError(fmt.Errorf("envelope sequence mismatch for %s", dto.ID))
+		}
+		result.Items = append(result.Items, *dto)
+	}
+	return result, nil
+}
+
 // RoomClose and RoomReopen are REMOVED. Rooms have no lifecycle that can gate
 // traffic (T-07612 rev 3), so there is nothing left for either verb to do. They
 // stay registered for one burn-in window returning a typed, named refusal —
@@ -2010,9 +2077,14 @@ func (a *API) envelopeListDTO(ctx context.Context, params store.EnvelopeListPara
 }
 
 func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *roomState) (*WrkqEnvelope, error) {
+	_, sequence, err := id.Parse(envelope.ID)
+	if err != nil {
+		return nil, NewInternalError(fmt.Errorf("invalid envelope ledger id %q: %w", envelope.ID, err))
+	}
 	dto := &WrkqEnvelope{
 		UUID: envelope.UUID, ID: envelope.ID, RoomUUID: envelope.RoomUUID,
-		RoomKey: room.key, RoomKind: string(room.row.Kind), GroupID: envelope.GroupID,
+		MessageSeq: int64(sequence),
+		RoomKey:    room.key, RoomKind: string(room.row.Kind), GroupID: envelope.GroupID,
 		From:       WrkqEnvelopeParty{PrincipalRef: envelope.FromPrincipalRef, ScopeRef: envelope.FromScopeRef},
 		ReplyTo:    envelopeReplyTo(envelope),
 		Obligation: string(envelope.Obligation), Body: envelope.Body,
@@ -2125,6 +2197,31 @@ func normalizeRoomScopeRef(raw string) (string, error) {
 	return scope.FormatScopeHandle(parsed), nil
 }
 
+func normalizeEnvelopePageMember(raw string) (string, string, error) {
+	raw = stripRuntimeLane(strings.TrimSpace(raw))
+	if strings.HasPrefix(raw, "agent:") {
+		if err := attribution.ValidatePrincipalRef(raw); err == nil {
+			return raw, raw, nil
+		}
+	}
+	memberRef, err := normalizeRoomScopeRef(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if memberRef == "" {
+		return "", "", NewValidationError(
+			"memberRef must be an exact scope handle or scope-less agent:<id> principal",
+			map[string]any{"field": "memberRef", "memberRef": raw})
+	}
+	parsed, err := scope.ParseScopeHandle(memberRef)
+	if err != nil {
+		return "", "", NewValidationError("invalid memberRef: "+err.Error(), map[string]any{
+			"field": "memberRef", "memberRef": raw,
+		})
+	}
+	return memberRef, "agent:" + parsed.AgentID, nil
+}
+
 // stripRuntimeLane drops the runtime lane HRC appends to a live session ref
 // (HRC_SESSION_REF is "agent:clod:project:wrkq:task:T-07613/lane:main"). A lane
 // is execution vocabulary: which pane of a runtime is speaking. A room member is
@@ -2178,6 +2275,10 @@ func mapRoomStoreError(err error, selector string) error {
 		return NewConflictError("envelope runtime does not own the newest presentation", map[string]any{
 			"envelope": runtimeMismatch.Envelope, "runtime": runtimeMismatch.Runtime,
 		})
+	}
+	var cursorInvalid *store.CollaborationCursorInvalidError
+	if errors.As(err, &cursorInvalid) {
+		return NewCursorInvalidError(cursorInvalid.Expected, cursorInvalid.Current)
 	}
 	var mismatch *domain.ETagMismatchError
 	if errors.As(err, &mismatch) {

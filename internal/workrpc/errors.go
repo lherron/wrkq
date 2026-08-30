@@ -24,6 +24,7 @@ const (
 	CodeWRKQWrongState        = "WRKQ_WRONG_STATE"
 	CodeWRKQClaimSuperseded   = "WRKQ_CLAIM_SUPERSEDED"
 	CodeWRKQNodeIdentity      = "WRKQ_NODE_IDENTITY_REQUIRED"
+	CodeWRKQCursorInvalid     = "WRKQ_CURSOR_INVALID"
 	CodeWorkRPCInternal       = "WORKRPC_INTERNAL"
 )
 
@@ -39,6 +40,7 @@ var domainRPCCode = map[string]int{
 	CodeWRKQWrongState:               -32028,
 	CodeWRKQClaimSuperseded:          -32029,
 	CodeWRKQNodeIdentity:             -32030,
+	CodeWRKQCursorInvalid:            -32032,
 	wrkfapi.CodeNotFound:             -32004,
 	wrkfapi.CodeValidation:           -32602,
 	wrkfapi.CodeStaleRevision:        -32009,

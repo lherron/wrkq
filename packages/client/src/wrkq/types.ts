@@ -241,6 +241,8 @@ export interface WrkqEnvelope {
   uuid: string;
   /** `EN-xxxxx`. An INTERNAL row id: the injected presentation never shows it. */
   id: string;
+  /** Numeric EN ordinal used by exclusive collaboration cursors. */
+  messageSeq: number;
   roomUuid: string;
   roomKey: string;
   roomKind: WrkqRoomKind;
@@ -418,6 +420,30 @@ export interface WrkqEnvelopeShowParams {
   envelope: string;
   principalRef?: string;
   scopeRef?: string;
+}
+
+export interface WrkqEnvelopeMemberPageParams {
+  /** Exact stored scope handle, or a scope-less `agent:<id>` principal. */
+  memberRef: string;
+  /** Exclusive reverse-history position. Mutually exclusive with `afterMessageSeq`. */
+  beforeMessageSeq?: number;
+  /** Exclusive forward-catch-up position. Mutually exclusive with `beforeMessageSeq`. */
+  afterMessageSeq?: number;
+  /** Required bounded page size, from 1 through 500. */
+  limit: number;
+  /** Fence follow-up reads against collaboration-ledger replacement. */
+  expectedLedgerIncarnation?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqEnvelopeMemberPage {
+  ledgerIncarnation: string;
+  headMessageSeq: number;
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+  /** Always chronological, in both cursor directions. */
+  items: WrkqEnvelope[];
 }
 
 export interface WrkqEnvelopeInboxViewParams {

@@ -15,6 +15,7 @@ const (
 	CodeWrongState       = "WRKQ_WRONG_STATE"
 	CodeClaimSuperseded  = "WRKQ_CLAIM_SUPERSEDED"
 	CodeNodeIdentity     = "WRKQ_NODE_IDENTITY_REQUIRED"
+	CodeCursorInvalid    = "WRKQ_CURSOR_INVALID"
 	CodeInternal         = "WORKRPC_INTERNAL"
 )
 
@@ -124,6 +125,17 @@ func NewClaimSupersededError(data any) *DomainError {
 func NewNodeIdentityError() *DomainError {
 	return newError(CodeNodeIdentity, "node identity is required for task claims", false, map[string]any{
 		"reason": "missing_verified_node_identity",
+	}, nil)
+}
+
+// NewCursorInvalidError reports an incarnation-fenced cursor whose ledger was
+// replaced. It is non-retryable with the same cursor: callers must retire the
+// old projection and start from the new incarnation.
+func NewCursorInvalidError(expected, current string) *DomainError {
+	return newError(CodeCursorInvalid, "cursor_invalid", false, map[string]any{
+		"reason":                    "ledger_incarnation_changed",
+		"expectedLedgerIncarnation": expected,
+		"currentLedgerIncarnation":  current,
 	}, nil)
 }
 

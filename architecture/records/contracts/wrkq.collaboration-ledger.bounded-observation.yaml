@@ -42,7 +42,7 @@ required_tests:
   - multi-page forward burst, incarnation replacement, typed-client, and no-all-history-fallback gates
 last_verified:
   date: 2026-08-29
-  evidence: P-00454 rev 4 design approval; implementation gates pending.
+  evidence: T-07723 indexed limit-plus-one repository, reverse/forward API, incarnation replacement, RPC schema, and typed-client gates; just verify green.
 reopen_when:
   - member filtering moves after ordering or limiting
   - page admission exceeds limit plus one matching rows or the maximum limit changes
