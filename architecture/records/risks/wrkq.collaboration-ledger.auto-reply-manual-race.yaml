@@ -1,0 +1,37 @@
+id: wrkq.collaboration-ledger.auto-reply-manual-race
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-08-31
+severity: low
+blast_radius: >
+  HRC checks a driven envelope's discharge state and then emits the automatic
+  turn-final reply through the existing ordinary say surface. Because those are
+  separate wrkq operations, a deliberate manual reply can commit between them
+  and be followed by the automatic reply, leaving two visible replies in the
+  same room and its egress. Both are ordinary says and preserve obligation
+  semantics; the failure is a cosmetic duplicate, not a suppressed reply or an
+  undisposed obligation.
+mitigation: >
+  Driven-turn priming no longer instructs agents to issue the ordinary reply
+  manually. Automatic replies carry deterministic auto-reply:<driveAttemptId>
+  idempotency and auto: turn_final provenance, and HRC verifies every uncertain
+  automatic write against the authoritative committed wrkq envelope row. This
+  excludes replay-created automatic duplicates and makes automatic provenance
+  visible while leaving only the accepted manual-race window.
+expiry: null
+review_trigger:
+  - a manual-race duplicate causes an external effect beyond one extra visible reply
+  - observed manual-race duplicates cease to be rare after the driven-turn prompt sweep
+  - automatic reply scope expands beyond one envelope or one same-sender fan-out group
+  - the principal permits an atomic conditional collaboration mutation
+reopen_when:
+  - ordinary say idempotency, discharge, or read-back identity semantics change
+  - the accepted duplicate window expands beyond a manual say committing between the discharge read and automatic say
+  - automatic replies can be suppressed or obligations can remain undisposed because of the race
+source:
+  - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
+  - wrkq:T-07789
+supersedes: []
+superseded_by: null

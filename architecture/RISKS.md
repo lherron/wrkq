@@ -14,6 +14,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **review_trigger:** a duplicate presentation causes a repeated external side effect; presentation identity stops being visible through wrkc inbox/show/log; the crash window or drive-attempt protocol changes; exactly-once agent side effects become a requirement
 - **expiry:** none
 
+## wrkq.collaboration-ledger.auto-reply-manual-race
+
+- **severity:** low
+- **accepted_by:** Lance (2026-08-31)
+- **blast_radius:** HRC checks a driven envelope's discharge state and then emits the automatic turn-final reply through the existing ordinary say surface. Because those are separate wrkq operations, a deliberate manual reply can commit between them and be followed by the automatic reply, leaving two visible replies in the same room and its egress. Both are ordinary says and preserve obligation semantics; the failure is a cosmetic duplicate, not a suppressed reply or an undisposed obligation.
+- **mitigation:** Driven-turn priming no longer instructs agents to issue the ordinary reply manually. Automatic replies carry deterministic auto-reply:<driveAttemptId> idempotency and auto: turn_final provenance, and HRC verifies every uncertain automatic write against the authoritative committed wrkq envelope row. This excludes replay-created automatic duplicates and makes automatic provenance visible while leaving only the accepted manual-race window.
+- **review_trigger:** a manual-race duplicate causes an external effect beyond one extra visible reply; observed manual-race duplicates cease to be rare after the driven-turn prompt sweep; automatic reply scope expands beyond one envelope or one same-sender fan-out group; the principal permits an atomic conditional collaboration mutation
+- **expiry:** none
+
 ## wrkq.collaboration-ledger.same-uid-disposition-confusion
 
 - **severity:** medium

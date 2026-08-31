@@ -30,6 +30,20 @@ predicate: >
   collaboration copy. wrkq never imports HRC, and wrkc must persist, read, and
   monitor collaboration with every HRC daemon unavailable.
 
+  A bodyless HRC pending-reply intent for one completed drive attempt is
+  execution actuation, not a second collaboration copy. For a successful drive
+  that presented exactly one envelope, or one fan-out group from one sender,
+  HRC may derive the reply from its canonical dispatcher turn-response
+  projection and emit it through the existing ordinary say surface with exact
+  seat-principal attribution, deterministic auto-reply:<driveAttemptId>
+  idempotency, and auto: turn_final provenance. wrkq remains authoritative for
+  both envelope discharge and whether that say committed. After every uncertain
+  write outcome, HRC establishes commitment only by reading the authoritative
+  envelope row bearing that exact sender and idempotency key; the HRC intent
+  never stores the reply body or decides room, envelope, or obligation state.
+  The non-atomic discharge-read/plain-say race is limited to and accepted by
+  wrkq.collaboration-ledger.auto-reply-manual-race.
+
   ACP may persist a rebuildable mobile presentation projection of immutable
   envelope identity, content, addressing, and creation time, fenced by the wrkq
   ledger incarnation. That projection is not collaboration authority, excludes
@@ -42,7 +56,7 @@ predicate: >
 authority:
   repo: wrkq
   surface: room/envelope/member store transactions, wrkq workrpc methods, @wrkq/client, and wrkc
-enforced_by: T-07612 rev 2 ratified boundary, its rev 3 amendment revision 2, and the amended ledger/routing and consumer/cutover evidence bundles
+enforced_by: T-07612 rev 2 ratified boundary, its rev 3 amendment revision 2, the approved T-07789 auto-reply amendment, and the amended ledger/routing and consumer/cutover evidence bundles
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the collaboration mutation, routing, or consumer boundary"
 source:
   - architecture/adr/0002-wrkq-owns-durable-agent-collaboration.md
@@ -50,12 +64,14 @@ source:
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
   - architecture/records/invariants/wrkq.campaign.canonical-portfolio-authority.yaml
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
+  - architecture/records/risks/wrkq.collaboration-ledger.auto-reply-manual-race.yaml
+  - wrkq:T-07789
 required_tests:
   - T-07612 ledger and routing bundle
   - T-07612 consumer and cutover bundle
 last_verified:
-  date: 2026-08-27
-  evidence: Daedalus source-grounded architecture approval of T-07612 rev 2; implementation gates pending.
+  date: 2026-08-31
+  evidence: Daedalus source-grounded architecture approval of the T-07789 auto-reply amendment; implementation gates pending.
 reopen_when:
   - any non-wrkq store becomes a durable room, envelope, obligation, membership, attendance, or presentation-receipt authority
   - wrkq or wrkc acquires an HRC runtime dependency
@@ -66,5 +82,8 @@ reopen_when:
   - an ACP projection persists mutable collaboration state or survives a wrkq ledger-incarnation replacement
   - room work, activity, or visibility becomes a send gate or excludes an addressed obligation from the uniform kicker and stop-hook reads
   - room activity ceases to be one total, first-match projection over the specified last_activity clock
+  - an HRC auto-reply intent stores collaboration content, becomes authoritative for mint or discharge state, or stops verifying uncertain writes against committed wrkq envelope rows
+  - automatic reply scope expands beyond one envelope or one same-sender fan-out group per driven turn
+  - the accepted discharge-read/plain-say duplicate window changes
 supersedes: []
 superseded_by: null
