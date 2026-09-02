@@ -374,7 +374,7 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
 	f := newWrkcFixture(t)
 	sayOut, err := runWrkcInput(t, f.dbPath, "agent:clod", "admission\n",
-		"say", f.taskID, "-", "--to", "cody", "--ttl", "1h", "--hold",
+		"say", f.taskID, "-", "--to", "cody", "--ttl", "1h", "--preempt",
 		"--idempotency-key", "admission-cli-1", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
 	if err != nil {
 		t.Fatalf("say admission: %v\n%s", err, sayOut)
@@ -399,7 +399,7 @@ func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
 		t.Fatalf("withdrawn = %+v", withdrawn)
 	}
 
-	for _, args := range [][]string{{"say", f.taskID, "body", "--ttl", "30s"}, {"say", f.taskID, "body", "--hold"}, {"say", f.taskID, "body", "--discharges", "EN-00001"}} {
+	for _, args := range [][]string{{"say", f.taskID, "body", "--ttl", "30s"}, {"say", f.taskID, "body", "--preempt"}, {"say", f.taskID, "body", "--discharges", "EN-00001"}} {
 		if out, err := runWrkc(t, f.dbPath, "agent:clod", args...); err == nil {
 			t.Fatalf("%v unexpectedly succeeded: %s", args, out)
 		}

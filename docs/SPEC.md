@@ -417,7 +417,7 @@ with obligation `none`, `fyi`, or `reply_required`. HRC owns runtime delivery an
 actuation, and persists only opaque presentation receipts back into wrkq.
 
 Addressed envelopes store immutable `delivery` (`queue` by default, `hold` when
-requested) and optional server-normalized `expires_at`. wrkq projects these
+`wrkc say --preempt` is requested) and optional server-normalized `expires_at`. wrkq projects these
 fields but never interprets hold as routing authority. A pending or deferred
 envelope whose deadline passes before any presentation receipt materializes as
 terminal `expired` on the next attributed inbox, show, pending-view, present, or

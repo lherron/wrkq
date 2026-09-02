@@ -258,7 +258,7 @@ func newWrkcSayCmd() *cobra.Command {
 	var to, discharges []string
 	var fyi, newRoom, record bool
 	var respondTo, idempotencyKey, timeout, message, ttl string
-	var wait, hold bool
+	var wait, preempt bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "say <ref> [body|-] [-m body]",
@@ -329,8 +329,8 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if wait && len(to) == 0 {
 				return errors.New("--wait requires --to")
 			}
-			if (hold || ttl != "" || cmd.Flags().Changed("discharges")) && len(to) == 0 {
-				return errors.New("--hold, --ttl, and --discharges require --to")
+			if (preempt || ttl != "" || cmd.Flags().Changed("discharges")) && len(to) == 0 {
+				return errors.New("--preempt, --ttl, and --discharges require --to")
 			}
 
 			tr, _, closeFn, err := openMirror(cmd)
@@ -354,7 +354,8 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if ttl != "" {
 				params["ttl"] = ttl
 			}
-			if hold {
+			if preempt {
+				// The ledger stores the intent as delivery "hold"; the verb is HRC's.
 				params["hold"] = true
 			}
 			if cmd.Flags().Changed("discharges") {
@@ -407,7 +408,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 	cmd.Flags().BoolVar(&record, "record", false, "Also write the body as a wrkq comment on the room's task")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key for this say; carried by every envelope of the fan-out")
 	cmd.Flags().StringVar(&ttl, "ttl", "", "Expire if never presented within this duration (for example 30s)")
-	cmd.Flags().BoolVar(&hold, "hold", false, "Store hold delivery intent for HRC admission")
+	cmd.Flags().BoolVar(&preempt, "preempt", false, "Ask HRC to interrupt the addressee's active turn and inject this now (operator authority; otherwise queued with a refusal receipt). Stored as delivery intent \"hold\"; wrkq never routes it")
 	cmd.Flags().StringSliceVar(&discharges, "discharges", nil, "Presented envelope ids this reply discharges, exactly")
 	addPromiseOutputFlags(cmd, &output, false)
 	return cmd

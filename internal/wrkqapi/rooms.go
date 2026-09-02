@@ -47,7 +47,7 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		return nil, NewValidationError("--ttl requires --to", map[string]any{"field": "to"})
 	}
 	if p.Hold && len(p.To) == 0 {
-		return nil, NewValidationError("--hold requires --to", map[string]any{"field": "to"})
+		return nil, NewValidationError("--preempt requires --to", map[string]any{"field": "to"})
 	}
 	if p.DischargeEnvelopeIDs != nil && len(p.To) == 0 {
 		return nil, NewValidationError("dischargeEnvelopeIds requires --to", map[string]any{"field": "to"})

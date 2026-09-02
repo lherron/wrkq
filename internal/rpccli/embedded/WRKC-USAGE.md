@@ -105,8 +105,11 @@ retry time): the deferral survives rotation and returns as a pointer.
 
 `say --ttl 30s` gives addressed mail a server-normalized expiry. If it has no
 presentation receipt by then, the next authoritative read materializes terminal
-`expired`; a deferral does not extend the TTL. `say --hold` stores immutable
-delivery intent for HRC; wrkq does not route or authorize preemption.
+`expired`; a deferral does not extend the TTL. `say --preempt` asks HRC to
+interrupt the addressee's active turn and inject the message now; it is honored
+only under operator authority and otherwise queued with a refusal receipt. wrkq
+stores it as immutable delivery intent `hold` and never routes or authorizes
+preemption itself.
 
 `withdraw EN-xxxxx` lets the sender cancel pending or deferred mail before any
 presentation receipt. `--group` attempts every fan-out sibling atomically and
@@ -129,7 +132,7 @@ on — and answering it is an ordinary say.
 
 ```bash
 wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--new]
-                        [--ttl d] [--hold] [--discharges EN-a,EN-b]
+                        [--ttl d] [--preempt] [--discharges EN-a,EN-b]
                         [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
 wrkc log <room> [--task T-x] [--limit n]
