@@ -43,6 +43,19 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if p.FYI && len(p.To) == 0 {
 		return nil, NewValidationError("--fyi requires --to; a say without an addressee is a log entry", map[string]any{"field": "to"})
 	}
+	if strings.TrimSpace(p.TTL) != "" && len(p.To) == 0 {
+		return nil, NewValidationError("--ttl requires --to", map[string]any{"field": "to"})
+	}
+	if p.Hold && len(p.To) == 0 {
+		return nil, NewValidationError("--hold requires --to", map[string]any{"field": "to"})
+	}
+	if p.DischargeEnvelopeIDs != nil && len(p.To) == 0 {
+		return nil, NewValidationError("dischargeEnvelopeIds requires --to", map[string]any{"field": "to"})
+	}
+	expiresAt, _, err := normalizePromiseReviewTime("", p.TTL, false)
+	if err != nil {
+		return nil, NewValidationError(strings.Replace(err.Error(), "reviewIn", "ttl", 1), map[string]any{"field": "ttl"})
+	}
 
 	routed, err := a.routeSay(ctx, attr, senderScope, p)
 	if err != nil {
@@ -88,28 +101,25 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		respondTo = &normalized
 	}
 
-	// Speaking is membership: the sender is in the room from the first say.
+	// Speaking is membership: the sender is in the room from the first say. It
+	// is written inside the envelope transaction so explicit scoped discharge
+	// is all-or-nothing with both reply and membership.
 	senderRef := attr.PrincipalRef
 	senderScoped := false
 	if senderScope != "" {
 		senderRef = senderScope
 		senderScoped = true
 	}
-	if _, err := a.store.Rooms.AddMemberWithAttribution(attr, room.row.UUID, store.RoomMemberSeed{
-		MemberRef: senderRef, MemberPrincipalRef: attr.PrincipalRef,
-		Scoped: senderScoped, Source: domain.RoomMemberSourceSpoke,
-	}); err != nil {
-		return nil, NewInternalError(err)
-	}
-
 	var senderScopePtr *string
 	if senderScope != "" {
 		senderScopePtr = &senderScope
 	}
-	created, err := a.store.Rooms.CreateEnvelopesWithAttribution(attr, store.EnvelopeCreateParams{
+	createParams := store.EnvelopeCreateParams{
 		RoomUUID:              room.row.UUID,
 		FromPrincipalRef:      attr.PrincipalRef,
 		FromScopeRef:          senderScopePtr,
+		SenderMemberRef:       senderRef,
+		SenderScoped:          senderScoped,
 		Addressees:            addressees,
 		Obligation:            obligation,
 		Body:                  body,
@@ -117,7 +127,24 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		RespondToPrincipalRef: respondTo,
 		IdempotencyKey:        optionalString(p.IdempotencyKey),
 		Meta:                  metaString(p.Meta),
-	})
+		ExpiresAt:             optionalString(expiresAt),
+		Delivery:              domain.EnvelopeDeliveryQueue,
+		DischargeEnvelopeIDs:  p.DischargeEnvelopeIDs,
+	}
+	if p.Hold {
+		createParams.Delivery = domain.EnvelopeDeliveryHold
+	}
+	var created []domain.Envelope
+	acked := []string{}
+	if p.DischargeEnvelopeIDs != nil {
+		var scopedAcked []domain.Envelope
+		created, scopedAcked, err = a.store.Rooms.CreateEnvelopesAndDischargeWithAttribution(attr, createParams)
+		for i := range scopedAcked {
+			acked = append(acked, scopedAcked[i].ID)
+		}
+	} else {
+		created, err = a.store.Rooms.CreateEnvelopesWithAttribution(attr, createParams)
+	}
 	if err != nil {
 		return nil, mapRoomStoreError(err, "")
 	}
@@ -128,9 +155,11 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	// enters it. Sibling envelopes of a fan-out addressed to other scopes are
 	// untouched, and a deferred envelope is excluded — defer first to hold one
 	// back.
-	acked := []string{}
 	seenCounterparty := map[string]bool{}
 	for _, addressee := range addressees {
+		if p.DischargeEnvelopeIDs != nil {
+			break
+		}
 		// A counterparty is an ADDRESS: its scope, or its principal only when it
 		// has no scope. Two seats of the same agent are two counterparties.
 		counterparty := addressee.ScopeRef
@@ -1271,6 +1300,13 @@ func (a *API) EnvelopeShow(ctx context.Context, p EnvelopeShowParams) (*WrkqEnve
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	attr, err := a.attributionFor(p.PrincipalRef)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := a.store.Rooms.ExpireDueEnvelopes(attr); err != nil {
+		return nil, NewInternalError(err)
+	}
 	envelope, err := a.store.Rooms.GetEnvelope(strings.TrimSpace(p.Envelope))
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Envelope)
@@ -1332,6 +1368,9 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	if err != nil {
 		return nil, err
 	}
+	if _, err := a.store.Rooms.ExpireDueEnvelopes(attr); err != nil {
+		return nil, NewInternalError(err)
+	}
 	if _, err := a.store.Rooms.RependDueDeferrals(attr); err != nil {
 		return nil, NewInternalError(err)
 	}
@@ -1349,7 +1388,7 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 
 	view := &WrkqEnvelopeInboxView{
 		PrincipalRef: attr.PrincipalRef, Groups: []WrkqEnvelopeInboxGroup{},
-		Deferred: []WrkqEnvelope{}, Failed: []WrkqEnvelope{}, SentFailed: []WrkqEnvelope{},
+		Deferred: []WrkqEnvelope{}, Failed: []WrkqEnvelope{}, SentFailed: []WrkqEnvelope{}, SentExpired: []WrkqEnvelope{}, SentWithdrawn: []WrkqEnvelope{},
 	}
 	if target != "" {
 		view.ScopeRef = &target
@@ -1414,7 +1453,67 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	if err != nil {
 		return nil, err
 	}
+	sent.States = []domain.EnvelopeState{domain.EnvelopeStateExpired}
+	view.SentExpired, err = a.envelopeListDTO(ctx, sent)
+	if err != nil {
+		return nil, err
+	}
+	sent.States = []domain.EnvelopeState{domain.EnvelopeStateWithdrawn}
+	view.SentWithdrawn, err = a.envelopeListDTO(ctx, sent)
+	if err != nil {
+		return nil, err
+	}
 	return view, nil
+}
+
+// EnvelopeWithdraw is the sender cancellation surface. A scope-less operator
+// already known to the ledger may override sender ownership, matching wrkc's
+// existing operator model without adding a second principal registry.
+func (a *API) EnvelopeWithdraw(ctx context.Context, p EnvelopeWithdrawParams) (*WrkqEnvelopeWithdrawResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	attr, err := a.attributionFor(p.PrincipalRef)
+	if err != nil {
+		return nil, err
+	}
+	envelope, err := a.store.Rooms.GetEnvelope(strings.TrimSpace(p.Envelope))
+	if err != nil {
+		return nil, mapRoomStoreError(err, p.Envelope)
+	}
+	if envelope.FromPrincipalRef != attr.PrincipalRef {
+		scopeRef, serr := normalizeRoomScopeRef(p.ScopeRef)
+		if serr != nil {
+			return nil, serr
+		}
+		if scopeRef != "" {
+			return nil, NewForbiddenError("only the sender or a scope-less operator may withdraw this envelope", map[string]any{"envelope": envelope.ID})
+		}
+	}
+	withdrawn, err := a.store.Rooms.WithdrawEnvelopesWithAttribution(attr, envelope.UUID, p.Group, strings.TrimSpace(p.Reason))
+	if err != nil {
+		return nil, mapRoomStoreError(err, p.Envelope)
+	}
+	result := &WrkqEnvelopeWithdrawResult{Withdrawn: []WrkqEnvelope{}, Refused: []WrkqEnvelopeWithdrawRefusal{}}
+	for i := range withdrawn.Withdrawn {
+		state, serr := a.loadRoomState(ctx, withdrawn.Withdrawn[i].RoomUUID)
+		if serr != nil {
+			return nil, serr
+		}
+		dto, derr := a.envelopeDTO(ctx, &withdrawn.Withdrawn[i], state)
+		if derr != nil {
+			return nil, derr
+		}
+		result.Withdrawn = append(result.Withdrawn, *dto)
+	}
+	for i := range withdrawn.Refused {
+		refusal := WrkqEnvelopeWithdrawRefusal{EnvelopeID: withdrawn.Refused[i].Envelope.ID, Reason: withdrawn.Refused[i].Reason, State: string(withdrawn.Refused[i].Envelope.State)}
+		if withdrawn.Refused[i].Presentation != nil {
+			refusal.Presentation = presentationDTO(withdrawn.Refused[i].Presentation)
+		}
+		result.Refused = append(result.Refused, refusal)
+	}
+	return result, nil
 }
 
 // EnvelopeDefer pauses one obligation. Deferred is paused, NEVER terminal: a
@@ -1531,6 +1630,9 @@ func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*Wr
 	if err != nil {
 		return nil, err
 	}
+	if _, err := a.store.Rooms.ExpireDueEnvelopes(attr); err != nil {
+		return nil, NewInternalError(err)
+	}
 	envelope, err := a.store.Rooms.GetEnvelope(strings.TrimSpace(p.Envelope))
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Envelope)
@@ -1614,6 +1716,9 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 	attr, err := a.attributionFor(p.PrincipalRef)
 	if err != nil {
 		return nil, err
+	}
+	if _, err := a.store.Rooms.ExpireDueEnvelopes(attr); err != nil {
+		return nil, NewInternalError(err)
 	}
 	repended, err := a.store.Rooms.RependDueDeferrals(attr)
 	if err != nil {
@@ -2104,7 +2209,7 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 		From:       WrkqEnvelopeParty{PrincipalRef: envelope.FromPrincipalRef, ScopeRef: envelope.FromScopeRef},
 		ReplyTo:    envelopeReplyTo(envelope),
 		Obligation: string(envelope.Obligation), Body: envelope.Body,
-		State: string(envelope.State), Terminal: domain.IsEnvelopeTerminal(envelope.State),
+		State: string(envelope.State), Terminal: domain.IsEnvelopeTerminal(envelope.State), ExpiresAt: envelope.ExpiresAt, Delivery: string(envelope.Delivery),
 		RetryAt:     envelope.RetryAt,
 		DeferReason: envelope.DeferReason, TerminalActor: envelope.TerminalActor,
 		MaterializationIntent: envelope.MaterializationIntent,
@@ -2285,6 +2390,16 @@ func mapRoomStoreError(err error, selector string) error {
 		return NewWrongStateError(map[string]any{
 			"envelope": wrongState.Envelope, "state": string(wrongState.State), "verb": wrongState.Verb,
 		})
+	}
+	var alreadyPresented *store.EnvelopeAlreadyPresentedError
+	if errors.As(err, &alreadyPresented) {
+		return newError(CodeAlreadyPresented, "already_presented", false, map[string]any{
+			"envelope": alreadyPresented.Envelope, "presentation": presentationDTO(&alreadyPresented.Presentation),
+		}, err)
+	}
+	var dischargeInvalid *store.EnvelopeDischargeInvalidError
+	if errors.As(err, &dischargeInvalid) {
+		return NewValidationError("invalid discharge envelope", map[string]any{"envelope": dischargeInvalid.Envelope, "reason": dischargeInvalid.Reason})
 	}
 	var runtimeMismatch *store.EnvelopeRuntimeMismatchError
 	if errors.As(err, &runtimeMismatch) {

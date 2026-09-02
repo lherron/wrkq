@@ -106,6 +106,8 @@ type WrkqEnvelope struct {
 	TaskID                *string `json:"taskId,omitempty"`
 	State                 string  `json:"state"`
 	Terminal              bool    `json:"terminal"`
+	ExpiresAt             *string `json:"expiresAt,omitempty"`
+	Delivery              string  `json:"delivery"`
 	FailureReason         *string `json:"failureReason,omitempty"`
 	RetryAt               *string `json:"retryAt,omitempty"`
 	DeferReason           *string `json:"deferReason,omitempty"`
@@ -195,12 +197,14 @@ type WrkqEnvelopeInboxGroup struct {
 // own heading with their retry time. Failed contains failed obligations
 // addressed to the caller when requested; SentFailed is always sender-side.
 type WrkqEnvelopeInboxView struct {
-	ScopeRef     *string                  `json:"scopeRef,omitempty"`
-	PrincipalRef string                   `json:"principalRef"`
-	Groups       []WrkqEnvelopeInboxGroup `json:"groups"`
-	Deferred     []WrkqEnvelope           `json:"deferred"`
-	Failed       []WrkqEnvelope           `json:"failed"`
-	SentFailed   []WrkqEnvelope           `json:"sentFailed"`
+	ScopeRef      *string                  `json:"scopeRef,omitempty"`
+	PrincipalRef  string                   `json:"principalRef"`
+	Groups        []WrkqEnvelopeInboxGroup `json:"groups"`
+	Deferred      []WrkqEnvelope           `json:"deferred"`
+	Failed        []WrkqEnvelope           `json:"failed"`
+	SentFailed    []WrkqEnvelope           `json:"sentFailed"`
+	SentExpired   []WrkqEnvelope           `json:"sentExpired"`
+	SentWithdrawn []WrkqEnvelope           `json:"sentWithdrawn"`
 }
 
 // WrkqEnvelopePresentResult is what HRC gets back after recording a
@@ -235,19 +239,42 @@ type WrkqEnvelopePendingView struct {
 // RoomSayParams is the single write verb of the collaboration ledger. Ref is
 // resolved by the §4 routing table; To is the addressee list that fans out.
 type RoomSayParams struct {
-	Ref            string         `json:"ref,omitempty"`
-	Body           string         `json:"body"`
-	To             []string       `json:"to,omitempty"`
-	FYI            bool           `json:"fyi,omitempty"`
-	New            bool           `json:"new,omitempty"`
-	RespondTo      string         `json:"respondTo,omitempty"`
-	Record         bool           `json:"record,omitempty"`
-	IdempotencyKey string         `json:"idempotencyKey,omitempty"`
-	Meta           map[string]any `json:"meta,omitempty"`
-	PrincipalRef   string         `json:"principalRef,omitempty"`
+	Ref                  string         `json:"ref,omitempty"`
+	Body                 string         `json:"body"`
+	To                   []string       `json:"to,omitempty"`
+	FYI                  bool           `json:"fyi,omitempty"`
+	TTL                  string         `json:"ttl,omitempty"`
+	Hold                 bool           `json:"hold,omitempty"`
+	DischargeEnvelopeIDs []string       `json:"dischargeEnvelopeIds,omitempty"`
+	New                  bool           `json:"new,omitempty"`
+	RespondTo            string         `json:"respondTo,omitempty"`
+	Record               bool           `json:"record,omitempty"`
+	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
+	Meta                 map[string]any `json:"meta,omitempty"`
+	PrincipalRef         string         `json:"principalRef,omitempty"`
 	// ScopeRef is the caller's HRC session handle when it has one. wrkq parses it
 	// only as a scope handle and is otherwise opaque to it.
 	ScopeRef string `json:"scopeRef,omitempty"`
+}
+
+type EnvelopeWithdrawParams struct {
+	Envelope     string `json:"envelope"`
+	Group        bool   `json:"group,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	PrincipalRef string `json:"principalRef,omitempty"`
+	ScopeRef     string `json:"scopeRef,omitempty"`
+}
+
+type WrkqEnvelopeWithdrawRefusal struct {
+	EnvelopeID   string                    `json:"envelopeId"`
+	Reason       string                    `json:"reason"`
+	State        string                    `json:"state,omitempty"`
+	Presentation *WrkqEnvelopePresentation `json:"presentation,omitempty"`
+}
+
+type WrkqEnvelopeWithdrawResult struct {
+	Withdrawn []WrkqEnvelope                `json:"withdrawn"`
+	Refused   []WrkqEnvelopeWithdrawRefusal `json:"refused"`
 }
 
 type RoomShowParams struct {

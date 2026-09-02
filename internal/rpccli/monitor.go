@@ -199,6 +199,10 @@ Invalid selectors fail with exit code 2 before any streaming.
 			if scope != "" {
 				return monitorUsageErrorQuiet(errOut, errors.New("--scope is not implemented yet"))
 			}
+			principalRef, err := actorFlag(cmd)
+			if err != nil {
+				return err
+			}
 
 			// --last: replay the last N events. Resolve the start cursor server-side
 			// from actual row identity (COALESCE(MIN(id),0)-1 over the last N existing
@@ -227,6 +231,8 @@ Invalid selectors fail with exit code 2 before any streaming.
 				stallAfter:    stallAfter,
 				startCursor:   startCursor,
 				fromHighWater: fromHighWater,
+				principalRef:  principalRef,
+				scopeRef:      wrkcScopeRef(cmd),
 			})
 		},
 	}
@@ -287,12 +293,18 @@ An envelope group waits with: wrkq monitor wait EN-00012 --until terminal
 			if err != nil {
 				return monitorUsageError(errOut, err)
 			}
+			principalRef, err := actorFlag(cmd)
+			if err != nil {
+				return err
+			}
 
 			result, unmet, exitCode, err := monitorWaitLoop(cmd.Context(), tr, monitorStreamOpts{
-				scopedTasks: scoped,
-				condition:   until,
-				timeout:     timeout,
-				stallAfter:  stallAfter,
+				scopedTasks:  scoped,
+				condition:    until,
+				timeout:      timeout,
+				stallAfter:   stallAfter,
+				principalRef: principalRef,
+				scopeRef:     wrkcScopeRef(cmd),
 			})
 			if err != nil {
 				// Selector / condition validation error → exit 2; stream error → exit 3.
@@ -334,6 +346,8 @@ type monitorStreamOpts struct {
 	// startCursor: the no-flag `monitor watch` default (T-07620). A --until
 	// stream always starts there regardless.
 	fromHighWater bool
+	principalRef  string
+	scopeRef      string
 }
 
 // monitorStreamUntil drives `monitor watch`: it runs the follow loop and owns the
@@ -498,8 +512,10 @@ func monitorWaitLoop(ctx context.Context, tr Transport, opts monitorStreamOpts) 
 // (met, unmet, exitCode, err): a validation error → code 2, a stream error → 3.
 func monitorConditionSnapshot(ctx context.Context, tr Transport, opts monitorStreamOpts) (bool, []string, int, error) {
 	raw, err := tr.Call(ctx, "wrkq.monitor.stateView", map[string]any{
-		"tasks":     opts.scopedTasks,
-		"condition": opts.condition,
+		"tasks":        opts.scopedTasks,
+		"condition":    opts.condition,
+		"principalRef": opts.principalRef,
+		"scopeRef":     opts.scopeRef,
 	})
 	if err != nil {
 		return false, nil, monitorErrExitCode(err), monitorStripError(err)

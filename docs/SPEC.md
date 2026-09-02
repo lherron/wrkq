@@ -409,6 +409,33 @@ retirement mechanism. Handoffs do not auto-expire.
 `IndexPending` before querying so fresh handoffs are visible without a manual
 rebuild when indexing succeeds.
 
+### Collaboration rooms and envelopes
+
+wrkq is the sole durable authority for agent collaboration. Rooms are keyed by
+task, campaign, project, or ad-hoc pair; envelopes are single-addressee messages
+with obligation `none`, `fyi`, or `reply_required`. HRC owns runtime delivery and
+actuation, and persists only opaque presentation receipts back into wrkq.
+
+Addressed envelopes store immutable `delivery` (`queue` by default, `hold` when
+requested) and optional server-normalized `expires_at`. wrkq projects these
+fields but never interprets hold as routing authority. A pending or deferred
+envelope whose deadline passes before any presentation receipt materializes as
+terminal `expired` on the next attributed inbox, show, pending-view, present, or
+envelope-monitor observation. No timer or sweeper owns this transition, and a
+presentation receipt permanently excludes expiry.
+
+The sender may withdraw pending or deferred mail before presentation. A
+scope-less operator may override sender ownership. The transition is terminal
+`withdrawn`; presentation and withdrawal serialize so only one can win. Group
+withdrawal commits one complete result and reports the members it could not
+withdraw, including an `already_presented` receipt.
+
+A reply normally acks every presented `reply_required` envelope in the room
+from the addressed counterparty to the replier's scope. When
+`dischargeEnvelopeIds` is present, wrkq validates the complete set, creates the
+reply, and acks exactly those envelopes in one transaction. Invalid sets write
+neither reply nor ack, and the wide rule does not also run.
+
 ## 6. Slugs, Paths, and Selectors
 
 Slug normalization:

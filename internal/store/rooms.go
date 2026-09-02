@@ -44,6 +44,26 @@ type EnvelopeWrongStateError struct {
 	Verb     string
 }
 
+// EnvelopeAlreadyPresentedError carries the receipt that makes sender
+// withdrawal illegal.
+type EnvelopeAlreadyPresentedError struct {
+	Envelope     string
+	Presentation domain.EnvelopePresentation
+}
+
+func (e *EnvelopeAlreadyPresentedError) Error() string {
+	return fmt.Sprintf("already_presented: envelope %s", e.Envelope)
+}
+
+type EnvelopeDischargeInvalidError struct {
+	Envelope string
+	Reason   string
+}
+
+func (e *EnvelopeDischargeInvalidError) Error() string {
+	return fmt.Sprintf("invalid scoped discharge %s: %s", e.Envelope, e.Reason)
+}
+
 func (e *EnvelopeWrongStateError) Error() string {
 	return fmt.Sprintf("cannot %s envelope %s in state %s", e.Verb, e.Envelope, e.State)
 }
@@ -83,7 +103,7 @@ const roomColumns = `
 const envelopeColumns = `
 	uuid, id, room_uuid, group_id, from_principal_ref, from_scope_ref,
 	to_scope_ref, to_principal_ref, obligation, body, task_uuid, state,
-	failure_reason, retry_at, defer_reason, terminal_actor, terminal_at,
+	expires_at, delivery, failure_reason, retry_at, defer_reason, terminal_actor, terminal_at,
 	materialization_intent, respond_to_principal_ref, retry_promise_uuid,
 	idempotency_key, meta, etag, created_at, updated_at,
 	created_by_principal_ref, created_by_scope_ref,
@@ -535,6 +555,8 @@ type EnvelopeCreateParams struct {
 	RoomUUID              string
 	FromPrincipalRef      string
 	FromScopeRef          *string
+	SenderMemberRef       string
+	SenderScoped          bool
 	Addressees            []EnvelopeAddressee
 	Obligation            domain.EnvelopeObligation
 	Body                  string
@@ -542,6 +564,11 @@ type EnvelopeCreateParams struct {
 	RespondToPrincipalRef *string
 	IdempotencyKey        *string
 	Meta                  *string
+	ExpiresAt             *string
+	Delivery              domain.EnvelopeDelivery
+	// DischargeEnvelopeIDs nil selects the legacy wide reply-is-ack rule in
+	// the API. A non-nil set is validated and acked atomically with creation.
+	DischargeEnvelopeIDs []string
 }
 
 // CreateEnvelopesWithAttribution writes one envelope per addressee in ONE
@@ -565,111 +592,222 @@ func (rs *RoomStore) CreateEnvelopesWithAttribution(attr attribution.Attribution
 	if params.Obligation != domain.EnvelopeObligationNone && len(params.Addressees) == 0 {
 		return nil, fmt.Errorf("obligation %s requires at least one addressee", params.Obligation)
 	}
+	if params.Delivery == "" {
+		params.Delivery = domain.EnvelopeDeliveryQueue
+	}
+	if err := domain.ValidateEnvelopeDelivery(params.Delivery); err != nil {
+		return nil, err
+	}
+	if params.Obligation == domain.EnvelopeObligationNone && (params.ExpiresAt != nil || params.Delivery != domain.EnvelopeDeliveryQueue) {
+		return nil, fmt.Errorf("obligation none does not accept ttl or delivery intent")
+	}
 
 	var created []domain.Envelope
 	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		created = nil
-		rows := params.Addressees
-		if params.Obligation == domain.EnvelopeObligationNone {
-			rows = []EnvelopeAddressee{{}}
-		}
-
-		groupID := ""
-		for _, addressee := range rows {
-			var toScope, toPrincipal, intent interface{}
-			if params.Obligation != domain.EnvelopeObligationNone {
-				toPrincipal = addressee.PrincipalRef
-				if strings.TrimSpace(addressee.ScopeRef) != "" {
-					toScope = addressee.ScopeRef
-				}
-				if addressee.MaterializationIntent != nil {
-					intent = *addressee.MaterializationIntent
-				}
-			}
-			// A `none` envelope never fires, so it is disposed at write; every
-			// addressed envelope opens pending and is disposed by delivery.
-			state := domain.EnvelopeStatePending
-			var terminalActor, terminalAt interface{}
-			if params.Obligation == domain.EnvelopeObligationNone {
-				state = domain.EnvelopeStateAcked
-				terminalActor = attr.PrincipalRef
-			}
-
-			// The idempotency key belongs to the SAY, so EVERY envelope it fanned
-			// out to carries it: a consumer dual-writing into another system can
-			// correlate on any addressee's row, and the per-(key, addressee)
-			// unique index still collides a retried say into a rollback.
-			var idempotencyKey interface{}
-			if params.IdempotencyKey != nil && strings.TrimSpace(*params.IdempotencyKey) != "" {
-				idempotencyKey = *params.IdempotencyKey
-			}
-
-			res, err := tx.Exec(`INSERT INTO envelopes (
-				id, room_uuid, from_principal_ref, from_scope_ref, to_scope_ref,
-				to_principal_ref, obligation, body, task_uuid, state,
-				materialization_intent, respond_to_principal_ref, idempotency_key,
-				meta, terminal_actor, terminal_at,
-				created_by_principal_ref, created_by_scope_ref,
-				updated_by_principal_ref, updated_by_scope_ref
-			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				params.RoomUUID, params.FromPrincipalRef, params.FromScopeRef, toScope,
-				toPrincipal, params.Obligation, params.Body, params.TaskUUID, state,
-				intent, params.RespondToPrincipalRef, idempotencyKey, params.Meta,
-				terminalActor, terminalAt,
-				attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr))
-			if err != nil {
-				return fmt.Errorf("failed to create envelope: %w", err)
-			}
-			rowID, err := res.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("failed to read envelope row id: %w", err)
-			}
-			envelope, err := scanEnvelope(tx.QueryRow("SELECT "+envelopeColumns+" FROM envelopes WHERE rowid = ?", rowID))
-			if err != nil {
-				return fmt.Errorf("failed to read created envelope: %w", err)
-			}
-			// group_id equals the FIRST envelope's own id, so a single addressee
-			// groups with itself and a fan-out shares one waitable handle.
-			if groupID == "" {
-				groupID = envelope.ID
-			}
-			if _, err := tx.Exec("UPDATE envelopes SET group_id = ? WHERE uuid = ?", groupID, envelope.UUID); err != nil {
-				return fmt.Errorf("failed to stamp envelope group: %w", err)
-			}
-			envelope.GroupID = &groupID
-
-			if params.Obligation != domain.EnvelopeObligationNone {
-				if _, err := upsertRoomMemberTx(tx, ew, attr, params.RoomUUID, RoomMemberSeed{
-					MemberRef:          addresseeMemberRef(addressee),
-					MemberPrincipalRef: addressee.PrincipalRef,
-					Scoped:             strings.TrimSpace(addressee.ScopeRef) != "",
-					Source:             domain.RoomMemberSourceAddressed,
-				}); err != nil {
-					return err
-				}
-			}
-
-			payload := envelopeEventPayload(envelope)
-			if _, err := logEnvelopeEvent(tx, ew, attr, envelope.UUID, "envelope.created", envelope.ETag, payload); err != nil {
-				return err
-			}
-			created = append(created, *envelope)
-		}
-
-		if _, err := tx.Exec(`UPDATE rooms
-			SET last_activity_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-			WHERE uuid = ?`, params.RoomUUID); err != nil {
-			return fmt.Errorf("failed to touch room activity: %w", err)
-		}
-		return nil
+		var err error
+		created, err = rs.createEnvelopesTx(tx, ew, attr, params)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	rs.dispatchCreated(created, attr)
+	return created, nil
+}
+
+// CreateEnvelopesAndDischargeWithAttribution validates the complete explicit
+// discharge set, creates the reply, and acks exactly that set in one
+// transaction. A rejected id leaves both reply and obligations untouched.
+func (rs *RoomStore) CreateEnvelopesAndDischargeWithAttribution(attr attribution.Attribution, params EnvelopeCreateParams) ([]domain.Envelope, []domain.Envelope, error) {
+	if params.DischargeEnvelopeIDs == nil {
+		return nil, nil, fmt.Errorf("explicit discharge set is required")
+	}
+	if err := requireAttribution(attr); err != nil {
+		return nil, nil, err
+	}
+	var created, acked []domain.Envelope
+	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		candidates, err := rs.validateScopedDischargesTx(tx, params)
+		if err != nil {
+			return err
+		}
+		created, err = rs.createEnvelopesTx(tx, ew, attr, params)
+		if err != nil {
+			return err
+		}
+		for i := range candidates {
+			updated, derr := disposeEnvelopeTx(tx, ew, attr, candidates[i], EnvelopeDisposition{State: domain.EnvelopeStateAcked, Reason: "reply_scoped"}, 0)
+			if derr != nil {
+				return derr
+			}
+			acked = append(acked, *updated)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	rs.dispatchCreated(created, attr)
+	return created, acked, nil
+}
+
+func (rs *RoomStore) createEnvelopesTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, params EnvelopeCreateParams) ([]domain.Envelope, error) {
+	created := []domain.Envelope{}
+	if strings.TrimSpace(params.SenderMemberRef) != "" {
+		if _, err := upsertRoomMemberTx(tx, ew, attr, params.RoomUUID, RoomMemberSeed{
+			MemberRef: params.SenderMemberRef, MemberPrincipalRef: params.FromPrincipalRef,
+			Scoped: params.SenderScoped, Source: domain.RoomMemberSourceSpoke,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	rows := params.Addressees
+	if params.Obligation == domain.EnvelopeObligationNone {
+		rows = []EnvelopeAddressee{{}}
+	}
+	groupID := ""
+	for _, addressee := range rows {
+		var toScope, toPrincipal, intent interface{}
+		if params.Obligation != domain.EnvelopeObligationNone {
+			toPrincipal = addressee.PrincipalRef
+			if strings.TrimSpace(addressee.ScopeRef) != "" {
+				toScope = addressee.ScopeRef
+			}
+			if addressee.MaterializationIntent != nil {
+				intent = *addressee.MaterializationIntent
+			}
+		}
+		// A `none` envelope never fires, so it is disposed at write; every
+		// addressed envelope opens pending and is disposed by delivery.
+		state := domain.EnvelopeStatePending
+		var terminalActor, terminalAt interface{}
+		if params.Obligation == domain.EnvelopeObligationNone {
+			state = domain.EnvelopeStateAcked
+			terminalActor = attr.PrincipalRef
+		}
+
+		// The idempotency key belongs to the SAY, so EVERY envelope it fanned
+		// out to carries it: a consumer dual-writing into another system can
+		// correlate on any addressee's row, and the per-(key, addressee)
+		// unique index still collides a retried say into a rollback.
+		var idempotencyKey interface{}
+		if params.IdempotencyKey != nil && strings.TrimSpace(*params.IdempotencyKey) != "" {
+			idempotencyKey = *params.IdempotencyKey
+		}
+
+		res, err := tx.Exec(`INSERT INTO envelopes (
+				id, room_uuid, from_principal_ref, from_scope_ref, to_scope_ref,
+				to_principal_ref, obligation, body, task_uuid, state,
+				expires_at, delivery, materialization_intent, respond_to_principal_ref, idempotency_key,
+				meta, terminal_actor, terminal_at,
+				created_by_principal_ref, created_by_scope_ref,
+				updated_by_principal_ref, updated_by_scope_ref
+			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			params.RoomUUID, params.FromPrincipalRef, params.FromScopeRef, toScope,
+			toPrincipal, params.Obligation, params.Body, params.TaskUUID, state,
+			params.ExpiresAt, params.Delivery, intent, params.RespondToPrincipalRef, idempotencyKey, params.Meta,
+			terminalActor, terminalAt,
+			attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create envelope: %w", err)
+		}
+		rowID, err := res.LastInsertId()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read envelope row id: %w", err)
+		}
+		envelope, err := scanEnvelope(tx.QueryRow("SELECT "+envelopeColumns+" FROM envelopes WHERE rowid = ?", rowID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read created envelope: %w", err)
+		}
+		// group_id equals the FIRST envelope's own id, so a single addressee
+		// groups with itself and a fan-out shares one waitable handle.
+		if groupID == "" {
+			groupID = envelope.ID
+		}
+		if _, err := tx.Exec("UPDATE envelopes SET group_id = ? WHERE uuid = ?", groupID, envelope.UUID); err != nil {
+			return nil, fmt.Errorf("failed to stamp envelope group: %w", err)
+		}
+		envelope.GroupID = &groupID
+
+		if params.Obligation != domain.EnvelopeObligationNone {
+			if _, err := upsertRoomMemberTx(tx, ew, attr, params.RoomUUID, RoomMemberSeed{
+				MemberRef:          addresseeMemberRef(addressee),
+				MemberPrincipalRef: addressee.PrincipalRef,
+				Scoped:             strings.TrimSpace(addressee.ScopeRef) != "",
+				Source:             domain.RoomMemberSourceAddressed,
+			}); err != nil {
+				return nil, err
+			}
+		}
+
+		payload := envelopeEventPayload(envelope)
+		if _, err := logEnvelopeEvent(tx, ew, attr, envelope.UUID, "envelope.created", envelope.ETag, payload); err != nil {
+			return nil, err
+		}
+		created = append(created, *envelope)
+	}
+
+	if _, err := tx.Exec(`UPDATE rooms
+			SET last_activity_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+			WHERE uuid = ?`, params.RoomUUID); err != nil {
+		return nil, fmt.Errorf("failed to touch room activity: %w", err)
+	}
+	return created, nil
+}
+
+func (rs *RoomStore) dispatchCreated(created []domain.Envelope, attr attribution.Attribution) {
 	for index := range created {
 		webhooks.DispatchEnvelopeEvent(rs.store.db, created[index], "envelope.created", envelopeEventPayload(&created[index]), attr.PrincipalRef)
 	}
-	return created, nil
+}
+
+func (rs *RoomStore) validateScopedDischargesTx(tx *sql.Tx, params EnvelopeCreateParams) ([]*domain.Envelope, error) {
+	if len(params.DischargeEnvelopeIDs) == 0 {
+		return nil, &EnvelopeDischargeInvalidError{Reason: "explicit set must not be empty"}
+	}
+	allowedCounterparties := map[string]bool{}
+	for _, addressee := range params.Addressees {
+		key := addressee.ScopeRef
+		if key == "" {
+			key = addressee.PrincipalRef
+		}
+		allowedCounterparties[key] = true
+	}
+	seen := map[string]bool{}
+	result := make([]*domain.Envelope, 0, len(params.DischargeEnvelopeIDs))
+	for _, raw := range params.DischargeEnvelopeIDs {
+		selector := strings.TrimSpace(raw)
+		if selector == "" || seen[selector] {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: selector, Reason: "empty or duplicate envelope id"}
+		}
+		seen[selector] = true
+		envelope, err := getEnvelopeSelectorTx(tx, selector)
+		if err != nil {
+			return nil, err
+		}
+		if envelope.RoomUUID != params.RoomUUID {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "foreign room"}
+		}
+		if envelope.Obligation != domain.EnvelopeObligationReplyRequired || envelope.State != domain.EnvelopeStatePresented {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "must be presented reply_required"}
+		}
+		if params.FromScopeRef != nil {
+			if envelope.ToScopeRef == nil || *envelope.ToScopeRef != *params.FromScopeRef {
+				return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "addressed to another scope"}
+			}
+		} else if envelope.ToScopeRef != nil || envelope.ToPrincipalRef == nil || *envelope.ToPrincipalRef != params.FromPrincipalRef {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "addressed to another principal"}
+		}
+		counterparty := envelope.FromPrincipalRef
+		if envelope.FromScopeRef != nil {
+			counterparty = *envelope.FromScopeRef
+		}
+		if !allowedCounterparties[counterparty] {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "sender is not a reply addressee"}
+		}
+		result = append(result, envelope)
+	}
+	return result, nil
 }
 
 // GetEnvelope resolves an envelope by UUID or EN- friendly ID.
@@ -974,6 +1112,129 @@ func (rs *RoomStore) BirthEnvelope(scopeRef string) (*domain.Envelope, error) {
 	return &rows[0], nil
 }
 
+// ExpireDueEnvelopes materializes server-clock expiry exactly once on the
+// authoritative observation paths. Presentation receipts permanently exclude
+// an envelope from TTL expiry.
+func (rs *RoomStore) ExpireDueEnvelopes(attr attribution.Attribution) (int, error) {
+	if err := requireAttribution(attr); err != nil {
+		return 0, err
+	}
+	expired := 0
+	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		rows, err := tx.Query(`SELECT ` + envelopeColumns + ` FROM envelopes e
+			WHERE e.state IN ('pending','deferred') AND e.expires_at IS NOT NULL
+			  AND e.expires_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
+			  AND NOT EXISTS (SELECT 1 FROM envelope_presentations p WHERE p.envelope_uuid = e.uuid)
+			ORDER BY e.id`)
+		if err != nil {
+			return fmt.Errorf("failed to find expired envelopes: %w", err)
+		}
+		var due []*domain.Envelope
+		for rows.Next() {
+			envelope, serr := scanEnvelope(rows)
+			if serr != nil {
+				_ = rows.Close()
+				return serr
+			}
+			due = append(due, envelope)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, envelope := range due {
+			if _, err := disposeEnvelopeTx(tx, ew, attr, envelope, EnvelopeDisposition{State: domain.EnvelopeStateExpired, Reason: "ttl"}, 0); err != nil {
+				return err
+			}
+			expired++
+		}
+		return nil
+	})
+	return expired, err
+}
+
+type EnvelopeWithdrawRefusal struct {
+	Envelope     domain.Envelope
+	Reason       string
+	Presentation *domain.EnvelopePresentation
+}
+
+type EnvelopeWithdrawResult struct {
+	Withdrawn []domain.Envelope
+	Refused   []EnvelopeWithdrawRefusal
+}
+
+// WithdrawEnvelopesWithAttribution withdraws one envelope, or every sibling
+// in its fan-out group, in one transaction. Presented siblings are reported
+// and left unchanged.
+func (rs *RoomStore) WithdrawEnvelopesWithAttribution(attr attribution.Attribution, selector string, group bool, reason string) (*EnvelopeWithdrawResult, error) {
+	if err := requireAttribution(attr); err != nil {
+		return nil, err
+	}
+	result := &EnvelopeWithdrawResult{Withdrawn: []domain.Envelope{}, Refused: []EnvelopeWithdrawRefusal{}}
+	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		target, err := getEnvelopeSelectorTx(tx, selector)
+		if err != nil {
+			return err
+		}
+		candidates := []*domain.Envelope{target}
+		if group && target.GroupID != nil {
+			rows, qerr := tx.Query("SELECT "+envelopeColumns+" FROM envelopes WHERE group_id = ? ORDER BY id", *target.GroupID)
+			if qerr != nil {
+				return qerr
+			}
+			candidates = nil
+			for rows.Next() {
+				envelope, serr := scanEnvelope(rows)
+				if serr != nil {
+					_ = rows.Close()
+					return serr
+				}
+				candidates = append(candidates, envelope)
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+		}
+		for _, envelope := range candidates {
+			presentation, perr := newestPresentationTx(tx, envelope.UUID)
+			if perr != nil {
+				return perr
+			}
+			if presentation != nil {
+				if !group {
+					return &EnvelopeAlreadyPresentedError{Envelope: envelope.ID, Presentation: *presentation}
+				}
+				result.Refused = append(result.Refused, EnvelopeWithdrawRefusal{Envelope: *envelope, Reason: "already_presented", Presentation: presentation})
+				continue
+			}
+			if envelope.State == domain.EnvelopeStateWithdrawn {
+				result.Withdrawn = append(result.Withdrawn, *envelope)
+				continue
+			}
+			if envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStateDeferred {
+				if !group {
+					return &EnvelopeWrongStateError{Envelope: envelope.ID, State: envelope.State, Verb: "withdraw"}
+				}
+				result.Refused = append(result.Refused, EnvelopeWithdrawRefusal{Envelope: *envelope, Reason: "wrong_state"})
+				continue
+			}
+			updated, derr := disposeEnvelopeTx(tx, ew, attr, envelope, EnvelopeDisposition{State: domain.EnvelopeStateWithdrawn, Reason: reason}, 0)
+			if derr != nil {
+				return derr
+			}
+			result.Withdrawn = append(result.Withdrawn, *updated)
+		}
+		return nil
+	})
+	return result, err
+}
+
 // RependDueDeferrals returns deferred envelopes whose retry time has arrived to
 // pending so the kicker's next sweep re-drives them, and resolves the promise
 // that was carrying the deferral. This is a DERIVED transition back to the
@@ -1061,72 +1322,64 @@ func (rs *RoomStore) DisposeEnvelopeWithAttribution(attr attribution.Attribution
 	if err := domain.ValidateEnvelopeState(disposition.State); err != nil {
 		return nil, err
 	}
-	eventType := map[domain.EnvelopeState]string{
-		domain.EnvelopeStateAcked:    "envelope.acked",
-		domain.EnvelopeStateDeferred: "envelope.deferred",
-	}[disposition.State]
-	if eventType == "" {
-		return nil, fmt.Errorf("envelope disposition %q is not a terminal or paused state", disposition.State)
-	}
-
 	var updated *domain.Envelope
 	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		current, err := getEnvelopeTx(tx, envelopeUUID)
 		if err != nil {
 			return err
 		}
-		if err := checkETag(current.ETag, ifMatch); err != nil {
-			return err
-		}
-		if domain.IsEnvelopeTerminal(current.State) {
-			// First terminal disposition wins; an identical retry is a no-op.
-			if current.State == disposition.State {
-				updated = current
-				return nil
-			}
-			return &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: string(disposition.State)}
-		}
-		var terminalActor, terminalAt interface{}
-		if domain.IsEnvelopeTerminal(disposition.State) {
-			terminalActor = attr.PrincipalRef
-			now, nerr := serverNowTx(tx)
-			if nerr != nil {
-				return nerr
-			}
-			terminalAt = now
-		}
-		if _, err := tx.Exec(`UPDATE envelopes
-			SET state = ?, defer_reason = ?, retry_at = ?, retry_promise_uuid = ?,
-			    terminal_actor = ?, terminal_at = ?, etag = etag + 1,
-			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-			    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-			WHERE uuid = ?`,
-			disposition.State, disposition.DeferReason, disposition.RetryAt,
-			disposition.RetryPromiseUUID, terminalActor, terminalAt,
-			attr.PrincipalRef, scopeSQL(attr), envelopeUUID); err != nil {
-			return fmt.Errorf("failed to dispose envelope: %w", err)
-		}
-		payload := map[string]interface{}{
-			"state":          string(disposition.State),
-			"previous_state": string(current.State),
-			"room_uuid":      current.RoomUUID,
-		}
-		if disposition.DeferReason != nil {
-			payload["defer_reason"] = *disposition.DeferReason
-		}
-		if disposition.RetryAt != nil {
-			payload["retry_at"] = *disposition.RetryAt
-		}
-		if disposition.Reason != "" {
-			payload["reason"] = disposition.Reason
-		}
-		if _, err := logEnvelopeEvent(tx, ew, attr, envelopeUUID, eventType, current.ETag+1, payload); err != nil {
-			return err
-		}
-		updated, err = getEnvelopeTx(tx, envelopeUUID)
+		updated, err = disposeEnvelopeTx(tx, ew, attr, current, disposition, ifMatch)
 		return err
 	})
 	return updated, err
+}
+
+func disposeEnvelopeTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, current *domain.Envelope, disposition EnvelopeDisposition, ifMatch int64) (*domain.Envelope, error) {
+	eventType := map[domain.EnvelopeState]string{
+		domain.EnvelopeStateAcked: "envelope.acked", domain.EnvelopeStateDeferred: "envelope.deferred",
+		domain.EnvelopeStateExpired: "envelope.expired", domain.EnvelopeStateWithdrawn: "envelope.withdrawn",
+	}[disposition.State]
+	if eventType == "" {
+		return nil, fmt.Errorf("envelope disposition %q is not a terminal or paused state", disposition.State)
+	}
+	if err := checkETag(current.ETag, ifMatch); err != nil {
+		return nil, err
+	}
+	if domain.IsEnvelopeTerminal(current.State) {
+		if current.State == disposition.State {
+			return current, nil
+		}
+		return nil, &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: string(disposition.State)}
+	}
+	var terminalActor, terminalAt interface{}
+	if domain.IsEnvelopeTerminal(disposition.State) {
+		terminalActor = attr.PrincipalRef
+		if disposition.State == domain.EnvelopeStateExpired {
+			terminalActor = "wrkq"
+		}
+		now, err := serverNowTx(tx)
+		if err != nil {
+			return nil, err
+		}
+		terminalAt = now
+	}
+	if _, err := tx.Exec(`UPDATE envelopes SET state = ?, defer_reason = ?, retry_at = ?, retry_promise_uuid = ?, terminal_actor = ?, terminal_at = ?, etag = etag + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), updated_by_principal_ref = ?, updated_by_scope_ref = ? WHERE uuid = ?`, disposition.State, disposition.DeferReason, disposition.RetryAt, disposition.RetryPromiseUUID, terminalActor, terminalAt, attr.PrincipalRef, scopeSQL(attr), current.UUID); err != nil {
+		return nil, fmt.Errorf("failed to dispose envelope: %w", err)
+	}
+	payload := map[string]interface{}{"state": string(disposition.State), "previous_state": string(current.State), "room_uuid": current.RoomUUID}
+	if disposition.DeferReason != nil {
+		payload["defer_reason"] = *disposition.DeferReason
+	}
+	if disposition.RetryAt != nil {
+		payload["retry_at"] = *disposition.RetryAt
+	}
+	if disposition.Reason != "" {
+		payload["reason"] = disposition.Reason
+	}
+	if _, err := logEnvelopeEvent(tx, ew, attr, current.UUID, eventType, current.ETag+1, payload); err != nil {
+		return nil, err
+	}
+	return getEnvelopeTx(tx, current.UUID)
 }
 
 // PresentedObligationsForReplier lists the PRESENTED reply_required envelopes in
@@ -1166,7 +1419,7 @@ func (rs *RoomStore) StandingObligationFromSender(roomUUID, senderScopeRef, send
 	clauses := []string{
 		"room_uuid = ?",
 		"obligation = 'reply_required'",
-		"state NOT IN ('acked', 'failed')",
+		"state NOT IN ('acked', 'failed', 'expired', 'withdrawn')",
 	}
 	args := []interface{}{roomUUID}
 	if strings.TrimSpace(senderScopeRef) != "" {
@@ -1273,6 +1526,7 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 	}
 	var updated *domain.Envelope
 	recorded := false
+	var afterCommit error
 	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		current, err := getEnvelopeTx(tx, envelopeUUID)
 		if err != nil {
@@ -1289,6 +1543,24 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 				updated = current
 				return nil
 			}
+		}
+		if domain.IsEnvelopeTerminal(current.State) {
+			return &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: "present"}
+		}
+		var due int
+		if err := tx.QueryRow(`SELECT CASE WHEN expires_at IS NOT NULL
+			AND expires_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
+			AND NOT EXISTS (SELECT 1 FROM envelope_presentations WHERE envelope_uuid = ?)
+			THEN 1 ELSE 0 END FROM envelopes WHERE uuid = ?`, current.UUID, current.UUID).Scan(&due); err != nil {
+			return fmt.Errorf("failed to check envelope expiry: %w", err)
+		}
+		if due == 1 && (current.State == domain.EnvelopeStatePending || current.State == domain.EnvelopeStateDeferred) {
+			updated, err = disposeEnvelopeTx(tx, ew, attr, current, EnvelopeDisposition{State: domain.EnvelopeStateExpired, Reason: "ttl"}, 0)
+			if err != nil {
+				return err
+			}
+			afterCommit = &EnvelopeWrongStateError{Envelope: current.ID, State: domain.EnvelopeStateExpired, Verb: "present"}
+			return nil
 		}
 		if _, err := tx.Exec(`INSERT INTO envelope_presentations (
 			envelope_uuid, room_uuid, member_ref, node, runtime_id, host_session_id,
@@ -1359,6 +1631,9 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 		updated, err = getEnvelopeTx(tx, envelopeUUID)
 		return err
 	})
+	if err == nil && afterCommit != nil {
+		err = afterCommit
+	}
 	return updated, recorded, err
 }
 
@@ -1605,7 +1880,7 @@ func envelopeScanDestinations(envelope *domain.Envelope) []interface{} {
 		&envelope.UUID, &envelope.ID, &envelope.RoomUUID, &envelope.GroupID,
 		&envelope.FromPrincipalRef, &envelope.FromScopeRef, &envelope.ToScopeRef,
 		&envelope.ToPrincipalRef, &envelope.Obligation, &envelope.Body,
-		&envelope.TaskUUID, &envelope.State, &envelope.FailureReason,
+		&envelope.TaskUUID, &envelope.State, &envelope.ExpiresAt, &envelope.Delivery, &envelope.FailureReason,
 		&envelope.RetryAt, &envelope.DeferReason, &envelope.TerminalActor,
 		&envelope.TerminalAt, &envelope.MaterializationIntent,
 		&envelope.RespondToPrincipalRef, &envelope.RetryPromiseUUID,
@@ -1666,6 +1941,31 @@ func getEnvelopeTx(tx *sql.Tx, uuid string) (*domain.Envelope, error) {
 		return nil, fmt.Errorf("failed to get envelope: %w", err)
 	}
 	return envelope, nil
+}
+
+func getEnvelopeSelectorTx(tx *sql.Tx, selector string) (*domain.Envelope, error) {
+	envelope, err := scanEnvelope(tx.QueryRow("SELECT "+envelopeColumns+" FROM envelopes WHERE uuid = ? OR id = ?", selector, selector))
+	if err == sql.ErrNoRows {
+		return nil, &EnvelopeNotFoundError{Selector: selector}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get envelope: %w", err)
+	}
+	return envelope, nil
+}
+
+func newestPresentationTx(tx *sql.Tx, envelopeUUID string) (*domain.EnvelopePresentation, error) {
+	presentation, err := scanEnvelopePresentation(tx.QueryRow(`SELECT uuid, envelope_uuid, room_uuid,
+		member_ref, node, runtime_id, host_session_id, generation, run_id,
+		drive_attempt_id, input_id, delivery_outcome, presented_at, presented_by_principal_ref
+		FROM envelope_presentations WHERE envelope_uuid = ? ORDER BY presented_at DESC, rowid DESC LIMIT 1`, envelopeUUID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read envelope presentation: %w", err)
+	}
+	return presentation, nil
 }
 
 func serverNowTx(tx *sql.Tx) (string, error) {

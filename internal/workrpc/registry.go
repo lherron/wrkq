@@ -243,6 +243,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.envelope.defer", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeDeferParams) (any, error) {
 		return wq.EnvelopeDefer(ctx, p)
 	}))
+	s.Register("wrkq.envelope.withdraw", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeWithdrawParams) (any, error) {
+		return wq.EnvelopeWithdraw(ctx, p)
+	}))
 	s.Register("wrkq.envelope.ack", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeAckParams) (any, error) {
 		return wq.EnvelopeAck(ctx, p)
 	}))

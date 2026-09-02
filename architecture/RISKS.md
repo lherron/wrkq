@@ -23,6 +23,15 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 - **review_trigger:** a manual-race duplicate causes an external effect beyond one extra visible reply; observed manual-race duplicates cease to be rare after the driven-turn prompt sweep; automatic reply scope expands beyond one envelope or one same-sender fan-out group; the principal permits an atomic conditional collaboration mutation
 - **expiry:** none
 
+## wrkq.collaboration-ledger.read-time-expiry-window
+
+- **severity:** low
+- **accepted_by:** Lance (2026-09-02)
+- **blast_radius:** After an envelope's expires_at deadline but before the next authoritative observation, raw storage can still say pending or deferred. The terminal event appears at first observation time rather than exactly at the deadline.
+- **mitigation:** Delivery, inbox, show, pendingView, and envelope-monitor paths check the server clock before acting. Presentation checks inside its receipt transaction, so no receipt can cross the deadline guard. First-terminal-wins emits one expiry.
+- **review_trigger:** a consumer acts on raw pending state outside an authoritative observation; users require an event exactly at the deadline without a read; a sweeper or timer is proposed for envelope expiry
+- **expiry:** none
+
 ## wrkq.collaboration-ledger.same-uid-disposition-confusion
 
 - **severity:** medium

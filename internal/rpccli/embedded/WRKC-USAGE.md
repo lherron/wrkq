@@ -88,6 +88,9 @@ match is seat-to-seat: the principal a say was attributed to never enters it, so
 two seats of the same agent are two counterparties, and only a scope-less party
 (a human) matches on its principal. Sibling envelopes of a fan-out addressed to
 *other* scopes are untouched. To hold one back, `defer` it first.
+`--discharges EN-a,EN-b` narrows a reply to exactly the presented envelopes in
+the broker turn manifest. The whole set is validated before the reply and acks
+commit together; omitting it keeps the wide rule above.
 
 An obligation belongs to the runtime that receives it. Its body is pushed once
 on the common path; later attention is a pointer to `wrkc show`. It is never
@@ -99,6 +102,16 @@ retry time): the deferral survives rotation and returns as a pointer.
 
 `defer` is paused, never terminal — a later reply still acks it.
 `--retry-after` arms a wrkq promise; at expiry the envelope returns to pending.
+
+`say --ttl 30s` gives addressed mail a server-normalized expiry. If it has no
+presentation receipt by then, the next authoritative read materializes terminal
+`expired`; a deferral does not extend the TTL. `say --hold` stores immutable
+delivery intent for HRC; wrkq does not route or authorize preemption.
+
+`withdraw EN-xxxxx` lets the sender cancel pending or deferred mail before any
+presentation receipt. `--group` attempts every fan-out sibling atomically and
+reports siblings already presented. Presentation-first returns the typed
+`already_presented` refusal; withdrawal-first prevents any later receipt.
 
 `--to a,b` fans out to one envelope per addressee sharing a group id. Every
 lifecycle field is per envelope, so one recipient's reply, defer, or failure never
@@ -116,6 +129,7 @@ on — and answering it is an ordinary say.
 
 ```bash
 wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--new]
+                        [--ttl d] [--hold] [--discharges EN-a,EN-b]
                         [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
 wrkc log <room> [--task T-x] [--limit n]
@@ -123,6 +137,7 @@ wrkc show <EN-xxxxx|room>
 wrkc ls [--all] [--failed] [--scope me] [--kind k]
 wrkc inbox [--failed]
 wrkc defer <EN-xxxxx> --reason <t> [--retry-after d]
+wrkc withdraw <EN-xxxxx> [--group] [--reason t]
 wrkc hide|unhide <room>
 wrkc join|leave <room>
 wrkc invite <room> <scope>

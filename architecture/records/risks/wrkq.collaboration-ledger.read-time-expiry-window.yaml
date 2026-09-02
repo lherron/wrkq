@@ -1,0 +1,30 @@
+id: wrkq.collaboration-ledger.read-time-expiry-window
+kind: accepted_risk
+status: active
+owner_project: wrkq
+accepted_by: Lance
+date: 2026-09-02
+severity: low
+blast_radius: >
+  After an envelope's expires_at deadline but before the next authoritative
+  observation, raw storage can still say pending or deferred. The terminal event
+  appears at first observation time rather than exactly at the deadline.
+mitigation: >
+  Delivery, inbox, show, pendingView, and envelope-monitor paths check the server
+  clock before acting. Presentation checks inside its receipt transaction, so no
+  receipt can cross the deadline guard. First-terminal-wins emits one expiry.
+expiry: null
+review_trigger:
+  - a consumer acts on raw pending state outside an authoritative observation
+  - users require an event exactly at the deadline without a read
+  - a sweeper or timer is proposed for envelope expiry
+reopen_when:
+  - expiry materialization moves away from server-clock observation
+  - presentation can record a first receipt after expires_at
+source:
+  - wrkq:T-07871
+  - internal/store/rooms.go
+  - internal/wrkqapi/monitorview.go
+  - internal/wrkqapi/rooms_admission_test.go
+supersedes: []
+superseded_by: null

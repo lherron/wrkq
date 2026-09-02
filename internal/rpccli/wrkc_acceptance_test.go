@@ -371,6 +371,41 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	}
 }
 
+func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
+	f := newWrkcFixture(t)
+	sayOut, err := runWrkcInput(t, f.dbPath, "agent:clod", "admission\n",
+		"say", f.taskID, "-", "--to", "cody", "--ttl", "1h", "--hold",
+		"--idempotency-key", "admission-cli-1", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
+	if err != nil {
+		t.Fatalf("say admission: %v\n%s", err, sayOut)
+	}
+	var said roomSayResultWire
+	if err := json.Unmarshal([]byte(sayOut), &said); err != nil {
+		t.Fatal(err)
+	}
+	if len(said.Envelopes) != 1 || said.Envelopes[0].Delivery != "hold" || said.Envelopes[0].ExpiresAt == nil {
+		t.Fatalf("admission envelope = %+v", said.Envelopes)
+	}
+
+	withdrawOut, err := runWrkc(t, f.dbPath, "agent:clod", "withdraw", said.Envelopes[0].ID, "--reason", "superseded", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
+	if err != nil {
+		t.Fatalf("withdraw: %v\n%s", err, withdrawOut)
+	}
+	var withdrawn envelopeWithdrawResultWire
+	if err := json.Unmarshal([]byte(withdrawOut), &withdrawn); err != nil {
+		t.Fatal(err)
+	}
+	if len(withdrawn.Withdrawn) != 1 || withdrawn.Withdrawn[0].State != "withdrawn" || !withdrawn.Withdrawn[0].Terminal || len(withdrawn.Refused) != 0 {
+		t.Fatalf("withdrawn = %+v", withdrawn)
+	}
+
+	for _, args := range [][]string{{"say", f.taskID, "body", "--ttl", "30s"}, {"say", f.taskID, "body", "--hold"}, {"say", f.taskID, "body", "--discharges", "EN-00001"}} {
+		if out, err := runWrkc(t, f.dbPath, "agent:clod", args...); err == nil {
+			t.Fatalf("%v unexpectedly succeeded: %s", args, out)
+		}
+	}
+}
+
 // TestWrkcLsScopeIsAValueNotABoolean pins the §9.1 surface: `wrkc ls --scope me`
 // takes a value. It is a convenience filter, never a permission boundary —
 // rooms are readable by any principal — so the only accepted value is "me" and

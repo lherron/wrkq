@@ -95,8 +95,10 @@ type MonitorEventsViewParams struct {
 // MonitorStateViewParams carries the watched task selectors and the --until
 // condition for the single authoritative snapshot.
 type MonitorStateViewParams struct {
-	Tasks     []string `json:"tasks"`
-	Condition string   `json:"condition"`
+	Tasks        []string `json:"tasks"`
+	Condition    string   `json:"condition"`
+	PrincipalRef string   `json:"principalRef,omitempty"`
+	ScopeRef     string   `json:"scopeRef,omitempty"`
 }
 
 // HistoryTailViewParams carries the monotonic cursor + bounded limit for the raw

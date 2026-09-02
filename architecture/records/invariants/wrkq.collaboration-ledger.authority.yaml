@@ -30,6 +30,14 @@ predicate: >
   collaboration copy. wrkq never imports HRC, and wrkc must persist, read, and
   monitor collaboration with every HRC daemon unavailable.
 
+  Envelope delivery is immutable durable intent (`queue` or `hold`) owned by
+  wrkq even though its actuation is intentionally external: HRC's kicker is the
+  named reader that maps `hold` to its preempt admission door and applies HRC
+  authority. expires_at and terminal expired/withdrawn are likewise wrkq ledger
+  state. Expiry is derived from the server clock on an attributed observation;
+  HRC supplies presentation receipts and explicit manifest discharge sets but
+  never decides or mirrors the resulting envelope state.
+
   A bodyless HRC pending-reply intent for one completed drive attempt is
   execution actuation, not a second collaboration copy. For a successful drive
   that presented exactly one envelope, or one fan-out group from one sender,
@@ -65,13 +73,17 @@ source:
   - architecture/records/invariants/wrkq.campaign.canonical-portfolio-authority.yaml
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
   - architecture/records/risks/wrkq.collaboration-ledger.auto-reply-manual-race.yaml
+  - internal/db/migrations/000059_envelope_admission.sql
+  - internal/wrkqapi/rooms_admission_test.go
   - wrkq:T-07789
 required_tests:
   - T-07612 ledger and routing bundle
   - T-07612 consumer and cutover bundle
+  - TestEnvelopeTTLExpiryMaterializesFromPendingAndDeferredWithExactObserver
+  - TestManifestScopedReplyDischargesExactSetAtomically
 last_verified:
-  date: 2026-08-31
-  evidence: Daedalus source-grounded architecture approval of the T-07789 auto-reply amendment; implementation gates pending.
+  date: 2026-09-02
+  evidence: T-07871 durability implementation passed Daedalus review and just verify; installed daemon-down ledger and HRC-up presentation evidence remains the completion gate.
 reopen_when:
   - any non-wrkq store becomes a durable room, envelope, obligation, membership, attendance, or presentation-receipt authority
   - wrkq or wrkc acquires an HRC runtime dependency
@@ -85,5 +97,7 @@ reopen_when:
   - an HRC auto-reply intent stores collaboration content, becomes authoritative for mint or discharge state, or stops verifying uncertain writes against committed wrkq envelope rows
   - automatic reply scope expands beyond one envelope or one same-sender fan-out group per driven turn
   - the accepted discharge-read/plain-say duplicate window changes
+  - delivery intent is dropped as dead data before the HRC reader is retired or moved by explicit law
+  - expiry or withdrawal state is authored outside wrkq
 supersedes: []
 superseded_by: null

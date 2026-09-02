@@ -97,6 +97,7 @@ const ENVELOPE: WrkqEnvelope = {
   taskId: "T-07613",
   state: "presented",
   terminal: false,
+  delivery: "queue",
   idempotencyKey: "acp:hrc-message:m-1",
   meta: {},
   presentedTo: [
@@ -152,6 +153,8 @@ const INBOX_VIEW: WrkqEnvelopeInboxView = {
   deferred: [],
   failed: [],
   sentFailed: [],
+  sentExpired: [],
+  sentWithdrawn: [],
 };
 const PRESENT_RESULT: WrkqEnvelopePresentResult = {
   envelope: ENVELOPE,
@@ -259,6 +262,7 @@ describe("wrkq.envelope facade", () => {
       .onResult("wrkq.envelope.memberPage", MEMBER_PAGE)
       .onResult("wrkq.envelope.inboxView", INBOX_VIEW)
       .onResult("wrkq.envelope.defer", { ...ENVELOPE, state: "deferred" })
+      .onResult("wrkq.envelope.withdraw", { withdrawn: [{ ...ENVELOPE, state: "withdrawn", terminal: true }], refused: [] })
       .onResult("wrkq.envelope.ack", LOG_VIEW)
       .onResult("wrkq.envelope.present", PRESENT_RESULT)
       .onResult("wrkq.envelope.pendingView", PENDING_VIEW)
@@ -289,6 +293,7 @@ describe("wrkq.envelope facade", () => {
       retryAfter: "2h",
       scopeRef: "cody@wrkq:T-07613",
     };
+    const withdraw = { envelope: "EN-00001", reason: "superseded" };
     const ack = {
       envelopes: ["EN-00001"],
       note: "handled",
@@ -333,6 +338,7 @@ describe("wrkq.envelope facade", () => {
       "clod@wrkq:T-07613",
     );
     expect((await client.wrkq.envelope.defer(defer)).state).toBe("deferred");
+    expect((await client.wrkq.envelope.withdraw(withdraw)).withdrawn[0]?.state).toBe("withdrawn");
     expect((await client.wrkq.envelope.ack(ack)).items).toHaveLength(1);
 
     // The presentation receipt answers the §7 history cue, keyed to the RUNTIME.
@@ -367,6 +373,7 @@ describe("wrkq.envelope facade", () => {
       { method: "wrkq.envelope.memberPage", params: memberPage },
       { method: "wrkq.envelope.inboxView", params: inbox },
       { method: "wrkq.envelope.defer", params: defer },
+      { method: "wrkq.envelope.withdraw", params: withdraw },
       { method: "wrkq.envelope.ack", params: ack },
       { method: "wrkq.envelope.present", params: present },
       { method: "wrkq.envelope.pendingView", params: pending },

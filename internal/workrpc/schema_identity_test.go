@@ -18,7 +18,10 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after T-07723 added
+// pinnedProtocolSchemaHash is the intentional wire identity after T-07871 added
+// immutable envelope expiresAt/delivery projections, expired/withdrawn states,
+// scoped discharge input, the envelope.withdraw method and result DTOs, and the
+// WRKQ_ALREADY_PRESENTED refusal code. That sits on top of T-07723, which added
 // wrkq.envelope.memberPage, its request/result DTOs, envelope.messageSeq, and
 // WRKQ_CURSOR_INVALID for incarnation-fenced collaboration history/catch-up.
 // That sits on top of T-07703, which cut
@@ -47,7 +50,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:07c641d7531432a04b56144e46c03c36765f6816bfda7a5e3120f8140f130bdb"
+const pinnedProtocolSchemaHash = "sha256:70f0899baba61650a2ff57b5628ff93aeedb9e244f3680394869a797971a3345"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -66,9 +69,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 180},
-		{"errorCodes", len(ErrorCodeCatalog()), 26},
-		{"dtos", len(dtoCatalog), 139},
+		{"methods", len(MethodCatalog()), 181},
+		{"errorCodes", len(ErrorCodeCatalog()), 27},
+		{"dtos", len(dtoCatalog), 141},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

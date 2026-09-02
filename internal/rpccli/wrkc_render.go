@@ -62,6 +62,50 @@ func renderWrkcSayResult(cmd *cobra.Command, result roomSayResultWire, flags pro
 	return renderer.RenderList(lines)
 }
 
+func renderWrkcWithdrawResult(cmd *cobra.Command, result envelopeWithdrawResultWire, flags promiseOutputFlags) error {
+	mode, stable, err := resolvePromiseOutputMode(cmd, flags, false)
+	if err != nil {
+		return err
+	}
+	renderer := render.NewRenderer(cmd.OutOrStdout(), render.Options{Porcelain: stable})
+	switch mode {
+	case "json":
+		return renderer.RenderJSON(result)
+	case "yaml":
+		return renderer.RenderYAML(result)
+	case "ndjson":
+		items := make([]interface{}, 0, len(result.Withdrawn)+len(result.Refused))
+		for index := range result.Withdrawn {
+			items = append(items, result.Withdrawn[index])
+		}
+		for index := range result.Refused {
+			items = append(items, result.Refused[index])
+		}
+		return renderer.RenderNDJSON(items)
+	case "raw":
+		lines := make([]string, 0, len(result.Withdrawn)+len(result.Refused))
+		for _, envelope := range result.Withdrawn {
+			lines = append(lines, envelope.ID)
+		}
+		for _, refusal := range result.Refused {
+			lines = append(lines, refusal.EnvelopeID+" refused:"+refusal.Reason)
+		}
+		return renderer.RenderList(lines)
+	}
+	lines := make([]string, 0, len(result.Withdrawn)+len(result.Refused))
+	for _, envelope := range result.Withdrawn {
+		lines = append(lines, envelope.ID+" withdrawn")
+	}
+	for _, refusal := range result.Refused {
+		line := refusal.EnvelopeID + " refused: " + refusal.Reason
+		if refusal.Presentation != nil && refusal.Presentation.RuntimeID != nil {
+			line += " (presented by " + *refusal.Presentation.RuntimeID + ")"
+		}
+		lines = append(lines, line)
+	}
+	return renderer.RenderList(lines)
+}
+
 func renderWrkcRoomSingleton(cmd *cobra.Command, raw json.RawMessage, flags promiseOutputFlags, identity *wrkcAdhocIdentity) error {
 	var room roomWire
 	if err := json.Unmarshal(raw, &room); err != nil {
@@ -306,7 +350,11 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 	lines = append(lines,
 		"obligation: "+envelope.Obligation,
 		"state: "+envelopeStateLabel(envelope),
+		"delivery: "+envelope.Delivery,
 	)
+	if envelope.ExpiresAt != nil {
+		lines = append(lines, "expires_at: "+*envelope.ExpiresAt)
+	}
 	if envelope.GroupID != nil {
 		lines = append(lines, "group: "+*envelope.GroupID)
 	}
@@ -436,6 +484,16 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 				target = "  → " + envelopePartyLabel(*envelope.To)
 			}
 			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+target+"  "+envelopeStateLabel(envelope))
+		}
+	}
+	if len(view.SentExpired)+len(view.SentWithdrawn) > 0 {
+		lines = append(lines, "", "sent, expired or withdrawn")
+		for _, envelope := range append(view.SentExpired, view.SentWithdrawn...) {
+			target := ""
+			if envelope.To != nil {
+				target = "  → " + envelopePartyLabel(*envelope.To)
+			}
+			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+target+"  "+envelope.State)
 		}
 	}
 	return render.NewRenderer(cmd.OutOrStdout(), render.Options{}).RenderList(lines)

@@ -16,15 +16,18 @@ const roomWaitPollInterval = 100 * time.Millisecond
 type RoomService struct{ client *Client }
 
 type RoomSayOptions struct {
-	To             []string
-	FYI            bool
-	New            bool
-	RespondTo      string
-	Record         bool
-	IdempotencyKey string
-	Meta           map[string]any
-	Wait           bool
-	Timeout        time.Duration
+	To                   []string
+	FYI                  bool
+	New                  bool
+	RespondTo            string
+	Record               bool
+	IdempotencyKey       string
+	TTL                  time.Duration
+	Hold                 bool
+	DischargeEnvelopeIDs []string
+	Meta                 map[string]any
+	Wait                 bool
+	Timeout              time.Duration
 }
 
 // RoomSayResult is the canonical say receipt plus client-owned wait results.
@@ -44,10 +47,22 @@ type RoomLogOptions struct {
 	Limit int
 }
 
+type EnvelopeWithdrawOptions struct {
+	Group  bool
+	Reason string
+}
+
 // RoomShowResult contains exactly one of Room or Envelope.
 type RoomShowResult struct {
 	Room     *Room
 	Envelope *Envelope
+}
+
+func durationString(value time.Duration) string {
+	if value <= 0 {
+		return ""
+	}
+	return value.String()
 }
 
 // WaitError reports a timed-out, cancelled, or failed say --wait while keeping
@@ -81,18 +96,21 @@ func (s RoomService) Say(ref, body string, options ...RoomSayOptions) (*RoomSayR
 		return nil, errors.New("room say wait requires at least one addressee")
 	}
 	params := struct {
-		Ref            string         `json:"ref,omitempty"`
-		Body           string         `json:"body"`
-		To             []string       `json:"to,omitempty"`
-		FYI            bool           `json:"fyi,omitempty"`
-		New            bool           `json:"new,omitempty"`
-		RespondTo      string         `json:"respondTo,omitempty"`
-		Record         bool           `json:"record,omitempty"`
-		IdempotencyKey string         `json:"idempotencyKey,omitempty"`
-		Meta           map[string]any `json:"meta,omitempty"`
-		PrincipalRef   string         `json:"principalRef,omitempty"`
-		ScopeRef       string         `json:"scopeRef,omitempty"`
-	}{ref, body, opts.To, opts.FYI, opts.New, opts.RespondTo, opts.Record, opts.IdempotencyKey, opts.Meta, principal, s.client.scopeRef}
+		Ref                  string         `json:"ref,omitempty"`
+		Body                 string         `json:"body"`
+		To                   []string       `json:"to,omitempty"`
+		FYI                  bool           `json:"fyi,omitempty"`
+		New                  bool           `json:"new,omitempty"`
+		RespondTo            string         `json:"respondTo,omitempty"`
+		Record               bool           `json:"record,omitempty"`
+		IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
+		TTL                  string         `json:"ttl,omitempty"`
+		Hold                 bool           `json:"hold,omitempty"`
+		DischargeEnvelopeIDs []string       `json:"dischargeEnvelopeIds,omitempty"`
+		Meta                 map[string]any `json:"meta,omitempty"`
+		PrincipalRef         string         `json:"principalRef,omitempty"`
+		ScopeRef             string         `json:"scopeRef,omitempty"`
+	}{ref, body, opts.To, opts.FYI, opts.New, opts.RespondTo, opts.Record, opts.IdempotencyKey, durationString(opts.TTL), opts.Hold, opts.DischargeEnvelopeIDs, opts.Meta, principal, s.client.scopeRef}
 	var out RoomSayResult
 	if err := s.client.call("wrkq.room.say", params, &out); err != nil {
 		return nil, err
@@ -168,6 +186,29 @@ func (s RoomService) Show(selector string) (*RoomShowResult, error) {
 	return result, nil
 }
 
+// Withdraw terminally disposes one unpresented envelope, or every eligible
+// sibling in its fan-out group. Group results include refusals so callers can
+// distinguish a partial result from a complete withdrawal.
+func (s RoomService) Withdraw(envelope string, options ...EnvelopeWithdrawOptions) (*EnvelopeWithdrawResult, error) {
+	principal, err := s.client.mutationPrincipal()
+	if err != nil {
+		return nil, err
+	}
+	opts := first(options)
+	params := wrkqapi.EnvelopeWithdrawParams{
+		Envelope:     envelope,
+		Group:        opts.Group,
+		Reason:       opts.Reason,
+		PrincipalRef: principal,
+		ScopeRef:     s.client.scopeRef,
+	}
+	var out EnvelopeWithdrawResult
+	if err := s.client.call("wrkq.envelope.withdraw", params, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (s RoomService) waitForGroup(result *RoomSayResult, timeout time.Duration) error {
 	if result.GroupID == "" {
 		return &WaitError{Reason: "returned no group", Result: result}
@@ -187,9 +228,11 @@ func (s RoomService) waitForGroup(result *RoomSayResult, timeout time.Duration) 
 			Unmet []string `json:"unmet"`
 		}
 		if err := s.client.Call(ctx, "wrkq.monitor.stateView", struct {
-			Tasks     []string `json:"tasks"`
-			Condition string   `json:"condition"`
-		}{[]string{result.GroupID}, "terminal"}, &snapshot); err != nil {
+			Tasks        []string `json:"tasks"`
+			Condition    string   `json:"condition"`
+			PrincipalRef string   `json:"principalRef,omitempty"`
+			ScopeRef     string   `json:"scopeRef,omitempty"`
+		}{[]string{result.GroupID}, "terminal", s.client.principalRef, s.client.scopeRef}, &snapshot); err != nil {
 			return &WaitError{Reason: "failed", Result: result, Cause: err}
 		}
 		if snapshot.Met {
@@ -225,7 +268,7 @@ func (s RoomService) collectWaitResult(result *RoomSayResult) error {
 		}
 	}
 	for _, envelope := range log.Items {
-		if sent[envelope.ID] && envelope.State == "failed" {
+		if sent[envelope.ID] && (envelope.State == "failed" || envelope.State == "expired" || envelope.State == "withdrawn") {
 			result.Failures = append(result.Failures, envelope)
 		}
 		if sent[envelope.ID] || envelope.MessageSeq <= lastSeq || !counterparties[envelope.From.PrincipalRef] {
@@ -236,7 +279,7 @@ func (s RoomService) collectWaitResult(result *RoomSayResult) error {
 		}
 	}
 	if len(result.Failures) > 0 {
-		return &WaitError{Reason: "ended with failed envelopes", Result: result}
+		return &WaitError{Reason: "ended with terminal failures", Result: result}
 	}
 	return nil
 }

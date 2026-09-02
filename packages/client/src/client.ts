@@ -186,6 +186,7 @@ class WorkClientImpl implements WorkClient {
       memberPage: (p) => this.call("wrkq.envelope.memberPage", p),
       inboxView: (p) => this.call("wrkq.envelope.inboxView", p ?? {}),
       defer: (p) => this.call("wrkq.envelope.defer", p),
+      withdraw: (p) => this.call("wrkq.envelope.withdraw", p),
       ack: (p) => this.call("wrkq.envelope.ack", p),
       present: (p) => this.call("wrkq.envelope.present", p),
       pendingView: (p) => this.call("wrkq.envelope.pendingView", p ?? {}),

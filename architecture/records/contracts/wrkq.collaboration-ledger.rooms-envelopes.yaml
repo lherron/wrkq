@@ -32,21 +32,33 @@ predicate: >
   and exposes through wrkf.evidence.show. A multi-addressee say fans out to one
   envelope per addressee in ONE transaction sharing a group id equal to the
   first envelope's own id, so every lifecycle field is per envelope and one
-  recipient's reply, defer, round, or dead never disposes or pauses another's
+  recipient's reply, defer, failure, expiry, or withdrawal never disposes or pauses another's
   obligation. The say's idempotency key rides every envelope of the fan-out and
   is unique per (key, addressee), so a retried say rolls the whole group back
-  rather than half-writing it. The live vocabulary is exactly none, notify, and
-  reply_required. An addressee-less none say is disposed at write. Addressed
-  notify and reply_required envelopes both birth an unborn scope and wake a
-  seated one; notify owes nothing and is acked at its OWN presentation, while
-  reply_required advances to presented and remains owed. A reply acks every
-  presented reply_required envelope in that room addressed to the replier's own
-  scope from that counterparty and nothing else; deferred is paused and never
-  terminal, and a retry time is carried by a wrkq promise whose expiry re-pends
-  the envelope through a derived, event-free transition. The summon set and the
-  stop-hook predicate are uniform over rooms: addressed notify and
-  reply_required envelopes summon whatever the room's work, activity, or hidden
-  label reads, while only reply_required gates turn end.
+  rather than half-writing it. The live obligation vocabulary is exactly none,
+  fyi, and reply_required. An addressee-less none say is disposed at write.
+  Addressed fyi never births an unborn scope and never gates; when a seat exists
+  it is injected and acked at its own presentation. reply_required births,
+  wakes, advances to presented, and remains owed.
+
+  expires_at is a server-normalized immutable creation attribute. A due pending
+  or deferred envelope with no presentation receipt materializes once as
+  terminal expired on the next authoritative inbox, show, pendingView, present,
+  or envelope-monitor observation; a receipt permanently excludes expiry.
+  delivery is the other immutable attribute, queue by default or hold. wrkq
+  stores and projects delivery but never routes or actuates it; HRC's kicker is
+  its named reader and decides whether hold reaches its preempt admission door.
+
+  Sender withdrawal changes an unpresented pending or deferred envelope to
+  terminal withdrawn. Presentation and withdrawal reciprocally guard each other
+  inside their transactions. A group withdrawal commits one complete per-member
+  result atomically. A reply without an explicit discharge set retains the wide
+  rule. A reply with dischargeEnvelopeIds validates the whole set and atomically
+  creates the reply plus acks exactly those ids; wide and scoped rules never
+  combine. deferred is paused and never terminal, and a retry time remains
+  carried by a wrkq promise whose readiness re-pends the envelope through a
+  derived, event-free transition. Only presented reply_required envelopes gate
+  turn end.
 
   Membership is identity and attendance, never delivery and never an ACL, and is
   sourced only from spoke, addressed, and joined — never derived from wrkq
@@ -73,17 +85,25 @@ source:
   - architecture/records/risks/wrkq.collaboration-ledger.at-least-once-presentation.yaml
   - architecture/records/risks/wrkq.collaboration-ledger.same-uid-disposition-confusion.yaml
   - internal/db/migrations/000052_rooms.sql
+  - internal/db/migrations/000059_envelope_admission.sql
   - internal/domain/rooms.go
   - internal/store/rooms.go
   - internal/wrkqapi/rooms.go
   - internal/rpccli/wrkc.go
-required_tests:
-  - internal/wrkqapi/rooms_test.go
   - internal/rpccli/wrkc_acceptance_test.go
+  - internal/wrkqapi/rooms_admission_test.go
+  - packages/client/test/room-contract.test.ts
+required_tests:
+  - TestEnvelopeTTLExpiryMaterializesFromPendingAndDeferredWithExactObserver
+  - TestEnvelopeTTLDoesNotExpireAfterPresentationAndPresentGuardsTerminal
+  - TestEnvelopeWithdrawBeforeAndAfterPresentationAndGroupPartialReport
+  - TestManifestScopedReplyDischargesExactSetAtomically
+  - TestSayStoresTTLHoldAndIdempotencyAcrossFanout
+  - TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon
   - packages/client/test/room-contract.test.ts
 last_verified:
-  date: 2026-08-28
-  evidence: T-07642 amended bundle 1 green (say into terminal work writes; stale notice after 4h only; obligations gate uniformly; pair reuse keys on activity; hide affects listing only; close/reopen refuse room_lifecycle_removed). Promote to active when waves 2 and 3 prove the consumer side.
+  date: 2026-09-02
+  evidence: T-07871 durability bundle green under just verify; named expiry, withdrawal, scoped-discharge, CLI, migration, and SDK contract tests pin the additive admission surface. Promote to active when waves 2 and 3 prove the consumer side.
 enforced_by: "wave 1 ledger/routing bundle; promote to active only after the HRC consumer and ACP cutover guards exist"
 reopen_when:
   - one envelope acquires multiple addressees, or a fan-out sibling's disposition can reach another sibling
@@ -92,6 +112,9 @@ reopen_when:
   - room activity ceases to be one total, first-match projection over max(opened_at, newest envelope, newest member join)
   - membership becomes derived from a wrkq field, or membership starts gating delivery or reads
   - deferred becomes terminal, or a defer retry stops being carried by a wrkq promise
+  - delivery stops being immutable store-only intent or wrkq begins routing hold
+  - expiry uses a client clock, timer, or sweeper instead of server-clock observation materialization
+  - presentation and withdrawal cease to serialize, or scoped discharge ceases to be atomic with reply creation
   - a presentation receipt becomes anything other than opaque HRC join data, or stops being exactly-once per drive attempt
   - room, member, or envelope activity leaves the shared wrkq event ledger for a separate stream
   - the envelope id prefix changes, or EN- collides with another addressable wrkq id kind

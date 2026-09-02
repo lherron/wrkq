@@ -20,4 +20,6 @@ type EnvelopeParty = wrkqapi.WrkqEnvelopeParty
 type EnvelopePresentation = wrkqapi.WrkqEnvelopePresentation
 type EnvelopeInboxView = wrkqapi.WrkqEnvelopeInboxView
 type EnvelopeInboxGroup = wrkqapi.WrkqEnvelopeInboxGroup
+type EnvelopeWithdrawResult = wrkqapi.WrkqEnvelopeWithdrawResult
+type EnvelopeWithdrawRefusal = wrkqapi.WrkqEnvelopeWithdrawRefusal
 type RoomLog = wrkqapi.WrkqRoomLogView

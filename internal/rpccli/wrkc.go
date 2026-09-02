@@ -92,6 +92,8 @@ type envelopeWire struct {
 	TaskID                *string                    `json:"taskId,omitempty"`
 	State                 string                     `json:"state"`
 	Terminal              bool                       `json:"terminal"`
+	ExpiresAt             *string                    `json:"expiresAt,omitempty"`
+	Delivery              string                     `json:"delivery"`
 	FailureReason         *string                    `json:"failureReason,omitempty"`
 	RetryAt               *string                    `json:"retryAt,omitempty"`
 	DeferReason           *string                    `json:"deferReason,omitempty"`
@@ -127,6 +129,18 @@ type roomSayResultWire struct {
 	Notice            *string        `json:"notice,omitempty"`
 }
 
+type envelopeWithdrawRefusalWire struct {
+	EnvelopeID   string                    `json:"envelopeId"`
+	Reason       string                    `json:"reason"`
+	State        string                    `json:"state,omitempty"`
+	Presentation *envelopePresentationWire `json:"presentation,omitempty"`
+}
+
+type envelopeWithdrawResultWire struct {
+	Withdrawn []envelopeWire                `json:"withdrawn"`
+	Refused   []envelopeWithdrawRefusalWire `json:"refused"`
+}
+
 type roomLogViewWire struct {
 	Room  roomWire       `json:"room"`
 	Items []envelopeWire `json:"items"`
@@ -143,12 +157,14 @@ type envelopeInboxGroupWire struct {
 }
 
 type envelopeInboxViewWire struct {
-	ScopeRef     *string                  `json:"scopeRef,omitempty"`
-	PrincipalRef string                   `json:"principalRef"`
-	Groups       []envelopeInboxGroupWire `json:"groups"`
-	Deferred     []envelopeWire           `json:"deferred"`
-	Failed       []envelopeWire           `json:"failed"`
-	SentFailed   []envelopeWire           `json:"sentFailed"`
+	ScopeRef      *string                  `json:"scopeRef,omitempty"`
+	PrincipalRef  string                   `json:"principalRef"`
+	Groups        []envelopeInboxGroupWire `json:"groups"`
+	Deferred      []envelopeWire           `json:"deferred"`
+	Failed        []envelopeWire           `json:"failed"`
+	SentFailed    []envelopeWire           `json:"sentFailed"`
+	SentExpired   []envelopeWire           `json:"sentExpired"`
+	SentWithdrawn []envelopeWire           `json:"sentWithdrawn"`
 }
 
 // ─── root ─────────────────────────────────────────────────────────────────────
@@ -189,6 +205,7 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 	root.AddCommand(newWrkcLsCmd())
 	root.AddCommand(newWrkcInboxCmd())
 	root.AddCommand(newWrkcDeferCmd())
+	root.AddCommand(newWrkcWithdrawCmd())
 	root.AddCommand(newWrkcVisibilityCmd("hide"))
 	root.AddCommand(newWrkcVisibilityCmd("unhide"))
 	root.AddCommand(newWrkcJoinCmd())
@@ -238,10 +255,10 @@ func wrkcParams(cmd *cobra.Command) (map[string]any, error) {
 // ─── say ──────────────────────────────────────────────────────────────────────
 
 func newWrkcSayCmd() *cobra.Command {
-	var to []string
+	var to, discharges []string
 	var fyi, newRoom, record bool
-	var respondTo, idempotencyKey, timeout, message string
-	var wait bool
+	var respondTo, idempotencyKey, timeout, message, ttl string
+	var wait, hold bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "say <ref> [body|-] [-m body]",
@@ -312,6 +329,9 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if wait && len(to) == 0 {
 				return errors.New("--wait requires --to")
 			}
+			if (hold || ttl != "" || cmd.Flags().Changed("discharges")) && len(to) == 0 {
+				return errors.New("--hold, --ttl, and --discharges require --to")
+			}
 
 			tr, _, closeFn, err := openMirror(cmd)
 			if err != nil {
@@ -330,6 +350,15 @@ agent:<id> to address a scope-less principal such as a human.`,
 			}
 			if fyi {
 				params["fyi"] = true
+			}
+			if ttl != "" {
+				params["ttl"] = ttl
+			}
+			if hold {
+				params["hold"] = true
+			}
+			if cmd.Flags().Changed("discharges") {
+				params["dischargeEnvelopeIds"] = discharges
 			}
 			if newRoom {
 				params["new"] = true
@@ -377,6 +406,9 @@ agent:<id> to address a scope-less principal such as a human.`,
 	cmd.Flags().StringVar(&respondTo, "respond-to", "", "Principal the reply should be addressed to")
 	cmd.Flags().BoolVar(&record, "record", false, "Also write the body as a wrkq comment on the room's task")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key for this say; carried by every envelope of the fan-out")
+	cmd.Flags().StringVar(&ttl, "ttl", "", "Expire if never presented within this duration (for example 30s)")
+	cmd.Flags().BoolVar(&hold, "hold", false, "Store hold delivery intent for HRC admission")
+	cmd.Flags().StringSliceVar(&discharges, "discharges", nil, "Presented envelope ids this reply discharges, exactly")
 	addPromiseOutputFlags(cmd, &output, false)
 	return cmd
 }
@@ -393,9 +425,11 @@ func wrkcWaitForGroup(cmd *cobra.Command, tr Transport, result roomSayResultWire
 		return err
 	}
 	terminal, unmet, _, err := monitorWaitLoop(cmd.Context(), tr, monitorStreamOpts{
-		scopedTasks: []string{result.GroupID},
-		condition:   "terminal",
-		timeout:     duration,
+		scopedTasks:  []string{result.GroupID},
+		condition:    "terminal",
+		timeout:      duration,
+		principalRef: mustActorFlag(cmd),
+		scopeRef:     wrkcScopeRef(cmd),
 	})
 	if err != nil {
 		return err
@@ -447,20 +481,66 @@ func wrkcCollectGroupFailures(cmd *cobra.Command, tr Transport, result roomSayRe
 	}
 	failures := []string{}
 	for _, envelope := range view.Items {
-		if !wanted[envelope.ID] || envelope.State != "failed" {
+		if !wanted[envelope.ID] || (envelope.State != "failed" && envelope.State != "expired" && envelope.State != "withdrawn") {
 			continue
 		}
 		member := envelope.ID
 		if envelope.To != nil {
 			member = envelopePartyLabel(*envelope.To)
 		}
-		reason := "unknown"
+		reason := envelope.State
 		if envelope.FailureReason != nil {
 			reason = *envelope.FailureReason
 		}
-		failures = append(failures, member+" failed:"+reason)
+		failures = append(failures, member+" "+reason)
 	}
 	return failures, nil
+}
+
+func mustActorFlag(cmd *cobra.Command) string {
+	principal, _ := actorFlag(cmd)
+	return principal
+}
+
+func newWrkcWithdrawCmd() *cobra.Command {
+	var group bool
+	var reason string
+	var output promiseOutputFlags
+	cmd := &cobra.Command{
+		Use: "withdraw <EN-xxxxx>", Short: "Withdraw unpresented mail",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tr, _, closeFn, err := openMirror(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			params, err := wrkcParams(cmd)
+			if err != nil {
+				return err
+			}
+			params["envelope"] = args[0]
+			if group {
+				params["group"] = true
+			}
+			if reason != "" {
+				params["reason"] = reason
+			}
+			raw, err := tr.Call(cmd.Context(), "wrkq.envelope.withdraw", params)
+			if err != nil {
+				return err
+			}
+			var result envelopeWithdrawResultWire
+			if err := json.Unmarshal(raw, &result); err != nil {
+				return err
+			}
+			return renderWrkcWithdrawResult(cmd, result, output)
+		},
+	}
+	cmd.Flags().BoolVar(&group, "group", false, "Withdraw every unpresented envelope in this fan-out group")
+	cmd.Flags().StringVar(&reason, "reason", "", "Reason for withdrawal")
+	addPromiseOutputFlags(cmd, &output, true)
+	return cmd
 }
 
 // wrkcCollectReplies reads back the room and returns the envelopes each

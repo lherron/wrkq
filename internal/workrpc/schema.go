@@ -43,6 +43,8 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqEnvelopeInboxView":           dtoType[wrkqapi.WrkqEnvelopeInboxView](),
 	"WrkqEnvelopePresentResult":       dtoType[wrkqapi.WrkqEnvelopePresentResult](),
 	"WrkqEnvelopePendingView":         dtoType[wrkqapi.WrkqEnvelopePendingView](),
+	"WrkqEnvelopeWithdrawParams":      dtoType[wrkqapi.EnvelopeWithdrawParams](),
+	"WrkqEnvelopeWithdrawResult":      dtoType[wrkqapi.WrkqEnvelopeWithdrawResult](),
 	"WrkqRoomSayParams":               dtoType[wrkqapi.RoomSayParams](),
 	"WrkqRoomShowParams":              dtoType[wrkqapi.RoomShowParams](),
 	"WrkqRoomListParams":              dtoType[wrkqapi.RoomListParams](),

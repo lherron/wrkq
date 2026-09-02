@@ -132,6 +132,13 @@ func (a *API) MonitorStateView(ctx context.Context, p MonitorStateViewParams) (*
 	// state=/all-terminal evaluate task lifecycle, acked/terminal evaluate
 	// envelope dispositions. Mixing them would make `unmet` meaningless.
 	if condition.isEnvelopeCondition() {
+		attr, aerr := a.attributionFor(p.PrincipalRef)
+		if aerr != nil {
+			return nil, aerr
+		}
+		if _, xerr := a.store.Rooms.ExpireDueEnvelopes(attr); xerr != nil {
+			return nil, NewInternalError(xerr)
+		}
 		if len(selected.envelopeUUIDs) == 0 {
 			return nil, NewValidationError("monitor --until "+p.Condition+" requires at least one envelope selector (EN-xxxxx)", nil)
 		}

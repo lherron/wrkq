@@ -79,6 +79,8 @@ import type {
   WrkqEnvelopeMemberPageParams,
   WrkqEnvelopeAckParams,
   WrkqEnvelopeDeferParams,
+  WrkqEnvelopeWithdrawParams,
+  WrkqEnvelopeWithdrawResult,
   WrkqEnvelopeInboxView,
   WrkqEnvelopeInboxViewParams,
   WrkqEnvelopePendingView,
@@ -342,6 +344,7 @@ export interface WrkqEnvelopeFacade {
     params?: WrkqEnvelopeInboxViewParams,
   ): Promise<WrkqEnvelopeInboxView>;
   defer(params: WrkqEnvelopeDeferParams): Promise<WrkqEnvelope>;
+  withdraw(params: WrkqEnvelopeWithdrawParams): Promise<WrkqEnvelopeWithdrawResult>;
   ack(params: WrkqEnvelopeAckParams): Promise<WrkqRoomLogView>;
   present(
     params: WrkqEnvelopePresentParams,

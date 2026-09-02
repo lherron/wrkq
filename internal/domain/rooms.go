@@ -72,6 +72,17 @@ const (
 	EnvelopeStateAcked     EnvelopeState = "acked"
 	EnvelopeStateDeferred  EnvelopeState = "deferred"
 	EnvelopeStateFailed    EnvelopeState = "failed"
+	EnvelopeStateExpired   EnvelopeState = "expired"
+	EnvelopeStateWithdrawn EnvelopeState = "withdrawn"
+)
+
+// EnvelopeDelivery is immutable delivery intent. wrkq stores and projects it;
+// HRC alone decides how that intent maps to execution admission.
+type EnvelopeDelivery string
+
+const (
+	EnvelopeDeliveryQueue EnvelopeDelivery = "queue"
+	EnvelopeDeliveryHold  EnvelopeDelivery = "hold"
 )
 
 // EnvelopeFailureReason classifies why an obligation ended without a reply,
@@ -138,6 +149,8 @@ type Envelope struct {
 	Body                  string                 `json:"body" db:"body"`
 	TaskUUID              *string                `json:"task_uuid,omitempty" db:"task_uuid"`
 	State                 EnvelopeState          `json:"state" db:"state"`
+	ExpiresAt             *string                `json:"expires_at,omitempty" db:"expires_at"`
+	Delivery              EnvelopeDelivery       `json:"delivery" db:"delivery"`
 	FailureReason         *EnvelopeFailureReason `json:"failure_reason,omitempty" db:"failure_reason"`
 	RetryAt               *string                `json:"retry_at,omitempty" db:"retry_at"`
 	DeferReason           *string                `json:"defer_reason,omitempty" db:"defer_reason"`
@@ -218,10 +231,21 @@ func ValidateEnvelopeObligation(obligation EnvelopeObligation) error {
 func ValidateEnvelopeState(state EnvelopeState) error {
 	switch state {
 	case EnvelopeStatePending, EnvelopeStatePresented, EnvelopeStateAcked,
-		EnvelopeStateDeferred, EnvelopeStateFailed:
+		EnvelopeStateDeferred, EnvelopeStateFailed, EnvelopeStateExpired,
+		EnvelopeStateWithdrawn:
 		return nil
 	default:
-		return fmt.Errorf("invalid envelope state %q: must be one of: pending, presented, acked, deferred, failed", state)
+		return fmt.Errorf("invalid envelope state %q: must be one of: pending, presented, acked, deferred, failed, expired, withdrawn", state)
+	}
+}
+
+// ValidateEnvelopeDelivery validates the stored delivery-intent vocabulary.
+func ValidateEnvelopeDelivery(delivery EnvelopeDelivery) error {
+	switch delivery {
+	case EnvelopeDeliveryQueue, EnvelopeDeliveryHold:
+		return nil
+	default:
+		return fmt.Errorf("invalid envelope delivery %q: must be one of: queue, hold", delivery)
 	}
 }
 
@@ -239,7 +263,8 @@ func ValidateEnvelopeFailureReason(reason EnvelopeFailureReason) error {
 // IsEnvelopeTerminal reports whether an envelope has reached a disposition no
 // further delivery can change. deferred is paused, never terminal.
 func IsEnvelopeTerminal(state EnvelopeState) bool {
-	return state == EnvelopeStateAcked || state == EnvelopeStateFailed
+	return state == EnvelopeStateAcked || state == EnvelopeStateFailed ||
+		state == EnvelopeStateExpired || state == EnvelopeStateWithdrawn
 }
 
 // RoomActivityFor classifies a room by FIRST MATCH, so the three labels are

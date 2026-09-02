@@ -16,6 +16,7 @@ const (
 	CodeClaimSuperseded  = "WRKQ_CLAIM_SUPERSEDED"
 	CodeNodeIdentity     = "WRKQ_NODE_IDENTITY_REQUIRED"
 	CodeCursorInvalid    = "WRKQ_CURSOR_INVALID"
+	CodeAlreadyPresented = "WRKQ_ALREADY_PRESENTED"
 	CodeInternal         = "WORKRPC_INTERNAL"
 )
 

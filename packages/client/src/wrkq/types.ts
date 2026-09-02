@@ -150,7 +150,7 @@ export type WrkqRoomWork = "open" | "terminal";
 export type WrkqRoomActivity = "active" | "quiet" | "stale";
 export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
 export type WrkqEnvelopeState =
-  "pending" | "presented" | "acked" | "deferred" | "failed";
+  "pending" | "presented" | "acked" | "deferred" | "failed" | "expired" | "withdrawn";
 export type WrkqEnvelopeFailureReason =
   "runtime_terminated" | "ignored" | "undeliverable" | "legacy";
 export type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
@@ -262,8 +262,10 @@ export interface WrkqEnvelope {
   /** Set when the say routed via a task, even into a campaign room. */
   taskId?: string;
   state: WrkqEnvelopeState;
-  /** acked | failed. `deferred` is paused, NEVER terminal. */
+  /** acked | failed | expired | withdrawn. `deferred` is paused. */
   terminal: boolean;
+  expiresAt?: string;
+  delivery: "queue" | "hold";
   failureReason?: WrkqEnvelopeFailureReason;
   retryAt?: string;
   deferReason?: string;
@@ -298,6 +300,12 @@ export interface WrkqRoomSayParams {
   /** Fans out to one envelope per addressee. Only `to` fires. */
   to?: string[];
   fyi?: boolean;
+  /** Server-relative TTL; expires only if never presented. */
+  ttl?: string;
+  /** Store hold delivery intent for HRC. */
+  hold?: boolean;
+  /** Exact presented obligations this reply discharges. */
+  dischargeEnvelopeIds?: string[];
   /** Force a fresh ad-hoc room instead of reusing the open pair room. */
   new?: boolean;
   respondTo?: string;
@@ -482,6 +490,28 @@ export interface WrkqEnvelopeInboxView {
   deferred: WrkqEnvelope[];
   failed: WrkqEnvelope[];
   sentFailed: WrkqEnvelope[];
+  sentExpired: WrkqEnvelope[];
+  sentWithdrawn: WrkqEnvelope[];
+}
+
+export interface WrkqEnvelopeWithdrawParams {
+  envelope: string;
+  group?: boolean;
+  reason?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqEnvelopeWithdrawRefusal {
+  envelopeId: string;
+  reason: string;
+  state?: WrkqEnvelopeState;
+  presentation?: WrkqEnvelopePresentation;
+}
+
+export interface WrkqEnvelopeWithdrawResult {
+  withdrawn: WrkqEnvelope[];
+  refused: WrkqEnvelopeWithdrawRefusal[];
 }
 
 export interface WrkqEnvelopeDeferParams {
