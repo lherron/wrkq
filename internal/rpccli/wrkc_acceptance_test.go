@@ -113,6 +113,147 @@ func backdateWrkcRoom(t *testing.T, dbPath, roomUUID string, age time.Duration) 
 	}
 }
 
+func waitForWrkcEnvelope(t *testing.T, dbPath, body string) string {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open while waiting for envelope: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var envelopeID string
+		err = database.QueryRow("SELECT id FROM envelopes WHERE body = ? ORDER BY id DESC LIMIT 1", body).Scan(&envelopeID)
+		if err == nil {
+			return envelopeID
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for envelope body %q", body)
+	return ""
+}
+
+// TestWrkcSayWaitConsumesOnlyTheExactAddresseeReply proves that reading a
+// reply through --wait is its terminal consumption. The reply fan-out uses two
+// scopes of the same principal so principal-only matching would consume the
+// sibling addressed to a different seat.
+func TestWrkcSayWaitConsumesOnlyTheExactAddresseeReply(t *testing.T) {
+	f := newWrkcFixture(t)
+	aScope := "alice@wrkc-proj:" + f.taskID
+	otherAliceScope := "alice@wrkc-proj:primary"
+	bScope := "bob@wrkc-proj:" + f.taskID
+
+	type waitResult struct {
+		output string
+		err    error
+	}
+	waited := make(chan waitResult, 1)
+	go func() {
+		output, err := runWrkc(t, f.dbPath, "agent:alice", "say", f.taskID, "question for bob",
+			"--to", bScope, "--scope-ref", aScope, "--wait", "--timeout", "3s", "--json")
+		waited <- waitResult{output: output, err: err}
+	}()
+
+	questionID := waitForWrkcEnvelope(t, f.dbPath, "question for bob")
+	presentationDB, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open for question presentation: %v", err)
+	}
+	question, err := store.New(presentationDB).Rooms.GetEnvelope(questionID)
+	if err != nil {
+		_ = presentationDB.Close()
+		t.Fatalf("read question for presentation: %v", err)
+	}
+	if _, _, err := store.New(presentationDB).Rooms.RecordPresentationWithAttribution(
+		attribution.Attribution{PrincipalRef: "agent:hrc"}, question.UUID,
+		store.PresentationRecord{MemberRef: bScope},
+	); err != nil {
+		_ = presentationDB.Close()
+		t.Fatalf("present question: %v", err)
+	}
+	if err := presentationDB.Close(); err != nil {
+		t.Fatalf("close question presentation database: %v", err)
+	}
+	replyOut, err := runWrkc(t, f.dbPath, "agent:bob", "say", f.taskID, "answer for alice",
+		"--to", aScope, "--to", otherAliceScope, "--scope-ref", bScope, "--json")
+	if err != nil {
+		t.Fatalf("reply fan-out: %v\n%s", err, replyOut)
+	}
+	var reply roomSayResultWire
+	if err := json.Unmarshal([]byte(replyOut), &reply); err != nil {
+		t.Fatalf("decode reply fan-out: %v\n%s", err, replyOut)
+	}
+	var otherAliceReplyID string
+	for _, envelope := range reply.Envelopes {
+		if envelope.To != nil && envelope.To.ScopeRef != nil && *envelope.To.ScopeRef == otherAliceScope {
+			otherAliceReplyID = envelope.ID
+		}
+	}
+	if otherAliceReplyID == "" {
+		t.Fatalf("reply fan-out has no sibling for %s: %+v", otherAliceScope, reply.Envelopes)
+	}
+	transport, _, closeTransport, err := openLocalTransport(f.dbPath)
+	if err != nil {
+		t.Fatalf("open acceptance transport: %v", err)
+	}
+	_, nonAddresseeErr := transport.Call(t.Context(), "wrkq.envelope.ack", map[string]any{
+		"envelopes": []string{otherAliceReplyID}, "reason": "consumed_by_wait",
+		"principalRef": "agent:alice", "scopeRef": aScope,
+	})
+	closeTransport()
+	if nonAddresseeErr == nil {
+		t.Fatalf("non-addressee scope consumed %s", otherAliceReplyID)
+	}
+
+	result := <-waited
+	if result.err != nil {
+		t.Fatalf("wrkc say --wait: %v\n%s", result.err, result.output)
+	}
+	var returned []envelopeWire
+	if err := json.Unmarshal([]byte(result.output), &returned); err != nil {
+		t.Fatalf("decode --wait replies: %v\n%s", err, result.output)
+	}
+	if len(returned) != 1 || returned[0].To == nil || returned[0].To.ScopeRef == nil ||
+		*returned[0].To.ScopeRef != aScope || returned[0].State != "acked" ||
+		returned[0].Reason == nil || *returned[0].Reason != "consumed_by_wait" {
+		t.Fatalf("returned replies = %+v, want one exact-scope consumed reply", returned)
+	}
+	showOut, err := runWrkc(t, f.dbPath, "agent:alice", "show", returned[0].ID, "--scope-ref", aScope, "--output", "human")
+	if err != nil || !strings.Contains(showOut, "reason: consumed_by_wait") {
+		t.Fatalf("wrkc show did not render consumed reason: %v\n%s", err, showOut)
+	}
+	logOut, err := runWrkc(t, f.dbPath, "agent:alice", "log", f.taskID, "--scope-ref", aScope, "--output", "human")
+	if err != nil || !strings.Contains(logOut, "reason: consumed_by_wait") {
+		t.Fatalf("wrkc log did not render consumed reason: %v\n%s", err, logOut)
+	}
+
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open reply ledger: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var siblingState string
+	if err := database.QueryRow("SELECT state FROM envelopes WHERE group_id = ? AND to_scope_ref = ?",
+		reply.GroupID, otherAliceScope).Scan(&siblingState); err != nil {
+		t.Fatalf("read non-addressee sibling: %v", err)
+	}
+	if siblingState != "pending" {
+		t.Fatalf("reply sibling for another scope = %s, want pending", siblingState)
+	}
+
+	inboxOut, err := runWrkc(t, f.dbPath, "agent:alice", "inbox", "--scope-ref", aScope, "--json")
+	if err != nil {
+		t.Fatalf("alice inbox: %v\n%s", err, inboxOut)
+	}
+	var inbox envelopeInboxViewWire
+	if err := json.Unmarshal([]byte(inboxOut), &inbox); err != nil {
+		t.Fatalf("decode alice inbox: %v\n%s", err, inboxOut)
+	}
+	if len(inbox.Groups) != 0 {
+		t.Fatalf("consumed reply remains in alice inbox: %+v", inbox.Groups)
+	}
+}
+
 // TestWrkcFullSurfaceWithNoHRCDaemon walks the §9.1 verb list end to end against
 // a real database with no HRC anything in the process.
 func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {

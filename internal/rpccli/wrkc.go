@@ -97,6 +97,7 @@ type envelopeWire struct {
 	FailureReason         *string                    `json:"failureReason,omitempty"`
 	RetryAt               *string                    `json:"retryAt,omitempty"`
 	DeferReason           *string                    `json:"deferReason,omitempty"`
+	Reason                *string                    `json:"reason,omitempty"`
 	TerminalActor         *string                    `json:"terminalActor,omitempty"`
 	MaterializationIntent *string                    `json:"materializationIntent,omitempty"`
 	RespondToPrincipalRef *string                    `json:"respondToPrincipalRef,omitempty"`
@@ -459,7 +460,11 @@ func wrkcWaitForGroup(cmd *cobra.Command, tr Transport, result roomSayResultWire
 	if len(replies) == 0 {
 		return renderWrkcSayResult(cmd, result, output)
 	}
-	return renderWrkcEnvelopes(cmd, replies, output, false)
+	consumed, err := wrkcConsumeWaitReplies(cmd, tr, replies)
+	if err != nil {
+		return err
+	}
+	return renderWrkcEnvelopes(cmd, consumed, output, false)
 }
 
 func wrkcCollectGroupFailures(cmd *cobra.Command, tr Transport, result roomSayResultWire) ([]string, error) {
@@ -564,13 +569,13 @@ func wrkcCollectReplies(cmd *cobra.Command, tr Transport, result roomSayResultWi
 
 	sent := map[string]bool{}
 	counterparties := map[string]bool{}
-	sender := ""
+	var sender envelopePartyWire
 	last := ""
 	for _, envelope := range result.Envelopes {
 		sent[envelope.ID] = true
-		sender = envelope.From.PrincipalRef
+		sender = envelope.From
 		if envelope.To != nil {
-			counterparties[envelope.To.PrincipalRef] = true
+			counterparties[envelopePartyKey(*envelope.To)] = true
 		}
 		if envelope.ID > last {
 			last = envelope.ID
@@ -582,15 +587,49 @@ func wrkcCollectReplies(cmd *cobra.Command, tr Transport, result roomSayResultWi
 		if sent[envelope.ID] || envelope.ID <= last {
 			continue
 		}
-		if !counterparties[envelope.From.PrincipalRef] {
+		if !counterparties[envelopePartyKey(envelope.From)] {
 			continue
 		}
-		if envelope.To == nil || envelope.To.PrincipalRef != sender {
+		if envelope.Obligation != "reply_required" || envelope.To == nil || !sameEnvelopeParty(*envelope.To, sender) {
 			continue
 		}
 		replies = append(replies, envelope)
 	}
 	return replies, nil
+}
+
+func envelopePartyKey(party envelopePartyWire) string {
+	scopeRef := ""
+	if party.ScopeRef != nil {
+		scopeRef = *party.ScopeRef
+	}
+	return party.PrincipalRef + "\x00" + scopeRef
+}
+
+func sameEnvelopeParty(left, right envelopePartyWire) bool {
+	return envelopePartyKey(left) == envelopePartyKey(right)
+}
+
+func wrkcConsumeWaitReplies(cmd *cobra.Command, tr Transport, replies []envelopeWire) ([]envelopeWire, error) {
+	params, err := wrkcParams(cmd)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(replies))
+	for _, reply := range replies {
+		ids = append(ids, reply.ID)
+	}
+	params["envelopes"] = ids
+	params["reason"] = "consumed_by_wait"
+	raw, err := tr.Call(cmd.Context(), "wrkq.envelope.ack", params)
+	if err != nil {
+		return nil, err
+	}
+	var view roomLogViewWire
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return nil, err
+	}
+	return view.Items, nil
 }
 
 // ─── room verbs ───────────────────────────────────────────────────────────────

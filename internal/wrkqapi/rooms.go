@@ -5,6 +5,7 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -1569,10 +1570,11 @@ func (a *API) EnvelopeDefer(ctx context.Context, p EnvelopeDeferParams) (*WrkqEn
 	return a.envelopeDTO(ctx, updated, state)
 }
 
-// EnvelopeAck is the OPERATOR-only ack, intended for humans such as agent:lance
-// clearing failed mail. There is no agent-facing ack: for an agent the reply IS
-// the ack, which is why this accepts ANY principal and refuses nothing on
-// identity — the surface it is reachable from is the control.
+const envelopeAckReasonConsumedByWait = "consumed_by_wait"
+
+// EnvelopeAck defaults to the OPERATOR-only ack intended for humans such as
+// agent:lance clearing mail. consumed_by_wait is the sole caller-scoped path:
+// it is accepted only for the exact addressee's pending/presented reply.
 func (a *API) EnvelopeAck(ctx context.Context, p EnvelopeAckParams) (*WrkqRoomLogView, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -1584,6 +1586,12 @@ func (a *API) EnvelopeAck(ctx context.Context, p EnvelopeAckParams) (*WrkqRoomLo
 	if len(p.Envelopes) == 0 {
 		return nil, NewValidationError("ack requires at least one envelope", map[string]any{"field": "envelopes"})
 	}
+	reason := strings.TrimSpace(p.Reason)
+	if reason != "" && reason != envelopeAckReasonConsumedByWait {
+		return nil, NewValidationError("unsupported caller-scoped ack reason", map[string]any{
+			"field": "reason", "reason": p.Reason,
+		})
+	}
 	view := &WrkqRoomLogView{Items: []WrkqEnvelope{}}
 	for _, selector := range p.Envelopes {
 		envelope, gerr := a.store.Rooms.GetEnvelope(strings.TrimSpace(selector))
@@ -1591,7 +1599,20 @@ func (a *API) EnvelopeAck(ctx context.Context, p EnvelopeAckParams) (*WrkqRoomLo
 			return nil, mapRoomStoreError(gerr, selector)
 		}
 		disposition := store.EnvelopeDisposition{State: domain.EnvelopeStateAcked, Reason: "operator"}
-		if strings.TrimSpace(p.Note) != "" {
+		if reason == envelopeAckReasonConsumedByWait {
+			claimedScope, aerr := a.requireExactEnvelopeAddressee(envelope, attr, p.ScopeRef, "ack as consumed_by_wait")
+			if aerr != nil {
+				return nil, aerr
+			}
+			if envelope.Obligation != domain.EnvelopeObligationReplyRequired ||
+				(envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented) {
+				return nil, NewWrongStateError(map[string]any{
+					"envelope": envelope.ID, "state": string(envelope.State), "verb": envelopeAckReasonConsumedByWait,
+				})
+			}
+			attr.ScopeRef = claimedScope
+			disposition.Reason = envelopeAckReasonConsumedByWait
+		} else if strings.TrimSpace(p.Note) != "" {
 			disposition.Reason = "operator: " + strings.TrimSpace(p.Note)
 		}
 		updated, derr := a.store.Rooms.DisposeEnvelopeWithAttribution(attr, envelope.UUID, disposition, 0)
@@ -1861,6 +1882,36 @@ func (a *API) requireEnvelopeAddressee(envelope *domain.Envelope, attr attributi
 	}
 	return NewForbiddenError("only the addressee may "+verb+" this envelope", map[string]any{
 		"envelope": envelope.ID, "claimed": attr.PrincipalRef,
+	})
+}
+
+// requireExactEnvelopeAddressee is deliberately stricter than the legacy
+// defer hygiene check: consumed_by_wait is a caller authority, so BOTH the
+// durable principal and durable scope must equal the caller. A scoped envelope
+// cannot fall back to same-principal authority when scopeRef is missing.
+func (a *API) requireExactEnvelopeAddressee(envelope *domain.Envelope, attr attribution.Attribution, scopeRef, verb string) (string, error) {
+	claimedScope, err := normalizeRoomScopeRef(scopeRef)
+	if err != nil {
+		return "", err
+	}
+	targetScope := ""
+	if envelope.ToScopeRef != nil {
+		targetScope = *envelope.ToScopeRef
+	}
+	if envelope.ToPrincipalRef != nil && *envelope.ToPrincipalRef == attr.PrincipalRef && targetScope == claimedScope {
+		return claimedScope, nil
+	}
+	return "", NewForbiddenError("only the exact addressee may "+verb+" this envelope", map[string]any{
+		"envelope": envelope.ID,
+		"addresseePrincipalRef": func() string {
+			if envelope.ToPrincipalRef == nil {
+				return ""
+			}
+			return *envelope.ToPrincipalRef
+		}(),
+		"addresseeScopeRef":   targetScope,
+		"claimedPrincipalRef": attr.PrincipalRef,
+		"claimedScopeRef":     claimedScope,
 	})
 }
 
@@ -2223,6 +2274,26 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 	if envelope.FailureReason != nil {
 		reason := string(*envelope.FailureReason)
 		dto.FailureReason = &reason
+	}
+	if envelope.State == domain.EnvelopeStateAcked {
+		var payload string
+		err := a.db.QueryRowContext(ctx, `SELECT payload FROM event_log
+			WHERE resource_type = 'envelope' AND resource_uuid = ? AND event_type = 'envelope.acked'
+			ORDER BY id DESC LIMIT 1`, envelope.UUID).Scan(&payload)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, NewInternalError(err)
+		}
+		if err == nil {
+			var event struct {
+				Reason string `json:"reason"`
+			}
+			if jerr := json.Unmarshal([]byte(payload), &event); jerr != nil {
+				return nil, NewInternalError(fmt.Errorf("decode envelope.acked payload: %w", jerr))
+			}
+			if strings.TrimSpace(event.Reason) != "" {
+				dto.Reason = &event.Reason
+			}
+		}
 	}
 	if envelope.Meta != nil {
 		dto.Meta = parseMeta(*envelope.Meta)

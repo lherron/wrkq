@@ -100,17 +100,21 @@ type WrkqEnvelope struct {
 	// reply line prints it verbatim. A bare name must never be printed in its
 	// place: bare names resolve per room, and reply-is-ack keys on scopes, so a
 	// bare reply line can address a seat that never asked (T-07638).
-	ReplyTo               string  `json:"replyTo"`
-	Obligation            string  `json:"obligation"`
-	Body                  string  `json:"body"`
-	TaskID                *string `json:"taskId,omitempty"`
-	State                 string  `json:"state"`
-	Terminal              bool    `json:"terminal"`
-	ExpiresAt             *string `json:"expiresAt,omitempty"`
-	Delivery              string  `json:"delivery"`
-	FailureReason         *string `json:"failureReason,omitempty"`
-	RetryAt               *string `json:"retryAt,omitempty"`
-	DeferReason           *string `json:"deferReason,omitempty"`
+	ReplyTo       string  `json:"replyTo"`
+	Obligation    string  `json:"obligation"`
+	Body          string  `json:"body"`
+	TaskID        *string `json:"taskId,omitempty"`
+	State         string  `json:"state"`
+	Terminal      bool    `json:"terminal"`
+	ExpiresAt     *string `json:"expiresAt,omitempty"`
+	Delivery      string  `json:"delivery"`
+	FailureReason *string `json:"failureReason,omitempty"`
+	RetryAt       *string `json:"retryAt,omitempty"`
+	DeferReason   *string `json:"deferReason,omitempty"`
+	// Reason is the disposition reason carried by the terminal envelope event.
+	// It is populated for acknowledgements so consumers can distinguish reply,
+	// operator, fyi_presented, and consumed_by_wait.
+	Reason                *string `json:"reason,omitempty"`
 	TerminalActor         *string `json:"terminalActor,omitempty"`
 	MaterializationIntent *string `json:"materializationIntent,omitempty"`
 	RespondToPrincipalRef *string `json:"respondToPrincipalRef,omitempty"`
@@ -375,11 +379,13 @@ type EnvelopeDeferParams struct {
 	ScopeRef     string `json:"scopeRef,omitempty"`
 }
 
-// EnvelopeAckParams is the OPERATOR-only ack used to clear failed mail. There is
-// no agent-facing ack: for an agent, the reply IS the ack.
+// EnvelopeAckParams defaults to the operator ack used to clear mail. The one
+// caller-scoped reason, consumed_by_wait, is reserved for wrkc say --wait and
+// may acknowledge only the exact caller's pending/presented reply obligation.
 type EnvelopeAckParams struct {
 	Envelopes    []string `json:"envelopes"`
 	Note         string   `json:"note,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
 	PrincipalRef string   `json:"principalRef,omitempty"`
 	ScopeRef     string   `json:"scopeRef,omitempty"`
 }

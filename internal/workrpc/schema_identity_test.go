@@ -18,7 +18,9 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after T-07871 added
+// pinnedProtocolSchemaHash is the intentional wire identity after T-07889 added
+// the caller-scoped consumed_by_wait ack reason and rendered envelope reason.
+// That sits on top of T-07871, which added
 // immutable envelope expiresAt/delivery projections, expired/withdrawn states,
 // scoped discharge input, the envelope.withdraw method and result DTOs, and the
 // WRKQ_ALREADY_PRESENTED refusal code. That sits on top of T-07723, which added
@@ -50,7 +52,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:70f0899baba61650a2ff57b5628ff93aeedb9e244f3680394869a797971a3345"
+const pinnedProtocolSchemaHash = "sha256:f11b124352aac423dd50a9b1b714ca7f31c8067e554a70b195ace2b329ca4511"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

@@ -329,6 +329,9 @@ func wrkcEnvelopeTranscriptLines(envelope envelopeWire) []string {
 		}
 		lines = append(lines, deferred)
 	}
+	if envelope.Reason != nil {
+		lines = append(lines, "  reason: "+*envelope.Reason)
+	}
 	for _, line := range strings.Split(strings.TrimRight(envelope.Body, "\n"), "\n") {
 		lines = append(lines, "  "+line)
 	}
@@ -363,6 +366,9 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 	}
 	if envelope.DeferReason != nil {
 		lines = append(lines, "defer_reason: "+*envelope.DeferReason)
+	}
+	if envelope.Reason != nil {
+		lines = append(lines, "reason: "+*envelope.Reason)
 	}
 	if envelope.RetryAt != nil {
 		lines = append(lines, "retry_at: "+*envelope.RetryAt)

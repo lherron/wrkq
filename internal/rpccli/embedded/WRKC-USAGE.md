@@ -120,6 +120,12 @@ reports siblings already presented. Presentation-first returns the typed
 lifecycle field is per envelope, so one recipient's reply, defer, or failure never
 disposes another's obligation.
 
+A reply returned by `say --wait` is acked as `consumed_by_wait`; nothing is owed
+on it. The ack requires the waiter's exact principal and scope, so another
+same-principal seat and every other fan-out sibling remain untouched. During the
+HRC companion rollout, a reply already queued in a busy seat's broker may still
+replay once even though the wrkq ledger now records it as consumed.
+
 `ack` is operator-only, for a human clearing failed mail
 (`wrkc ack EN-00042 --as agent:lance`). Agents do not ack; they reply or defer.
 

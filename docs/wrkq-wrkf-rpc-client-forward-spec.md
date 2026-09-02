@@ -971,9 +971,10 @@ wrkq.envelope.fail            # HRC-facing
 Three of these are the HRC-facing surface and nothing else should call them:
 `present` records `presented_to` and emits `envelope.presented`; `pendingView` is
 the kicker's wake set AND the stop-hook predicate in one read model; `fail`
-records `failed{reason}` and emits `envelope.failed`. There is no agent-facing ack — for
-an agent the reply IS the ack — so `envelope.ack` is the OPERATOR verb, intended
-for a human principal clearing failed mail.
+records `failed{reason}` and emits `envelope.failed`. `envelope.ack` defaults to
+the OPERATOR verb for a human clearing mail. Its sole caller-scoped mode is
+`reason: "consumed_by_wait"`, which requires the exact addressee principal and
+scope and accepts only a pending/presented reply-required envelope.
 
 ```ts
 type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
@@ -1005,7 +1006,7 @@ interface WrkqEnvelope {
   obligation: WrkqEnvelopeObligation; body: string; taskId?: string;
   state: WrkqEnvelopeState; terminal: boolean;
   failureReason?: WrkqEnvelopeFailureReason;
-  retryAt?: string; deferReason?: string; terminalActor?: string;
+  retryAt?: string; deferReason?: string; reason?: string; terminalActor?: string;
   materializationIntent?: string;
   respondToPrincipalRef?: string; retryPromiseId?: string;
   idempotencyKey?: string; meta: Record<string, unknown>;
@@ -1077,6 +1078,9 @@ Contract points a consumer must not have to rediscover:
   with itself and a fan-out shares one waitable handle. `wrkq monitor wait
   <groupId> --until terminal` blocks on the whole group; `terminal` is
   `acked | failed`, so a failed obligation releases a waiter.
+- **A reply returned by `wrkc say --wait` is terminally acknowledged as
+  `consumed_by_wait`.** Its exact principal and scope must match the waiter;
+  same-principal sibling scopes and other fan-out addressees remain untouched.
 - **`idempotencyKey` rides EVERY envelope of a fan-out**, so a consumer
   dual-writing into another system can correlate on any addressee's row. Its
   uniqueness guard is per `(key, addressee)`: a retried say rolls the whole group

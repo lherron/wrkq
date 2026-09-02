@@ -1241,6 +1241,105 @@ func TestHumanPrincipalSaysAndAcksUnderUnchangedAttribution(t *testing.T) {
 	}
 }
 
+func TestConsumedByWaitAckRequiresExactAddresseeAndLiveReply(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	aScope := "alice@proj:" + f.loneTaskID
+	otherAliceScope := "alice@proj:primary"
+	bScope := "bob@proj:" + f.loneTaskID
+
+	fanout := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "fan-out reply", To: []string{aScope, otherAliceScope},
+		PrincipalRef: "agent:bob", ScopeRef: bScope,
+	})
+	toAlice := fanout.Envelopes[0]
+	toOtherAlice := fanout.Envelopes[1]
+	if toAlice.To == nil || toAlice.To.ScopeRef == nil || *toAlice.To.ScopeRef != aScope {
+		toAlice, toOtherAlice = toOtherAlice, toAlice
+	}
+
+	_, err := f.api.EnvelopeAck(ctx, EnvelopeAckParams{
+		Envelopes: []string{toAlice.ID}, Reason: envelopeAckReasonConsumedByWait,
+		PrincipalRef: "agent:bob", ScopeRef: bScope,
+	})
+	_ = assertDomainCode(t, CodeForbidden, err)
+	_, err = f.api.EnvelopeAck(ctx, EnvelopeAckParams{
+		Envelopes: []string{toAlice.ID}, Reason: envelopeAckReasonConsumedByWait,
+		PrincipalRef: "agent:alice", ScopeRef: otherAliceScope,
+	})
+	_ = assertDomainCode(t, CodeForbidden, err)
+
+	acked, err := f.api.EnvelopeAck(ctx, EnvelopeAckParams{
+		Envelopes: []string{toAlice.ID}, Reason: envelopeAckReasonConsumedByWait,
+		PrincipalRef: "agent:alice", ScopeRef: aScope,
+	})
+	if err != nil {
+		t.Fatalf("consume pending reply: %v", err)
+	}
+	if len(acked.Items) != 1 || acked.Items[0].State != "acked" || acked.Items[0].Reason == nil ||
+		*acked.Items[0].Reason != envelopeAckReasonConsumedByWait {
+		t.Fatalf("consumed pending reply = %+v", acked.Items)
+	}
+	var eventPayload string
+	if err := f.s.DB().QueryRow(`SELECT payload FROM event_log
+		WHERE resource_uuid = ? AND event_type = 'envelope.acked' ORDER BY id DESC LIMIT 1`,
+		toAlice.UUID).Scan(&eventPayload); err != nil {
+		t.Fatalf("read consumed ack event: %v", err)
+	}
+	if !strings.Contains(eventPayload, `"reason":"consumed_by_wait"`) {
+		t.Fatalf("consumed ack payload = %s", eventPayload)
+	}
+
+	other, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: toOtherAlice.ID, PrincipalRef: "agent:alice"})
+	if err != nil {
+		t.Fatalf("show untouched sibling: %v", err)
+	}
+	if other.State != "pending" {
+		t.Fatalf("same-principal other-scope sibling = %s, want pending", other.State)
+	}
+
+	presented := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "presented reply", To: []string{aScope},
+		PrincipalRef: "agent:bob", ScopeRef: bScope,
+	})
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: presented.Envelopes[0].ID, PrincipalRef: "agent:hrc", ScopeRef: aScope,
+	}); err != nil {
+		t.Fatalf("present reply: %v", err)
+	}
+	if _, err := f.api.EnvelopeAck(ctx, EnvelopeAckParams{
+		Envelopes: []string{presented.Envelopes[0].ID}, Reason: envelopeAckReasonConsumedByWait,
+		PrincipalRef: "agent:alice", ScopeRef: aScope,
+	}); err != nil {
+		t.Fatalf("consume presented reply: %v", err)
+	}
+
+	deferred := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "deferred reply", To: []string{aScope},
+		PrincipalRef: "agent:bob", ScopeRef: bScope,
+	})
+	if _, err := f.api.EnvelopeDefer(ctx, EnvelopeDeferParams{
+		Envelope: deferred.Envelopes[0].ID, Reason: "later",
+		PrincipalRef: "agent:alice", ScopeRef: aScope,
+	}); err != nil {
+		t.Fatalf("defer reply: %v", err)
+	}
+	_, err = f.api.EnvelopeAck(ctx, EnvelopeAckParams{
+		Envelopes: []string{deferred.Envelopes[0].ID}, Reason: envelopeAckReasonConsumedByWait,
+		PrincipalRef: "agent:alice", ScopeRef: aScope,
+	})
+	_ = assertDomainCode(t, CodeWrongState, err)
+	stillDeferred, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{
+		Envelope: deferred.Envelopes[0].ID, PrincipalRef: "agent:alice",
+	})
+	if err != nil {
+		t.Fatalf("show deferred reply: %v", err)
+	}
+	if stillDeferred.State != "deferred" {
+		t.Fatalf("consumed_by_wait touched deferred reply: %s", stillDeferred.State)
+	}
+}
+
 // TestDeferWithRetryIsPromiseBackedAndRepends proves §6's defer contract: the
 // retry time is carried by a real wrkq promise, and when it comes due the
 // envelope returns to PENDING so the kicker's next sweep re-drives it. Deferred

@@ -269,6 +269,8 @@ export interface WrkqEnvelope {
   failureReason?: WrkqEnvelopeFailureReason;
   retryAt?: string;
   deferReason?: string;
+  /** Terminal acknowledgement disposition from the envelope.acked event. */
+  reason?: string;
   terminalActor?: string;
   materializationIntent?: string;
   respondToPrincipalRef?: string;
@@ -525,10 +527,14 @@ export interface WrkqEnvelopeDeferParams {
   scopeRef?: string;
 }
 
-/** OPERATOR-only. For an agent, the reply IS the ack. */
+/**
+ * Defaults to the operator ack. `consumed_by_wait` is caller-scoped and only
+ * accepts the exact addressee's pending/presented reply-required envelope.
+ */
 export interface WrkqEnvelopeAckParams {
   envelopes: string[];
   note?: string;
+  reason?: "consumed_by_wait";
   principalRef?: string;
   scopeRef?: string;
 }
