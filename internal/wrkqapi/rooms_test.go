@@ -1461,6 +1461,53 @@ func TestDeferredEnvelopeStillAckableByALaterReply(t *testing.T) {
 
 // TestEnvelopeFailIsTerminalVisibleAndIdempotentPerRuntime pins rev 5.1's
 // unsuccessful terminal transition, including its rejection rules.
+// A presented envelope whose queued copy the broker expired before injection is
+// failed `undeliverable` by the runtime holding its newest receipt (T-07891
+// amendment 6). The body never reached a reader, so the D7 reason is truthful;
+// an acked envelope is still refused.
+func TestEnvelopeFailUndeliverableAdmitsPresented(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	ask := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "queued then expired", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	envelopeID := ask.Envelopes[0].ID
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: envelopeID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present: %v", err)
+	}
+	failed, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: envelopeID, Reason: "undeliverable", Runtime: "rt-1", PrincipalRef: "agent:hrc",
+	})
+	if err != nil {
+		t.Fatalf("fail presented as undeliverable: %v", err)
+	}
+	if failed.State != "failed" || !failed.Terminal || failed.FailureReason == nil || *failed.FailureReason != "undeliverable" {
+		t.Fatalf("failed envelope = %+v", failed)
+	}
+
+	acked := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "read and answered", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	ackedID := acked.Envelopes[0].ID
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: ackedID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present acked candidate: %v", err)
+	}
+	f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "reply", To: []string{"clod"},
+		PrincipalRef: "agent:cody", ScopeRef: *acked.Envelopes[0].To.ScopeRef,
+	})
+	if _, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+		Envelope: ackedID, Reason: "undeliverable", Runtime: "rt-1", PrincipalRef: "agent:hrc",
+	}); err == nil {
+		t.Fatal("undeliverable on an acked envelope succeeded")
+	}
+}
+
 func TestEnvelopeFailIsTerminalVisibleAndIdempotentPerRuntime(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()

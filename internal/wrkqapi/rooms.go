@@ -1840,7 +1840,11 @@ func (a *API) EnvelopeFail(ctx context.Context, p EnvelopeFailParams) (*WrkqEnve
 	if reason == domain.EnvelopeFailureLegacy {
 		return nil, NewValidationError("legacy is migration-only and cannot be written by envelope.fail", map[string]any{"field": "reason", "reason": p.Reason})
 	}
-	if reason == domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStateFailed {
+	// `undeliverable` means the body never reached a reader. That is true of a
+	// pending envelope nobody could be born for (rev 5.1 D7) AND of a presented
+	// one whose queued copy the harness broker expired before injection (hcs
+	// T-07891 amendment 6, 2026-09-02): the receipt says queued, not read.
+	if reason == domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
 		return nil, NewWrongStateError(map[string]any{"envelope": envelope.ID, "state": string(envelope.State), "verb": "fail"})
 	}
 	if reason != domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
