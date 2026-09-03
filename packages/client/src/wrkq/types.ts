@@ -306,7 +306,7 @@ export interface WrkqRoomSayParams {
   ttl?: string;
   /** Store hold delivery intent for HRC. */
   hold?: boolean;
-  /** Exact presented obligations this reply discharges. */
+  /** Exact pending or presented obligations this reply discharges. */
   dischargeEnvelopeIds?: string[];
   /** Force a fresh ad-hoc room instead of reusing the open pair room. */
   new?: boolean;

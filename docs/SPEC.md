@@ -430,8 +430,8 @@ scope-less operator may override sender ownership. The transition is terminal
 withdrawal commits one complete result and reports the members it could not
 withdraw, including an `already_presented` receipt.
 
-A reply normally acks every presented `reply_required` envelope in the room
-from the addressed counterparty to the replier's scope. When
+A reply normally acks every pending or presented `reply_required` envelope in
+the room from the addressed counterparty to the replier's scope. When
 `dischargeEnvelopeIds` is present, wrkq validates the complete set, creates the
 reply, and acks exactly those envelopes in one transaction. Invalid sets write
 neither reply nor ack, and the wide rule does not also run.

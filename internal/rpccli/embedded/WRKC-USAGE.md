@@ -82,15 +82,16 @@ until X replies. `--to X --fyi` → no obligation: still INJECTED into X's seat 
 one is live (it drives a turn there), but never births an unborn seat and never
 gates. No `--to` → a log entry, nobody is presented.
 
-**Reply is the ack.** Saying `--to X` acks every presented reply-required
-envelope in that room addressed to your own scope and sent from X's scope. The
-match is seat-to-seat: the principal a say was attributed to never enters it, so
-two seats of the same agent are two counterparties, and only a scope-less party
-(a human) matches on its principal. Sibling envelopes of a fan-out addressed to
-*other* scopes are untouched. To hold one back, `defer` it first.
-`--discharges EN-a,EN-b` narrows a reply to exactly the presented envelopes in
-the broker turn manifest. The whole set is validated before the reply and acks
-commit together; omitting it keeps the wide rule above.
+**Reply is the ack.** Saying `--to X` acks every pending or presented
+reply-required envelope in that room addressed to your own scope and sent from
+X's scope. The match is seat-to-seat: the principal a say was attributed to
+never enters it, so two seats of the same agent are two counterparties, and only
+a scope-less party (a human) matches on its principal. Sibling envelopes of a
+fan-out addressed to *other* scopes are untouched. To hold one back, `defer` it
+first.
+`--discharges EN-a,EN-b` narrows a reply to exactly the pending or presented
+envelopes named by the caller. The whole set is validated before the reply and
+acks commit together; omitting it keeps the wide rule above.
 
 An obligation belongs to the runtime that receives it. Its body is pushed once
 on the common path; later attention is a pointer to `wrkc show`. It is never
@@ -100,8 +101,9 @@ send one pointer reminder; ending that reminder turn undisposed fails it as
 `ignored`. If you are not answering now, `defer` with a reason (and optionally a
 retry time): the deferral survives rotation and returns as a pointer.
 
-`defer` is paused, never terminal — a later reply still acks it.
-`--retry-after` arms a wrkq promise; at expiry the envelope returns to pending.
+`defer` is paused, never terminal — replies leave it paused.
+`--retry-after` arms a wrkq promise; at expiry the envelope returns to pending
+and can then be acked by a reply.
 
 `say --ttl 30s` gives addressed mail a server-normalized expiry. If it has no
 presentation receipt by then, the next authoritative read materializes terminal

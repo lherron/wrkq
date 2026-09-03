@@ -410,7 +410,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key for this say; carried by every envelope of the fan-out")
 	cmd.Flags().StringVar(&ttl, "ttl", "", "Expire if never presented within this duration (for example 30s)")
 	cmd.Flags().BoolVar(&preempt, "preempt", false, "Ask HRC to interrupt the addressee's active turn and inject this now (operator authority; otherwise queued with a refusal receipt). Stored as delivery intent \"hold\"; wrkq never routes it")
-	cmd.Flags().StringSliceVar(&discharges, "discharges", nil, "Presented envelope ids this reply discharges, exactly")
+	cmd.Flags().StringSliceVar(&discharges, "discharges", nil, "Pending or presented envelope ids this reply discharges, exactly")
 	addPromiseOutputFlags(cmd, &output, false)
 	return cmd
 }
@@ -935,16 +935,16 @@ func newWrkcDeferCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "defer <EN-xxxxx>",
 		Short: "Pause one obligation with a reason",
-		Long: `Pause one obligation. Deferred is PAUSED, never terminal: a later reply still
-acks it, and the sender keeps visibility rather than a silent drop.
+		Long: `Pause one obligation. Deferred is PAUSED, never terminal: replies leave it
+paused, and the sender keeps visibility rather than a silent drop.
 
 --retry-after arms a wrkq promise; when that time arrives the envelope returns to
 pending and the kicker re-drives it. Deferring without a retry time is legal —
 the protection for the sender is visibility, not a timer.
 
 Defer is also how you exclude ONE obligation from a reply: saying --to acks
-every presented obligation from that counterparty, so defer the one you are not
-answering first.`,
+every pending or presented obligation from that counterparty, so defer the one
+you are not answering first.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			claims := &stdinClaims{}

@@ -788,8 +788,9 @@ func (rs *RoomStore) validateScopedDischargesTx(tx *sql.Tx, params EnvelopeCreat
 		if envelope.RoomUUID != params.RoomUUID {
 			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "foreign room"}
 		}
-		if envelope.Obligation != domain.EnvelopeObligationReplyRequired || envelope.State != domain.EnvelopeStatePresented {
-			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "must be presented reply_required"}
+		if envelope.Obligation != domain.EnvelopeObligationReplyRequired ||
+			(envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented) {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "must be pending or presented reply_required"}
 		}
 		if params.FromScopeRef != nil {
 			if envelope.ToScopeRef == nil || *envelope.ToScopeRef != *params.FromScopeRef {
@@ -1445,9 +1446,9 @@ func (rs *RoomStore) StandingObligationFromSender(roomUUID, senderScopeRef, send
 }
 
 // AckSenderObligationsWithAttribution is the reply-is-ack rule: saying into a
-// room with --to X acks every PRESENTED reply_required envelope in that room
-// addressed to the replier's own scope and sent from X's scope. Both sides
-// match on the SCOPE, never on a principal: a member IS a scope and its
+// room with --to X acks every PENDING or PRESENTED reply_required envelope in
+// that room addressed to the replier's own scope and sent from X's scope. Both
+// sides match on the SCOPE, never on a principal: a member IS a scope and its
 // principal is attribution only, so a say that carried an --as disagreeing with
 // the seat can never silently break the ack (T-07628). Only a scope-less party
 // — a human such as agent:lance, who has no scope — matches by principal.
@@ -1461,7 +1462,7 @@ func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attrib
 	clauses := []string{
 		"room_uuid = ?",
 		"obligation = 'reply_required'",
-		"state = 'presented'",
+		"state IN ('pending', 'presented')",
 	}
 	args := []interface{}{roomUUID}
 	if strings.TrimSpace(counterpartyScopeRef) != "" {

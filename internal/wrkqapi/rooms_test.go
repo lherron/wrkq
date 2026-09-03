@@ -164,6 +164,18 @@ func assertDomainCode(t *testing.T, want string, err error) *DomainError {
 	return de
 }
 
+func assertValidationReason(t *testing.T, want string, err error) {
+	t.Helper()
+	de := assertDomainCode(t, CodeValidation, err)
+	data, ok := de.Data().(map[string]any)
+	if !ok {
+		t.Fatalf("validation data = %T(%v), want reason %q", de.Data(), de.Data(), want)
+	}
+	if got, _ := data["reason"].(string); got != want {
+		t.Fatalf("validation reason = %q, want %q (data=%v)", got, want, data)
+	}
+}
+
 // ─── §4 routing table ─────────────────────────────────────────────────────────
 
 // TestRoutingRule1_RoomAndEnvelopeIDsResolveToTheirRoom covers rule 1: an R- id
@@ -1034,6 +1046,130 @@ func TestReplyAcksOwnObligationsOnlyAndDeferExcludesOne(t *testing.T) {
 		if shown.State != want {
 			t.Fatalf("envelope %s = %s, want %s", envelopeID, shown.State, want)
 		}
+	}
+}
+
+// TestReplyAcksPendingObligationsAndPreservesIsolation covers the mid-turn
+// mail-hint path: a reply is stronger evidence of reading than a presentation
+// receipt, so it acks both pending and presented obligations while preserving
+// every existing room, obligation, counterparty-scope, and addressee boundary.
+func TestReplyAcksPendingObligationsAndPreservesIsolation(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	clodSeat := "clod@proj:" + f.loneTaskID
+	otherClodSeat := "clod@proj:primary"
+	codySeat := "cody@proj:" + f.loneTaskID
+	mableSeat := "mable@proj:" + f.loneTaskID
+
+	pending := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "pending", To: []string{codySeat},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	presented := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "presented", To: []string{codySeat},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	deferred := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "deferred", To: []string{codySeat},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	for _, envelopeID := range []string{presented.Envelopes[0].ID, deferred.Envelopes[0].ID} {
+		if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+			Envelope: envelopeID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+		}); err != nil {
+			t.Fatalf("present %s: %v", envelopeID, err)
+		}
+	}
+	if _, err := f.api.EnvelopeDefer(ctx, EnvelopeDeferParams{
+		Envelope: deferred.Envelopes[0].ID, Reason: "not this reply",
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	}); err != nil {
+		t.Fatalf("defer: %v", err)
+	}
+	fyi := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "fyi", To: []string{codySeat}, FYI: true,
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	otherCounterpartyScope := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "same principal, other seat", To: []string{codySeat},
+		PrincipalRef: "agent:clod", ScopeRef: otherClodSeat,
+	})
+	fanout := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "fanout", To: []string{codySeat, mableSeat},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	var codySibling, mableSibling string
+	for _, envelope := range fanout.Envelopes {
+		if envelope.To == nil || envelope.To.ScopeRef == nil {
+			t.Fatalf("fan-out envelope %s has no scope addressee", envelope.ID)
+		}
+		switch *envelope.To.ScopeRef {
+		case codySeat:
+			codySibling = envelope.ID
+		case mableSeat:
+			mableSibling = envelope.ID
+		}
+	}
+	if codySibling == "" || mableSibling == "" {
+		t.Fatalf("fan-out did not produce both scoped siblings: %+v", fanout.Envelopes)
+	}
+	otherRoom := f.say(t, RoomSayParams{
+		Ref: f.memberTaskID, Body: "other room", To: []string{codySeat},
+		PrincipalRef: "agent:clod", ScopeRef: clodSeat,
+	})
+	human := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "scope-less human", To: []string{codySeat},
+		PrincipalRef: "agent:lance",
+	})
+
+	reply := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "read and answered", To: []string{clodSeat},
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	acked := make(map[string]bool, len(reply.Acked))
+	for _, id := range reply.Acked {
+		acked[id] = true
+	}
+	for _, id := range []string{pending.Envelopes[0].ID, presented.Envelopes[0].ID, codySibling} {
+		if !acked[id] {
+			t.Fatalf("reply did not ack %s: %v", id, reply.Acked)
+		}
+	}
+	if len(acked) != 3 {
+		t.Fatalf("reply acked extra envelopes: %v", reply.Acked)
+	}
+	for id, want := range map[string]string{
+		deferred.Envelopes[0].ID:               "deferred",
+		fyi.Envelopes[0].ID:                    "pending",
+		otherCounterpartyScope.Envelopes[0].ID: "pending",
+		mableSibling:                           "pending",
+		otherRoom.Envelopes[0].ID:              "pending",
+		human.Envelopes[0].ID:                  "pending",
+	} {
+		shown, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: id})
+		if err != nil {
+			t.Fatalf("show %s: %v", id, err)
+		}
+		if shown.State != want {
+			t.Fatalf("isolated envelope %s = %s, want %s", id, shown.State, want)
+		}
+	}
+	var payload string
+	if err := f.s.DB().QueryRow(`SELECT payload FROM event_log
+		WHERE resource_uuid = ? AND event_type = 'envelope.acked' ORDER BY id DESC LIMIT 1`,
+		pending.Envelopes[0].UUID).Scan(&payload); err != nil {
+		t.Fatalf("read pending ack event: %v", err)
+	}
+	if !strings.Contains(payload, `"reason":"reply"`) || !strings.Contains(payload, `"previous_state":"pending"`) {
+		t.Fatalf("pending ack payload = %s", payload)
+	}
+
+	humanReply := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "answering Lance", To: []string{"lance"},
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	if len(humanReply.Acked) != 1 || humanReply.Acked[0] != human.Envelopes[0].ID {
+		t.Fatalf("scope-less pending reply acked %v, want %s", humanReply.Acked, human.Envelopes[0].ID)
 	}
 }
 

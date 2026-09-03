@@ -124,10 +124,8 @@ func TestManifestScopedReplyDischargesExactSetAtomically(t *testing.T) {
 	codySeat := "cody@proj:" + f.loneTaskID
 	a := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "a", To: []string{"cody"}, PrincipalRef: "agent:clod"})
 	b := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "b", To: []string{"cody"}, PrincipalRef: "agent:clod"})
-	for _, id := range []string{a.Envelopes[0].ID, b.Envelopes[0].ID} {
-		if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{Envelope: id, PrincipalRef: "agent:hrc", RuntimeID: "rt-1", DriveAttemptID: "drive-" + id}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{Envelope: b.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1", DriveAttemptID: "drive-" + b.Envelopes[0].ID}); err != nil {
+		t.Fatal(err)
 	}
 	reply := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "only a", To: []string{"clod"}, DischargeEnvelopeIDs: []string{a.Envelopes[0].ID}, PrincipalRef: "agent:cody", ScopeRef: codySeat})
 	if len(reply.Acked) != 1 || reply.Acked[0] != a.Envelopes[0].ID {
@@ -143,7 +141,7 @@ func TestManifestScopedReplyDischargesExactSetAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "invalid", To: []string{"clod"}, DischargeEnvelopeIDs: []string{reply.Envelopes[0].ID}, PrincipalRef: "agent:cody", ScopeRef: codySeat})
-	_ = assertDomainCode(t, CodeValidation, err)
+	assertValidationReason(t, "addressed to another scope", err)
 	var after int
 	if err := f.s.DB().QueryRow("SELECT COUNT(*) FROM envelopes").Scan(&after); err != nil {
 		t.Fatal(err)
@@ -153,20 +151,21 @@ func TestManifestScopedReplyDischargesExactSetAtomically(t *testing.T) {
 	}
 
 	foreign := f.say(t, RoomSayParams{Ref: f.memberTaskID, Body: "foreign", To: []string{"cody"}, PrincipalRef: "agent:clod"})
-	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{Envelope: foreign.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-foreign", DriveAttemptID: "drive-foreign"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := f.s.DB().QueryRow("SELECT COUNT(*) FROM envelopes").Scan(&before); err != nil {
 		t.Fatal(err)
 	}
 	_, err = f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "foreign refusal", To: []string{"clod"}, DischargeEnvelopeIDs: []string{foreign.Envelopes[0].ID}, PrincipalRef: "agent:cody", ScopeRef: codySeat})
-	_ = assertDomainCode(t, CodeValidation, err)
+	assertValidationReason(t, "foreign room", err)
 	if err := f.s.DB().QueryRow("SELECT COUNT(*) FROM envelopes").Scan(&after); err != nil {
 		t.Fatal(err)
 	}
 	if after != before {
 		t.Fatalf("foreign scoped reply wrote %d envelopes", after-before)
 	}
+
+	fyi := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "fyi", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod"})
+	_, err = f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "not an obligation", To: []string{"clod"}, DischargeEnvelopeIDs: []string{fyi.Envelopes[0].ID}, PrincipalRef: "agent:cody", ScopeRef: codySeat})
+	assertValidationReason(t, "must be pending or presented reply_required", err)
 }
 
 func TestSayStoresTTLHoldAndIdempotencyAcrossFanout(t *testing.T) {
