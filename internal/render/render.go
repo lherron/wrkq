@@ -27,7 +27,6 @@ type Options struct {
 	Format    Format
 	Porcelain bool
 	Fields    []string
-	Delimiter string // for -1 (newline) or -0 (NUL)
 }
 
 // Renderer handles output rendering
@@ -88,21 +87,15 @@ func (r *Renderer) RenderTSV(headers []string, rows [][]string) error {
 	return nil
 }
 
-// RenderList renders a simple list of strings
+// RenderList renders a simple list of strings. Every item is newline-
+// TERMINATED, not newline-separated: a reader splitting the stream must see a
+// final record no different from the others. Terminating only the interior
+// items made `--output raw` lose its last record to any `while read` loop and
+// undercount under `wc -l`, and left a partial line on the terminal.
 func (r *Renderer) RenderList(items []string) error {
-	delimiter := "\n"
-	if r.opts.Delimiter == "0" {
-		delimiter = "\x00"
-	}
-
-	for i, item := range items {
-		if _, err := fmt.Fprint(r.writer, item); err != nil {
+	for _, item := range items {
+		if _, err := fmt.Fprint(r.writer, item+"\n"); err != nil {
 			return err
-		}
-		if i < len(items)-1 || r.opts.Delimiter != "" {
-			if _, err := fmt.Fprint(r.writer, delimiter); err != nil {
-				return err
-			}
 		}
 	}
 
