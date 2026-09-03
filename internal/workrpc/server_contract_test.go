@@ -27,6 +27,55 @@ func TestMethodCatalogMatchesRegistry(t *testing.T) {
 	}
 }
 
+func TestInitializeProtocolMismatchCarriesServerIdentity(t *testing.T) {
+	revision := "0123456789abcdef0123456789abcdef01234567"
+	srv := NewRegistry(nil, RegistryOptions{ServerRevision: revision})
+	response, ok := srv.HandleRequest(t.Context(), Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`0`),
+		Method:  "rpc.initialize",
+		Params:  json.RawMessage(`{"protocolVersion":"2026-09-30"}`),
+	})
+	if !ok || response.Error == nil {
+		t.Fatalf("initialize response = (%#v, %v), want protocol mismatch", response, ok)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(response.Error.Data, &data); err != nil {
+		t.Fatalf("decode error data: %v", err)
+	}
+	want := map[string]any{
+		"expected":                 ProtocolVersion,
+		"actual":                   "2026-09-30",
+		"serverProtocolSchemaHash": ProtocolSchemaHash(),
+		"serverRevision":           revision,
+	}
+	for key, value := range want {
+		if data[key] != value {
+			t.Errorf("error data %s = %#v, want %#v", key, data[key], value)
+		}
+	}
+}
+
+func TestInitializeProtocolMismatchUsesUnknownRevisionFallback(t *testing.T) {
+	srv := NewRegistry(nil, RegistryOptions{})
+	response, ok := srv.HandleRequest(t.Context(), Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`0`),
+		Method:  "rpc.initialize",
+		Params:  json.RawMessage(`{"protocolVersion":"2026-09-30"}`),
+	})
+	if !ok || response.Error == nil {
+		t.Fatalf("initialize response = (%#v, %v), want protocol mismatch", response, ok)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(response.Error.Data, &data); err != nil {
+		t.Fatalf("decode error data: %v", err)
+	}
+	if data["serverRevision"] != "unknown" {
+		t.Fatalf("serverRevision = %#v, want unknown", data["serverRevision"])
+	}
+}
+
 func TestRoomOpenIsMethodNotFound(t *testing.T) {
 	srv := NewRegistry(nil, RegistryOptions{})
 	initialized, ok := srv.HandleRequest(t.Context(), Request{

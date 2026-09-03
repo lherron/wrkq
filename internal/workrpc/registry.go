@@ -57,9 +57,15 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 			return nil, err
 		}
 		if params.ProtocolVersion != ProtocolVersion {
+			revision := strings.TrimSpace(opts.ServerRevision)
+			if revision == "" {
+				revision = "unknown"
+			}
 			return nil, NewDomainError(wrkfapi.CodeValidation, "invalid protocolVersion", false, map[string]any{
-				"expected": ProtocolVersion,
-				"actual":   params.ProtocolVersion,
+				"expected":                 ProtocolVersion,
+				"actual":                   params.ProtocolVersion,
+				"serverRevision":           revision,
+				"serverProtocolSchemaHash": ProtocolSchemaHash(),
 			})
 		}
 		return marshalResult(newInitializeResult(opts, s.RegisteredMethods()))

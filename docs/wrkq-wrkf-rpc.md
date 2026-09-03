@@ -194,8 +194,15 @@ authority. A stamped `wrkqd` reports its full Git revision and retains the
 dirty-bearing build string in `server.version`; unstamped development servers
 report `revision: "unknown"`. Clients continue to fail closed on
 `protocolVersion`, `protocolSchemaHash`, required methods, and capabilities.
-Schema-mismatch diagnostics must name the client-expected hash, server-actual
-hash, and server revision.
+When the requested `protocolVersion` differs, `rpc.initialize` returns a
+validation error whose data includes `expected` (the server protocol), `actual`
+(the client protocol), `serverProtocolSchemaHash`, and `serverRevision` (the
+full revision, or `"unknown"` for an unstamped build). Version- and
+schema-mismatch diagnostics name both protocol versions and schema hashes plus
+the wrkqd revision. Operators should update the affected host's wrkq checkout
+to at least that wrkqd revision and run `just install`. If the host is
+deliberately ahead of the canonical wrkqd, redeploy wrkqd from the host's
+revision instead; host binaries never lead wrkqd.
 
 ### rpc.shutdown / rpc.exit
 

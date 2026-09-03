@@ -49,6 +49,49 @@ type Error struct {
 	Retryable bool
 }
 
+// ProtocolMismatchError reports all client and server identity needed to
+// repair an incompatible wrkq/wrkqd installation. It is returned for both
+// protocol-version and protocol-schema mismatches during rpc.initialize.
+type ProtocolMismatchError struct {
+	ClientProtocol   string
+	ClientSchemaHash string
+	ServerProtocol   string
+	ServerSchemaHash string
+	ServerRevision   string
+}
+
+func (e *ProtocolMismatchError) Error() string {
+	if e == nil {
+		return ""
+	}
+	revision := strings.TrimSpace(e.ServerRevision)
+	updateTarget := revision
+	if revision == "" || revision == "unknown" {
+		revision = "unknown — run `wrkqd version` on the wrkqd host"
+		updateTarget = "the revision reported by `wrkqd version`"
+	}
+	return fmt.Sprintf(
+		"wrkq client is incompatible with wrkqd (rpc protocol mismatch)\n"+
+			"  client: protocol %s, schema %s\n"+
+			"  server: protocol %s, schema %s, wrkqd revision %s\n"+
+			"  Update this host's wrkq checkout to at least %s and run `just install`.\n"+
+			"  If this host is deliberately ahead of the canonical wrkqd, redeploy wrkqd from your revision instead — host binaries never lead wrkqd (conventions-full.md).",
+		protocolIdentity(e.ClientProtocol),
+		protocolIdentity(e.ClientSchemaHash),
+		protocolIdentity(e.ServerProtocol),
+		protocolIdentity(e.ServerSchemaHash),
+		revision,
+		updateTarget,
+	)
+}
+
+func protocolIdentity(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "unknown"
+}
+
 func (e *Error) Error() string {
 	if e.DomainID != "" {
 		return fmt.Sprintf("%s: %s", e.DomainID, e.Message)
@@ -138,10 +181,7 @@ func (c *conn) writeFrame(id json.RawMessage, method string, params any) error {
 
 func (c *conn) initialize() error {
 	res, err := c.request("rpc.initialize", map[string]string{"protocolVersion": workrpc.ProtocolVersion})
-	if err != nil {
-		return fmt.Errorf("rpc.initialize: %w", err)
-	}
-	return validateInitializeResult(res, c.profile)
+	return validateInitializeResponse(res, err, c.profile)
 }
 
 type initializeResult struct {
@@ -167,27 +207,10 @@ func validateInitializeResult(res json.RawMessage, profile Profile) error {
 		return fmt.Errorf("decode initialize result: %w", err)
 	}
 	if init.ProtocolVersion != workrpc.ProtocolVersion {
-		return fmt.Errorf(
-			"rpc protocol mismatch: server %q, client %q (server revision %q)",
-			init.ProtocolVersion,
-			workrpc.ProtocolVersion,
-			serverRevision(init.Server.Revision),
-		)
+		return newProtocolMismatchError(init.ProtocolVersion, init.ProtocolSchemaHash, init.Server.Revision)
 	}
 	if want := workrpc.ProtocolSchemaHash(); init.ProtocolSchemaHash != want {
-		if init.ProtocolSchemaHash == "" {
-			return fmt.Errorf(
-				"rpc server reported no protocolSchemaHash: client expected %s, server actual <missing> (server revision %q)",
-				want,
-				serverRevision(init.Server.Revision),
-			)
-		}
-		return fmt.Errorf(
-			"rpc protocol schema mismatch: client expected %s, server actual %s (server revision %q)",
-			want,
-			init.ProtocolSchemaHash,
-			serverRevision(init.Server.Revision),
-		)
+		return newProtocolMismatchError(init.ProtocolVersion, init.ProtocolSchemaHash, init.Server.Revision)
 	}
 	for _, method := range profile.RequiredMethods {
 		if !containsMethod(init.Methods, method) {
@@ -200,11 +223,43 @@ func validateInitializeResult(res json.RawMessage, profile Profile) error {
 	return nil
 }
 
-func serverRevision(revision string) string {
-	if revision = strings.TrimSpace(revision); revision != "" {
-		return revision
+func validateInitializeResponse(res json.RawMessage, requestErr error, profile Profile) error {
+	if requestErr != nil {
+		if mismatch, ok := protocolMismatchFromInitializeError(requestErr); ok {
+			return mismatch
+		}
+		return fmt.Errorf("rpc.initialize: %w", requestErr)
 	}
-	return "unknown"
+	return validateInitializeResult(res, profile)
+}
+
+func newProtocolMismatchError(serverProtocol, serverSchemaHash, serverRevision string) *ProtocolMismatchError {
+	return &ProtocolMismatchError{
+		ClientProtocol:   workrpc.ProtocolVersion,
+		ClientSchemaHash: workrpc.ProtocolSchemaHash(),
+		ServerProtocol:   serverProtocol,
+		ServerSchemaHash: serverSchemaHash,
+		ServerRevision:   serverRevision,
+	}
+}
+
+func protocolMismatchFromInitializeError(err error) (*ProtocolMismatchError, bool) {
+	var rpcErr *Error
+	if !errors.As(err, &rpcErr) || len(rpcErr.Data) == 0 {
+		return nil, false
+	}
+	var data struct {
+		Expected                 *string `json:"expected"`
+		Actual                   *string `json:"actual"`
+		ServerRevision           string  `json:"serverRevision"`
+		ServerProtocolSchemaHash string  `json:"serverProtocolSchemaHash"`
+	}
+	if err := json.Unmarshal(rpcErr.Data, &data); err != nil || data.Expected == nil || data.Actual == nil {
+		return nil, false
+	}
+	mismatch := newProtocolMismatchError(*data.Expected, data.ServerProtocolSchemaHash, data.ServerRevision)
+	mismatch.ClientProtocol = *data.Actual
+	return mismatch, true
 }
 
 func containsMethod(methods []string, want string) bool {
@@ -297,10 +352,7 @@ func NewRemote(endpoint, token string, profile Profile) (Transport, error) {
 
 func (t *remoteTransport) initialize() error {
 	res, err := t.request(context.Background(), "rpc.initialize", map[string]string{"protocolVersion": workrpc.ProtocolVersion})
-	if err != nil {
-		return fmt.Errorf("rpc.initialize: %w", err)
-	}
-	return validateInitializeResult(res, t.profile)
+	return validateInitializeResponse(res, err, t.profile)
 }
 
 func (t *remoteTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {

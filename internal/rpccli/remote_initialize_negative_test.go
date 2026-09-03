@@ -124,7 +124,7 @@ func TestRemoteInitializeRefusesIncompatibleDaemons(t *testing.T) {
 			skew: func(result map[string]any) {
 				result["protocolSchemaHash"] = "sha256:" + strings.Repeat("f", 64)
 			},
-			wantErr:   "rpc protocol schema mismatch",
+			wantErr:   "wrkq client is incompatible with wrkqd (rpc protocol mismatch)",
 			rationale: "matching protocolVersion must not excuse a diverged method/DTO/error contract",
 		},
 		{
@@ -132,7 +132,7 @@ func TestRemoteInitializeRefusesIncompatibleDaemons(t *testing.T) {
 			skew: func(result map[string]any) {
 				delete(result, "protocolSchemaHash")
 			},
-			wantErr:   "reported no protocolSchemaHash",
+			wantErr:   "wrkq client is incompatible with wrkqd (rpc protocol mismatch)",
 			rationale: "a daemon too old to advertise the hash cannot be verified, so it is refused",
 		},
 		{
