@@ -181,6 +181,19 @@ Commands:
 Use "{{.CommandPath}} <command> --help" for command details.
 `
 
+// wrkcRootHelpTemplate lists one command per line with its Short. wrkc has a
+// small, unfamiliar verb set whose names do not say what they do (`defer`,
+// `ack`, `withdraw`), so the description earns its width. wrkq keeps the
+// four-column grid: at 46 commands a description list stops being scannable.
+const wrkcRootHelpTemplate = `{{with .Short}}{{.}}{{end}}
+Usage:
+  {{.UseLine}}
+Commands:
+{{commandDescriptions .Commands}}{{if .HasAvailableLocalFlags}}Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+Use "{{.CommandPath}} <command> --help" for command details.
+`
+
 const commandHelpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}{{end}}
 Usage:
   {{.UseLine}}{{if gt (len .Aliases) 0}}
@@ -198,11 +211,25 @@ Global Flags:
 `
 
 func applyHelpTemplates(root *cobra.Command) {
-	cobra.AddTemplateFunc("commandColumns", commandColumns)
+	registerHelpTemplateFuncs()
 	root.SetHelpTemplate(rootHelpTemplate)
 	for _, cmd := range root.Commands() {
 		applyCommandHelpTemplate(cmd)
 	}
+}
+
+// applyWrkcHelpTemplates is applyHelpTemplates with the description-list root.
+func applyWrkcHelpTemplates(root *cobra.Command) {
+	registerHelpTemplateFuncs()
+	root.SetHelpTemplate(wrkcRootHelpTemplate)
+	for _, cmd := range root.Commands() {
+		applyCommandHelpTemplate(cmd)
+	}
+}
+
+func registerHelpTemplateFuncs() {
+	cobra.AddTemplateFunc("commandColumns", commandColumns)
+	cobra.AddTemplateFunc("commandDescriptions", commandDescriptions)
 }
 
 func applyCommandHelpTemplate(cmd *cobra.Command) {
@@ -251,6 +278,38 @@ func commandColumns(commands []*cobra.Command, columns int) string {
 			fmt.Fprintf(&b, "%-*s", width, name)
 		}
 		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// commandDescriptions renders one "name  short" line per available command,
+// name column padded to align the descriptions. Like commandColumns it emits a
+// trailing newline, which the root templates depend on.
+func commandDescriptions(commands []*cobra.Command) string {
+	type entry struct{ name, short string }
+
+	entries := make([]entry, 0, len(commands))
+	maxLen := 0
+	for _, cmd := range commands {
+		if !cmd.IsAvailableCommand() && cmd.Name() != "help" {
+			continue
+		}
+		entries = append(entries, entry{name: cmd.Name(), short: cmd.Short})
+		if len(cmd.Name()) > maxLen {
+			maxLen = len(cmd.Name())
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, e := range entries {
+		if e.short == "" {
+			fmt.Fprintf(&b, "  %s\n", e.name)
+			continue
+		}
+		fmt.Fprintf(&b, "  %-*s  %s\n", maxLen, e.name, e.short)
 	}
 	return b.String()
 }

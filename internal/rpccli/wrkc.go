@@ -216,7 +216,7 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 	root.AddCommand(newWrkcAckCmd())
 	root.AddCommand(newWrkcInfoCmd())
 	root.AddCommand(newVersionCmd())
-	applyHelpTemplates(root)
+	applyWrkcHelpTemplates(root)
 	return root
 }
 
@@ -263,7 +263,7 @@ func newWrkcSayCmd() *cobra.Command {
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
 		Use:   "say <ref> [body|-] [-m body]",
-		Short: "Say something in a room",
+		Short: "Send a message into a room; only --to presents it",
 		Long: `Say something in the room the ref routes to.
 
 Routing (first match wins):
@@ -1045,7 +1045,7 @@ There is no close and no reopen. A room you can resolve always accepts talk.`
 
 func newWrkcJoinCmd() *cobra.Command {
 	return newWrkcMembershipCmd("join", "wrkq.room.join",
-		"Join a room",
+		"Join a room so you appear in its members and attendance",
 		`Join a room so you appear in its member list and attendance.
 
 Membership is identity and attendance, not delivery: nothing fires from it. Only
@@ -1054,7 +1054,7 @@ Membership is identity and attendance, not delivery: nothing fires from it. Only
 
 func newWrkcLeaveCmd() *cobra.Command {
 	return newWrkcMembershipCmd("leave", "wrkq.room.leave",
-		"Leave a room",
+		"Leave a room, keeping your attendance and obligations",
 		`Leave a room. Leaving is not a delete: your attendance record stays readable,
 and any obligation already addressed to you stays yours.`)
 }
