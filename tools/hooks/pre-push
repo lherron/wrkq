@@ -20,9 +20,16 @@
 # Suppression is a real hole by design: the compensating control is the
 # supervisor's merge gate outside the container, not this hook.
 
+refs=$(cat)
 if [ "${LEFTHOOK:-}" = "0" ] || [ "${WRKQ_SKIP_VERIFY_HOOK:-}" = "1" ]; then
   echo "pre-push: verify suppressed (LEFTHOOK=0 / WRKQ_SKIP_VERIFY_HOOK=1)" >&2
+  command -v wrkp >/dev/null 2>&1 && printf "%s\n" "$refs" | wrkp git push "$@" --payload-extra verifySuppressed=true || true
   exit 0
 fi
 
 just verify
+rc=$?
+if [ $rc -eq 0 ] && command -v wrkp >/dev/null 2>&1; then
+  printf "%s\n" "$refs" | wrkp git push "$@" || true
+fi
+exit $rc

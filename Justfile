@@ -468,7 +468,7 @@ doc-links:
 architecture-records *args:
   go run ./cmd/architecture-records --root . {{args}}
 
-# Install tools/hooks/pre-push into .git/hooks — only when ABSENT, never clobbering
+# Install tracked Git hooks into .git/hooks — only when ABSENT, never clobbering
 hooks-install:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -482,15 +482,17 @@ hooks-install:
   # silently repaired. Bootstrapping absence is not the same as overwriting
   # divergence, and only the first is safe to automate.
   hook_dir="$(git rev-parse --git-path hooks)"
-  hook="$hook_dir/pre-push"
-  if [[ -e "$hook" ]]; then
-    echo "hooks-install: .git/hooks/pre-push already present — left untouched"
-    exit 0
-  fi
   mkdir -p "$hook_dir"
-  cp tools/hooks/pre-push "$hook"
-  chmod +x "$hook"
-  echo "hooks-install: installed .git/hooks/pre-push from tools/hooks/pre-push"
+  for name in pre-push post-commit; do
+    hook="$hook_dir/$name"
+    if [[ -e "$hook" ]]; then
+      echo "hooks-install: .git/hooks/$name already present — left untouched"
+      continue
+    fi
+    cp "tools/hooks/$name" "$hook"
+    chmod +x "$hook"
+    echo "hooks-install: installed .git/hooks/$name from tools/hooks/$name"
+  done
 
 # Run local fitkit S6 guard: pre-push hook must delegate to just verify.
 fitkit-s6: hooks-install

@@ -98,10 +98,10 @@ The YAML records are the source of truth; regenerate with `just architecture-rec
 ## wrkq.verify-gate
 
 - **scope:** handoff / commit-time control loop
-- **predicate:** `just verify` is wrkq's local handoff gate and must be green before handoff; once DAP is adopted, architecture-records must be part of that gate. Cloud CI is release/recheck verification, not the local handoff authority.
-- **source:** `Justfile`
+- **predicate:** `just verify` is wrkq's local handoff gate and must be green before handoff; once DAP is adopted, architecture-records must be part of that gate. Cloud CI is release/recheck verification, not the local handoff authority. Enforcement note (T-08054): the pre-push hook captures stdin once, preserves bare `just verify`, and posts `git.push` only at the successful tail; the executable post-commit hook posts `git.commit` best-effort, and hook installation never clobbers.
+- **source:** `Justfile`, `tools/hooks/pre-push`, `tools/hooks/post-commit`
 - **required_tests:** `just verify exits 0`
-- **last_verified:** 2026-06-22
+- **last_verified:** 2026-09-05
 
 ## wrkq.wrkf-action.lease-recovery
 

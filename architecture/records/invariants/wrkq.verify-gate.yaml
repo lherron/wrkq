@@ -6,19 +6,24 @@ scope: handoff / commit-time control loop
 predicate: >
   `just verify` is wrkq's local handoff gate and must be green before handoff; once DAP
   is adopted, architecture-records must be part of that gate. Cloud CI is
-  release/recheck verification, not the local handoff authority.
+  release/recheck verification, not the local handoff authority. Enforcement note
+  (T-08054): the pre-push hook captures stdin once, preserves bare `just verify`,
+  and posts `git.push` only at the successful tail; the executable post-commit
+  hook posts `git.commit` best-effort, and hook installation never clobbers.
 authority:
   repo: wrkq
   surface: justfile `verify` recipe
 source:
   - Justfile                              # the recipe binds the exact chain composition
+  - tools/hooks/pre-push                  # captures refs once, runs bare just verify, then posts git.push at the successful tail
+  - tools/hooks/post-commit               # executable best-effort git.commit entrypoint installed without clobbering
 required_tests:
   - "just verify exits 0"
 last_verified:
-  date: 2026-06-22
-  evidence: "Daedalus ran just verify in /Users/lherron/praesidium/wrkq — green end-to-end (hrcchat#9876)"
+  date: 2026-09-05
+  evidence: "T-08054 landing just verify green with the hook topology above"
 reopen_when:
   - the verify chain composition changes
-  - a pre-push/pre-commit git hook is added (record the enforcement)
+  - the pre-push or post-commit enforcement topology changes
 supersedes: []
 superseded_by: null

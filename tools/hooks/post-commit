@@ -1,0 +1,3 @@
+#!/bin/sh
+# wrkq post-commit hook — canonical tracked source for .git/hooks/post-commit.
+command -v wrkp >/dev/null 2>&1 && wrkp git commit || true
