@@ -186,6 +186,11 @@ func newWrkpLogCmd() *cobra.Command {
 			}
 			cursor := after
 			containerSet := ""
+			delivered := 0
+			deliveredLimit := limit
+			if deliveredLimit == 0 {
+				deliveredLimit = 100
+			}
 			for {
 				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow}
 				if cursor != "" {
@@ -197,8 +202,8 @@ func newWrkpLogCmd() *cobra.Command {
 				if task != "" {
 					params["task"] = sc.selector(task, false)
 				}
-				if limit != 0 {
-					params["limit"] = limit
+				if remaining := deliveredLimit - delivered; remaining != 100 || limit != 0 {
+					params["limit"] = remaining
 				}
 				if typeList != "" {
 					params["types"] = splitCommaValues(typeList)
@@ -214,6 +219,7 @@ func newWrkpLogCmd() *cobra.Command {
 				if err := renderWrkpEntries(cmd, view.Entries, mode); err != nil {
 					return err
 				}
+				delivered += len(view.Entries)
 				if follow {
 					currentSet, err := wrkpSubtreeFingerprint(cmd.Context(), tr, view.Container.UUID)
 					if err != nil {
@@ -226,6 +232,12 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				cursor = view.NextCursor
 				if !follow {
+					// A raw-scan page may consume only excluded rows. Keep advancing
+					// sparse filtered reads until the delivered limit is full or the
+					// fixed fence is drained; --porcelain reports that final position.
+					if cursor != "" && delivered < deliveredLimit {
+						continue
+					}
 					if porcelain && cursor != "" {
 						fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", cursor)
 					}
