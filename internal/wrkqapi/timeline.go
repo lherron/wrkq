@@ -40,6 +40,14 @@ func (a *API) ContainerTimelineView(
 			map[string]any{"field": "limit"},
 		)
 	}
+	resolvedTaskUUID := ""
+	if timelineRequestUsesV2(p) && strings.TrimSpace(p.Task) != "" {
+		var resolveErr error
+		resolvedTaskUUID, _, resolveErr = a.resolveTaskRef(p.Task)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+	}
 
 	tx, err := a.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -55,6 +63,25 @@ func (a *API) ContainerTimelineView(
 	if err != nil {
 		return nil, err
 	}
+
+	// Immutable production-time stamps make delivered == scanned on the legacy
+	// SQL-filtered reader, so its delivered-row cursor remains exact. Any
+	// additive parameter, or a v2 cursor, forks to the raw-scan position reader.
+	if !timelineRequestUsesV2(p) {
+		return containerTimelineViewV1(ctx, tx, p, containerUUID, container, campaign, limit)
+	}
+	return a.containerTimelineViewV2(ctx, tx, p, containerUUID, container, campaign, resolvedTaskUUID, limit)
+}
+
+func containerTimelineViewV1(
+	ctx context.Context,
+	tx *sql.Tx,
+	p ContainerTimelineViewParams,
+	containerUUID string,
+	container WrkqTimelineContainer,
+	campaign *WrkqCampaignAdornment,
+	limit int,
+) (*WrkqContainerTimelineView, error) {
 	members, rollup, missing, decisions, footprint, memberActivityAt, err :=
 		loadTimelineMembersTx(ctx, tx, containerUUID)
 	if err != nil {
@@ -458,11 +485,12 @@ func normalizeTimelineEntry(
 		entry.Outcome = &WrkqTimelineOutcome{Text: outcome}
 	case "task.updated":
 		state, _ := timelinePayloadString(payload, "state")
+		from, _ := timelinePayloadString(payload, "state_from")
 		if state == nil {
 			return fmt.Errorf("timeline task.updated event %d lacks state", entry.EventID)
 		}
 		entry.Type = "task.state"
-		entry.TaskState = &WrkqTimelineTaskState{State: *state, SourceEventType: eventType}
+		entry.TaskState = &WrkqTimelineTaskState{From: from, State: *state, SourceEventType: eventType}
 	case "task.archived":
 		entry.Type = "task.state"
 		entry.TaskState = &WrkqTimelineTaskState{State: "archived", SourceEventType: eventType}

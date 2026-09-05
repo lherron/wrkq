@@ -18,8 +18,11 @@ import (
 // JSON tags are untouched. That is why the cut moved implementations out from
 // behind internal/wrkqapi and internal/wrkfapi instead of moving the DTOs out.
 
-// pinnedProtocolSchemaHash is the intentional wire identity after T-07889 added
-// the caller-scoped consumed_by_wait ack reason and rendered envelope reason.
+// pinnedProtocolSchemaHash is the intentional wire identity after T-08048 added
+// project-event post/get/types methods and widened timeline parameters, entries,
+// task-state origin, cursor fences, and project-event DTOs. That sits on top of
+// T-07889, which added the caller-scoped consumed_by_wait ack reason and rendered
+// envelope reason.
 // That sits on top of T-07871, which added
 // immutable envelope expiresAt/delivery projections, expired/withdrawn states,
 // scoped discharge input, the envelope.withdraw method and result DTOs, and the
@@ -52,7 +55,7 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:f11b124352aac423dd50a9b1b714ca7f31c8067e554a70b195ace2b329ca4511"
+const pinnedProtocolSchemaHash = "sha256:e2b2157088348dbc274c5dd9e3a5fe07feeec8721be8140b4184da2f7a59dcad"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -71,9 +74,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 181},
+		{"methods", len(MethodCatalog()), 184},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 141},
+		{"dtos", len(dtoCatalog), 150},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

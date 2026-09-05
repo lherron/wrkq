@@ -15,6 +15,7 @@ export type {
   WrkqFacade,
   WrkqIndexFacade,
   WrkqPromiseFacade,
+  WrkqProjectEventFacade,
   WrkqRelationFacade,
   WrkqRoomFacade,
   WrkqSearchFacade,

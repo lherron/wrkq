@@ -1195,6 +1195,9 @@ wrkq.container.list
 wrkq.container.taskCounts [complete producer-owned subtree-count aggregate]
 wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
 wrkq.project.setRoot    [dedicated top-level project checkout-root mutation]
+wrkq.projectEvent.post  [attributed foreign-fact mutation]
+wrkq.projectEvent.get
+wrkq.projectEvent.typesView
 wrkq.container.update
 wrkq.container.campaignConvert
 wrkq.container.campaignActivate
@@ -1388,6 +1391,12 @@ interface WrkqContainerTimelineViewParams {
   container: string;
   cursor?: string;
   limit?: number;          // default 100; maximum 1000
+  scope?: "container" | "subtree";
+  types?: string[];
+  task?: string;
+  since?: string;
+  entriesOnly?: boolean;
+  tail?: boolean;
 }
 
 interface WrkqTimelineContainer {
@@ -1432,6 +1441,7 @@ type WrkqTimelineEntry =
   | ({ type: "task.outcome"; outcome: { text: string | null } }
       & WrkqTimelineEntryBase)
   | ({ type: "task.state"; taskState: {
+        from?: WrkqTaskState;
         state: WrkqTaskState | "purged";
         sourceEventType:
           | "task.updated" | "task.archived" | "task.deleted"
@@ -1440,6 +1450,11 @@ type WrkqTimelineEntry =
   | ({ type: "container.state"; containerState: {
         from: "active" | null;
         to: "active" | "completed" | "cancelled";
+      } } & WrkqTimelineEntryBase)
+  | ({ type: "project.event"; projectEvent: {
+        fid: string; type: string; source: string; node?: string;
+        principalRef: string; summary: string;
+        payload?: Record<string, unknown>; occurredAt: string;
       } } & WrkqTimelineEntryBase);
 
 interface WrkqTimelineEntryBase {
@@ -1450,7 +1465,7 @@ interface WrkqTimelineEntryBase {
   taskUuid?: string;
   taskId?: string;
   taskPath?: string;
-  membership?: "resident" | "enrolled";
+  membership?: "resident" | "enrolled" | "subtree";
   campaignUuid: string | null;
   containerUuid?: string;
 }
@@ -1466,6 +1481,7 @@ interface WrkqContainerTimelineView {
   decisionTasks: WrkqTimelineMember[];
   entries: WrkqTimelineEntry[];
   snapshotEventId: number;
+  snapshotProjectEventId?: number;
   nextCursor?: string;
 }
 

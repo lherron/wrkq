@@ -150,7 +150,13 @@ export type WrkqRoomWork = "open" | "terminal";
 export type WrkqRoomActivity = "active" | "quiet" | "stale";
 export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
 export type WrkqEnvelopeState =
-  "pending" | "presented" | "acked" | "deferred" | "failed" | "expired" | "withdrawn";
+  | "pending"
+  | "presented"
+  | "acked"
+  | "deferred"
+  | "failed"
+  | "expired"
+  | "withdrawn";
 export type WrkqEnvelopeFailureReason =
   "runtime_terminated" | "ignored" | "undeliverable" | "legacy";
 export type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
@@ -1308,6 +1314,12 @@ export interface WrkqContainerTimelineViewParams {
   container: string;
   cursor?: string;
   limit?: number;
+  scope?: "container" | "subtree";
+  types?: string[];
+  task?: string;
+  since?: string;
+  entriesOnly?: boolean;
+  tail?: boolean;
 }
 
 export interface WrkqTimelineContainer {
@@ -1361,6 +1373,7 @@ export interface WrkqTimelineOutcome {
 }
 
 export interface WrkqTimelineTaskState {
+  from?: WrkqTaskState;
   state: WrkqTaskState | "purged";
   sourceEventType:
     | "task.updated"
@@ -1377,13 +1390,14 @@ export interface WrkqTimelineContainerState {
 
 interface WrkqTimelineEntryBase {
   eventId: number;
+  projectEventId?: number;
   timestamp: string;
   principalRef?: string;
   resourceUuid?: string;
   taskUuid?: string;
   taskId?: string;
   taskPath?: string;
-  membership?: "resident" | "enrolled";
+  membership?: "resident" | "enrolled" | "subtree";
   campaignUuid: string | null;
   containerUuid?: string;
 }
@@ -1404,20 +1418,94 @@ export type WrkqTimelineEntry =
   | (WrkqTimelineEntryBase & {
       type: "container.state";
       containerState: WrkqTimelineContainerState;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "project.event";
+      projectEvent: WrkqTimelineProjectEvent;
     });
+
+export interface WrkqTimelineProjectEvent {
+  fid: string;
+  type: string;
+  source: string;
+  node?: string;
+  principalRef: string;
+  summary: string;
+  payload?: Record<string, unknown>;
+  occurredAt: string;
+}
 
 export interface WrkqContainerTimelineView {
   container: WrkqTimelineContainer;
   campaign: WrkqCampaignAdornment | null;
-  members: WrkqTimelineMember[];
-  rollup: WrkqTimelineRollup;
-  missingOutcomes: WrkqCampaignMemberDiagnostic[];
-  footprint: WrkqCampaignFootprint[];
+  members?: WrkqTimelineMember[];
+  rollup?: WrkqTimelineRollup;
+  missingOutcomes?: WrkqCampaignMemberDiagnostic[];
+  footprint?: WrkqCampaignFootprint[];
   lastActivityAt: string;
-  decisionTasks: WrkqTimelineMember[];
+  decisionTasks?: WrkqTimelineMember[];
   entries: WrkqTimelineEntry[];
   snapshotEventId: number;
+  snapshotProjectEventId?: number;
   nextCursor?: string;
+}
+
+// ── Foreign project facts ──────────────────────────────────────────────────
+
+export interface WrkqProjectEventPostParams {
+  project?: string;
+  task?: string;
+  type: string;
+  source: string;
+  node?: string;
+  summary: string;
+  payload?: Record<string, unknown>;
+  idempotencyKey?: string;
+  occurredAt?: string;
+  principalRef?: string;
+  scopeRef?: string;
+}
+
+export interface WrkqProjectEventGetParams {
+  projectEvent: string;
+}
+export interface WrkqProjectEventTypesViewParams {
+  project?: string;
+}
+
+export interface WrkqProjectEvent {
+  id: number;
+  fid: string;
+  projectUuid: string;
+  containerUuid: string;
+  campaignUuid: string | null;
+  taskUuid: string | null;
+  type: string;
+  source: string;
+  node?: string;
+  principalRef: string;
+  scopeRef?: string;
+  summary: string;
+  payload?: Record<string, unknown>;
+  idempotencyKey?: string;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface WrkqProjectEventPostResult {
+  id: number;
+  fid: string;
+  created: boolean;
+}
+
+export interface WrkqProjectEventType {
+  type: string;
+  count: number;
+  lastCreatedAt: string;
+}
+
+export interface WrkqProjectEventTypesView {
+  items: WrkqProjectEventType[];
 }
 
 export interface WrkqContainerDeleteParams {

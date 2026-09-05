@@ -44,7 +44,7 @@ func ComputeSnapshotRev(data []byte) string {
 }
 
 // buildOrderedSnapshot creates an ordered map structure for canonical JSON.
-// Order: meta, containers, tasks, promises, comments, links, events
+// Order: meta, containers, tasks, promises, comments, links, events, project_events
 func buildOrderedSnapshot(s *Snapshot) orderedMap {
 	result := make(orderedMap, 0, 7)
 
@@ -80,7 +80,57 @@ func buildOrderedSnapshot(s *Snapshot) orderedMap {
 	if len(s.Events) > 0 {
 		result = append(result, keyValue{"events", buildOrderedEvents(s.Events)})
 	}
+	if len(s.ProjectEvents) > 0 {
+		result = append(result, keyValue{"project_events", buildOrderedProjectEvents(s.ProjectEvents)})
+	}
 
+	return result
+}
+
+func buildOrderedProjectEvents(events map[string]ProjectEventEntry) orderedMap {
+	ids := make([]string, 0, len(events))
+	for id := range events {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make(orderedMap, 0, len(events))
+	for _, id := range ids {
+		event := events[id]
+		result = append(result, keyValue{id, buildOrderedProjectEvent(&event)})
+	}
+	return result
+}
+
+func buildOrderedProjectEvent(e *ProjectEventEntry) orderedMap {
+	result := make(orderedMap, 0, 16)
+	if e.CampaignUUID != nil {
+		result = append(result, keyValue{"campaign_uuid", *e.CampaignUUID})
+	}
+	result = append(result, keyValue{"container_uuid", e.ContainerUUID})
+	result = append(result, keyValue{"created_at", e.CreatedAt})
+	result = append(result, keyValue{"fid", e.FID})
+	result = append(result, keyValue{"id", e.ID})
+	if e.IdempotencyKey != nil {
+		result = append(result, keyValue{"idempotency_key", *e.IdempotencyKey})
+	}
+	if e.Node != nil {
+		result = append(result, keyValue{"node", *e.Node})
+	}
+	result = append(result, keyValue{"occurred_at", e.OccurredAt})
+	if e.Payload != nil {
+		result = append(result, keyValue{"payload", *e.Payload})
+	}
+	result = append(result, keyValue{"principal_ref", e.PrincipalRef})
+	result = append(result, keyValue{"project_uuid", e.ProjectUUID})
+	if e.ScopeRef != nil {
+		result = append(result, keyValue{"scope_ref", *e.ScopeRef})
+	}
+	result = append(result, keyValue{"source", e.Source})
+	result = append(result, keyValue{"summary", e.Summary})
+	if e.TaskUUID != nil {
+		result = append(result, keyValue{"task_uuid", *e.TaskUUID})
+	}
+	result = append(result, keyValue{"type", e.Type})
 	return result
 }
 

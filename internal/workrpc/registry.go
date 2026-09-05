@@ -342,6 +342,15 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.container.timelineView", apiHandler(func(ctx context.Context, p wrkqapi.ContainerTimelineViewParams) (any, error) {
 		return wq.ContainerTimelineView(ctx, p)
 	}))
+	s.Register("wrkq.projectEvent.post", apiHandler(func(ctx context.Context, p wrkqapi.ProjectEventPostParams) (any, error) {
+		return wq.ProjectEventPost(ctx, p)
+	}))
+	s.Register("wrkq.projectEvent.get", apiHandler(func(ctx context.Context, p wrkqapi.ProjectEventGetParams) (any, error) {
+		return wq.ProjectEventGet(ctx, p)
+	}))
+	s.Register("wrkq.projectEvent.typesView", apiHandler(func(ctx context.Context, p wrkqapi.ProjectEventTypesViewParams) (any, error) {
+		return wq.ProjectEventTypesView(ctx, p)
+	}))
 	s.Register("wrkq.container.move", apiHandler(func(ctx context.Context, p wrkqapi.ContainerMoveParams) (any, error) {
 		return wq.ContainerMove(ctx, p)
 	}))

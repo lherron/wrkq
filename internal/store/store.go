@@ -16,11 +16,12 @@ type Store struct {
 	db *db.DB
 
 	// Domain-specific stores
-	Tasks      *TaskStore
-	Containers *ContainerStore
-	Comments   *CommentStore
-	Promises   *PromiseStore
-	Rooms      *RoomStore
+	Tasks         *TaskStore
+	Containers    *ContainerStore
+	Comments      *CommentStore
+	Promises      *PromiseStore
+	Rooms         *RoomStore
+	ProjectEvents *ProjectEventStore
 }
 
 // New creates a new Store wrapping the given database connection.
@@ -31,6 +32,7 @@ func New(database *db.DB) *Store {
 	s.Comments = &CommentStore{store: s}
 	s.Promises = &PromiseStore{store: s}
 	s.Rooms = &RoomStore{store: s}
+	s.ProjectEvents = &ProjectEventStore{store: s}
 	return s
 }
 

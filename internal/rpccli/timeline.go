@@ -21,14 +21,15 @@ type timelineMember struct {
 }
 
 type timelineEntry struct {
-	Type       string `json:"type"`
-	EventID    int64  `json:"eventId"`
-	Timestamp  string `json:"timestamp"`
-	TaskUUID   string `json:"taskUuid,omitempty"`
-	TaskID     string `json:"taskId,omitempty"`
-	TaskPath   string `json:"taskPath,omitempty"`
-	Membership string `json:"membership,omitempty"`
-	Comment    *struct {
+	Type           string `json:"type"`
+	EventID        int64  `json:"eventId"`
+	ProjectEventID int64  `json:"projectEventId,omitempty"`
+	Timestamp      string `json:"timestamp"`
+	TaskUUID       string `json:"taskUuid,omitempty"`
+	TaskID         string `json:"taskId,omitempty"`
+	TaskPath       string `json:"taskPath,omitempty"`
+	Membership     string `json:"membership,omitempty"`
+	Comment        *struct {
 		ID   string  `json:"id,omitempty"`
 		Kind *string `json:"kind,omitempty"`
 		Body string  `json:"body"`
@@ -37,13 +38,24 @@ type timelineEntry struct {
 		Text *string `json:"text"`
 	} `json:"outcome,omitempty"`
 	TaskState *struct {
-		State           string `json:"state"`
-		SourceEventType string `json:"sourceEventType"`
+		From            *string `json:"from,omitempty"`
+		State           string  `json:"state"`
+		SourceEventType string  `json:"sourceEventType"`
 	} `json:"taskState,omitempty"`
 	ContainerState *struct {
 		From *string `json:"from"`
 		To   string  `json:"to"`
 	} `json:"containerState,omitempty"`
+	ProjectEvent *struct {
+		FID          string          `json:"fid"`
+		Type         string          `json:"type"`
+		Source       string          `json:"source"`
+		Node         *string         `json:"node,omitempty"`
+		PrincipalRef string          `json:"principalRef"`
+		Summary      string          `json:"summary"`
+		Payload      json.RawMessage `json:"payload,omitempty"`
+		OccurredAt   string          `json:"occurredAt"`
+	} `json:"projectEvent,omitempty"`
 }
 
 type containerTimelineView struct {

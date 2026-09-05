@@ -131,6 +131,23 @@ There are no `promise show` or `promise history` commands: use root `cat` and
 `log`. `wrkq check` and `wrkq tree` surface ready/attached promises; tree shows
 open promise leaves by default and includes closed leaves with `--state all`.
 
+## Collaboration and project facts
+
+`wrkc` owns durable rooms and envelopes (`wrkc info` for its full guide).
+`wrkp` posts foreign project facts and reads them together with wrkq mutations
+through the project timeline (`wrkp info` for its full guide):
+
+```bash
+wrkp post wrkq --type install.completed --source install -m "installed v1.2.3"
+wrkp log wrkq --since 4h
+wrkp log wrkq --follow --type 'hrc.*'
+wrkp show PE-00001
+wrkp types wrkq
+```
+
+Project-event posting never sends a webhook, creates an envelope, or wakes an
+agent. Event types in wrkq-owned namespaces such as `task.*` are refused.
+
 ## Output Formats
 - `--json` - Pretty JSON
 - `--ndjson` - Newline-delimited JSON (best for parsing)

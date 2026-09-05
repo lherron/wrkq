@@ -48,16 +48,17 @@ db-reset:
 
 # --- CLI tasks (Golang) ---
 
-# Build shipped CLI binaries (wrkq, wrkf, wrkc, wrkqadm, wrkqd)
+# Build shipped CLI binaries (wrkq, wrkf, wrkc, wrkp, wrkqadm, wrkqd)
 build:
   #!/usr/bin/env bash
   set -euo pipefail
-  echo "Building wrkq, wrkf, wrkc, wrkqadm, and wrkqd binaries..."
+  echo "Building wrkq, wrkf, wrkc, wrkp, wrkqadm, and wrkqd binaries..."
   rm -f bin/wrkq-rpccli bin/wrkq-legacy
   LDFLAGS="$(scripts/ldflags.sh)"
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkc ./cmd/wrkc
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkp ./cmd/wrkp
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
@@ -119,6 +120,7 @@ agent-build:
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkc ./cmd/wrkc
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkp ./cmd/wrkp
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
 
@@ -209,20 +211,23 @@ install *flags:
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries
-  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkc ~/.local/bin/wrkqadm ~/.local/bin/wrkqd ~/.local/bin/wrkq-rpccli
+  rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkc ~/.local/bin/wrkp ~/.local/bin/wrkqadm ~/.local/bin/wrkqd ~/.local/bin/wrkq-rpccli
   cp bin/wrkq ~/.local/bin/wrkq
   cp bin/wrkf ~/.local/bin/wrkf
   cp bin/wrkc ~/.local/bin/wrkc
+  cp bin/wrkp ~/.local/bin/wrkp
   cp bin/wrkqadm ~/.local/bin/wrkqadm
   cp bin/wrkqd ~/.local/bin/wrkqd
   chmod +x ~/.local/bin/wrkq
   chmod +x ~/.local/bin/wrkf
   chmod +x ~/.local/bin/wrkc
+  chmod +x ~/.local/bin/wrkp
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
   echo "✓ Installed to ~/.local/bin/wrkq"
   echo "✓ Installed to ~/.local/bin/wrkf"
   echo "✓ Installed to ~/.local/bin/wrkc"
+  echo "✓ Installed to ~/.local/bin/wrkp"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo "✓ Installed to ~/.local/bin/wrkqd"
   echo ""
@@ -231,7 +236,7 @@ install *flags:
     echo "   export PATH=\"\$HOME/.local/bin:\$PATH\""
     echo ""
   fi
-  echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkc info', 'wrkqadm version', and 'wrkqd --help' to verify"
+  echo "✓ Run 'wrkq version', 'wrkf --help', 'wrkc info', 'wrkp info', 'wrkqadm version', and 'wrkqd --help' to verify"
   echo ""
   # A rebuilt wrkqd carries a fresh adhoc cdhash, so a launchd job still running
   # the previous image is armed to die on its next respawn (keepalive, crash,
@@ -344,24 +349,29 @@ install-system:
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkq ./cmd/wrkq
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkf ./cmd/wrkf
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkc ./cmd/wrkc
+  go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkp ./cmd/wrkp
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqadm ./cmd/wrkqadm
   go build -tags "sqlite_fts5,wrkq_local" -ldflags "$LDFLAGS" -o bin/wrkqd ./cmd/wrkqd
   echo "Installing to /usr/local/bin/wrkq (requires sudo)..."
   # Remove old binary first to avoid crashes when overwriting running binaries
   sudo rm -f /usr/local/bin/wrkq
   sudo rm -f /usr/local/bin/wrkf
+  sudo rm -f /usr/local/bin/wrkp
   sudo rm -f /usr/local/bin/wrkqadm
   sudo rm -f /usr/local/bin/wrkqd
   sudo cp bin/wrkq /usr/local/bin/wrkq
   sudo cp bin/wrkf /usr/local/bin/wrkf
+  sudo cp bin/wrkp /usr/local/bin/wrkp
   sudo cp bin/wrkqadm /usr/local/bin/wrkqadm
   sudo cp bin/wrkqd /usr/local/bin/wrkqd
   sudo chmod +x /usr/local/bin/wrkq
   sudo chmod +x /usr/local/bin/wrkf
+  sudo chmod +x /usr/local/bin/wrkp
   sudo chmod +x /usr/local/bin/wrkqadm
   sudo chmod +x /usr/local/bin/wrkqd
   echo "✓ Installed to /usr/local/bin/wrkq"
   echo "✓ Installed to /usr/local/bin/wrkf"
+  echo "✓ Installed to /usr/local/bin/wrkp"
   echo "✓ Installed to /usr/local/bin/wrkqadm"
   echo "✓ Installed to /usr/local/bin/wrkqd"
   echo "✓ Run 'wrkq --version' to verify"

@@ -64,6 +64,12 @@ import type {
   WrkqProjectListViewParams,
   WrkqProjectSetRootParams,
   WrkqProjectsListView,
+  WrkqProjectEvent,
+  WrkqProjectEventGetParams,
+  WrkqProjectEventPostParams,
+  WrkqProjectEventPostResult,
+  WrkqProjectEventTypesView,
+  WrkqProjectEventTypesViewParams,
   WrkqPromise,
   WrkqPromiseAddParams,
   WrkqPromiseDeleteParams,
@@ -228,6 +234,14 @@ export interface WrkqProjectFacade {
   setRoot(params: WrkqProjectSetRootParams): Promise<WrkqProjectEntry>;
 }
 
+export interface WrkqProjectEventFacade {
+  post(params: WrkqProjectEventPostParams): Promise<WrkqProjectEventPostResult>;
+  get(params: WrkqProjectEventGetParams): Promise<WrkqProjectEvent>;
+  typesView(
+    params?: WrkqProjectEventTypesViewParams,
+  ): Promise<WrkqProjectEventTypesView>;
+}
+
 /**
  * Global webhook subscriptions on the singleton root container (DEDICATED family,
  * T-05119). add/remove are PRODUCER mutations; listView is a CLI compatibility
@@ -339,12 +353,16 @@ export interface WrkqRoomFacade {
 export interface WrkqEnvelopeFacade {
   show(params: WrkqEnvelopeShowParams): Promise<WrkqEnvelope>;
   /** Bounded cross-room reverse history / forward catch-up for one exact member. */
-  memberPage(params: WrkqEnvelopeMemberPageParams): Promise<WrkqEnvelopeMemberPage>;
+  memberPage(
+    params: WrkqEnvelopeMemberPageParams,
+  ): Promise<WrkqEnvelopeMemberPage>;
   inboxView(
     params?: WrkqEnvelopeInboxViewParams,
   ): Promise<WrkqEnvelopeInboxView>;
   defer(params: WrkqEnvelopeDeferParams): Promise<WrkqEnvelope>;
-  withdraw(params: WrkqEnvelopeWithdrawParams): Promise<WrkqEnvelopeWithdrawResult>;
+  withdraw(
+    params: WrkqEnvelopeWithdrawParams,
+  ): Promise<WrkqEnvelopeWithdrawResult>;
   ack(params: WrkqEnvelopeAckParams): Promise<WrkqRoomLogView>;
   present(
     params: WrkqEnvelopePresentParams,
@@ -378,6 +396,7 @@ export interface WrkqFacade {
   readonly envelope: WrkqEnvelopeFacade;
   readonly container: WrkqContainerFacade;
   readonly project: WrkqProjectFacade;
+  readonly projectEvent: WrkqProjectEventFacade;
   readonly webhook: WrkqWebhookFacade;
   readonly workflow: WrkqWorkflowFacade;
   readonly handoff: WrkqHandoffFacade;

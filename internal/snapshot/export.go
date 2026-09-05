@@ -66,14 +66,15 @@ func Export(db *sql.DB, opts ExportOptions) (*ExportResult, error) {
 	}
 
 	result := &ExportResult{
-		OutputPath:     opts.OutputPath,
-		SnapshotRev:    snapshotRev,
-		ContainerCount: len(snap.Containers),
-		TaskCount:      len(snap.Tasks),
-		PromiseCount:   len(snap.Promises),
-		CommentCount:   len(snap.Comments),
-		LinkCount:      len(snap.Links),
-		EventCount:     len(snap.Events),
+		OutputPath:        opts.OutputPath,
+		SnapshotRev:       snapshotRev,
+		ContainerCount:    len(snap.Containers),
+		TaskCount:         len(snap.Tasks),
+		PromiseCount:      len(snap.Promises),
+		CommentCount:      len(snap.Comments),
+		LinkCount:         len(snap.Links),
+		EventCount:        len(snap.Events),
+		ProjectEventCount: len(snap.ProjectEvents),
 	}
 
 	return result, nil
@@ -159,9 +160,47 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 		if err := exportEvents(db, snap); err != nil {
 			return nil, fmt.Errorf("failed to export events: %w", err)
 		}
+		if err := exportProjectEvents(db, snap); err != nil {
+			return nil, fmt.Errorf("failed to export project events: %w", err)
+		}
 	}
 
 	return snap, nil
+}
+
+func exportProjectEvents(db *sql.DB, snap *Snapshot) error {
+	snap.ProjectEvents = make(map[string]ProjectEventEntry)
+	rows, err := db.Query(`SELECT id, fid, project_uuid, container_uuid, campaign_uuid,
+		task_uuid, type, source, node, principal_ref, scope_ref, summary, payload,
+		idempotency_key, occurred_at, created_at FROM project_events ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var entry ProjectEventEntry
+		var campaign, task, node, scope, payload, key sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.FID, &entry.ProjectUUID, &entry.ContainerUUID,
+			&campaign, &task, &entry.Type, &entry.Source, &node, &entry.PrincipalRef,
+			&scope, &entry.Summary, &payload, &key, &entry.OccurredAt, &entry.CreatedAt); err != nil {
+			return err
+		}
+		entry.CampaignUUID = snapshotNullString(campaign)
+		entry.TaskUUID = snapshotNullString(task)
+		entry.Node = snapshotNullString(node)
+		entry.ScopeRef = snapshotNullString(scope)
+		entry.Payload = snapshotNullString(payload)
+		entry.IdempotencyKey = snapshotNullString(key)
+		snap.ProjectEvents[entry.FID] = entry
+	}
+	return rows.Err()
+}
+
+func snapshotNullString(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }
 
 func exportPromises(db *sql.DB, snap *Snapshot) error {

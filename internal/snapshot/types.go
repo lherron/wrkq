@@ -16,13 +16,14 @@ import (
 // "actors" map, actor UUIDs, actor slugs/roles) is no longer serialized.
 // Write attribution is carried by canonical "*_principal_ref" fields.
 type Snapshot struct {
-	Meta       Meta                      `json:"meta"`
-	Containers map[string]ContainerEntry `json:"containers,omitempty"`
-	Tasks      map[string]TaskEntry      `json:"tasks,omitempty"`
-	Promises   map[string]PromiseEntry   `json:"promises,omitempty"`
-	Comments   map[string]CommentEntry   `json:"comments,omitempty"`
-	Links      map[string]LinkEntry      `json:"links,omitempty"`
-	Events     map[string]EventEntry     `json:"events,omitempty"`
+	Meta          Meta                         `json:"meta"`
+	Containers    map[string]ContainerEntry    `json:"containers,omitempty"`
+	Tasks         map[string]TaskEntry         `json:"tasks,omitempty"`
+	Promises      map[string]PromiseEntry      `json:"promises,omitempty"`
+	Comments      map[string]CommentEntry      `json:"comments,omitempty"`
+	Links         map[string]LinkEntry         `json:"links,omitempty"`
+	Events        map[string]EventEntry        `json:"events,omitempty"`
+	ProjectEvents map[string]ProjectEventEntry `json:"project_events,omitempty"`
 }
 
 // PromiseEntry represents a principal-owned attention promise in the
@@ -144,6 +145,28 @@ type EventEntry struct {
 	Payload      string `json:"payload,omitempty"`
 }
 
+// ProjectEventEntry is one foreign fact included with --include-events. Import
+// accepts the table in the snapshot shape but, like event_log, does not replay
+// append-only history (T-07498).
+type ProjectEventEntry struct {
+	ID             int64   `json:"id"`
+	FID            string  `json:"fid"`
+	ProjectUUID    string  `json:"project_uuid"`
+	ContainerUUID  string  `json:"container_uuid"`
+	CampaignUUID   *string `json:"campaign_uuid,omitempty"`
+	TaskUUID       *string `json:"task_uuid,omitempty"`
+	Type           string  `json:"type"`
+	Source         string  `json:"source"`
+	Node           *string `json:"node,omitempty"`
+	PrincipalRef   string  `json:"principal_ref"`
+	ScopeRef       *string `json:"scope_ref,omitempty"`
+	Summary        string  `json:"summary"`
+	Payload        *string `json:"payload,omitempty"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+	OccurredAt     string  `json:"occurred_at"`
+	CreatedAt      string  `json:"created_at"`
+}
+
 // ExportOptions configures snapshot export behavior.
 type ExportOptions struct {
 	// OutputPath is the file to write to (default: .wrkq/state.json)
@@ -168,14 +191,15 @@ type ImportOptions struct {
 
 // ExportResult contains the result of an export operation.
 type ExportResult struct {
-	OutputPath     string `json:"out"`
-	SnapshotRev    string `json:"snapshot_rev"`
-	ContainerCount int    `json:"containers"`
-	TaskCount      int    `json:"tasks"`
-	PromiseCount   int    `json:"promises,omitempty"`
-	CommentCount   int    `json:"comments"`
-	LinkCount      int    `json:"links,omitempty"`
-	EventCount     int    `json:"events,omitempty"`
+	OutputPath        string `json:"out"`
+	SnapshotRev       string `json:"snapshot_rev"`
+	ContainerCount    int    `json:"containers"`
+	TaskCount         int    `json:"tasks"`
+	PromiseCount      int    `json:"promises,omitempty"`
+	CommentCount      int    `json:"comments"`
+	LinkCount         int    `json:"links,omitempty"`
+	EventCount        int    `json:"events,omitempty"`
+	ProjectEventCount int    `json:"project_events,omitempty"`
 }
 
 // ImportResult contains the result of an import operation.

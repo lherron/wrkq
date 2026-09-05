@@ -96,7 +96,11 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 	}
 
 	// Ensure sqlite_sequence matches max friendly IDs after import.
-	if _, err := dbsync.FixSequenceDrifts(tx, dbsync.DefaultSequenceSpecs()); err != nil {
+	sequenceSpecs, err := snapshotSequenceSpecs(tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect snapshot sequences: %w", err)
+	}
+	if _, err := dbsync.FixSequenceDrifts(tx, sequenceSpecs); err != nil {
 		return nil, fmt.Errorf("failed to sync sqlite_sequence: %w", err)
 	}
 
@@ -114,6 +118,23 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		CommentCount:   len(snap.Comments),
 		DryRun:         false,
 	}, nil
+}
+
+func snapshotSequenceSpecs(tx *sql.Tx) ([]dbsync.SequenceSpec, error) {
+	var projectEventsExists int
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_events')`).Scan(&projectEventsExists); err != nil {
+		return nil, err
+	}
+	result := dbsync.DefaultSequenceSpecs()
+	if projectEventsExists == 0 {
+		for i, spec := range result {
+			if spec.EntityTable == "project_events" {
+				result = append(result[:i], result[i+1:]...)
+				break
+			}
+		}
+	}
+	return result, nil
 }
 
 // rejectLegacyActorData refuses any snapshot that still carries actor

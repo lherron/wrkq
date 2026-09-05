@@ -37,11 +37,13 @@ Non-goals:
 
 ## 2. Shipped Binaries
 
-`just build` and `just install` build four shipped binaries:
+`just build` and `just install` build six shipped binaries:
 
 | Binary | Role | Canonical use |
 | --- | --- | --- |
 | `wrkq` | Human and agent task surface | RPC-backed task/container/comment/attachment CRUD, search, handoffs, and local server lifecycle helpers. |
+| `wrkc` | Durable collaboration surface | Rooms, envelopes, obligations, and attendance. |
+| `wrkp` | Project-event surface | Post foreign project facts and read the merged project timeline. |
 | `wrkqadm` | Administrative surface | Init, migrations, snapshots, actors, merge, patches, and state import/export. |
 | `wrkqd` | Local daemon | Token-auth HTTP API over the same database. |
 | `wrkf` | Workflow CLI/RPC surface | Workflow templates, evidence, obligations, effects, transitions, and JSON-RPC stdio. |
@@ -58,7 +60,7 @@ Important implementation packages:
 
 | Path | Responsibility |
 | --- | --- |
-| `cmd/wrkq`, `cmd/wrkqadm`, `cmd/wrkqd`, `cmd/wrkf` | Shipped binary entry points. |
+| `cmd/wrkq`, `cmd/wrkc`, `cmd/wrkp`, `cmd/wrkqadm`, `cmd/wrkqd`, `cmd/wrkf` | Shipped binary entry points. |
 | `internal/rpccli` | RPC-backed production `wrkq` command adapters and command contract tests. |
 | `internal/rpccli` | Production day-to-day `wrkq` command layer over the shared workrpc transport. |
 | `internal/admincli` | Local-path-only `wrkqadm` database lifecycle and administrative commands. |

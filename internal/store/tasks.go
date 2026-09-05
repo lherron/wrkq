@@ -705,6 +705,7 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 			if err := StampTaskCampaignContext(tx, taskUUID, payloadFields); err != nil {
 				return err
 			}
+			payloadFields["state_from"] = currentState
 		}
 		changesJSON, err := json.Marshal(payloadFields)
 		if err != nil {

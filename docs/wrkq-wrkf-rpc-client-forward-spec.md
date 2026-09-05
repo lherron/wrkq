@@ -1268,7 +1268,13 @@ The published client adds:
 client.wrkq.container.timelineView({
   container: string,
   cursor?: string,
-  limit?: number
+  limit?: number,
+  scope?: "container" | "subtree",
+  types?: string[],
+  task?: string,
+  since?: string,
+  entriesOnly?: boolean,
+  tail?: boolean
 })
 ```
 
@@ -1286,6 +1292,34 @@ affiliation is taken only from immutable event payload stamps; clients must not
 reclassify entries using current membership. Task-state history is restricted
 to state-bearing `task.updated`, `task.archived`, `task.deleted`,
 `task.restored`, and `task.purged`.
+
+The additive v2 path is selected by any new parameter or a v2 cursor. It scans
+both `event_log` and `project_events` in raw id order inside independent fences,
+applies affiliation and display filters after scanning, and advances each
+cursor position through excluded rows. The delivered limit is separate from
+the per-source raw cap. Cross-source delivery is a head-pop merge by server
+time, source rank (`event_log` first), then id; per-source id order is always
+preserved. `tail: true` re-fences at current maxima and always returns a cursor.
+The no-new-param v1 path remains unchanged apart from additive `from` on new
+`task.state` entries.
+
+##### Project event methods
+
+The published client exposes the foreign-fact family directly:
+
+```ts
+client.wrkq.projectEvent.post(params)       // → { id, fid, created }
+client.wrkq.projectEvent.get({ projectEvent: "PE-00012" })
+client.wrkq.projectEvent.typesView({ project: "wrkq" })
+```
+
+`post` requires exact caller attribution, validates dotted open-namespace event
+types, and stores immutable container/campaign affiliation stamps. Its optional
+idempotency key is scoped to the resolved top-level project. It writes only
+`project_events`: no `event_log`, webhook, room, envelope, workflow, wake, or
+kicker effect. `get` remains addressable after affiliation containers or tasks
+are deleted. Project-scoped `typesView` uses the same current subtree predicate
+as `timelineView`, never the stored `projectUuid` idempotency stamp.
 
 ##### `wrkq.container.update` (in-place rename — Tranche B)
 

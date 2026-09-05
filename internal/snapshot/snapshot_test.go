@@ -759,3 +759,29 @@ func TestSnapshotPreservesCampaignEnrollment(t *testing.T) {
 		t.Fatalf("restored campaign_uuid = %v, want %s", restored, campaign.UUID)
 	}
 }
+
+func TestSnapshotIncludesProjectEventsWithEventExport(t *testing.T) {
+	database, err := wrkqdb.Open(filepath.Join(t.TempDir(), "project-events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	if err := database.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO project_events (
+		fid, project_uuid, container_uuid, type, source, principal_ref, summary,
+		payload, occurred_at
+	) VALUES ('PE-00042', 'project-stamp', 'container-stamp', 'smoke.posted',
+		'smoke', 'agent:mable', 'smoke', '{"exact":true}', '2026-09-04T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	snap, _, err := ExportToSnapshot(database.DB, ExportOptions{IncludeEvents: true, Canonical: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, ok := snap.ProjectEvents["PE-00042"]
+	if !ok || event.Payload == nil || *event.Payload != `{"exact":true}` || event.ProjectUUID != "project-stamp" {
+		t.Fatalf("project event snapshot = %#v", event)
+	}
+}
