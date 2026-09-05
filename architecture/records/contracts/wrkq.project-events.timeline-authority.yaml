@@ -1,6 +1,6 @@
 id: wrkq.project-events.timeline-authority
 kind: contract
-status: proposed
+status: active
 owner_project: wrkq
 scope: foreign project facts, their affiliation and retention, and the merged project timeline reader
 predicate: >
@@ -50,11 +50,30 @@ source:
   - architecture/records/invariants/wrkq.campaign.canonical-portfolio-authority.yaml
   - architecture/records/invariants/wrkq.wrkf-rpc.bounded-polling-streaming.yaml
   - internal/wrkqapi/timeline.go
+  - internal/wrkqapi/project_events_test.go
   - internal/wrkqapi/monitorview.go
   - internal/store/containers.go
-required_tests: []
-last_verified: null
-enforced_by: "approved T-08048 rev 6 design; promote to active only after the schema, API, cursor, CLI, client, and live acceptance guards in I1-I12 exist"
+required_tests:
+  - TestProjectEventsI1OneFactOneHome
+  - TestProjectEventsI2ReservedNamespacesAndOpenVocabulary
+  - TestProjectEventsI3ExactAttributionAndNoWakeEffects
+  - TestProjectEventsI4ProjectScopedIdempotentReplay
+  - TestProjectEventsI5RawScanCursorExactnessCycle5
+  - TestProjectEventsI6V1ContinuationAndScopeMismatch
+  - TestProjectEventsI7LegacyAdditiveOnlyAndStateFrom
+  - TestProjectEventsI8UnprunedNoDeletionOwner
+  - TestProjectEventsI9ProductionTimeAffiliation
+  - TestProjectEventsI10TailLivenessFromColdStart
+  - TestProjectEventsI11SubtreeCoherenceAndConfinement
+  - TestProjectEventsI12MoveCoherenceFreshReads
+last_verified:
+  date: 2026-09-05
+  evidence: >
+    T-08048 implementation and live mini acceptance; all named I1-I12 guards
+    passed under the canonical sqlite_fts5,wrkq_local Go test profile, the
+    @wrkq/client facade contract and typecheck passed, migration 000060 applied,
+    and ghostmux proved cold follow delivery plus clean interrupt exit.
+enforced_by: "T-08048 rev 6 schema, API, cursor, CLI, client, I1-I12, and live mini acceptance guards"
 reopen_when:
   - a wrkq mutation is copied into project_events or a foreign project fact is written to event_log
   - a project-event write can succeed without exact caller attribution
