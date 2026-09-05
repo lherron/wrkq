@@ -66,7 +66,7 @@ func NewWrkpRootCmd() *cobra.Command {
 	root.PersistentFlags().String("output", "", "Output mode: human, json, ndjson, porcelain, yaml, tsv")
 	root.PersistentFlags().Bool("json", false, "Output as JSON")
 	root.PersistentFlags().String("scope-ref", "", "Caller scope handle (defaults to $HRC_SESSION_REF)")
-	root.AddCommand(newWrkpPostCmd(), newWrkpLogCmd(), newWrkpShowCmd(), newWrkpTypesCmd(), newWrkpInfoCmd(), newVersionCmd())
+	root.AddCommand(newWrkpPostCmd(), newWrkpGitCmd(), newWrkpLogCmd(), newWrkpShowCmd(), newWrkpTypesCmd(), newWrkpInfoCmd(), newVersionCmd())
 	applyWrkcHelpTemplates(root)
 	return root
 }
