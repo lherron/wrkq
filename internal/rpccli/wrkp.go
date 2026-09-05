@@ -130,7 +130,7 @@ func newWrkpPostCmd() *cobra.Command {
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.projectEvent.post", params)
 			if err != nil {
-				return fmt.Errorf("%s", rpcMessage(err))
+				return wrkpRPCError(err)
 			}
 			var result struct {
 				ID      int64  `json:"id"`
@@ -205,7 +205,7 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", params)
 				if err != nil {
-					return fmt.Errorf("%s", rpcMessage(err))
+					return wrkpRPCError(err)
 				}
 				var view wrkpLogView
 				if err := json.Unmarshal(raw, &view); err != nil {
@@ -256,7 +256,7 @@ func newWrkpLogCmd() *cobra.Command {
 func wrkpSubtreeFingerprint(ctx context.Context, tr Transport, projectUUID string) (string, error) {
 	raw, err := tr.Call(ctx, "wrkq.container.taskCounts", map[string]any{"includeArchived": true})
 	if err != nil {
-		return "", fmt.Errorf("%s", rpcMessage(err))
+		return "", wrkpRPCError(err)
 	}
 	var counts wrkpContainerTaskCounts
 	if err := json.Unmarshal(raw, &counts); err != nil {
@@ -293,7 +293,7 @@ func newWrkpShowCmd() *cobra.Command {
 			defer closeFn()
 			raw, err := tr.Call(cmd.Context(), "wrkq.projectEvent.get", map[string]any{"projectEvent": args[0]})
 			if err != nil {
-				return fmt.Errorf("%s", rpcMessage(err))
+				return wrkpRPCError(err)
 			}
 			var event wrkpProjectEvent
 			if err := json.Unmarshal(raw, &event); err != nil {
@@ -321,7 +321,7 @@ func newWrkpTypesCmd() *cobra.Command {
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.projectEvent.typesView", params)
 			if err != nil {
-				return fmt.Errorf("%s", rpcMessage(err))
+				return wrkpRPCError(err)
 			}
 			var result struct {
 				Items []struct {
@@ -354,6 +354,26 @@ func newWrkpInfoCmd() *cobra.Command {
 func wrkpJSON(cmd *cobra.Command) bool {
 	value, _ := cmd.Flags().GetBool("json")
 	return value
+}
+
+// wrkpRPCError keeps the public domain code and stable validation reason in
+// CLI diagnostics. Hooks use both to distinguish permanent input failures from
+// transport errors, and the generic mirror helper intentionally strips them.
+func wrkpRPCError(err error) error {
+	var rpcErr *Error
+	if !errors.As(err, &rpcErr) {
+		return err
+	}
+	message := rpcErr.Error()
+	if len(rpcErr.Data) > 0 {
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(rpcErr.Data, &data) == nil && data.Reason != "" {
+			message += " (" + data.Reason + ")"
+		}
+	}
+	return errors.New(message)
 }
 
 func splitCommaValues(raw string) []string {
