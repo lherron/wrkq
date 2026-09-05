@@ -210,6 +210,9 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", params)
 				if err != nil {
+					if cmd.Context().Err() != nil {
+						return nil
+					}
 					return wrkpRPCError(err)
 				}
 				var view wrkpLogView
@@ -223,6 +226,9 @@ func newWrkpLogCmd() *cobra.Command {
 				if follow {
 					currentSet, err := wrkpSubtreeFingerprint(cmd.Context(), tr, view.Container.UUID)
 					if err != nil {
+						if cmd.Context().Err() != nil {
+							return nil
+						}
 						return err
 					}
 					if containerSet != "" && currentSet != containerSet {
