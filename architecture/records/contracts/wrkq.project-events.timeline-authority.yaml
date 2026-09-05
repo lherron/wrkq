@@ -1,0 +1,67 @@
+id: wrkq.project-events.timeline-authority
+kind: contract
+status: proposed
+owner_project: wrkq
+scope: foreign project facts, their affiliation and retention, and the merged project timeline reader
+predicate: >
+  `project_events` is the sole wrkq-owned home for foreign facts posted about a
+  project; `event_log` remains the sole home for wrkq mutations, and neither
+  source copies facts from the other. Every project-event post resolves exact
+  caller attribution before any read, write, or idempotent success under
+  `wrkq.attribution.caller-principal-exact`, rejects wrkq-owned event
+  namespaces, and scopes idempotency to the top-level project resolved at post
+  time.
+
+  Project-event container and campaign affiliation are immutable production-time
+  stamps, while project affiliation for an unadorned-project subtree read is
+  derived from the current container tree. `project_uuid` is an idempotency
+  scope, never a read key or deletion owner. The table is unpruned: no container,
+  campaign, project, or task deletion removes a row; `task_uuid ON DELETE SET
+  NULL` is its only foreign key, and an otherwise unreachable row remains
+  addressable by its project-event id.
+
+  `wrkq.container.timelineView` is the sole merged reader over normalized
+  `event_log` entries and foreign project events. Subtree scope is admitted only
+  for an unadorned project and never widens the campaign portfolio projections
+  governed by `wrkq.campaign.canonical-portfolio-authority`. A fresh subtree
+  read follows the current tree; a held cursor is a position, not a membership
+  snapshot.
+
+  The additive v2 path scans each source in ascending raw-id order inside its
+  fence with a server-side raw-row cap, applies affiliation and display filters
+  after scanning, and advances each source position to its last raw row consumed
+  whether or not that row was delivered. The delivered-entry limit is separate
+  from the raw scan cap, so an empty result may advance the cursor. Fixed pages
+  retain their source fences; tail pages re-fence at current source maxima and
+  always return a cursor. Per-source id order is preserved and cross-source
+  ordering is the declared head merge by server time, source rank, then id. The
+  legacy v1 path remains unchanged for requests carrying no additive parameter
+  and no v2 cursor.
+authority:
+  repo: wrkq
+  surface: project_events schema, wrkq.projectEvent.*, wrkq.container.timelineView v2, wrkp, and @wrkq/client
+consumers:
+  - foreign fact producers using wrkq.projectEvent.post
+  - operators reading project history through wrkp
+  - "@wrkq/client timeline and project-event consumers"
+source:
+  - wrkq:T-08048
+  - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
+  - architecture/records/invariants/wrkq.campaign.canonical-portfolio-authority.yaml
+  - architecture/records/invariants/wrkq.wrkf-rpc.bounded-polling-streaming.yaml
+  - internal/wrkqapi/timeline.go
+  - internal/wrkqapi/monitorview.go
+  - internal/store/containers.go
+required_tests: []
+last_verified: null
+enforced_by: "approved T-08048 rev 6 design; promote to active only after the schema, API, cursor, CLI, client, and live acceptance guards in I1-I12 exist"
+reopen_when:
+  - a wrkq mutation is copied into project_events or a foreign project fact is written to event_log
+  - a project-event write can succeed without exact caller attribution
+  - project_uuid becomes an affiliation read key or any project-event column becomes a deletion owner
+  - a subtree read is admitted for a directory or campaign-adorned container
+  - the v2 cursor advances only over delivered rows or filtering moves ahead of raw-row position advancement
+  - a fixed page loses its source fences, tail stops re-fencing, or tail can return without a cursor
+  - the legacy no-new-param timeline path changes behavior
+supersedes: []
+superseded_by: null
