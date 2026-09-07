@@ -28,7 +28,7 @@ import (
 func newTreeCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, includeArchived, openOnly bool
 	var depth int
-	var fields, promiseState string
+	var fields, promiseState, statesFlag string
 	cmd := &cobra.Command{
 		Use:   "tree [path...]",
 		Short: "Display containers and tasks in a tree structure",
@@ -58,11 +58,8 @@ func newTreeCmd() *cobra.Command {
 			if depth > 0 {
 				params["maxDepth"] = depth
 			}
-			if includeArchived {
-				params["includeArchived"] = true
-			}
-			if openOnly {
-				params["openOnly"] = true
+			if err := viewSelectorParams(params, statesFlag, includeArchived, openOnly); err != nil {
+				return err
 			}
 			if promiseState != "" {
 				params["promiseState"] = promiseState
@@ -100,8 +97,9 @@ func newTreeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVarP(&depth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
-	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include completed/archived/deleted tasks and empty containers")
-	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only open tasks")
+	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include every state, archived/deleted rows, and empty containers")
+	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only open tasks (alias for --states open)")
+	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)")
 	cmd.Flags().StringVar(&fields, "fields", "", "Fields to display (comma-separated)")
 	cmd.Flags().StringVar(&promiseState, "state", "", "Promise leaf state: open (default) or all")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
@@ -519,7 +517,7 @@ func fetchTreePriorities(ctx context.Context, tr Transport, path string, include
 	if openOnly {
 		params["state"] = "open"
 	} else if !includeArchived {
-		params["state"] = []string{"draft", "open"}
+		params["state"] = defaultViewStates
 	}
 	if includeArchived {
 		params["includeDeleted"] = true
@@ -666,4 +664,66 @@ func formatTreeHumanTaskState(node *treeWireNode) string {
 		return node.State
 	}
 	return "opened " + openedAge + " ago"
+}
+
+// defaultViewStates is the no-flags visibility set for `tree` and `ls`.
+// T-08216: this default is the CLI's, not the server's. The server has no
+// opinion about which states are interesting and refuses a request that omits
+// `states` outright, so this list is sent explicitly on every call.
+//
+// Lance's ruling, 2026-09-07: exactly draft, open and in_progress. Narrower
+// than the full non-terminal set (which would add idea and blocked) because
+// tree is a working view.
+var defaultViewStates = []string{"draft", "open", "in_progress"}
+
+// viewSelectorParams fills the states/lifecycle/pruneEmpty triple that replaced
+// the conflated includeArchived/openOnly booleans. `all` (-a) is the only caller
+// that turns off pruning, and it is assembled here from three independent
+// fields rather than read off one overloaded flag.
+func viewSelectorParams(params map[string]any, statesFlag string, all, openOnly bool) error {
+	switch {
+	case statesFlag != "":
+		states, err := parseStatesFlag(statesFlag)
+		if err != nil {
+			return err
+		}
+		params["states"] = states
+	case all:
+		params["states"] = "any"
+		params["lifecycle"] = "any"
+		params["pruneEmpty"] = false
+	case openOnly:
+		params["states"] = []string{"open"}
+	default:
+		params["states"] = defaultViewStates
+	}
+	if all && statesFlag != "" {
+		// An explicit --states wins the state set, but -a keeps its other two
+		// meanings so `-a --states completed` still reaches archived rows.
+		params["lifecycle"] = "any"
+		params["pruneEmpty"] = false
+	}
+	return nil
+}
+
+// parseStatesFlag splits a comma-separated --states value. Validation of the
+// member names is the SERVER's, so a bad state is refused identically whether
+// it arrived from this flag or from another client.
+func parseStatesFlag(v string) (any, error) {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--states requires at least one state (or \"any\")")
+	}
+	if len(out) == 1 && out[0] == "any" {
+		return "any", nil
+	}
+	return out, nil
 }

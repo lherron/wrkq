@@ -16,6 +16,13 @@ type LsListViewParams struct {
 	Type                   string   `json:"type,omitempty"` // "p" or "t"
 	IncludeHidden          bool     `json:"includeHidden,omitempty"`
 	IncludeCampaignMembers bool     `json:"includeCampaignMembers,omitempty"`
+
+	// T-08216: ls previously had NO state parameter at all — the draft/open set
+	// was welded into its SQL. States is REQUIRED, with the same contract as
+	// TreeViewParams.States. Type is unrelated and unchanged.
+	States     flexString `json:"states"`
+	Lifecycle  string     `json:"lifecycle,omitempty"`
+	PruneEmpty *bool      `json:"pruneEmpty,omitempty"`
 }
 
 // WrkqLsEntry matches the legacy lsEntry shape exactly (field order + json tags).

@@ -1751,7 +1751,7 @@
           {
             "name": "all",
             "shorthand": "a",
-            "usage": "Include archived and deleted items",
+            "usage": "Include every state and archived/deleted rows",
             "type": "bool",
             "default": "false",
             "hidden": false
@@ -1833,6 +1833,12 @@
             "usage": "Sort by field: slug, updated_at, created_at, id",
             "type": "string",
             "default": "slug",
+            "hidden": false
+          },
+          {
+            "name": "states",
+            "usage": "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)",
+            "type": "string",
             "hidden": false
           },
           {
@@ -3696,7 +3702,7 @@
           {
             "name": "all",
             "shorthand": "a",
-            "usage": "Include completed/archived/deleted tasks and empty containers",
+            "usage": "Include every state, archived/deleted rows, and empty containers",
             "type": "bool",
             "default": "false",
             "hidden": false
@@ -3731,7 +3737,7 @@
           },
           {
             "name": "open",
-            "usage": "Show only open tasks",
+            "usage": "Show only open tasks (alias for --states open)",
             "type": "bool",
             "default": "false",
             "hidden": false
@@ -3753,6 +3759,12 @@
           {
             "name": "state",
             "usage": "Promise leaf state: open (default) or all",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "states",
+            "usage": "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)",
             "type": "string",
             "hidden": false
           }

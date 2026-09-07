@@ -48,7 +48,7 @@ type lsEntry struct {
 func newLsCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, recursive, one, nul, all, reverse bool
 	var limit int
-	var cursorTok, typeFilter, sort string
+	var cursorTok, typeFilter, sort, statesFlag string
 	cmd := &cobra.Command{
 		Use:     "ls [path...]",
 		Aliases: []string{"list"},
@@ -96,8 +96,8 @@ func newLsCmd() *cobra.Command {
 			if typeFilter != "" {
 				params["type"] = typeFilter
 			}
-			if all {
-				params["includeHidden"] = true
+			if err := viewSelectorParams(params, statesFlag, all, false); err != nil {
+				return err
 			}
 			if mode == "table" {
 				params["includeCampaignMembers"] = true
@@ -204,7 +204,8 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&nul, "nul", "0", false, "NUL-separated output")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of results to return (0 = no limit)")
 	cmd.Flags().StringVar(&cursorTok, "cursor", "", "Pagination cursor from previous page")
-	cmd.Flags().BoolVarP(&all, "all", "a", false, "Include archived and deleted items")
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Include every state and archived/deleted rows")
+	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)")
 	cmd.Flags().StringVar(&sort, "sort", "slug", "Sort by field: slug, updated_at, created_at, id")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 	return cmd

@@ -235,11 +235,11 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 
 	// task.lsView (the ls mixed task/container compat list projection) must agree
 	// across transports. List the seeded project's children.
-	inLs, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"path": "rpccli-test-proj"})
+	inLs, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"path": "rpccli-test-proj", "states": defaultViewStates})
 	if err != nil {
 		t.Fatalf("in-process task.lsView: %v", err)
 	}
-	subLs, err := sub.Call(ctx, "wrkq.task.lsView", map[string]any{"path": "rpccli-test-proj"})
+	subLs, err := sub.Call(ctx, "wrkq.task.lsView", map[string]any{"path": "rpccli-test-proj", "states": defaultViewStates})
 	if err != nil {
 		t.Fatalf("subprocess task.lsView: %v", err)
 	}
@@ -263,11 +263,11 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 
 	// task.treeView (the tree recursive compat projection) must agree across
 	// transports. Walk the seeded project's hierarchy.
-	inTree, err := inproc.Call(context.Background(), "wrkq.task.treeView", map[string]any{"path": "rpccli-test-proj"})
+	inTree, err := inproc.Call(context.Background(), "wrkq.task.treeView", map[string]any{"path": "rpccli-test-proj", "states": defaultViewStates})
 	if err != nil {
 		t.Fatalf("in-process task.treeView: %v", err)
 	}
-	subTree, err := sub.Call(ctx, "wrkq.task.treeView", map[string]any{"path": "rpccli-test-proj"})
+	subTree, err := sub.Call(ctx, "wrkq.task.treeView", map[string]any{"path": "rpccli-test-proj", "states": defaultViewStates})
 	if err != nil {
 		t.Fatalf("subprocess task.treeView: %v", err)
 	}
@@ -364,11 +364,11 @@ func TestTransportEquivalence_InProcVsSubprocess(t *testing.T) {
 
 	// task.lsView multi-path form ("paths") — the server owns the per-path query
 	// plus the combined merge-sort — must also agree across transports.
-	inLsM, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}})
+	inLsM, err := inproc.Call(context.Background(), "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}, "states": defaultViewStates})
 	if err != nil {
 		t.Fatalf("in-process task.lsView (paths): %v", err)
 	}
-	subLsM, err := sub.Call(ctx, "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}})
+	subLsM, err := sub.Call(ctx, "wrkq.task.lsView", map[string]any{"paths": []string{"rpccli-test-proj"}, "states": defaultViewStates})
 	if err != nil {
 		t.Fatalf("subprocess task.lsView (paths): %v", err)
 	}

@@ -23,6 +23,17 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 	if err != nil {
 		return nil, NewValidationError(err.Error(), map[string]any{"field": "sort"})
 	}
+	// T-08216: ls had no state parameter at all — the draft/open set was welded
+	// into its SQL. It now answers the same question as tree, in the same words.
+	states, err := resolveStateSelector(p.States, "states")
+	if err != nil {
+		return nil, err
+	}
+	lifecycle, err := resolveLifecycle(p.Lifecycle, "lifecycle")
+	if err != nil {
+		return nil, err
+	}
+	filter := treeFilter{states: states, lifecycle: lifecycle}
 	pag, err := cursor.Apply(p.Cursor, cursor.ApplyOptions{
 		SortFields: []string{sortField},
 		Descending: []bool{descending},
@@ -44,7 +55,7 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 
 	var entries []WrkqLsEntry
 	for _, path := range paths {
-		rows, perr := a.lsEntriesForPath(ctx, path, p, pag)
+		rows, perr := a.lsEntriesForPath(ctx, path, p, filter, pag)
 		if perr != nil {
 			return nil, perr
 		}
@@ -66,7 +77,7 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 // child containers + tasks, or (if the path is not a container) the single task
 // at that path. The cursor's per-path WHERE/LIMIT clauses are applied in SQL here,
 // exactly as legacy does, before the combined merge-sort in LsListView.
-func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewParams, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewParams, filter treeFilter, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
 	var entries []WrkqLsEntry
 	if path == "" {
 		if p.Type == "" || p.Type == "p" {
@@ -88,13 +99,13 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 			entries = append(entries, rows...)
 		}
 		if p.Type == "" || p.Type == "t" {
-			rows, qerr := a.lsQueryTasks(ctx, containerUUID, path, p.IncludeHidden, pag)
+			rows, qerr := a.lsQueryTasks(ctx, containerUUID, path, filter, pag)
 			if qerr != nil {
 				return nil, qerr
 			}
 			entries = append(entries, rows...)
 			if p.IncludeCampaignMembers {
-				campaignRows, qerr := a.lsQueryCampaignEnrollments(ctx, containerUUID, path, p.IncludeHidden, pag)
+				campaignRows, qerr := a.lsQueryCampaignEnrollments(ctx, containerUUID, path, filter, pag)
 				if qerr != nil {
 					return nil, qerr
 				}
@@ -110,7 +121,7 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 	return append(entries, *single), nil
 }
 
-func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, campaignPath string, includeHidden bool, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, campaignPath string, filter treeFilter, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
 	var campaignState sql.NullString
 	if err := a.db.QueryRowContext(ctx, "SELECT campaign_state FROM containers WHERE uuid = ?", campaignUUID).Scan(&campaignState); err != nil || !campaignState.Valid {
 		return nil, nil
@@ -129,8 +140,9 @@ func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, camp
 	                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), '')
 	  FROM tasks t WHERE t.campaign_uuid = ? AND t.project_uuid != ?`
 	args := []any{campaignUUID, campaignUUID}
-	if !includeHidden {
-		query += ` AND t.state IN ('draft', 'open')`
+	if clause, clauseArgs := filter.sqlPredicate("t"); clause != "" {
+		query += clause
+		args = append(args, clauseArgs...)
 	}
 	if pag.WhereClause != "" {
 		query += " AND " + pag.WhereClause
@@ -211,13 +223,14 @@ func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cur
 	return out, rows.Err()
 }
 
-func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string, includeHidden bool, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string, filter treeFilter, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
 	query := `SELECT id, slug, title, created_at, updated_at, state, kind,
 		requested_by_project_id, assigned_project_id, acknowledged_at, resolution
 		FROM tasks WHERE project_uuid = ?`
 	args := []any{containerUUID}
-	if !includeHidden {
-		query += ` AND state IN ('draft', 'open')`
+	if clause, clauseArgs := filter.sqlPredicate(""); clause != "" {
+		query += clause
+		args = append(args, clauseArgs...)
 	}
 	if pag.WhereClause != "" {
 		query += " AND " + pag.WhereClause

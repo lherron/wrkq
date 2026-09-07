@@ -55,7 +55,14 @@ import (
 // (T-07638), `includeFyi` (T-07627), and the wave-1 ledger (T-07612). Update it
 // only alongside an explicit protocol change; an incidental mismatch remains a
 // test failure.
-const pinnedProtocolSchemaHash = "sha256:e2b2157088348dbc274c5dd9e3a5fe07feeec8721be8140b4184da2f7a59dcad"
+//
+// T-08216 (caller state selection): WrkqTreeViewParams and WrkqLsListViewParams
+// join the catalog, so the two tree/ls REQUEST shapes now sit inside the hash.
+// That is the whole compatibility mechanism for the change — a client built with
+// `states`/`lifecycle`/`pruneEmpty` fails initialize against a daemon that would
+// silently ignore them, instead of rendering a tree it believes is filtered.
+// dtos 150 -> 152.
+const pinnedProtocolSchemaHash = "sha256:b8182664dac6d9ed9fedd2f02e948d974df1c94e95f1f33954df51c648462772"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -76,7 +83,7 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 	}{
 		{"methods", len(MethodCatalog()), 184},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 150},
+		{"dtos", len(dtoCatalog), 152},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

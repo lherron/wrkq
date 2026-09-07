@@ -3,13 +3,21 @@ package wrkqapi
 // TreeViewParams mirrors the legacy `wrkq tree [PATH]` traversal surface for one
 // root path. Project-root scoping is the CALLER's responsibility: Path is already
 // scoped before it reaches this method.
+//
+// T-08216: which task states are shown is the CALLER's choice, not a server
+// policy. States is REQUIRED — an absent selector is refused rather than
+// defaulted, so a client whose parameter was dropped in transit cannot be
+// silently answered with a different question. Lifecycle and PruneEmpty carry
+// the two other meanings that the removed IncludeArchived boolean used to
+// conflate with state selection.
 type TreeViewParams struct {
-	Path                   string `json:"path,omitempty"`
-	MaxDepth               int    `json:"maxDepth,omitempty"`
-	IncludeArchived        bool   `json:"includeArchived,omitempty"`
-	OpenOnly               bool   `json:"openOnly,omitempty"`
-	IncludeCampaignMembers bool   `json:"includeCampaignMembers,omitempty"`
-	PromiseState           string `json:"promiseState,omitempty"`
+	Path                   string     `json:"path,omitempty"`
+	MaxDepth               int        `json:"maxDepth,omitempty"`
+	States                 flexString `json:"states"`
+	Lifecycle              string     `json:"lifecycle,omitempty"`
+	PruneEmpty             *bool      `json:"pruneEmpty,omitempty"`
+	IncludeCampaignMembers bool       `json:"includeCampaignMembers,omitempty"`
+	PromiseState           string     `json:"promiseState,omitempty"`
 }
 
 // WrkqTreeNode is the server-owned COMPATIBILITY projection of one tree node. Its
@@ -51,6 +59,12 @@ type WrkqTreeNode struct {
 	hasVisibleTasks      bool
 	hasVisibleContent    bool
 	hiddenContainerCount int
+	// allBuiltChildrenDone aggregates AllTasksCompleted over every child
+	// container that was BUILT, including those the selector later pruned from
+	// display (T-08216 §8). Aggregating over the displayed slice instead let a
+	// hidden child's unfinished work vanish from its parent's rollup, so a
+	// container holding live in_progress work reported "(All done)".
+	allBuiltChildrenDone bool
 }
 
 // WrkqTreeView is the server-owned COMPATIBILITY tree projection for `wrkq tree`.

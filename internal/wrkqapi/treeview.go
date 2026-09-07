@@ -25,16 +25,28 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 		return nil, NewValidationError("tree promiseState must be open or all", map[string]any{"field": "promiseState"})
 	}
 	includeClosedPromises := p.PromiseState == "all"
-	pruneEmpty := !p.IncludeArchived
-	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, p.IncludeArchived, p.OpenOnly, pruneEmpty, includeClosedPromises, 0)
+	states, err := resolveStateSelector(p.States, "states")
 	if err != nil {
 		return nil, err
 	}
-	if err := a.attachExternalTreeBacklinks(ctx, root, p.IncludeArchived, p.OpenOnly); err != nil {
+	lifecycle, err := resolveLifecycle(p.Lifecycle, "lifecycle")
+	if err != nil {
+		return nil, err
+	}
+	filter := treeFilter{states: states, lifecycle: lifecycle}
+	pruneEmpty := true
+	if p.PruneEmpty != nil {
+		pruneEmpty = *p.PruneEmpty
+	}
+	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, filter, pruneEmpty, includeClosedPromises, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.attachExternalTreeBacklinks(ctx, root, filter); err != nil {
 		return nil, err
 	}
 	if p.IncludeCampaignMembers {
-		if err := a.attachCampaignEnrollments(ctx, root, p.Path, p.IncludeArchived, p.OpenOnly); err != nil {
+		if err := a.attachCampaignEnrollments(ctx, root, p.Path, filter); err != nil {
 			return nil, err
 		}
 	}
@@ -112,7 +124,7 @@ func (a *API) attachTreePromises(ctx context.Context, nodes []*WrkqTreeNode, roo
 	return rootPromises, nil
 }
 
-func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode, path string, includeArchived, openOnly bool) error {
+func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode, path string, filter treeFilter) error {
 	if path == "" {
 		return nil
 	}
@@ -162,16 +174,7 @@ func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode,
 		node.RequestedByProjectID, node.AssignedProjectID = requestedBy, assigned
 		node.AcknowledgedAt, node.Resolution = acknowledged, resolution
 		node.IsArchived, node.IsDeleted = archivedAt != nil, deletedAt != nil
-		show := node.State == "draft" || node.State == "open"
-		if includeArchived {
-			show = true
-		} else if node.IsArchived || node.IsDeleted {
-			show = false
-		}
-		if openOnly && node.State != "open" {
-			show = false
-		}
-		if !show {
+		if !filter.admits(node.State, node.IsArchived, node.IsDeleted) {
 			continue
 		}
 		node.ExternalPath = "campaign:"
@@ -198,12 +201,14 @@ func (a *API) treeTopLevelProjectID(rootPath string) string {
 }
 
 // buildTreeNode is the faithful port of internal/cli buildTree.
-func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, includeArchived, openOnly, pruneEmptyContainers, includeClosedPromises bool, currentDepth int) (*WrkqTreeNode, error) {
+func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filter treeFilter, pruneEmptyContainers, includeClosedPromises bool, currentDepth int) (*WrkqTreeNode, error) {
 	root := &WrkqTreeNode{
 		Type:     "container",
 		Slug:     path,
 		Children: make([]*WrkqTreeNode, 0),
 	}
+	// Aggregated over every BUILT child below, before any pruning decision.
+	root.allBuiltChildrenDone = true
 
 	if maxDepth > 0 && currentDepth >= maxDepth {
 		return root, nil
@@ -229,7 +234,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 		containerQuery += `parent_uuid = ?`
 		containerArgs = append(containerArgs, *parentUUID)
 	}
-	if !includeArchived {
+	if !filter.includesArchivedContainers() {
 		containerQuery += ` AND archived_at IS NULL`
 	}
 	containerQuery += ` ORDER BY slug`
@@ -254,7 +259,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 		}
 		childPath += node.Slug
 
-		child, err := a.buildTreeNode(ctx, childPath, maxDepth, includeArchived, openOnly, pruneEmptyContainers, includeClosedPromises, currentDepth+1)
+		child, err := a.buildTreeNode(ctx, childPath, maxDepth, filter, pruneEmptyContainers, includeClosedPromises, currentDepth+1)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -262,6 +267,12 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 
 		node.Children = child.Children
 		node.AllTasksCompleted = child.AllTasksCompleted
+		// T-08216 §8: count EVERY built child, appended or pruned. This line is
+		// the whole fix; the value was already computed and then discarded when
+		// the child failed shouldShowContainer below.
+		if !node.AllTasksCompleted {
+			root.allBuiltChildrenDone = false
+		}
 		node.hasVisibleTasks = child.hasVisibleTasks
 		node.hasVisibleContent = child.hasVisibleContent
 		node.hiddenContainerCount = child.hiddenContainerCount
@@ -335,17 +346,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 				closedTasks++
 			}
 
-			showTask := node.State == "draft" || node.State == "open"
-			if includeArchived {
-				showTask = true
-			} else if node.IsArchived || node.IsDeleted {
-				showTask = false
-			}
-			if openOnly && node.State != "open" {
-				showTask = false
-			}
-
-			if showTask {
+			if showTask := filter.admits(node.State, node.IsArchived, node.IsDeleted); showTask {
 				tasks = append(tasks, &node)
 				root.hasVisibleTasks = true
 				root.hasVisibleContent = true
@@ -357,16 +358,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 		}
 
 		allDirectTasksClosed := totalTasks == 0 || (totalTasks > 0 && closedTasks == totalTasks)
-		allChildContainersDone := true
-		for _, child := range root.Children {
-			if child.Type == "container" {
-				if !child.AllTasksCompleted {
-					allChildContainersDone = false
-					break
-				}
-			}
-		}
-		root.AllTasksCompleted = allDirectTasksClosed && allChildContainersDone
+		root.AllTasksCompleted = allDirectTasksClosed && root.allBuiltChildrenDone
 
 		byUUID := make(map[string]*WrkqTreeNode, len(tasks))
 		for _, t := range tasks {
@@ -381,7 +373,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, incl
 			topTasks = append(topTasks, t)
 		}
 
-		if includeArchived || !root.AllTasksCompleted || totalTasks == 0 {
+		if !pruneEmptyContainers || !root.AllTasksCompleted || totalTasks == 0 {
 			root.Children = append(root.Children, topTasks...)
 		}
 	}
@@ -407,12 +399,12 @@ func treeAlwaysShow(node *WrkqTreeNode) bool {
 	return node.Type == "container" && node.Slug == "inbox"
 }
 
-func (a *API) attachExternalTreeBacklinks(ctx context.Context, root *WrkqTreeNode, includeArchived bool, openOnly bool) error {
+func (a *API) attachExternalTreeBacklinks(ctx context.Context, root *WrkqTreeNode, filter treeFilter) error {
 	var walk func(nodes []*WrkqTreeNode) error
 	walk = func(nodes []*WrkqTreeNode) error {
 		for _, node := range nodes {
 			if node.Type == "task" {
-				children, err := a.loadExternalTreeBacklinks(ctx, node.UUID, includeArchived, openOnly)
+				children, err := a.loadExternalTreeBacklinks(ctx, node.UUID, filter)
 				if err != nil {
 					return err
 				}
@@ -427,7 +419,7 @@ func (a *API) attachExternalTreeBacklinks(ctx context.Context, root *WrkqTreeNod
 	return walk(root.Children)
 }
 
-func (a *API) loadExternalTreeBacklinks(ctx context.Context, parentUUID string, includeArchived bool, openOnly bool) ([]*WrkqTreeNode, error) {
+func (a *API) loadExternalTreeBacklinks(ctx context.Context, parentUUID string, filter treeFilter) ([]*WrkqTreeNode, error) {
 	rows, err := a.db.QueryContext(ctx, `
 		SELECT c.uuid, c.id, c.slug, c.title, c.state, c.created_at, c.archived_at, c.deleted_at,
 		       c.requested_by_project_id, c.assigned_project_id, c.acknowledged_at, c.resolution,
@@ -463,16 +455,7 @@ func (a *API) loadExternalTreeBacklinks(ctx context.Context, parentUUID string, 
 		node.IsDeleted = deletedAt != nil
 		node.ExternalBacklink = true
 
-		showTask := node.State == "draft" || node.State == "open"
-		if includeArchived {
-			showTask = true
-		} else if node.IsArchived || node.IsDeleted {
-			showTask = false
-		}
-		if openOnly && node.State != "open" {
-			showTask = false
-		}
-		if showTask {
+		if filter.admits(node.State, node.IsArchived, node.IsDeleted) {
 			out = append(out, &node)
 		}
 	}

@@ -297,6 +297,7 @@ var dtoCatalog = []string{
 	"WrkqCommentListView",    // CLI compatibility list projection (comment ls)
 	"WrkqAttachmentListView", // CLI compatibility list projection (attach ls)
 	"WrkqLsListView",         // CLI compatibility list projection (ls)
+	"WrkqLsListViewParams",   // CLI compatibility ls REQUEST (T-08216 caller state selection)
 	"WrkqFindListViewParams", // CLI compatibility find request (exact label filters included)
 	"WrkqFindListView",       // CLI compatibility list projection (find)
 	"WrkqHistoryListView",    // CLI compatibility history read model (log over event_log); nested WrkqLogEvent is part of this DTO
@@ -307,6 +308,7 @@ var dtoCatalog = []string{
 	"WrkqMonitorEvent",       // element of monitor.eventsView (the legacy monitorEventLine data row)
 	"WrkqMonitorStateView",   // CLI compatibility single --until condition snapshot (monitor watch/wait)
 	"WrkqTreeView",           // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
+	"WrkqTreeViewParams",     // CLI compatibility tree REQUEST (T-08216 caller state selection)
 	"WrkqTaskBlockedView",    // CLI compatibility projection (check blocked); nested WrkqTaskBlockedEntry is part of this DTO
 	"WrkqInboxView",          // CLI compatibility list projection (check-inbox); nested WrkqInboxEntry is part of this DTO
 	"CatViewRelation",        // element of relation.listView (also nested in WrkqTaskCatView)
