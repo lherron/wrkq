@@ -1,6 +1,6 @@
 id: wrkq.task-view.caller-state-selection
 kind: invariant
-status: proposed
+status: active
 owner_project: wrkq
 scope: wrkq.task.treeView and wrkq.task.lsView state selection and tree rollup aggregation
 predicate: >
@@ -11,6 +11,10 @@ predicate: >
   sends it explicitly. The server owns filtering execution, traversal, and pruning.
   TreeViewParams and LsListViewParams participate in the existing protocol schema
   catalog so incompatible old servers are refused at client initialization.
+  Single-task paths apply the same selection as container task queries. Selected
+  tasks are not suppressed by container completion or pruneEmpty. In lsView,
+  empty-container pruning precedes the page limit, so excluded containers cannot
+  consume page slots and make later selected containers unreachable.
 
   Tree AllTasksCompleted must not change because the task-state selector or display
   pruning excludes unfinished work. Direct-task counters precede visibility
@@ -23,14 +27,18 @@ authority:
   repo: wrkq
   surface: wrkqapi task view projections, rpccli caller policy, and workrpc schema catalog
 enforced_by: >
-  Planned T-08216 tree-state-selector implementation, approved design revision 3.
-  Not yet implemented or verified; activation awaits implementation evidence.
+  Shared state/lifecycle validation and task predicates; CLI viewSelectorParams;
+  tree pre-prune child aggregation and unconditional selected-task append;
+  ls single-task filtering and SQL EXISTS pruning before ORDER BY/LIMIT;
+  catalogued request DTOs and Go-client initialize schema comparison;
+  T-08216 installed-surface acceptance through gate 16.
 source:
   - architecture/adr/0003-task-view-caller-state-selection.md
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
   - architecture/records/invariants/wrkq.task-hierarchy.cross-project-parents.yaml
   - internal/wrkqapi/types_treeview.go
   - internal/wrkqapi/types_lslistview.go
+  - internal/wrkqapi/types_stateselector.go
   - internal/wrkqapi/treeview.go
   - internal/wrkqapi/lslistview.go
   - internal/rpccli/tree.go
@@ -38,16 +46,39 @@ source:
   - internal/workrpc/catalog.go
   - internal/workrpc/schema.go
   - internal/workrpc/schema_identity_test.go
+  - internal/cursor/cursor.go
   - pkg/client/transport.go
 required_tests:
   - T-08216 revision 3 installed-surface acceptance for selector exclusion, required and invalid states, CLI defaults, and priority hydration
   - T-08216 revision 3 installed-surface acceptance for pruned-child rollup independence and unchanged cancelled-task closure
   - T-08216 revision 3 installed-surface acceptance for new-client initialization refusal against the old daemon
-last_verified: null
+  - T-08216 gates 13 and 14 for single-task selector exclusion and selected completed tasks under default pruning
+  - T-08216 gates 15 and 16 for selected-container pruning before pagination and unpruned control
+  - TestProtocolSchemaHashPinned
+  - TestProtocolCatalogCardinality
+last_verified:
+  date: 2026-09-07
+  evidence: >
+    Activated at 5b265d0219ef039982aaf106f9b66c93d1021ff8, following 7752a12
+    and 127a3d1. Daedalus read the producer's GATES.txt in
+    var/wrkq-artifacts/T-08216 and the gate-16 reproduction/results submitted
+    in EN-05740: open selection returns cc at limits 1/2/3; completed selection
+    returns aa at limit 1 and aa,bb at limit 2; unpruned returns aa,bb,cc.
+    Source verification confirms EXISTS precedes ORDER BY/LIMIT and the old
+    Go-side pruning path is deleted. Earlier evidence covers required/invalid
+    selectors, default and non-default priorities, unchanged tree -a, bounded
+    --open annotation changes, cancelled-task rollups, and actual deployment
+    skew refusing schema e2b21570 from the new b8182664 client. Daedalus also
+    independently observed the installed single-task path return null for draft
+    and T-08216 completed for completed after 127a3d1. Suite and fleet-deployment
+    results are producer-reported; Daedalus did not run builds, suites, installs,
+    or restarts for activation.
 reopen_when:
   - a server supplies a default task-state set for these projections
   - visibility pruning changes the completion aggregate
   - task closure or resident rollup membership changes
   - these request DTOs leave the protocol schema catalog
+  - a path bypasses selection or pruning can suppress a selected task
+  - pruning occurs after the ls page limit or removes access to subsequent selected rows
 supersedes: []
 superseded_by: null

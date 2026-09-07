@@ -1,10 +1,10 @@
 # ADR 0003: Caller-selected task views preserve completion facts
 
-- Status: Accepted design; implementation pending
+- Status: Accepted; implemented and activated at 5b265d0
 - Date: 2026-09-07
 - Authority: Lance's working-set and hard-cutover decisions; Daedalus approval
   of T-08216 (tree-state-selector), DESIGN.md revision 3
-- Record: `wrkq.task-view.caller-state-selection` (proposed, not active law)
+- Record: `wrkq.task-view.caller-state-selection` (active)
 - Submission: `/Users/lherron/praesidium/var/wrkq-artifacts/T-08216/DESIGN.md`
 - Counsel provenance: task room T-08216, revision 3 submitted as EN-05608
 
@@ -37,8 +37,30 @@ resolves the three flaws from prior reviews without changing task residency or
 the external-backlink boundary in wrkq.task-hierarchy.cross-project-parents.
 The remote boundary in wrkq.rpc.remote-transport-locator remains unchanged.
 
-This is design verification, not evidence of implemented enforcement. No build,
-test, installation, or service-health result is asserted. The proposed record
-has no last_verified stamp and becomes active only on implementation evidence.
-Its installed-surface acceptance obligations are those submitted in revision 3;
-the requester owns their execution and Daedalus owns the record's activation.
+The record was initially proposed pending implementation evidence. Activation at
+5b265d0 follows source verification and the producer's installed-surface results
+in `/Users/lherron/praesidium/var/wrkq-artifacts/T-08216/GATES.txt`, together with
+gate 16 submitted in EN-05740. The initial implementation at 7752a12 did not
+enforce selection on single-task ls paths, suppressed selected completed tree
+tasks, and accepted ls pruneEmpty without executing it. The 127a3d1 corrections
+resolved those failures but pruned containers after the SQL page limit, making
+later matches unreachable. The 5b265d0 query applies pruning before pagination
+and removes the separate Go-side pruning path.
+
+The acceptance evidence covers exclusion as well as inclusion, actual new-client
+refusal against the old daemon during deployment, unchanged tree -a output,
+removal of false completion annotations, cancelled remaining non-closed,
+single-task selection, all-closed containers, non-default priority hydration,
+and pruning with page limits. Daedalus independently repeated the installed
+single-task exclusion/inclusion pair after 127a3d1. Other execution and fleet
+results are producer-reported; no build, suite, installation, or restart was
+performed by Daedalus for activation. The invariant carries these evidence
+boundaries in last_verified, dated 2026-09-07.
+
+The ls live-lifecycle default intentionally excludes archived/deleted task rows
+that its former state-only SQL could return. The producer also reported that
+the first schema cutover interrupted hcs, a Go pkg/client consumer outside the
+four wrkq checkouts. The schema-compatibility deployment boundary therefore
+extends beyond callers of the two changed methods. The reported consumer
+inventory and separate TypeScript handshake question are not frozen by this
+decision; the evidence does not establish a universal fleet inventory.
