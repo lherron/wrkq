@@ -34,6 +34,10 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 		return nil, err
 	}
 	filter := treeFilter{states: states, lifecycle: lifecycle}
+	pruneEmpty := true
+	if p.PruneEmpty != nil {
+		pruneEmpty = *p.PruneEmpty
+	}
 	pag, err := cursor.Apply(p.Cursor, cursor.ApplyOptions{
 		SortFields: []string{sortField},
 		Descending: []bool{descending},
@@ -55,7 +59,7 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 
 	var entries []WrkqLsEntry
 	for _, path := range paths {
-		rows, perr := a.lsEntriesForPath(ctx, path, p, filter, pag)
+		rows, perr := a.lsEntriesForPath(ctx, path, p, filter, pruneEmpty, pag)
 		if perr != nil {
 			return nil, perr
 		}
@@ -77,11 +81,11 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 // child containers + tasks, or (if the path is not a container) the single task
 // at that path. The cursor's per-path WHERE/LIMIT clauses are applied in SQL here,
 // exactly as legacy does, before the combined merge-sort in LsListView.
-func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewParams, filter treeFilter, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewParams, filter treeFilter, pruneEmpty bool, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
 	var entries []WrkqLsEntry
 	if path == "" {
 		if p.Type == "" || p.Type == "p" {
-			rows, qerr := a.lsQueryContainers(ctx, "(SELECT uuid FROM containers WHERE kind = 'root')", pag, "")
+			rows, qerr := a.lsQueryContainers(ctx, "(SELECT uuid FROM containers WHERE kind = 'root')", pag, filter, pruneEmpty, "")
 			if qerr != nil {
 				return nil, qerr
 			}
@@ -92,7 +96,7 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 	containerUUID, _, cerr := selectors.WalkContainerPath(a.db, path)
 	if cerr == nil {
 		if p.Type == "" || p.Type == "p" {
-			rows, qerr := a.lsQueryContainers(ctx, "?", pag, path, containerUUID)
+			rows, qerr := a.lsQueryContainers(ctx, "?", pag, filter, pruneEmpty, path, containerUUID)
 			if qerr != nil {
 				return nil, qerr
 			}
@@ -114,9 +118,16 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 		}
 		return entries, nil
 	}
-	single, serr := a.lsSingleTask(ctx, path)
+	single, serr := a.lsSingleTask(ctx, path, filter)
 	if serr != nil {
 		return nil, serr
+	}
+	if single == nil {
+		// T-08216 F4(a): a single-task path is a SELECTION like any other. A task
+		// the caller did not ask for is absent, not returned regardless — the
+		// filter has to bite here too, or `ls <task-path> --states draft` hands
+		// back a completed task.
+		return entries, nil
 	}
 	return append(entries, *single), nil
 }
@@ -178,7 +189,7 @@ func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, camp
 
 // lsQueryContainers lists child containers under parentExpr (a SQL expression or
 // "?" with parentArgs) and computes rollup counts. pathPrefix is the parent path.
-func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cursor.ApplyResult, pathPrefix string, parentArgs ...any) ([]WrkqLsEntry, error) {
+func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cursor.ApplyResult, filter treeFilter, pruneEmpty bool, pathPrefix string, parentArgs ...any) ([]WrkqLsEntry, error) {
 	query := "SELECT uuid, id, slug, title, kind, created_at, updated_at FROM containers WHERE parent_uuid = " + parentExpr
 	args := append([]any{}, parentArgs...)
 	if pag.WhereClause != "" {
@@ -209,6 +220,19 @@ func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cur
 		childPath := slug
 		if pathPrefix != "" {
 			childPath = pathPrefix + "/" + slug
+		}
+		if pruneEmpty {
+			// T-08216 F5: pruneEmpty was accepted and never executed on ls, so the
+			// approved identical parameter was a no-op here. A child container with
+			// no SELECTED content in its subtree is dropped, matching what the same
+			// flag means on tree.
+			has, herr := a.containerHasSelectedTasks(ctx, uuid, filter)
+			if herr != nil {
+				return nil, herr
+			}
+			if !has {
+				continue
+			}
 		}
 		tc, atc, rerr := a.containerRollupCounts(ctx, uuid)
 		if rerr != nil {
@@ -265,7 +289,7 @@ func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string
 	return out, rows.Err()
 }
 
-func (a *API) lsSingleTask(ctx context.Context, path string) (*WrkqLsEntry, error) {
+func (a *API) lsSingleTask(ctx context.Context, path string, filter treeFilter) (*WrkqLsEntry, error) {
 	taskUUID, taskID, terr := selectors.ResolveTaskByPath(a.db, path)
 	if terr != nil {
 
@@ -273,13 +297,17 @@ func (a *API) lsSingleTask(ctx context.Context, path string) (*WrkqLsEntry, erro
 	}
 	var e WrkqLsEntry
 	var slug string
+	var archivedAt, deletedAt *string
 	if err := a.db.QueryRowContext(ctx, `
 		SELECT slug, title, created_at, updated_at, state, kind, requested_by_project_id,
-		       assigned_project_id, acknowledged_at, resolution
+		       assigned_project_id, acknowledged_at, resolution, archived_at, deleted_at
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind, &e.RequestedByProjectID,
-		&e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution); err != nil {
+		&e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &archivedAt, &deletedAt); err != nil {
 		return nil, NewInternalError(err)
+	}
+	if !filter.admits(e.State, archivedAt != nil, deletedAt != nil) {
+		return nil, nil
 	}
 	e.Type = "task"
 	e.ID = taskID
@@ -356,3 +384,25 @@ func lsEntrySortValue(entry WrkqLsEntry, field string) string {
 }
 
 var _ = sql.ErrNoRows
+
+// containerHasSelectedTasks reports whether any task in this container's SUBTREE
+// matches the caller's selector. It is the ls-side equivalent of tree's
+// hasVisibleContent, and exists so pruneEmpty means the same thing on both.
+func (a *API) containerHasSelectedTasks(ctx context.Context, containerUUID string, filter treeFilter) (bool, error) {
+	clause, args := filter.sqlPredicate("t")
+	query := `
+		WITH RECURSIVE descendants(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid FROM containers c JOIN descendants d ON c.parent_uuid = d.uuid
+		)
+		SELECT EXISTS(
+			SELECT 1 FROM descendants d JOIN tasks t ON t.project_uuid = d.uuid
+			 WHERE 1=1` + clause + `)`
+	queryArgs := append([]any{containerUUID}, args...)
+	var exists bool
+	if err := a.db.QueryRowContext(ctx, query, queryArgs...).Scan(&exists); err != nil {
+		return false, NewInternalError(err)
+	}
+	return exists, nil
+}

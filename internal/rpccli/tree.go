@@ -80,7 +80,7 @@ func newTreeCmd() *cobra.Command {
 				return err
 			}
 			if mode == "human" {
-				hydrateTreePriorities(cmd.Context(), tr, path, view.Children, includeArchived, openOnly)
+				hydrateTreePriorities(cmd.Context(), tr, path, view.Children, params["states"], includeArchived)
 			}
 
 			out := cmd.OutOrStdout()
@@ -478,8 +478,8 @@ type treePriorityPage struct {
 // Every read is best-effort: a missing or transiently unreadable priority leaves
 // that row unlabeled rather than failing the tree. Priority remains absent from
 // the compatibility tree wire DTO and all machine tree formats.
-func hydrateTreePriorities(ctx context.Context, tr Transport, path string, nodes []*treeWireNode, includeArchived, openOnly bool) {
-	priorities := fetchTreePriorities(ctx, tr, path, includeArchived, openOnly)
+func hydrateTreePriorities(ctx context.Context, tr Transport, path string, nodes []*treeWireNode, states any, includeArchived bool) {
+	priorities := fetchTreePriorities(ctx, tr, path, states, includeArchived)
 	fallbackAttempted := make(map[string]bool)
 	var walk func([]*treeWireNode)
 	walk = func(children []*treeWireNode) {
@@ -506,7 +506,12 @@ func hydrateTreePriorities(ctx context.Context, tr Transport, path string, nodes
 	walk(nodes)
 }
 
-func fetchTreePriorities(ctx context.Context, tr Transport, path string, includeArchived, openOnly bool) map[string]int {
+// fetchTreePriorities enriches human rows with their priority. It MUST follow the
+// same state selector the tree itself was given: a state the tree draws but this
+// fetch omits renders its row with no Pn. Passing the very value sent as `states`
+// is what keeps the two in step by construction rather than by remembering to
+// update both (T-08216).
+func fetchTreePriorities(ctx context.Context, tr Transport, path string, states any, includeArchived bool) map[string]int {
 	priorities := make(map[string]int)
 	params := map[string]any{
 		"path":      path,
@@ -514,10 +519,9 @@ func fetchTreePriorities(ctx context.Context, tr Transport, path string, include
 		"summary":   true,
 		"limit":     treePriorityPageSize,
 	}
-	if openOnly {
-		params["state"] = "open"
-	} else if !includeArchived {
-		params["state"] = defaultViewStates
+	// "any" means every state, which task.list expresses by omitting the filter.
+	if s, ok := states.(string); !ok || s != "any" {
+		params["state"] = states
 	}
 	if includeArchived {
 		params["includeDeleted"] = true

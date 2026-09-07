@@ -373,9 +373,15 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 			topTasks = append(topTasks, t)
 		}
 
-		if !pruneEmptyContainers || !root.AllTasksCompleted || totalTasks == 0 {
-			root.Children = append(root.Children, topTasks...)
-		}
+		// T-08216 F4(b): the selector decides which TASKS are visible; pruneEmpty
+		// governs empty CONTAINERS. The legacy rule also suppressed task rows in
+		// an all-done container, which was invisible while only draft/open could
+		// ever be selected (a closed task was never visible anyway) but becomes a
+		// residual server visibility policy the moment a caller can ask for
+		// completed: `--states completed`, and even `--states any`, returned an
+		// empty container that demonstrably held the task. Selected tasks are now
+		// always appended.
+		root.Children = append(root.Children, topTasks...)
 	}
 
 	root.hasVisibleContent = root.hasVisibleContent || root.hasVisibleTasks || len(root.Children) > 0
