@@ -214,7 +214,12 @@ func visibleWidth(s string) int {
 // continuation (a hanging indent or a quote bar). Text is styled first, then
 // wrapped ANSI-aware, so inline spans (code, bold, links) survive a break.
 func emitFlow(w io.Writer, firstPrefix, contPrefix, raw string) {
-	maxW := wrapWidth()
+	emitFlowWidth(w, firstPrefix, contPrefix, raw, wrapWidth())
+}
+
+// emitFlowWidth is emitFlow against an explicit column budget, for renderers
+// that set their own frame rather than filling the terminal.
+func emitFlowWidth(w io.Writer, firstPrefix, contPrefix, raw string, maxW int) {
 	firstBudget := maxW - visibleWidth(firstPrefix)
 	contBudget := maxW - visibleWidth(contPrefix)
 	if firstBudget < 8 {

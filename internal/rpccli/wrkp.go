@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -165,7 +166,7 @@ func newWrkpPostCmd() *cobra.Command {
 func newWrkpLogCmd() *cobra.Command {
 	var after, since, task, typeList string
 	var limit int
-	var follow, ndjson, porcelain bool
+	var follow, ndjson, porcelain, pretty bool
 	cmd := &cobra.Command{
 		Use: "log [project]", Short: "Read the merged project timeline", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -178,12 +179,8 @@ func newWrkpLogCmd() *cobra.Command {
 			if len(args) == 1 {
 				project = args[0]
 			}
-			mode := "human"
-			if wrkpJSON(cmd) {
-				mode = "json"
-			} else if ndjson || !isStdoutTTY(cmd.OutOrStdout()) {
-				mode = "ndjson"
-			}
+			mode := resolveWrkpMode(cmd, pretty, ndjson)
+			var styled *style.TimelineWriter
 			cursor := after
 			containerSet := ""
 			delivered := 0
@@ -219,7 +216,10 @@ func newWrkpLogCmd() *cobra.Command {
 				if err := json.Unmarshal(raw, &view); err != nil {
 					return err
 				}
-				if err := renderWrkpEntries(cmd, view.Entries, mode); err != nil {
+				if mode == "human" && styled == nil {
+					styled = style.NewTimelineWriter(cmd.OutOrStdout(), view.Container.Path)
+				}
+				if err := renderWrkpEntries(cmd, view.Entries, mode, styled); err != nil {
 					return err
 				}
 				delivered += len(view.Entries)
@@ -265,7 +265,36 @@ func newWrkpLogCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow newly appended matching entries")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output entries as NDJSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Write the next cursor to stderr")
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled timeline even when not a TTY")
 	return cmd
+}
+
+// resolveWrkpMode picks the output mode for a wrkp read. Interactive displays
+// default to the human porcelain: on a terminal the styled render wins, and a
+// pipe falls to the machine format so scripted callers are untouched. --pretty
+// forces the styled LAYOUT exactly as it does for `wrkq cat` — it never flips
+// style.ColorEnabled, which is what keeps non-TTY --pretty byte-parity provable.
+func resolveWrkpMode(cmd *cobra.Command, pretty, ndjson bool) string {
+	if pretty {
+		return "human"
+	}
+	if outF := cmd.Flag("output"); outF != nil && outF.Changed {
+		switch outF.Value.String() {
+		case "human":
+			return "human"
+		case "json":
+			return "json"
+		case "ndjson":
+			return "ndjson"
+		}
+	}
+	if wrkpJSON(cmd) {
+		return "json"
+	}
+	if ndjson || !isStdoutTTY(cmd.OutOrStdout()) {
+		return "ndjson"
+	}
+	return "human"
 }
 
 // wrkpSubtreeFingerprint is advisory only: the timeline cursor remains the
@@ -301,10 +330,11 @@ func wrkpSubtreeFingerprint(ctx context.Context, tr Transport, projectUUID strin
 }
 
 func newWrkpShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var pretty bool
+	cmd := &cobra.Command{
 		Use: "show PE-xxxxx", Short: "Show one project event", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tr, _, closeFn, err := openMirror(cmd)
+			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
 			}
@@ -317,9 +347,40 @@ func newWrkpShowCmd() *cobra.Command {
 			if err := json.Unmarshal(raw, &event); err != nil {
 				return err
 			}
-			return encodeJSONIndent(cmd, event)
+			if resolveWrkpMode(cmd, pretty, false) != "human" {
+				return encodeJSONIndent(cmd, event)
+			}
+			style.RenderStyledEvent(cmd.OutOrStdout(), styledProjectEvent(event, sc.selector("", true)))
+			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled card even when not a TTY")
+	return cmd
+}
+
+// styledProjectEvent flattens the wire event into the presentation view model.
+func styledProjectEvent(event wrkpProjectEvent, project string) style.StyledEvent {
+	styled := style.StyledEvent{
+		ID:         event.FID,
+		Type:       event.Type,
+		Summary:    event.Summary,
+		Source:     event.Source,
+		Principal:  event.PrincipalRef,
+		Project:    project,
+		OccurredAt: event.OccurredAt,
+		CreatedAt:  event.CreatedAt,
+		Payload:    event.Payload,
+	}
+	if event.Node != nil {
+		styled.Node = *event.Node
+	}
+	if event.ScopeRef != nil {
+		styled.ScopeRef = *event.ScopeRef
+	}
+	if event.IdempotencyKey != nil {
+		styled.Idempotency = *event.IdempotencyKey
+	}
+	return styled
 }
 
 func newWrkpTypesCmd() *cobra.Command {
@@ -404,7 +465,11 @@ func splitCommaValues(raw string) []string {
 	return result
 }
 
-func renderWrkpEntries(cmd *cobra.Command, entries []timelineEntry, mode string) error {
+func renderWrkpEntries(cmd *cobra.Command, entries []timelineEntry, mode string, styled *style.TimelineWriter) error {
+	if mode == "human" {
+		styled.Write(styledTimelineEntries(entries))
+		return nil
+	}
 	if mode == "json" {
 		return encodeJSONIndent(cmd, entries)
 	}
@@ -417,27 +482,63 @@ func renderWrkpEntries(cmd *cobra.Command, entries []timelineEntry, mode string)
 		}
 		return nil
 	}
-	for _, entry := range entries {
-		if entry.ProjectEvent != nil {
-			source := entry.ProjectEvent.Source
-			if entry.ProjectEvent.Node != nil {
-				source += "@" + *entry.ProjectEvent.Node
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%-9s  %s  %-24s  %-14s  %s\n", entry.ProjectEvent.FID, entry.Timestamp, entry.ProjectEvent.Type, source, entry.ProjectEvent.Summary)
-			continue
-		}
-		detail := entry.TaskID
-		if entry.TaskState != nil {
-			if entry.TaskState.From != nil {
-				detail += " " + *entry.TaskState.From + "→" + entry.TaskState.State
-			} else {
-				detail += " →" + entry.TaskState.State
-			}
-		}
-		if entry.TaskPath != "" {
-			detail += "  " + entry.TaskPath
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "#%-8d  %s  %-24s  %-14s  %s\n", entry.EventID, entry.Timestamp, entry.Type, "wrkq", strings.TrimSpace(detail))
-	}
 	return nil
+}
+
+// styledTimelineEntries flattens merged-timeline entries into the presentation
+// view model. Each kind is given the weight it carries: prose entries hand their
+// body to the renderer to flow, ticks resolve to a single label. An entry whose
+// type is not recognized still renders as itself — project-event types are
+// free-form dotted names validated only against a reserved-namespace list, so a
+// renderer that only knew today's names would start dropping tomorrow's facts.
+func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
+	styledEntries := make([]style.StyledEntry, 0, len(entries))
+	for _, entry := range entries {
+		styled := style.StyledEntry{
+			Timestamp: entry.Timestamp,
+			Principal: entry.PrincipalRef,
+			TaskID:    entry.TaskID,
+			TaskPath:  entry.TaskPath,
+			Label:     entry.Type,
+			Accent:    style.ColDim,
+		}
+		switch {
+		case entry.Comment != nil:
+			styled.ID = entry.Comment.ID
+			styled.Label = entry.Comment.ID
+			styled.Body = entry.Comment.Body
+			if entry.Comment.Kind != nil && *entry.Comment.Kind != "" {
+				styled.Label = entry.Comment.ID + " " + *entry.Comment.Kind
+			}
+		case entry.Outcome != nil:
+			styled.Label = "outcome"
+			styled.Accent = style.ColDone
+			if entry.Outcome.Text != nil {
+				styled.Body = *entry.Outcome.Text
+			}
+		case entry.TaskState != nil:
+			styled.Label = "→ " + entry.TaskState.State
+			if entry.TaskState.From != nil && *entry.TaskState.From != "" {
+				styled.Label = *entry.TaskState.From + " → " + entry.TaskState.State
+			}
+			styled.Accent = style.StateColor(entry.TaskState.State)
+			styled.TaskState = entry.TaskState.State
+		case entry.ContainerState != nil:
+			styled.Label = "campaign → " + entry.ContainerState.To
+			if entry.ContainerState.From != nil && *entry.ContainerState.From != "" {
+				styled.Label = "campaign " + *entry.ContainerState.From + " → " + entry.ContainerState.To
+			}
+			styled.Accent = style.ColMarker
+		case entry.ProjectEvent != nil:
+			styled.ID = entry.ProjectEvent.FID
+			styled.Label = entry.ProjectEvent.Type
+			styled.Accent = style.ColMarker
+			styled.Body = entry.ProjectEvent.Summary
+			if styled.Principal == "" {
+				styled.Principal = entry.ProjectEvent.PrincipalRef
+			}
+		}
+		styledEntries = append(styledEntries, styled)
+	}
+	return styledEntries
 }

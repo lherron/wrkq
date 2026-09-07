@@ -25,11 +25,15 @@ type timelineEntry struct {
 	EventID        int64  `json:"eventId"`
 	ProjectEventID int64  `json:"projectEventId,omitempty"`
 	Timestamp      string `json:"timestamp"`
-	TaskUUID       string `json:"taskUuid,omitempty"`
-	TaskID         string `json:"taskId,omitempty"`
-	TaskPath       string `json:"taskPath,omitempty"`
-	Membership     string `json:"membership,omitempty"`
-	Comment        *struct {
+	// PrincipalRef is the actor the server attributes the entry to. It is the
+	// one field every entry kind shares and the one a reader asks for first, so
+	// it is carried through rather than dropped in projection.
+	PrincipalRef string `json:"principalRef,omitempty"`
+	TaskUUID     string `json:"taskUuid,omitempty"`
+	TaskID       string `json:"taskId,omitempty"`
+	TaskPath     string `json:"taskPath,omitempty"`
+	Membership   string `json:"membership,omitempty"`
+	Comment      *struct {
 		ID   string  `json:"id,omitempty"`
 		Kind *string `json:"kind,omitempty"`
 		Body string  `json:"body"`
