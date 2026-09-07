@@ -502,7 +502,8 @@ func renderKeyValues(w io.Writer, rows []keyValue) {
 		}
 	}
 	for _, row := range rows {
-		key := Paint(ColDim, row.Key+strings.Repeat(" ", width-len(row.Key)))
+		// Pad outside the paint so no SGR run covers bare alignment space.
+		key := Paint(ColDim, row.Key) + strings.Repeat(" ", width-len(row.Key))
 		first := bodyIndent + key + "  "
 		cont := bodyIndent + strings.Repeat(" ", width) + "  "
 		emitFlowPlain(w, first, cont, row.Value)
