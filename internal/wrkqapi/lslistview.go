@@ -190,8 +190,29 @@ func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, camp
 // lsQueryContainers lists child containers under parentExpr (a SQL expression or
 // "?" with parentArgs) and computes rollup counts. pathPrefix is the parent path.
 func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cursor.ApplyResult, filter treeFilter, pruneEmpty bool, pathPrefix string, parentArgs ...any) ([]WrkqLsEntry, error) {
-	query := "SELECT uuid, id, slug, title, kind, created_at, updated_at FROM containers WHERE parent_uuid = " + parentExpr
-	args := append([]any{}, parentArgs...)
+	// T-08216 F6: the prune MUST run before the SQL page limit. Filtering
+	// surviving rows in Go after LIMIT let unselected containers consume page
+	// slots, so a selected container beyond them was returned by an unlimited
+	// request and unreachable through pagination -- the page came back empty
+	// with no continuation. The predicate is therefore part of the query.
+	query := ""
+	var args []any
+	if pruneEmpty {
+		query += `WITH RECURSIVE ls_sub(root_uuid, uuid) AS (
+			SELECT uuid, uuid FROM containers WHERE parent_uuid = ` + parentExpr + `
+			UNION ALL
+			SELECT s.root_uuid, c.uuid FROM containers c JOIN ls_sub s ON c.parent_uuid = s.uuid
+		) `
+		args = append(args, parentArgs...)
+	}
+	query += "SELECT uuid, id, slug, title, kind, created_at, updated_at FROM containers WHERE parent_uuid = " + parentExpr
+	args = append(args, parentArgs...)
+	if pruneEmpty {
+		clause, clauseArgs := filter.sqlPredicate("t")
+		query += ` AND EXISTS (SELECT 1 FROM ls_sub s JOIN tasks t ON t.project_uuid = s.uuid
+			WHERE s.root_uuid = containers.uuid` + clause + `)`
+		args = append(args, clauseArgs...)
+	}
 	if pag.WhereClause != "" {
 		query += " AND " + pag.WhereClause
 		args = append(args, pag.Params...)
@@ -220,19 +241,6 @@ func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cur
 		childPath := slug
 		if pathPrefix != "" {
 			childPath = pathPrefix + "/" + slug
-		}
-		if pruneEmpty {
-			// T-08216 F5: pruneEmpty was accepted and never executed on ls, so the
-			// approved identical parameter was a no-op here. A child container with
-			// no SELECTED content in its subtree is dropped, matching what the same
-			// flag means on tree.
-			has, herr := a.containerHasSelectedTasks(ctx, uuid, filter)
-			if herr != nil {
-				return nil, herr
-			}
-			if !has {
-				continue
-			}
 		}
 		tc, atc, rerr := a.containerRollupCounts(ctx, uuid)
 		if rerr != nil {
@@ -384,25 +392,3 @@ func lsEntrySortValue(entry WrkqLsEntry, field string) string {
 }
 
 var _ = sql.ErrNoRows
-
-// containerHasSelectedTasks reports whether any task in this container's SUBTREE
-// matches the caller's selector. It is the ls-side equivalent of tree's
-// hasVisibleContent, and exists so pruneEmpty means the same thing on both.
-func (a *API) containerHasSelectedTasks(ctx context.Context, containerUUID string, filter treeFilter) (bool, error) {
-	clause, args := filter.sqlPredicate("t")
-	query := `
-		WITH RECURSIVE descendants(uuid) AS (
-			SELECT uuid FROM containers WHERE uuid = ?
-			UNION ALL
-			SELECT c.uuid FROM containers c JOIN descendants d ON c.parent_uuid = d.uuid
-		)
-		SELECT EXISTS(
-			SELECT 1 FROM descendants d JOIN tasks t ON t.project_uuid = d.uuid
-			 WHERE 1=1` + clause + `)`
-	queryArgs := append([]any{containerUUID}, args...)
-	var exists bool
-	if err := a.db.QueryRowContext(ctx, query, queryArgs...).Scan(&exists); err != nil {
-		return false, NewInternalError(err)
-	}
-	return exists, nil
-}
