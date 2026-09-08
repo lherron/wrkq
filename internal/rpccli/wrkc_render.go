@@ -306,6 +306,11 @@ func renderWrkcTranscript(cmd *cobra.Command, view roomLogViewWire, identity *wr
 	if view.Room.Kind == "adhoc" && identity != nil {
 		lines = append(lines, "members: "+strings.Join(identity.Members, ", "))
 	}
+	if len(view.Items) == 0 {
+		// Say so rather than printing a bare header. A room with no traffic is
+		// an ordinary state, not a failure, and an empty body reads like one.
+		lines = append(lines, "", "no messages yet — say into this room to start it")
+	}
 	for _, envelope := range view.Items {
 		lines = append(lines, "")
 		lines = append(lines, wrkcEnvelopeTranscriptLines(envelope)...)

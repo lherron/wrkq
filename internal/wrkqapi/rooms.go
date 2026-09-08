@@ -434,29 +434,38 @@ func (a *API) routeToContainer(ctx context.Context, attr attribution.Attribution
 
 // routeToContainerUUID is §4 rule 3: campaign-adorned → campaign room;
 // project-kind → project room; any other container is a typed refusal.
-func (a *API) routeToContainerUUID(ctx context.Context, attr attribution.Attribution, selector, containerUUID string) (*routedSay, error) {
+// containerRoomKind is the §4 rule 3 entitlement gate: campaign-adorned ->
+// campaign room; project-kind -> project room; any other container kind is a
+// typed refusal. Say routing and room reads BOTH call this, so they can never
+// disagree about which containers have rooms.
+func (a *API) containerRoomKind(ctx context.Context, selector, containerUUID string) (domain.RoomKind, error) {
 	var kind string
 	var campaignState sql.NullString
 	if err := a.db.QueryRowContext(ctx,
 		"SELECT kind, campaign_state FROM containers WHERE uuid = ?", containerUUID).Scan(&kind, &campaignState); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, NewNotFoundError(selector, "container")
+			return "", NewNotFoundError(selector, "container")
 		}
-		return nil, NewInternalError(err)
+		return "", NewInternalError(err)
 	}
-	var roomKind domain.RoomKind
 	switch {
 	case campaignState.Valid && campaignState.String != "":
-		roomKind = domain.RoomKindCampaign
+		return domain.RoomKindCampaign, nil
 	case kind == string(domain.ContainerKindProject):
-		roomKind = domain.RoomKindProject
-	default:
-		return nil, NewValidationError(
-			"room_kind_unsupported: only campaign-adorned and project containers have rooms",
-			map[string]any{
-				"reason": "room_kind_unsupported", "container": selector,
-				"kind": kind, "expected": "campaign-adorned container or project",
-			})
+		return domain.RoomKindProject, nil
+	}
+	return "", NewValidationError(
+		"room_kind_unsupported: only campaign-adorned and project containers have rooms",
+		map[string]any{
+			"reason": "room_kind_unsupported", "container": selector,
+			"kind": kind, "expected": "campaign-adorned container or project",
+		})
+}
+
+func (a *API) routeToContainerUUID(ctx context.Context, attr attribution.Attribution, selector, containerUUID string) (*routedSay, error) {
+	roomKind, kerr := a.containerRoomKind(ctx, selector, containerUUID)
+	if kerr != nil {
+		return nil, kerr
 	}
 	room, err := a.ensureContainerRoom(attr, containerUUID, roomKind)
 	if err != nil {
@@ -1015,6 +1024,15 @@ func (a *API) RoomLogView(ctx context.Context, p RoomLogViewParams) (*WrkqRoomLo
 	if err != nil {
 		return nil, err
 	}
+	if state.derived {
+		// No row means no envelopes. Return the room itself so the caller learns
+		// the room exists-in-principle and is simply empty, rather than an error.
+		dto, derr := a.roomDTO(ctx, state)
+		if derr != nil {
+			return nil, derr
+		}
+		return &WrkqRoomLogView{Room: *dto, Items: []WrkqEnvelope{}}, nil
+	}
 	params := store.EnvelopeListParams{RoomUUID: state.row.UUID}
 	if strings.TrimSpace(p.Task) != "" {
 		taskUUID, _, terr := selectors.ResolveTask(a.db, p.Task)
@@ -1167,6 +1185,10 @@ func (a *API) roomSetLabel(ctx context.Context, p RoomLabelParams, on bool) (*Wr
 	if err != nil {
 		return nil, err
 	}
+	// Labelling is state: the row has to exist to carry it.
+	if current, err = a.materializeRoom(ctx, attr, current); err != nil {
+		return nil, err
+	}
 	if _, err := a.store.Rooms.SetRoomLabelWithAttribution(
 		attr, current.row.UUID, domain.RoomLabelHidden, on); err != nil {
 		return nil, mapRoomStoreError(err, p.Room)
@@ -1217,6 +1239,16 @@ func (a *API) roomMemberMutation(ctx context.Context, p RoomMemberParams, join b
 	if err != nil {
 		return nil, err
 	}
+	if !join && state.derived {
+		// Leaving a room with no row: the postcondition already holds and there
+		// is nothing to record. Do NOT materialize — that would open a room as a
+		// side effect of declining to be in it.
+		return a.RoomMembersView(ctx, RoomMembersViewParams{Room: p.Room, PrincipalRef: p.PrincipalRef})
+	}
+	// Joining is state, so the row has to exist first.
+	if state, err = a.materializeRoom(ctx, attr, state); err != nil {
+		return nil, err
+	}
 	if join {
 		if _, err := a.store.Rooms.AddMemberWithAttribution(attr, state.row.UUID, *seed); err != nil {
 			return nil, mapRoomStoreError(err, p.Room)
@@ -1238,6 +1270,13 @@ func (a *API) RoomMembersView(ctx context.Context, p RoomMembersViewParams) (*Wr
 	state, err := a.resolveRoomSelector(ctx, p.Room)
 	if err != nil {
 		return nil, err
+	}
+	if state.derived {
+		dto, derr := a.roomDTO(ctx, state)
+		if derr != nil {
+			return nil, derr
+		}
+		return &WrkqRoomMembersView{Room: *dto, Items: []WrkqRoomMember{}}, nil
 	}
 	members, err := a.store.Rooms.ListMembers(state.row.UUID)
 	if err != nil {
@@ -1934,6 +1973,12 @@ type roomState struct {
 	row     *domain.Room
 	key     string
 	workRef *WrkqRoomWorkRef
+	// derived marks a room the ledger has not materialized: the work IS entitled
+	// to a room under the §4 routing table, but nobody has said into it, so no
+	// row exists. row.UUID is empty and every count reads zero. Reads render it
+	// as the empty room it is; a write verb that ADDS state materializes it
+	// first. A read never materializes — see roomOrDerivedForTask.
+	derived bool
 	// work and activity are the two read-time projections. Neither is stored and
 	// neither gates: they are computed here once per call and only ever read.
 	work         domain.RoomWork
@@ -1967,14 +2012,7 @@ func (a *API) resolveRoomSelector(ctx context.Context, selector string) (*roomSt
 			if terr != nil {
 				return nil, NewNotFoundError(selector, "task")
 			}
-			room, rerr := a.store.Rooms.GetByTask(taskUUID)
-			if rerr != nil {
-				return nil, NewInternalError(rerr)
-			}
-			if room == nil {
-				return nil, NewNotFoundError(selector, "room")
-			}
-			return a.hydrateRoomState(ctx, room)
+			return a.roomOrDerivedForTask(ctx, taskUUID)
 		case id.TypeContainer:
 			return a.roomStateForContainerSelector(ctx, selector)
 		}
@@ -1982,25 +2020,112 @@ func (a *API) resolveRoomSelector(ctx context.Context, selector string) (*roomSt
 	if room, err := a.store.Rooms.Get(selector); err == nil {
 		return a.hydrateRoomState(ctx, room)
 	}
+	// A path selector names work. Resolve it the way say does and derive the
+	// room it is entitled to, rather than reporting the room missing.
 	if containerUUID, _, err := selectors.ResolveContainer(a.db, selector); err == nil {
-		room, rerr := a.store.Rooms.GetByContainer(containerUUID)
-		if rerr != nil {
-			return nil, NewInternalError(rerr)
-		}
-		if room != nil {
-			return a.hydrateRoomState(ctx, room)
-		}
+		return a.roomOrDerivedForContainer(ctx, selector, containerUUID)
 	}
 	if taskUUID, _, err := selectors.ResolveTask(a.db, selector); err == nil {
-		room, rerr := a.store.Rooms.GetByTask(taskUUID)
-		if rerr != nil {
-			return nil, NewInternalError(rerr)
-		}
-		if room != nil {
-			return a.hydrateRoomState(ctx, room)
-		}
+		return a.roomOrDerivedForTask(ctx, taskUUID)
 	}
+	// Nothing resolved: not a room id, not a container, not a task. An R-xxxxx
+	// that does not exist lands here and STAYS not-found — an ad-hoc room's
+	// identity is its member set, so a selector naming no work derives nothing.
 	return nil, NewNotFoundError(selector, "room")
+}
+
+// roomOrDerivedForTask resolves the room a task talks in, deriving an empty one
+// when the ledger holds no row yet.
+//
+// It reuses effectiveCampaignForTask — the SAME decision routeToTaskUUID makes —
+// and that reuse is load-bearing, not tidiness. A campaign-resident task's say
+// coalesces into the campaign room. Deriving a task room here instead would show
+// an empty room for a conversation that actually lives in the campaign room, and
+// materializing that room later would split the campaign's conversation in two.
+// The comment on effectiveCampaignForTask records that exact bug, fixed once
+// already on the say side.
+func (a *API) roomOrDerivedForTask(ctx context.Context, taskUUID string) (*roomState, error) {
+	// An EXISTING task room wins, and the order matters. A task room that
+	// predates enrolment keeps its own history readable at its own selector
+	// while new says route to the campaign room — linked, never merged. Asking
+	// about the coalesce first would silently answer a read about the task room
+	// with the campaign's traffic.
+	room, rerr := a.store.Rooms.GetByTask(taskUUID)
+	if rerr != nil {
+		return nil, NewInternalError(rerr)
+	}
+	if room != nil {
+		return a.hydrateRoomState(ctx, room)
+	}
+	// No task room. Follow the coalesce so the derived room is the one a say
+	// would actually land in.
+	campaignUUID, err := a.effectiveCampaignForTask(ctx, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	if campaignUUID != "" {
+		return a.roomOrDerivedForContainer(ctx, campaignUUID, campaignUUID)
+	}
+	return a.hydrateDerivedRoomState(ctx, &domain.Room{
+		Kind: domain.RoomKindTask, TaskUUID: &taskUUID,
+	})
+}
+
+// roomOrDerivedForContainer resolves a container's room, deriving an empty one
+// when the container is entitled to a room nobody has opened. A container that
+// is NOT entitled keeps the typed room_kind_unsupported refusal say returns:
+// that is a true answer about the object, not a missing room.
+func (a *API) roomOrDerivedForContainer(ctx context.Context, selector, containerUUID string) (*roomState, error) {
+	roomKind, err := a.containerRoomKind(ctx, selector, containerUUID)
+	if err != nil {
+		return nil, err
+	}
+	room, rerr := a.store.Rooms.GetByContainer(containerUUID)
+	if rerr != nil {
+		return nil, NewInternalError(rerr)
+	}
+	if room != nil {
+		return a.hydrateRoomState(ctx, room)
+	}
+	return a.hydrateDerivedRoomState(ctx, &domain.Room{
+		Kind: roomKind, ContainerUUID: &containerUUID,
+	})
+}
+
+// hydrateDerivedRoomState projects a room that has no row. Every count query in
+// hydrateRoomState keys on row.UUID, which is empty here, so counts read zero
+// and last-activity reads empty without a special case. The activity projection
+// then lands where it should on its own: an empty room on live work reads quiet,
+// and on terminal work reads stale.
+func (a *API) hydrateDerivedRoomState(ctx context.Context, row *domain.Room) (*roomState, error) {
+	state, err := a.hydrateRoomState(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	state.derived = true
+	return state, nil
+}
+
+// materializeRoom opens the row behind a derived room so a write verb has
+// something to write to. Reads never call it.
+func (a *API) materializeRoom(ctx context.Context, attr attribution.Attribution, state *roomState) (*roomState, error) {
+	if !state.derived {
+		return state, nil
+	}
+	var room *domain.Room
+	var err error
+	switch {
+	case state.row.TaskUUID != nil:
+		room, err = a.ensureTaskRoom(attr, *state.row.TaskUUID)
+	case state.row.ContainerUUID != nil:
+		room, err = a.ensureContainerRoom(attr, *state.row.ContainerUUID, state.row.Kind)
+	default:
+		return nil, NewInternalError(fmt.Errorf("derived room %q anchors on nothing", state.key))
+	}
+	if err != nil {
+		return nil, err
+	}
+	return a.hydrateRoomState(ctx, room)
 }
 
 func (a *API) roomStateForContainerSelector(ctx context.Context, selector string) (*roomState, error) {
@@ -2008,14 +2133,7 @@ func (a *API) roomStateForContainerSelector(ctx context.Context, selector string
 	if err != nil {
 		return nil, NewNotFoundError(selector, "container")
 	}
-	room, rerr := a.store.Rooms.GetByContainer(containerUUID)
-	if rerr != nil {
-		return nil, NewInternalError(rerr)
-	}
-	if room == nil {
-		return nil, NewNotFoundError(selector, "room")
-	}
-	return a.hydrateRoomState(ctx, room)
+	return a.roomOrDerivedForContainer(ctx, selector, containerUUID)
 }
 
 func (a *API) loadRoomState(ctx context.Context, roomUUID string) (*roomState, error) {
