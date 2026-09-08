@@ -30,6 +30,103 @@ func newMkdirCmd() *cobra.Command {
 	return cmd
 }
 
+// newArchiveCmd exposes the existing non-destructive container archive
+// mutation directly. Archive intentionally has no emptiness guard: preserving
+// a project together with its child containers and tasks is its primary use.
+func newArchiveCmd() *cobra.Command {
+	var ifMatch int64
+	cmd := &cobra.Command{
+		Use:   "archive <path|id>...",
+		Short: "Archive one or more containers",
+		Long: `Archives one or more containers without deleting their descendants or tasks.
+
+Archived containers are hidden from default listings and remain available with
+--all. Use "wrkq unarchive" to make an archived container active again.`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runContainerArchive(cmd, args, ifMatch, false)
+		},
+	}
+	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Conditional archive (etag)")
+	return cmd
+}
+
+// newUnarchiveCmd is the explicit inverse of archive over the existing
+// wrkq.container.restore RPC.
+func newUnarchiveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unarchive <path|id>...",
+		Short: "Unarchive one or more containers",
+		Long: `Restores one or more archived containers to active listings.
+
+This reverses "wrkq archive" and does not recreate hard-deleted containers.`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runContainerArchive(cmd, args, 0, true)
+		},
+	}
+	return cmd
+}
+
+func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, restore bool) error {
+	tr, sc, closeFn, err := openMirror(cmd)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	actor, err := actorFlag(cmd)
+	if err != nil {
+		return err
+	}
+
+	selectors := sc.paths(args, false)
+	results := make([]map[string]interface{}, 0, len(selectors))
+	for _, selector := range selectors {
+		params := map[string]any{"container": selector}
+		if actor != "" {
+			params["actor"] = actor
+		}
+		method := "wrkq.container.archive"
+		if ifMatch != 0 {
+			params["expectEtag"] = ifMatch
+		}
+		if restore {
+			method = "wrkq.container.restore"
+		}
+		raw, callErr := tr.Call(cmd.Context(), method, params)
+		if callErr != nil {
+			return errors.New(rpcMessage(callErr))
+		}
+
+		result := map[string]interface{}{"path": selector}
+		if restore {
+			var restored struct {
+				UUID string `json:"uuid"`
+			}
+			if err := json.Unmarshal(raw, &restored); err != nil {
+				return err
+			}
+			result["uuid"] = restored.UUID
+			result["unarchived"] = true
+		} else {
+			result["archived"] = true
+		}
+		results = append(results, result)
+	}
+
+	if isStdoutTTY(cmd.OutOrStdout()) {
+		verb := "Archived"
+		if restore {
+			verb = "Unarchived"
+		}
+		for _, result := range results {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s container: %s\n", verb, result["path"])
+		}
+		return nil
+	}
+	return encodeJSONIndent(cmd, results)
+}
+
 func runMkdir(cmd *cobra.Command, args []string, kind string) error {
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
@@ -83,14 +180,19 @@ func newRmdirCmd() *cobra.Command {
 	var force, yes bool
 	cmd := &cobra.Command{
 		Use:   "rmdir <path|id>...",
-		Short: "Remove one or more containers",
-		Args:  cobra.MinimumNArgs(1),
+		Short: "Permanently delete one or more containers",
+		Long: `Permanently destroys one or more containers.
+
+Plain rmdir hard-deletes only an empty container. With --force, rmdir
+cascade-deletes every descendant container and task. Neither mode is reversible;
+use "wrkq archive" when you want to preserve the container and its contents.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRmdir(cmd, args, force, yes)
 		},
 	}
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Force removal of non-empty containers")
-	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation prompts")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Permanently cascade-delete descendant containers and tasks")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation prompts except when deleting a project")
 	return cmd
 }
 
@@ -100,6 +202,7 @@ type rmdirImpact struct {
 	Container struct {
 		ID   string `json:"id"`
 		Path string `json:"path"`
+		Kind string `json:"kind"`
 	} `json:"container"`
 	Containers  int64 `json:"containers"`
 	Tasks       int64 `json:"tasks"`
@@ -129,7 +232,7 @@ func runRmdir(cmd *cobra.Command, args []string, force, yes bool) error {
 		if force {
 			containerID, rerr = rmdirForcePath(ctx, cmd, tr, actor, path, yes)
 		} else {
-			containerID, rerr = rmdirEmptyPath(ctx, tr, actor, path)
+			containerID, rerr = rmdirEmptyPath(ctx, cmd, tr, actor, path)
 		}
 		if rerr != nil {
 			return rerr
@@ -149,39 +252,75 @@ func runRmdir(cmd *cobra.Command, args []string, force, yes bool) error {
 
 // rmdirEmptyPath removes an empty container via wrkq.container.delete and returns
 // the container's friendly ID (for the legacy "✓ Removed" TTY line).
-func rmdirEmptyPath(ctx context.Context, tr Transport, actor, path string) (string, error) {
-	containerID, _, serr := rmdirResolve(ctx, tr, path)
+func rmdirEmptyPath(ctx context.Context, cmd *cobra.Command, tr Transport, actor, path string) (string, error) {
+	containerID, _, kind, serr := rmdirResolve(ctx, tr, path)
 	if serr != nil {
 		return "", serr
+	}
+	if kind == "project" {
+		impact, ierr := rmdirPreflight(ctx, tr, path)
+		if ierr != nil {
+			return "", ierr
+		}
+		if impact.Containers == 1 && impact.Tasks == 0 {
+			warning := rmdirForceWarning(impact.Container.ID, path, 0, 0)
+			if cerr := confirmProjectDeletion(cmd, warning); cerr != nil {
+				return "", cerr
+			}
+		}
 	}
 	params := map[string]any{"path": path}
 	if actor != "" {
 		params["actor"] = actor
 	}
 	if _, derr := tr.Call(ctx, "wrkq.container.delete", params); derr != nil {
-		return "", errors.New(rpcMessage(derr))
+		message := rpcMessage(derr)
+		if strings.Contains(message, "container is not empty") {
+			message += "; use 'wrkq archive <path|id>' to preserve it, or 'wrkq rmdir --force' to permanently cascade-delete descendants and tasks"
+		}
+		return "", errors.New(message)
 	}
 	return containerID, nil
 }
 
 // rmdirResolve fetches the container's friendly id + path via wrkq.container.show.
 // Legacy surfaces "container not found: <path>" for an unresolvable path.
-func rmdirResolve(ctx context.Context, tr Transport, path string) (id, resolvedPath string, err error) {
+func rmdirResolve(ctx context.Context, tr Transport, path string) (id, resolvedPath, kind string, err error) {
 	raw, serr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": path})
 	if serr != nil {
 		if isNotFound(serr) {
-			return "", "", fmt.Errorf("container not found: %s", path)
+			return "", "", "", fmt.Errorf("container not found: %s", path)
 		}
-		return "", "", errors.New(rpcMessage(serr))
+		return "", "", "", errors.New(rpcMessage(serr))
 	}
 	var c struct {
 		ID   string `json:"id"`
 		Path string `json:"path"`
+		Kind string `json:"kind"`
 	}
 	if uerr := json.Unmarshal(raw, &c); uerr != nil {
-		return "", "", uerr
+		return "", "", "", uerr
 	}
-	return c.ID, c.Path, nil
+	return c.ID, c.Path, c.Kind, nil
+}
+
+func rmdirPreflight(ctx context.Context, tr Transport, path string) (rmdirImpact, error) {
+	raw, err := tr.Call(ctx, "wrkq.container.deleteRecursive", map[string]any{"path": path, "dryRun": true})
+	if err != nil {
+		return rmdirImpact{}, errors.New(rpcMessage(err))
+	}
+	var impact rmdirImpact
+	if err := json.Unmarshal(raw, &impact); err != nil {
+		return rmdirImpact{}, err
+	}
+	return impact, nil
+}
+
+func confirmProjectDeletion(cmd *cobra.Command, warning string) error {
+	if err := rmdirForceConfirm(cmd, false, warning); err != nil {
+		return errors.New("project deletion aborted: --yes does not bypass confirmation for projects; use 'wrkq archive <path|id>' for reversible removal")
+	}
+	return nil
 }
 
 // rmdirForcePath runs the two-phase deleteRecursive for one --force path: preflight
@@ -191,14 +330,9 @@ func rmdirResolve(ctx context.Context, tr Transport, path string) (id, resolvedP
 // ID for the legacy "✓ Removed" TTY line.
 func rmdirForcePath(ctx context.Context, cmd *cobra.Command, tr Transport, actor, path string, yes bool) (string, error) {
 	// Phase 1: preflight impact (no mutation).
-	dryParams := map[string]any{"path": path, "dryRun": true}
-	raw, derr := tr.Call(ctx, "wrkq.container.deleteRecursive", dryParams)
+	impact, derr := rmdirPreflight(ctx, tr, path)
 	if derr != nil {
-		return "", errors.New(rpcMessage(derr))
-	}
-	var impact rmdirImpact
-	if uerr := json.Unmarshal(raw, &impact); uerr != nil {
-		return "", uerr
+		return "", derr
 	}
 
 	// The impact's container count INCLUDES the target itself (subtree depth 0), so
@@ -207,7 +341,12 @@ func rmdirForcePath(ctx context.Context, cmd *cobra.Command, tr Transport, actor
 	descendants := impact.Containers - 1
 	nonEmpty := impact.Tasks > 0 || descendants > 0
 
-	if nonEmpty && !yes {
+	if impact.Container.Kind == "project" {
+		warning := rmdirForceWarning(impact.Container.ID, path, impact.Tasks, descendants)
+		if cerr := confirmProjectDeletion(cmd, warning); cerr != nil {
+			return "", cerr
+		}
+	} else if nonEmpty && !yes {
 		warning := rmdirForceWarning(impact.Container.ID, path, impact.Tasks, descendants)
 		if cerr := rmdirForceConfirm(cmd, false, warning); cerr != nil {
 			return "", cerr

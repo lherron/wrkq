@@ -187,3 +187,47 @@ func TestWrkqRootHelpKeepsColumnGrid(t *testing.T) {
 		t.Fatalf("wrkq root help missing Commands section:\n%s", stdout.String())
 	}
 }
+
+func TestContainerLifecycleHelpNamesSafeAndDestructiveChoices(t *testing.T) {
+	tests := []struct {
+		command string
+		want    []string
+	}{
+		{
+			command: "archive",
+			want:    []string{"without deleting", "wrkq unarchive", "--if-match"},
+		},
+		{
+			command: "unarchive",
+			want:    []string{"wrkq archive", "does not recreate hard-deleted"},
+		},
+		{
+			command: "rmdir",
+			want: []string{
+				"Permanently destroys",
+				"Neither mode is reversible",
+				"wrkq archive",
+				"Permanently cascade-delete descendant containers and tasks",
+				"except when deleting a project",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.command, func(t *testing.T) {
+			root := NewRootCmdFor("wrkq")
+			var output bytes.Buffer
+			root.SetArgs([]string{tc.command, "--help"})
+			root.SetOut(&output)
+			root.SetErr(&output)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("%s --help: %v", tc.command, err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(output.String(), want) {
+					t.Errorf("%s help missing %q:\n%s", tc.command, want, output.String())
+				}
+			}
+		})
+	}
+}

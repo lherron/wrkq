@@ -18,7 +18,11 @@ predicate: >
   method. Destructive recursive mutations preflight + commit under an
   expected-impact CAS (see wrkq.container.deleteRecursive). A command that cannot
   yet byte-prove a destructive mode/flag HARD-GATES it (clean non-zero, no silent
-  degradation) rather than routing through an unproven path.
+  degradation) rather than routing through an unproven path. Container project
+  identity is a high-blast-radius deletion boundary: every `rmdir` of a project,
+  including empty non-forced deletion, requires caller-side typed exact `yes`;
+  `--yes` MUST NOT bypass that checkpoint. A failed/non-TTY project confirmation
+  names that exception and the reversible `wrkq archive` alternative.
 authority:
   repo: wrkq
   surface: wrkq mutation methods (wrkq.task.delete mode, wrkq.container.deleteRecursive CAS) over the JSON-RPC boundary
@@ -30,26 +34,29 @@ source:
   - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY) — rm/comment-rm/rmdir-force variants
   - internal/rpccli/rm.go                             # rm mirror: explicit mode + scoper + confirm; container targets hard-gated
   - internal/rpccli/comment_rm.go                     # comment rm mirror: explicit mode + [y/N] prompt + if-match warn-skip + dry-run
-  - internal/rpccli/containers.go                     # rmdir --force mirror: two-phase deleteRecursive preflight→confirm→commit(expected)
+  - internal/rpccli/containers.go                     # reversible archive/unarchive + project-always-confirms rmdir + two-phase force delete
   - internal/workrpc/registry.go                      # wrkq.task.delete / comment.delete (param-only mode change) + container.deleteRecursive registration
   - internal/workrpc/taskdelete_mode_test.go          # server delete-mode + non-interactivity acceptance tests
   - internal/workrpc/commentdelete_mode_test.go       # server comment-delete mode/ifMatch + event-payload-parity + non-interactivity acceptance tests
   - internal/rpccli/comment_rm_test.go                # mirror if-match forwarding (server-CAS) param guard
   - internal/rpccli/pty_rm_darwin_test.go             # PTY prompt-ownership tests (rm/comment-rm/rmdir-force)
+  - internal/rpccli/container_archive_test.go         # archive round-trip/non-delete + rmdir project safety and error guidance
 required_tests:
   - internal/workrpc/taskdelete_mode_test.go          # TestTaskDelete_* (no-mode preserved, archive, purge+cleanup, invalid→VALIDATION, non-interactive)
   - internal/workrpc/commentdelete_mode_test.go       # TestCommentDelete_* (soft default/explicit, purge, invalid→VALIDATION, ifMatch→CONFLICT/match, non-interactive) + TestCommentDelete_SoftEventParity/PurgeEventParity (durable event payload shape + new-etag byte-match — the snapshot oracle can't see event drift)
   - internal/rpccli/comment_rm_test.go                # TestCommentDeleteParams_ForwardsIfMatch (mirror forwards the etag CAS to the server after the precheck passes; omits when absent)
   - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership / TestCommentRmPromptOwnership / TestRmdirForcePromptOwnership (mirror owns each prompt's exact text/accept-token/abort/--yes on a real TTY)
+  - internal/rpccli/container_archive_test.go         # non-empty archive/unarchive and typed-yes project deletion boundary
   - internal/rpccli/parity_test.go                    # production contract rm/*, production contract comment-rm/*, production contract rmdir/* (incl. --force two-phase) + comment row in the durable snapshot
   - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror routes durable mutation through the RPC boundary only)
 last_verified:
-  date: 2026-06-30
-  evidence: "T-05381 record update: mutation attribution vocabulary amended from actor to principalRef; package compile check go test -run TestDoesNotExist ./internal/wrkqapi ./internal/workrpc green."
+  date: 2026-09-08
+  evidence: "T-08259: explicit archive/unarchive CLI and project-always-confirms rmdir safety boundary; focused rpccli acceptance and real installed scratch-project smoke green."
 reopen_when:
   - a mutation method begins prompting, reading stdin, or inspecting a TTY
   - a destructive disposition becomes a hidden default (no explicit mode/intent)
   - a new destructive mirror command routes confirmation server-side instead of through the caller seam
   - the legacy prompt text / abort / --yes semantics change without updating the mirror + parity
+  - any project container can be hard-deleted without caller-side typed exact yes
 supersedes: []
 superseded_by: null

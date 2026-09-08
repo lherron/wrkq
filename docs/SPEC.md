@@ -500,8 +500,8 @@ machine-oriented output and no width/ANSI formatting where applicable.
 Primary task/container surface:
 
 `projects`, `ls`, `tree`, `find`, `search`, `index`, `stat`, `cat`, `touch`,
-`set`, `apply`, `diff`, `log`, `watch`, `mkdir`, `rmdir`, `mv`, `cp`, `rm`,
-`restore`, `container`, `rename-container`, `comment`, `attach`, `relation`,
+`set`, `apply`, `diff`, `log`, `watch`, `mkdir`, `archive`, `unarchive`,
+`rmdir`, `mv`, `cp`, `rm`, `restore`, `container`, `rename-container`, `comment`, `attach`, `relation`,
 `check`, `ack`, `handoff`, `agent-context`, `whoami`, `webhook`, `server`,
 `usage`, `agent-info`, `version`, `completion`.
 
@@ -522,6 +522,12 @@ Important behavior:
   explicit selector and one resolved task and emits the task object bare.
   `--porcelain` may be added for compact JSON; non-JSON modes are refused.
 - `rm` archives by default; `--purge --yes` permanently deletes.
+- `archive` hides a container or project without deleting any descendant
+  containers or tasks; `unarchive` reverses it. Non-empty projects are valid
+  archive targets.
+- `rmdir` permanently hard-deletes containers. Plain `rmdir` is empty-only;
+  `--force` cascade-deletes descendants and tasks. Every project deletion
+  requires a typed `yes`; `--yes` never bypasses that project checkpoint.
 - `restore` restores archived/deleted tasks to `open` by default or to a
   provided non-archived/non-deleted state.
 - `tree` defaults to visible containers and draft/open tasks; `--open` narrows

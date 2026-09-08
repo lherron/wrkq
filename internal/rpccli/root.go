@@ -96,6 +96,8 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	root.AddCommand(newAckCmd())
 	root.AddCommand(newStatCmd())
 	root.AddCommand(newMkdirCmd())
+	root.AddCommand(newArchiveCmd())
+	root.AddCommand(newUnarchiveCmd())
 	root.AddCommand(newRmdirCmd())
 	root.AddCommand(newTouchCmd())
 	root.AddCommand(newMvCmd())

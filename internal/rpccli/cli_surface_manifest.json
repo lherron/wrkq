@@ -171,6 +171,22 @@
         ]
       },
       {
+        "name": "archive",
+        "use": "archive \u003cpath|id\u003e...",
+        "short": "Archive one or more containers",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "if-match",
+            "usage": "Conditional archive (etag)",
+            "type": "int64",
+            "default": "0",
+            "hidden": false
+          }
+        ]
+      },
+      {
         "name": "attach",
         "use": "attach",
         "short": "Manage task attachments",
@@ -3013,21 +3029,21 @@
       {
         "name": "rmdir",
         "use": "rmdir \u003cpath|id\u003e...",
-        "short": "Remove one or more containers",
+        "short": "Permanently delete one or more containers",
         "hidden": false,
         "available": true,
         "flags": [
           {
             "name": "force",
             "shorthand": "f",
-            "usage": "Force removal of non-empty containers",
+            "usage": "Permanently cascade-delete descendant containers and tasks",
             "type": "bool",
             "default": "false",
             "hidden": false
           },
           {
             "name": "yes",
-            "usage": "Skip confirmation prompts",
+            "usage": "Skip confirmation prompts except when deleting a project",
             "type": "bool",
             "default": "false",
             "hidden": false
@@ -3769,6 +3785,13 @@
             "hidden": false
           }
         ]
+      },
+      {
+        "name": "unarchive",
+        "use": "unarchive \u003cpath|id\u003e...",
+        "short": "Unarchive one or more containers",
+        "hidden": false,
+        "available": true
       },
       {
         "name": "usage",

@@ -258,8 +258,8 @@ func TestCpPromptOwnership(t *testing.T) {
 // TestRmdirForcePromptOwnership proves the mirror owns the legacy `rmdir --force`
 // confirmation on a real TTY: the destructive WARNING block (with the rendered
 // counts) + "Are you sure? (yes/no): " requiring EXACTLY "yes", the accept/abort
-// branches, and --yes (no prompt). The terminal output + exit code + durable
-// snapshot byte-match legacy `wrkq rmdir --force`.
+// branches, and the project safety exception where --yes still requires typed
+// confirmation. The terminal output + exit code + durable snapshot byte-match.
 func TestRmdirForcePromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
@@ -274,7 +274,7 @@ func TestRmdirForcePromptOwnership(t *testing.T) {
 		{name: "accept", args: []string{"rmdir", "doomed", "--force"}, input: "yes\n"},
 		{name: "abort-no", args: []string{"rmdir", "doomed", "--force"}, input: "no\n"},
 		{name: "abort-y-not-yes", args: []string{"rmdir", "doomed", "--force"}, input: "y\n"},
-		{name: "yes-flag-skips-prompt", args: []string{"rmdir", "doomed", "--force", "--yes"}, input: ""},
+		{name: "yes-flag-project-still-prompts", args: []string{"rmdir", "doomed", "--force", "--yes"}, input: "yes\n"},
 	}
 
 	for _, tc := range cases {
@@ -296,11 +296,9 @@ func TestRmdirForcePromptOwnership(t *testing.T) {
 				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
 			}
 
-			if tc.name != "yes-flag-skips-prompt" {
-				for _, want := range []string{"WARNING: This will permanently delete", "Are you sure? (yes/no):"} {
-					if !strings.Contains(oldOut, want) {
-						t.Fatalf("legacy rmdir --force prompt missing %q (got %q)", want, oldOut)
-					}
+			for _, want := range []string{"WARNING: This will permanently delete", "Are you sure? (yes/no):"} {
+				if !strings.Contains(oldOut, want) {
+					t.Fatalf("rmdir --force prompt missing %q (got %q)", want, oldOut)
 				}
 			}
 			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
