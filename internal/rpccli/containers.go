@@ -35,19 +35,23 @@ func newMkdirCmd() *cobra.Command {
 // a project together with its child containers and tasks is its primary use.
 func newArchiveCmd() *cobra.Command {
 	var ifMatch int64
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "archive <path|id>...",
 		Short: "Archive one or more containers",
 		Long: `Archives one or more containers without deleting their descendants or tasks.
 
-Archived containers are hidden from default listings and remain available with
---all. Use "wrkq unarchive" to make an archived container active again.`,
+Before acting, archive reports how many live tasks in the complete descendant
+subtree will move to cancelled and asks for confirmation; --yes skips the prompt.
+Archived containers remain available with --all. Use "wrkq unarchive" to restore
+the container and exactly the task states changed by its archive cascade.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runContainerArchive(cmd, args, ifMatch, false)
+			return runContainerArchive(cmd, args, ifMatch, false, yes)
 		},
 	}
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Conditional archive (etag)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip archive confirmation")
 	return cmd
 }
 
@@ -59,16 +63,22 @@ func newUnarchiveCmd() *cobra.Command {
 		Short: "Unarchive one or more containers",
 		Long: `Restores one or more archived containers to active listings.
 
-This reverses "wrkq archive" and does not recreate hard-deleted containers.`,
+This reverses "wrkq archive", restores exactly the task states changed by its
+archive cascade, and does not recreate hard-deleted containers.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runContainerArchive(cmd, args, 0, true)
+			return runContainerArchive(cmd, args, 0, true, true)
 		},
 	}
 	return cmd
 }
 
-func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, restore bool) error {
+type containerArchivePreflight struct {
+	UUID        string
+	ActiveTasks int
+}
+
+func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, restore, yes bool) error {
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
@@ -80,6 +90,22 @@ func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, resto
 	}
 
 	selectors := sc.paths(args, false)
+	preflights := make(map[string]containerArchivePreflight, len(selectors))
+	if !restore {
+		var total int
+		for _, selector := range selectors {
+			preflight, err := loadContainerArchivePreflight(cmd.Context(), tr, selector)
+			if err != nil {
+				return err
+			}
+			preflights[selector] = preflight
+			total += preflight.ActiveTasks
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "Archive %d container(s): %d live task(s) will be cancelled.\n", len(selectors), total)
+		if err := archiveConfirm(cmd, yes); err != nil {
+			return err
+		}
+	}
 	results := make([]map[string]interface{}, 0, len(selectors))
 	for _, selector := range selectors {
 		params := map[string]any{"container": selector}
@@ -110,6 +136,7 @@ func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, resto
 			result["unarchived"] = true
 		} else {
 			result["archived"] = true
+			result["tasks_cancelled"] = preflights[selector].ActiveTasks
 		}
 		results = append(results, result)
 	}
@@ -125,6 +152,39 @@ func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, resto
 		return nil
 	}
 	return encodeJSONIndent(cmd, results)
+}
+
+func loadContainerArchivePreflight(ctx context.Context, tr Transport, selector string) (containerArchivePreflight, error) {
+	raw, err := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": selector})
+	if err != nil {
+		return containerArchivePreflight{}, errors.New(rpcMessage(err))
+	}
+	var container struct {
+		UUID string `json:"uuid"`
+	}
+	if err := json.Unmarshal(raw, &container); err != nil {
+		return containerArchivePreflight{}, err
+	}
+
+	raw, err = tr.Call(ctx, "wrkq.container.taskCounts", map[string]any{"includeArchived": true})
+	if err != nil {
+		return containerArchivePreflight{}, errors.New(rpcMessage(err))
+	}
+	var counts struct {
+		Items []struct {
+			UUID            string `json:"uuid"`
+			ActiveTaskCount int    `json:"activeTaskCount"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &counts); err != nil {
+		return containerArchivePreflight{}, err
+	}
+	for _, item := range counts.Items {
+		if item.UUID == container.UUID {
+			return containerArchivePreflight{UUID: container.UUID, ActiveTasks: item.ActiveTaskCount}, nil
+		}
+	}
+	return containerArchivePreflight{}, fmt.Errorf("container task count not found: %s", selector)
 }
 
 func runMkdir(cmd *cobra.Command, args []string, kind string) error {

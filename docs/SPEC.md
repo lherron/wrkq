@@ -522,9 +522,13 @@ Important behavior:
   explicit selector and one resolved task and emits the task object bare.
   `--porcelain` may be added for compact JSON; non-JSON modes are refused.
 - `rm` archives by default; `--purge --yes` permanently deletes.
-- `archive` hides a container or project without deleting any descendant
-  containers or tasks; `unarchive` reverses it. Non-empty projects are valid
-  archive targets.
+- `archive` hides a container or project and atomically moves every resident
+  task in `idea`, `draft`, `open`, `in_progress`, or `blocked` beneath its
+  descendant-container subtree to `cancelled`. It reports the recursive live
+  count before acting and requires confirmation (`--yes` skips). Each changed
+  task carries a reserved, event-linked meta marker with its prior state;
+  `unarchive` restores exactly those tasks and leaves pre-existing terminal
+  tasks untouched. Re-archiving is valid and cancels newly live stragglers.
 - `rmdir` permanently hard-deletes containers. Plain `rmdir` is empty-only;
   `--force` cascade-deletes descendants and tasks. Every project deletion
   requires a typed `yes`; `--yes` never bypasses that project checkpoint.

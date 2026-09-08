@@ -9,7 +9,25 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
+
+const containerArchiveCascadeMetaKey = "_wrkq_archive_cascade"
+
+type containerArchiveCascadeMarker struct {
+	Version        int    `json:"version"`
+	ContainerUUID  string `json:"container_uuid"`
+	ArchiveEventID int64  `json:"archive_event_id"`
+	PriorState     string `json:"prior_state"`
+	MetaWasNull    bool   `json:"meta_was_null,omitempty"`
+}
+
+type containerArchiveTask struct {
+	UUID  string
+	State string
+	Meta  sql.NullString
+	ETag  int64
+}
 
 // ContainerStore handles container persistence operations.
 type ContainerStore struct {
@@ -474,6 +492,7 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 		return 0, err
 	}
 	var newETag int64
+	var webhooksToDispatch []pendingWebhook
 
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		// Get current state
@@ -492,7 +511,13 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 			return err
 		}
 
-		// Soft delete
+		cascadeTasks, err := containerArchiveLiveTasks(tx, containerUUID)
+		if err != nil {
+			return err
+		}
+
+		// Soft delete. Re-archiving is intentional: it refreshes the archive event
+		// and cascades any live stragglers created since the prior archive.
 		_, err = tx.Exec(`
 			UPDATE containers
 			SET archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
@@ -505,7 +530,8 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 			return fmt.Errorf("failed to archive container: %w", err)
 		}
 
-		// Log event
+		// Log the container event before task updates so its durable event id can
+		// be stored in every causal marker written by this transaction.
 		payload := map[string]interface{}{
 			"slug":        slug,
 			"soft_delete": true,
@@ -514,7 +540,7 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 		payloadStr := string(payloadJSON)
 		newETag = currentETag + 1
 
-		if err := ew.LogEvent(tx, &domain.Event{
+		archiveEvent, err := ew.LogEventReturning(tx, &domain.Event{
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
 			ResourceType: "container",
@@ -522,14 +548,296 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 			EventType:    "container.archived",
 			ETag:         &newETag,
 			Payload:      &payloadStr,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log event: %w", err)
+		}
+
+		for _, task := range cascadeTasks {
+			pending, err := cascadeCancelTask(tx, ew, attr, containerUUID, archiveEvent.ID, task)
+			if err != nil {
+				return err
+			}
+			webhooksToDispatch = append(webhooksToDispatch, pending)
+		}
+		for _, task := range cascadeTasks {
+			if err := maybeLogCampaignCloseNudgeForTask(tx, ew, attr, task.UUID); err != nil {
+				return err
+			}
 		}
 
 		return nil
 	})
+	if err == nil {
+		for _, pending := range webhooksToDispatch {
+			webhooks.DispatchTaskEvent(cs.store.db, pending.taskUUID, pending.ctx)
+		}
+	}
 
 	return newETag, err
+}
+
+// RestoreWithAttribution clears a container's archived marker and reverses only
+// task cancellations causally marked by ArchiveWithAttribution for this exact
+// container UUID. The container and task mutations share one transaction.
+func (cs *ContainerStore) RestoreWithAttribution(attr attribution.Attribution, containerUUID string) error {
+	if err := requireAttribution(attr); err != nil {
+		return err
+	}
+	var webhooksToDispatch []pendingWebhook
+	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		var exists int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM containers WHERE uuid = ?", containerUUID).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to resolve container: %w", err)
+		}
+		if exists == 0 {
+			return fmt.Errorf("container not found: %s", containerUUID)
+		}
+
+		tasks, err := containerArchiveMarkedTasks(tx, containerUUID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+			UPDATE containers
+			SET archived_at = NULL,
+			    updated_by_principal_ref = ?,
+			    updated_by_scope_ref = ?
+			WHERE uuid = ?
+		`, attr.PrincipalRef, scopeSQL(attr), containerUUID); err != nil {
+			return fmt.Errorf("failed to restore container: %w", err)
+		}
+
+		for _, task := range tasks {
+			pending, _, err := restoreCascadeTask(tx, ew, attr, containerUUID, task)
+			if err != nil {
+				return err
+			}
+			webhooksToDispatch = append(webhooksToDispatch, pending)
+		}
+		payloadStr := `{"action":"restored"}`
+		if err := ew.LogEvent(tx, &domain.Event{
+			PrincipalRef: attr.PrincipalRef,
+			ScopeRef:     attr.ScopeRef,
+			ResourceType: "container",
+			ResourceUUID: &containerUUID,
+			EventType:    "container.restored",
+			Payload:      &payloadStr,
+		}); err != nil {
+			return fmt.Errorf("failed to log event: %w", err)
+		}
+		return nil
+	})
+	if err == nil {
+		for _, pending := range webhooksToDispatch {
+			webhooks.DispatchTaskEvent(cs.store.db, pending.taskUUID, pending.ctx)
+		}
+	}
+	return err
+}
+
+func containerArchiveLiveTasks(tx *sql.Tx, containerUUID string) ([]containerArchiveTask, error) {
+	rows, err := tx.Query(`
+		WITH RECURSIVE subtree(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid FROM containers c JOIN subtree s ON c.parent_uuid = s.uuid
+		)
+		SELECT t.uuid, t.state, t.meta, t.etag
+		FROM tasks t JOIN subtree s ON s.uuid = t.project_uuid
+		WHERE t.state IN ('idea','draft','open','in_progress','blocked')
+		  AND t.archived_at IS NULL AND t.deleted_at IS NULL
+		ORDER BY t.uuid`, containerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query container archive tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var tasks []containerArchiveTask
+	for rows.Next() {
+		var task containerArchiveTask
+		if err := rows.Scan(&task.UUID, &task.State, &task.Meta, &task.ETag); err != nil {
+			return nil, fmt.Errorf("failed to scan container archive task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate container archive tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func containerArchiveMarkedTasks(tx *sql.Tx, containerUUID string) ([]containerArchiveTask, error) {
+	rows, err := tx.Query(`
+		WITH RECURSIVE subtree(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid FROM containers c JOIN subtree s ON c.parent_uuid = s.uuid
+		)
+		SELECT t.uuid, t.state, t.meta, t.etag
+		FROM tasks t JOIN subtree s ON s.uuid = t.project_uuid
+		WHERE json_valid(t.meta)
+		  AND json_extract(t.meta, '$._wrkq_archive_cascade.container_uuid') = ?
+		ORDER BY t.uuid`, containerUUID, containerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query container unarchive tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var tasks []containerArchiveTask
+	for rows.Next() {
+		var task containerArchiveTask
+		if err := rows.Scan(&task.UUID, &task.State, &task.Meta, &task.ETag); err != nil {
+			return nil, fmt.Errorf("failed to scan container unarchive task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate container unarchive tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func cascadeCancelTask(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, containerUUID string, archiveEventID int64, task containerArchiveTask) (pendingWebhook, error) {
+	meta, err := parseContainerArchiveMeta(task)
+	if err != nil {
+		return pendingWebhook{}, err
+	}
+	meta[containerArchiveCascadeMetaKey] = containerArchiveCascadeMarker{
+		Version: 1, ContainerUUID: containerUUID, ArchiveEventID: archiveEventID,
+		PriorState: task.State, MetaWasNull: !task.Meta.Valid,
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return pendingWebhook{}, fmt.Errorf("failed to encode archive marker for task %s: %w", task.UUID, err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE tasks
+		SET state = 'cancelled', meta = ?, etag = etag + 1,
+		    updated_by_principal_ref = ?, updated_by_scope_ref = ?
+		WHERE uuid = ?`, string(metaJSON), attr.PrincipalRef, scopeSQL(attr), task.UUID); err != nil {
+		return pendingWebhook{}, fmt.Errorf("failed to cancel task %s during container archive: %w", task.UUID, err)
+	}
+	payload := map[string]any{"state": "cancelled", "state_from": task.State, "meta": string(metaJSON)}
+	if err := StampTaskCampaignContext(tx, task.UUID, payload); err != nil {
+		return pendingWebhook{}, err
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	payloadStr := string(payloadJSON)
+	newETag := task.ETag + 1
+	eventMeta, err := ew.LogEventReturning(tx, &domain.Event{
+		PrincipalRef: attr.PrincipalRef, ScopeRef: attr.ScopeRef,
+		ResourceType: "task", ResourceUUID: &task.UUID, EventType: "task.updated",
+		ETag: &newETag, Payload: &payloadStr,
+	})
+	if err != nil {
+		return pendingWebhook{}, fmt.Errorf("failed to log archive cancellation for task %s: %w", task.UUID, err)
+	}
+	return pendingWebhook{taskUUID: task.UUID, ctx: webhooks.EventContext{
+		Metadata: eventMeta, Event: "updated", PrincipalRef: attr.PrincipalRef, Via: "cli",
+		Transition: &webhooks.Transition{From: stringPtr(task.State), To: stringPtr("cancelled")},
+		Changed:    []string{"meta", "state"},
+		Changes: map[string]webhooks.Change{
+			"meta":  {From: archiveNullableStringValue(task.Meta), To: string(metaJSON)},
+			"state": {From: task.State, To: "cancelled"},
+		},
+	}}, nil
+}
+
+func restoreCascadeTask(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, containerUUID string, task containerArchiveTask) (pendingWebhook, bool, error) {
+	meta, err := parseContainerArchiveMeta(task)
+	if err != nil {
+		return pendingWebhook{}, false, err
+	}
+	rawMarker, ok := meta[containerArchiveCascadeMetaKey]
+	if !ok {
+		return pendingWebhook{}, false, fmt.Errorf("archive marker disappeared for task %s", task.UUID)
+	}
+	markerJSON, _ := json.Marshal(rawMarker)
+	var marker containerArchiveCascadeMarker
+	if err := json.Unmarshal(markerJSON, &marker); err != nil || marker.Version != 1 || marker.ContainerUUID != containerUUID || !isContainerArchiveLiveState(marker.PriorState) {
+		return pendingWebhook{}, false, fmt.Errorf("invalid archive marker for task %s", task.UUID)
+	}
+	delete(meta, containerArchiveCascadeMetaKey)
+	var restoredMeta any
+	var restoredMetaForEvent any
+	if len(meta) == 0 && marker.MetaWasNull {
+		restoredMeta = nil
+		restoredMetaForEvent = nil
+	} else {
+		metaJSON, err := json.Marshal(meta)
+		if err != nil {
+			return pendingWebhook{}, false, fmt.Errorf("failed to clear archive marker for task %s: %w", task.UUID, err)
+		}
+		restoredMeta = string(metaJSON)
+		restoredMetaForEvent = string(metaJSON)
+	}
+	restoreState := task.State == "cancelled"
+	state := task.State
+	if restoreState {
+		state = marker.PriorState
+	}
+	if _, err := tx.Exec(`
+		UPDATE tasks
+		SET state = ?, meta = ?, etag = etag + 1,
+		    updated_by_principal_ref = ?, updated_by_scope_ref = ?
+		WHERE uuid = ?`, state, restoredMeta, attr.PrincipalRef, scopeSQL(attr), task.UUID); err != nil {
+		return pendingWebhook{}, false, fmt.Errorf("failed to restore task %s during container unarchive: %w", task.UUID, err)
+	}
+	payload := map[string]any{"meta": restoredMetaForEvent}
+	changed := []string{"meta"}
+	changes := map[string]webhooks.Change{"meta": {From: archiveNullableStringValue(task.Meta), To: restoredMetaForEvent}}
+	var transition *webhooks.Transition
+	if restoreState {
+		payload["state"] = state
+		payload["state_from"] = task.State
+		changed = append(changed, "state")
+		changes["state"] = webhooks.Change{From: task.State, To: state}
+		transition = &webhooks.Transition{From: stringPtr(task.State), To: stringPtr(state)}
+	}
+	if err := StampTaskCampaignContext(tx, task.UUID, payload); err != nil {
+		return pendingWebhook{}, false, err
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	payloadStr := string(payloadJSON)
+	newETag := task.ETag + 1
+	eventMeta, err := ew.LogEventReturning(tx, &domain.Event{
+		PrincipalRef: attr.PrincipalRef, ScopeRef: attr.ScopeRef,
+		ResourceType: "task", ResourceUUID: &task.UUID, EventType: "task.updated",
+		ETag: &newETag, Payload: &payloadStr,
+	})
+	if err != nil {
+		return pendingWebhook{}, false, fmt.Errorf("failed to log cascade restore for task %s: %w", task.UUID, err)
+	}
+	return pendingWebhook{taskUUID: task.UUID, ctx: webhooks.EventContext{
+		Metadata: eventMeta, Event: "updated", PrincipalRef: attr.PrincipalRef, Via: "cli",
+		Transition: transition, Changed: changed, Changes: changes,
+	}}, restoreState, nil
+}
+
+func parseContainerArchiveMeta(task containerArchiveTask) (map[string]any, error) {
+	meta := map[string]any{}
+	if !task.Meta.Valid || strings.TrimSpace(task.Meta.String) == "" {
+		return meta, nil
+	}
+	if err := json.Unmarshal([]byte(task.Meta.String), &meta); err != nil || meta == nil {
+		return nil, fmt.Errorf("task %s has invalid meta; container archive aborted", task.UUID)
+	}
+	return meta, nil
+}
+
+func isContainerArchiveLiveState(state string) bool {
+	switch state {
+	case "idea", "draft", "open", "in_progress", "blocked":
+		return true
+	default:
+		return false
+	}
+}
+
+func archiveNullableStringValue(value sql.NullString) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
 }
 
 // Delete hard-deletes an empty container.

@@ -195,7 +195,7 @@ func TestContainerLifecycleHelpNamesSafeAndDestructiveChoices(t *testing.T) {
 	}{
 		{
 			command: "archive",
-			want:    []string{"without deleting", "wrkq unarchive", "--if-match"},
+			want:    []string{"without deleting", "wrkq unarchive", "--if-match", "--yes"},
 		},
 		{
 			command: "unarchive",

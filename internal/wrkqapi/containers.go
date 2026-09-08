@@ -13,7 +13,6 @@ import (
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -396,36 +395,8 @@ func (a *API) ContainerRestore(ctx context.Context, p ContainerRestoreParams) (*
 		return nil, aerr
 	}
 
-	tx, err := a.db.Begin()
-	if err != nil {
-		return nil, NewInternalError(errors.New("failed to begin transaction: " + err.Error()))
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.Exec(`
-		UPDATE containers
-		SET archived_at = NULL,
-		    updated_by_principal_ref = ?,
-		    updated_by_scope_ref = ?
-		WHERE uuid = ?
-	`, attr.PrincipalRef, scopeBind(attr), containerUUID); err != nil {
-		return nil, NewInternalError(errors.New("failed to restore container: " + err.Error()))
-	}
-
-	eventWriter := events.NewWriter(a.db.DB)
-	payload := `{"action":"restored"}`
-	if err := eventWriter.LogEvent(tx, &domain.Event{
-		PrincipalRef: attr.PrincipalRef,
-		ScopeRef:     attr.ScopeRef,
-		ResourceType: "container",
-		ResourceUUID: &containerUUID,
-		EventType:    "container.restored",
-		Payload:      &payload,
-	}); err != nil {
-		return nil, NewInternalError(errors.New("failed to log event: " + err.Error()))
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, NewInternalError(err)
+	if err := a.store.Containers.RestoreWithAttribution(attr, containerUUID); err != nil {
+		return nil, mapContainerStoreError(err, selector)
 	}
 	return &WrkqContainerRestoreResult{UUID: containerUUID, Restored: true}, nil
 }

@@ -42,17 +42,24 @@ predicate: >
   Unconditional schema-level cascade on `tasks.parent_task_uuid` is forbidden under
   this invariant. The database default failure mode must be detach or reject; any
   same-residency cascade is an explicit store/API behavior with tests.
+
+  Container archive/unarchive follows this same residency rule: archive cancels
+  live tasks whose `project_uuid` lies in the selected container subtree, marks
+  the exact prior state, and unarchive restores only those marked tasks. A
+  cross-residency child linked only by `parent_task_uuid` is never selected by
+  that cascade.
 authority:
   repo: wrkq
   surface: tasks table parent graph + wrkq task/container mutation/read-model surfaces
 enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/tasks.go; internal/store/containers.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/wrkqd/tree_http.go; internal/store/cross_project_parent_test.go; internal/workrpc/taskmove_test.go"
 required_tests:
   - go test ./internal/store ./internal/wrkqapi ./internal/rpccli ./internal/wrkqd
+  - internal/rpccli/container_archive_test.go
   - go test ./internal/workrpc -run 'TestWrkqTaskMove_(ResidentSubtreeMove|CrossProjectChild)'
   - just architecture-records
 last_verified:
-  date: 2026-06-28
-  evidence: "T-05266 implementation and T-06762 relocation: store/wrkqapi/rpccli/wrkqd suites green; workrpc cross-project move tests green; full verify/install/manual smoke captured on tasks."
+  date: 2026-09-08
+  evidence: "T-08261: container archive/unarchive task cascade follows recursive residency and round-trips causal markers; focused nested acceptance, full verify, and installed scratch smoke green."
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the hierarchy mutation/read-model call site"
 source:
   - internal/db/migrations/000026_external_principal_attribution.sql
@@ -70,6 +77,7 @@ reopen_when:
   - task parent depth changes beyond max depth 1
   - parent_task_uuid becomes containment rather than backlink across project_uuid boundaries
   - task/container deletion, purge, restore, or move semantics change for parented tasks
+  - container archive/unarchive task cascade selection or marker semantics change
   - schema referential action on tasks.parent_task_uuid changes
 supersedes: []
 superseded_by: null

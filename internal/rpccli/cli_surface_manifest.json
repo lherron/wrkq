@@ -183,6 +183,13 @@
             "type": "int64",
             "default": "0",
             "hidden": false
+          },
+          {
+            "name": "yes",
+            "usage": "Skip archive confirmation",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
           }
         ]
       },

@@ -5,6 +5,7 @@ package rpccli
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 )
 
@@ -98,7 +100,7 @@ func TestContainerArchiveNonEmptyProjectRoundTrip(t *testing.T) {
 		t.Fatalf("project missing before archive: %q", before)
 	}
 
-	archiveOut := mustContainerLifecycleCLI(t, f.dbPath, "--project", "archive-roundtrip", "archive", "archive-roundtrip", "--if-match", fmt.Sprint(f.project.ETag))
+	archiveOut := mustContainerLifecycleCLI(t, f.dbPath, "--project", "archive-roundtrip", "archive", "archive-roundtrip", "--if-match", fmt.Sprint(f.project.ETag), "--yes")
 	if !strings.Contains(archiveOut, `"archived": true`) || !strings.Contains(archiveOut, `"path": "archive-roundtrip"`) {
 		t.Fatalf("archive output does not identify mutation: %s", archiveOut)
 	}
@@ -152,6 +154,150 @@ func TestContainerArchiveNonEmptyProjectRoundTrip(t *testing.T) {
 	}
 }
 
+func TestContainerArchiveCascadeRoundTripAndIdempotentRepair(t *testing.T) {
+	f := newContainerLifecycleFixture(t, "archive-cascade", false)
+	s := store.New(f.db)
+	levelOne, err := s.Containers.Create(containerLifecycleActorUUID, store.ContainerCreateParams{
+		Slug: "level-one", Kind: "directory", ParentUUID: &f.project.UUID,
+	})
+	if err != nil {
+		t.Fatalf("create level one: %v", err)
+	}
+	levelTwo, err := s.Containers.Create(containerLifecycleActorUUID, store.ContainerCreateParams{
+		Slug: "level-two", Kind: "directory", ParentUUID: &levelOne.UUID,
+	})
+	if err != nil {
+		t.Fatalf("create level two: %v", err)
+	}
+
+	live := map[string]string{}
+	var residentParentUUID string
+	for i, state := range []string{"idea", "draft", "open", "in_progress", "blocked"} {
+		containerUUID := levelOne.UUID
+		if i%2 == 0 {
+			containerUUID = levelTwo.UUID
+		}
+		task := createContainerLifecycleTask(t, s, containerUUID, "live-"+state, state, nil)
+		live[task.UUID] = state
+		if state == "open" {
+			residentParentUUID = task.UUID
+		}
+	}
+	externalProject, err := s.Containers.Create(containerLifecycleActorUUID, store.ContainerCreateParams{Slug: "archive-cascade-external", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create external project: %v", err)
+	}
+	externalChild, err := s.Tasks.Create(containerLifecycleActorUUID, store.CreateParams{
+		Slug: "external-child", Title: "external-child", ProjectUUID: externalProject.UUID,
+		State: "open", Priority: 2, Kind: "subtask", ParentTaskUUID: &residentParentUUID,
+	})
+	if err != nil {
+		t.Fatalf("create cross-residency child: %v", err)
+	}
+	originalMeta := `{"owner":"human"}`
+	preCancelled := createContainerLifecycleTask(t, s, levelTwo.UUID, "pre-cancelled", "cancelled", &originalMeta)
+	terminal := map[string]string{}
+	for _, state := range []string{"completed", "archived", "deleted"} {
+		task := createContainerLifecycleTask(t, s, levelTwo.UUID, "terminal-"+state, state, nil)
+		terminal[task.UUID] = state
+	}
+
+	stdout, stderr, err := runContainerLifecycleCLI(t, f.dbPath, "y\n", "--project", "archive-cascade", "archive", "archive-cascade")
+	if err != nil {
+		t.Fatalf("archive cascade: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	for _, want := range []string{"5 live task(s) will be cancelled", "Archive container(s) and cancel", `"tasks_cancelled": 5`} {
+		if !strings.Contains(stdout+stderr, want) {
+			t.Errorf("archive report missing %q:\nstdout:\n%s\nstderr:\n%s", want, stdout, stderr)
+		}
+	}
+	for uuid, priorState := range live {
+		state, meta := taskStateAndMeta(t, f.db, uuid)
+		if state != "cancelled" {
+			t.Errorf("live task %s state = %s, want cancelled", uuid, state)
+		}
+		assertArchiveMarker(t, meta, f.project.UUID, priorState)
+	}
+	assertTaskStateAndMeta(t, f.db, preCancelled.UUID, "cancelled", originalMeta)
+	for uuid, state := range terminal {
+		assertTaskStateAndMeta(t, f.db, uuid, state, "")
+	}
+	assertTaskStateAndMeta(t, f.db, externalChild.UUID, "open", "")
+
+	straggler := createContainerLifecycleTask(t, s, levelTwo.UUID, "late-straggler", "blocked", nil)
+	stdout, stderr, err = runContainerLifecycleCLI(t, f.dbPath, "", "--project", "archive-cascade", "archive", "archive-cascade", "--yes")
+	if err != nil {
+		t.Fatalf("re-archive with straggler: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "1 live task(s) will be cancelled") || !strings.Contains(stdout, `"tasks_cancelled": 1`) {
+		t.Fatalf("re-archive count mismatch:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	stragglerState, stragglerMeta := taskStateAndMeta(t, f.db, straggler.UUID)
+	if stragglerState != "cancelled" {
+		t.Fatalf("re-archive straggler state = %s, want cancelled", stragglerState)
+	}
+	assertArchiveMarker(t, stragglerMeta, f.project.UUID, "blocked")
+
+	mustContainerLifecycleCLI(t, f.dbPath, "--project", "archive-cascade", "unarchive", "archive-cascade")
+	for uuid, priorState := range live {
+		assertTaskStateAndMeta(t, f.db, uuid, priorState, "")
+	}
+	assertTaskStateAndMeta(t, f.db, straggler.UUID, "blocked", "")
+	assertTaskStateAndMeta(t, f.db, preCancelled.UUID, "cancelled", originalMeta)
+	for uuid, state := range terminal {
+		assertTaskStateAndMeta(t, f.db, uuid, state, "")
+	}
+	assertTaskStateAndMeta(t, f.db, externalChild.UUID, "open", "")
+}
+
+func TestContainerArchiveCascadeIsAtomicOnInvalidTaskMeta(t *testing.T) {
+	f := newContainerLifecycleFixture(t, "archive-atomic", false)
+	s := store.New(f.db)
+	first := createContainerLifecycleTask(t, s, f.project.UUID, "first", "open", nil)
+	second := createContainerLifecycleTask(t, s, f.project.UUID, "second", "blocked", nil)
+	if _, err := f.db.Exec("UPDATE tasks SET meta = '{broken' WHERE uuid = ?", second.UUID); err != nil {
+		t.Fatalf("seed invalid meta: %v", err)
+	}
+
+	_, _, err := runContainerLifecycleCLI(t, f.dbPath, "", "--project", "archive-atomic", "archive", "archive-atomic", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "invalid meta") {
+		t.Fatalf("archive with invalid task meta error = %v, want invalid meta", err)
+	}
+	assertTaskStateAndMeta(t, f.db, first.UUID, "open", "")
+	state, meta := taskStateAndMeta(t, f.db, second.UUID)
+	if state != "blocked" || meta != "{broken" {
+		t.Fatalf("invalid-meta task mutated to state=%s meta=%q", state, meta)
+	}
+	var archivedAt sql.NullString
+	if err := f.db.QueryRow("SELECT archived_at FROM containers WHERE uuid = ?", f.project.UUID).Scan(&archivedAt); err != nil {
+		t.Fatalf("read project archived_at: %v", err)
+	}
+	if archivedAt.Valid {
+		t.Fatalf("failed atomic archive left archived_at=%s", archivedAt.String)
+	}
+}
+
+func TestContainerArchiveRequiresReportedConfirmation(t *testing.T) {
+	f := newContainerLifecycleFixture(t, "archive-confirm", true)
+	_, stderr, err := runContainerLifecycleCLI(t, f.dbPath, "", "--project", "archive-confirm", "archive", "archive-confirm")
+	if err == nil || err.Error() != "aborted" {
+		t.Fatalf("archive without confirmation error = %v, want aborted", err)
+	}
+	for _, want := range []string{"1 live task(s) will be cancelled", "Archive container(s) and cancel"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("archive confirmation missing %q: %s", want, stderr)
+		}
+	}
+	assertTaskStateAndMeta(t, f.db, taskUUIDByID(t, f.db, f.taskID), "open", "")
+	var archivedAt sql.NullString
+	if err := f.db.QueryRow("SELECT archived_at FROM containers WHERE uuid = ?", f.project.UUID).Scan(&archivedAt); err != nil {
+		t.Fatalf("read project archived_at: %v", err)
+	}
+	if archivedAt.Valid {
+		t.Fatalf("aborted archive set archived_at=%s", archivedAt.String)
+	}
+}
+
 func TestRmdirNonEmptyErrorNamesArchiveAndDestructiveForce(t *testing.T) {
 	f := newContainerLifecycleFixture(t, "rmdir-nonempty", true)
 	_, _, err := runContainerLifecycleCLI(t, f.dbPath, "", "--project", "rmdir-nonempty", "rmdir", "rmdir-nonempty")
@@ -202,6 +348,55 @@ func taskUUIDByID(t *testing.T, database *db.DB, id string) string {
 		t.Fatalf("resolve task %s: %v", id, err)
 	}
 	return uuid
+}
+
+func createContainerLifecycleTask(t *testing.T, s *store.Store, containerUUID, slug, state string, meta *string) store.CreateResult {
+	t.Helper()
+	task, err := s.Tasks.Create(containerLifecycleActorUUID, store.CreateParams{
+		Slug: slug, Title: slug, ProjectUUID: containerUUID, State: domain.State(state), Priority: 2, Meta: meta,
+	})
+	if err != nil {
+		t.Fatalf("create task %s: %v", slug, err)
+	}
+	return *task
+}
+
+func taskStateAndMeta(t *testing.T, database *db.DB, uuid string) (string, string) {
+	t.Helper()
+	var state string
+	var meta sql.NullString
+	if err := database.QueryRow("SELECT state, meta FROM tasks WHERE uuid = ?", uuid).Scan(&state, &meta); err != nil {
+		t.Fatalf("read task %s: %v", uuid, err)
+	}
+	return state, meta.String
+}
+
+func assertTaskStateAndMeta(t *testing.T, database *db.DB, uuid, wantState, wantMeta string) {
+	t.Helper()
+	state, meta := taskStateAndMeta(t, database, uuid)
+	if state != wantState || meta != wantMeta {
+		t.Errorf("task %s = state %s meta %q, want state %s meta %q", uuid, state, meta, wantState, wantMeta)
+	}
+}
+
+func assertArchiveMarker(t *testing.T, rawMeta, containerUUID, priorState string) {
+	t.Helper()
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(rawMeta), &meta); err != nil {
+		t.Fatalf("decode marked meta %q: %v", rawMeta, err)
+	}
+	var marker struct {
+		Version        int    `json:"version"`
+		ContainerUUID  string `json:"container_uuid"`
+		ArchiveEventID int64  `json:"archive_event_id"`
+		PriorState     string `json:"prior_state"`
+	}
+	if err := json.Unmarshal(meta["_wrkq_archive_cascade"], &marker); err != nil {
+		t.Fatalf("decode archive marker from %q: %v", rawMeta, err)
+	}
+	if marker.Version != 1 || marker.ContainerUUID != containerUUID || marker.ArchiveEventID <= 0 || marker.PriorState != priorState {
+		t.Errorf("archive marker = %#v, want container=%s prior=%s with event", marker, containerUUID, priorState)
+	}
 }
 
 func assertProjectConfirmationAbort(t *testing.T, stderr string, err error) {

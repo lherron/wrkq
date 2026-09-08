@@ -22,7 +22,10 @@ predicate: >
   identity is a high-blast-radius deletion boundary: every `rmdir` of a project,
   including empty non-forced deletion, requires caller-side typed exact `yes`;
   `--yes` MUST NOT bypass that checkpoint. A failed/non-TTY project confirmation
-  names that exception and the reversible `wrkq archive` alternative.
+  names that exception and the reversible `wrkq archive` alternative. Reversible
+  container archive still reports its recursive live-task cancellation count and
+  requires a lightweight caller confirmation; `--yes` MAY bypass that archive
+  confirmation because unarchive restores the causally marked prior states.
 authority:
   repo: wrkq
   surface: wrkq mutation methods (wrkq.task.delete mode, wrkq.container.deleteRecursive CAS) over the JSON-RPC boundary
@@ -34,7 +37,7 @@ source:
   - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY) — rm/comment-rm/rmdir-force variants
   - internal/rpccli/rm.go                             # rm mirror: explicit mode + scoper + confirm; container targets hard-gated
   - internal/rpccli/comment_rm.go                     # comment rm mirror: explicit mode + [y/N] prompt + if-match warn-skip + dry-run
-  - internal/rpccli/containers.go                     # reversible archive/unarchive + project-always-confirms rmdir + two-phase force delete
+  - internal/rpccli/containers.go                     # reported/confirmed reversible archive + project-always-confirms rmdir + two-phase force delete
   - internal/workrpc/registry.go                      # wrkq.task.delete / comment.delete (param-only mode change) + container.deleteRecursive registration
   - internal/workrpc/taskdelete_mode_test.go          # server delete-mode + non-interactivity acceptance tests
   - internal/workrpc/commentdelete_mode_test.go       # server comment-delete mode/ifMatch + event-payload-parity + non-interactivity acceptance tests

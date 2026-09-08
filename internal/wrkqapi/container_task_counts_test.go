@@ -61,7 +61,9 @@ func TestContainerTaskCountsCanonicalInclusionAndIdentity(t *testing.T) {
 	}
 	byPath := taskCountsByPath(got.Items)
 
-	assertContainerCounts(t, byPath["proj"], 7, 4)
+	// Archiving archivedContainer cascades its resident draft task to cancelled,
+	// so the enclosing project has three (not four) live tasks afterward.
+	assertContainerCounts(t, byPath["proj"], 7, 3)
 	assertContainerCounts(t, byPath["proj/nested"], 5, 2)
 	assertContainerCounts(t, byPath["proj/nested/deep"], 3, 1)
 	assertContainerCounts(t, byPath["proj/nested/empty"], 0, 0)
@@ -90,7 +92,7 @@ func TestContainerTaskCountsCanonicalInclusionAndIdentity(t *testing.T) {
 		t.Fatalf("ContainerTaskCounts(includeArchived): %v", err)
 	}
 	archivedRow := taskCountsByPath(withArchived.Items)["proj/archived-container"]
-	assertContainerCounts(t, archivedRow, 1, 1)
+	assertContainerCounts(t, archivedRow, 1, 0)
 	if archivedRow.ArchivedAt == nil {
 		t.Fatalf("archived row has no archivedAt: %#v", archivedRow)
 	}

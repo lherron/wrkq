@@ -90,3 +90,15 @@ func rmdirForceConfirm(cmd *cobra.Command, skip bool, warning string) error {
 		return answer == "yes"
 	})
 }
+
+// archiveConfirm gates a reversible bulk state change. It intentionally uses a
+// lightweight y/N prompt rather than rmdir's typed-yes destruction ceremony;
+// --yes remains available for non-interactive archive automation.
+func archiveConfirm(cmd *cobra.Command, skip bool) error {
+	if skip {
+		return nil
+	}
+	return promptConfirm(cmd, "", "Archive container(s) and cancel the reported live tasks? [y/N]: ", func(answer string) bool {
+		return answer == "y" || answer == "Y"
+	})
+}

@@ -1650,17 +1650,26 @@ legacy flag precedence, project-root scoping for the single-container selector,
 and TTY vs non-TTY rendering.
 
 `wrkq.container.archive` soft-archives one resolved container by setting
-`archived_at` and logging `container.archived`; it is the server-owned mutation
-behind legacy `wrkq rm <container>` without `--purge`. It intentionally does not
-perform recursive deletion. `wrkq rm <container> --purge` uses
+`archived_at` and logging `container.archived`. In the same transaction it
+cancels every resident task in `idea`, `draft`, `open`, `in_progress`, or
+`blocked` across the complete descendant-container subtree. Each task changed by
+that cascade receives a reserved `_wrkq_archive_cascade` meta marker containing
+the root container UUID, archive event id, and its exact prior state. The
+operation remains valid on an already-archived container so newly live
+stragglers are cancelled. It never recursively deletes. `wrkq rm <container>
+--purge` uses
 `wrkq.container.delete`, which remains empty-only; recursive subtree purge stays
 on `wrkq.container.deleteRecursive` via `wrkq rmdir --force`.
 
 `wrkq.container.restore` clears `archived_at` for one resolved container and logs
 `container.restored` with the legacy `{"action":"restored"}` payload. It does not
-bump the container etag, matching legacy restore behavior. The `wrkq restore`
-mirror calls `wrkq.task.restore` first so task flag validation precedence remains
-unchanged; only a genuine task miss falls through to this container method.
+bump the container etag, matching legacy restore behavior. In that same
+transaction it restores exactly the still-cancelled resident descendant tasks
+whose cascade marker names this container UUID, to their recorded prior states,
+then removes only the reserved marker. Pre-existing cancelled tasks have no
+marker and remain cancelled. The `wrkq restore` mirror calls `wrkq.task.restore`
+first so task flag validation precedence remains unchanged; only a genuine task
+miss falls through to this container method.
 
 `wrkq.container.delete` hard-deletes an EMPTY container (root rejected →
 `WRKQ_VALIDATION`; non-empty → `WRKQ_VALIDATION` "not empty"). `wrkq rmdir`
