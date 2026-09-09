@@ -8,7 +8,7 @@ Guide for agents working on **wrkq** — a filesystem-flavored CLI for projects,
 
 @internal/rpccli/embedded/WRKQ-USAGE.md
 
-For a deeper command reference, run `wrkq info`.
+`wrkq info` serves this same agent guide. Use command-specific `--help` for the full option surface.
 
 ## Binaries
 
@@ -33,6 +33,19 @@ Main-checkout `just install` also publishes one timestamped immutable
 nodes must receive that exact package version in their own loopback registry;
 do not rerun a timestamp-generating producer install merely to seed another
 node.
+
+On the canonical daemon node, install and restart together. If the change
+carries a migration, first take a file-level database backup, then run
+`just install`, `wrkqadm migrate`, and `wrkq server restart`, in that order.
+Restarting before migration can leave the daemon unable to start. Check
+`wrkq server health` afterward; `wrkq server status` reports `binaryStale`
+when the running daemon holds an older installed binary.
+
+`just install` refuses uncommitted tracked changes. Commit first; use
+`just install allow-dirty=1` only for an intentional dirty install. Untracked
+files and the install-rewritten `packages/client/bun.lock` do not trip this check.
+See [daemon operations](docs/wrkq-operations.md) for launchd restart and
+codesigning details.
 
 If a project lacks `just install`, add it.
 
