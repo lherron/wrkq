@@ -712,6 +712,8 @@ Canonical markdown that remains:
 | `docs/SPEC.md` | Canonical wrkq specification. |
 | `docs/wrkf-rpc.md` | Frozen wrkf JSON-RPC machine contract. |
 | `internal/rpccli/embedded/WRKQ-USAGE.md` | Embedded agent guide; the single source served by `usage`/`info`/`agent-info`. |
+| `internal/rpccli/embedded/WRKC-USAGE.md` | Embedded wrkc agent guide served by `wrkc info`. |
+| `docs/wrkc-reference.md` | wrkc room/routing/obligation reference; the detail the injected guide omits. |
 | `mcp-server/README.md` | Local package README for the MCP stdio wrapper. |
 | `pbc/templates/` | Workflow artifact templates used by the PBC sample preset. |
 | `vendor/` | Third-party vendored documentation; not a wrkq spec surface. |

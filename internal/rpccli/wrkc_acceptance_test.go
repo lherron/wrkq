@@ -507,8 +507,18 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wrkc info: %v\n%s", err, infoOut)
 	}
-	if !strings.Contains(infoOut, "Only `--to` fires") {
-		t.Fatalf("wrkc info does not carry the priming rules:\n%s", infoOut)
+	// The guide was rewritten around working recipes (T-08347); the only-`--to`-
+	// fires rule is now stated as the log-entry sentence rather than a named rule.
+	// Assert the rule itself, not the old heading, so a rewording that keeps the
+	// rule passes and a rewrite that drops it fails.
+	for _, want := range []string{
+		"# wrkc agent guide",
+		"omitting `--to` records a log entry without addressing anyone",
+		"reply discharges every pending or presented reply-required envelope",
+	} {
+		if !strings.Contains(infoOut, want) {
+			t.Fatalf("wrkc info does not carry the priming rule %q:\n%s", want, infoOut)
+		}
 	}
 }
 
