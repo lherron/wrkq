@@ -83,8 +83,44 @@ func wrkpGitTestDeps(repo string, tr Transport) wrkpGitDependencies {
 	}
 }
 
+// wrkpGitIsolateEnv detaches the test from any ambient git repository.
+//
+// runWrkpGitCommand sets only cmd.Dir, and git's GIT_DIR/GIT_WORK_TREE
+// environment variables OVERRIDE the working directory. So when this package is
+// tested from inside a git hook — which is exactly what `git push` does, since the
+// pre-push hook runs `just verify` — every git command these tests issue against
+// their temp repo is silently redirected at the REAL repository. Observed
+// 2026-09-09: the whole TestWrkpGit* set fails, and `git add` stages a phantom
+// path into the real repo's index. Nothing was committed only because the real
+// pre-commit hook happened to error out first.
+//
+// That made `git push` from a worktree impossible in this repo and let a test
+// mutate the developer's index. Clearing the inherited locators is what makes
+// t.TempDir() actually isolating.
+func wrkpGitIsolateEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"GIT_DIR",
+		"GIT_WORK_TREE",
+		"GIT_INDEX_FILE",
+		"GIT_COMMON_DIR",
+		"GIT_OBJECT_DIRECTORY",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+		"GIT_PREFIX",
+	} {
+		name := key
+		if previous, ok := os.LookupEnv(name); ok {
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatalf("unset %s: %v", name, err)
+			}
+			t.Cleanup(func() { _ = os.Setenv(name, previous) })
+		}
+	}
+}
+
 func wrkpGitTestRepo(t *testing.T) string {
 	t.Helper()
+	wrkpGitIsolateEnv(t)
 	repo := t.TempDir()
 	wrkpGitMust(t, repo, "init", "-q", "-b", "main")
 	wrkpGitMust(t, repo, "config", "user.name", "Cody")
