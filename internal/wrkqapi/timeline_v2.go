@@ -135,14 +135,20 @@ func (a *API) containerTimelineViewV2(
 	}
 	cur.Version = 2
 
-	eventRows, err := loadTimelineRawEvents(ctx, tx, cur.AfterEventID, cur.SnapshotEventID)
+	eventRows, eventTruncated, err := loadTimelineRawEvents(ctx, tx, cur.AfterEventID, cur.SnapshotEventID)
 	if err != nil {
 		return nil, err
 	}
-	projectRows, err := loadTimelineRawProjectEvents(ctx, tx, cur.AfterProjectEventID, cur.SnapshotProjectEventID)
+	projectRows, projectTruncated, err := loadTimelineRawProjectEvents(ctx, tx, cur.AfterProjectEventID, cur.SnapshotProjectEventID)
 	if err != nil {
 		return nil, err
 	}
+	horizon := timelineMergeHorizon(
+		timelineScanBound(eventTruncated, len(eventRows) > 0, lastEventTimestamp(eventRows)),
+		timelineScanBound(projectTruncated, len(projectRows) > 0, lastProjectTimestamp(projectRows)),
+	)
+	eventRows = trimTimelineEventRows(eventRows, horizon)
+	projectRows = trimTimelineProjectRows(projectRows, horizon)
 
 	entries := make([]WrkqTimelineEntry, 0, limit)
 	eventIndex, projectIndex := 0, 0
@@ -222,7 +228,7 @@ func timelineSourceMaxima(ctx context.Context, tx *sql.Tx) (int64, int64, error)
 	return eventID, projectEventID, nil
 }
 
-func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int64) ([]timelineRawEvent, error) {
+func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int64) ([]timelineRawEvent, bool, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.resource_uuid, ''),
 		       e.event_type, COALESCE(e.payload, ''),
@@ -239,7 +245,7 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int6
 		 WHERE e.id > ? AND e.id <= ?
 		 ORDER BY e.id ASC LIMIT ?`, after, snapshot, monitorMaxPageLimit)
 	if err != nil {
-		return nil, NewInternalError(err)
+		return nil, false, NewInternalError(err)
 	}
 	defer func() { _ = rows.Close() }()
 	result := []timelineRawEvent{}
@@ -250,21 +256,21 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int6
 			&raw.eventType, &raw.payload, &raw.entry.TaskUUID, &raw.entry.TaskID, &raw.entry.TaskPath,
 			&raw.commentID, &raw.commentKind, &raw.commentBody, &raw.commentMeta,
 		); err != nil {
-			return nil, NewInternalError(err)
+			return nil, false, NewInternalError(err)
 		}
 		raw.entry.Timestamp = toRFC3339(raw.serverTime)
 		result = append(result, raw)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, NewInternalError(err)
+		return nil, false, NewInternalError(err)
 	}
-	return result, nil
+	return result, len(result) == monitorMaxPageLimit, nil
 }
 
-func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, after, snapshot int64) ([]timelineRawProjectEvent, error) {
+func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, after, snapshot int64) ([]timelineRawProjectEvent, bool, error) {
 	rows, err := tx.QueryContext(ctx, timelineProjectEventsRawQuery, after, snapshot, monitorMaxPageLimit)
 	if err != nil {
-		return nil, NewInternalError(err)
+		return nil, false, NewInternalError(err)
 	}
 	defer func() { _ = rows.Close() }()
 	result := []timelineRawProjectEvent{}
@@ -278,7 +284,7 @@ func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, after, snapsh
 			&raw.serverTime, &raw.entry.ContainerUUID, &campaign, &task,
 			&raw.entry.TaskID, &raw.entry.TaskPath,
 		); err != nil {
-			return nil, NewInternalError(err)
+			return nil, false, NewInternalError(err)
 		}
 		detail.Type = raw.semantic
 		detail.Node = nullStringPtr(node)
@@ -298,9 +304,9 @@ func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, after, snapsh
 		result = append(result, raw)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, NewInternalError(err)
+		return nil, false, NewInternalError(err)
 	}
-	return result, nil
+	return result, len(result) == monitorMaxPageLimit, nil
 }
 
 // project_uuid is intentionally absent: current subtree membership is the one
@@ -315,6 +321,95 @@ const timelineProjectEventsRawQuery = `
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
 		 WHERE pe.id > ? AND pe.id <= ?
 		 ORDER BY pe.id ASC LIMIT ?`
+
+// The merged timeline is assembled from two independently scanned sources, and
+// each scan is bounded by a ROW COUNT, not by time. Those two facts do not
+// compose: event_log is large and project_events is small, so one page of the
+// fixed fence drains project_events entirely while event_log is still tens of
+// thousands of rows into its own past. Merging those two pages is locally
+// correct and globally wrong — every project event is emitted before the event
+// rows that share its week, which arrive pages later and jump the delivered
+// stream backwards (T-08328: a 47-day reversal at the page-one boundary, so any
+// --limit under the project-event count returned nothing but git facts).
+//
+// The horizon is the repair. A source truncated by its scan cap still has
+// unread rows immediately after its last one, so NO source may emit past that
+// timestamp; the withheld rows would otherwise be delivered on a later page,
+// behind entries older than themselves. A source that drained to the fence has
+// no such rows and imposes no bound. The page's horizon is therefore the
+// EARLIEST bound any truncated source imposes, and every source is trimmed to
+// it before the merge. Per-source cursors advance only to the last KEPT row, so
+// the withheld rows are re-read, in order, on the next page.
+//
+// Progress is guaranteed: the source that DEFINES the horizon keeps its whole
+// page, because its own last row is the horizon. A page can therefore never
+// trim both sources to nothing, and the fence always drains.
+
+// timelineScanBound reports the timestamp bound one source imposes, or "" when
+// it imposes none. Only a truncated source with rows bounds the page.
+func timelineScanBound(truncated, hasRows bool, last string) string {
+	if !truncated || !hasRows {
+		return ""
+	}
+	return last
+}
+
+// timelineMergeHorizon is the earliest bound across sources. Timestamps are
+// normalized by toRFC3339 to a fixed-width UTC layout, so lexical order is
+// chronological order — the same comparison the merge itself makes.
+func timelineMergeHorizon(bounds ...string) string {
+	horizon := ""
+	for _, bound := range bounds {
+		if bound == "" {
+			continue
+		}
+		if horizon == "" || bound < horizon {
+			horizon = bound
+		}
+	}
+	return horizon
+}
+
+func lastEventTimestamp(rows []timelineRawEvent) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	return rows[len(rows)-1].entry.Timestamp
+}
+
+func lastProjectTimestamp(rows []timelineRawProjectEvent) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	return rows[len(rows)-1].entry.Timestamp
+}
+
+// trimTimelineEventRows drops the trailing rows past the horizon. Rows are
+// already in ascending timestamp order within a source, so the kept prefix is
+// contiguous and the source cursor still advances monotonically.
+func trimTimelineEventRows(rows []timelineRawEvent, horizon string) []timelineRawEvent {
+	if horizon == "" {
+		return rows
+	}
+	for index, row := range rows {
+		if row.entry.Timestamp > horizon {
+			return rows[:index]
+		}
+	}
+	return rows
+}
+
+func trimTimelineProjectRows(rows []timelineRawProjectEvent, horizon string) []timelineRawProjectEvent {
+	if horizon == "" {
+		return rows
+	}
+	for index, row := range rows {
+		if row.entry.Timestamp > horizon {
+			return rows[:index]
+		}
+	}
+	return rows
+}
 
 func timelineHeadBefore(event timelineRawEvent, project timelineRawProjectEvent) bool {
 	if event.entry.Timestamp != project.entry.Timestamp {

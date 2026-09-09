@@ -185,8 +185,8 @@ func newWrkpLogCmd() *cobra.Command {
 			containerSet := ""
 			delivered := 0
 			deliveredLimit := limit
-			if deliveredLimit == 0 {
-				deliveredLimit = 100
+			if deliveredLimit <= 0 {
+				deliveredLimit = wrkpDefaultLimit
 			}
 			for {
 				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow}
@@ -199,8 +199,13 @@ func newWrkpLogCmd() *cobra.Command {
 				if task != "" {
 					params["task"] = sc.selector(task, false)
 				}
-				if remaining := deliveredLimit - delivered; remaining != 100 || limit != 0 {
-					params["limit"] = remaining
+				// --limit is a delivered BUDGET for a bounded read and a per-poll
+				// page size under --follow, where the read never ends and a
+				// decreasing budget would collapse to the server default.
+				if follow {
+					params["limit"] = wrkpPageLimit(deliveredLimit)
+				} else {
+					params["limit"] = wrkpPageLimit(deliveredLimit - delivered)
 				}
 				if typeList != "" {
 					params["types"] = splitCommaValues(typeList)
@@ -267,6 +272,25 @@ func newWrkpLogCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Write the next cursor to stderr")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled timeline even when not a TTY")
 	return cmd
+}
+
+// wrkpDefaultLimit matches the server's own default page size, and
+// wrkpMaxPageLimit matches its hard per-page cap. The cap belongs to one PAGE,
+// not to the read: --limit is what the CALLER asked for, and the paging loop
+// below already stitches pages together, so a --limit above the cap is
+// satisfied by more pages rather than refused. Before T-08328 the whole --limit
+// went to the server verbatim, so `--limit 5000` was rejected outright and a
+// caller who piped the output saw an empty stream and the pipeline's exit code.
+const (
+	wrkpDefaultLimit = 100
+	wrkpMaxPageLimit = 1000
+)
+
+func wrkpPageLimit(remaining int) int {
+	if remaining > wrkpMaxPageLimit {
+		return wrkpMaxPageLimit
+	}
+	return remaining
 }
 
 // resolveWrkpMode picks the output mode for a wrkp read. Interactive displays

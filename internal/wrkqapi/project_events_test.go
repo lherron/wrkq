@@ -542,3 +542,105 @@ func TestProjectEventsI12MoveCoherenceFreshReads(t *testing.T) {
 		t.Fatal("timeline reader predicates on project_uuid")
 	}
 }
+
+// TestTimelineMergeHorizonAcrossPages is T-08328's regression. The two sources
+// are scanned at a fixed ROW cap, so a small project_events table drains in one
+// page while event_log is still deep in its own past. Without a common
+// timestamp horizon the page-one merge emits every project event before the
+// older event rows that arrive pages later, and the delivered stream jumps
+// backwards at the boundary.
+//
+// The fixture is that shape in miniature: a scan-cap's worth of old filler
+// events, then one deliverable event that is NEWER than the filler but OLDER
+// than the only project event, positioned beyond the first page's reach.
+func TestTimelineMergeHorizonAcrossPages(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "horizon", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "task", "open", "")
+
+	for index := 0; index < monitorMaxPageLimit; index++ {
+		if _, err := api.db.Exec(`INSERT INTO event_log(resource_type,event_type) VALUES ('system','ignored.raw')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Every row written so far is filler as far as the merge is concerned, and
+	// backdating the whole prefix keeps id order equal to timestamp order --
+	// the invariant the per-source scan depends on.
+	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2020-01-01 00:00:00'`); err != nil {
+		t.Fatal(err)
+	}
+
+	state := "completed"
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{Task: task.ID, Patch: TaskPatch{State: &state}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2026-01-01 00:00:00' WHERE timestamp <> '2020-01-01 00:00:00'`); err != nil {
+		t.Fatal(err)
+	}
+	event := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "git.commit"})
+	if _, err := api.db.Exec(`UPDATE project_events SET created_at = '2026-01-02 00:00:00'`); err != nil {
+		t.Fatal(err)
+	}
+
+	delivered := []WrkqTimelineEntry{}
+	cursor := ""
+	for page := 0; page < 8; page++ {
+		view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project.UUID, Scope: "subtree", EntriesOnly: true, Limit: 100, Cursor: cursor,
+		})
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		delivered = append(delivered, view.Entries...)
+		if cursor = view.NextCursor; cursor == "" {
+			break
+		}
+	}
+	if cursor != "" {
+		t.Fatal("fence did not drain in 8 pages")
+	}
+
+	for index := 1; index < len(delivered); index++ {
+		if delivered[index].Timestamp < delivered[index-1].Timestamp {
+			t.Fatalf("delivered stream jumps backwards at %d: %s -> %s (%#v)",
+				index, delivered[index-1].Timestamp, delivered[index].Timestamp, delivered)
+		}
+	}
+	if len(delivered) < 2 {
+		t.Fatalf("expected the state change and the project event, got %#v", delivered)
+	}
+	last := delivered[len(delivered)-1]
+	if last.ProjectEventID != event.ID {
+		t.Fatalf("newest entry is not the project event: %#v", delivered)
+	}
+	if !timelineContainsIDs(delivered, 0, event.ID) {
+		t.Fatalf("project event never delivered: %#v", delivered)
+	}
+}
+
+// TestTimelineMergeHorizonBound pins the horizon rule itself: only a truncated
+// source bounds the page, and the earliest such bound wins.
+func TestTimelineMergeHorizonBound(t *testing.T) {
+	if bound := timelineScanBound(false, true, "2026-01-01T00:00:00Z"); bound != "" {
+		t.Fatalf("a drained source must impose no bound, got %q", bound)
+	}
+	if bound := timelineScanBound(true, false, ""); bound != "" {
+		t.Fatalf("an empty source must impose no bound, got %q", bound)
+	}
+	if got := timelineMergeHorizon("2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"); got != "2026-01-01T00:00:00Z" {
+		t.Fatalf("horizon = %q, want the earliest bound", got)
+	}
+	if got := timelineMergeHorizon("", ""); got != "" {
+		t.Fatalf("no bound must leave the page unbounded, got %q", got)
+	}
+	rows := []timelineRawProjectEvent{
+		{entry: WrkqTimelineEntry{Timestamp: "2026-01-01T00:00:00Z"}},
+		{entry: WrkqTimelineEntry{Timestamp: "2026-01-05T00:00:00Z"}},
+	}
+	if kept := trimTimelineProjectRows(rows, "2026-01-01T00:00:00Z"); len(kept) != 1 {
+		t.Fatalf("trim kept %d rows, want the horizon prefix", len(kept))
+	}
+	if kept := trimTimelineProjectRows(rows, ""); len(kept) != 2 {
+		t.Fatalf("an unbounded page must keep every row, got %d", len(kept))
+	}
+}

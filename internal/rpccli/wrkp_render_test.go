@@ -157,3 +157,27 @@ func TestTimelineEntryCarriesPrincipalRefThroughNDJSON(t *testing.T) {
 		t.Fatalf("principalRef was dropped on encode: %s", encoded)
 	}
 }
+
+// wrkpPageLimit is the T-08328 clamp. --limit is the caller's DELIVERED budget
+// and the paging loop stitches pages to reach it, so a budget above the server's
+// per-page cap must be satisfied by more pages rather than refused. Before the
+// clamp the whole budget went to the server verbatim, which returned
+// WRKQ_VALIDATION and no rows at all.
+func TestWrkpPageLimitClampsTheRequestNotTheRead(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining int
+		want      int
+	}{
+		{name: "the default budget fits in one page", remaining: wrkpDefaultLimit, want: wrkpDefaultLimit},
+		{name: "the cap itself is not clamped", remaining: wrkpMaxPageLimit, want: wrkpMaxPageLimit},
+		{name: "one over the cap becomes a full page", remaining: wrkpMaxPageLimit + 1, want: wrkpMaxPageLimit},
+		{name: "a large budget becomes a full page", remaining: 5000, want: wrkpMaxPageLimit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wrkpPageLimit(tc.remaining); got != tc.want {
+				t.Fatalf("wrkpPageLimit(%d) = %d, want %d", tc.remaining, got, tc.want)
+			}
+		})
+	}
+}
