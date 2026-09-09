@@ -192,6 +192,14 @@ func newWrkpLogCmd() *cobra.Command {
 				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow}
 				if cursor != "" {
 					params["cursor"] = cursor
+				} else if !follow {
+					// A log reads newest-first: --limit N is "the N most recent",
+					// and the newest entry is the first one delivered. --follow
+					// stays ascending because it follows APPENDS, which only
+					// arrive at the newest end. Later pages take their direction
+					// from the cursor, which is authoritative, so the flag is
+					// sent only on the opening page.
+					params["order"] = "desc"
 				}
 				if since != "" {
 					params["since"] = since

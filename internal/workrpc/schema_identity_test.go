@@ -62,7 +62,7 @@ import (
 // `states`/`lifecycle`/`pruneEmpty` fails initialize against a daemon that would
 // silently ignore them, instead of rendering a tree it believes is filtered.
 // dtos 150 -> 152.
-const pinnedProtocolSchemaHash = "sha256:b8182664dac6d9ed9fedd2f02e948d974df1c94e95f1f33954df51c648462772"
+const pinnedProtocolSchemaHash = "sha256:94f4acec0f7e8d8f6f7b83580e96ab3f448bdb1cf9f108f2bb753c646b9dbc09"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

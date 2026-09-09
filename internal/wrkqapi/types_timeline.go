@@ -15,6 +15,11 @@ type ContainerTimelineViewParams struct {
 	Since       string   `json:"since,omitempty"`
 	EntriesOnly bool     `json:"entriesOnly,omitempty"`
 	Tail        bool     `json:"tail,omitempty"`
+	// Order is the delivery direction: "asc" (default, oldest first) or "desc"
+	// (newest first). Default asc keeps every existing caller byte-identical.
+	// A cursor carries its own direction and is authoritative; an Order that
+	// contradicts it is refused rather than silently reinterpreted.
+	Order string `json:"order,omitempty"`
 }
 
 // WrkqTimelineContainer is the timeline's BASE container object. Content and
@@ -167,4 +172,10 @@ type timelineCursor struct {
 	Scope                  string `json:"scope,omitempty"`
 	SnapshotProjectEventID int64  `json:"snapshotProjectEventId,omitempty"`
 	AfterProjectEventID    int64  `json:"afterProjectEventId,omitempty"`
+	// Version 3 is the descending cursor. It walks each source DOWN from the
+	// fence, so its position is an exclusive UPPER bound per source rather than
+	// the ascending reader's exclusive lower bound. Zero means that source is
+	// drained; the ascending After* fields are unused.
+	BeforeEventID        int64 `json:"beforeEventId,omitempty"`
+	BeforeProjectEventID int64 `json:"beforeProjectEventId,omitempty"`
 }

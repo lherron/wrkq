@@ -36,10 +36,11 @@ type timelineRawProjectEvent struct {
 }
 
 func timelineRequestUsesV2(p ContainerTimelineViewParams) bool {
-	if p.Scope != "" || p.Types != nil || p.Task != "" || p.Since != "" || p.EntriesOnly || p.Tail {
+	if p.Scope != "" || p.Types != nil || p.Task != "" || p.Since != "" || p.EntriesOnly || p.Tail || p.Order != "" {
 		return true
 	}
-	return timelineCursorVersion(p.Cursor) == 2
+	version := timelineCursorVersion(p.Cursor)
+	return version == 2 || version == 3
 }
 
 func timelineCursorVersion(raw string) int {
@@ -102,20 +103,44 @@ func (a *API) containerTimelineViewV2(
 		}
 	}
 
+	requested, err := parseTimelineOrder(p.Order)
+	if err != nil {
+		return nil, err
+	}
+	desc := requested == timelineOrderDesc
+
 	cur := timelineCursor{Version: 2, ContainerUUID: containerUUID, Scope: scope}
 	if p.Cursor != "" {
 		cur, err = decodeTimelineCursorAny(p.Cursor)
 		if err != nil {
 			return nil, NewValidationError("invalid timeline cursor", map[string]any{"field": "cursor"})
 		}
-		if cur.ContainerUUID != containerUUID || (cur.Version == 2 && cur.Scope != scope) {
+		if cur.ContainerUUID != containerUUID || (cur.Version >= 2 && cur.Scope != scope) {
 			return nil, NewValidationError("timeline cursor does not match the request", map[string]any{"field": "cursor"})
 		}
+		// A cursor is a POSITION in one direction and cannot be reinterpreted in
+		// the other: the ascending reader's position is an exclusive lower bound
+		// and the descending reader's an exclusive upper one. Refuse the
+		// contradiction rather than silently paging the wrong way.
+		cursorDesc := cur.Version == 3
+		if requested != timelineOrderUnset && cursorDesc != desc {
+			return nil, NewValidationError("order contradicts the cursor's direction", map[string]any{
+				"field": "order", "reason": "cursor_direction_mismatch",
+			})
+		}
+		desc = cursorDesc
 		if cur.Version == 1 {
 			cur.Scope = scope
 			cur.SnapshotProjectEventID = 0
 			cur.AfterProjectEventID = 0
 		}
+	}
+	// A tail follows APPENDS, which only ever arrive at the newest end, so it is
+	// ascending by construction.
+	if desc && p.Tail {
+		return nil, NewValidationError("tail requires ascending order", map[string]any{
+			"field": "order", "reason": "tail_requires_ascending",
+		})
 	}
 
 	currentEventID, currentProjectEventID, err := timelineSourceMaxima(ctx, tx)
@@ -125,6 +150,10 @@ func (a *API) containerTimelineViewV2(
 	if p.Cursor == "" {
 		cur.SnapshotEventID = currentEventID
 		cur.SnapshotProjectEventID = currentProjectEventID
+		// The descending reader starts AT the fence and walks down, so its
+		// exclusive upper bound opens one past the newest row.
+		cur.BeforeEventID = currentEventID + 1
+		cur.BeforeProjectEventID = currentProjectEventID + 1
 		if p.Tail && since == nil {
 			cur.AfterEventID = currentEventID
 			cur.AfterProjectEventID = currentProjectEventID
@@ -134,33 +163,42 @@ func (a *API) containerTimelineViewV2(
 		cur.SnapshotProjectEventID = currentProjectEventID
 	}
 	cur.Version = 2
+	if desc {
+		cur.Version = 3
+	}
 
-	eventRows, eventTruncated, err := loadTimelineRawEvents(ctx, tx, cur.AfterEventID, cur.SnapshotEventID)
+	eventLow, eventHigh := timelineScanWindow(desc, cur.AfterEventID, cur.SnapshotEventID, cur.BeforeEventID)
+	projectLow, projectHigh := timelineScanWindow(desc, cur.AfterProjectEventID, cur.SnapshotProjectEventID, cur.BeforeProjectEventID)
+	eventRows, eventTruncated, err := loadTimelineRawEvents(ctx, tx, eventLow, eventHigh, desc)
 	if err != nil {
 		return nil, err
 	}
-	projectRows, projectTruncated, err := loadTimelineRawProjectEvents(ctx, tx, cur.AfterProjectEventID, cur.SnapshotProjectEventID)
+	projectRows, projectTruncated, err := loadTimelineRawProjectEvents(ctx, tx, projectLow, projectHigh, desc)
 	if err != nil {
 		return nil, err
 	}
-	horizon := timelineMergeHorizon(
+	horizon := timelineMergeHorizon(desc,
 		timelineScanBound(eventTruncated, len(eventRows) > 0, lastEventTimestamp(eventRows)),
 		timelineScanBound(projectTruncated, len(projectRows) > 0, lastProjectTimestamp(projectRows)),
 	)
-	eventRows = trimTimelineEventRows(eventRows, horizon)
-	projectRows = trimTimelineProjectRows(projectRows, horizon)
+	eventKept := trimTimelineEventRows(eventRows, horizon, desc)
+	projectKept := trimTimelineProjectRows(projectRows, horizon, desc)
+	eventDrained := !eventTruncated && len(eventKept) == len(eventRows)
+	projectDrained := !projectTruncated && len(projectKept) == len(projectRows)
+	eventRows, projectRows = eventKept, projectKept
 
 	entries := make([]WrkqTimelineEntry, 0, limit)
 	eventIndex, projectIndex := 0, 0
 	for len(entries) < limit && (eventIndex < len(eventRows) || projectIndex < len(projectRows)) {
 		popEvent := projectIndex >= len(projectRows)
 		if eventIndex < len(eventRows) && projectIndex < len(projectRows) {
-			popEvent = timelineHeadBefore(eventRows[eventIndex], projectRows[projectIndex])
+			popEvent = timelineHeadFirst(eventRows[eventIndex], projectRows[projectIndex], desc)
 		}
 		if popEvent {
 			raw := eventRows[eventIndex]
 			eventIndex++
 			cur.AfterEventID = raw.entry.EventID
+			cur.BeforeEventID = raw.entry.EventID
 			entry, included, err := deliverTimelineEvent(raw, containerUUID, affiliation, p.Types, taskUUID, since)
 			if err != nil {
 				return nil, err
@@ -173,12 +211,29 @@ func (a *API) containerTimelineViewV2(
 		raw := projectRows[projectIndex]
 		projectIndex++
 		cur.AfterProjectEventID = raw.entry.ProjectEventID
+		cur.BeforeProjectEventID = raw.entry.ProjectEventID
 		if entry, included := deliverTimelineProjectEvent(raw, containerUUID, affiliation, p.Types, taskUUID, since); included {
 			entries = append(entries, entry)
 		}
 	}
 
 	hasMore := cur.AfterEventID < cur.SnapshotEventID || cur.AfterProjectEventID < cur.SnapshotProjectEventID
+	if desc {
+		// The descending reader has no cheap fence to compare against -- it
+		// walks toward id 0 -- so a source reports itself drained when its scan
+		// was neither truncated by the cap nor trimmed by the horizon. `since`
+		// closes it earlier: below the floor no older row can ever match.
+		// Only the CONSUMED prefix may close a source. A page that filled the
+		// delivery limit early leaves kept rows unread, and those are re-read
+		// from the unchanged position on the next page.
+		if (eventDrained && eventIndex == len(eventRows)) || timelineEventFloorReached(eventRows[:eventIndex], since) {
+			cur.BeforeEventID = 0
+		}
+		if (projectDrained && projectIndex == len(projectRows)) || timelineProjectFloorReached(projectRows[:projectIndex], since) {
+			cur.BeforeProjectEventID = 0
+		}
+		hasMore = cur.BeforeEventID > 0 || cur.BeforeProjectEventID > 0
+	}
 	nextCursor := ""
 	if p.Tail || hasMore {
 		nextCursor, err = encodeTimelineCursor(cur)
@@ -228,8 +283,8 @@ func timelineSourceMaxima(ctx context.Context, tx *sql.Tx) (int64, int64, error)
 	return eventID, projectEventID, nil
 }
 
-func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int64) ([]timelineRawEvent, bool, error) {
-	rows, err := tx.QueryContext(ctx, `
+func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool) ([]timelineRawEvent, bool, error) {
+	rows, err := tx.QueryContext(ctx, timelineOrdered(`
 		SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.resource_uuid, ''),
 		       e.event_type, COALESCE(e.payload, ''),
 		       COALESCE(t.uuid, comment_task.uuid, ''),
@@ -243,7 +298,7 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int6
 		  LEFT JOIN tasks comment_task ON e.event_type = 'comment.created' AND comment_task.uuid = json_extract(e.payload, '$.task_id')
 		  LEFT JOIN v_task_paths comment_tp ON comment_tp.uuid = comment_task.uuid
 		 WHERE e.id > ? AND e.id <= ?
-		 ORDER BY e.id ASC LIMIT ?`, after, snapshot, monitorMaxPageLimit)
+		 ORDER BY e.id %s LIMIT ?`, desc), low, high, monitorMaxPageLimit)
 	if err != nil {
 		return nil, false, NewInternalError(err)
 	}
@@ -267,8 +322,8 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, after, snapshot int6
 	return result, len(result) == monitorMaxPageLimit, nil
 }
 
-func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, after, snapshot int64) ([]timelineRawProjectEvent, bool, error) {
-	rows, err := tx.QueryContext(ctx, timelineProjectEventsRawQuery, after, snapshot, monitorMaxPageLimit)
+func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool) ([]timelineRawProjectEvent, bool, error) {
+	rows, err := tx.QueryContext(ctx, timelineOrdered(timelineProjectEventsRawQuery, desc), low, high, monitorMaxPageLimit)
 	if err != nil {
 		return nil, false, NewInternalError(err)
 	}
@@ -320,7 +375,7 @@ const timelineProjectEventsRawQuery = `
 		  LEFT JOIN tasks t ON t.uuid = pe.task_uuid
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
 		 WHERE pe.id > ? AND pe.id <= ?
-		 ORDER BY pe.id ASC LIMIT ?`
+		 ORDER BY pe.id %s LIMIT ?`
 
 // The merged timeline is assembled from two independently scanned sources, and
 // each scan is bounded by a ROW COUNT, not by time. Those two facts do not
@@ -345,6 +400,62 @@ const timelineProjectEventsRawQuery = `
 // page, because its own last row is the horizon. A page can therefore never
 // trim both sources to nothing, and the fence always drains.
 
+// Delivery direction. Ascending is the default and the shape every caller
+// before T-08328 got; descending is what a `log` verb wants, where --limit N
+// means "the N most recent" and the newest entry is the first one delivered.
+// Descending is also the cheaper read for that question: it starts AT the fence
+// instead of walking the whole history to reach it.
+const (
+	timelineOrderUnset = ""
+	timelineOrderAsc   = "asc"
+	timelineOrderDesc  = "desc"
+)
+
+func parseTimelineOrder(raw string) (string, error) {
+	switch value := strings.TrimSpace(raw); value {
+	case timelineOrderUnset, timelineOrderAsc, timelineOrderDesc:
+		return value, nil
+	default:
+		return "", NewValidationError("order must be asc or desc", map[string]any{"field": "order"})
+	}
+}
+
+// timelineOrdered stamps the scan direction into a source query. The token is
+// from a closed set, never caller text.
+func timelineOrdered(query string, desc bool) string {
+	if desc {
+		return fmt.Sprintf(query, "DESC")
+	}
+	return fmt.Sprintf(query, "ASC")
+}
+
+// timelineScanWindow maps a cursor position to the source's id window. The two
+// directions carry opposite positions: ascending holds an exclusive LOWER bound
+// under a fixed fence, descending an exclusive UPPER bound walking toward zero.
+func timelineScanWindow(desc bool, after, snapshot, before int64) (int64, int64) {
+	if desc {
+		return 0, before - 1
+	}
+	return after, snapshot
+}
+
+// timelineEventFloorReached reports that a descending scan has passed below
+// `since`: within one source id order is timestamp order, so once a consumed
+// row is older than the floor no older row can ever match.
+func timelineEventFloorReached(consumed []timelineRawEvent, since *time.Time) bool {
+	if since == nil || len(consumed) == 0 {
+		return false
+	}
+	return !timelineSinceMatches(consumed[len(consumed)-1].entry.Timestamp, since)
+}
+
+func timelineProjectFloorReached(consumed []timelineRawProjectEvent, since *time.Time) bool {
+	if since == nil || len(consumed) == 0 {
+		return false
+	}
+	return !timelineSinceMatches(consumed[len(consumed)-1].entry.Timestamp, since)
+}
+
 // timelineScanBound reports the timestamp bound one source imposes, or "" when
 // it imposes none. Only a truncated source with rows bounds the page.
 func timelineScanBound(truncated, hasRows bool, last string) string {
@@ -357,17 +468,27 @@ func timelineScanBound(truncated, hasRows bool, last string) string {
 // timelineMergeHorizon is the earliest bound across sources. Timestamps are
 // normalized by toRFC3339 to a fixed-width UTC layout, so lexical order is
 // chronological order — the same comparison the merge itself makes.
-func timelineMergeHorizon(bounds ...string) string {
+func timelineMergeHorizon(desc bool, bounds ...string) string {
 	horizon := ""
 	for _, bound := range bounds {
 		if bound == "" {
 			continue
 		}
-		if horizon == "" || bound < horizon {
+		if horizon == "" || timelineAheadOf(horizon, bound, desc) {
 			horizon = bound
 		}
 	}
 	return horizon
+}
+
+// timelineAheadOf reports whether a is further along the delivery direction
+// than b. Ascending delivery runs toward later timestamps, descending toward
+// earlier ones, so "the earliest bound wins" inverts with the direction.
+func timelineAheadOf(a, b string, desc bool) bool {
+	if desc {
+		return a < b
+	}
+	return a > b
 }
 
 func lastEventTimestamp(rows []timelineRawEvent) string {
@@ -387,36 +508,40 @@ func lastProjectTimestamp(rows []timelineRawProjectEvent) string {
 // trimTimelineEventRows drops the trailing rows past the horizon. Rows are
 // already in ascending timestamp order within a source, so the kept prefix is
 // contiguous and the source cursor still advances monotonically.
-func trimTimelineEventRows(rows []timelineRawEvent, horizon string) []timelineRawEvent {
+func trimTimelineEventRows(rows []timelineRawEvent, horizon string, desc bool) []timelineRawEvent {
 	if horizon == "" {
 		return rows
 	}
 	for index, row := range rows {
-		if row.entry.Timestamp > horizon {
+		if timelineAheadOf(row.entry.Timestamp, horizon, desc) {
 			return rows[:index]
 		}
 	}
 	return rows
 }
 
-func trimTimelineProjectRows(rows []timelineRawProjectEvent, horizon string) []timelineRawProjectEvent {
+func trimTimelineProjectRows(rows []timelineRawProjectEvent, horizon string, desc bool) []timelineRawProjectEvent {
 	if horizon == "" {
 		return rows
 	}
 	for index, row := range rows {
-		if row.entry.Timestamp > horizon {
+		if timelineAheadOf(row.entry.Timestamp, horizon, desc) {
 			return rows[:index]
 		}
 	}
 	return rows
 }
 
-func timelineHeadBefore(event timelineRawEvent, project timelineRawProjectEvent) bool {
+// timelineHeadFirst reports whether the event head is delivered before the
+// project head. Descending delivery is the exact reverse of ascending, ties
+// included: event_log has source rank zero and wins an ascending server-time
+// tie, so it must LOSE the descending one for a descending page to be the
+// reverse of the ascending page over the same rows.
+func timelineHeadFirst(event timelineRawEvent, project timelineRawProjectEvent, desc bool) bool {
 	if event.entry.Timestamp != project.entry.Timestamp {
-		return event.entry.Timestamp < project.entry.Timestamp
+		return timelineAheadOf(project.entry.Timestamp, event.entry.Timestamp, desc)
 	}
-	// event_log has source rank zero, so it wins a server-time tie.
-	return true
+	return !desc
 }
 
 func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[string]bool, filters []string, taskUUID string, since *time.Time) (WrkqTimelineEntry, bool, error) {
@@ -548,6 +673,13 @@ func decodeTimelineCursorAny(raw string) (timelineCursor, error) {
 	case 2:
 		if (cur.Scope != "container" && cur.Scope != "subtree") || cur.AfterProjectEventID < 0 ||
 			cur.SnapshotProjectEventID < 0 || cur.AfterProjectEventID > cur.SnapshotProjectEventID {
+			return timelineCursor{}, fmt.Errorf("invalid timeline cursor fields")
+		}
+		return cur, nil
+	case 3:
+		if (cur.Scope != "container" && cur.Scope != "subtree") ||
+			cur.BeforeEventID < 0 || cur.BeforeProjectEventID < 0 ||
+			cur.BeforeEventID > cur.SnapshotEventID+1 || cur.BeforeProjectEventID > cur.SnapshotProjectEventID+1 {
 			return timelineCursor{}, fmt.Errorf("invalid timeline cursor fields")
 		}
 		return cur, nil

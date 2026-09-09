@@ -627,20 +627,181 @@ func TestTimelineMergeHorizonBound(t *testing.T) {
 	if bound := timelineScanBound(true, false, ""); bound != "" {
 		t.Fatalf("an empty source must impose no bound, got %q", bound)
 	}
-	if got := timelineMergeHorizon("2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"); got != "2026-01-01T00:00:00Z" {
+	if got := timelineMergeHorizon(false, "2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"); got != "2026-01-01T00:00:00Z" {
 		t.Fatalf("horizon = %q, want the earliest bound", got)
 	}
-	if got := timelineMergeHorizon("", ""); got != "" {
+	if got := timelineMergeHorizon(false, "", ""); got != "" {
 		t.Fatalf("no bound must leave the page unbounded, got %q", got)
 	}
 	rows := []timelineRawProjectEvent{
 		{entry: WrkqTimelineEntry{Timestamp: "2026-01-01T00:00:00Z"}},
 		{entry: WrkqTimelineEntry{Timestamp: "2026-01-05T00:00:00Z"}},
 	}
-	if kept := trimTimelineProjectRows(rows, "2026-01-01T00:00:00Z"); len(kept) != 1 {
+	if kept := trimTimelineProjectRows(rows, "2026-01-01T00:00:00Z", false); len(kept) != 1 {
 		t.Fatalf("trim kept %d rows, want the horizon prefix", len(kept))
 	}
-	if kept := trimTimelineProjectRows(rows, ""); len(kept) != 2 {
+	if kept := trimTimelineProjectRows(rows, "", false); len(kept) != 2 {
 		t.Fatalf("an unbounded page must keep every row, got %d", len(kept))
+	}
+	// Descending delivery inverts the rule: the LATEST bound wins, and rows
+	// EARLIER than the horizon are the ones withheld.
+	if got := timelineMergeHorizon(true, "2026-02-01T00:00:00Z", "2026-01-01T00:00:00Z"); got != "2026-02-01T00:00:00Z" {
+		t.Fatalf("descending horizon = %q, want the latest bound", got)
+	}
+	descRows := []timelineRawProjectEvent{
+		{entry: WrkqTimelineEntry{Timestamp: "2026-01-05T00:00:00Z"}},
+		{entry: WrkqTimelineEntry{Timestamp: "2026-01-01T00:00:00Z"}},
+	}
+	if kept := trimTimelineProjectRows(descRows, "2026-01-05T00:00:00Z", true); len(kept) != 1 {
+		t.Fatalf("descending trim kept %d rows, want the horizon prefix", len(kept))
+	}
+}
+
+// TestTimelineDescendingIsTheExactReverse is F2's contract. A `log` verb reads
+// newest-first, so --limit N means "the N most recent". The descending page
+// must be the exact reverse of the ascending one over the same rows -- ties
+// included -- or the two directions disagree about what the timeline IS.
+func TestTimelineDescendingIsTheExactReverse(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "desc", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "task", "open", "")
+	for _, state := range []string{"in_progress", "completed"} {
+		if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{Task: task.ID, Patch: TaskPatch{State: &state}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < 3; index++ {
+		postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "git.commit"})
+	}
+
+	drain := func(order string) []WrkqTimelineEntry {
+		t.Helper()
+		out, cursor := []WrkqTimelineEntry{}, ""
+		for page := 0; page < 8; page++ {
+			view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+				Container: project.UUID, Scope: "subtree", EntriesOnly: true, Limit: 2,
+				Order: order, Cursor: cursor,
+			})
+			if err != nil {
+				t.Fatalf("%s page %d: %v", order, page, err)
+			}
+			out = append(out, view.Entries...)
+			if cursor = view.NextCursor; cursor == "" {
+				return out
+			}
+		}
+		t.Fatalf("%s did not drain in 8 pages", order)
+		return nil
+	}
+
+	ascending := drain("asc")
+	descending := drain("desc")
+	if len(ascending) != len(descending) || len(ascending) < 5 {
+		t.Fatalf("asc delivered %d, desc delivered %d", len(ascending), len(descending))
+	}
+	for index, entry := range descending {
+		mirror := ascending[len(ascending)-1-index]
+		if entry.Timestamp != mirror.Timestamp || entry.EventID != mirror.EventID ||
+			entry.ProjectEventID != mirror.ProjectEventID {
+			t.Fatalf("desc[%d] is not the mirror of asc[%d]: %#v vs %#v",
+				index, len(ascending)-1-index, entry, mirror)
+		}
+	}
+	for index := 1; index < len(descending); index++ {
+		if descending[index].Timestamp > descending[index-1].Timestamp {
+			t.Fatalf("descending stream jumps forwards at %d: %s -> %s",
+				index, descending[index-1].Timestamp, descending[index].Timestamp)
+		}
+	}
+
+	// A cursor is a position in ONE direction and must never be reinterpreted
+	// in the other, and a tail follows appends so it cannot run backwards.
+	first, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Limit: 2, Order: "desc",
+	})
+	if err != nil || first.NextCursor == "" {
+		t.Fatalf("descending first page = %#v %v", first, err)
+	}
+	if timelineCursorVersion(first.NextCursor) != 3 {
+		t.Fatalf("descending cursor version = %d, want 3", timelineCursorVersion(first.NextCursor))
+	}
+	if _, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Order: "asc", Cursor: first.NextCursor,
+	}); err == nil {
+		t.Fatal("asc over a descending cursor must be refused")
+	}
+	if _, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Order: "desc", Tail: true,
+	}); err == nil {
+		t.Fatal("a descending tail must be refused")
+	}
+	if _, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Order: "sideways",
+	}); err == nil {
+		t.Fatal("an unknown order must be refused")
+	}
+}
+
+// TestTimelineDescendingHonoursTheHorizon is the T-08328 fixture read backwards:
+// the newest end is reached on page one instead of after the whole history, and
+// the horizon still keeps the two sources from crossing.
+func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "deschorizon", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "task", "open", "")
+	state := "completed"
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{Task: task.ID, Patch: TaskPatch{State: &state}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2026-01-01 00:00:00'`); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < monitorMaxPageLimit; index++ {
+		if _, err := api.db.Exec(`INSERT INTO event_log(resource_type,event_type,timestamp) VALUES ('system','ignored.raw','2026-03-01 00:00:00')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "git.commit"})
+	if _, err := api.db.Exec(`UPDATE project_events SET created_at = '2026-02-01 00:00:00'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// A page may legitimately deliver nothing -- here the newest 1000 rows are
+	// all unmatched filler -- so the contract is about the DELIVERED stream,
+	// not about page one. The first entry delivered must be the newest match,
+	// and the stream must never run forwards.
+	delivered, cursor := []WrkqTimelineEntry{}, ""
+	for page := 0; page < 8; page++ {
+		view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project.UUID, Scope: "subtree", EntriesOnly: true, Limit: 100,
+			Order: "desc", Cursor: cursor,
+		})
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		delivered = append(delivered, view.Entries...)
+		if cursor = view.NextCursor; cursor == "" {
+			break
+		}
+	}
+	if cursor != "" {
+		t.Fatal("descending fence did not drain in 8 pages")
+	}
+	if len(delivered) < 2 {
+		t.Fatalf("expected the project event and the state change, got %#v", delivered)
+	}
+	if delivered[0].ProjectEventID != event.ID {
+		t.Fatalf("descending stream must open on the newest match, got %#v", delivered)
+	}
+	for index := 1; index < len(delivered); index++ {
+		if delivered[index].Timestamp > delivered[index-1].Timestamp {
+			t.Fatalf("descending stream jumps forwards at %d: %s -> %s",
+				index, delivered[index-1].Timestamp, delivered[index].Timestamp)
+		}
+	}
+	// The horizon still separates the sources: the project event is NEWER than
+	// the state change and must be delivered before it, never beside it.
+	if delivered[len(delivered)-1].ProjectEventID == event.ID {
+		t.Fatalf("project event landed at the oldest end: %#v", delivered)
 	}
 }

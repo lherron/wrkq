@@ -1320,6 +1320,14 @@ export interface WrkqContainerTimelineViewParams {
   since?: string;
   entriesOnly?: boolean;
   tail?: boolean;
+  /**
+   * Delivery direction: "asc" (default, oldest first) or "desc" (newest
+   * first). A cursor carries its own direction and is authoritative; an order
+   * that contradicts it is refused rather than silently reinterpreted. "desc"
+   * is incompatible with tail, which follows appends and is ascending by
+   * construction.
+   */
+  order?: "asc" | "desc";
 }
 
 export interface WrkqTimelineContainer {
