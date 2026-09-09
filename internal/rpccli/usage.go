@@ -11,9 +11,6 @@ import (
 //go:embed embedded/WRKQ-USAGE.md
 var wrkqUsageContent string
 
-//go:embed embedded/AGENT-WRKQ-USAGE.md
-var agentUsageContent string
-
 //go:embed embedded/WRKC-USAGE.md
 var wrkcUsageContent string
 
@@ -22,8 +19,8 @@ func newUsageCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "usage",
 		Aliases: []string{"info"},
-		Short:   "Display wrkq usage documentation",
-		Long:    `Displays the embedded WRKQ-USAGE.md documentation for agents and users.`,
+		Short:   "Display the wrkq agent guide",
+		Long:    `Displays the embedded WRKQ-USAGE.md agent guide. ` + "`wrkq agent-info`" + ` serves the same content.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return renderEmbeddedUsage(cmd, wrkqUsageContent, asJSON)
 		},
@@ -36,10 +33,10 @@ func newAgentInfoCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "agent-info",
-		Short: "Display condensed wrkq quick reference for agents",
-		Long:  `Displays a condensed quick reference of essential wrkq commands for coding agents.`,
+		Short: "Display the wrkq agent guide (alias for usage)",
+		Long:  `Compatibility entry point for startup hooks. Serves the same embedded WRKQ-USAGE.md agent guide as ` + "`wrkq usage`" + ` / ` + "`wrkq info`" + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return renderEmbeddedUsage(cmd, agentUsageContent, asJSON)
+			return renderEmbeddedUsage(cmd, wrkqUsageContent, asJSON)
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")

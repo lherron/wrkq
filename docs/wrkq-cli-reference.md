@@ -248,7 +248,7 @@ wrkq handoff search "auth flow"
 ## Agent ergonomics
 
 ```bash
-wrkq agent-info                # embedded usage doc, for startup hooks
+wrkq agent-info                # same agent guide as `wrkq info`, for startup hooks
 wrkq agent-context             # resolve/print the active agent scope
 wrkq agent-context --scope agent:cody:project:wrkq
 wrkq whoami                    # resolved principal + runtime scope

@@ -711,8 +711,7 @@ Canonical markdown that remains:
 | `AGENTS.md` / `CLAUDE.md` | Agent operating instructions; `CLAUDE.md` is a symlink. |
 | `docs/SPEC.md` | Canonical wrkq specification. |
 | `docs/wrkf-rpc.md` | Frozen wrkf JSON-RPC machine contract. |
-| `internal/rpccli/embedded/WRKQ-USAGE.md` | Embedded full agent usage block. |
-| `internal/rpccli/embedded/AGENT-WRKQ-USAGE.md` | Embedded compact quick reference. |
+| `internal/rpccli/embedded/WRKQ-USAGE.md` | Embedded agent guide; the single source served by `usage`/`info`/`agent-info`. |
 | `mcp-server/README.md` | Local package README for the MCP stdio wrapper. |
 | `pbc/templates/` | Workflow artifact templates used by the PBC sample preset. |
 | `vendor/` | Third-party vendored documentation; not a wrkq spec surface. |

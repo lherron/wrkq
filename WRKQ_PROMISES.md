@@ -643,8 +643,8 @@ contract; none of these are promise-specific decisions:
   supply the creator; owner defaults to creator.
 - **Concurrency**: mutations take `--etag` / `--if-match` like task `set`;
   every mutation increments `etag`.
-- **Help and info**: usage text lives in the embedded `WRKQ-USAGE.md` and
-  `AGENT-WRKQ-USAGE.md` (served by `wrkq info` / `wrkq agent-info`), plus
+- **Help and info**: usage text lives in the embedded `WRKQ-USAGE.md`
+  (served by `wrkq info` and the `wrkq agent-info` compatibility alias), plus
   cobra `--help`; the reference docs are generated from the same source, not
   written twice.
 - **Selectors**: `PR-xxxxx` friendly IDs and UUIDs resolve through the

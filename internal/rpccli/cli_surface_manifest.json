@@ -121,7 +121,7 @@
       {
         "name": "agent-info",
         "use": "agent-info",
-        "short": "Display condensed wrkq quick reference for agents",
+        "short": "Display the wrkq agent guide (alias for usage)",
         "hidden": false,
         "available": true,
         "flags": [
@@ -3806,7 +3806,7 @@
         "aliases": [
           "info"
         ],
-        "short": "Display wrkq usage documentation",
+        "short": "Display the wrkq agent guide",
         "hidden": false,
         "available": true,
         "flags": [

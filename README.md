@@ -35,8 +35,10 @@ Then update your agent startup hook to run `wrkq info`:
 
 ```bash
 echo "=== This project uses wrkq ==="
-wrkq agent-info 2>/dev/null || echo "(wrkq info failed or not available, notify user)"
+wrkq info 2>/dev/null || echo "(wrkq info failed or not available, notify user)"
 ```
+
+`wrkq agent-info` is a compatibility alias that serves the same agent guide.
 
 ### Requirements
 

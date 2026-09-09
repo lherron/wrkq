@@ -25,7 +25,7 @@ var topLevelCommands = []mirroredCommand{
 	// ack is RPC-backed (real parity command); registered separately.
 	// agent is local pass-through to hrcchat; registered separately.
 	// agent-context is local/RPC-lookup parity; registered separately.
-	// agent-info is local-only and byte-proven; registered separately.
+	// agent-info is a local-only compatibility alias serving WRKQ-USAGE.md; registered separately.
 	// apply is RPC-backed (wrkq.task.update via the caller-side parse/gate); registered separately.
 	// bundle is sunset before production cutover; see T-04371.
 	// cat is the one real command this slice; registered separately.
