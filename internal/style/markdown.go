@@ -175,11 +175,23 @@ func styleEmphasis(s string) string {
 	return s
 }
 
-// detectedWidth is the terminal column count, resolved once at startup. Falls
-// back to COLUMNS, then a sane default, when the size can't be read. Both
-// binaries resolve it identically (same stdout / env), so wrapped --pretty
-// output stays byte-identical between them.
-var detectedWidth = func() int {
+// detectedWidth is the terminal column count, resolved PER RENDER rather than
+// once at startup (T-08225). Resolving it once was harmless while every human
+// render was one-shot; `wrkp log --follow` streams for as long as the reader
+// leaves it open, so a process-lifetime width means a resized pane keeps
+// wrapping, padding and right-aligning to the width the stream started with.
+//
+// Falls back to COLUMNS, then a sane default, when the size can't be read. The
+// resolution ORDER is unchanged, which is what preserves determinism: under a
+// non-TTY (every byte-parity test, and any pipe) term.GetSize fails and COLUMNS
+// decides, so --pretty stays byte-identical run to run and between binaries.
+// Re-reading only adds freshness on a real terminal, where there is no parity
+// claim to keep.
+//
+// A live ioctl per call is deliberate over caching plus an explicit refresh
+// hook: a cache is only correct if every render boundary remembers to invalidate
+// it, and the follow loop is precisely the caller that would forget.
+func detectedWidth() int {
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 1 {
 		return w
 	}
@@ -187,13 +199,13 @@ var detectedWidth = func() int {
 		return c
 	}
 	return 100
-}()
+}
 
 // wrapWidth is the visible column budget for flowing text: the terminal width
 // less a one-column safety margin (so the terminal never re-wraps our lines),
 // capped for readability on very wide terminals.
 func wrapWidth() int {
-	w := detectedWidth - 1
+	w := detectedWidth() - 1
 	if w > 120 {
 		w = 120
 	}

@@ -509,3 +509,72 @@ func renderKeyValues(w io.Writer, rows []keyValue) {
 		emitFlowPlain(w, first, cont, row.Value)
 	}
 }
+
+// StyledType is the flattened view model for one observed project-event type.
+// Like StyledEntry it is decoupled from any wire struct so the renderer stays
+// presentation only.
+type StyledType struct {
+	Type          string
+	Count         int64
+	LastCreatedAt string
+}
+
+// RenderStyledTypes draws the observed foreign fact types for a project (T-08224).
+// `types` was the one wrkp read left out of the porcelain pass, so it emitted a
+// raw JSON array between two styled siblings.
+//
+// The empty case is the interesting one and is NOT an error: a project with no
+// project_events has simply never had a producer post to it. Saying "[]", or
+// saying nothing at all, is indistinguishable from a broken command — so name the
+// project and the cause.
+func RenderStyledTypes(w io.Writer, project string, types []StyledType) {
+	if project != "" {
+		_, _ = io.WriteString(w, Paint(ColDir, project)+"\n")
+		_, _ = io.WriteString(w, Paint(ColRule, strings.Repeat("─", typesWidth(types)))+"\n")
+	}
+	if len(types) == 0 {
+		_, _ = io.WriteString(w, "\n")
+		target := "this project"
+		if project != "" {
+			target = project
+		}
+		_, _ = io.WriteString(w, Paint(ColDim, "no facts have been posted to "+target)+"\n")
+		_, _ = io.WriteString(w, Paint(ColDim, "install a producer (wrkp git hooks) or post one with wrkp post")+"\n")
+		return
+	}
+	_, _ = io.WriteString(w, "\n")
+	for _, t := range types {
+		left := Paint(ColMarker, "◆ ") + t.Type
+		right := Paint(ColDim, fmt.Sprintf("%d", t.Count)+" · "+typesAge(t.LastCreatedAt))
+		_, _ = io.WriteString(w, "  "+padPairWidth(left, right, typesWidth(types)-2)+"\n")
+	}
+}
+
+// typesWidth frames the type list the way timelineWidth frames a stream: wide
+// enough for the right-hand column, never wider than the terminal.
+func typesWidth(types []StyledType) int {
+	want := RuleWidth
+	for _, t := range types {
+		if n := len(t.Type) + 24; n > want {
+			want = n
+		}
+	}
+	if w := wrapWidth(); w < want {
+		return w
+	}
+	return want
+}
+
+// typesAge renders the last-seen stamp as a relative age, reusing the same clock
+// the task cards use so WRKQ_NOW keeps --pretty deterministic.
+func typesAge(ts string) string {
+	parsed, ok := ParseTimestamp(ts)
+	if !ok {
+		return ts
+	}
+	elapsed := NowUTC().Sub(parsed)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return FormatDuration(elapsed) + " ago"
+}

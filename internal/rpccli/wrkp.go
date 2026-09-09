@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -416,7 +415,8 @@ func styledProjectEvent(event wrkpProjectEvent, project string) style.StyledEven
 }
 
 func newWrkpTypesCmd() *cobra.Command {
-	return &cobra.Command{
+	var pretty bool
+	cmd := &cobra.Command{
 		Use: "types [project]", Short: "List observed project-event types", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tr, sc, closeFn, err := openMirror(cmd)
@@ -444,16 +444,28 @@ func newWrkpTypesCmd() *cobra.Command {
 			if err := json.Unmarshal(raw, &result); err != nil {
 				return err
 			}
-			if wrkpJSON(cmd) || !isStdoutTTY(cmd.OutOrStdout()) {
+			// Same mode contract as log and show (T-08224): a terminal gets the
+			// styled render, a pipe stays machine-readable, and --pretty forces the
+			// LAYOUT without flipping color. `types` previously hard-coded JSON for
+			// every path including --output human, which is the defect.
+			if resolveWrkpMode(cmd, pretty, false) != "human" {
 				return encodeJSONIndent(cmd, result.Items)
 			}
-			rows := make([][]string, 0, len(result.Items))
+			project, _ := params["project"].(string)
+			types := make([]style.StyledType, 0, len(result.Items))
 			for _, item := range result.Items {
-				rows = append(rows, []string{item.Type, fmt.Sprint(item.Count), item.LastCreatedAt})
+				types = append(types, style.StyledType{
+					Type:          item.Type,
+					Count:         item.Count,
+					LastCreatedAt: item.LastCreatedAt,
+				})
 			}
-			return render.NewRenderer(cmd.OutOrStdout(), render.Options{Format: render.FormatTable}).RenderTable([]string{"TYPE", "COUNT", "LAST CREATED"}, rows)
+			style.RenderStyledTypes(cmd.OutOrStdout(), project, types)
+			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled list even when not a TTY")
+	return cmd
 }
 
 func newWrkpInfoCmd() *cobra.Command {
