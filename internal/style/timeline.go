@@ -222,7 +222,9 @@ func timelineRow(entry StyledEntry, width int) string {
 // its thesis, the same reason git shows a commit subject rather than the whole
 // message. The remainder is counted, never silently dropped.
 //
-// Prose flows to the full terminal (wrapWidth), NOT to timelineWidth. The log's
+// Prose flows to the full terminal (timelineProseWidth), NOT to timelineWidth,
+// and the four-line cap and the elided count are therefore measured against the
+// reader's own terminal: a wider window holds back fewer lines. The log's
 // 88-column frame exists so the day rule and the right-aligned actor have one
 // edge to land on — a right-hand column needs something to align to. A comment
 // body has no right-hand column, so that frame buys it nothing and only costs

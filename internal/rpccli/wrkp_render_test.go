@@ -114,7 +114,12 @@ func TestStyledTimelineEntriesGivesEachKindItsWeight(t *testing.T) {
 		t.Fatalf("every entry must survive projection: got %d want %d", len(styled), len(entries))
 	}
 
-	if styled[0].Label != "C-9 note" || styled[0].Body != "prose" || styled[0].TaskID != "T-1" {
+	// A comment names its author and what it was written on: the authoring seat
+	// leads in From, the label points at the task, and the id — with its kind —
+	// rides beside them. The author moves out of Principal so one row never
+	// prints the same handle twice.
+	if styled[0].Label != "→ T-1" || styled[0].From != "agent:cody" || styled[0].Principal != "" ||
+		styled[0].ID != "C-9 note" || styled[0].Body != "prose" || styled[0].TaskID != "T-1" {
 		t.Fatalf("comment projection: %+v", styled[0])
 	}
 	if styled[1].Label != "open → in_progress" || styled[1].TaskState != "in_progress" ||
