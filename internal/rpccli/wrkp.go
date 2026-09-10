@@ -556,22 +556,31 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			}
 		case entry.Message != nil:
 			// A message is prose and carries the same weight as a comment: the
-			// body flows. The label answers "who is this addressed to", which is
-			// the question a room message raises and a comment does not.
+			// body flows. The label answers the question a room message raises
+			// and a comment does not — who handed what to whom — so it names
+			// BOTH seats: "sender → addressee   EN-xxxxx". Addressee alone, with
+			// the sender pushed to the right-hand actor column, made the reader
+			// pair two columns to recover a direction the arrow can just state.
 			// The id is carried in ID, which the renderer prints beside the
-			// label, so the label must not repeat it: this reads
-			// "→ addressee   EN-xxxxx", the same shape a project event uses.
+			// label, so the label must not repeat it.
 			styled.ID = entry.Message.EnvelopeID
 			styled.Label = "→ " + strings.Join(entry.Message.To, ", ")
+			if entry.Message.From != "" {
+				// The sender is in the label now; leaving it in the actor column
+				// too would print the same handle twice on one row.
+				styled.Label = entry.Message.From + " " + styled.Label
+				styled.Principal = ""
+			}
 			if len(entry.Message.To) == 0 {
-				// A log entry (obligation "none") addresses nobody.
+				// A log entry (obligation "none") addresses nobody: there is no
+				// direction to draw, so the sender goes back to the actor column.
 				styled.Label = "logged"
+				if entry.Message.From != "" {
+					styled.Principal = entry.Message.From
+				}
 			}
 			styled.Accent = style.ColMarker
 			styled.Body = entry.Message.Body
-			if entry.Message.From != "" {
-				styled.Principal = entry.Message.From
-			}
 		case entry.Outcome != nil:
 			styled.Label = "outcome"
 			styled.Accent = style.ColDone
