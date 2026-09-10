@@ -566,15 +566,17 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			styled.ID = entry.Message.EnvelopeID
 			styled.Label = "→ " + strings.Join(entry.Message.To, ", ")
 			if entry.Message.From != "" {
-				// The sender is in the label now; leaving it in the actor column
-				// too would print the same handle twice on one row.
-				styled.Label = entry.Message.From + " " + styled.Label
+				// The sender leads the row in From, which the renderer paints in
+				// the actor color it wore at the right margin. Leaving it in the
+				// actor column too would print the same handle twice on one row.
+				styled.From = entry.Message.From
 				styled.Principal = ""
 			}
 			if len(entry.Message.To) == 0 {
 				// A log entry (obligation "none") addresses nobody: there is no
 				// direction to draw, so the sender goes back to the actor column.
 				styled.Label = "logged"
+				styled.From = ""
 				if entry.Message.From != "" {
 					styled.Principal = entry.Message.From
 				}

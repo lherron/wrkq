@@ -55,6 +55,11 @@ type StyledEntry struct {
 	// ID is the entry's own public identifier (C-xxxxx, PE-xxxxx) when it has
 	// one, rendered dim beside the label.
 	ID string
+	// From is the seat an entry came FROM, rendered ahead of the label in the
+	// actor color. It is a separate field rather than text folded into Label so
+	// the two keep their own colors: an actor stays an actor wherever on the row
+	// it is drawn, and neither has to nest an SGR run inside the other.
+	From string
 	// Principal is the actor, rendered right-aligned. Every row answers "who".
 	Principal string
 	// Body is prose flowed under the label — a comment or an outcome. Empty for
@@ -194,10 +199,13 @@ func renderRunHeader(w io.Writer, run []StyledEntry) {
 	_, _ = io.WriteString(w, "\n"+padPair(left, Paint(ColDim, timelineParent(head.TaskPath)))+"\n")
 }
 
-// timelineRow lays out one row: the label, its own id when it has one, and the
-// actor at the right margin.
+// timelineRow lays out one row: the originating seat when the entry names one,
+// the label, its own id when it has one, and the actor at the right margin.
 func timelineRow(entry StyledEntry, width int) string {
 	left := Paint(entry.Accent, entry.Label)
+	if entry.From != "" {
+		left = Paint(ColDir, entry.From) + " " + left
+	}
 	if entry.ID != "" && entry.ID != entry.Label {
 		left += "  " + Paint(ColDim, entry.ID)
 	}
