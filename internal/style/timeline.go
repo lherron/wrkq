@@ -278,24 +278,27 @@ func padPairWidth(left, right string, width int) string {
 }
 
 // timelineDay renders an entry's calendar day as a day header, e.g.
-// "Sun 2026-09-07". Unparseable timestamps head their own group under the raw
+// "Sun 2026-09-07 CDT". Times are shown in the reader's zone, so the header
+// names that zone once per day rather than leaving a bare wall time ambiguous —
+// and it is the day header, not every row, because the zone is a property of
+// the whole log. Unparseable timestamps head their own group under the raw
 // value rather than being dropped.
 func timelineDay(ts string) string {
 	parsed, ok := ParseTimestamp(ts)
 	if !ok {
 		return ShortStamp(ts)
 	}
-	return parsed.Format("Mon 2006-01-02")
+	return parsed.In(DisplayLocation()).Format("Mon 2006-01-02 MST")
 }
 
-// timelineClock renders an entry's wall time. It falls back to a fixed-width
-// blank so an unparseable timestamp keeps the gutter aligned.
+// timelineClock renders an entry's wall time in the reader's zone. It falls back
+// to a fixed-width blank so an unparseable timestamp keeps the gutter aligned.
 func timelineClock(ts string) string {
 	parsed, ok := ParseTimestamp(ts)
 	if !ok {
 		return "     "
 	}
-	return parsed.Format("15:04")
+	return parsed.In(DisplayLocation()).Format("15:04")
 }
 
 // timelineSlug is the last path segment — the task's own name.

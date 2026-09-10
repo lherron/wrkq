@@ -38,6 +38,9 @@ func renderFixture(t *testing.T, entries []StyledEntry) string {
 	previous := ColorEnabled
 	ColorEnabled = false
 	t.Cleanup(func() { ColorEnabled = previous })
+	// The timeline renders wall times in the READER's zone, so a test that
+	// asserts a clock has to pin one or it passes only where it was written.
+	t.Setenv("TZ", "America/Chicago")
 	var buf strings.Builder
 	RenderStyledTimeline(&buf, "hcs", entries)
 	return buf.String()
@@ -50,14 +53,16 @@ func TestTimelineBraidsRunsAndFloats(t *testing.T) {
 	// run header on a rail, and the run closes with └.
 	for _, want := range []string{
 		"hcs\n",
-		"Mon 2026-09-07",
-		"  ◆ 11:43   git.commit  PE-00103",
+		// Stored UTC, shown in the reader's zone: 11:43Z is 06:43 CDT. The day
+		// header names the zone once so a bare wall time is never ambiguous.
+		"Mon 2026-09-07 CDT",
+		"  ◆ 06:43   git.commit  PE-00103",
 		"T-07733  ● hcs-core",
-		"  │ 14:15   → in_progress",
-		"  └ 14:15   C-17217",
-		"Tue 2026-09-08",
+		"  │ 09:15   → in_progress",
+		"  └ 09:15   C-17217",
+		"Tue 2026-09-08 CDT",
 		"T-07736  ● probe",
-		"  └ 09:00   outcome",
+		"  └ 04:00   outcome",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("timeline missing %q in:\n%s", want, got)
@@ -154,7 +159,7 @@ func TestTimelineWriterResumesARunAcrossBatches(t *testing.T) {
 	if n := strings.Count(got, "T-07733  ●"); n != 1 {
 		t.Fatalf("a resumed run must not restate its header, got %d in:\n%s", n, got)
 	}
-	if n := strings.Count(got, "Mon 2026-09-07"); n != 1 {
+	if n := strings.Count(got, "Mon 2026-09-07 CDT"); n != 1 {
 		t.Fatalf("the day header must not repeat across batches, got %d in:\n%s", n, got)
 	}
 }
@@ -205,7 +210,7 @@ func TestStyledEventPayloadIsNotReinterpretedAsMarkdown(t *testing.T) {
 	var buf strings.Builder
 	RenderStyledEvent(&buf, StyledEvent{
 		ID: "PE-1", Type: "deploy.finished", Summary: "done",
-		Payload: json.RawMessage(`{"ref":"refs/heads/_main_","note":"a `+"`code`"+` span"}`),
+		Payload: json.RawMessage(`{"ref":"refs/heads/_main_","note":"a ` + "`code`" + ` span"}`),
 	})
 	got := buf.String()
 	if !strings.Contains(got, "refs/heads/_main_") {
@@ -228,5 +233,56 @@ func TestStyledEventToleratesNonObjectPayload(t *testing.T) {
 	})
 	if !strings.Contains(buf.String(), "[1,2]") {
 		t.Fatalf("a non-object payload must still render:\n%s", buf.String())
+	}
+}
+
+// TestTimelineRendersInTheReadersZone pins the localization itself: one stored
+// UTC instant renders as a different wall time, and a different day header, in
+// two zones. Asserting one zone alone would pass against a renderer that never
+// converted at all, so the proof is the DIFFERENCE.
+func TestTimelineRendersInTheReadersZone(t *testing.T) {
+	previous := ColorEnabled
+	ColorEnabled = false
+	t.Cleanup(func() { ColorEnabled = previous })
+
+	// 02:30Z on the 10th is still the evening of the 9th in Chicago, so this
+	// instant moves the CLOCK and the DAY, not just the clock.
+	entries := []StyledEntry{{
+		Timestamp: "2026-09-10T02:30:00Z", Label: "PE-00100", ID: "PE-00100",
+		Principal: "agent:clod",
+	}}
+
+	render := func(tz string) string {
+		t.Setenv("TZ", tz)
+		var buf strings.Builder
+		RenderStyledTimeline(&buf, "wrkq", entries)
+		return buf.String()
+	}
+
+	utc := render("UTC")
+	if !strings.Contains(utc, "Thu 2026-09-10 UTC") || !strings.Contains(utc, "02:30") {
+		t.Fatalf("UTC render did not show the stored instant:\n%s", utc)
+	}
+
+	chicago := render("America/Chicago")
+	if !strings.Contains(chicago, "Wed 2026-09-09 CDT") || !strings.Contains(chicago, "21:30") {
+		t.Fatalf("Chicago render did not localize the stored instant:\n%s", chicago)
+	}
+
+	if utc == chicago {
+		t.Fatal("the same instant rendered identically in two zones; the timeline is not localizing")
+	}
+}
+
+// TestDisplayLocationPrefersTZ pins the resolution rule: TZ decides, an
+// unparseable TZ falls back rather than failing the render.
+func TestDisplayLocationPrefersTZ(t *testing.T) {
+	t.Setenv("TZ", "America/Chicago")
+	if got := DisplayLocation().String(); got != "America/Chicago" {
+		t.Fatalf("DisplayLocation ignored TZ, got %q", got)
+	}
+	t.Setenv("TZ", "Not/AZone")
+	if DisplayLocation() == nil {
+		t.Fatal("an unparseable TZ must fall back to a usable location, not nil")
 	}
 }

@@ -18,6 +18,25 @@ func NowUTC() time.Time {
 	return time.Now().UTC()
 }
 
+// DisplayLocation is the zone a human-facing render shows wall-clock times in.
+// Stored timestamps are UTC and machine output never moves off it — that is the
+// wire contract — but a log is read by a person sitting in one place, so the
+// human porcelain shows THEIR clock.
+//
+// TZ decides, exactly as it does for every other unix tool, and unset means the
+// host zone. It is read here rather than left to time.Local because time.Local
+// is resolved once and cached, which would make the zone untestable and would
+// pin a long-lived `--follow` to the zone it started in. Resolving per render is
+// the same call T-08225 made for terminal width.
+func DisplayLocation() *time.Location {
+	if tz := os.Getenv("TZ"); tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			return loc
+		}
+	}
+	return time.Local
+}
+
 // ParseTimestamp parses the timestamp formats wrkq stores, normalized to UTC.
 func ParseTimestamp(timestamp string) (time.Time, bool) {
 	for _, layout := range []string{
