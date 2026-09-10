@@ -23,14 +23,15 @@ import (
 // weight: a comment is prose and gets flowed body text, a state change is a tick
 // and gets one line. Color stays on structure, per the palette's own rule.
 const (
-	timelineRail    = "│"
-	timelineRailEnd = "└"
-	timelineFloat   = "◆"
-	timelineRunDot  = "●"
-	timelineGutter  = 12 // "  <glyph> HH:MM   " — one time column for rails and floats
-	timelineBodyCap = 4  // flowed lines of a comment/outcome before it is elided
-	timelinePairGap = 2  // columns between a label and the right-hand principal
-	timelineMeasure = 88 // widest comfortable column for a log that has a right margin
+	timelineRail     = "│"
+	timelineRailEnd  = "└"
+	timelineFloat    = "◆"
+	timelineRunDot   = "●"
+	timelineGutter   = 12 // "  <glyph> HH:MM   " — one time column for rails and floats
+	timelineProseMin = 20 // narrowest prose budget, matching wrapWidth's own floor
+	timelineBodyCap  = 4  // flowed lines of a comment/outcome before it is elided
+	timelinePairGap  = 2  // columns between a label and the right-hand principal
+	timelineMeasure  = 88 // widest comfortable column for a log that has a right margin
 )
 
 // timelineWidth is the log's frame: rules, right-aligned actors and flowed prose
@@ -234,7 +235,7 @@ func renderTimelineBody(w io.Writer, cont, body string) {
 		return
 	}
 	var buf strings.Builder
-	emitFlowWidth(&buf, cont, cont, paragraph, wrapWidth())
+	emitFlowWidth(&buf, cont, cont, paragraph, timelineProseWidth())
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	shown := lines
 	elided := rest
@@ -248,6 +249,23 @@ func renderTimelineBody(w io.Writer, cont, body string) {
 	if elided > 0 {
 		_, _ = io.WriteString(w, cont+Paint(ColRule, fmt.Sprintf("… %d more lines", elided))+"\n")
 	}
+}
+
+// timelineProseWidth is the column budget for flowed timeline prose: the whole
+// terminal less the one-column safety margin that keeps the terminal from
+// re-wrapping our lines, and NO upper ceiling.
+//
+// It deliberately does not use wrapWidth. That helper caps flowed text at 120
+// columns, a number written for CARD prose — where the card's own 64-column
+// frame decides the measure and the cap never binds. Inherited into a log whose
+// prose is otherwise unframed, it would be the only thing standing between a
+// comment and the terminal the reader chose, and there is no argument on record
+// for it doing that job here.
+func timelineProseWidth() int {
+	if w := detectedWidth() - 1; w > timelineProseMin {
+		return w
+	}
+	return timelineProseMin
 }
 
 // timelineLead splits prose into its leading paragraph and a count of the lines
