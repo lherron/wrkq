@@ -220,13 +220,21 @@ func timelineRow(entry StyledEntry, width int) string {
 // paragraph is shown, capped at timelineBodyCap lines: ledger prose opens with
 // its thesis, the same reason git shows a commit subject rather than the whole
 // message. The remainder is counted, never silently dropped.
+//
+// Prose flows to the full terminal (wrapWidth), NOT to timelineWidth. The log's
+// 88-column frame exists so the day rule and the right-aligned actor have one
+// edge to land on — a right-hand column needs something to align to. A comment
+// body has no right-hand column, so that frame buys it nothing and only costs
+// it lines: on a wide terminal the same paragraph was being broken into twice
+// the rows for no structural reason. The two measures are independent, and this
+// is the one place they part.
 func renderTimelineBody(w io.Writer, cont, body string) {
 	paragraph, rest := timelineLead(body)
 	if paragraph == "" {
 		return
 	}
 	var buf strings.Builder
-	emitFlowWidth(&buf, cont, cont, paragraph, timelineWidth())
+	emitFlowWidth(&buf, cont, cont, paragraph, wrapWidth())
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	shown := lines
 	elided := rest
