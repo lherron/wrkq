@@ -558,10 +558,14 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			// A message is prose and carries the same weight as a comment: the
 			// body flows. The label answers "who is this addressed to", which is
 			// the question a room message raises and a comment does not.
+			// The id is carried in ID, which the renderer prints beside the
+			// label, so the label must not repeat it: this reads
+			// "→ addressee   EN-xxxxx", the same shape a project event uses.
 			styled.ID = entry.Message.EnvelopeID
-			styled.Label = entry.Message.EnvelopeID
-			if len(entry.Message.To) > 0 {
-				styled.Label = entry.Message.EnvelopeID + " → " + strings.Join(entry.Message.To, ", ")
+			styled.Label = "→ " + strings.Join(entry.Message.To, ", ")
+			if len(entry.Message.To) == 0 {
+				// A log entry (obligation "none") addresses nobody.
+				styled.Label = "logged"
 			}
 			styled.Accent = style.ColMarker
 			styled.Body = entry.Message.Body
