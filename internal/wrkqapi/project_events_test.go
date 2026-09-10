@@ -964,3 +964,115 @@ func TestTimelineExcludesAdHocRooms(t *testing.T) {
 		t.Fatalf("want exactly the task-room message, got %d: %#v", len(view.Entries), view.Entries)
 	}
 }
+
+// TestAscendingSinceSeeksPastHistory pins the fix for the `--follow --since`
+// stall. A tail is ascending by construction, and an ascending scan starts at
+// the OLDEST row, so before the seek it walked every event ever written before
+// reaching the window: on a real ledger that was ~78 pages at the poll interval
+// (~16s) to print a backlog that `--since` alone returned in 0.15s.
+//
+// The assertion is on the CURSOR POSITION, not on wall time, so it states the
+// mechanism and cannot flake: the opening tail page must start just below the
+// first in-window row rather than at zero. Removing the seek leaves
+// AfterEventID at 0 and fails this.
+func TestAscendingSinceSeeksPastHistory(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "seek", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+
+	// A long prefix of history, all far older than the floor.
+	for index := 0; index < 2500; index++ {
+		if _, err := api.db.Exec(`INSERT INTO event_log(resource_type,event_type) VALUES ('system','ignored.raw')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// One recent, deliverable entry inside the window.
+	state := "completed"
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{
+		Task: task.ID, Patch: TaskPatch{State: &state},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var firstRecent int64
+	if err := api.db.QueryRow(
+		`SELECT MIN(id) FROM event_log WHERE timestamp > '2020-01-01T00:00:00Z'`,
+	).Scan(&firstRecent); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+		Since: "2h", Tail: true, Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("ContainerTimelineView: %v", err)
+	}
+
+	cur, err := decodeTimelineCursorAny(view.NextCursor)
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	// The scan must have skipped the 2500-row prefix outright.
+	if cur.AfterEventID < firstRecent-1 {
+		t.Fatalf("ascending tail did not seek past history: AfterEventID=%d, want >= %d "+
+			"(the first in-window row is %d; starting below that walks the whole ledger)",
+			cur.AfterEventID, firstRecent-1, firstRecent)
+	}
+	// And the in-window entry is still delivered -- a seek that overshot would
+	// be fast and WRONG.
+	found := false
+	for _, entry := range view.Entries {
+		if entry.TaskID == task.ID && entry.Type == "task.state" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the in-window entry was skipped by the seek: %#v", view.Entries)
+	}
+}
+
+// TestAscendingSinceSeekKeepsAnEmptyWindowUsable pins the no-match arm: when
+// every row predates the floor there is nothing to deliver, and the tail must
+// start at the END rather than replaying history.
+func TestAscendingSinceSeekKeepsAnEmptyWindowUsable(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "seekempty", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+
+	state := "completed"
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{
+		Task: task.ID, Patch: TaskPatch{State: &state},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	var maxEvent int64
+	if err := api.db.QueryRow(`SELECT MAX(id) FROM event_log`).Scan(&maxEvent); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+		Since: "2h", Tail: true, Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("ContainerTimelineView: %v", err)
+	}
+	if len(view.Entries) != 0 {
+		t.Fatalf("every row predates the floor, so nothing may be delivered: %#v", view.Entries)
+	}
+	cur, err := decodeTimelineCursorAny(view.NextCursor)
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	if cur.AfterEventID != maxEvent {
+		t.Fatalf("an all-behind-the-floor source must start at the end: AfterEventID=%d, want %d",
+			cur.AfterEventID, maxEvent)
+	}
+}

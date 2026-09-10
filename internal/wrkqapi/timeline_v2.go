@@ -177,6 +177,42 @@ func (a *API) containerTimelineViewV2(
 			cur.AfterEventID = currentEventID
 			cur.AfterProjectEventID = currentProjectEventID
 		}
+		// An ascending read with a floor must SEEK to it. The descending reader
+		// starts at the newest row and closes each source as soon as it passes
+		// below `since`, so it never scans history it cannot deliver. The
+		// ascending reader starts at the OLDEST row, so without this it grinds
+		// through every event ever written before reaching the window -- and a
+		// tail is ascending by construction. That was the whole cost of
+		// `--follow --since`: on an 80k-event ledger it paged ~78 times at the
+		// poll interval, ~16s, before printing a backlog the same `--since`
+		// without `--follow` returned in 0.15s.
+		//
+		// The seek is sound because both sources order by an id monotonic with
+		// the timestamp the timeline actually filters on: event_log.timestamp
+		// and project_events.created_at are server-assigned at insert (schema
+		// default strftime('%Y-%m-%dT%H:%M:%SZ','now')). Note this is created_at,
+		// NOT the caller-supplied occurred_at -- a backdated `wrkp post
+		// --occurred-at` never moves a project event's position in the scan.
+		// Only the opening page seeks; later pages carry an authoritative cursor.
+		if !desc && since != nil {
+			floor := since.UTC().Format(time.RFC3339)
+			eventFloor, ferr := timelineSeekFloor(ctx, tx,
+				"SELECT MIN(id) FROM event_log WHERE timestamp >= ?", floor, currentEventID)
+			if ferr != nil {
+				return nil, ferr
+			}
+			projectFloor, ferr := timelineSeekFloor(ctx, tx,
+				"SELECT MIN(id) FROM project_events WHERE created_at >= ?", floor, currentProjectEventID)
+			if ferr != nil {
+				return nil, ferr
+			}
+			if eventFloor > cur.AfterEventID {
+				cur.AfterEventID = eventFloor
+			}
+			if projectFloor > cur.AfterProjectEventID {
+				cur.AfterProjectEventID = projectFloor
+			}
+		}
 	} else if p.Tail {
 		cur.SnapshotEventID = currentEventID
 		cur.SnapshotProjectEventID = currentProjectEventID
@@ -296,6 +332,21 @@ func (a *API) containerTimelineViewV2(
 		SnapshotProjectEventID: cur.SnapshotProjectEventID,
 		NextCursor:             nextCursor, entriesOnly: p.EntriesOnly,
 	}, nil
+}
+
+// timelineSeekFloor returns the exclusive lower bound for an ascending scan
+// with a `since` floor: one before the first row at or after it. When no row
+// qualifies, the entire source lies behind the floor, so the bound is its
+// current maximum and the scan starts at the end with nothing to skip.
+func timelineSeekFloor(ctx context.Context, tx *sql.Tx, query, floor string, max int64) (int64, error) {
+	var first sql.NullInt64
+	if err := tx.QueryRowContext(ctx, query, floor).Scan(&first); err != nil {
+		return 0, NewInternalError(err)
+	}
+	if !first.Valid {
+		return max, nil
+	}
+	return first.Int64 - 1, nil
 }
 
 func timelineSourceMaxima(ctx context.Context, tx *sql.Tx) (int64, int64, error) {
