@@ -805,3 +805,162 @@ func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
 		t.Fatalf("project event landed at the oldest end: %#v", delivered)
 	}
 }
+
+// TestTimelineCollapsesSayFanOut is the fan-out collapse (T-08358 D2). One say
+// to three addressees writes THREE envelope rows sharing one group id; the
+// timeline reports the MESSAGE, so it must deliver exactly one entry naming all
+// three. Removing the leader predicate from loadTimelineRawEvents' envelope join
+// fails this with 3 entries — that is the defect this test exists to catch.
+func TestTimelineCollapsesSayFanOut(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "fanout", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+
+	said, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref:  task.ID,
+		Body: "three addressees, one message",
+		To: []string{
+			"cody@fanout:" + task.ID,
+			"astra@fanout:" + task.ID,
+			"mable@fanout:" + task.ID,
+		},
+		PrincipalRef: "agent:clod",
+	})
+	if err != nil {
+		t.Fatalf("RoomSay: %v", err)
+	}
+	if len(said.Envelopes) != 3 {
+		t.Fatalf("precondition: fan-out wrote %d envelopes, want 3", len(said.Envelopes))
+	}
+
+	view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("ContainerTimelineView: %v", err)
+	}
+	if len(view.Entries) != 1 {
+		t.Fatalf("one say to three addressees delivered %d entries, want exactly 1: %#v",
+			len(view.Entries), view.Entries)
+	}
+	message := view.Entries[0].Message
+	if message == nil {
+		t.Fatalf("message entry carries no message detail: %#v", view.Entries[0])
+	}
+	if len(message.To) != 3 {
+		t.Fatalf("collapsed entry names %d addressees, want all 3: %#v", len(message.To), message.To)
+	}
+	for _, want := range []string{"astra@fanout:" + task.ID, "cody@fanout:" + task.ID, "mable@fanout:" + task.ID} {
+		found := false
+		for _, got := range message.To {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("addressee %s missing from the collapsed entry: %#v", want, message.To)
+		}
+	}
+	if message.Body != "three addressees, one message" {
+		t.Fatalf("message body = %q", message.Body)
+	}
+	if message.From != "agent:clod" && message.From != "clod" {
+		t.Fatalf("message from = %q, want the sender", message.From)
+	}
+	if view.Entries[0].TaskID != task.ID {
+		t.Fatalf("message is not tagged with its task: %#v", view.Entries[0])
+	}
+}
+
+// TestTimelineTypeFilterSelectsMessages proves the `message` type filter BITES:
+// an unfiltered read carries both kinds, --type message narrows to the message,
+// and a bogus selector returns nothing. Without the last arm a filter that
+// matched everything would pass the first two.
+func TestTimelineTypeFilterSelectsMessages(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "filter", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+
+	if _, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref: task.ID, Body: "a room message", To: []string{"cody@filter:" + task.ID},
+		PrincipalRef: "agent:clod",
+	}); err != nil {
+		t.Fatalf("RoomSay: %v", err)
+	}
+	state := "completed"
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{
+		Task: task.ID, Patch: TaskPatch{State: &state},
+	}); err != nil {
+		t.Fatalf("TaskUpdate: %v", err)
+	}
+
+	read := func(types []string) []WrkqTimelineEntry {
+		t.Helper()
+		view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project.UUID, Scope: "subtree", EntriesOnly: true, Types: types, Limit: 100,
+		})
+		if err != nil {
+			t.Fatalf("ContainerTimelineView(%v): %v", types, err)
+		}
+		return view.Entries
+	}
+
+	all := read(nil)
+	var sawMessage, sawState bool
+	for _, entry := range all {
+		switch entry.Type {
+		case "message":
+			sawMessage = true
+		case "task.state":
+			sawState = true
+		}
+	}
+	if !sawMessage || !sawState {
+		t.Fatalf("unfiltered read must carry both kinds (message=%v state=%v): %#v", sawMessage, sawState, all)
+	}
+
+	messages := read([]string{"message"})
+	if len(messages) != 1 || messages[0].Type != "message" {
+		t.Fatalf("--type message returned %#v, want exactly the one message", messages)
+	}
+
+	if bogus := read([]string{"no.such.type"}); len(bogus) != 0 {
+		t.Fatalf("a bogus type filter returned %d entries; the filter does not bite", len(bogus))
+	}
+}
+
+// TestTimelineExcludesAdHocRooms pins D4's membership property: an ad-hoc room
+// (an agent DM) is anchored to neither a task nor a container, so it resolves to
+// no container and never appears in any project's log.
+func TestTimelineExcludesAdHocRooms(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "dmproj", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "anchor", "open", "")
+
+	if _, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref: task.ID, Body: "anchored to the task", To: []string{"cody@dmproj:" + task.ID},
+		PrincipalRef: "agent:clod",
+	}); err != nil {
+		t.Fatalf("RoomSay(task room): %v", err)
+	}
+	if _, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref: "cody@dmproj:primary", Body: "a direct message", PrincipalRef: "agent:clod",
+	}); err != nil {
+		t.Fatalf("RoomSay(dm): %v", err)
+	}
+
+	view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("ContainerTimelineView: %v", err)
+	}
+	for _, entry := range view.Entries {
+		if entry.Message != nil && entry.Message.Body == "a direct message" {
+			t.Fatalf("an ad-hoc DM leaked into the project log: %#v", entry)
+		}
+	}
+	if len(view.Entries) != 1 {
+		t.Fatalf("want exactly the task-room message, got %d: %#v", len(view.Entries), view.Entries)
+	}
+}

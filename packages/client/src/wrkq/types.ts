@@ -1376,6 +1376,23 @@ export interface WrkqTimelineComment {
   meta?: Record<string, unknown>;
 }
 
+/**
+ * One room message projected into the timeline. This is the leader of a
+ * fan-out group, not one entry per addressee: a single `say` to N addressees
+ * writes N envelopes sharing one group id, and the timeline reports the
+ * MESSAGE, listing every addressee in `to`.
+ */
+export interface WrkqTimelineMessage {
+  envelopeId: string;
+  groupId?: string;
+  roomId?: string;
+  roomKind?: WrkqRoomKind;
+  from: string;
+  to: string[];
+  obligation: WrkqEnvelopeObligation;
+  body: string;
+}
+
 export interface WrkqTimelineOutcome {
   text: string | null;
 }
@@ -1414,6 +1431,10 @@ export type WrkqTimelineEntry =
   | (WrkqTimelineEntryBase & {
       type: "comment";
       comment: WrkqTimelineComment;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "message";
+      message: WrkqTimelineMessage;
     })
   | (WrkqTimelineEntryBase & {
       type: "task.outcome";

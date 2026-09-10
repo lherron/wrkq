@@ -76,6 +76,22 @@ type WrkqTimelineComment struct {
 	Meta json.RawMessage `json:"meta,omitempty"`
 }
 
+// WrkqTimelineMessage is one room message projected into the timeline. It is
+// the leader of its fan-out group, not one envelope per addressee: a single
+// `say` to N addressees writes N envelope rows sharing one group id, and the
+// timeline reports the MESSAGE, so every addressee of that one say is listed
+// here in `to` rather than repeated as N entries.
+type WrkqTimelineMessage struct {
+	EnvelopeID string   `json:"envelopeId"`
+	GroupID    string   `json:"groupId,omitempty"`
+	RoomID     string   `json:"roomId,omitempty"`
+	RoomKind   string   `json:"roomKind,omitempty"`
+	From       string   `json:"from"`
+	To         []string `json:"to"`
+	Obligation string   `json:"obligation"`
+	Body       string   `json:"body"`
+}
+
 type WrkqTimelineOutcome struct {
 	Text *string `json:"text"`
 }
@@ -118,6 +134,7 @@ type WrkqTimelineEntry struct {
 	CampaignUUID   *string                     `json:"campaignUuid"`
 	ContainerUUID  string                      `json:"containerUuid,omitempty"`
 	Comment        *WrkqTimelineComment        `json:"comment,omitempty"`
+	Message        *WrkqTimelineMessage        `json:"message,omitempty"`
 	Outcome        *WrkqTimelineOutcome        `json:"outcome,omitempty"`
 	TaskState      *WrkqTimelineTaskState      `json:"taskState,omitempty"`
 	ContainerState *WrkqTimelineContainerState `json:"containerState,omitempty"`

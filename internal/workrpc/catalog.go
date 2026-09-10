@@ -335,6 +335,7 @@ var dtoCatalog = []string{
 	"WrkqTimelineMember",
 	"WrkqTimelineRollup",
 	"WrkqTimelineComment",
+	"WrkqTimelineMessage",
 	"WrkqTimelineOutcome",
 	"WrkqTimelineTaskState",
 	"WrkqTimelineContainerState",

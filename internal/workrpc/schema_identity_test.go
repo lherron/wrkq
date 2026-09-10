@@ -62,7 +62,15 @@ import (
 // `states`/`lifecycle`/`pruneEmpty` fails initialize against a daemon that would
 // silently ignore them, instead of rendering a tree it believes is filtered.
 // dtos 150 -> 152.
-const pinnedProtocolSchemaHash = "sha256:94f4acec0f7e8d8f6f7b83580e96ab3f448bdb1cf9f108f2bb753c646b9dbc09"
+//
+// T-08358 (room messages in the project timeline): WrkqTimelineMessage joins the
+// catalog and WrkqTimelineEntry gains the optional `message` variant, so a room
+// message is a timeline entry like a comment. The field is additive and
+// omitempty, so every entry type that existed before is byte-identical on the
+// wire; what the hash change buys is the handshake refusal — a client built
+// without the `message` variant would silently drop every room message rather
+// than render a log it believes is complete. dtos 152 -> 153.
+const pinnedProtocolSchemaHash = "sha256:e48a835e420b9430a49d8b3d08a19e0f2ccc0832b2c72a14651490fef057b883"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -83,7 +91,7 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 	}{
 		{"methods", len(MethodCatalog()), 184},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 152},
+		{"dtos", len(dtoCatalog), 153},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

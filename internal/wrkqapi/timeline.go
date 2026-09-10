@@ -479,6 +479,11 @@ func normalizeTimelineEntry(
 		if taskUUID, _ := timelinePayloadString(payload, "task_id"); taskUUID != nil {
 			entry.TaskUUID = *taskUUID
 		}
+	case "envelope.created":
+		// Affiliation, addressees and the message body are hydrated from the
+		// envelope/room columns, not the payload: an envelope event carries
+		// neither container nor campaign uuid.
+		entry.Type = "message"
 	case "task.outcome_set":
 		entry.Type = "task.outcome"
 		outcome, _ := timelinePayloadString(payload, "outcome")

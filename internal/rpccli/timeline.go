@@ -38,6 +38,16 @@ type timelineEntry struct {
 		Kind *string `json:"kind,omitempty"`
 		Body string  `json:"body"`
 	} `json:"comment,omitempty"`
+	Message *struct {
+		EnvelopeID string   `json:"envelopeId"`
+		GroupID    string   `json:"groupId,omitempty"`
+		RoomID     string   `json:"roomId,omitempty"`
+		RoomKind   string   `json:"roomKind,omitempty"`
+		From       string   `json:"from"`
+		To         []string `json:"to"`
+		Obligation string   `json:"obligation"`
+		Body       string   `json:"body"`
+	} `json:"message,omitempty"`
 	Outcome *struct {
 		Text *string `json:"text"`
 	} `json:"outcome,omitempty"`

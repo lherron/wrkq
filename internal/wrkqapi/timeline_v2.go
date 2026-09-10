@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,24 @@ type timelineRawEvent struct {
 	commentKind sql.NullString
 	commentBody string
 	commentMeta sql.NullString
+	envelope    timelineRawEnvelope
+}
+
+// timelineRawEnvelope carries the room-message columns for an envelope.created
+// row. Unlike a comment, an envelope event's payload holds no container or
+// campaign uuid, so affiliation is resolved in SQL through the ROOM: a task
+// room affiliates exactly as a comment on that task would, and a container room
+// affiliates to its own container.
+type timelineRawEnvelope struct {
+	id         sql.NullString
+	groupID    sql.NullString
+	roomID     sql.NullString
+	roomKind   sql.NullString
+	from       sql.NullString
+	obligation sql.NullString
+	body       sql.NullString
+	container  sql.NullString
+	campaign   sql.NullString
 }
 
 type timelineRawProjectEvent struct {
@@ -217,6 +236,13 @@ func (a *API) containerTimelineViewV2(
 		}
 	}
 
+	// Addressees are hydrated for the DELIVERED messages only, in one query,
+	// rather than as a correlated subquery on every scanned row: the scan reads
+	// up to a full page cap, the delivery is bounded by `limit`.
+	if err := hydrateTimelineAddressees(ctx, tx, entries); err != nil {
+		return nil, err
+	}
+
 	hasMore := cur.AfterEventID < cur.SnapshotEventID || cur.AfterProjectEventID < cur.SnapshotProjectEventID
 	if desc {
 		// The descending reader has no cheap fence to compare against -- it
@@ -283,20 +309,89 @@ func timelineSourceMaxima(ctx context.Context, tx *sql.Tx) (int64, int64, error)
 	return eventID, projectEventID, nil
 }
 
+// hydrateTimelineAddressees fills each message entry's `to` with every
+// addressee of that one say. The rows were collapsed to one entry per group, so
+// the addressees have to be read back from the group; obligation 'none' (a log
+// entry) addresses nobody and keeps an empty list. Handles are sorted so the
+// projection is deterministic regardless of scan order.
+func hydrateTimelineAddressees(ctx context.Context, tx *sql.Tx, entries []WrkqTimelineEntry) error {
+	groups := make([]any, 0, len(entries))
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		if entry.Message == nil || entry.Message.GroupID == "" || seen[entry.Message.GroupID] {
+			continue
+		}
+		seen[entry.Message.GroupID] = true
+		groups = append(groups, entry.Message.GroupID)
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	query := `SELECT group_id, COALESCE(to_scope_ref, to_principal_ref)
+		    FROM envelopes
+		   WHERE group_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(groups)), ",") + `)
+		     AND (to_scope_ref IS NOT NULL OR to_principal_ref IS NOT NULL)`
+	rows, err := tx.QueryContext(ctx, query, groups...)
+	if err != nil {
+		return NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	addressees := map[string][]string{}
+	for rows.Next() {
+		var group, handle string
+		if err := rows.Scan(&group, &handle); err != nil {
+			return NewInternalError(err)
+		}
+		addressees[group] = append(addressees[group], handle)
+	}
+	if err := rows.Err(); err != nil {
+		return NewInternalError(err)
+	}
+	for index := range entries {
+		message := entries[index].Message
+		if message == nil {
+			continue
+		}
+		if to := addressees[message.GroupID]; len(to) > 0 {
+			sort.Strings(to)
+			message.To = to
+		}
+	}
+	return nil
+}
+
 func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool) ([]timelineRawEvent, bool, error) {
+	// The envelope joins are guarded on event_type, so a non-envelope row costs
+	// one NULL probe. The `env` join carries the fan-out collapse in its own ON
+	// clause: a say to N addressees writes N rows sharing one group_id whose
+	// value is the FIRST envelope's own id, so exactly one row per say satisfies
+	// id = group_id. The other N-1 join to nothing and are dropped by the same
+	// delivery filter that drops an unsupported event type. COALESCE guards a
+	// null group_id so an unstamped row reports itself rather than vanishing.
 	rows, err := tx.QueryContext(ctx, timelineOrdered(`
 		SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.resource_uuid, ''),
 		       e.event_type, COALESCE(e.payload, ''),
-		       COALESCE(t.uuid, comment_task.uuid, ''),
-		       COALESCE(t.id, comment_task.id, ''),
-		       COALESCE(tp.path, comment_tp.path, json_extract(e.payload, '$.slug'), ''),
-		       COALESCE(cm.id, ''), cm.kind, COALESCE(cm.body, ''), cm.meta
+		       COALESCE(t.uuid, comment_task.uuid, env_task.uuid, ''),
+		       COALESCE(t.id, comment_task.id, env_task.id, ''),
+		       COALESCE(tp.path, comment_tp.path, env_tp.path, json_extract(e.payload, '$.slug'), ''),
+		       COALESCE(cm.id, ''), cm.kind, COALESCE(cm.body, ''), cm.meta,
+		       env.id, COALESCE(env.group_id, env.id), rm.id, rm.kind,
+		       COALESCE(env.from_scope_ref, env.from_principal_ref),
+		       env.obligation, env.body,
+		       COALESCE(rm.container_uuid, room_task.project_uuid),
+		       room_task.campaign_uuid
 		  FROM event_log e
 		  LEFT JOIN tasks t ON e.resource_type = 'task' AND t.uuid = e.resource_uuid
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
 		  LEFT JOIN comments cm ON e.event_type = 'comment.created' AND cm.uuid = e.resource_uuid
 		  LEFT JOIN tasks comment_task ON e.event_type = 'comment.created' AND comment_task.uuid = json_extract(e.payload, '$.task_id')
 		  LEFT JOIN v_task_paths comment_tp ON comment_tp.uuid = comment_task.uuid
+		  LEFT JOIN envelopes env ON e.event_type = 'envelope.created' AND env.uuid = e.resource_uuid
+		                         AND env.id = COALESCE(env.group_id, env.id)
+		  LEFT JOIN rooms rm ON rm.uuid = env.room_uuid
+		  LEFT JOIN tasks room_task ON room_task.uuid = rm.task_uuid
+		  LEFT JOIN tasks env_task ON env_task.uuid = COALESCE(env.task_uuid, rm.task_uuid)
+		  LEFT JOIN v_task_paths env_tp ON env_tp.uuid = env_task.uuid
 		 WHERE e.id > ? AND e.id <= ?
 		 ORDER BY e.id %s LIMIT ?`, desc), low, high, monitorMaxPageLimit)
 	if err != nil {
@@ -310,6 +405,9 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 			&raw.entry.EventID, &raw.serverTime, &raw.entry.PrincipalRef, &raw.entry.ResourceUUID,
 			&raw.eventType, &raw.payload, &raw.entry.TaskUUID, &raw.entry.TaskID, &raw.entry.TaskPath,
 			&raw.commentID, &raw.commentKind, &raw.commentBody, &raw.commentMeta,
+			&raw.envelope.id, &raw.envelope.groupID, &raw.envelope.roomID, &raw.envelope.roomKind,
+			&raw.envelope.from, &raw.envelope.obligation, &raw.envelope.body,
+			&raw.envelope.container, &raw.envelope.campaign,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}
@@ -548,9 +646,18 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 	if !timelineEventTypeSupported(raw.eventType, raw.payload) {
 		return WrkqTimelineEntry{}, false, nil
 	}
+	// The fan-out siblings of a say join to no envelope row (the leader
+	// predicate lives in the join), so they are dropped here exactly as an
+	// unsupported event type is: the cursor has already advanced past them.
+	if raw.eventType == "envelope.created" && !raw.envelope.id.Valid {
+		return WrkqTimelineEntry{}, false, nil
+	}
 	entry := raw.entry
 	if err := normalizeTimelineEntry(&entry, raw.eventType, raw.payload, root); err != nil {
 		return WrkqTimelineEntry{}, false, NewInternalError(err)
+	}
+	if raw.eventType == "envelope.created" {
+		applyTimelineEnvelope(&entry, raw.envelope)
 	}
 	applyTimelineMembership(&entry, root, affiliation)
 	if entry.Membership == "" || !timelineTypeMatches(filters, entry.Type) ||
@@ -580,9 +687,36 @@ func deliverTimelineProjectEvent(raw timelineRawProjectEvent, root string, affil
 	return raw.entry, true
 }
 
+// applyTimelineEnvelope carries the room-message columns onto the entry. An
+// envelope event's payload holds no affiliation, so container and campaign come
+// from the ROOM: a task room resolves to the same container and campaign a
+// comment on that task would carry, and a container room to its own container.
+// An ad-hoc room is anchored to neither, so it resolves to no container and the
+// membership test that follows excludes it with no special case.
+func applyTimelineEnvelope(entry *WrkqTimelineEntry, env timelineRawEnvelope) {
+	if env.container.Valid {
+		entry.ContainerUUID = env.container.String
+	}
+	if env.campaign.Valid {
+		value := env.campaign.String
+		entry.CampaignUUID = &value
+	}
+	message := &WrkqTimelineMessage{
+		EnvelopeID: env.id.String,
+		GroupID:    env.groupID.String,
+		RoomID:     env.roomID.String,
+		RoomKind:   env.roomKind.String,
+		From:       env.from.String,
+		Obligation: env.obligation.String,
+		Body:       env.body.String,
+		To:         []string{},
+	}
+	entry.Message = message
+}
+
 func timelineEventTypeSupported(eventType, payload string) bool {
 	switch eventType {
-	case "comment.created", "task.outcome_set", "task.archived", "task.deleted", "task.restored", "task.purged", "container.campaign_state_changed":
+	case "comment.created", "envelope.created", "task.outcome_set", "task.archived", "task.deleted", "task.restored", "task.purged", "container.campaign_state_changed":
 		return true
 	case "task.updated":
 		var fields map[string]json.RawMessage

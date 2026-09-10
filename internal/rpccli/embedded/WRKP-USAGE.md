@@ -15,6 +15,12 @@ wrkp types [project]
 wrkp info
 ```
 
+The timeline is the project's whole record: git facts and `wrkp post` events
+merge with task state changes, outcomes, task comments, and room messages. One
+`wrkc say` is ONE `message` entry naming every addressee, not one per recipient.
+Narrow to chat with `--type message`. Ad-hoc rooms (agent DMs) are anchored to no
+container and appear in no project log.
+
 Project-event types use dotted lowercase names. wrkq-owned namespaces such as
 `task`, `container`, `campaign`, `workflow`, and `system` are reserved. Posting
 is idempotent when `--key` is supplied; a replay prints the same `PE-` id with

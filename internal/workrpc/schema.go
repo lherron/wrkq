@@ -106,6 +106,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqTimelineMember":              dtoType[wrkqapi.WrkqTimelineMember](),
 	"WrkqTimelineRollup":              dtoType[wrkqapi.WrkqTimelineRollup](),
 	"WrkqTimelineComment":             dtoType[wrkqapi.WrkqTimelineComment](),
+	"WrkqTimelineMessage":             dtoType[wrkqapi.WrkqTimelineMessage](),
 	"WrkqTimelineOutcome":             dtoType[wrkqapi.WrkqTimelineOutcome](),
 	"WrkqTimelineTaskState":           dtoType[wrkqapi.WrkqTimelineTaskState](),
 	"WrkqTimelineContainerState":      dtoType[wrkqapi.WrkqTimelineContainerState](),

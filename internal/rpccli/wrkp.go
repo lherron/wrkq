@@ -554,6 +554,20 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			if entry.Comment.Kind != nil && *entry.Comment.Kind != "" {
 				styled.Label = entry.Comment.ID + " " + *entry.Comment.Kind
 			}
+		case entry.Message != nil:
+			// A message is prose and carries the same weight as a comment: the
+			// body flows. The label answers "who is this addressed to", which is
+			// the question a room message raises and a comment does not.
+			styled.ID = entry.Message.EnvelopeID
+			styled.Label = entry.Message.EnvelopeID
+			if len(entry.Message.To) > 0 {
+				styled.Label = entry.Message.EnvelopeID + " → " + strings.Join(entry.Message.To, ", ")
+			}
+			styled.Accent = style.ColMarker
+			styled.Body = entry.Message.Body
+			if entry.Message.From != "" {
+				styled.Principal = entry.Message.From
+			}
 		case entry.Outcome != nil:
 			styled.Label = "outcome"
 			styled.Accent = style.ColDone
