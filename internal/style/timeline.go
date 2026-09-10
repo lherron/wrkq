@@ -29,10 +29,28 @@ const (
 	timelineRunDot   = "●"
 	timelineGutter   = 12 // "  <glyph> HH:MM   " — one time column for rails and floats
 	timelineProseMin = 20 // narrowest prose budget, matching wrapWidth's own floor
-	timelineBodyCap  = 4  // flowed lines of a comment/outcome before it is elided
+	timelineBodyCap  = 4  // flowed rows of a comment/outcome before it is elided
 	timelinePairGap  = 2  // columns between a label and the right-hand principal
 	timelineMeasure  = 88 // widest comfortable column for a log that has a right margin
 )
+
+// timelineFillBody selects how much of an entry's prose the log shows. Flip
+// this one constant to revert.
+//
+// When true, the log fills the whole timelineBodyCap budget from the body,
+// flowing block after block until the budget is spent: every row shown carries
+// real content, and the count held back is in one unit, display rows. When
+// false it restores the older rule — show only the leading paragraph, whatever
+// its length, and hold back everything after the first blank line.
+//
+// The older rule reasoned from git's commit subject, but a commit subject is a
+// format with a contract and a ledger comment is not. The prevailing house
+// style opens with a one-line headline, which that rule reads as the whole
+// thesis: the four-row budget went unspent while the substance was held back.
+// Sampled 2026-09-10 across four jobhunt tasks, 10 of 41 comments showed under
+// 90 characters while hiding the rest — the worst showed 45 characters and held
+// back 128 lines, on a terminal with room for roughly 1,200.
+const timelineFillBody = true
 
 // timelineWidth is the log's frame: rules, right-aligned actors and flowed prose
 // all land on it, so the stream reads as one column rather than full-bleed text
@@ -232,25 +250,69 @@ func timelineRow(entry StyledEntry, width int) string {
 // the rows for no structural reason. The two measures are independent, and this
 // is the one place they part.
 func renderTimelineBody(w io.Writer, cont, body string) {
-	paragraph, rest := timelineLead(body)
-	if paragraph == "" {
-		return
-	}
-	var buf strings.Builder
-	emitFlowWidth(&buf, cont, cont, paragraph, timelineProseWidth())
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	shown := lines
-	elided := rest
-	if len(lines) > timelineBodyCap {
-		shown = lines[:timelineBodyCap]
-		elided += len(lines) - timelineBodyCap
-	}
+	shown, elided := timelineBodyRows(cont, body)
 	for _, line := range shown {
 		_, _ = io.WriteString(w, line+"\n")
 	}
 	if elided > 0 {
 		_, _ = io.WriteString(w, cont+Paint(ColRule, fmt.Sprintf("… %d more lines", elided))+"\n")
 	}
+}
+
+// timelineBodyRows resolves a body into the rows to print and the count held
+// back, under whichever rule timelineFillBody selects.
+func timelineBodyRows(cont, body string) ([]string, int) {
+	if !timelineFillBody {
+		paragraph, rest := timelineLead(body)
+		if paragraph == "" {
+			return nil, 0
+		}
+		lines := timelineFlow(cont, paragraph)
+		if len(lines) > timelineBodyCap {
+			return lines[:timelineBodyCap], rest + len(lines) - timelineBodyCap
+		}
+		return lines, rest
+	}
+	var rows []string
+	for _, block := range timelineBlocks(body) {
+		rows = append(rows, timelineFlow(cont, block)...)
+	}
+	if len(rows) > timelineBodyCap {
+		return rows[:timelineBodyCap], len(rows) - timelineBodyCap
+	}
+	return rows, 0
+}
+
+// timelineFlow wraps one already-joined block to the prose budget and returns
+// its rows, prefix included.
+func timelineFlow(cont, block string) []string {
+	var buf strings.Builder
+	emitFlowWidth(&buf, cont, cont, block, timelineProseWidth())
+	return strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+}
+
+// timelineBlocks splits a body at its blank lines and joins each block onto one
+// line. The joining is not cosmetic: the wrapper breaks on spaces and treats a
+// newline as an ordinary character, so a block reaches it as one line or not at
+// all.
+func timelineBlocks(body string) []string {
+	var blocks []string
+	var current []string
+	flush := func() {
+		if len(current) > 0 {
+			blocks = append(blocks, strings.TrimSpace(strings.Join(current, " ")))
+			current = nil
+		}
+	}
+	for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		current = append(current, line)
+	}
+	flush()
+	return blocks
 }
 
 // timelineProseWidth is the column budget for flowed timeline prose: the whole

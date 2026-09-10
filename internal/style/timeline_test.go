@@ -107,19 +107,28 @@ func TestTimelineNeverReordersAndSplitsRunsOnLaneChange(t *testing.T) {
 	}
 }
 
-func TestTimelineShowsLeadParagraphAndCountsTheRest(t *testing.T) {
+// A body fills the whole four-row budget, crossing blank lines to do it, and
+// whatever will not fit is counted rather than silently dropped. The old rule
+// stopped at the first blank line, so a one-line headline — the prevailing
+// house style for a ledger comment — spent one row of four and held the
+// substance back. timelineFillBody selects between the two; this asserts the
+// rule that constant currently names.
+func TestTimelineFillsTheBodyBudgetAndCountsTheRest(t *testing.T) {
 	got := renderFixture(t, []StyledEntry{{
 		Timestamp: "2026-09-07T14:15:05Z", Label: "C-1", Accent: ColDim, ID: "C-1",
 		Principal: "agent:cody", TaskID: "T-1", TaskPath: "p/t",
-		Body: "Lead thesis.\n\nheld one\nheld two",
+		Body: "Headline.\n\nsecond one\n\nthird one\n\nfourth one\n\nfifth one",
 	}})
-	if !strings.Contains(got, "Lead thesis.") {
+	if !strings.Contains(got, "Headline.") {
 		t.Fatalf("lead paragraph missing:\n%s", got)
 	}
-	if strings.Contains(got, "held one") {
-		t.Fatalf("body beyond the lead paragraph must not be flowed:\n%s", got)
+	if !strings.Contains(got, "second one") || !strings.Contains(got, "fourth one") {
+		t.Fatalf("a short headline must not leave the budget unspent:\n%s", got)
 	}
-	if !strings.Contains(got, "… 2 more lines") {
+	if strings.Contains(got, "fifth one") {
+		t.Fatalf("the budget is four rows and must stop there:\n%s", got)
+	}
+	if !strings.Contains(got, "… 1 more lines") {
 		t.Fatalf("held-back prose must be counted, never silently dropped:\n%s", got)
 	}
 }
