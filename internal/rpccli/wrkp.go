@@ -548,11 +548,25 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 		}
 		switch {
 		case entry.Comment != nil:
+			// A comment is an author writing ON a task, so the row is drawn with
+			// the same grammar as a message: the authoring seat leads, an arrow
+			// names what it wrote on, and the comment id rides dim beside them.
+			// The seat is the entry's principal — which IS the scope ref — so it
+			// moves out of the right-hand actor column rather than being repeated
+			// there. A comment attached to no task keeps the older shape: there is
+			// no target to point at.
 			styled.ID = entry.Comment.ID
 			styled.Label = entry.Comment.ID
 			styled.Body = entry.Comment.Body
 			if entry.Comment.Kind != nil && *entry.Comment.Kind != "" {
-				styled.Label = entry.Comment.ID + " " + *entry.Comment.Kind
+				styled.ID = entry.Comment.ID + " " + *entry.Comment.Kind
+			}
+			if entry.TaskID != "" {
+				styled.Label = "→ " + entry.TaskID
+				if styled.Principal != "" {
+					styled.From = styled.Principal
+					styled.Principal = ""
+				}
 			}
 		case entry.Message != nil:
 			// A message is prose and carries the same weight as a comment: the
