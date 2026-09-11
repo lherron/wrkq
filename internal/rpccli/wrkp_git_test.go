@@ -220,12 +220,53 @@ func TestWrkpGitG2ExactAttribution(t *testing.T) {
 	if got := tr.posts[0]["principalRef"]; got != "agent:cody" {
 		t.Fatalf("principalRef = %v", got)
 	}
-	attributes, _ := tr.posts[0]["attributes"].(map[string]string)
-	if got := attributes["source"]; got != "lefthook" {
-		t.Fatalf("source = %v", got)
+	raw, _ := tr.posts[0]["attributes"].(json.RawMessage)
+	keys := wrkpAttributeKeyOrder(t, raw)
+	// Producer order is the contract (T-08388 D7): the wire object must carry it,
+	// so the assertion is on the byte order, not on a decoded map.
+	want := []string{"source", "node", "sha", "branch", "author", "files_changed", "insertions", "deletions", "parents", "tasks"}
+	if strings.Join(keys, ",") != strings.Join(want, ",") {
+		t.Fatalf("attribute key order = %v, want %v", keys, want)
 	}
-	if got := attributes["node"]; got != "max3" {
-		t.Fatalf("node = %v", got)
+	if !strings.Contains(string(raw), `"source":"lefthook"`) || !strings.Contains(string(raw), `"node":"max3"`) {
+		t.Fatalf("attributes = %s", raw)
+	}
+}
+
+// wrkpAttributeKeyOrder walks the object tokens so the order asserted is the
+// order on the wire; json.Unmarshal into a map would hide the defect under test.
+func wrkpAttributeKeyOrder(t *testing.T, raw json.RawMessage) []string {
+	t.Helper()
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		t.Fatalf("attributes is not an object: %s", raw)
+	}
+	var keys []string
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, token.(string))
+		var value string
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return keys
+}
+
+func TestWrkpPostAttributeOrderAndDuplicates(t *testing.T) {
+	pairs := appendWrkpAttribute(nil, "zebra", "1")
+	pairs = appendWrkpAttribute(pairs, "middle", "2")
+	pairs = appendWrkpAttribute(pairs, "alpha", "3")
+	pairs = appendWrkpAttribute(pairs, "zebra", "9")
+	raw := encodeWrkpAttributes(pairs)
+	if got := string(raw); got != `{"zebra":"9","middle":"2","alpha":"3"}` {
+		t.Fatalf("encoded = %s", got)
+	}
+	if keys := wrkpAttributeKeyOrder(t, raw); strings.Join(keys, ",") != "zebra,middle,alpha" {
+		t.Fatalf("key order = %v", keys)
 	}
 }
 

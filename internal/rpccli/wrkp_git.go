@@ -134,13 +134,14 @@ func runWrkpGitCommit(cmd *cobra.Command, deps wrkpGitDependencies) error {
 	if err != nil {
 		return err
 	}
-	attributes := map[string]string{
-		"source": "lefthook", "node": node, "sha": sha, "branch": branch, "author": author,
-		"files_changed": strconv.Itoa(files), "insertions": strconv.Itoa(insertions),
-		"deletions": strconv.Itoa(deletions), "parents": strings.Join(parents, " "),
+	// D7 order: provenance first, then the identity a reader scans for.
+	attributes := []wrkpAttribute{
+		{"source", "lefthook"}, {"node", node}, {"sha", sha}, {"branch", branch}, {"author", author},
+		{"files_changed", strconv.Itoa(files)}, {"insertions", strconv.Itoa(insertions)},
+		{"deletions", strconv.Itoa(deletions)}, {"parents", strings.Join(parents, " ")},
 	}
 	if len(tasks) > 0 {
-		attributes["tasks"] = strings.Join(tasks, " ")
+		attributes = append(attributes, wrkpAttribute{"tasks", strings.Join(tasks, " ")})
 	}
 	summary := truncateWrkpGitSummary(fmt.Sprintf("commit %s on %s: %s", shortSHA, branch, subject), 512)
 	task := wrkpGitLinkableTask(cmd.Context(), tr, project.Slug, tasks)
@@ -166,13 +167,13 @@ func runWrkpGitPush(cmd *cobra.Command, deps wrkpGitDependencies, remote, url st
 		if err != nil {
 			return err
 		}
-		attributes := map[string]string{
-			"source": "lefthook", "node": node, "remote": remote, "url": url,
-			"local_ref": ref.LocalRef, "local_sha": ref.LocalSHA, "remote_ref": ref.RemoteRef,
-			"remote_sha": ref.RemoteSHA, "commits": fmt.Sprint(shape.commits), "forced": fmt.Sprint(shape.forced),
+		attributes := []wrkpAttribute{
+			{"source", "lefthook"}, {"node", node}, {"remote", remote}, {"url", url},
+			{"local_ref", ref.LocalRef}, {"local_sha", ref.LocalSHA}, {"remote_ref", ref.RemoteRef},
+			{"remote_sha", ref.RemoteSHA}, {"commits", fmt.Sprint(shape.commits)}, {"forced", fmt.Sprint(shape.forced)},
 		}
 		if len(shape.tasks) > 0 {
-			attributes["tasks"] = strings.Join(shape.tasks, " ")
+			attributes = append(attributes, wrkpAttribute{"tasks", strings.Join(shape.tasks, " ")})
 		}
 		task := ""
 		if shape.tasks != nil {
@@ -469,9 +470,9 @@ func wrkpGitLinkableTask(ctx context.Context, tr Transport, projectSlug string, 
 	return task.ID
 }
 
-func postWrkpGitFact(cmd *cobra.Command, tr Transport, principal, project, task, eventType, summary string, attributes map[string]string, key, occurredAt string) error {
+func postWrkpGitFact(cmd *cobra.Command, tr Transport, principal, project, task, eventType, summary string, attributes []wrkpAttribute, key, occurredAt string) error {
 	params := map[string]any{
-		"project": project, "type": eventType, "summary": summary, "attributes": attributes,
+		"project": project, "type": eventType, "summary": summary, "attributes": encodeWrkpAttributes(attributes),
 		"idempotencyKey": key, "occurredAt": occurredAt,
 	}
 	if principal != "" {

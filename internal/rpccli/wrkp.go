@@ -1,6 +1,7 @@
 package rpccli
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -109,15 +110,15 @@ func newWrkpPostCmd() *cobra.Command {
 				"idempotencyKey": key, "occurredAt": occurredAt,
 			}
 			if len(attrs) > 0 {
-				attributes := map[string]string{}
+				pairs := make([]wrkpAttribute, 0, len(attrs))
 				for _, raw := range attrs {
 					name, value, ok := strings.Cut(raw, "=")
 					if !ok || name == "" {
 						return fmt.Errorf("--attr requires key=value")
 					}
-					attributes[name] = value
+					pairs = appendWrkpAttribute(pairs, name, value)
 				}
-				params["attributes"] = attributes
+				params["attributes"] = encodeWrkpAttributes(pairs)
 			}
 			principal, err := actorFlag(cmd)
 			if err != nil {
@@ -158,6 +159,49 @@ func newWrkpPostCmd() *cobra.Command {
 	cmd.Flags().StringVar(&key, "key", "", "Project-scoped idempotency key")
 	cmd.Flags().StringVar(&occurredAt, "occurred-at", "", "Occurrence time (RFC3339)")
 	return cmd
+}
+
+// wrkpAttribute is one key=value pair. A slice, not a map, because the contract
+// stores attributes verbatim in the producer's key order and the timeline renders
+// them in that order: it is the producer's only control over what a reader sees
+// first. encoding/json sorts map keys, which is exactly the order loss the first
+// landing shipped (clod's probe on T-08388: posted zebra/middle/alpha, rendered
+// alpha/middle/zebra).
+type wrkpAttribute struct {
+	Key   string
+	Value string
+}
+
+// appendWrkpAttribute keeps the first position of a repeated key and takes the
+// last value, so `--attr a=1 --attr b=2 --attr a=3` is {a:3, b:2}.
+func appendWrkpAttribute(pairs []wrkpAttribute, key, value string) []wrkpAttribute {
+	for i := range pairs {
+		if pairs[i].Key == key {
+			pairs[i].Value = value
+			return pairs
+		}
+	}
+	return append(pairs, wrkpAttribute{Key: key, Value: value})
+}
+
+// encodeWrkpAttributes writes the pairs as one JSON object in slice order. The
+// server stores the bytes it receives, so order survives end to end only if the
+// wire carries it.
+func encodeWrkpAttributes(pairs []wrkpAttribute) json.RawMessage {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, pair := range pairs {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		key, _ := json.Marshal(pair.Key)
+		value, _ := json.Marshal(pair.Value)
+		buf.Write(key)
+		buf.WriteByte(':')
+		buf.Write(value)
+	}
+	buf.WriteByte('}')
+	return json.RawMessage(buf.Bytes())
 }
 
 func newWrkpLogCmd() *cobra.Command {
