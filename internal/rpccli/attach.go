@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
@@ -22,12 +23,14 @@ const attachByteChunkBytes = 1 << 20
 
 // newAttachCmd mirrors `wrkq attach`. `ls` is RPC-backed via the server-owned
 // wrkq.attachment.listView compat list projection (cursor-paginated, DB-only).
-// `put` (real-file) and `rm` are RPC-backed via wrkq.attachment.add /
-// wrkq.attachment.remove — for a real local file the mirror sends the host PATH
-// (the server reads the bytes), which is the "server-local host-path hint" fast
-// path. `get` and `put` FROM STDIN move attachment CONTENT across the RPC boundary
-// as base64 PROTOCOL DATA (chunked) via wrkq.attachment.getBytes /
-// wrkq.attachment.addBytes — never a host path (T-05103, daedalus OPTION 1). Raw
+// `put` (real-file, LOCAL server only) and `rm` are RPC-backed via
+// wrkq.attachment.add / wrkq.attachment.remove — against a co-located server the
+// mirror sends the host PATH (the server reads the bytes), which is the
+// "server-local host-path hint" fast path. `get`, `put` FROM STDIN, and
+// `put` of a real file against a REMOTE server move attachment CONTENT across the
+// RPC boundary as base64 PROTOCOL DATA (chunked) via wrkq.attachment.getBytes /
+// wrkq.attachment.addBytes — never a host path (T-05103, daedalus OPTION 1;
+// remote real-file put per rpc-cli-cutover-plan step 7, T-08374). Raw
 // bytes are emitted ONLY here, after RPC-frame decode; the server stdout stays
 // JSON-RPC-pure.
 func newAttachCmd() *cobra.Command {
@@ -140,10 +143,19 @@ func newAttachLsCmd() *cobra.Command {
 	return cmd
 }
 
-// newAttachPutCmd mirrors `wrkq attach put <task> <file>`. The host file path is
-// sent to wrkq.attachment.add; the server reads the bytes and writes them into
-// the (server-local) attach dir. Reading FROM STDIN ('-') uses
-// runAttachPutStdin and uploads bytes over the chunked RPC byte-transfer path.
+// newAttachPutCmd mirrors `wrkq attach put <task> <file>`. Which path the bytes
+// take depends on whether the server shares this machine's filesystem:
+//
+//   - LOCAL (no remote endpoint): the host file path is sent to
+//     wrkq.attachment.add and the server reads the bytes itself. This is the
+//     host-path fast path the byte-transfer invariant preserves as local-only —
+//     it avoids base64 inflation for a co-located file.
+//   - REMOTE (rpc:// endpoint): the CLI opens the file HERE and streams it over
+//     chunked wrkq.attachment.addBytes, exactly like stdin. A host path is
+//     meaningless across the boundary — the server would stat it on its own
+//     filesystem and fail for every caller path (T-08374).
+//
+// Reading FROM STDIN ('-') always uses the byte path, local or remote.
 func newAttachPutCmd() *cobra.Command {
 	var mime, name string
 	cmd := &cobra.Command{
@@ -152,11 +164,8 @@ func newAttachPutCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srcPath := args[1]
-			if srcPath == "-" {
-				return runAttachPutStdin(cmd, args[0], name, mime)
-			}
 
-			tr, sc, closeFn, err := openMirror(cmd)
+			tr, sc, cfg, closeFn, err := openMirrorConfig(cmd)
 			if err != nil {
 				return err
 			}
@@ -164,6 +173,13 @@ func newAttachPutCmd() *cobra.Command {
 			actor, err := actorFlag(cmd)
 			if err != nil {
 				return err
+			}
+
+			if srcPath == "-" {
+				return runAttachPutBytes(cmd, tr, sc, actor, args[0], name, mime, cmd.InOrStdin())
+			}
+			if cfg.RemoteEndpoint != "" {
+				return runAttachPutRemoteFile(cmd, tr, sc, actor, args[0], srcPath, name, mime)
 			}
 
 			// Legacy: applyProjectRootToSelector(taskRef, false). The source FILE path
@@ -375,26 +391,34 @@ func runAttachGet(cmd *cobra.Command, ref, as string) error {
 	return nil
 }
 
-// runAttachPutStdin reads the attachment bytes from stdin and uploads them via
-// wrkq.attachment.addBytes in 1 MiB chunks (base64 protocol data, never a host
-// path). The first chunk supplies task/filename/mime and receives an uploadId;
-// the final chunk commits and returns the WrkqAttachment, re-projected to legacy's
-// snake_case map exactly like the real-file `attach put` path.
-func runAttachPutStdin(cmd *cobra.Command, taskRef, name, mime string) error {
+// runAttachPutRemoteFile uploads a CALLER-LOCAL file over the chunked byte path
+// when the server is remote. The file is opened HERE, so a missing or unreadable
+// source fails caller-side with the caller's own path — the server is never asked
+// about a path it cannot see. --name defaults to the basename so a remote put
+// takes exactly the arguments a local one does.
+func runAttachPutRemoteFile(cmd *cobra.Command, tr Transport, sc *scoper, actor, taskRef, srcPath, name, mime string) error {
+	f, err := os.Open(srcPath) // #nosec G304 -- user-supplied attachment source, CLI-side read
+	if err != nil {
+		return fmt.Errorf("cannot read attachment source: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if name == "" {
+		name = filepath.Base(srcPath)
+	}
+	return runAttachPutBytes(cmd, tr, sc, actor, taskRef, name, mime, f)
+}
+
+// runAttachPutBytes uploads attachment bytes from src via wrkq.attachment.addBytes
+// in 1 MiB chunks (base64 protocol data, never a host path). The first chunk
+// supplies task/filename/mime and receives an uploadId; the final chunk commits and
+// returns the WrkqAttachment, re-projected to legacy's snake_case map exactly like
+// the real-file `attach put` path. src is stdin for `attach put <task> -` and an
+// open local file for a remote real-file put.
+func runAttachPutBytes(cmd *cobra.Command, tr Transport, sc *scoper, actor, taskRef, name, mime string, src io.Reader) error {
 	// --name required + unknown-task are enforced server-side (resolve-then-name
 	// order, matching legacy runAttachPut) so the error precedence is identical.
-	tr, sc, closeFn, err := openMirror(cmd)
-	if err != nil {
-		return err
-	}
-	defer closeFn()
-	actor, err := actorFlag(cmd)
-	if err != nil {
-		return err
-	}
 	scopedTask := sc.selector(taskRef, false)
 
-	in := cmd.InOrStdin()
 	buf := make([]byte, attachByteChunkBytes)
 	var (
 		uploadID string
@@ -403,7 +427,7 @@ func runAttachPutStdin(cmd *cobra.Command, taskRef, name, mime string) error {
 		gotDTO   bool
 	)
 	for {
-		n, rerr := io.ReadFull(in, buf)
+		n, rerr := io.ReadFull(src, buf)
 		if rerr == io.EOF {
 			n = 0
 		} else if rerr != nil && rerr != io.ErrUnexpectedEOF {

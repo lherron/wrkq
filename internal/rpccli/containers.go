@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
 )
@@ -456,16 +457,24 @@ func rmdirForceWarning(containerID, path string, tasks, descendants int64) strin
 // close function that tears it down. Callers MUST scope every raw path/selector
 // argument through the returned scoper before sending it as an RPC param.
 func openMirror(cmd *cobra.Command) (Transport, *scoper, func(), error) {
+	tr, sc, _, closeFn, err := openMirrorConfig(cmd)
+	return tr, sc, closeFn, err
+}
+
+// openMirrorConfig is openMirror plus the resolved config. Commands that must
+// know whether the server shares this machine's filesystem (`attach put` and its
+// host-path fast path) read cfg.RemoteEndpoint; everything else uses openMirror.
+func openMirrorConfig(cmd *cobra.Command) (Transport, *scoper, *config.Config, func(), error) {
 	tr, cfg, closeFn, err := openConfiguredTransport(cmd)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	sc, err := newScoperFromConfig(cmd, cfg, tr)
 	if err != nil {
 		closeFn()
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return tr, sc, closeFn, nil
+	return tr, sc, cfg, closeFn, nil
 }
 
 // mkdirKindFor mirrors legacy mkdir's kind inference for the final path segment.
