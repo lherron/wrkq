@@ -6,10 +6,8 @@ type ProjectEventPostParams struct {
 	Project        string          `json:"project,omitempty"`
 	Task           string          `json:"task,omitempty"`
 	Type           string          `json:"type"`
-	Source         string          `json:"source"`
-	Node           string          `json:"node,omitempty"`
 	Summary        string          `json:"summary"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
+	Attributes     json.RawMessage `json:"attributes"`
 	IdempotencyKey string          `json:"idempotencyKey,omitempty"`
 	OccurredAt     string          `json:"occurredAt,omitempty"`
 	PrincipalRef   string          `json:"principalRef,omitempty"`
@@ -25,28 +23,28 @@ type ProjectEventTypesViewParams struct {
 }
 
 type WrkqProjectEvent struct {
-	ID             int64           `json:"id"`
-	FID            string          `json:"fid"`
+	UUID           string          `json:"uuid"`
 	ProjectUUID    string          `json:"projectUuid"`
 	ContainerUUID  string          `json:"containerUuid"`
 	CampaignUUID   *string         `json:"campaignUuid"`
 	TaskUUID       *string         `json:"taskUuid"`
 	Type           string          `json:"type"`
-	Source         string          `json:"source"`
-	Node           *string         `json:"node,omitempty"`
-	PrincipalRef   string          `json:"principalRef"`
-	ScopeRef       *string         `json:"scopeRef,omitempty"`
+	Attributes     json.RawMessage `json:"attributes"`
+	PrincipalRef   *string         `json:"principalRef"`
+	ScopeRef       *string         `json:"scopeRef"`
 	Summary        string          `json:"summary"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	IdempotencyKey *string         `json:"idempotencyKey,omitempty"`
+	IdempotencyKey *string         `json:"idempotencyKey"`
 	OccurredAt     string          `json:"occurredAt"`
 	CreatedAt      string          `json:"createdAt"`
+	Task           *string         `json:"task"`
+	Container      *string         `json:"container"`
+	Campaign       *string         `json:"campaign"`
 }
 
 type WrkqProjectEventPostResult struct {
-	ID      int64  `json:"id"`
-	FID     string `json:"fid"`
+	UUID    string `json:"uuid"`
 	Created bool   `json:"created"`
+	ID      int64  `json:"-"`
 }
 
 type WrkqProjectEventType struct {

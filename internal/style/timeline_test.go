@@ -195,13 +195,11 @@ func TestStyledEventCardCarriesProvenanceAndAlignedPayload(t *testing.T) {
 		"lefthook · agent:cody · max3",
 		"occurred 4 hours ago on 2026-09-07",
 		"§ Summary",
-		"§ Payload",
+		"§ Attributes",
 		"commits  1",
 		"forced   false",
 		"remote   origin",
 		"tasks    []",
-		"§ Provenance",
-		"produced by  agent:cody:project:hrc-runtime:task:T-08199/lane:main",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("event card missing %q in:\n%s", want, got)

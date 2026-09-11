@@ -1308,13 +1308,13 @@ The no-new-param v1 path remains unchanged apart from additive `from` on new
 The published client exposes the foreign-fact family directly:
 
 ```ts
-client.wrkq.projectEvent.post(params)       // → { id, fid, created }
-client.wrkq.projectEvent.get({ projectEvent: "PE-00012" })
+client.wrkq.projectEvent.post(params)       // → { uuid, created }
+client.wrkq.projectEvent.get({ projectEvent: "<uuid>" })
 client.wrkq.projectEvent.typesView({ project: "wrkq" })
 ```
 
-`post` requires exact caller attribution, validates dotted open-namespace event
-types, and stores immutable container/campaign affiliation stamps. Its optional
+`post` accepts optional caller attribution, validates dotted open-namespace event
+types plus a required flat string `attributes` map, and stores immutable container/campaign affiliation stamps. Its optional
 idempotency key is scoped to the resolved top-level project. It writes only
 `project_events`: no `event_log`, webhook, room, envelope, workflow, wake, or
 kicker effect. `get` remains addressable after affiliation containers or tasks

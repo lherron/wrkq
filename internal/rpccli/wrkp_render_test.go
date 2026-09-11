@@ -99,15 +99,14 @@ func TestStyledTimelineEntriesGivesEachKindItsWeight(t *testing.T) {
 		To   string  `json:"to"`
 	}{From: &campaignFrom, To: "active"}
 	entries[4].ProjectEvent = &struct {
-		FID          string          `json:"fid"`
+		UUID         string          `json:"uuid"`
 		Type         string          `json:"type"`
-		Source       string          `json:"source"`
-		Node         *string         `json:"node,omitempty"`
-		PrincipalRef string          `json:"principalRef"`
+		Attributes   json.RawMessage `json:"attributes"`
+		PrincipalRef *string         `json:"principalRef"`
+		ScopeRef     *string         `json:"scopeRef"`
 		Summary      string          `json:"summary"`
-		Payload      json.RawMessage `json:"payload,omitempty"`
 		OccurredAt   string          `json:"occurredAt"`
-	}{FID: "PE-7", Type: "deploy.rolled_back", Source: "ci", PrincipalRef: "agent:clod", Summary: "back to 1.2.3"}
+	}{UUID: "a0000000-0000-0000-0000-000000000007", Type: "deploy.rolled_back", Summary: "back to 1.2.3"}
 
 	styled := styledTimelineEntries(entries)
 	if len(styled) != len(entries) {
@@ -134,8 +133,8 @@ func TestStyledTimelineEntriesGivesEachKindItsWeight(t *testing.T) {
 	}
 	// An unrecognized dotted type is drawn as itself, and a project event falls
 	// back to its own principal when the entry carries none.
-	if styled[4].Label != "deploy.rolled_back" || styled[4].ID != "PE-7" ||
-		styled[4].Body != "back to 1.2.3" || styled[4].Principal != "agent:clod" {
+	if styled[4].Label != "deploy.rolled_back" || styled[4].ID != "" ||
+		styled[4].Body != "back to 1.2.3" || styled[4].Principal != "" {
 		t.Fatalf("project event projection: %+v", styled[4])
 	}
 	// A row with no task floats; the renderer reads that from an empty TaskID.

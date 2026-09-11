@@ -79,7 +79,6 @@ func newWrkpGitCommitCmd(deps wrkpGitDependencies) *cobra.Command {
 }
 
 func newWrkpGitPushCmd(deps wrkpGitDependencies) *cobra.Command {
-	var payloadExtra []string
 	cmd := &cobra.Command{
 		Use: "push <remote> <url>", Short: "Post pre-push ref transitions as git.push facts",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -87,15 +86,10 @@ func newWrkpGitPushCmd(deps wrkpGitDependencies) *cobra.Command {
 				if len(args) != 2 {
 					return fmt.Errorf("push requires <remote> <url>")
 				}
-				extra, err := parseWrkpGitPayloadExtra(payloadExtra)
-				if err != nil {
-					return err
-				}
-				return runWrkpGitPush(cmd, deps, args[0], args[1], extra)
+				return runWrkpGitPush(cmd, deps, args[0], args[1])
 			})
 		},
 	}
-	cmd.Flags().StringArrayVar(&payloadExtra, "payload-extra", nil, "Add key=value to each push payload")
 	return cmd
 }
 
@@ -140,17 +134,20 @@ func runWrkpGitCommit(cmd *cobra.Command, deps wrkpGitDependencies) error {
 	if err != nil {
 		return err
 	}
-	payload := map[string]any{
-		"sha": sha, "branch": branch, "subject": subject, "author": author,
-		"committerDate": committedAt, "filesChanged": files, "insertions": insertions,
-		"deletions": deletions, "parents": parents, "tasks": tasks,
+	attributes := map[string]string{
+		"source": "lefthook", "node": node, "sha": sha, "branch": branch, "author": author,
+		"files_changed": strconv.Itoa(files), "insertions": strconv.Itoa(insertions),
+		"deletions": strconv.Itoa(deletions), "parents": strings.Join(parents, " "),
+	}
+	if len(tasks) > 0 {
+		attributes["tasks"] = strings.Join(tasks, " ")
 	}
 	summary := truncateWrkpGitSummary(fmt.Sprintf("commit %s on %s: %s", shortSHA, branch, subject), 512)
 	task := wrkpGitLinkableTask(cmd.Context(), tr, project.Slug, tasks)
-	return postWrkpGitFact(cmd, tr, principal, project.Slug, task, node, "git.commit", summary, payload, "git.commit:"+sha, committedAt)
+	return postWrkpGitFact(cmd, tr, principal, project.Slug, task, "git.commit", summary, attributes, "git.commit:"+sha, committedAt)
 }
 
-func runWrkpGitPush(cmd *cobra.Command, deps wrkpGitDependencies, remote, url string, extra map[string]any) error {
+func runWrkpGitPush(cmd *cobra.Command, deps wrkpGitDependencies, remote, url string, _ ...map[string]any) error {
 	refs, err := readWrkpGitRefs(cmd.InOrStdin())
 	if err != nil {
 		return err
@@ -169,23 +166,20 @@ func runWrkpGitPush(cmd *cobra.Command, deps wrkpGitDependencies, remote, url st
 		if err != nil {
 			return err
 		}
-		payload := map[string]any{
-			"remote": remote, "url": url, "localRef": ref.LocalRef, "localSha": ref.LocalSHA,
-			"remoteRef": ref.RemoteRef, "remoteSha": ref.RemoteSHA, "commits": shape.commits,
-			"forced": shape.forced, "tasks": shape.tasks,
+		attributes := map[string]string{
+			"source": "lefthook", "node": node, "remote": remote, "url": url,
+			"local_ref": ref.LocalRef, "local_sha": ref.LocalSHA, "remote_ref": ref.RemoteRef,
+			"remote_sha": ref.RemoteSHA, "commits": fmt.Sprint(shape.commits), "forced": fmt.Sprint(shape.forced),
 		}
-		for key, value := range extra {
-			if _, reserved := payload[key]; reserved {
-				return fmt.Errorf("--payload-extra cannot replace %q", key)
-			}
-			payload[key] = value
+		if len(shape.tasks) > 0 {
+			attributes["tasks"] = strings.Join(shape.tasks, " ")
 		}
 		task := ""
 		if shape.tasks != nil {
 			task = wrkpGitLinkableTask(cmd.Context(), tr, project.Slug, shape.tasks)
 		}
 		key := strings.Join([]string{"git.push", remote, url, ref.RemoteRef, ref.RemoteSHA, ref.LocalSHA}, ":")
-		if err := postWrkpGitFact(cmd, tr, principal, project.Slug, task, node, "git.push", shape.summary, payload, key, deps.now().UTC().Format(time.RFC3339)); err != nil {
+		if err := postWrkpGitFact(cmd, tr, principal, project.Slug, task, "git.push", shape.summary, attributes, key, deps.now().UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}
 	}
@@ -196,9 +190,6 @@ func prepareWrkpGit(cmd *cobra.Command, deps wrkpGitDependencies) (string, Trans
 	principal, err := deps.principal(cmd)
 	if err != nil {
 		return "", nil, nil, wrkpGitProject{}, "", "", err
-	}
-	if principal == "" {
-		return "", nil, nil, wrkpGitProject{}, "", "", fmt.Errorf("no resolvable principal; skipping")
 	}
 	repo, err := deps.workdir()
 	if err != nil {
@@ -478,15 +469,13 @@ func wrkpGitLinkableTask(ctx context.Context, tr Transport, projectSlug string, 
 	return task.ID
 }
 
-func postWrkpGitFact(cmd *cobra.Command, tr Transport, principal, project, task, node, eventType, summary string, payload map[string]any, key, occurredAt string) error {
-	payloadRaw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
+func postWrkpGitFact(cmd *cobra.Command, tr Transport, principal, project, task, eventType, summary string, attributes map[string]string, key, occurredAt string) error {
 	params := map[string]any{
-		"project": project, "type": eventType, "source": "lefthook", "node": node,
-		"summary": summary, "payload": json.RawMessage(payloadRaw), "idempotencyKey": key,
-		"occurredAt": occurredAt, "principalRef": principal,
+		"project": project, "type": eventType, "summary": summary, "attributes": attributes,
+		"idempotencyKey": key, "occurredAt": occurredAt,
+	}
+	if principal != "" {
+		params["principalRef"] = principal
 	}
 	if task != "" {
 		params["task"] = task
@@ -499,7 +488,7 @@ func postWrkpGitFact(cmd *cobra.Command, tr Transport, principal, project, task,
 		return wrkpRPCError(err)
 	}
 	var result struct {
-		FID     string `json:"fid"`
+		UUID    string `json:"uuid"`
 		Created bool   `json:"created"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
@@ -509,28 +498,11 @@ func postWrkpGitFact(cmd *cobra.Command, tr Transport, principal, project, task,
 		return encodeJSONIndent(cmd, result)
 	}
 	if result.Created {
-		fmt.Fprintln(cmd.OutOrStdout(), result.FID)
+		fmt.Fprintln(cmd.OutOrStdout(), result.UUID)
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s (existing)\n", result.FID)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s (existing)\n", result.UUID)
 	}
 	return nil
-}
-
-func parseWrkpGitPayloadExtra(values []string) (map[string]any, error) {
-	result := map[string]any{}
-	for _, raw := range values {
-		key, value, ok := strings.Cut(raw, "=")
-		key = strings.TrimSpace(key)
-		if !ok || key == "" {
-			return nil, fmt.Errorf("--payload-extra requires key=value")
-		}
-		var decoded any
-		if json.Unmarshal([]byte(value), &decoded) != nil {
-			decoded = value
-		}
-		result[key] = decoded
-	}
-	return result, nil
 }
 
 func truncateWrkpGitSummary(value string, maxRunes int) string {

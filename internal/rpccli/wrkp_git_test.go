@@ -165,14 +165,6 @@ func TestWrkpGitG1NeverBlocks(t *testing.T) {
 		push bool
 	}{
 		{
-			name: "no-principal",
-			deps: func() wrkpGitDependencies {
-				d := wrkpGitTestDeps(repo, registered)
-				d.principal = func(*cobra.Command) (string, error) { return "", nil }
-				return d
-			}(),
-		},
-		{
 			name: "unregistered-repo",
 			deps: wrkpGitTestDeps(repo, &wrkpGitFakeTransport{tasks: map[string]string{}}),
 		},
@@ -228,10 +220,11 @@ func TestWrkpGitG2ExactAttribution(t *testing.T) {
 	if got := tr.posts[0]["principalRef"]; got != "agent:cody" {
 		t.Fatalf("principalRef = %v", got)
 	}
-	if got := tr.posts[0]["source"]; got != "lefthook" {
+	attributes, _ := tr.posts[0]["attributes"].(map[string]string)
+	if got := attributes["source"]; got != "lefthook" {
 		t.Fatalf("source = %v", got)
 	}
-	if got := tr.posts[0]["node"]; got != "max3" {
+	if got := attributes["node"]; got != "max3" {
 		t.Fatalf("node = %v", got)
 	}
 }

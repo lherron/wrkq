@@ -50,6 +50,7 @@ type timelineRawEnvelope struct {
 
 type timelineRawProjectEvent struct {
 	entry      WrkqTimelineEntry
+	id         int64
 	semantic   string
 	serverTime string
 }
@@ -265,8 +266,8 @@ func (a *API) containerTimelineViewV2(
 		}
 		raw := projectRows[projectIndex]
 		projectIndex++
-		cur.AfterProjectEventID = raw.entry.ProjectEventID
-		cur.BeforeProjectEventID = raw.entry.ProjectEventID
+		cur.AfterProjectEventID = raw.id
+		cur.BeforeProjectEventID = raw.id
 		if entry, included := deliverTimelineProjectEvent(raw, containerUUID, affiliation, p.Types, taskUUID, since); included {
 			entries = append(entries, entry)
 		}
@@ -480,26 +481,27 @@ func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int
 	result := []timelineRawProjectEvent{}
 	for rows.Next() {
 		var raw timelineRawProjectEvent
-		var node, payload, campaign, task sql.NullString
+		var principal, scope, campaign, task sql.NullString
 		var detail WrkqTimelineProjectEvent
+		var attributes string
 		if err := rows.Scan(
-			&raw.entry.ProjectEventID, &detail.FID, &raw.semantic, &detail.Source,
-			&node, &detail.PrincipalRef, &detail.Summary, &payload, &detail.OccurredAt,
+			&raw.id, &detail.UUID, &raw.semantic, &attributes,
+			&principal, &scope, &detail.Summary, &detail.OccurredAt,
 			&raw.serverTime, &raw.entry.ContainerUUID, &campaign, &task,
 			&raw.entry.TaskID, &raw.entry.TaskPath,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}
+		detail.Attributes = json.RawMessage(attributes)
 		detail.Type = raw.semantic
-		detail.Node = nullStringPtr(node)
-		if payload.Valid {
-			detail.Payload = json.RawMessage(payload.String)
-		}
+		detail.PrincipalRef = nullStringPtr(principal)
+		detail.ScopeRef = nullStringPtr(scope)
 		detail.OccurredAt = toRFC3339(detail.OccurredAt)
 		raw.entry.Type = "project.event"
-		raw.entry.EventID = 0
 		raw.entry.Timestamp = toRFC3339(raw.serverTime)
-		raw.entry.PrincipalRef = detail.PrincipalRef
+		if detail.PrincipalRef != nil {
+			raw.entry.PrincipalRef = *detail.PrincipalRef
+		}
 		raw.entry.CampaignUUID = nullStringPtr(campaign)
 		if task.Valid {
 			raw.entry.TaskUUID = task.String
@@ -516,8 +518,8 @@ func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int
 // project_uuid is intentionally absent: current subtree membership is the one
 // project reader authority; the stored project is idempotency scope only.
 const timelineProjectEventsRawQuery = `
-		SELECT pe.id, pe.fid, pe.type, pe.source, pe.node, pe.principal_ref,
-		       pe.summary, pe.payload, pe.occurred_at, pe.created_at,
+		SELECT pe.id, pe.uuid, pe.type, pe.attributes, pe.principal_ref, pe.scope_ref,
+		       pe.summary, pe.occurred_at, pe.created_at,
 		       pe.container_uuid, pe.campaign_uuid, pe.task_uuid,
 		       COALESCE(t.id, ''), COALESCE(tp.path, '')
 		  FROM project_events pe

@@ -7,8 +7,8 @@ predicate: >
   `project_events` is the sole wrkq-owned home for foreign facts posted about a
   project; `event_log` remains the sole home for wrkq mutations, and neither
   source copies facts from the other. Every project-event post resolves exact
-  caller attribution before any read, write, or idempotent success under
-  `wrkq.attribution.caller-principal-exact`, rejects wrkq-owned event
+  optional caller attribution when supplied (with no attribution error path),
+  rejects wrkq-owned event
   namespaces, and scopes idempotency to the top-level project resolved at post
   time.
 
@@ -54,10 +54,11 @@ source:
   - internal/wrkqapi/monitorview.go
   - internal/store/containers.go
 required_tests:
-  - TestProjectEventsI1OneFactOneHome
-  - TestProjectEventsI2ReservedNamespacesAndOpenVocabulary
-  - TestProjectEventsI3ExactAttributionAndNoWakeEffects
-  - TestProjectEventsI4ProjectScopedIdempotentReplay
+  - TestProjectEventsA1OneBody
+  - TestProjectEventsA2ShapeAndBounds
+  - TestProjectEventsA3SubjectNamespace
+  - TestProjectEventsA4OptionalAttributionAndNoWakeEffects
+  - TestProjectEventsA5UUIDIdentity
   - TestProjectEventsI5RawScanCursorExactnessCycle5
   - TestProjectEventsI6V1ContinuationAndScopeMismatch
   - TestProjectEventsI7LegacyAdditiveOnlyAndStateFrom
@@ -67,7 +68,7 @@ required_tests:
   - TestProjectEventsI11SubtreeCoherenceAndConfinement
   - TestProjectEventsI12MoveCoherenceFreshReads
 last_verified:
-  date: 2026-09-05
+  date: 2026-09-11
   evidence: >
     T-08048 implementation and live mini acceptance; all named I1-I12 guards
     passed under the canonical sqlite_fts5,wrkq_local Go test profile, the

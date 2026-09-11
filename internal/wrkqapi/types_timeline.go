@@ -103,13 +103,12 @@ type WrkqTimelineTaskState struct {
 }
 
 type WrkqTimelineProjectEvent struct {
-	FID          string          `json:"fid"`
+	UUID         string          `json:"uuid"`
 	Type         string          `json:"type"`
-	Source       string          `json:"source"`
-	Node         *string         `json:"node,omitempty"`
-	PrincipalRef string          `json:"principalRef"`
+	Attributes   json.RawMessage `json:"attributes"`
+	PrincipalRef *string         `json:"principalRef"`
+	ScopeRef     *string         `json:"scopeRef"`
 	Summary      string          `json:"summary"`
-	Payload      json.RawMessage `json:"payload,omitempty"`
 	OccurredAt   string          `json:"occurredAt"`
 }
 
@@ -123,7 +122,6 @@ type WrkqTimelineContainerState struct {
 type WrkqTimelineEntry struct {
 	Type           string                      `json:"type"`
 	EventID        int64                       `json:"eventId"`
-	ProjectEventID int64                       `json:"projectEventId,omitempty"`
 	Timestamp      string                      `json:"timestamp"`
 	PrincipalRef   string                      `json:"principalRef,omitempty"`
 	ResourceUUID   string                      `json:"resourceUuid,omitempty"`

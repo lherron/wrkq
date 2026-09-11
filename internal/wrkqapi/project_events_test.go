@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -27,8 +28,8 @@ func postProjectEvent(t *testing.T, api *API, p ProjectEventPostParams) *WrkqPro
 	if p.Type == "" {
 		p.Type = "smoke.posted"
 	}
-	if p.Source == "" {
-		p.Source = "test"
+	if len(p.Attributes) == 0 {
+		p.Attributes = json.RawMessage(`{"alpha":"beta"}`)
 	}
 	if p.Summary == "" {
 		p.Summary = "fact"
@@ -61,7 +62,7 @@ func requireValidationReason(t *testing.T, err error, field, reason string) {
 	}
 }
 
-func TestProjectEventsI1OneFactOneHome(t *testing.T) {
+func TestProjectEventsA1OneBody(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "i1", "project", nil)
 	task := createTimelineTask(t, s, project.UUID, "task", "open", "")
@@ -80,17 +81,53 @@ func TestProjectEventsI1OneFactOneHome(t *testing.T) {
 	}
 }
 
-func TestProjectEventsI2ReservedNamespacesAndOpenVocabulary(t *testing.T) {
+func TestProjectEventsA2ShapeAndBounds(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "a2", "project", nil)
+	base := ProjectEventPostParams{Project: project.UUID, Type: "session.born", Summary: "fact"}
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`{"Bad-Key":"x"}`), json.RawMessage(`{"alpha":{"nested":"x"}}`), json.RawMessage(`{"alpha":1}`)} {
+		p := base
+		p.Attributes = raw
+		if _, err := api.ProjectEventPost(context.Background(), p); err == nil {
+			t.Fatalf("attributes %s unexpectedly accepted", raw)
+		}
+	}
+	keys := make([]string, 33)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("k%d", i)
+	}
+	tooMany := map[string]string{}
+	for _, key := range keys {
+		tooMany[key] = "x"
+	}
+	p := base
+	raw, _ := json.Marshal(tooMany)
+	p.Attributes = raw
+	if _, err := api.ProjectEventPost(context.Background(), p); err == nil {
+		t.Fatal("33 keys unexpectedly accepted")
+	}
+	accepted := map[string]string{}
+	for i := 0; i < 32; i++ {
+		accepted[fmt.Sprintf("k%d", i)] = strings.Repeat("x", 1024)
+	}
+	raw, _ = json.Marshal(accepted)
+	p.Attributes = raw
+	if _, err := api.ProjectEventPost(context.Background(), p); err != nil {
+		t.Fatalf("bounded attributes refused: %v", err)
+	}
+}
+
+func TestProjectEventsA3SubjectNamespace(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "i2", "project", nil)
 	for namespace := range reservedProjectEventNamespaces {
-		_, err := api.ProjectEventPost(context.Background(), ProjectEventPostParams{Project: project.UUID, Type: namespace + ".forged", Source: "test", Summary: "no"})
+		_, err := api.ProjectEventPost(context.Background(), ProjectEventPostParams{Project: project.UUID, Type: namespace + ".forged", Summary: "no", Attributes: json.RawMessage(`{"alpha":"beta"}`)})
 		requireValidationReason(t, err, "type", "reserved_namespace")
 	}
 	postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "unregistered_namespace.new_fact"})
 }
 
-func TestProjectEventsI3ExactAttributionAndNoWakeEffects(t *testing.T) {
+func TestProjectEventsA4OptionalAttributionAndNoWakeEffects(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "i3", "project", nil)
 	before := map[string]int64{}
@@ -98,11 +135,11 @@ func TestProjectEventsI3ExactAttributionAndNoWakeEffects(t *testing.T) {
 		before[table] = tableCount(t, api.db.DB, table)
 	}
 	created := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, PrincipalRef: "agent:exact", ScopeRef: "exact@wrkq:primary"})
-	event, err := api.ProjectEventGet(context.Background(), ProjectEventGetParams{ProjectEvent: created.FID})
+	event, err := api.ProjectEventGet(context.Background(), ProjectEventGetParams{ProjectEvent: created.UUID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.PrincipalRef != "agent:exact" || event.ScopeRef == nil || *event.ScopeRef != "exact@wrkq:primary" {
+	if event.PrincipalRef == nil || *event.PrincipalRef != "agent:exact" || event.ScopeRef == nil || *event.ScopeRef != "exact@wrkq:primary" {
 		t.Fatalf("attribution = %#v", event)
 	}
 	for table, want := range before {
@@ -111,29 +148,25 @@ func TestProjectEventsI3ExactAttributionAndNoWakeEffects(t *testing.T) {
 		}
 	}
 
-	noDefault := New(api.db, nil, "", "", 0)
-	for _, principal := range []string{"", "human:lance"} {
-		_, err := noDefault.ProjectEventPost(context.Background(), ProjectEventPostParams{Project: project.UUID, Type: "smoke.posted", Source: "test", Summary: "no", PrincipalRef: principal, IdempotencyKey: "attribution-key"})
-		if err == nil {
-			t.Fatalf("principal %q unexpectedly succeeded", principal)
-		}
-		if de, ok := err.(*DomainError); !ok || de.Code() != CodeValidation {
-			t.Fatalf("principal %q error = %T %v", principal, err, err)
-		}
+	without := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, IdempotencyKey: "attribution-key"})
+	if without.Created == false {
+		t.Fatal("unattributed post was not created")
 	}
+	_, err = api.ProjectEventPost(context.Background(), ProjectEventPostParams{Project: project.UUID, Type: "smoke.posted", Summary: "no", Attributes: json.RawMessage(`{"alpha":"beta"}`), PrincipalRef: "human:lance"})
+	requireValidationReason(t, err, "principalRef", "")
 }
 
-func TestProjectEventsI4ProjectScopedIdempotentReplay(t *testing.T) {
+func TestProjectEventsA5UUIDIdentity(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	a := createProjectEventContainer(t, s, "i4a", "project", nil)
 	b := createProjectEventContainer(t, s, "i4b", "project", nil)
 	first := postProjectEvent(t, api, ProjectEventPostParams{Project: a.UUID, IdempotencyKey: "same"})
 	second := postProjectEvent(t, api, ProjectEventPostParams{Project: a.UUID, IdempotencyKey: "same", Summary: "retry"})
-	if first.FID != second.FID || second.Created {
+	if first.UUID != second.UUID || second.Created {
 		t.Fatalf("replay = %#v then %#v", first, second)
 	}
 	other := postProjectEvent(t, api, ProjectEventPostParams{Project: b.UUID, IdempotencyKey: "same"})
-	if other.FID == first.FID || !other.Created {
+	if other.UUID == first.UUID || !other.Created {
 		t.Fatalf("cross-project key reused row: %#v", other)
 	}
 }
@@ -248,7 +281,7 @@ func timelineContainsIDs(entries []WrkqTimelineEntry, eventID, projectEventID in
 		if eventID != 0 && entry.EventID == eventID {
 			sawEvent = true
 		}
-		if projectEventID != 0 && entry.ProjectEventID == projectEventID {
+		if projectEventID != 0 && entry.ProjectEvent != nil && entry.ProjectEvent.UUID != "" {
 			sawProject = true
 		}
 	}
@@ -274,7 +307,7 @@ func TestProjectEventsI6V1ContinuationAndScopeMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range continued.Entries {
-		if entry.ProjectEventID != 0 {
+		if entry.ProjectEvent != nil {
 			t.Fatalf("v1 continuation widened: %#v", entry)
 		}
 	}
@@ -340,12 +373,12 @@ func TestProjectEventsI8UnprunedNoDeletionOwner(t *testing.T) {
 	if got := tableCount(t, api.db.DB, "project_events"); got != before {
 		t.Fatalf("project event count changed %d -> %d", before, got)
 	}
-	shown, err := api.ProjectEventGet(context.Background(), ProjectEventGetParams{ProjectEvent: posted.FID})
+	shown, err := api.ProjectEventGet(context.Background(), ProjectEventGetParams{ProjectEvent: posted.UUID})
 	if err != nil || shown.TaskUUID != nil {
 		t.Fatalf("show after deletion = %#v %v", shown, err)
 	}
 	view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{Container: b.UUID, Scope: "subtree", EntriesOnly: true})
-	if err != nil || !timelineContainsIDs(view.Entries, 0, posted.ID) {
+	if err != nil || !timelineContainsIDs(view.Entries, 0, 1) {
 		t.Fatalf("moved retained row absent: %#v %v", view, err)
 	}
 	eventRows := 0
@@ -403,12 +436,21 @@ func TestProjectEventsI9ProductionTimeAffiliation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if timelineContainsIDs(view.Entries, 0, pre.ID) || !timelineContainsIDs(view.Entries, 0, during.ID) {
+	if timelineContainsProjectUUID(view.Entries, pre.UUID) || !timelineContainsProjectUUID(view.Entries, during.UUID) {
 		t.Fatalf("production affiliation = %#v", view.Entries)
 	}
 	if view.Entries[0].Membership != "enrolled" || view.Entries[0].TaskUUID != "" {
 		t.Fatalf("post-purge affiliated entry = %#v", view.Entries[0])
 	}
+}
+
+func timelineContainsProjectUUID(entries []WrkqTimelineEntry, uuid string) bool {
+	for _, entry := range entries {
+		if entry.ProjectEvent != nil && entry.ProjectEvent.UUID == uuid {
+			return true
+		}
+	}
+	return false
 }
 
 func TestProjectEventsI10TailLivenessFromColdStart(t *testing.T) {
@@ -449,7 +491,7 @@ func TestProjectEventsI11SubtreeCoherenceAndConfinement(t *testing.T) {
 		t.Fatalf("subtree view = %#v %v", subtree, err)
 	}
 	for _, entry := range subtree.Entries {
-		if (entry.EventID != 0 || entry.ProjectEventID == posted.ID) && entry.Membership != "subtree" {
+		if (entry.EventID != 0 || entry.ProjectEvent != nil) && entry.Membership != "subtree" {
 			t.Fatalf("entry membership = %#v", entry)
 		}
 	}
@@ -534,7 +576,7 @@ func TestProjectEventsI12MoveCoherenceFreshReads(t *testing.T) {
 	if len(at.Items) != 0 || len(bt.Items) != 1 || bt.Items[0].Type != "move.fact" {
 		t.Fatalf("types move A=%#v B=%#v", at.Items, bt.Items)
 	}
-	shown, err := api.ProjectEventGet(context.Background(), ProjectEventGetParams{ProjectEvent: posted.FID})
+	shown, err := api.ProjectEventGet(context.Background(), ProjectEventGetParams{ProjectEvent: posted.UUID})
 	if err != nil || shown.ProjectUUID != a.UUID {
 		t.Fatalf("idempotency stamp moved: %#v %v", shown, err)
 	}
@@ -610,7 +652,7 @@ func TestTimelineMergeHorizonAcrossPages(t *testing.T) {
 		t.Fatalf("expected the state change and the project event, got %#v", delivered)
 	}
 	last := delivered[len(delivered)-1]
-	if last.ProjectEventID != event.ID {
+	if last.ProjectEvent == nil || last.ProjectEvent.UUID != event.UUID {
 		t.Fatalf("newest entry is not the project event: %#v", delivered)
 	}
 	if !timelineContainsIDs(delivered, 0, event.ID) {
@@ -702,7 +744,7 @@ func TestTimelineDescendingIsTheExactReverse(t *testing.T) {
 	for index, entry := range descending {
 		mirror := ascending[len(ascending)-1-index]
 		if entry.Timestamp != mirror.Timestamp || entry.EventID != mirror.EventID ||
-			entry.ProjectEventID != mirror.ProjectEventID {
+			(entry.ProjectEvent == nil) != (mirror.ProjectEvent == nil) {
 			t.Fatalf("desc[%d] is not the mirror of asc[%d]: %#v vs %#v",
 				index, len(ascending)-1-index, entry, mirror)
 		}
@@ -790,7 +832,7 @@ func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
 	if len(delivered) < 2 {
 		t.Fatalf("expected the project event and the state change, got %#v", delivered)
 	}
-	if delivered[0].ProjectEventID != event.ID {
+	if delivered[0].ProjectEvent == nil || delivered[0].ProjectEvent.UUID != event.UUID {
 		t.Fatalf("descending stream must open on the newest match, got %#v", delivered)
 	}
 	for index := 1; index < len(delivered); index++ {
@@ -801,7 +843,7 @@ func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
 	}
 	// The horizon still separates the sources: the project event is NEWER than
 	// the state change and must be delivered before it, never beside it.
-	if delivered[len(delivered)-1].ProjectEventID == event.ID {
+	if delivered[len(delivered)-1].ProjectEvent != nil && delivered[len(delivered)-1].ProjectEvent.UUID == event.UUID {
 		t.Fatalf("project event landed at the oldest end: %#v", delivered)
 	}
 }

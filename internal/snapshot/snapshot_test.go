@@ -770,18 +770,18 @@ func TestSnapshotIncludesProjectEventsWithEventExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`INSERT INTO project_events (
-		fid, project_uuid, container_uuid, type, source, principal_ref, summary,
-		payload, occurred_at
-	) VALUES ('PE-00042', 'project-stamp', 'container-stamp', 'smoke.posted',
-		'smoke', 'agent:mable', 'smoke', '{"exact":true}', '2026-09-04T00:00:00Z')`); err != nil {
+		uuid, project_uuid, container_uuid, type, principal_ref, summary,
+		attributes, occurred_at
+	) VALUES ('a0000000-0000-0000-0000-000000000042', 'project-stamp', 'container-stamp', 'smoke.posted',
+		'agent:mable', 'smoke', '{"exact":"true"}', '2026-09-04T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 	snap, _, err := ExportToSnapshot(database.DB, ExportOptions{IncludeEvents: true, Canonical: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, ok := snap.ProjectEvents["PE-00042"]
-	if !ok || event.Payload == nil || *event.Payload != `{"exact":true}` || event.ProjectUUID != "project-stamp" {
+	event, ok := snap.ProjectEvents["a0000000-0000-0000-0000-000000000042"]
+	if !ok || event.Attributes != `{"exact":"true"}` || event.ProjectUUID != "project-stamp" {
 		t.Fatalf("project event snapshot = %#v", event)
 	}
 }

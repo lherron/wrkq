@@ -170,8 +170,8 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 
 func exportProjectEvents(db *sql.DB, snap *Snapshot) error {
 	snap.ProjectEvents = make(map[string]ProjectEventEntry)
-	rows, err := db.Query(`SELECT id, fid, project_uuid, container_uuid, campaign_uuid,
-		task_uuid, type, source, node, principal_ref, scope_ref, summary, payload,
+	rows, err := db.Query(`SELECT id, uuid, project_uuid, container_uuid, campaign_uuid,
+		task_uuid, type, summary, attributes, principal_ref, scope_ref,
 		idempotency_key, occurred_at, created_at FROM project_events ORDER BY id`)
 	if err != nil {
 		return err
@@ -179,19 +179,18 @@ func exportProjectEvents(db *sql.DB, snap *Snapshot) error {
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var entry ProjectEventEntry
-		var campaign, task, node, scope, payload, key sql.NullString
-		if err := rows.Scan(&entry.ID, &entry.FID, &entry.ProjectUUID, &entry.ContainerUUID,
-			&campaign, &task, &entry.Type, &entry.Source, &node, &entry.PrincipalRef,
-			&scope, &entry.Summary, &payload, &key, &entry.OccurredAt, &entry.CreatedAt); err != nil {
+		var campaign, task, principal, scope, key sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.UUID, &entry.ProjectUUID, &entry.ContainerUUID,
+			&campaign, &task, &entry.Type, &entry.Summary, &entry.Attributes, &principal,
+			&scope, &key, &entry.OccurredAt, &entry.CreatedAt); err != nil {
 			return err
 		}
 		entry.CampaignUUID = snapshotNullString(campaign)
 		entry.TaskUUID = snapshotNullString(task)
-		entry.Node = snapshotNullString(node)
+		entry.PrincipalRef = snapshotNullString(principal)
 		entry.ScopeRef = snapshotNullString(scope)
-		entry.Payload = snapshotNullString(payload)
 		entry.IdempotencyKey = snapshotNullString(key)
-		snap.ProjectEvents[entry.FID] = entry
+		snap.ProjectEvents[entry.UUID] = entry
 	}
 	return rows.Err()
 }

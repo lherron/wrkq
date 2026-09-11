@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 )
 
@@ -21,20 +20,17 @@ type ProjectEventCreateParams struct {
 	CampaignUUID   *string
 	TaskUUID       *string
 	Type           string
-	Source         string
-	Node           *string
 	Summary        string
-	Payload        *string
+	Attributes     string
+	PrincipalRef   *string
+	ScopeRef       *string
 	IdempotencyKey *string
 	OccurredAt     string
 }
 
 // CreateWithAttribution inserts exactly one foreign fact, or returns the
 // existing fact for a project-scoped idempotent replay.
-func (ps *ProjectEventStore) CreateWithAttribution(attr attribution.Attribution, p ProjectEventCreateParams) (*domain.ProjectEvent, bool, error) {
-	if err := requireAttribution(attr); err != nil {
-		return nil, false, err
-	}
+func (ps *ProjectEventStore) Create(p ProjectEventCreateParams) (*domain.ProjectEvent, bool, error) {
 	tx, err := ps.store.db.Begin()
 	if err != nil {
 		return nil, false, fmt.Errorf("begin project event post: %w", err)
@@ -52,12 +48,12 @@ func (ps *ProjectEventStore) CreateWithAttribution(attr attribution.Attribution,
 	}
 
 	result, err := tx.Exec(`INSERT INTO project_events (
-		fid, project_uuid, container_uuid, campaign_uuid, task_uuid, type,
-		source, node, principal_ref, scope_ref, summary, payload,
+		uuid, project_uuid, container_uuid, campaign_uuid, task_uuid, type,
+		summary, attributes, principal_ref, scope_ref,
 		idempotency_key, occurred_at
-	) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ProjectUUID, p.ContainerUUID, p.CampaignUUID, p.TaskUUID, p.Type,
-		p.Source, p.Node, attr.PrincipalRef, scopeSQL(attr), p.Summary, p.Payload,
+		p.Summary, p.Attributes, p.PrincipalRef, p.ScopeRef,
 		p.IdempotencyKey, p.OccurredAt)
 	if err != nil {
 		return nil, false, fmt.Errorf("insert project event: %w", err)
@@ -77,8 +73,8 @@ func (ps *ProjectEventStore) CreateWithAttribution(attr attribution.Attribution,
 }
 
 // Get resolves an addressable project event independently of tree membership.
-func (ps *ProjectEventStore) Get(fid string) (*domain.ProjectEvent, error) {
-	return scanProjectEvent(ps.store.db.QueryRow(`SELECT `+projectEventColumns+` FROM project_events WHERE fid = ?`, fid))
+func (ps *ProjectEventStore) Get(uuid string) (*domain.ProjectEvent, error) {
+	return scanProjectEvent(ps.store.db.QueryRow(`SELECT `+projectEventColumns+` FROM project_events WHERE uuid = ?`, uuid))
 }
 
 // TypesForContainers groups facts by type using only current subtree container
@@ -113,8 +109,8 @@ func (ps *ProjectEventStore) TypesForContainers(containerUUIDs []string) ([]doma
 }
 
 const projectEventColumns = `
-	id, fid, project_uuid, container_uuid, campaign_uuid, task_uuid, type,
-	source, node, principal_ref, scope_ref, summary, payload, idempotency_key,
+	id, uuid, project_uuid, container_uuid, campaign_uuid, task_uuid, type,
+	summary, attributes, principal_ref, scope_ref, idempotency_key,
 	occurred_at, created_at`
 
 type projectEventScanner interface {
@@ -123,11 +119,11 @@ type projectEventScanner interface {
 
 func scanProjectEvent(row projectEventScanner) (*domain.ProjectEvent, error) {
 	var event domain.ProjectEvent
-	var campaign, task, node, scope, payload, key sql.NullString
+	var campaign, task, principal, scope, key sql.NullString
 	err := row.Scan(
-		&event.ID, &event.FID, &event.ProjectUUID, &event.ContainerUUID,
-		&campaign, &task, &event.Type, &event.Source, &node,
-		&event.PrincipalRef, &scope, &event.Summary, &payload, &key,
+		&event.ID, &event.UUID, &event.ProjectUUID, &event.ContainerUUID,
+		&campaign, &task, &event.Type, &event.Summary, &event.Attributes,
+		&principal, &scope, &key,
 		&event.OccurredAt, &event.CreatedAt,
 	)
 	if err != nil {
@@ -135,9 +131,8 @@ func scanProjectEvent(row projectEventScanner) (*domain.ProjectEvent, error) {
 	}
 	event.CampaignUUID = nullStringPtr(campaign)
 	event.TaskUUID = nullStringPtr(task)
-	event.Node = nullStringPtr(node)
+	event.PrincipalRef = nullStringPtr(principal)
 	event.ScopeRef = nullStringPtr(scope)
-	event.Payload = nullStringPtr(payload)
 	event.IdempotencyKey = nullStringPtr(key)
 	return &event, nil
 }

@@ -150,18 +150,16 @@ type EventEntry struct {
 // append-only history (T-07498).
 type ProjectEventEntry struct {
 	ID             int64   `json:"id"`
-	FID            string  `json:"fid"`
+	UUID           string  `json:"uuid"`
 	ProjectUUID    string  `json:"project_uuid"`
 	ContainerUUID  string  `json:"container_uuid"`
 	CampaignUUID   *string `json:"campaign_uuid,omitempty"`
 	TaskUUID       *string `json:"task_uuid,omitempty"`
 	Type           string  `json:"type"`
-	Source         string  `json:"source"`
-	Node           *string `json:"node,omitempty"`
-	PrincipalRef   string  `json:"principal_ref"`
+	Attributes     string  `json:"attributes"`
+	PrincipalRef   *string `json:"principal_ref,omitempty"`
 	ScopeRef       *string `json:"scope_ref,omitempty"`
 	Summary        string  `json:"summary"`
-	Payload        *string `json:"payload,omitempty"`
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
 	OccurredAt     string  `json:"occurred_at"`
 	CreatedAt      string  `json:"created_at"`

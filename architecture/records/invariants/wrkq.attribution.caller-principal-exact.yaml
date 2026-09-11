@@ -18,6 +18,8 @@ predicate: >
   WRKF_ACTOR, or config default_actor as caller attribution, never reads the
   actors table for attribution, and never writes *_actor_uuid columns. Legacy
   wrkf workflow actors are never wrkq-core caller attribution defaults.
+  `wrkq.projectEvent.post` is the sole exception: attribution is optional and
+  stored exactly when supplied; it has no attribution error path.
 authority:
   repo: wrkq
   surface: internal/wrkqapi.API.attributionFor + every wrkqapi mutation call site (the JSON-RPC server, shared by wrkq + wrkf entrypoints)
@@ -43,7 +45,7 @@ required_tests:
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
   - internal/rpccli/parity_test.go             # webhook/add-with-principal mutates row (cross-binary updated_by_principal_ref parity)
 last_verified:
-  date: 2026-07-24
+  date: 2026-09-11
   evidence: "T-05397: wrkf flag/env/runtime/config resolution and legacy/invalid refusal tests, scope-free entrypoint parity, full just verify, and isolated local + authenticated remote wrkqd canonical-principal/legacy-only smokes green."
 reopen_when:
   - attributionFor stops returning an error for missing/invalid principal identity

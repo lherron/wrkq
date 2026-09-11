@@ -207,7 +207,7 @@ func writeSchemaType(b *strings.Builder, typ reflect.Type, seen map[reflect.Type
 		first := true
 		for i := 0; i < typ.NumField(); i++ {
 			field := typ.Field(i)
-			if field.PkgPath != "" {
+			if field.PkgPath != "" || field.Tag.Get("json") == "-" {
 				continue
 			}
 			if !first {

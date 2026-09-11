@@ -4,13 +4,13 @@
 with wrkq mutations through the project timeline.
 
 ```bash
-wrkp post [project] --type T -m SUMMARY|- [--source S] [--node N] [--task T-x]
+wrkp post [project] --type T -m SUMMARY|- --attr key=value [--attr key=value ...] [--task T-x]
           [--key K] [--payload -|@file] [--occurred-at TS]
 wrkp git commit
 wrkp git push <remote> <url>   # pre-push ref lines on stdin
 wrkp log [project] [--after CURSOR] [--since 4h|TS] [--type a,b,hrc.*]
          [--task T-x] [--limit N] [--follow] [--json|--ndjson]
-wrkp show PE-xxxxx
+wrkp show <uuid>
 wrkp types [project]
 wrkp info
 ```

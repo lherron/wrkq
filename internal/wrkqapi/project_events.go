@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -27,15 +28,6 @@ func (a *API) ProjectEventPost(ctx context.Context, p ProjectEventPostParams) (*
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Attribution precedes every lookup, including an idempotent replay.
-	attr, err := a.attributionFor(p.PrincipalRef)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(p.ScopeRef) != "" {
-		value := strings.TrimSpace(p.ScopeRef)
-		attr.ScopeRef = value
-	}
 	if err := validateProjectEventPost(&p); err != nil {
 		return nil, err
 	}
@@ -52,17 +44,18 @@ func (a *API) ProjectEventPost(ctx context.Context, p ProjectEventPostParams) (*
 		occurredAt = parsed.UTC().Format(time.RFC3339)
 	}
 
-	event, created, err := a.store.ProjectEvents.CreateWithAttribution(attr, store.ProjectEventCreateParams{
+	principal := optionalTrimmedString(p.PrincipalRef)
+	scope := optionalTrimmedString(p.ScopeRef)
+	event, created, err := a.store.ProjectEvents.Create(store.ProjectEventCreateParams{
 		ProjectUUID: projectUUID, ContainerUUID: containerUUID, CampaignUUID: campaignUUID,
-		TaskUUID: taskUUID, Type: p.Type, Source: p.Source,
-		Node: optionalTrimmedString(p.Node), Summary: p.Summary,
-		Payload: rawPayloadString(p.Payload), IdempotencyKey: optionalTrimmedString(p.IdempotencyKey),
+		TaskUUID: taskUUID, Type: p.Type, Summary: p.Summary, Attributes: string(p.Attributes),
+		PrincipalRef: principal, ScopeRef: scope, IdempotencyKey: optionalTrimmedString(p.IdempotencyKey),
 		OccurredAt: occurredAt,
 	})
 	if err != nil {
 		return nil, NewInternalError(err)
 	}
-	return &WrkqProjectEventPostResult{ID: event.ID, FID: event.FID, Created: created}, nil
+	return &WrkqProjectEventPostResult{UUID: event.UUID, Created: created, ID: event.ID}, nil
 }
 
 func (a *API) ProjectEventGet(ctx context.Context, p ProjectEventGetParams) (*WrkqProjectEvent, error) {
@@ -80,7 +73,7 @@ func (a *API) ProjectEventGet(ctx context.Context, p ProjectEventGetParams) (*Wr
 	if err != nil {
 		return nil, NewInternalError(err)
 	}
-	return projectEventDTO(event), nil
+	return a.projectEventDTO(ctx, event), nil
 }
 
 func (a *API) ProjectEventTypesView(ctx context.Context, p ProjectEventTypesViewParams) (*WrkqProjectEventTypesView, error) {
@@ -118,24 +111,40 @@ func validateProjectEventPost(p *ProjectEventPostParams) error {
 	if _, reserved := reservedProjectEventNamespaces[namespace]; reserved {
 		return NewValidationError("project event type uses a reserved namespace", map[string]any{"field": "type", "reason": "reserved_namespace"})
 	}
-	p.Source = strings.TrimSpace(p.Source)
-	if p.Source == "" || len(p.Source) > 64 {
-		return NewValidationError("source is required and must be at most 64 characters", map[string]any{"field": "source"})
-	}
-	if len(p.Node) > 64 {
-		return NewValidationError("node must be at most 64 characters", map[string]any{"field": "node"})
-	}
 	if strings.TrimSpace(p.Summary) == "" || len(p.Summary) > 512 || strings.ContainsAny(p.Summary, "\r\n") {
 		return NewValidationError("summary is required, single-line, and at most 512 characters", map[string]any{"field": "summary"})
 	}
-	if len(p.Payload) > 64*1024 {
-		return NewValidationError("payload must be at most 64 KiB", map[string]any{"field": "payload"})
+	if len(p.Attributes) == 0 {
+		return NewValidationError("attributes are required", map[string]any{"field": "attributes", "reason": "required"})
 	}
-	if len(p.Payload) > 0 {
-		var object map[string]json.RawMessage
-		if json.Unmarshal(p.Payload, &object) != nil || object == nil {
-			return NewValidationError("payload must be a JSON object", map[string]any{"field": "payload"})
+	var object map[string]json.RawMessage
+	if json.Unmarshal(p.Attributes, &object) != nil || object == nil {
+		return NewValidationError("attributes must be a JSON object", map[string]any{"field": "attributes", "reason": "invalid_value"})
+	}
+	if len(object) == 0 {
+		return NewValidationError("attributes are required", map[string]any{"field": "attributes", "reason": "required"})
+	}
+	if len(object) > 32 {
+		return NewValidationError("attributes has too many keys", map[string]any{"field": "attributes", "reason": "too_many_keys"})
+	}
+	keyPattern := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	for key, raw := range object {
+		if !keyPattern.MatchString(key) {
+			return NewValidationError("attributes has an invalid key", map[string]any{"field": "attributes", "reason": "invalid_key"})
 		}
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return NewValidationError("attributes has an invalid value", map[string]any{"field": "attributes", "reason": "invalid_value"})
+		}
+		if len(value) > 1024 {
+			return NewValidationError("attributes value is too long", map[string]any{"field": "attributes", "reason": "value_too_long"})
+		}
+	}
+	if value := strings.TrimSpace(p.PrincipalRef); value != "" {
+		if err := attribution.ValidatePrincipalRef(value); err != nil {
+			return NewValidationError("principalRef must be agent:<id>", map[string]any{"field": "principalRef"})
+		}
+		p.PrincipalRef = value
 	}
 	if value := strings.TrimSpace(p.OccurredAt); value != "" {
 		if _, err := time.Parse(time.RFC3339, value); err != nil {
@@ -199,16 +208,31 @@ func (a *API) resolveProjectEventAffiliation(ctx context.Context, project, task 
 	return projectUUID, containerUUID, campaignUUID, &taskUUID, nil
 }
 
-func projectEventDTO(event *domain.ProjectEvent) *WrkqProjectEvent {
+func (a *API) projectEventDTO(ctx context.Context, event *domain.ProjectEvent) *WrkqProjectEvent {
 	result := &WrkqProjectEvent{
-		ID: event.ID, FID: event.FID, ProjectUUID: event.ProjectUUID,
+		UUID: event.UUID, ProjectUUID: event.ProjectUUID,
 		ContainerUUID: event.ContainerUUID, CampaignUUID: event.CampaignUUID,
-		TaskUUID: event.TaskUUID, Type: event.Type, Source: event.Source, Node: event.Node,
+		TaskUUID: event.TaskUUID, Type: event.Type, Attributes: json.RawMessage(event.Attributes),
 		PrincipalRef: event.PrincipalRef, ScopeRef: event.ScopeRef, Summary: event.Summary,
 		IdempotencyKey: event.IdempotencyKey, OccurredAt: toRFC3339(event.OccurredAt), CreatedAt: toRFC3339(event.CreatedAt),
 	}
-	if event.Payload != nil {
-		result.Payload = json.RawMessage(*event.Payload)
+	if event.TaskUUID != nil {
+		var id string
+		if a.db.QueryRowContext(ctx, `SELECT id FROM tasks WHERE uuid = ?`, *event.TaskUUID).Scan(&id) == nil {
+			result.Task = &id
+		}
+	}
+	{
+		var path string
+		if a.db.QueryRowContext(ctx, `SELECT path FROM v_container_paths WHERE uuid = ?`, event.ContainerUUID).Scan(&path) == nil {
+			result.Container = &path
+		}
+	}
+	if event.CampaignUUID != nil {
+		var path string
+		if a.db.QueryRowContext(ctx, `SELECT path FROM v_container_paths WHERE uuid = ?`, *event.CampaignUUID).Scan(&path) == nil {
+			result.Campaign = &path
+		}
 	}
 	return result
 }
@@ -219,12 +243,4 @@ func optionalTrimmedString(value string) *string {
 		return nil
 	}
 	return &value
-}
-
-func rawPayloadString(value json.RawMessage) *string {
-	if len(value) == 0 {
-		return nil
-	}
-	result := string(value)
-	return &result
 }

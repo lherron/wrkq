@@ -36,22 +36,22 @@ type wrkpContainerTaskCounts struct {
 }
 
 type wrkpProjectEvent struct {
-	ID             int64           `json:"id"`
-	FID            string          `json:"fid"`
+	UUID           string          `json:"uuid"`
 	ProjectUUID    string          `json:"projectUuid"`
 	ContainerUUID  string          `json:"containerUuid"`
 	CampaignUUID   *string         `json:"campaignUuid"`
 	TaskUUID       *string         `json:"taskUuid"`
 	Type           string          `json:"type"`
-	Source         string          `json:"source"`
-	Node           *string         `json:"node,omitempty"`
-	PrincipalRef   string          `json:"principalRef"`
-	ScopeRef       *string         `json:"scopeRef,omitempty"`
+	Attributes     json.RawMessage `json:"attributes"`
+	PrincipalRef   *string         `json:"principalRef"`
+	ScopeRef       *string         `json:"scopeRef"`
 	Summary        string          `json:"summary"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	IdempotencyKey *string         `json:"idempotencyKey,omitempty"`
+	IdempotencyKey *string         `json:"idempotencyKey"`
 	OccurredAt     string          `json:"occurredAt"`
 	CreatedAt      string          `json:"createdAt"`
+	Task           *string         `json:"task"`
+	Container      *string         `json:"container"`
+	Campaign       *string         `json:"campaign"`
 }
 
 func NewWrkpRootCmd() *cobra.Command {
@@ -82,7 +82,8 @@ func ExecuteWrkp() error {
 }
 
 func newWrkpPostCmd() *cobra.Command {
-	var eventType, summary, source, node, task, key, payload, occurredAt string
+	var eventType, summary, task, key, occurredAt string
+	var attrs []string
 	cmd := &cobra.Command{
 		Use: "post [project]", Short: "Post one foreign fact", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,14 +91,6 @@ func newWrkpPostCmd() *cobra.Command {
 			message, err := readTextValue(summary, "--message", cmd.InOrStdin(), claims)
 			if err != nil {
 				return err
-			}
-			var payloadRaw json.RawMessage
-			if payload != "" {
-				value, err := readTextValue(payload, "--payload", cmd.InOrStdin(), claims)
-				if err != nil {
-					return err
-				}
-				payloadRaw = json.RawMessage(value)
 			}
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
@@ -112,11 +105,19 @@ func newWrkpPostCmd() *cobra.Command {
 			}
 			params := map[string]any{
 				"project": project, "task": sc.selector(task, false), "type": eventType,
-				"source": source, "node": node, "summary": strings.TrimSuffix(message, "\n"),
+				"summary":        strings.TrimSuffix(message, "\n"),
 				"idempotencyKey": key, "occurredAt": occurredAt,
 			}
-			if len(payloadRaw) > 0 {
-				params["payload"] = payloadRaw
+			if len(attrs) > 0 {
+				attributes := map[string]string{}
+				for _, raw := range attrs {
+					name, value, ok := strings.Cut(raw, "=")
+					if !ok || name == "" {
+						return fmt.Errorf("--attr requires key=value")
+					}
+					attributes[name] = value
+				}
+				params["attributes"] = attributes
 			}
 			principal, err := actorFlag(cmd)
 			if err != nil {
@@ -133,8 +134,7 @@ func newWrkpPostCmd() *cobra.Command {
 				return wrkpRPCError(err)
 			}
 			var result struct {
-				ID      int64  `json:"id"`
-				FID     string `json:"fid"`
+				UUID    string `json:"uuid"`
 				Created bool   `json:"created"`
 			}
 			if err := json.Unmarshal(raw, &result); err != nil {
@@ -144,20 +144,18 @@ func newWrkpPostCmd() *cobra.Command {
 				return encodeJSONIndent(cmd, result)
 			}
 			if result.Created {
-				fmt.Fprintln(cmd.OutOrStdout(), result.FID)
+				fmt.Fprintln(cmd.OutOrStdout(), result.UUID)
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s (existing)\n", result.FID)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s (existing)\n", result.UUID)
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&eventType, "type", "", "Dotted event type")
 	cmd.Flags().StringVarP(&summary, "message", "m", "", "One-line summary, or - for stdin")
-	cmd.Flags().StringVar(&source, "source", "wrkp", "Provenance source")
-	cmd.Flags().StringVar(&node, "node", "", "Optional node label")
+	cmd.Flags().StringArrayVar(&attrs, "attr", nil, "Attribute key=value (repeatable)")
 	cmd.Flags().StringVar(&task, "task", "", "Optional task selector")
 	cmd.Flags().StringVar(&key, "key", "", "Project-scoped idempotency key")
-	cmd.Flags().StringVar(&payload, "payload", "", "JSON object, @file, or - for stdin")
 	cmd.Flags().StringVar(&occurredAt, "occurred-at", "", "Occurrence time (RFC3339)")
 	return cmd
 }
@@ -388,7 +386,7 @@ func wrkpSubtreeFingerprint(ctx context.Context, tr Transport, projectUUID strin
 func newWrkpShowCmd() *cobra.Command {
 	var pretty bool
 	cmd := &cobra.Command{
-		Use: "show PE-xxxxx", Short: "Show one project event", Args: cobra.ExactArgs(1),
+		Use: "show <uuid>", Short: "Show one project event", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
@@ -417,18 +415,16 @@ func newWrkpShowCmd() *cobra.Command {
 // styledProjectEvent flattens the wire event into the presentation view model.
 func styledProjectEvent(event wrkpProjectEvent, project string) style.StyledEvent {
 	styled := style.StyledEvent{
-		ID:         event.FID,
+		ID:         event.UUID,
 		Type:       event.Type,
 		Summary:    event.Summary,
-		Source:     event.Source,
-		Principal:  event.PrincipalRef,
+		Attributes: event.Attributes,
 		Project:    project,
 		OccurredAt: event.OccurredAt,
 		CreatedAt:  event.CreatedAt,
-		Payload:    event.Payload,
 	}
-	if event.Node != nil {
-		styled.Node = *event.Node
+	if event.PrincipalRef != nil {
+		styled.Principal = *event.PrincipalRef
 	}
 	if event.ScopeRef != nil {
 		styled.ScopeRef = *event.ScopeRef
@@ -642,12 +638,12 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			}
 			styled.Accent = style.ColMarker
 		case entry.ProjectEvent != nil:
-			styled.ID = entry.ProjectEvent.FID
 			styled.Label = entry.ProjectEvent.Type
 			styled.Accent = style.ColMarker
 			styled.Body = entry.ProjectEvent.Summary
-			if styled.Principal == "" {
-				styled.Principal = entry.ProjectEvent.PrincipalRef
+			styled.Attributes = entry.ProjectEvent.Attributes
+			if styled.Principal == "" && entry.ProjectEvent.PrincipalRef != nil {
+				styled.Principal = *entry.ProjectEvent.PrincipalRef
 			}
 		}
 		styledEntries = append(styledEntries, styled)

@@ -84,6 +84,9 @@ type StyledEntry struct {
 	// Body is prose flowed under the label — a comment or an outcome. Empty for
 	// ticks.
 	Body string
+	// Attributes are the one generic project-event detail line. They are carried
+	// without interpreting the event type.
+	Attributes json.RawMessage
 	// Timestamp is the entry's RFC3339 server time.
 	Timestamp string
 	// TaskID and TaskPath attach the entry to a task. Empty means the entry
@@ -196,7 +199,46 @@ func renderTimelineRun(w io.Writer, run []StyledEntry, resumed bool) {
 
 		_, _ = io.WriteString(w, lead+timelineRow(entry, timelineWidth()-timelineGutter)+"\n")
 		renderTimelineBody(w, cont, entry.Body)
+		renderTimelineAttributes(w, cont, entry.Attributes)
 	}
+}
+
+// renderTimelineAttributes is deliberately type-agnostic: all project facts
+// carry the same flat string map and the timeline renders that one shape.
+func renderTimelineAttributes(w io.Writer, prefix string, raw json.RawMessage) {
+	pairs := orderedAttributePairs(raw)
+	if len(pairs) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		parts = append(parts, pair.Key+"="+pair.Value)
+	}
+	emitFlowPlain(w, prefix, prefix, strings.Join(parts, " "))
+}
+
+func orderedAttributePairs(raw json.RawMessage) []keyValue {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil
+	}
+	result := []keyValue{}
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil
+		}
+		var value string
+		if err := decoder.Decode(&value); err != nil {
+			return nil
+		}
+		result = append(result, keyValue{Key: key, Value: value})
+	}
+	return result
 }
 
 // renderRunHeader prints a task run's header in the task card's own grammar:
@@ -421,8 +463,6 @@ type StyledEvent struct {
 	ID          string
 	Type        string
 	Summary     string
-	Source      string
-	Node        string
 	Principal   string
 	ScopeRef    string
 	Project     string
@@ -431,7 +471,11 @@ type StyledEvent struct {
 	OccurredAt  string
 	CreatedAt   string
 	Idempotency string
-	Payload     json.RawMessage
+	Attributes  json.RawMessage
+	// Legacy presentation-test inputs; no wire surface uses these fields.
+	Source  string
+	Node    string
+	Payload json.RawMessage
 }
 
 // RenderStyledEvent writes one project event as a card in the task card's
@@ -443,11 +487,12 @@ func RenderStyledEvent(w io.Writer, e StyledEvent) {
 	eventSection(w, "§ Summary", func() {
 		emitFlow(w, bodyIndent, bodyIndent, e.Summary)
 	})
-	if rows := decodePayloadRows(e.Payload); len(rows) > 0 {
-		eventSection(w, "§ Payload", func() { renderKeyValues(w, rows) })
+	attributes := e.Attributes
+	if len(attributes) == 0 {
+		attributes = e.Payload
 	}
-	if rows := eventProvenance(e); len(rows) > 0 {
-		eventSection(w, "§ Provenance", func() { renderKeyValues(w, rows) })
+	if rows := decodePayloadRows(attributes); len(rows) > 0 {
+		eventSection(w, "§ Attributes", func() { renderKeyValues(w, rows) })
 	}
 }
 
@@ -507,28 +552,14 @@ func eventSection(w io.Writer, label string, body func()) {
 
 type keyValue struct{ Key, Value string }
 
-// eventProvenance surfaces the fields that identify where a fact came from.
-// ScopeRef is the reason the card exists: it names the seat that produced the
-// event even when the payload claims no task at all.
-func eventProvenance(e StyledEvent) []keyValue {
-	var rows []keyValue
-	if e.ScopeRef != "" {
-		rows = append(rows, keyValue{"produced by", e.ScopeRef})
-	}
-	if e.Idempotency != "" {
-		rows = append(rows, keyValue{"idempotency", e.Idempotency})
-	}
-	if e.CreatedAt != "" && e.CreatedAt != e.OccurredAt {
-		rows = append(rows, keyValue{"recorded", e.CreatedAt})
-	}
-	return rows
-}
-
 // decodePayloadRows flattens a payload object into aligned rows. Scalars print
 // bare; nested arrays and objects collapse to compact JSON on one line. A
 // payload that is not an object — which validation forbids but a future writer
 // could still deliver — renders as a single raw row rather than disappearing.
 func decodePayloadRows(payload json.RawMessage) []keyValue {
+	if rows := orderedAttributePairs(payload); len(rows) > 0 {
+		return rows
+	}
 	if len(payload) == 0 {
 		return nil
 	}

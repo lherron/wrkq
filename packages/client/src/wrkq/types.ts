@@ -1415,7 +1415,6 @@ export interface WrkqTimelineContainerState {
 
 interface WrkqTimelineEntryBase {
   eventId: number;
-  projectEventId?: number;
   timestamp: string;
   principalRef?: string;
   resourceUuid?: string;
@@ -1454,13 +1453,12 @@ export type WrkqTimelineEntry =
     });
 
 export interface WrkqTimelineProjectEvent {
-  fid: string;
+  uuid: string;
   type: string;
-  source: string;
-  node?: string;
-  principalRef: string;
+  attributes: Record<string, string>;
+  principalRef: string | null;
+  scopeRef: string | null;
   summary: string;
-  payload?: Record<string, unknown>;
   occurredAt: string;
 }
 
@@ -1485,10 +1483,8 @@ export interface WrkqProjectEventPostParams {
   project?: string;
   task?: string;
   type: string;
-  source: string;
-  node?: string;
   summary: string;
-  payload?: Record<string, unknown>;
+  attributes: Record<string, string>;
   idempotencyKey?: string;
   occurredAt?: string;
   principalRef?: string;
@@ -1503,27 +1499,26 @@ export interface WrkqProjectEventTypesViewParams {
 }
 
 export interface WrkqProjectEvent {
-  id: number;
-  fid: string;
+  uuid: string;
   projectUuid: string;
   containerUuid: string;
   campaignUuid: string | null;
   taskUuid: string | null;
   type: string;
-  source: string;
-  node?: string;
-  principalRef: string;
-  scopeRef?: string;
+  attributes: Record<string, string>;
+  principalRef: string | null;
+  scopeRef: string | null;
   summary: string;
-  payload?: Record<string, unknown>;
-  idempotencyKey?: string;
+  idempotencyKey: string | null;
   occurredAt: string;
   createdAt: string;
+  task: string | null;
+  container: string | null;
+  campaign: string | null;
 }
 
 export interface WrkqProjectEventPostResult {
-  id: number;
-  fid: string;
+  uuid: string;
   created: boolean;
 }
 

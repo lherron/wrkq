@@ -5,18 +5,16 @@ package domain
 // stamps; ProjectUUID scopes idempotency only.
 type ProjectEvent struct {
 	ID             int64
-	FID            string
+	UUID           string
 	ProjectUUID    string
 	ContainerUUID  string
 	CampaignUUID   *string
 	TaskUUID       *string
 	Type           string
-	Source         string
-	Node           *string
-	PrincipalRef   string
+	Attributes     string
+	PrincipalRef   *string
 	ScopeRef       *string
 	Summary        string
-	Payload        *string
 	IdempotencyKey *string
 	OccurredAt     string
 	CreatedAt      string

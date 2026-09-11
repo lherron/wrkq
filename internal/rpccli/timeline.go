@@ -21,10 +21,9 @@ type timelineMember struct {
 }
 
 type timelineEntry struct {
-	Type           string `json:"type"`
-	EventID        int64  `json:"eventId"`
-	ProjectEventID int64  `json:"projectEventId,omitempty"`
-	Timestamp      string `json:"timestamp"`
+	Type      string `json:"type"`
+	EventID   int64  `json:"eventId"`
+	Timestamp string `json:"timestamp"`
 	// PrincipalRef is the actor the server attributes the entry to. It is the
 	// one field every entry kind shares and the one a reader asks for first, so
 	// it is carried through rather than dropped in projection.
@@ -61,13 +60,12 @@ type timelineEntry struct {
 		To   string  `json:"to"`
 	} `json:"containerState,omitempty"`
 	ProjectEvent *struct {
-		FID          string          `json:"fid"`
+		UUID         string          `json:"uuid"`
 		Type         string          `json:"type"`
-		Source       string          `json:"source"`
-		Node         *string         `json:"node,omitempty"`
-		PrincipalRef string          `json:"principalRef"`
+		Attributes   json.RawMessage `json:"attributes"`
+		PrincipalRef *string         `json:"principalRef"`
+		ScopeRef     *string         `json:"scopeRef"`
 		Summary      string          `json:"summary"`
-		Payload      json.RawMessage `json:"payload,omitempty"`
 		OccurredAt   string          `json:"occurredAt"`
 	} `json:"projectEvent,omitempty"`
 }
