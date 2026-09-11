@@ -182,6 +182,12 @@ func newWrkpLogCmd() *cobra.Command {
 			var styled *style.TimelineWriter
 			cursor := after
 			containerSet := ""
+			// previousCursor and followIdleNoticed exist only for the
+			// empty-window notice below: one detects that a tail has caught up,
+			// the other keeps the notice to a single printing per session.
+			previousCursor := ""
+			followIdleNoticed := false
+			containerPath := ""
 			delivered := 0
 			deliveredLimit := limit
 			if deliveredLimit <= 0 {
@@ -231,6 +237,7 @@ func newWrkpLogCmd() *cobra.Command {
 				if mode == "human" && styled == nil {
 					styled = style.NewTimelineWriter(cmd.OutOrStdout(), view.Container.Path)
 				}
+				containerPath = view.Container.Path
 				if err := renderWrkpEntries(cmd, view.Entries, mode, styled); err != nil {
 					return err
 				}
@@ -249,6 +256,20 @@ func newWrkpLogCmd() *cobra.Command {
 					containerSet = currentSet
 				}
 				cursor = view.NextCursor
+				// A tail with an empty window prints nothing and waits, which on
+				// a terminal is indistinguishable from a hang -- that is exactly
+				// how `--since 3h --follow` was read as a stall. Say it once, and
+				// only when the read is demonstrably CAUGHT UP: a tail cursor
+				// moves whenever the scan advances, so two identical cursors mean
+				// the backlog is drained rather than that a sparse page of
+				// excluded rows is still being walked.
+				if follow && mode == "human" && delivered == 0 && !followIdleNoticed &&
+					cursor != "" && cursor == previousCursor {
+					fmt.Fprintln(cmd.ErrOrStderr(),
+						wrkpEmptyWindowNotice(cmd.Context(), tr, project, containerPath, since, true))
+					followIdleNoticed = true
+				}
+				previousCursor = cursor
 				if !follow {
 					// A raw-scan page may consume only excluded rows. Keep advancing
 					// sparse filtered reads until the delivered limit is full or the
@@ -258,6 +279,10 @@ func newWrkpLogCmd() *cobra.Command {
 					}
 					if porcelain && cursor != "" {
 						fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", cursor)
+					}
+					if mode == "human" && delivered == 0 {
+						fmt.Fprintln(cmd.ErrOrStderr(),
+							wrkpEmptyWindowNotice(cmd.Context(), tr, project, containerPath, since, false))
 					}
 					return nil
 				}
@@ -628,4 +653,72 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 		styledEntries = append(styledEntries, styled)
 	}
 	return styledEntries
+}
+
+// wrkpEmptyWindowNotice explains a read that delivered nothing. An empty window
+// is silent on BOTH paths -- the bounded read exits 0 with no output at all, and
+// the tail simply waits -- and that silence is read as a broken command rather
+// than as an answer. `wrkp log --since 3h --follow` on a project whose newest
+// entry was ten hours old was reported as a performance regression for exactly
+// this reason: the command was correct and fast, and said so in no way.
+//
+// The notice names the window that was asked for and, when the timeline does
+// hold older entries, WHEN the newest one was. That second fact is what
+// separates "your window is empty" from "the timeline is dead", and it is the
+// question a reader asks next.
+func wrkpEmptyWindowNotice(ctx context.Context, tr Transport, project, containerPath, since string, following bool) string {
+	where := containerPath
+	if where == "" {
+		where = project
+	}
+	notice := "no entries"
+	if where != "" {
+		notice += " in " + where
+	}
+	if since != "" {
+		notice += " since " + since
+	}
+	if newest := wrkpNewestEntryStamp(ctx, tr, project); newest != "" {
+		notice += "; newest is " + newest
+	}
+	if following {
+		notice += " — following for new ones (ctrl-c to stop)"
+	}
+	return "wrkp: " + notice
+}
+
+// wrkpNewestEntryStamp reports when the project last had a deliverable entry,
+// in the reader's own zone, for the empty-window notice. It is one descending
+// limit-1 read issued ONLY on the empty path, so a read that delivered anything
+// pays nothing for it.
+//
+// Its failure is never the caller's error -- the read it annotates already
+// succeeded -- so every failure degrades to the empty string and the notice
+// falls back to naming the window alone. A descending page can also legitimately
+// deliver nothing when its newest raw rows are all excluded from this container;
+// that too degrades quietly, and the surviving wording claims only that the
+// WINDOW is empty, never that the timeline is.
+func wrkpNewestEntryStamp(ctx context.Context, tr Transport, project string) string {
+	raw, err := tr.Call(ctx, "wrkq.container.timelineView", map[string]any{
+		"container": project, "scope": "subtree", "entriesOnly": true,
+		"order": "desc", "limit": 1,
+	})
+	if err != nil {
+		return ""
+	}
+	var view wrkpLogView
+	if err := json.Unmarshal(raw, &view); err != nil || len(view.Entries) == 0 {
+		return ""
+	}
+	newest, ok := style.ParseTimestamp(view.Entries[0].Timestamp)
+	if !ok {
+		return ""
+	}
+	elapsed := style.NowUTC().Sub(newest)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return fmt.Sprintf("%s (%s ago)",
+		newest.In(style.DisplayLocation()).Format("2006-01-02 15:04 MST"),
+		style.FormatDuration(elapsed))
 }
