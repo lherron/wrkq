@@ -43,8 +43,23 @@ predicate: >
 
   expires_at is a server-normalized immutable creation attribute. A due pending
   or deferred envelope with no presentation receipt materializes once as
-  terminal expired on the next authoritative inbox, show, pendingView, present,
-  or envelope-monitor observation; a receipt permanently excludes expiry.
+  terminal expired/ttl on the next maintenance-bearing authoritative
+  observation. Independently, every addressed pending or deferred envelope with
+  no receipt has an implicit undelivered horizon at created_at plus twenty-four
+  hours and materializes once as failed/undeliverable with the existing failure
+  event, sender-notice, and cleanup semantics. An earlier explicit deadline wins;
+  an equal deadline uses the implicit failure; a later explicit deadline cannot
+  extend the implicit horizon. Invalid created_at alone does not prove implicit
+  expiry, and a receipt permanently excludes both forms of expiry. Inbox, show,
+  pendingView, and monitor-state observations perform the global sweep;
+  presentation applies the same receipt, state, and deadline predicate inside
+  its receipt transaction. An ordinary event-monitor observation first snapshots
+  and closes its requested page, then performs the global sweep without advancing
+  the returned high-water; LastN cursor resolution performs no expiry
+  maintenance. Thus maintenance events are consumed by a later ordinary page
+  rather than hidden behind an adopted cursor. If no observer runs, raw state may
+  remain pending until the first later maintenance-bearing observation; there is
+  no wall-clock timer guarantee.
   delivery is the other immutable attribute, queue by default or hold. wrkq
   stores and projects delivery but never routes or actuates it; HRC's kicker is
   its named reader and decides whether hold reaches its preempt admission door.
@@ -93,6 +108,7 @@ source:
   - internal/rpccli/wrkc_acceptance_test.go
   - internal/wrkqapi/rooms_admission_test.go
   - packages/client/test/room-contract.test.ts
+  - hrc-runtime:T-08401
 required_tests:
   - TestEnvelopeTTLExpiryMaterializesFromPendingAndDeferredWithExactObserver
   - TestEnvelopeTTLDoesNotExpireAfterPresentationAndPresentGuardsTerminal
@@ -101,9 +117,11 @@ required_tests:
   - TestSayStoresTTLHoldAndIdempotencyAcrossFanout
   - TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon
   - packages/client/test/room-contract.test.ts
+  - T-08401 implicit expiry boundaries, receipt-first and expiry-first serialization, explicit precedence, receipt exemptions, and one terminal failure event
+  - T-08401 virgin and ongoing event pagination preserves unrelated events and consumes newly appended expiry failures through sender notice and terminal cleanup exactly once
 last_verified:
   date: 2026-09-02
-  evidence: T-07871 durability bundle green under just verify; named expiry, withdrawal, scoped-discharge, CLI, migration, and SDK contract tests pin the additive admission surface. Promote to active when waves 2 and 3 prove the consumer side.
+  evidence: T-07871 durability bundle green under just verify; named expiry, withdrawal, scoped-discharge, CLI, migration, and SDK contract tests pin the additive admission surface. T-08401 revision 3 was source-reviewed and approved on 2026-09-11; its implementation and named gates remain pending, so this date is not refreshed. Promote to active when waves 2 and 3 prove the consumer side.
 enforced_by: "wave 1 ledger/routing bundle; promote to active only after the HRC consumer and ACP cutover guards exist"
 reopen_when:
   - one envelope acquires multiple addressees, or a fan-out sibling's disposition can reach another sibling
@@ -113,7 +131,8 @@ reopen_when:
   - membership becomes derived from a wrkq field, or membership starts gating delivery or reads
   - deferred becomes terminal, or a defer retry stops being carried by a wrkq promise
   - delivery stops being immutable store-only intent or wrkq begins routing hold
-  - expiry uses a client clock, timer, or sweeper instead of server-clock observation materialization
+  - expiry uses a client clock or timer instead of server-clock observation materialization
+  - the implicit undelivered horizon, receipt exemption, explicit-deadline precedence, or event-monitor cursor ordering changes
   - presentation and withdrawal cease to serialize, or scoped discharge ceases to be atomic with reply creation
   - a presentation receipt becomes anything other than opaque HRC join data, or stops being exactly-once per drive attempt
   - room, member, or envelope activity leaves the shared wrkq event ledger for a separate stream

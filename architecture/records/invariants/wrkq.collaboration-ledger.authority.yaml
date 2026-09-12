@@ -34,9 +34,18 @@ predicate: >
   wrkq even though its actuation is intentionally external: HRC's kicker is the
   named reader that maps `hold` to its preempt admission door and applies HRC
   authority. expires_at and terminal expired/withdrawn are likewise wrkq ledger
-  state. Expiry is derived from the server clock on an attributed observation;
-  HRC supplies presentation receipts and explicit manifest discharge sets but
-  never decides or mirrors the resulting envelope state.
+  state. Independently, an addressed pending or deferred envelope with no
+  committed presentation receipt has an implicit undelivered horizon at
+  created_at plus twenty-four hours. At that horizon wrkq materializes
+  failed/undeliverable once; an earlier explicit expires_at still materializes
+  expired/ttl, and a later explicit deadline cannot extend the implicit bound.
+  Any committed receipt permanently exempts the envelope. Expiry is derived from
+  the server clock on an attributed observation. An ordinary event observation
+  snapshots and closes its requested page before global expiry maintenance, so
+  maintenance events remain beyond the returned high-water; LastN cursor
+  resolution performs no maintenance. HRC supplies presentation receipts and
+  explicit manifest discharge sets but never decides or mirrors the resulting
+  envelope state.
 
   A bodyless HRC pending-reply intent for one completed drive attempt is
   execution actuation, not a second collaboration copy. For a successful drive
@@ -76,14 +85,17 @@ source:
   - internal/db/migrations/000059_envelope_admission.sql
   - internal/wrkqapi/rooms_admission_test.go
   - wrkq:T-07789
+  - hrc-runtime:T-08401
 required_tests:
   - T-07612 ledger and routing bundle
   - T-07612 consumer and cutover bundle
   - TestEnvelopeTTLExpiryMaterializesFromPendingAndDeferredWithExactObserver
   - TestManifestScopedReplyDischargesExactSetAtomically
+  - T-08401 implicit expiry boundary, explicit-deadline precedence, receipt exemption, transaction-race, and idempotent terminal-event gates
+  - T-08401 virgin and ongoing event-cursor gates prove expiry failures remain beyond the returned high-water and reach sender-notice and cleanup consumers exactly once
 last_verified:
   date: 2026-09-02
-  evidence: T-07871 durability implementation passed Daedalus review and just verify; installed daemon-down ledger and HRC-up presentation evidence remains the completion gate.
+  evidence: T-07871 durability implementation passed Daedalus review and just verify; installed daemon-down ledger and HRC-up presentation evidence remains the completion gate. T-08401 revision 3 was source-reviewed and approved on 2026-09-11; its implementation and named gates remain pending, so this date is not refreshed.
 reopen_when:
   - any non-wrkq store becomes a durable room, envelope, obligation, membership, attendance, or presentation-receipt authority
   - wrkq or wrkc acquires an HRC runtime dependency
@@ -99,5 +111,6 @@ reopen_when:
   - the accepted discharge-read/plain-say duplicate window changes
   - delivery intent is dropped as dead data before the HRC reader is retired or moved by explicit law
   - expiry or withdrawal state is authored outside wrkq
+  - the implicit undelivered horizon, receipt exemption, explicit-deadline precedence, or event-cursor ordering changes
 supersedes: []
 superseded_by: null
