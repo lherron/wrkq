@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -127,7 +128,7 @@ func renderWrkcRoomSingleton(cmd *cobra.Command, raw json.RawMessage, flags prom
 	case "raw":
 		return renderer.RenderList([]string{room.Key})
 	case "tsv":
-		headers, rows := wrkcRoomTable([]roomWire{room}, wrkcIdentityMap(room, identity))
+		headers, rows := wrkcRoomTable([]roomWire{room}, wrkcIdentityMap(room, identity), false)
 		return renderer.RenderTSV(headers, rows)
 	}
 	return renderer.RenderList(wrkcRoomDetailLines(room, identity))
@@ -162,7 +163,7 @@ func wrkcRoomDetailLines(room roomWire, identity *wrkcAdhocIdentity) []string {
 	}
 	lines = append(lines,
 		fmt.Sprintf("messages: %d", room.MessageCount),
-		"last_activity: "+room.LastActivityAt,
+		"last_activity: "+style.FormatLocalTimestamp(room.LastActivityAt),
 		"opened_by: "+room.OpenedByPrincipalRef,
 		fmt.Sprintf("etag: %d", room.ETag),
 	)
@@ -194,7 +195,7 @@ func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, identities map[string
 		}
 		return renderer.RenderList(keys)
 	}
-	headers, rows := wrkcRoomTable(rooms, identities)
+	headers, rows := wrkcRoomTable(rooms, identities, mode != "tsv")
 	if mode == "tsv" {
 		return renderer.RenderTSV(headers, rows)
 	}
@@ -204,7 +205,7 @@ func renderWrkcRooms(cmd *cobra.Command, rooms []roomWire, identities map[string
 	return renderer.RenderTable(headers, rows)
 }
 
-func wrkcRoomTable(rooms []roomWire, identities map[string]wrkcAdhocIdentity) ([]string, [][]string) {
+func wrkcRoomTable(rooms []roomWire, identities map[string]wrkcAdhocIdentity, localTimes bool) ([]string, [][]string) {
 	headers := []string{"Room", "Kind", "Work", "Activity", "Members", "Messages", "Last activity", "Last"}
 	rows := make([][]string, 0, len(rooms))
 	for _, room := range rooms {
@@ -215,9 +216,13 @@ func wrkcRoomTable(rooms []roomWire, identities map[string]wrkcAdhocIdentity) ([
 			members = strings.Join(identity.Members, ", ")
 			last = identity.Last
 		}
+		lastActivityAt := room.LastActivityAt
+		if localTimes {
+			lastActivityAt = style.FormatLocalTimestamp(lastActivityAt)
+		}
 		rows = append(rows, []string{
 			room.Key, room.Kind, room.Work, room.Activity, members,
-			fmt.Sprint(room.MessageCount), room.LastActivityAt, last,
+			fmt.Sprint(room.MessageCount), lastActivityAt, last,
 		})
 	}
 	return headers, rows
@@ -266,10 +271,10 @@ func renderWrkcEnvelopesMode(cmd *cobra.Command, envelopes []envelopeWire, mode 
 		}
 		return renderer.RenderList(ids)
 	case "tsv":
-		headers, rows := wrkcEnvelopeTable(envelopes)
+		headers, rows := wrkcEnvelopeTable(envelopes, false)
 		return renderer.RenderTSV(headers, rows)
 	case "table":
-		headers, rows := wrkcEnvelopeTable(envelopes)
+		headers, rows := wrkcEnvelopeTable(envelopes, true)
 		return renderer.RenderTable(headers, rows)
 	}
 	lines := []string{}
@@ -282,7 +287,7 @@ func renderWrkcEnvelopesMode(cmd *cobra.Command, envelopes []envelopeWire, mode 
 	return renderer.RenderList(lines)
 }
 
-func wrkcEnvelopeTable(envelopes []envelopeWire) ([]string, [][]string) {
+func wrkcEnvelopeTable(envelopes []envelopeWire, localTimes bool) ([]string, [][]string) {
 	headers := []string{"ID", "Room", "From", "To", "Obligation", "State", "Created"}
 	rows := make([][]string, 0, len(envelopes))
 	for _, envelope := range envelopes {
@@ -290,9 +295,13 @@ func wrkcEnvelopeTable(envelopes []envelopeWire) ([]string, [][]string) {
 		if envelope.To != nil {
 			target = envelopePartyLabel(*envelope.To)
 		}
+		createdAt := envelope.CreatedAt
+		if localTimes {
+			createdAt = style.FormatLocalTimestamp(createdAt)
+		}
 		rows = append(rows, []string{
 			envelope.ID, envelope.RoomKey, envelopePartyLabel(envelope.From), target,
-			envelope.Obligation, envelopeStateLabel(envelope), envelope.CreatedAt,
+			envelope.Obligation, envelopeStateLabel(envelope), createdAt,
 		})
 	}
 	return headers, rows
@@ -319,7 +328,7 @@ func renderWrkcTranscript(cmd *cobra.Command, view roomLogViewWire, identity *wr
 }
 
 func wrkcEnvelopeTranscriptLines(envelope envelopeWire) []string {
-	header := fmt.Sprintf("[%s] %s", envelope.CreatedAt, envelopePartyLabel(envelope.From))
+	header := fmt.Sprintf("[%s] %s", style.FormatLocalTimestamp(envelope.CreatedAt), envelopePartyLabel(envelope.From))
 	if envelope.To == nil {
 		header += " → (log entry)"
 	} else {
@@ -330,7 +339,7 @@ func wrkcEnvelopeTranscriptLines(envelope envelopeWire) []string {
 	if envelope.DeferReason != nil {
 		deferred := "  deferred: " + *envelope.DeferReason
 		if envelope.RetryAt != nil {
-			deferred += " (retry " + *envelope.RetryAt + ")"
+			deferred += " (retry " + style.FormatLocalTimestamp(*envelope.RetryAt) + ")"
 		}
 		lines = append(lines, deferred)
 	}
@@ -361,7 +370,7 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 		"delivery: "+envelope.Delivery,
 	)
 	if envelope.ExpiresAt != nil {
-		lines = append(lines, "expires_at: "+*envelope.ExpiresAt)
+		lines = append(lines, "expires_at: "+style.FormatLocalTimestamp(*envelope.ExpiresAt))
 	}
 	if envelope.GroupID != nil {
 		lines = append(lines, "group: "+*envelope.GroupID)
@@ -376,7 +385,7 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 		lines = append(lines, "reason: "+*envelope.Reason)
 	}
 	if envelope.RetryAt != nil {
-		lines = append(lines, "retry_at: "+*envelope.RetryAt)
+		lines = append(lines, "retry_at: "+style.FormatLocalTimestamp(*envelope.RetryAt))
 	}
 	if envelope.RetryPromiseID != nil {
 		lines = append(lines, "retry_promise: "+*envelope.RetryPromiseID)
@@ -391,7 +400,7 @@ func renderWrkcEnvelopeDetail(cmd *cobra.Command, envelope envelopeWire) error {
 		lines = append(lines, "idempotency_key: "+*envelope.IdempotencyKey)
 	}
 	for _, presentation := range envelope.PresentedTo {
-		lines = append(lines, "presented: "+presentation.MemberRef+" at "+presentation.PresentedAt+
+		lines = append(lines, "presented: "+presentation.MemberRef+" at "+style.FormatLocalTimestamp(presentation.PresentedAt)+
 			presentationSuffix(presentation))
 	}
 	lines = append(lines, fmt.Sprintf("etag: %d", envelope.ETag), "", "body:")
@@ -472,7 +481,7 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 		for _, envelope := range view.Deferred {
 			retry := "no retry armed"
 			if envelope.RetryAt != nil {
-				retry = "retry " + *envelope.RetryAt
+				retry = "retry " + style.FormatLocalTimestamp(*envelope.RetryAt)
 			}
 			reason := ""
 			if envelope.DeferReason != nil {
@@ -545,6 +554,7 @@ func renderWrkcMembers(cmd *cobra.Command, view roomMembersViewWire, flags promi
 	headers := []string{"Member", "Principal", "Source", "Joined", "Left", "LastPresented"}
 	rows := make([][]string, 0, len(view.Items))
 	for _, member := range view.Items {
+		joinedAt := member.JoinedAt
 		left := ""
 		if member.LeftAt != nil {
 			left = *member.LeftAt
@@ -557,9 +567,18 @@ func renderWrkcMembers(cmd *cobra.Command, view roomMembersViewWire, flags promi
 			// empty attendance here is a fact about them, not a gap.
 			attendance = "(scope-less)"
 		}
+		if mode != "tsv" {
+			joinedAt = style.FormatLocalTimestamp(joinedAt)
+			if left != "" {
+				left = style.FormatLocalTimestamp(left)
+			}
+			if member.Attendance != nil {
+				attendance = style.FormatLocalTimestamp(member.Attendance.PresentedAt) + presentationSuffix(*member.Attendance)
+			}
+		}
 		rows = append(rows, []string{
 			member.MemberRef, member.MemberPrincipalRef, member.Source,
-			member.JoinedAt, left, attendance,
+			joinedAt, left, attendance,
 		})
 	}
 	if mode == "tsv" {

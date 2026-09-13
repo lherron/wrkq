@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -19,8 +20,8 @@ import (
 // prefix/glob matching, --type p|t, --limit, --cursor, all accepted --sort
 // values, --reverse, --json/--ndjson/--porcelain/non-TTY rendering, --print0,
 // and table/human/yaml/tsv rendering (the typed render paths decode the byte-
-// proven findListView projection back into the legacy findResult struct so
-// internal/render output is byte-identical, mirroring the ls ungate). The only
+// proven findListView projection back into the legacy findResult struct; human
+// tables localize timestamps while structured modes preserve wire values). The only
 // remaining divergence is the deliberate one legacy itself enforces: --output raw
 // is unsupported (byte-identical error).
 func newFindCmd() *cobra.Command {
@@ -205,10 +206,10 @@ func newFindCmd() *cobra.Command {
 			case "yaml":
 				return render.NewRenderer(out, render.Options{Format: render.FormatYAML}).RenderYAML(results)
 			case "tsv":
-				headers, rowsData := findTableData(results)
+				headers, rowsData := findTableData(results, false)
 				return render.NewRenderer(out, render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
 			default: // table / human
-				headers, rowsData := findTableData(results)
+				headers, rowsData := findTableData(results, true)
 				return render.NewRenderer(out, render.Options{Format: render.FormatTable, Porcelain: stable}).RenderTable(headers, rowsData)
 			}
 		},
@@ -349,9 +350,8 @@ func decodeFindResults(items []json.RawMessage) ([]findResult, error) {
 	return results, nil
 }
 
-// findTableData reproduces legacy runFind's table/tsv row construction: the
-// fixed header set and one row per result with a blank state for containers.
-func findTableData(results []findResult) ([]string, [][]string) {
+// findTableData builds table/TSV rows; localTimes is true only for the human table.
+func findTableData(results []findResult, localTimes bool) ([]string, [][]string) {
 	headers := []string{"Type", "ID", "Path", "Title", "State", "UpdatedAt"}
 	rowsData := make([][]string, 0, len(results))
 	for _, result := range results {
@@ -359,7 +359,11 @@ func findTableData(results []findResult) ([]string, [][]string) {
 		if result.State != nil {
 			state = *result.State
 		}
-		rowsData = append(rowsData, []string{result.Type, result.ID, result.Path, result.Title, state, result.UpdatedAt})
+		updatedAt := result.UpdatedAt
+		if localTimes {
+			updatedAt = style.FormatLocalTimestamp(updatedAt)
+		}
+		rowsData = append(rowsData, []string{result.Type, result.ID, result.Path, result.Title, state, updatedAt})
 	}
 	return headers, rowsData
 }

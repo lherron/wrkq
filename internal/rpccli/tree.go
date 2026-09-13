@@ -591,7 +591,7 @@ func printTreeHuman(w io.Writer, nodes []*treeWireNode, prefix string) {
 }
 
 func formatTreeHumanPromise(promise promiseWire) string {
-	parts := []string{style.Paint(style.ColDim, promise.ID), promise.OwnerPrincipalRef, promise.ReviewAt}
+	parts := []string{style.Paint(style.ColDim, promise.ID), promise.OwnerPrincipalRef, style.FormatLocalTimestamp(promise.ReviewAt)}
 	if promise.Ready {
 		ready := "ready"
 		if promise.ReadyFor != nil {

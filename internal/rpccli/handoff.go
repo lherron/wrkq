@@ -12,6 +12,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/scope"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -371,7 +372,7 @@ func writeHandoffCreateOutput(cmd *cobra.Command, mode handoffOutputMode, out ha
 		fmt.Fprintf(stdout, "ID\tScope\tStatus\tTitle\tCreated At\n")
 		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n",
 			out.Handoff.ID, out.Handoff.ScopeRef, out.Handoff.Status, out.Handoff.Title,
-			out.Handoff.CreatedAt.Format(time.RFC3339))
+			style.FormatLocalTime(out.Handoff.CreatedAt))
 		if out.IdempotentReplay {
 			fmt.Fprintln(stdout, "(idempotent replay)")
 		}
@@ -445,10 +446,10 @@ func writeHandoffGetOutput(cmd *cobra.Command, mode handoffOutputMode, h handoff
 		fmt.Fprintf(stdout, "Project: %s\n", h.ProjectID)
 		fmt.Fprintf(stdout, "Status: %s\n", h.Status)
 		fmt.Fprintf(stdout, "Title: %s\n", h.Title)
-		fmt.Fprintf(stdout, "Created: %s\n", h.CreatedAt.Format(time.RFC3339))
-		fmt.Fprintf(stdout, "Updated: %s\n", h.UpdatedAt.Format(time.RFC3339))
+		fmt.Fprintf(stdout, "Created: %s\n", style.FormatLocalTime(h.CreatedAt))
+		fmt.Fprintf(stdout, "Updated: %s\n", style.FormatLocalTime(h.UpdatedAt))
 		if h.AcknowledgedAt != nil {
-			fmt.Fprintf(stdout, "Acknowledged At: %s\n", h.AcknowledgedAt.Format(time.RFC3339))
+			fmt.Fprintf(stdout, "Acknowledged At: %s\n", style.FormatLocalTime(*h.AcknowledgedAt))
 		}
 		if h.AcknowledgedByAgentID != nil {
 			fmt.Fprintf(stdout, "Acknowledged By Agent ID: %s\n", *h.AcknowledgedByAgentID)
@@ -645,7 +646,7 @@ func writeHandoffListOutput(cmd *cobra.Command, mode handoffOutputMode, scopeRef
 		for _, h := range out.Handoffs {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 				h.ID, h.ScopeRef, h.Status,
-				h.CreatedAt.Format(time.RFC3339),
+				style.FormatLocalTime(h.CreatedAt),
 				truncateHandoffTitle(h.Title, 60),
 			)
 		}
@@ -830,7 +831,7 @@ func writeHandoffSearchOutput(cmd *cobra.Command, mode handoffOutputMode, query,
 		for _, h := range out.Handoffs {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 				h.ID, h.ScopeRef, h.Status,
-				h.CreatedAt.Format(time.RFC3339),
+				style.FormatLocalTime(h.CreatedAt),
 				truncateHandoffTitle(h.Title, 60),
 			)
 		}
@@ -1083,7 +1084,11 @@ func classifyHandoffAckError(cmd *cobra.Command, tr Transport, stderr io.Writer,
 			existingMsg := re.Message
 			if existing, gerr := tr.Call(cmd.Context(), "wrkq.handoff.get", map[string]string{"handoff": idOrUUID}); gerr == nil {
 				if h, herr := handoffFromRPC(existing); herr == nil && h.AcknowledgedAt != nil {
-					existingMsg = fmt.Sprintf("%s (acknowledged_at=%s)", re.Message, h.AcknowledgedAt.Format(time.RFC3339))
+					stamp := h.AcknowledgedAt.Format(time.RFC3339)
+					if mode == handoffOutputHuman {
+						stamp = style.FormatLocalTime(*h.AcknowledgedAt)
+					}
+					existingMsg = fmt.Sprintf("%s (acknowledged_at=%s)", re.Message, stamp)
 				}
 			}
 			return writeHandoffError(stderr, mode, 5, "already_acknowledged", idOrUUID, existingMsg, nil, "")
@@ -1100,7 +1105,7 @@ func writeHandoffAckOutput(cmd *cobra.Command, mode handoffOutputMode, out hando
 	if mode == handoffOutputHuman {
 		ts := ""
 		if out.Handoff.AcknowledgedAt != nil {
-			ts = out.Handoff.AcknowledgedAt.Format(time.RFC3339)
+			ts = style.FormatLocalTime(*out.Handoff.AcknowledgedAt)
 		}
 		fmt.Fprintf(stdout, "Acknowledged %s at %s.", out.Handoff.ID, ts)
 		if out.Handoff.AcknowledgementNote != nil {

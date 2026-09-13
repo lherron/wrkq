@@ -34,3 +34,29 @@ func TestNowUTCHonorsOverride(t *testing.T) {
 		t.Fatalf("NowUTC() with override = %q", got)
 	}
 }
+
+func TestHumanTimestampsUseLocalTwelveHourClock(t *testing.T) {
+	t.Setenv("TZ", "America/Chicago")
+
+	for _, tc := range []struct {
+		name      string
+		timestamp string
+		want      string
+	}{
+		{name: "midnight crosses to prior evening", timestamp: "2026-09-10T02:30:00Z", want: "2026-09-09 9:30 PM CDT"},
+		{name: "noon is PM", timestamp: "2026-09-10T17:00:00Z", want: "2026-09-10 12:00 PM CDT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FormatLocalTimestamp(tc.timestamp); got != tc.want {
+				t.Fatalf("FormatLocalTimestamp(%q) = %q, want %q", tc.timestamp, got, tc.want)
+			}
+		})
+	}
+
+	if got := FormatLocalTimestamp("not-a-timestamp"); got != "not-a-timestamp" {
+		t.Fatalf("unparseable timestamp = %q, want original value", got)
+	}
+	if got := ShortStamp("2026-09-10T02:30:00Z"); got != "2026-09-09" {
+		t.Fatalf("ShortStamp did not use the local calendar day: %q", got)
+	}
+}

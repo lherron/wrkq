@@ -9,6 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -311,8 +312,12 @@ func renderCommentLs(cmd *cobra.Command, mode string, stable bool, items []json.
 		if ref, ok := c["created_by_principal_ref"].(string); ok {
 			author = attribution.PrincipalHandle(ref)
 		}
+		createdAt := str(c["created_at"])
+		if mode != "tsv" {
+			createdAt = style.FormatLocalTimestamp(createdAt)
+		}
 		rowsData = append(rowsData, []string{
-			str(c["id"]), commentParentID(c), author, str(c["created_at"]), bodyPreview,
+			str(c["id"]), commentParentID(c), author, createdAt, bodyPreview,
 		})
 	}
 	if mode == "tsv" {
@@ -432,7 +437,7 @@ func newCommentCatCmd() *cobra.Command {
 					continue
 				}
 				fmt.Fprintf(out, "[%s] [%s] %s - Task: %s\n",
-					p.ID, p.CreatedAt, attribution.PrincipalHandle(p.CreatedByPrincipalRef), p.TaskID)
+					p.ID, style.FormatLocalTimestamp(p.CreatedAt), attribution.PrincipalHandle(p.CreatedByPrincipalRef), p.TaskID)
 				fmt.Fprintln(out)
 				fmt.Fprintln(out, p.Body)
 			}

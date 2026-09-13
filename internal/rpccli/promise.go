@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -527,7 +528,7 @@ func renderPromiseSingleton(cmd *cobra.Command, promise promiseWire, flags promi
 	case "yaml":
 		return renderer.RenderYAML(promise)
 	case "tsv", "table", "human":
-		headers, rows := promiseTable([]promiseWire{promise})
+		headers, rows := promiseTable([]promiseWire{promise}, mode != "tsv")
 		if mode == "tsv" {
 			return renderer.RenderTSV(headers, rows)
 		}
@@ -558,7 +559,7 @@ func renderPromiseList(cmd *cobra.Command, promises []promiseWire, flags promise
 	case "yaml":
 		return renderer.RenderYAML(promises)
 	case "tsv", "table", "human":
-		headers, rows := promiseTable(promises)
+		headers, rows := promiseTable(promises, mode != "tsv")
 		if mode == "tsv" {
 			return renderer.RenderTSV(headers, rows)
 		}
@@ -574,7 +575,7 @@ func renderPromiseList(cmd *cobra.Command, promises []promiseWire, flags promise
 	}
 }
 
-func promiseTable(promises []promiseWire) ([]string, [][]string) {
+func promiseTable(promises []promiseWire, localTimes bool) ([]string, [][]string) {
 	headers := []string{"ID", "Owner", "Subject", "ReviewAt", "State", "ReadyFor", "Attachment", "ETag"}
 	rows := make([][]string, 0, len(promises))
 	for _, promise := range promises {
@@ -589,8 +590,12 @@ func promiseTable(promises []promiseWire) ([]string, [][]string) {
 		if promise.ReadyFor != nil {
 			readyFor = *promise.ReadyFor
 		}
+		reviewAt := promise.ReviewAt
+		if localTimes {
+			reviewAt = style.FormatLocalTimestamp(reviewAt)
+		}
 		rows = append(rows, []string{
-			promise.ID, promise.OwnerPrincipalRef, promise.Subject, promise.ReviewAt,
+			promise.ID, promise.OwnerPrincipalRef, promise.Subject, reviewAt,
 			promise.State, readyFor, attachment, fmt.Sprint(promise.ETag),
 		})
 	}
@@ -668,7 +673,7 @@ func renderPromiseDetail(w io.Writer, promise promiseWire) error {
 		"uuid: " + promise.UUID,
 		"owner: " + promise.OwnerPrincipalRef,
 		"subject: " + promise.Subject,
-		"review_at: " + promise.ReviewAt,
+		"review_at: " + style.FormatLocalTimestamp(promise.ReviewAt),
 		"attention: " + ready,
 		"state: " + promise.State,
 		"attachment: " + attachment,
@@ -679,7 +684,7 @@ func renderPromiseDetail(w io.Writer, promise promiseWire) error {
 		lines = append(lines, "question: "+*promise.ReviewQuestion)
 	}
 	if promise.LastReviewedAt != nil {
-		lines = append(lines, "last_reviewed_at: "+*promise.LastReviewedAt)
+		lines = append(lines, "last_reviewed_at: "+style.FormatLocalTimestamp(*promise.LastReviewedAt))
 	}
 	if promise.LastReviewNote != nil {
 		lines = append(lines, "last_review_note: "+*promise.LastReviewNote)

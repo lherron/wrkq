@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/style"
 )
 
 // TestContainerCatMarkdownRender proves the markdown (front matter + body) and the
@@ -18,6 +20,7 @@ import (
 // and rendering it through the same renderContainerMarkdown the CLI uses. UUIDs and
 // timestamps are normalized; the field set, order, and YAML framing are pinned.
 func TestContainerCatMarkdownRender(t *testing.T) {
+	t.Setenv("TZ", "UTC")
 	dbPath, _ := migratedDBWithTask(t)
 	tr := inProcessTransport(t, dbPath)
 	defer func() { _ = tr.Close() }()
@@ -34,7 +37,6 @@ func TestContainerCatMarkdownRender(t *testing.T) {
 
 	norm := func(s string) string {
 		s = uuidRe.ReplaceAllString(s, "<UUID>")
-		s = rfc3339Re.ReplaceAllString(s, "<TS>")
 		return s
 	}
 
@@ -59,8 +61,8 @@ func TestContainerCatMarkdownRender(t *testing.T) {
 		"parent_uuid: <UUID>\n" +
 		"sort_index: 0\n" +
 		"etag: 1\n" +
-		"created_at: <TS>\n" +
-		"updated_at: <TS>\n" +
+		"created_at: " + style.FormatLocalTimestamp(c.CreatedAt) + "\n" +
+		"updated_at: " + style.FormatLocalTimestamp(c.UpdatedAt) + "\n" +
 		"created_by: wrkq-system\n" +
 		"updated_by: wrkq-system\n" +
 		"---\n\n"

@@ -7,14 +7,15 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
 // lsEntry mirrors the legacy internal/cli lsEntry shape EXACTLY (field order +
 // json tags AND Go field names). The mirror unmarshals the server's compat
 // projection into this type so table/human/yaml/tsv rendering goes through the
-// SAME internal/render code path as legacy — yaml.v3 keys off the (untagged) Go
-// field names, so the struct identity is load-bearing for byte parity.
+// same internal/render code path. Human tables localize timestamps; structured
+// modes preserve the wire values and field order.
 type lsEntry struct {
 	Type                 string  `json:"type"`
 	ID                   string  `json:"id"`
@@ -186,10 +187,10 @@ func newLsCmd() *cobra.Command {
 			case "yaml":
 				return render.NewRenderer(out, render.Options{Format: render.FormatYAML}).RenderYAML(entries)
 			case "tsv":
-				headers, rowsData := lsTableData(entries)
+				headers, rowsData := lsTableData(entries, false)
 				return render.NewRenderer(out, render.Options{Format: render.FormatTSV}).RenderTSV(headers, rowsData)
 			default: // table / human
-				headers, rowsData := lsTableData(entries)
+				headers, rowsData := lsTableData(entries, true)
 				return render.NewRenderer(out, render.Options{Format: render.FormatTable, Porcelain: stable}).RenderTable(headers, rowsData)
 			}
 		},
@@ -225,10 +226,9 @@ func decodeLsEntries(items []json.RawMessage) ([]lsEntry, error) {
 	return entries, nil
 }
 
-// lsTableData reproduces legacy runLs's table/tsv row construction, including the
-// container slug "/" suffix, the rollup-count "Tasks" column, and the title rewrite
-// ("[kind] <rollup>" for containers, blank when the title equals the slug).
-func lsTableData(entries []lsEntry) ([]string, [][]string) {
+// lsTableData builds table/TSV rows, including the container slug "/" suffix,
+// rollup-count column, and title rewrite. localTimes is true only for humans.
+func lsTableData(entries []lsEntry, localTimes bool) ([]string, [][]string) {
 	headers := []string{"Type", "ID", "Slug", "Title", "State", "Kind", "Tasks", "CreatedAt", "UpdatedAt"}
 	var rowsData [][]string
 	for _, entry := range entries {
@@ -247,8 +247,13 @@ func lsTableData(entries []lsEntry) ([]string, [][]string) {
 				title = ""
 			}
 		}
+		createdAt, updatedAt := entry.CreatedAt, entry.UpdatedAt
+		if localTimes {
+			createdAt = style.FormatLocalTimestamp(createdAt)
+			updatedAt = style.FormatLocalTimestamp(updatedAt)
+		}
 		rowsData = append(rowsData, []string{
-			typeStr, entry.ID, slug, title, entry.State, entry.Kind, tasks, entry.CreatedAt, entry.UpdatedAt,
+			typeStr, entry.ID, slug, title, entry.State, entry.Kind, tasks, createdAt, updatedAt,
 		})
 	}
 	return headers, rowsData

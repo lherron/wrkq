@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -169,7 +170,7 @@ func renderLogEventsOneline(w io.Writer, events []logEvent) error {
 		if e.PrincipalRef != nil {
 			actor = *e.PrincipalRef
 		}
-		timestamp := e.Timestamp.Format("2006-01-02 15:04")
+		timestamp := style.FormatLocalTime(e.Timestamp)
 		fmt.Fprintf(w, "%s  %s  %s  by %s\n", timestamp, e.EventType, formatLogEventSummary(e), actor)
 	}
 	return nil
@@ -181,7 +182,7 @@ func renderLogEventsDetailed(w io.Writer, events []logEvent, showPatch bool) err
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "\033[33mEvent %d\033[0m - %s\n", e.ID, e.EventType)
-		fmt.Fprintf(w, "  Timestamp:  %s\n", e.Timestamp.Format(time.RFC3339))
+		fmt.Fprintf(w, "  Timestamp:  %s\n", style.FormatLocalTime(e.Timestamp))
 
 		if e.PrincipalRef != nil {
 			fmt.Fprintf(w, "  Principal:  %s\n", *e.PrincipalRef)

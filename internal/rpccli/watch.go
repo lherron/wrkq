@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -124,9 +125,9 @@ func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int
 	return nil
 }
 
-// printWatchEvent reproduces legacy printWatchEvent's human format byte-for-byte.
+// printWatchEvent renders the human stream with the shared local wall clock.
 func printWatchEvent(stdout io.Writer, e watchEvent) {
-	timestamp := e.Timestamp
+	timestamp := style.FormatLocalTimestamp(e.Timestamp)
 
 	actor := "system"
 	if e.PrincipalRef != nil {

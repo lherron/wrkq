@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/lherron/wrkq/internal/webhooksub"
 	"github.com/spf13/cobra"
 )
@@ -16,10 +17,9 @@ import (
 // containerCatModel mirrors the legacy `runContainerCat` local `Container` struct
 // (internal/rpccli/container.go) field-for-field and tag-for-tag. The server-owned
 // wrkq.container.catView returns this exact shape; the mirror decodes the raw RPC
-// result into this struct so every render mode (json/ndjson/porcelain/markdown/raw)
-// is produced from the SAME projection, byte-identical to legacy. Field ORDER here
-// is load-bearing: legacy encodes the struct directly (struct order, not alpha), so
-// json/ndjson/porcelain must preserve it.
+// result into this struct so every render mode is produced from the same
+// projection. Field order is load-bearing for JSON/NDJSON/porcelain; human
+// markdown localizes its timestamps at the presentation boundary.
 type containerCatModel struct {
 	ID          string                    `json:"id"`
 	UUID        string                    `json:"uuid"`
@@ -403,9 +403,9 @@ func runContainerCat(cmd *cobra.Command, args []string, asJSON, ndjson, porcelai
 	return renderContainerMarkdown(out, &c, noFrontmatter)
 }
 
-// renderContainerMarkdown reproduces legacy runContainerCat's markdown branch
-// byte-for-byte: a YAML front matter block (suppressed by noFrontmatter) followed
-// by the description. With noFrontmatter set it is the "raw" body-only mode.
+// renderContainerMarkdown writes the human YAML-frontmatter card followed by
+// the description, localizing absolute timestamps. With noFrontmatter set it is
+// the body-only mode.
 func renderContainerMarkdown(out io.Writer, c *containerCatModel, noFrontmatter bool) error {
 	if !noFrontmatter {
 		fmt.Fprintln(out, "---")
@@ -430,10 +430,10 @@ func renderContainerMarkdown(out io.Writer, c *containerCatModel, noFrontmatter 
 		}
 		fmt.Fprintf(out, "sort_index: %d\n", c.SortIndex)
 		fmt.Fprintf(out, "etag: %d\n", c.Etag)
-		fmt.Fprintf(out, "created_at: %s\n", c.CreatedAt)
-		fmt.Fprintf(out, "updated_at: %s\n", c.UpdatedAt)
+		fmt.Fprintf(out, "created_at: %s\n", style.FormatLocalTimestamp(c.CreatedAt))
+		fmt.Fprintf(out, "updated_at: %s\n", style.FormatLocalTimestamp(c.UpdatedAt))
 		if c.ArchivedAt != nil {
-			fmt.Fprintf(out, "archived_at: %s\n", *c.ArchivedAt)
+			fmt.Fprintf(out, "archived_at: %s\n", style.FormatLocalTimestamp(*c.ArchivedAt))
 		}
 		fmt.Fprintf(out, "created_by: %s\n", c.CreatedBy)
 		fmt.Fprintf(out, "updated_by: %s\n", c.UpdatedBy)

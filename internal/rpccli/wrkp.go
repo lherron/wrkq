@@ -759,6 +759,6 @@ func wrkpNewestEntryStamp(ctx context.Context, tr Transport, project string) str
 		elapsed = 0
 	}
 	return fmt.Sprintf("%s (%s ago)",
-		newest.In(style.DisplayLocation()).Format("2006-01-02 15:04 MST"),
+		style.FormatLocalTime(newest),
 		style.FormatDuration(elapsed))
 }

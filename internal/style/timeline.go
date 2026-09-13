@@ -27,7 +27,7 @@ const (
 	timelineRailEnd  = "└"
 	timelineFloat    = "◆"
 	timelineRunDot   = "●"
-	timelineGutter   = 12 // "  <glyph> HH:MM   " — one time column for rails and floats
+	timelineGutter   = 15 // "  <glyph> H:MM AM   " — one time column for rails and floats
 	timelineProseMin = 20 // narrowest prose budget, matching wrapWidth's own floor
 	timelineBodyCap  = 4  // flowed rows of a comment/outcome before it is elided
 	timelinePairGap  = 2  // columns between a label and the right-hand principal
@@ -431,14 +431,16 @@ func timelineDay(ts string) string {
 	return parsed.In(DisplayLocation()).Format("Mon 2006-01-02 MST")
 }
 
-// timelineClock renders an entry's wall time in the reader's zone. It falls back
-// to a fixed-width blank so an unparseable timestamp keeps the gutter aligned.
+// timelineClock renders an entry's 12-hour wall time in the reader's zone. It
+// pads single-digit hours so every row keeps one aligned time column, and falls
+// back to a fixed-width blank so an unparseable timestamp keeps the gutter
+// aligned.
 func timelineClock(ts string) string {
-	parsed, ok := ParseTimestamp(ts)
-	if !ok {
-		return "     "
+	clock := FormatLocalClock(ts)
+	if clock == "" {
+		return "        "
 	}
-	return parsed.In(DisplayLocation()).Format("15:04")
+	return fmt.Sprintf("%8s", clock)
 }
 
 // timelineSlug is the last path segment — the task's own name.

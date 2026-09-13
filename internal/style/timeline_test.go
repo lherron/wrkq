@@ -53,16 +53,16 @@ func TestTimelineBraidsRunsAndFloats(t *testing.T) {
 	// run header on a rail, and the run closes with └.
 	for _, want := range []string{
 		"hcs\n",
-		// Stored UTC, shown in the reader's zone: 11:43Z is 06:43 CDT. The day
+		// Stored UTC, shown in the reader's zone: 11:43Z is 6:43 AM CDT. The day
 		// header names the zone once so a bare wall time is never ambiguous.
 		"Mon 2026-09-07 CDT",
-		"  ◆ 06:43   git.commit  PE-00103",
+		"  ◆  6:43 AM   git.commit  PE-00103",
 		"T-07733  ● hcs-core",
-		"  │ 09:15   → in_progress",
-		"  └ 09:15   C-17217",
+		"  │  9:15 AM   → in_progress",
+		"  └  9:15 AM   C-17217",
 		"Tue 2026-09-08 CDT",
 		"T-07736  ● probe",
-		"  └ 04:00   outcome",
+		"  └  4:00 AM   outcome",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("timeline missing %q in:\n%s", want, got)
@@ -267,12 +267,12 @@ func TestTimelineRendersInTheReadersZone(t *testing.T) {
 	}
 
 	utc := render("UTC")
-	if !strings.Contains(utc, "Thu 2026-09-10 UTC") || !strings.Contains(utc, "02:30") {
+	if !strings.Contains(utc, "Thu 2026-09-10 UTC") || !strings.Contains(utc, "2:30 AM") {
 		t.Fatalf("UTC render did not show the stored instant:\n%s", utc)
 	}
 
 	chicago := render("America/Chicago")
-	if !strings.Contains(chicago, "Wed 2026-09-09 CDT") || !strings.Contains(chicago, "21:30") {
+	if !strings.Contains(chicago, "Wed 2026-09-09 CDT") || !strings.Contains(chicago, "9:30 PM") {
 		t.Fatalf("Chicago render did not localize the stored instant:\n%s", chicago)
 	}
 

@@ -22,10 +22,10 @@ import (
 //	ndjson (--ndjson, one compact object per line),
 //	raw (--output raw / --porcelain / TTY default markdown front-matter).
 //
-// The json/ndjson/raw modes are byte-parity proven against legacy. The styled
-// task card (style.RenderStyledTask) renders on an interactive TTY — matching
-// legacy — or whenever --pretty forces it; color follows style.ColorEnabled, so
-// a non-TTY --pretty card is plain text and byte-comparable to legacy's.
+// JSON and NDJSON retain their canonical wire timestamps. Human markdown and
+// the styled task card render wall-clock fields in the reader's local zone.
+// The styled card renders on an interactive TTY or whenever --pretty forces it;
+// color follows style.ColorEnabled.
 func newCatCmd() *cobra.Command {
 	var noFrontmatter, excludeComments, asJSON, ndjson, porcelain, pretty, one bool
 	cmd := &cobra.Command{
@@ -502,15 +502,15 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 					fmt.Fprintf(w, "claimed_node: %s\n", *t.ClaimedNode)
 				}
 				if t.ClaimedAt != nil {
-					fmt.Fprintf(w, "claimed_at: %s\n", *t.ClaimedAt)
+					fmt.Fprintf(w, "claimed_at: %s\n", style.FormatLocalTimestamp(*t.ClaimedAt))
 				}
 				fmt.Fprintf(w, "claim_generation: %d\n", t.ClaimGeneration)
 			}
 			if t.StartAt != nil {
-				fmt.Fprintf(w, "start_at: %s\n", *t.StartAt)
+				fmt.Fprintf(w, "start_at: %s\n", style.FormatLocalTimestamp(*t.StartAt))
 			}
 			if t.DueAt != nil {
-				fmt.Fprintf(w, "due_at: %s\n", *t.DueAt)
+				fmt.Fprintf(w, "due_at: %s\n", style.FormatLocalTimestamp(*t.DueAt))
 			}
 			if t.Labels != nil && *t.Labels != "" {
 				fmt.Fprintf(w, "labels: %s\n", *t.Labels)
@@ -532,7 +532,7 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 				}
 			}
 			if t.AcknowledgedAt != nil {
-				fmt.Fprintf(w, "acknowledged_at: %s\n", *t.AcknowledgedAt)
+				fmt.Fprintf(w, "acknowledged_at: %s\n", style.FormatLocalTimestamp(*t.AcknowledgedAt))
 			}
 			if t.Resolution != nil {
 				fmt.Fprintf(w, "resolution: %s\n", *t.Resolution)
@@ -545,13 +545,13 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 				fmt.Fprintf(w, "blocked_by: [%s]\n", strings.Join(parts, ", "))
 			}
 			fmt.Fprintf(w, "etag: %d\n", t.Etag)
-			fmt.Fprintf(w, "created_at: %s\n", t.CreatedAt)
-			fmt.Fprintf(w, "updated_at: %s\n", t.UpdatedAt)
+			fmt.Fprintf(w, "created_at: %s\n", style.FormatLocalTimestamp(t.CreatedAt))
+			fmt.Fprintf(w, "updated_at: %s\n", style.FormatLocalTimestamp(t.UpdatedAt))
 			if t.CompletedAt != nil {
-				fmt.Fprintf(w, "completed_at: %s\n", *t.CompletedAt)
+				fmt.Fprintf(w, "completed_at: %s\n", style.FormatLocalTimestamp(*t.CompletedAt))
 			}
 			if t.ArchivedAt != nil {
-				fmt.Fprintf(w, "archived_at: %s\n", *t.ArchivedAt)
+				fmt.Fprintf(w, "archived_at: %s\n", style.FormatLocalTimestamp(*t.ArchivedAt))
 			}
 			fmt.Fprintf(w, "created_by: %s\n", t.CreatedBy)
 			if t.CreatedByPrincipalRef != "" {
@@ -577,7 +577,7 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			fmt.Fprintln(w, "<!-- wrkq-comments: do not edit below -->")
 			fmt.Fprintln(w)
 			for _, c := range t.Comments {
-				fmt.Fprintf(w, "> [%s] [%s] %s\n", c.ID, c.CreatedAt, attribution.PrincipalHandle(c.PrincipalRef))
+				fmt.Fprintf(w, "> [%s] [%s] %s\n", c.ID, style.FormatLocalTimestamp(c.CreatedAt), attribution.PrincipalHandle(c.PrincipalRef))
 				for _, line := range strings.Split(c.Body, "\n") {
 					fmt.Fprintf(w, "> %s\n", line)
 				}
@@ -596,7 +596,7 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 func renderAttachedPromises(w io.Writer, promises []promiseWire) error {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Promises")
-	headers, rows := promiseTable(promises)
+	headers, rows := promiseTable(promises, true)
 	return render.NewRenderer(w, render.Options{Format: render.FormatTable}).RenderTable(headers, rows)
 }
 

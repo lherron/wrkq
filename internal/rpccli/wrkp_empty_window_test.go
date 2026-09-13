@@ -61,7 +61,7 @@ func TestWrkpLogNamesAnEmptyWindowInsteadOfExitingSilently(t *testing.T) {
 		t.Fatalf("an empty window delivers no entries, so stdout must stay clean: %q", got)
 	}
 	notice := stderr.String()
-	for _, want := range []string{"no entries", "since 1h", "newest is", "2020-01-01 00:00 UTC"} {
+	for _, want := range []string{"no entries", "since 1h", "newest is", "2020-01-01 12:00 AM UTC"} {
 		if !strings.Contains(notice, want) {
 			t.Fatalf("the empty-window notice must carry %q; got %q", want, notice)
 		}

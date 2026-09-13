@@ -51,6 +51,33 @@ func ParseTimestamp(timestamp string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// FormatLocalTime renders an absolute instant for a person: local wall time,
+// 12-hour clock, and an explicit zone abbreviation. Structured output should
+// keep its canonical RFC3339 value instead of using this presentation helper.
+func FormatLocalTime(timestamp time.Time) string {
+	return timestamp.In(DisplayLocation()).Format("2006-01-02 3:04 PM MST")
+}
+
+// FormatLocalTimestamp is FormatLocalTime for timestamps received as strings.
+// Unknown formats survive verbatim rather than disappearing from human output.
+func FormatLocalTimestamp(timestamp string) string {
+	parsed, ok := ParseTimestamp(timestamp)
+	if !ok {
+		return timestamp
+	}
+	return FormatLocalTime(parsed)
+}
+
+// FormatLocalClock renders only the localized 12-hour clock portion used by a
+// display that names the date and zone separately.
+func FormatLocalClock(timestamp string) string {
+	parsed, ok := ParseTimestamp(timestamp)
+	if !ok {
+		return ""
+	}
+	return parsed.In(DisplayLocation()).Format("3:04 PM")
+}
+
 // FormatDuration renders an elapsed duration as a single coarse unit, e.g.
 // "3 days", "1 hour", or "less than a minute".
 func FormatDuration(elapsed time.Duration) string {
@@ -97,6 +124,9 @@ func FormatOpenedAge(timestamp string) string {
 
 // ShortStamp trims an RFC3339-ish timestamp to its date for compact display.
 func ShortStamp(ts string) string {
+	if parsed, ok := ParseTimestamp(ts); ok {
+		return parsed.In(DisplayLocation()).Format("2006-01-02")
+	}
 	if len(ts) >= 10 && ts[4] == '-' && ts[7] == '-' {
 		return ts[:10]
 	}

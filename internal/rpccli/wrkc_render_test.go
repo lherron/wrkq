@@ -6,6 +6,7 @@ import (
 )
 
 func TestWrkcRoomTableRendersPairIdentityAndRuneClippedLastLine(t *testing.T) {
+	t.Setenv("TZ", "UTC")
 	long := strings.Repeat("界", 81) + " never shown"
 	rooms := []roomWire{
 		{Key: "R-00013", Kind: "adhoc", Work: "open", Activity: "active", MemberCount: 2, MessageCount: 3, LastActivityAt: "2026-08-29T12:00:00Z"},
@@ -15,12 +16,19 @@ func TestWrkcRoomTableRendersPairIdentityAndRuneClippedLastLine(t *testing.T) {
 		"R-00013": {Members: []string{"cody@wrkq:primary", "mable@wrkq:primary"}, Last: clipWrkcFirstLine(long+"\nsecond line", 80)},
 	}
 
-	headers, rows := wrkcRoomTable(rooms, identities)
+	headers, rows := wrkcRoomTable(rooms, identities, true)
 	if got, want := strings.Join(headers, "|"), "Room|Kind|Work|Activity|Members|Messages|Last activity|Last"; got != want {
 		t.Fatalf("headers = %q, want %q", got, want)
 	}
 	if got, want := rows[0][4], "cody@wrkq:primary, mable@wrkq:primary"; got != want {
 		t.Fatalf("pair members = %q, want %q", got, want)
+	}
+	if got, want := rows[0][6], "2026-08-29 12:00 PM UTC"; got != want {
+		t.Fatalf("human last activity = %q, want %q", got, want)
+	}
+	_, machineRows := wrkcRoomTable(rooms[:1], identities, false)
+	if got, want := machineRows[0][6], "2026-08-29T12:00:00Z"; got != want {
+		t.Fatalf("structured last activity = %q, want %q", got, want)
 	}
 	if got := []rune(rows[0][7]); len(got) != 80 || strings.Contains(rows[0][7], "never shown") {
 		t.Fatalf("last preview = %q (%d runes), want an 80-rune first-line clip", rows[0][7], len(got))

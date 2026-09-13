@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
 
@@ -129,7 +130,7 @@ func newAttachLsCmd() *cobra.Command {
 					row.Filename,
 					fmt.Sprintf("%d", row.SizeBytes),
 					row.MimeType,
-					row.CreatedAt,
+					style.FormatLocalTimestamp(row.CreatedAt),
 				})
 			}
 			return render.NewRenderer(out, render.Options{Format: render.FormatTable}).RenderTable(headers, rowsData)
