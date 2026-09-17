@@ -99,7 +99,7 @@ func newTreeCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&depth, "level", "L", 0, "Maximum depth to display (0 = unlimited)")
 	cmd.Flags().BoolVarP(&includeArchived, "all", "a", false, "Include every state, archived/deleted rows, and empty containers")
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only open tasks (alias for --states open)")
-	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)")
+	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress,blocked; \"any\" for all)")
 	cmd.Flags().StringVar(&fields, "fields", "", "Fields to display (comma-separated)")
 	cmd.Flags().StringVar(&promiseState, "state", "", "Promise leaf state: open (default) or all")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
@@ -676,9 +676,14 @@ func formatTreeHumanTaskState(node *treeWireNode) string {
 // `states` outright, so this list is sent explicitly on every call.
 //
 // Lance's ruling, 2026-09-07: exactly draft, open and in_progress. Narrower
-// than the full non-terminal set (which would add idea and blocked) because
-// tree is a working view.
-var defaultViewStates = []string{"draft", "open", "in_progress"}
+// than the full non-terminal set because tree is a working view.
+//
+// Amended by Lance, 2026-09-17: blocked joins the set. Blocked work is working
+// view work — it is waiting on something, not finished with something, and
+// hiding it by default made live members of an active campaign (T-08567,
+// T-08594) invisible in the view their owners read. idea stays out: it is the
+// only remaining non-terminal state that is genuinely not yet work.
+var defaultViewStates = []string{"draft", "open", "in_progress", "blocked"}
 
 // viewSelectorParams fills the states/lifecycle/pruneEmpty triple that replaced
 // the conflated includeArchived/openOnly booleans. `all` (-a) is the only caller

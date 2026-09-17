@@ -1860,7 +1860,7 @@
           },
           {
             "name": "states",
-            "usage": "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)",
+            "usage": "Task states to show, comma-separated (default draft,open,in_progress,blocked; \"any\" for all)",
             "type": "string",
             "hidden": false
           },
@@ -3787,7 +3787,7 @@
           },
           {
             "name": "states",
-            "usage": "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)",
+            "usage": "Task states to show, comma-separated (default draft,open,in_progress,blocked; \"any\" for all)",
             "type": "string",
             "hidden": false
           }

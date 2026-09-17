@@ -206,7 +206,7 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of results to return (0 = no limit)")
 	cmd.Flags().StringVar(&cursorTok, "cursor", "", "Pagination cursor from previous page")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Include every state and archived/deleted rows")
-	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress; \"any\" for all)")
+	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress,blocked; \"any\" for all)")
 	cmd.Flags().StringVar(&sort, "sort", "slug", "Sort by field: slug, updated_at, created_at, id")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 	return cmd
