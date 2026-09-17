@@ -868,3 +868,123 @@ func campaignFriendlyID(t *testing.T, dbPath, containerUUID string) string {
 	}
 	return id
 }
+
+// TestCampaignMembersFlagDefaultsAndRecursion pins the --campaign-members
+// contract. The overlay attaches at EVERY campaign node in the walked tree, not
+// just the requested root, and whether it runs at all is the render mode's
+// default unless the flag overrides it.
+func TestCampaignMembersFlagDefaultsAndRecursion(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open fixture DB: %v", err)
+	}
+	if _, err := database.Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", f.campaignAUUID, f.enrolledUUID); err != nil {
+		t.Fatalf("seed enrollment: %v", err)
+	}
+
+	// A campaign with NO resident member: every task belongs to another project
+	// and is only enrolled. Empty-container pruning used to drop it before the
+	// overlay could run, so it could never show its own membership from above.
+	s := store.New(database)
+	actor := "00000000-0000-4000-8000-0000000000a0"
+	hollow, err := s.Containers.Create(actor, store.ContainerCreateParams{Slug: "wave-hollow", Kind: "directory", ParentUUID: &f.projectAUUID})
+	if err != nil {
+		t.Fatalf("create hollow campaign: %v", err)
+	}
+	if _, err := database.Exec("UPDATE containers SET campaign_state = 'active' WHERE uuid = ?", hollow.UUID); err != nil {
+		t.Fatalf("activate hollow campaign: %v", err)
+	}
+	foreign, err := s.Tasks.Create(actor, store.CreateParams{
+		Slug: "hollow-member", Title: "Hollow member", ProjectUUID: f.campaignBUUID, State: "open", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("create hollow member: %v", err)
+	}
+	if _, err := database.Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", hollow.UUID, foreign.UUID); err != nil {
+		t.Fatalf("enroll hollow member: %v", err)
+	}
+	_ = database.Close()
+
+	t.Run("recurses below the requested root", func(t *testing.T) {
+		// Rooted at the PROJECT, one level above the campaign. Before the
+		// overlay recursed, this showed resident-member only.
+		out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "--pretty")
+		if err != nil {
+			t.Fatalf("project-rooted human tree failed: %v\n%s", err, out)
+		}
+		for _, want := range []string{"resident-member", "enrolled-member", "↗ campaign-cli-b"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("project-rooted tree missing %q: %q", want, out)
+			}
+		}
+	})
+
+	t.Run("keeps an all-enrolled campaign through pruning", func(t *testing.T) {
+		out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "--pretty")
+		if err != nil {
+			t.Fatalf("project-rooted human tree failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "wave-hollow") || !strings.Contains(out, "hollow-member") {
+			t.Errorf("all-enrolled campaign pruned away: %q", out)
+		}
+	})
+
+	t.Run("machine modes stay residency-only by default", func(t *testing.T) {
+		out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "wave-a", "--ndjson")
+		if err != nil {
+			t.Fatalf("machine tree failed: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "enrolled-member") {
+			t.Errorf("machine tree leaked an enrolled member without the flag: %q", out)
+		}
+	})
+
+	t.Run("machine modes opt in with the flag", func(t *testing.T) {
+		out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "wave-a", "--ndjson", "--campaign-members")
+		if err != nil {
+			t.Fatalf("machine tree with flag failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "enrolled-member") {
+			t.Errorf("--campaign-members did not reach ndjson: %q", out)
+		}
+	})
+
+	t.Run("human view opts out with the flag", func(t *testing.T) {
+		out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "wave-a", "--pretty", "--campaign-members=false")
+		if err != nil {
+			t.Fatalf("human tree with negated flag failed: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "enrolled-member") {
+			t.Errorf("--campaign-members=false still showed an enrolled member: %q", out)
+		}
+		// The resident member is still listed — by ID and title. Its SLUG is not
+		// printed, because the human renderer prints a task slug only for rows
+		// the overlay marked (ExternalPath "campaign:"), and with the overlay off
+		// nothing is marked. Asserting on the slug here would be asserting on the
+		// campaign-view decoration, not on the row's presence.
+		if !strings.Contains(out, f.residentID) {
+			t.Errorf("--campaign-members=false dropped a RESIDENT member: %q", out)
+		}
+		if strings.Contains(out, "resident-member") {
+			t.Errorf("--campaign-members=false still rendered campaign-view slugs: %q", out)
+		}
+	})
+
+	t.Run("ls honours the same flag", func(t *testing.T) {
+		out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "ls", "wave-a", "--type", "t", "--ndjson")
+		if err != nil {
+			t.Fatalf("machine ls failed: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "enrolled-member") {
+			t.Errorf("machine ls leaked an enrolled member without the flag: %q", out)
+		}
+		withFlag, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "ls", "wave-a", "--type", "t", "--ndjson", "--campaign-members")
+		if err != nil {
+			t.Fatalf("machine ls with flag failed: %v\n%s", err, withFlag)
+		}
+		if !strings.Contains(withFlag, "enrolled-member") {
+			t.Errorf("--campaign-members did not reach ls ndjson: %q", withFlag)
+		}
+	})
+}

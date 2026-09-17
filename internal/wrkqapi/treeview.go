@@ -38,7 +38,7 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 	if p.PruneEmpty != nil {
 		pruneEmpty = *p.PruneEmpty
 	}
-	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, filter, pruneEmpty, includeClosedPromises, 0)
+	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, filter, pruneEmpty, includeClosedPromises, p.IncludeCampaignMembers, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -124,20 +124,73 @@ func (a *API) attachTreePromises(ctx context.Context, nodes []*WrkqTreeNode, roo
 	return rootPromises, nil
 }
 
+// attachCampaignEnrollments overlays each campaign container in the built tree
+// with the tasks ENROLLED in it — members that live in another container (very
+// often another project), which the residency-only walk can never reach.
+//
+// It runs at the requested root and at every campaign node beneath it, so a
+// campaign shows its full membership whether you point tree AT it or walk past
+// it from above. The cost is that a tree holding both the campaign node and an
+// enrolled task's resident container lists that task twice, under two different
+// paths. That is why callers opt in (`includeCampaignMembers`): the duplicate
+// rows are labelled — every overlay row carries ExternalPath "campaign:<project>",
+// which is what renders the ↗ marker — but a consumer treating `path` as a
+// task's one location would double-count them silently.
 func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode, path string, filter treeFilter) error {
-	if path == "" {
+	// The synthetic root node carries no UUID, so it is resolved by path. Every
+	// node below it was built from a container row and knows whether it is a
+	// campaign already.
+	if path != "" {
+		campaignUUID, _, err := selectors.WalkContainerPath(a.db, path)
+		if err == nil {
+			if err := a.attachEnrollmentsToNode(ctx, root, campaignUUID, campaignProjectOf(path), filter); err != nil {
+				return err
+			}
+		}
+	}
+	var walk func(nodes []*WrkqTreeNode, parentPath string) error
+	walk = func(nodes []*WrkqTreeNode, parentPath string) error {
+		for _, node := range nodes {
+			if node.Type != "container" {
+				continue
+			}
+			nodePath := node.Slug
+			if parentPath != "" {
+				nodePath = parentPath + "/" + node.Slug
+			}
+			if node.isCampaign {
+				if err := a.attachEnrollmentsToNode(ctx, node, node.UUID, campaignProjectOf(nodePath), filter); err != nil {
+					return err
+				}
+			}
+			if err := walk(node.Children, nodePath); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
-	campaignUUID, _, err := selectors.WalkContainerPath(a.db, path)
-	if err != nil {
+	return walk(root.Children, path)
+}
+
+// campaignProjectOf returns the project a campaign path sits under, which decides
+// whether an enrolled member is labelled with its resident project (foreign) or
+// left bare (same project).
+func campaignProjectOf(path string) string {
+	return strings.Split(path, "/")[0]
+}
+
+// attachEnrollmentsToNode appends campaignUUID's enrolled members to node. It is
+// a no-op for a container that is not a campaign, so the root path resolution
+// above can call it unconditionally.
+func (a *API) attachEnrollmentsToNode(ctx context.Context, node *WrkqTreeNode, campaignUUID, campaignProject string, filter treeFilter) error {
+	if campaignUUID == "" {
 		return nil
 	}
 	var state sql.NullString
 	if err := a.db.QueryRowContext(ctx, "SELECT campaign_state FROM containers WHERE uuid = ?", campaignUUID).Scan(&state); err != nil || !state.Valid {
 		return nil
 	}
-	campaignProject := strings.Split(path, "/")[0]
-	for _, child := range root.Children {
+	for _, child := range node.Children {
 		if child.Type == "task" {
 			child.ExternalPath = "campaign:"
 		}
@@ -163,25 +216,25 @@ func (a *API) attachCampaignEnrollments(ctx context.Context, root *WrkqTreeNode,
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var node WrkqTreeNode
+		var member WrkqTreeNode
 		var archivedAt, deletedAt, requestedBy, assigned, acknowledged, resolution *string
 		var residentProject string
-		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.WireCreatedAt,
+		if err := rows.Scan(&member.UUID, &member.ID, &member.Slug, &member.Title, &member.State, &member.WireCreatedAt,
 			&archivedAt, &deletedAt, &requestedBy, &assigned, &acknowledged, &resolution, &residentProject); err != nil {
 			return NewInternalError(err)
 		}
-		node.Type = "task"
-		node.RequestedByProjectID, node.AssignedProjectID = requestedBy, assigned
-		node.AcknowledgedAt, node.Resolution = acknowledged, resolution
-		node.IsArchived, node.IsDeleted = archivedAt != nil, deletedAt != nil
-		if !filter.admits(node.State, node.IsArchived, node.IsDeleted) {
+		member.Type = "task"
+		member.RequestedByProjectID, member.AssignedProjectID = requestedBy, assigned
+		member.AcknowledgedAt, member.Resolution = acknowledged, resolution
+		member.IsArchived, member.IsDeleted = archivedAt != nil, deletedAt != nil
+		if !filter.admits(member.State, member.IsArchived, member.IsDeleted) {
 			continue
 		}
-		node.ExternalPath = "campaign:"
+		member.ExternalPath = "campaign:"
 		if residentProject != campaignProject {
-			node.ExternalPath += residentProject
+			member.ExternalPath += residentProject
 		}
-		root.Children = append(root.Children, &node)
+		node.Children = append(node.Children, &member)
 	}
 	return rows.Err()
 }
@@ -201,7 +254,7 @@ func (a *API) treeTopLevelProjectID(rootPath string) string {
 }
 
 // buildTreeNode is the faithful port of internal/cli buildTree.
-func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filter treeFilter, pruneEmptyContainers, includeClosedPromises bool, currentDepth int) (*WrkqTreeNode, error) {
+func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filter treeFilter, pruneEmptyContainers, includeClosedPromises, keepCampaigns bool, currentDepth int) (*WrkqTreeNode, error) {
 	root := &WrkqTreeNode{
 		Type:     "container",
 		Slug:     path,
@@ -224,7 +277,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 	}
 
 	containerQuery := `
-		SELECT uuid, id, slug, COALESCE(title, slug) as title, created_at, archived_at
+		SELECT uuid, id, slug, COALESCE(title, slug) as title, created_at, archived_at, campaign_state
 		FROM containers
 		WHERE `
 	var containerArgs []any
@@ -246,12 +299,14 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 	for rows.Next() {
 		var node WrkqTreeNode
 		var archivedAt *string
-		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.WireCreatedAt, &archivedAt); err != nil {
+		var campaignState sql.NullString
+		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.WireCreatedAt, &archivedAt, &campaignState); err != nil {
 			_ = rows.Close()
 			return nil, NewInternalError(err)
 		}
 		node.Type = "container"
 		node.IsArchived = archivedAt != nil
+		node.isCampaign = campaignState.Valid
 
 		childPath := path
 		if childPath != "" {
@@ -259,7 +314,7 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 		}
 		childPath += node.Slug
 
-		child, err := a.buildTreeNode(ctx, childPath, maxDepth, filter, pruneEmptyContainers, includeClosedPromises, currentDepth+1)
+		child, err := a.buildTreeNode(ctx, childPath, maxDepth, filter, pruneEmptyContainers, includeClosedPromises, keepCampaigns, currentDepth+1)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
@@ -283,7 +338,11 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 			node.hasVisibleContent = true
 		}
 
-		shouldShowContainer := !pruneEmptyContainers || node.hasVisibleContent || treeAlwaysShow(&node)
+		// A campaign whose members are all enrolled holds no resident task, so
+		// empty-container pruning would drop it before the overlay could attach
+		// its members. Keep it whenever the overlay is going to run.
+		shouldShowContainer := !pruneEmptyContainers || node.hasVisibleContent || treeAlwaysShow(&node) ||
+			(keepCampaigns && node.isCampaign)
 		if shouldShowContainer {
 			root.Children = append(root.Children, &node)
 			root.hasVisibleContent = true

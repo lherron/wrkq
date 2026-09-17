@@ -100,7 +100,7 @@ func newLsCmd() *cobra.Command {
 			if err := viewSelectorParams(params, statesFlag, all, false); err != nil {
 				return err
 			}
-			if mode == "table" {
+			if campaignMembersRequested(cmd, mode == "table") {
 				params["includeCampaignMembers"] = true
 			}
 
@@ -209,6 +209,7 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&statesFlag, "states", "", "Task states to show, comma-separated (default draft,open,in_progress,blocked; \"any\" for all)")
 	cmd.Flags().StringVar(&sort, "sort", "slug", "Sort by field: slug, updated_at, created_at, id")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
+	cmd.Flags().Bool(campaignMembersFlag, false, campaignMembersUsage)
 	return cmd
 }
 

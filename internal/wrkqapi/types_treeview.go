@@ -65,6 +65,11 @@ type WrkqTreeNode struct {
 	// hidden child's unfinished work vanish from its parent's rollup, so a
 	// container holding live in_progress work reported "(All done)".
 	allBuiltChildrenDone bool
+	// isCampaign marks a container whose campaign_state is set. The walk itself
+	// is residency-only, but the enrollment overlay needs to find campaign nodes
+	// at any depth, and a campaign whose members are ALL enrolled has no
+	// resident task to keep it alive through empty-container pruning.
+	isCampaign bool
 }
 
 // WrkqTreeView is the server-owned COMPATIBILITY tree projection for `wrkq tree`.

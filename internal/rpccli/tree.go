@@ -64,7 +64,7 @@ func newTreeCmd() *cobra.Command {
 			if promiseState != "" {
 				params["promiseState"] = promiseState
 			}
-			if mode == "human" {
+			if campaignMembersRequested(cmd, mode == "human") {
 				params["includeCampaignMembers"] = true
 			}
 
@@ -106,6 +106,7 @@ func newTreeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force human-readable tree output even when not a TTY")
+	cmd.Flags().Bool(campaignMembersFlag, false, campaignMembersUsage)
 	return cmd
 }
 
@@ -684,6 +685,28 @@ func formatTreeHumanTaskState(node *treeWireNode) string {
 // T-08594) invisible in the view their owners read. idea stays out: it is the
 // only remaining non-terminal state that is genuinely not yet work.
 var defaultViewStates = []string{"draft", "open", "in_progress", "blocked"}
+
+// campaignMembersFlag opts a view into the campaign enrollment overlay: the
+// members that live in another container (usually another project) and are
+// enrolled in a campaign rather than resident in it.
+//
+// It is tri-state on purpose. The default is the RENDER MODE's, not the flag's:
+// on for the human/interactive view, off for ndjson/json/porcelain, whose
+// stable field contract should not grow rows at new paths unasked. Passing the
+// flag either way overrides that, so `--campaign-members=false` gets a human a
+// residency-only tree without dropping to a machine format.
+const campaignMembersFlag = "campaign-members"
+
+const campaignMembersUsage = "Include tasks enrolled in a campaign from elsewhere " +
+	"(default: on for the interactive view, off for ndjson/json/porcelain)"
+
+func campaignMembersRequested(cmd *cobra.Command, defaultOn bool) bool {
+	if f := cmd.Flags().Lookup(campaignMembersFlag); f != nil && f.Changed {
+		on, err := cmd.Flags().GetBool(campaignMembersFlag)
+		return err == nil && on
+	}
+	return defaultOn
+}
 
 // viewSelectorParams fills the states/lifecycle/pruneEmpty triple that replaced
 // the conflated includeArchived/openOnly booleans. `all` (-a) is the only caller

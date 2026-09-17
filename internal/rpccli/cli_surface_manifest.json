@@ -1780,6 +1780,13 @@
             "hidden": false
           },
           {
+            "name": "campaign-members",
+            "usage": "Include tasks enrolled in a campaign from elsewhere (default: on for the interactive view, off for ndjson/json/porcelain)",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
             "name": "cursor",
             "usage": "Pagination cursor from previous page",
             "type": "string",
@@ -3726,6 +3733,13 @@
             "name": "all",
             "shorthand": "a",
             "usage": "Include every state, archived/deleted rows, and empty containers",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
+          {
+            "name": "campaign-members",
+            "usage": "Include tasks enrolled in a campaign from elsewhere (default: on for the interactive view, off for ndjson/json/porcelain)",
             "type": "bool",
             "default": "false",
             "hidden": false
