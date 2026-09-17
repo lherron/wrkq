@@ -21,7 +21,12 @@ const (
 	ColMarker    = "33"   // amber — list bullets/numbers (structure)
 	ColDim       = "2"    // tree branches, IDs, secondary metadata
 	ColDir       = "1;34" // container slug — bold blue
-	ColSlug      = "94"   // task slug — bright blue, the leaf of the same path a container names
+	// ColSlug is the one 256-colour code in this palette. The 16-colour blues
+	// were the wrong hue (34 read purple only by theme, 94 washed out) and the
+	// magentas are spoken for by ColSection, so the slug takes a true violet
+	// picked for saturation against a dark background. Terminals that cannot do
+	// 256 colours never see it: colour is off unless stdout is a terminal.
+	ColSlug      = "38;5;135" // task slug — violet, the leaf of the same path a container names
 	ColStateOpen = "33"   // amber — active/needs attention
 	ColStateWIP  = "36"   // cyan — in progress
 	ColStateStop = "31"   // red — blocked
