@@ -958,16 +958,11 @@ func TestCampaignMembersFlagDefaultsAndRecursion(t *testing.T) {
 		if strings.Contains(out, "enrolled-member") {
 			t.Errorf("--campaign-members=false still showed an enrolled member: %q", out)
 		}
-		// The resident member is still listed — by ID and title. Its SLUG is not
-		// printed, because the human renderer prints a task slug only for rows
-		// the overlay marked (ExternalPath "campaign:"), and with the overlay off
-		// nothing is marked. Asserting on the slug here would be asserting on the
-		// campaign-view decoration, not on the row's presence.
-		if !strings.Contains(out, f.residentID) {
+		// The resident member is still listed, by ID and by slug. Slug rendering
+		// is no longer tied to the campaign overlay — every task row prints one —
+		// so turning the overlay off removes enrolled MEMBERS and nothing else.
+		if !strings.Contains(out, f.residentID) || !strings.Contains(out, "resident-member") {
 			t.Errorf("--campaign-members=false dropped a RESIDENT member: %q", out)
-		}
-		if strings.Contains(out, "resident-member") {
-			t.Errorf("--campaign-members=false still rendered campaign-view slugs: %q", out)
 		}
 	})
 

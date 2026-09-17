@@ -611,9 +611,15 @@ func formatTreeHumanPromise(promise promiseWire) string {
 func formatTreeHumanNode(node *treeWireNode) string {
 	var parts []string
 	if node.Type == "task" {
+		// A row reads address, then meaning: the ID and slug are two spellings of
+		// where the task lives, so both are coloured — faint for the ID, blue for
+		// the slug, the non-bold sibling of the bold blue a container slug gets —
+		// and the title is left the only plain text in the row. Slugs used to
+		// print only under a campaign, which made campaign rows look like a
+		// different kind of row once the enrolment overlay could appear mid-tree.
 		parts = append(parts, style.Paint(style.ColDim, node.ID))
-		if strings.HasPrefix(node.ExternalPath, "campaign:") {
-			parts = append(parts, node.Slug)
+		if node.Slug != "" {
+			parts = append(parts, style.Paint(style.ColSlug, node.Slug))
 		}
 		if node.Title != "" && node.Title != node.Slug {
 			parts = append(parts, node.Title)

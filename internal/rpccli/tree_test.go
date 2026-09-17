@@ -29,7 +29,8 @@ func TestTreeHumanDisplaysTaskPriority(t *testing.T) {
 		t.Fatalf("tree --pretty --all: %v\n%s", err, output.String())
 	}
 
-	want := fmt.Sprintf("%s rpccli smoke ✓ \"task\" P1 <completed>", taskID)
+	// Address then meaning: ID, slug, title, then the priority this test is about.
+	want := fmt.Sprintf("%s rpccli-smoke-task rpccli smoke ✓ \"task\" P1 <completed>", taskID)
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("human tree missing task priority %q:\n%s", want, output.String())
 	}

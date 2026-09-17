@@ -190,6 +190,10 @@ func (a *API) attachEnrollmentsToNode(ctx context.Context, node *WrkqTreeNode, c
 	if err := a.db.QueryRowContext(ctx, "SELECT campaign_state FROM containers WHERE uuid = ?", campaignUUID).Scan(&state); err != nil || !state.Valid {
 		return nil
 	}
+	// Residents carry the bare marker. It no longer changes how they RENDER —
+	// every task row prints its slug now — but it keeps them eligible for the
+	// CLI's per-task priority fallback, which is the path an enrolled member
+	// needs and a resident only needs when the bulk priority page misses it.
 	for _, child := range node.Children {
 		if child.Type == "task" {
 			child.ExternalPath = "campaign:"
