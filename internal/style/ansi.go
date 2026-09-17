@@ -21,7 +21,7 @@ const (
 	ColMarker    = "33"   // amber — list bullets/numbers (structure)
 	ColDim       = "2"    // tree branches, IDs, secondary metadata
 	ColDir       = "1;34" // container slug — bold blue
-	ColSlug      = "34"   // task slug — blue, the leaf of the same path a container names
+	ColSlug      = "94"   // task slug — bright blue, the leaf of the same path a container names
 	ColStateOpen = "33"   // amber — active/needs attention
 	ColStateWIP  = "36"   // cyan — in progress
 	ColStateStop = "31"   // red — blocked
