@@ -971,9 +971,9 @@ func TestTimelineTypeFilterSelectsMessages(t *testing.T) {
 	}
 }
 
-// TestTimelineExcludesAdHocRooms pins D4's membership property: an ad-hoc room
-// (an agent DM) is anchored to neither a task nor a container, so it resolves to
-// no container and never appears in any project's log.
+// TestTimelineExcludesUnstampedAdHocRooms pins the fail-closed legacy rule: an
+// ad-hoc room has no ownership affiliation, so an unstamped message remains
+// outside every project timeline rather than being guessed from current slugs.
 func TestTimelineExcludesAdHocRooms(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "dmproj", "project", nil)
@@ -986,7 +986,7 @@ func TestTimelineExcludesAdHocRooms(t *testing.T) {
 		t.Fatalf("RoomSay(task room): %v", err)
 	}
 	if _, err := api.RoomSay(context.Background(), RoomSayParams{
-		Ref: "cody@dmproj:primary", Body: "a direct message", PrincipalRef: "agent:clod",
+		Ref: "cody@unresolved-project:primary", Body: "a direct message", PrincipalRef: "agent:clod",
 	}); err != nil {
 		t.Fatalf("RoomSay(dm): %v", err)
 	}
@@ -1004,6 +1004,160 @@ func TestTimelineExcludesAdHocRooms(t *testing.T) {
 	}
 	if len(view.Entries) != 1 {
 		t.Fatalf("want exactly the task-room message, got %d: %#v", len(view.Entries), view.Entries)
+	}
+}
+
+func TestTimelineAdHocEndpointProjectAffiliationIsStampedAndImmutable(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	alpha := createProjectEventContainer(t, s, "alpha", "project", nil)
+	beta := createProjectEventContainer(t, s, "beta", "project", nil)
+	gamma := createProjectEventContainer(t, s, "gamma", "project", nil)
+
+	message := "ad-hoc endpoint affiliation"
+	result, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref:          "cody@alpha:primary",
+		ScopeRef:     "clod@alpha:primary",
+		PrincipalRef: "agent:clod",
+		To:           []string{"cody@alpha:primary", "astra@beta:primary", "mable@alpha:primary"},
+		Body:         message,
+	})
+	if err != nil {
+		t.Fatalf("RoomSay(ad-hoc): %v", err)
+	}
+	if len(result.Envelopes) != 3 {
+		t.Fatalf("fan-out envelopes = %d, want 3", len(result.Envelopes))
+	}
+	var stamped int
+	if err := api.db.QueryRow(`SELECT COUNT(*) FROM envelopes
+		WHERE group_id = ? AND (from_project_uuid IS NOT NULL OR to_project_uuid IS NOT NULL)`, result.GroupID).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != 3 {
+		t.Fatalf("stamped envelopes = %d, want 3", stamped)
+	}
+
+	read := func(project string) []WrkqTimelineEntry {
+		t.Helper()
+		view, viewErr := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+		})
+		if viewErr != nil {
+			t.Fatalf("timeline %s: %v", project, viewErr)
+		}
+		entries := []WrkqTimelineEntry{}
+		for _, entry := range view.Entries {
+			if entry.Message != nil && entry.Message.Body == message {
+				entries = append(entries, entry)
+			}
+		}
+		return entries
+	}
+	assertParticipant := func(project string) {
+		t.Helper()
+		entries := read(project)
+		if len(entries) != 1 {
+			t.Fatalf("project %s messages = %#v, want one", project, entries)
+		}
+		entry := entries[0]
+		if entry.Membership != "participant" || entry.TaskUUID != "" || entry.TaskID != "" || entry.TaskPath != "" {
+			t.Fatalf("participant entry = %#v", entry)
+		}
+		if len(entry.Message.To) != 3 {
+			t.Fatalf("fan-out addressees = %#v, want all three", entry.Message.To)
+		}
+	}
+	assertParticipant(alpha.UUID)
+	assertParticipant(beta.UUID)
+	if entries := read(gamma.UUID); len(entries) != 0 {
+		t.Fatalf("unrelated project received ad-hoc message: %#v", entries)
+	}
+
+	// Membership added after the fact is intentionally not a timeline authority.
+	if result.Room.ID == nil {
+		t.Fatal("ad-hoc room has no ID")
+	}
+	if _, err := api.RoomJoin(context.Background(), RoomMemberParams{
+		Room: *result.Room.ID, Member: "nova@gamma:primary", PrincipalRef: "agent:clod",
+	}); err != nil {
+		t.Fatalf("RoomJoin: %v", err)
+	}
+	if entries := read(gamma.UUID); len(entries) != 0 {
+		t.Fatalf("post-send join re-affiliated message: %#v", entries)
+	}
+
+	// Rename the original project, reuse its old slug for a new project, and
+	// prove lookup never happens at read time.
+	if _, err := api.ContainerUpdate(context.Background(), ContainerUpdateParams{
+		Container: alpha.UUID, Patch: json.RawMessage(`{"slug":"alpha-renamed"}`), Actor: "agent:wrkq-system",
+	}); err != nil {
+		t.Fatalf("rename alpha: %v", err)
+	}
+	reused := createProjectEventContainer(t, s, "alpha", "project", nil)
+	assertParticipant(alpha.UUID)
+	if entries := read(reused.UUID); len(entries) != 0 {
+		t.Fatalf("reused slug received historical message: %#v", entries)
+	}
+
+	// Simulate an old pre-stamp envelope. NULL means unknown history, not a
+	// request to re-resolve scope text through today's project names.
+	legacy, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref: "cody@alpha-renamed:primary", ScopeRef: "clod@alpha-renamed:primary", PrincipalRef: "agent:clod",
+		To: []string{"cody@alpha-renamed:primary"}, Body: "legacy unstamped message",
+	})
+	if err != nil {
+		t.Fatalf("RoomSay(legacy seed): %v", err)
+	}
+	if _, err := api.db.Exec(`UPDATE envelopes SET from_project_uuid = NULL, to_project_uuid = NULL WHERE group_id = ?`, legacy.GroupID); err != nil {
+		t.Fatal(err)
+	}
+	for _, project := range []string{alpha.UUID, beta.UUID, gamma.UUID, reused.UUID} {
+		view, viewErr := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+		})
+		if viewErr != nil {
+			t.Fatal(viewErr)
+		}
+		for _, entry := range view.Entries {
+			if entry.Message != nil && entry.Message.Body == "legacy unstamped message" {
+				t.Fatalf("unstamped legacy message appeared in %s: %#v", project, entry)
+			}
+		}
+	}
+
+	// Owned task-room history remains owned by its task/container, regardless of
+	// cross-project endpoints; it cannot duplicate into endpoint timelines.
+	task := createTimelineTask(t, s, alpha.UUID, "owned", "open", "")
+	if _, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref: task.ID, ScopeRef: "clod@beta:primary", PrincipalRef: "agent:clod",
+		To: []string{"cody@gamma:primary"}, Body: "owned task-room message",
+	}); err != nil {
+		t.Fatalf("RoomSay(task room): %v", err)
+	}
+	var ownedStamps int
+	if err := api.db.QueryRow(`SELECT COUNT(*) FROM envelopes WHERE body = 'owned task-room message'
+		AND (from_project_uuid IS NOT NULL OR to_project_uuid IS NOT NULL)`).Scan(&ownedStamps); err != nil {
+		t.Fatal(err)
+	}
+	if ownedStamps != 0 {
+		t.Fatalf("task-room endpoint stamps = %d, want 0", ownedStamps)
+	}
+	owned := func(project string) int {
+		view, viewErr := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+		})
+		if viewErr != nil {
+			t.Fatal(viewErr)
+		}
+		count := 0
+		for _, entry := range view.Entries {
+			if entry.Message != nil && entry.Message.Body == "owned task-room message" {
+				count++
+			}
+		}
+		return count
+	}
+	if owned(alpha.UUID) != 1 || owned(beta.UUID) != 0 || owned(gamma.UUID) != 0 {
+		t.Fatalf("task-room ownership precedence failed: alpha=%d beta=%d gamma=%d", owned(alpha.UUID), owned(beta.UUID), owned(gamma.UUID))
 	}
 }
 

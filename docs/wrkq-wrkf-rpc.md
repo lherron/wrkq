@@ -1465,7 +1465,7 @@ interface WrkqTimelineEntryBase {
   taskUuid?: string;
   taskId?: string;
   taskPath?: string;
-  membership?: "resident" | "enrolled" | "subtree";
+  membership?: "resident" | "enrolled" | "subtree" | "participant";
   campaignUuid: string | null;
   containerUuid?: string;
 }
@@ -1594,6 +1594,14 @@ membership. The task-state projection admits exactly state-bearing
 copied, created, and non-state update events. The other discriminants are
 `comment.created` → `comment`, `task.outcome_set` → `task.outcome`, and
 `container.campaign_state_changed` → `container.state`.
+
+An ad-hoc room has no owning task or container. At envelope creation only, each
+project-bearing endpoint scope is resolved to its current top-level project UUID
+and stored as a nullable, non-owning historical stamp. A stamped ad-hoc fan-out
+appears once in every matching endpoint project's timeline as `type: "message"`,
+`membership: "participant"`, and no task path. Reads compare UUID stamps only:
+room membership, delivery state, later project renames, and slug reuse cannot
+move a message; pre-stamp rows remain excluded.
 
 `wrkq.container.move` backs the container-source branch of legacy `wrkq mv`. It is
 deliberately **separate** from `wrkq.container.update`: update remains the narrow

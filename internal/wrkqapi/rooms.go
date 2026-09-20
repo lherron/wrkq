@@ -15,6 +15,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -115,10 +116,27 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if senderScope != "" {
 		senderScopePtr = &senderScope
 	}
+	// Endpoint affiliation belongs ONLY to unowned ad-hoc rooms. Resolve the
+	// project token at write time and persist its UUID; later reads never map
+	// historical scope text through mutable slugs or room membership.
+	var senderProjectUUID *string
+	if room.row.Kind == domain.RoomKindAdhoc {
+		senderProjectUUID, err = a.scopeProjectUUID(ctx, senderScope)
+		if err != nil {
+			return nil, err
+		}
+		for index := range addressees {
+			addressees[index].ProjectUUID, err = a.scopeProjectUUID(ctx, addressees[index].ScopeRef)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	createParams := store.EnvelopeCreateParams{
 		RoomUUID:              room.row.UUID,
 		FromPrincipalRef:      attr.PrincipalRef,
 		FromScopeRef:          senderScopePtr,
+		FromProjectUUID:       senderProjectUUID,
 		SenderMemberRef:       senderRef,
 		SenderScoped:          senderScoped,
 		Addressees:            addressees,
@@ -225,6 +243,33 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		result.RecordedCommentID = &comment.ID
 	}
 	return result, nil
+}
+
+// scopeProjectUUID resolves a project-bearing stored scope handle to the
+// current top-level project only while creating an envelope. Empty, malformed,
+// unresolved, and non-top-level scope tokens intentionally receive no stamp.
+func (a *API) scopeProjectUUID(ctx context.Context, scopeHandle string) (*string, error) {
+	if strings.TrimSpace(scopeHandle) == "" {
+		return nil, nil
+	}
+	parsed, err := scope.ParseScopeHandle(scopeHandle)
+	if err != nil || parsed.ProjectID == "" {
+		return nil, nil
+	}
+	slug, err := paths.NormalizeSlug(parsed.ProjectID)
+	if err != nil {
+		return nil, nil
+	}
+	var uuid string
+	err = a.db.QueryRowContext(ctx, `SELECT uuid FROM containers
+		WHERE kind = 'project' AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root') AND slug = ?`, slug).Scan(&uuid)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	return &uuid, nil
 }
 
 var taskMentionPattern = regexp.MustCompile(`\bT-\d{5}\b`)

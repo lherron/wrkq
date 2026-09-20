@@ -102,7 +102,7 @@ const roomColumns = `
 
 const envelopeColumns = `
 	uuid, id, room_uuid, group_id, from_principal_ref, from_scope_ref,
-	to_scope_ref, to_principal_ref, obligation, body, task_uuid, state,
+	from_project_uuid, to_scope_ref, to_principal_ref, to_project_uuid, obligation, body, task_uuid, state,
 	expires_at, delivery, failure_reason, retry_at, defer_reason, terminal_actor, terminal_at,
 	materialization_intent, respond_to_principal_ref, retry_promise_uuid,
 	idempotency_key, meta, etag, created_at, updated_at,
@@ -546,6 +546,7 @@ func (rs *RoomStore) HasRuntimeSeenRoom(roomUUID, runtimeID string) (bool, error
 type EnvelopeAddressee struct {
 	ScopeRef              string
 	PrincipalRef          string
+	ProjectUUID           *string
 	MaterializationIntent *string
 }
 
@@ -555,6 +556,7 @@ type EnvelopeCreateParams struct {
 	RoomUUID              string
 	FromPrincipalRef      string
 	FromScopeRef          *string
+	FromProjectUUID       *string
 	SenderMemberRef       string
 	SenderScoped          bool
 	Addressees            []EnvelopeAddressee
@@ -696,15 +698,15 @@ func (rs *RoomStore) createEnvelopesTx(tx *sql.Tx, ew *events.Writer, attr attri
 		}
 
 		res, err := tx.Exec(`INSERT INTO envelopes (
-				id, room_uuid, from_principal_ref, from_scope_ref, to_scope_ref,
-				to_principal_ref, obligation, body, task_uuid, state,
+				id, room_uuid, from_principal_ref, from_scope_ref, from_project_uuid, to_scope_ref,
+				to_principal_ref, to_project_uuid, obligation, body, task_uuid, state,
 				expires_at, delivery, materialization_intent, respond_to_principal_ref, idempotency_key,
 				meta, terminal_actor, terminal_at,
 				created_by_principal_ref, created_by_scope_ref,
 				updated_by_principal_ref, updated_by_scope_ref
-			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			params.RoomUUID, params.FromPrincipalRef, params.FromScopeRef, toScope,
-			toPrincipal, params.Obligation, params.Body, params.TaskUUID, state,
+			) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			params.RoomUUID, params.FromPrincipalRef, params.FromScopeRef, params.FromProjectUUID, toScope,
+			toPrincipal, addressee.ProjectUUID, params.Obligation, params.Body, params.TaskUUID, state,
 			params.ExpiresAt, params.Delivery, intent, params.RespondToPrincipalRef, idempotencyKey, params.Meta,
 			terminalActor, terminalAt,
 			attr.PrincipalRef, scopeSQL(attr), attr.PrincipalRef, scopeSQL(attr))
@@ -1740,11 +1742,17 @@ func envelopeEventPayload(envelope *domain.Envelope) map[string]interface{} {
 	if envelope.FromScopeRef != nil {
 		payload["from_scope_ref"] = *envelope.FromScopeRef
 	}
+	if envelope.FromProjectUUID != nil {
+		payload["from_project_uuid"] = *envelope.FromProjectUUID
+	}
 	if envelope.ToScopeRef != nil {
 		payload["to_scope_ref"] = *envelope.ToScopeRef
 	}
 	if envelope.ToPrincipalRef != nil {
 		payload["to_principal_ref"] = *envelope.ToPrincipalRef
+	}
+	if envelope.ToProjectUUID != nil {
+		payload["to_project_uuid"] = *envelope.ToProjectUUID
 	}
 	if envelope.TaskUUID != nil {
 		payload["task_uuid"] = *envelope.TaskUUID
@@ -1879,8 +1887,8 @@ func scanEnvelope(scanner collabScanner) (*domain.Envelope, error) {
 func envelopeScanDestinations(envelope *domain.Envelope) []interface{} {
 	return []interface{}{
 		&envelope.UUID, &envelope.ID, &envelope.RoomUUID, &envelope.GroupID,
-		&envelope.FromPrincipalRef, &envelope.FromScopeRef, &envelope.ToScopeRef,
-		&envelope.ToPrincipalRef, &envelope.Obligation, &envelope.Body,
+		&envelope.FromPrincipalRef, &envelope.FromScopeRef, &envelope.FromProjectUUID, &envelope.ToScopeRef,
+		&envelope.ToPrincipalRef, &envelope.ToProjectUUID, &envelope.Obligation, &envelope.Body,
 		&envelope.TaskUUID, &envelope.State, &envelope.ExpiresAt, &envelope.Delivery, &envelope.FailureReason,
 		&envelope.RetryAt, &envelope.DeferReason, &envelope.TerminalActor,
 		&envelope.TerminalAt, &envelope.MaterializationIntent,

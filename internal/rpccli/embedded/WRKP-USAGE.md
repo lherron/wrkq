@@ -47,6 +47,12 @@ summary, then `key=value` pairs in the producer's order.
 bounded timeline reader and owns its cursor locally; posting never wakes an
 agent or drives a turn.
 
+The merged timeline also includes ad-hoc room messages when an endpoint was in
+this project at send time. Those entries are `message` records with
+`membership: participant` and no task path. The affiliation is an immutable
+project UUID stamp, so renaming a project or reusing an old slug cannot move
+history; messages written before stamps existed remain excluded.
+
 `wrkp git commit` and `wrkp git push` are best-effort Git-hook producers. They
 resolve the current checkout through the registered project roots, attribute
 facts to the current principal when there is one, and always exit zero so

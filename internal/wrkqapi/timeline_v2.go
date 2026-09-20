@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
 )
 
@@ -37,15 +38,17 @@ type timelineRawEvent struct {
 // room affiliates exactly as a comment on that task would, and a container room
 // affiliates to its own container.
 type timelineRawEnvelope struct {
-	id         sql.NullString
-	groupID    sql.NullString
-	roomID     sql.NullString
-	roomKind   sql.NullString
-	from       sql.NullString
-	obligation sql.NullString
-	body       sql.NullString
-	container  sql.NullString
-	campaign   sql.NullString
+	id          sql.NullString
+	groupID     sql.NullString
+	roomID      sql.NullString
+	roomKind    sql.NullString
+	from        sql.NullString
+	obligation  sql.NullString
+	body        sql.NullString
+	container   sql.NullString
+	campaign    sql.NullString
+	fromProject sql.NullString
+	toProjects  sql.NullString
 }
 
 type timelineRawProjectEvent struct {
@@ -431,7 +434,11 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 		       COALESCE(env.from_scope_ref, env.from_principal_ref),
 		       env.obligation, env.body,
 		       COALESCE(rm.container_uuid, room_task.project_uuid),
-		       room_task.campaign_uuid
+		       room_task.campaign_uuid,
+		       env.from_project_uuid,
+		       (SELECT group_concat(to_project_uuid) FROM envelopes sibling
+		         WHERE COALESCE(sibling.group_id, sibling.id) = COALESCE(env.group_id, env.id)
+		           AND sibling.to_project_uuid IS NOT NULL)
 		  FROM event_log e
 		  LEFT JOIN tasks t ON e.resource_type = 'task' AND t.uuid = e.resource_uuid
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
@@ -460,6 +467,7 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 			&raw.envelope.id, &raw.envelope.groupID, &raw.envelope.roomID, &raw.envelope.roomKind,
 			&raw.envelope.from, &raw.envelope.obligation, &raw.envelope.body,
 			&raw.envelope.container, &raw.envelope.campaign,
+			&raw.envelope.fromProject, &raw.envelope.toProjects,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}
@@ -710,7 +718,7 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 		return WrkqTimelineEntry{}, false, NewInternalError(err)
 	}
 	if raw.eventType == "envelope.created" {
-		applyTimelineEnvelope(&entry, raw.envelope)
+		applyTimelineEnvelope(&entry, raw.envelope, root)
 	}
 	applyTimelineMembership(&entry, root, affiliation)
 	if entry.Membership == "" || !timelineTypeMatches(filters, entry.Type) ||
@@ -746,7 +754,7 @@ func deliverTimelineProjectEvent(raw timelineRawProjectEvent, root string, affil
 // comment on that task would carry, and a container room to its own container.
 // An ad-hoc room is anchored to neither, so it resolves to no container and the
 // membership test that follows excludes it with no special case.
-func applyTimelineEnvelope(entry *WrkqTimelineEntry, env timelineRawEnvelope) {
+func applyTimelineEnvelope(entry *WrkqTimelineEntry, env timelineRawEnvelope, root string) {
 	if env.container.Valid {
 		entry.ContainerUUID = env.container.String
 	}
@@ -765,6 +773,19 @@ func applyTimelineEnvelope(entry *WrkqTimelineEntry, env timelineRawEnvelope) {
 		To:         []string{},
 	}
 	entry.Message = message
+	if env.roomKind.String == string(domain.RoomKindAdhoc) &&
+		(env.fromProject.String == root || timelineProjectListContains(env.toProjects.String, root)) {
+		entry.Membership = "participant"
+	}
+}
+
+func timelineProjectListContains(raw, target string) bool {
+	for _, uuid := range strings.Split(raw, ",") {
+		if uuid == target {
+			return true
+		}
+	}
+	return false
 }
 
 func timelineEventTypeSupported(eventType, payload string) bool {
@@ -780,6 +801,9 @@ func timelineEventTypeSupported(eventType, payload string) bool {
 }
 
 func applyTimelineMembership(entry *WrkqTimelineEntry, root string, affiliation map[string]bool) {
+	if entry.Membership == "participant" {
+		return
+	}
 	entry.Membership = ""
 	switch {
 	case entry.CampaignUUID != nil && *entry.CampaignUUID == root:

@@ -137,14 +137,19 @@ type Room struct {
 // Envelope is one object for chat and obligation, addressed to exactly one
 // recipient. `--to a,b` fans out to one envelope per addressee sharing GroupID.
 type Envelope struct {
-	UUID                  string                 `json:"uuid" db:"uuid"`
-	ID                    string                 `json:"id" db:"id"`
-	RoomUUID              string                 `json:"room_uuid" db:"room_uuid"`
-	GroupID               *string                `json:"group_id,omitempty" db:"group_id"`
-	FromPrincipalRef      string                 `json:"from_principal_ref" db:"from_principal_ref"`
-	FromScopeRef          *string                `json:"from_scope_ref,omitempty" db:"from_scope_ref"`
+	UUID             string  `json:"uuid" db:"uuid"`
+	ID               string  `json:"id" db:"id"`
+	RoomUUID         string  `json:"room_uuid" db:"room_uuid"`
+	GroupID          *string `json:"group_id,omitempty" db:"group_id"`
+	FromPrincipalRef string  `json:"from_principal_ref" db:"from_principal_ref"`
+	FromScopeRef     *string `json:"from_scope_ref,omitempty" db:"from_scope_ref"`
+	// Project UUID stamps are immutable historical affiliation for ad-hoc
+	// messages. They are deliberately non-owning: no foreign key may rewrite or
+	// erase them when a project is renamed, deleted, or its slug is reused.
+	FromProjectUUID       *string                `json:"from_project_uuid,omitempty" db:"from_project_uuid"`
 	ToScopeRef            *string                `json:"to_scope_ref,omitempty" db:"to_scope_ref"`
 	ToPrincipalRef        *string                `json:"to_principal_ref,omitempty" db:"to_principal_ref"`
+	ToProjectUUID         *string                `json:"to_project_uuid,omitempty" db:"to_project_uuid"`
 	Obligation            EnvelopeObligation     `json:"obligation" db:"obligation"`
 	Body                  string                 `json:"body" db:"body"`
 	TaskUUID              *string                `json:"task_uuid,omitempty" db:"task_uuid"`

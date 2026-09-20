@@ -1421,7 +1421,7 @@ interface WrkqTimelineEntryBase {
   taskUuid?: string;
   taskId?: string;
   taskPath?: string;
-  membership?: "resident" | "enrolled" | "subtree";
+  membership?: "resident" | "enrolled" | "subtree" | "participant";
   campaignUuid: string | null;
   containerUuid?: string;
 }
