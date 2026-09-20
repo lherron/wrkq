@@ -97,6 +97,26 @@ func TestProductionCommandContract_ReadWriteCommentAttachment(t *testing.T) {
 	}
 }
 
+func TestProductionCommandContract_CompletionWorktreeCleanupHint(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds production wrkq and wrkqadm binaries; skipped under -short")
+	}
+	bins := buildProductionBinaries(t)
+	dir := seedFixture(t, bins, [][]string{{"touch", "inbox/cleanup", "-t", "Cleanup"}})
+
+	res := runCLI(t, bins.wrkq, dir, []string{"set", "T-00001", "--state", "completed"})
+	if res.exit != 0 {
+		t.Fatalf("complete task exit=%d stdout=%q stderr=%q", res.exit, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stdout, `"succeeded": 1`) {
+		t.Fatalf("completion stdout lost its machine-readable summary: %q", res.stdout)
+	}
+	const wantHint = "Hint: For each task just closed, reconcile any worktree under ~/praesidium/under-construction/: preserve or merge needed changes, then remove the task's worktree. Leave worktrees with unrelated or uncommitted work alone."
+	if !strings.Contains(res.stderr, wantHint) {
+		t.Fatalf("completion stderr missing worktree cleanup hint %q: %q", wantHint, res.stderr)
+	}
+}
+
 func TestProductionCommandContract_BoundedMonitorAndWatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds production wrkq and wrkqadm binaries; skipped under -short")

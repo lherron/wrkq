@@ -498,6 +498,9 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 	} else {
 		result.PrintSummary(cmd.OutOrStdout())
 	}
+	if state, ok := opts.patch["state"].(string); ok && state == "completed" && result.Succeeded > 0 {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Hint: For each task just closed, reconcile any worktree under ~/praesidium/under-construction/: preserve or merge needed changes, then remove the task's worktree. Leave worktrees with unrelated or uncommitted work alone.")
+	}
 	if result.ExitCode() != 0 {
 		if len(result.Errors) == 1 {
 			return result.Errors[0].Error
