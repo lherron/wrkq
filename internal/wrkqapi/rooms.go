@@ -116,11 +116,11 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if senderScope != "" {
 		senderScopePtr = &senderScope
 	}
-	// Endpoint affiliation belongs ONLY to unowned ad-hoc rooms. Resolve the
-	// project token at write time and persist its UUID; later reads never map
-	// historical scope text through mutable slugs or room membership.
+	// Endpoint affiliation belongs to unowned ad-hoc rooms and project rooms.
+	// Resolve the project token at write time and persist its UUID; later reads
+	// never map historical scope text through mutable slugs or room membership.
 	var senderProjectUUID *string
-	if room.row.Kind == domain.RoomKindAdhoc {
+	if room.row.Kind == domain.RoomKindAdhoc || room.row.Kind == domain.RoomKindProject {
 		senderProjectUUID, err = a.scopeProjectUUID(ctx, senderScope)
 		if err != nil {
 			return nil, err

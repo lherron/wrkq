@@ -752,8 +752,9 @@ func deliverTimelineProjectEvent(raw timelineRawProjectEvent, root string, affil
 // envelope event's payload holds no affiliation, so container and campaign come
 // from the ROOM: a task room resolves to the same container and campaign a
 // comment on that task would carry, and a container room to its own container.
-// An ad-hoc room is anchored to neither, so it resolves to no container and the
-// membership test that follows excludes it with no special case.
+// Ad-hoc rooms are anchored to neither. Their endpoint stamps, and those of a
+// project room read from a non-owning endpoint project, supply participant
+// membership without consulting current room membership or scope slugs.
 func applyTimelineEnvelope(entry *WrkqTimelineEntry, env timelineRawEnvelope, root string) {
 	if env.container.Valid {
 		entry.ContainerUUID = env.container.String
@@ -773,7 +774,9 @@ func applyTimelineEnvelope(entry *WrkqTimelineEntry, env timelineRawEnvelope, ro
 		To:         []string{},
 	}
 	entry.Message = message
-	if env.roomKind.String == string(domain.RoomKindAdhoc) &&
+	if (env.roomKind.String == string(domain.RoomKindAdhoc) ||
+		env.roomKind.String == string(domain.RoomKindProject)) &&
+		env.container.String != root &&
 		(env.fromProject.String == root || timelineProjectListContains(env.toProjects.String, root)) {
 		entry.Membership = "participant"
 	}

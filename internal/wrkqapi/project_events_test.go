@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 )
 
@@ -1158,6 +1159,146 @@ func TestTimelineAdHocEndpointProjectAffiliationIsStampedAndImmutable(t *testing
 	}
 	if owned(alpha.UUID) != 1 || owned(beta.UUID) != 0 || owned(gamma.UUID) != 0 {
 		t.Fatalf("task-room ownership precedence failed: alpha=%d beta=%d gamma=%d", owned(alpha.UUID), owned(beta.UUID), owned(gamma.UUID))
+	}
+}
+
+func TestTimelineProjectRoomEndpointProjectAffiliationKeepsOwnerResident(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	alpha := createProjectEventContainer(t, s, "alpha", "project", nil)
+	beta := createProjectEventContainer(t, s, "beta", "project", nil)
+	gamma := createProjectEventContainer(t, s, "gamma", "project", nil)
+	delta := createProjectEventContainer(t, s, "delta", "project", nil)
+
+	message := "project-room endpoint affiliation"
+	result, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref:          "alpha",
+		ScopeRef:     "clod@beta:primary",
+		PrincipalRef: "agent:clod",
+		To:           []string{"cody@alpha:primary", "astra@beta:primary", "mable@gamma:primary"},
+		Body:         message,
+	})
+	if err != nil {
+		t.Fatalf("RoomSay(project room): %v", err)
+	}
+	if result.Room.Kind != string(domain.RoomKindProject) {
+		t.Fatalf("room kind = %q, want project", result.Room.Kind)
+	}
+	if len(result.Envelopes) != 3 {
+		t.Fatalf("fan-out envelopes = %d, want 3", len(result.Envelopes))
+	}
+	var stamped int
+	if err := api.db.QueryRow(`SELECT COUNT(*) FROM envelopes
+		WHERE group_id = ? AND from_project_uuid IS NOT NULL AND to_project_uuid IS NOT NULL`, result.GroupID).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != 3 {
+		t.Fatalf("fully stamped envelopes = %d, want 3", stamped)
+	}
+
+	read := func(project string) []WrkqTimelineEntry {
+		t.Helper()
+		view, viewErr := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+		})
+		if viewErr != nil {
+			t.Fatalf("timeline %s: %v", project, viewErr)
+		}
+		entries := []WrkqTimelineEntry{}
+		for _, entry := range view.Entries {
+			if entry.Message != nil && entry.Message.Body == message {
+				entries = append(entries, entry)
+			}
+		}
+		return entries
+	}
+	assertMembership := func(project, membership string) {
+		t.Helper()
+		entries := read(project)
+		if len(entries) != 1 {
+			t.Fatalf("project %s messages = %#v, want one", project, entries)
+		}
+		entry := entries[0]
+		if entry.Membership != membership || entry.TaskUUID != "" || entry.TaskID != "" || entry.TaskPath != "" {
+			t.Fatalf("project %s entry = %#v, want membership %q without task", project, entry, membership)
+		}
+		if len(entry.Message.To) != 3 {
+			t.Fatalf("fan-out addressees = %#v, want all three", entry.Message.To)
+		}
+	}
+	assertMembership(alpha.UUID, "resident")
+	assertMembership(beta.UUID, "participant")
+	assertMembership(gamma.UUID, "participant")
+	if entries := read(delta.UUID); len(entries) != 0 {
+		t.Fatalf("unrelated project received project-room message: %#v", entries)
+	}
+
+	// The owning project keeps its stored identity after a rename; reused slugs
+	// and endpoint scope text cannot re-home this historical message.
+	if _, err := api.ContainerUpdate(context.Background(), ContainerUpdateParams{
+		Container: alpha.UUID, Patch: json.RawMessage(`{"slug":"alpha-renamed"}`), Actor: "agent:wrkq-system",
+	}); err != nil {
+		t.Fatalf("rename alpha: %v", err)
+	}
+	reused := createProjectEventContainer(t, s, "alpha", "project", nil)
+	assertMembership(alpha.UUID, "resident")
+	assertMembership(beta.UUID, "participant")
+	assertMembership(gamma.UUID, "participant")
+	if entries := read(reused.UUID); len(entries) != 0 {
+		t.Fatalf("reused slug received historical message: %#v", entries)
+	}
+
+	// A pre-stamp project-room row remains readable by its owner but cannot be
+	// guessed into an endpoint timeline.
+	if _, err := api.db.Exec(`UPDATE envelopes
+		SET from_project_uuid = NULL, to_project_uuid = NULL
+		WHERE group_id = ?`, result.GroupID); err != nil {
+		t.Fatal(err)
+	}
+	assertMembership(alpha.UUID, "resident")
+	for _, project := range []string{beta.UUID, gamma.UUID, delta.UUID, reused.UUID} {
+		if entries := read(project); len(entries) != 0 {
+			t.Fatalf("legacy unstamped project-room message appeared in %s: %#v", project, entries)
+		}
+	}
+
+	// Campaign rooms remain ownership-only: cross-project endpoints are neither
+	// stamped nor projected into recipient project timelines.
+	campaign := createProjectEventContainer(t, s, "campaign", "project", nil)
+	if _, err := api.db.Exec(`UPDATE containers SET campaign_state = 'active' WHERE uuid = ?`, campaign.UUID); err != nil {
+		t.Fatal(err)
+	}
+	campaignMessage := "campaign ownership-only message"
+	campaignResult, err := api.RoomSay(context.Background(), RoomSayParams{
+		Ref:          "campaign",
+		ScopeRef:     "clod@beta:primary",
+		PrincipalRef: "agent:clod",
+		To:           []string{"mable@gamma:primary"},
+		Body:         campaignMessage,
+	})
+	if err != nil {
+		t.Fatalf("RoomSay(campaign room): %v", err)
+	}
+	if campaignResult.Room.Kind != string(domain.RoomKindCampaign) {
+		t.Fatalf("campaign room kind = %q, want campaign", campaignResult.Room.Kind)
+	}
+	var campaignStamps int
+	if err := api.db.QueryRow(`SELECT COUNT(*) FROM envelopes
+		WHERE group_id = ? AND (from_project_uuid IS NOT NULL OR to_project_uuid IS NOT NULL)`, campaignResult.GroupID).Scan(&campaignStamps); err != nil {
+		t.Fatal(err)
+	}
+	if campaignStamps != 0 {
+		t.Fatalf("campaign endpoint stamps = %d, want 0", campaignStamps)
+	}
+	view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: gamma.UUID, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
+	})
+	if err != nil {
+		t.Fatalf("gamma timeline: %v", err)
+	}
+	for _, entry := range view.Entries {
+		if entry.Message != nil && entry.Message.Body == campaignMessage {
+			t.Fatalf("campaign room message leaked into endpoint timeline: %#v", entry)
+		}
 	}
 }
 
