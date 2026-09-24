@@ -89,6 +89,62 @@ func runWrkcSplit(t *testing.T, dbPath, principal string, args ...string) (strin
 	return stdout.String(), stderr.String(), err
 }
 
+func TestWrkcSayDefaultsMissingRefToSingleFullAddressee(t *testing.T) {
+	f := newWrkcFixture(t)
+	from := "alice@wrkc-proj:primary"
+	to := "bob@wrkc-proj:primary"
+	cases := []struct {
+		name  string
+		input string
+		args  []string
+	}{
+		{"explicit", "explicit body\n", []string{"say", to, "--to", to, "--fyi", "--scope-ref", from, "--json"}},
+		{"implicit stdin", "implicit body\n", []string{"say", "--to", to, "--fyi", "--scope-ref", from, "--json"}},
+		{"implicit dash", "dash body\n", []string{"say", "--to", to, "-", "--fyi", "--scope-ref", from, "--json"}},
+	}
+	var roomUUID string
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runWrkcInput(t, f.dbPath, "agent:alice", tc.input, tc.args...)
+			if err != nil {
+				t.Fatalf("say: %v\n%s", err, out)
+			}
+			var said roomSayResultWire
+			if err := json.Unmarshal([]byte(out), &said); err != nil {
+				t.Fatalf("decode say: %v\n%s", err, out)
+			}
+			if said.Room.Kind != "adhoc" || len(said.Envelopes) != 1 {
+				t.Fatalf("unexpected say result: %+v", said)
+			}
+			if roomUUID == "" {
+				roomUUID = said.Room.UUID
+			} else if said.Room.UUID != roomUUID {
+				t.Fatalf("room UUID %s, want %s", said.Room.UUID, roomUUID)
+			}
+		})
+	}
+}
+
+func TestWrkcSayMissingRefRequiresUnambiguousAddressee(t *testing.T) {
+	f := newWrkcFixture(t)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no to", []string{"say"}, "room ref"},
+		{"fan out", []string{"say", "--to", "bob@wrkc-proj:primary,carol@wrkc-proj:primary"}, "room ref"},
+		{"bare name", []string{"say", "--to", "bob"}, "full agent@project"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runWrkcInput(t, f.dbPath, "agent:alice", "body\n", tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q refusal, got err=%v output=%q", tc.want, err, out)
+			}
+		})
+	}
+}
+
 // backdateWrkcRoom ages every timestamp the activity clock folds, so a test can
 // reach `stale` without a clock injection.
 func backdateWrkcRoom(t *testing.T, dbPath, roomUUID string, age time.Duration) {

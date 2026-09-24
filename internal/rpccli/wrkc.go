@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
 )
 
@@ -262,9 +263,13 @@ func newWrkcSayCmd() *cobra.Command {
 	var wait, preempt bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
-		Use:   "say <ref> [body|-] [-m body]",
+		Use:   "say [ref] [body|-] [-m body]",
 		Short: "Send a message into a room; only --to presents it",
 		Long: `Say something in the room the ref routes to.
+
+With no ref, --to must name one full agent@project[:scope] addressee;
+that addressee becomes the ref. In this form, body is read from stdin
+directly or with a positional "-". A positional ref keeps its usual meaning.
 
 Routing (first match wins):
   R-xxxxx / EN-xxxxx   that room (an envelope resolves to its room)
@@ -296,11 +301,32 @@ Two members of that name and no obligation refuses and names them: reply to a
 seat that never asked and its obligation can fail unanswered. An envelope's
 replyTo is the exact token that answers it; a full handle always wins. Use
 agent:<id> to address a scope-less principal such as a human.`,
-		Args: cobra.RangeArgs(1, 2),
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ref := ""
+			bodyArg := "-"
+			implicitRef := len(args) == 0 || (len(args) == 1 && args[0] == "-" && len(to) > 0)
+			if implicitRef {
+				if len(to) == 0 {
+					return errors.New("say requires a room ref (R-/EN-/T-/container/agent@project) or one full --to addressee")
+				}
+				if len(to) != 1 {
+					return errors.New("say with multiple --to addressees requires an explicit room ref")
+				}
+				parsed, err := scope.ParseScopeHandle(strings.TrimSpace(to[0]))
+				if err != nil || parsed.ProjectID == "" {
+					return errors.New("say without a room ref requires a full agent@project[:scope] --to address; bare names need an explicit ref")
+				}
+				ref = to[0]
+			} else {
+				ref = args[0]
+				if len(args) > 1 {
+					bodyArg = args[1]
+				}
+			}
 			claims := &stdinClaims{}
 			body := ""
-			if message != "" && len(args) > 1 {
+			if message != "" && (len(args) > 1 || (implicitRef && len(args) == 1)) {
 				return errors.New("say takes the body either positionally or with -m, not both")
 			}
 			if message != "" {
@@ -311,14 +337,8 @@ agent:<id> to address a scope-less principal such as a human.`,
 					return err
 				}
 				body = value
-			} else if len(args) > 1 {
-				value, err := readTextValue(args[1], "body", cmd.InOrStdin(), claims)
-				if err != nil {
-					return err
-				}
-				body = value
 			} else {
-				value, err := readTextValue("-", "body", cmd.InOrStdin(), claims)
+				value, err := readTextValue(bodyArg, "body", cmd.InOrStdin(), claims)
 				if err != nil {
 					return err
 				}
@@ -344,7 +364,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if err != nil {
 				return err
 			}
-			params["ref"] = args[0]
+			params["ref"] = ref
 			params["body"] = body
 			if len(to) > 0 {
 				params["to"] = to
