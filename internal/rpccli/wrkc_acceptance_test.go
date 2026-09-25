@@ -365,15 +365,21 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 		t.Fatalf("close presentation database: %v", err)
 	}
 
-	// log renders a transcript in the human mode and envelopes in JSON.
+	// log renders a transcript in the human mode and, in JSON, the same
+	// {room, items} object as members and the wrkq.room.logView wire — never a
+	// bare array (R-00168: a parser learned from say/show broke on log).
 	logOut, err := runWrkc(t, f.dbPath, "agent:clod", "log", f.taskID, "--json")
 	if err != nil {
 		t.Fatalf("wrkc log: %v\n%s", err, logOut)
 	}
-	var logged []envelopeWire
-	if err := json.Unmarshal([]byte(logOut), &logged); err != nil {
+	var logView roomLogViewWire
+	if err := json.Unmarshal([]byte(logOut), &logView); err != nil {
 		t.Fatalf("decode log: %v\n%s", err, logOut)
 	}
+	if logView.Room.Key == "" {
+		t.Fatalf("log JSON carries no room: %s", logOut)
+	}
+	logged := logView.Items
 	if len(logged) != 1 || logged[0].Body != "first message" {
 		t.Fatalf("log = %+v", logged)
 	}

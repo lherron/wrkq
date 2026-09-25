@@ -669,7 +669,10 @@ This is the pull the injected "history:" cue asks for. Room history is NEVER
 injected: a message you do not recognize means you have not read the room yet.
 
 The room selector is the room key: T-xxxxx, a container id or path, or R-xxxxx.
-In a campaign room, --task narrows to the traffic that came through one task.`,
+In a campaign room, --task narrows to the traffic that came through one task.
+
+--json returns {"room": {...}, "items": [envelope, ...]}; --ndjson emits one
+envelope per line.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tr, _, closeFn, err := openMirror(cmd)
@@ -707,6 +710,15 @@ In a campaign room, --task narrows to the traffic that came through one task.`,
 					return err
 				}
 				return renderWrkcTranscript(cmd, view, identity)
+			}
+			// JSON/YAML keep the {room, items} view, like members and the RPC
+			// wire; only the line-oriented modes flatten to one envelope each.
+			if mode == "json" || mode == "yaml" {
+				renderer := render.NewRenderer(cmd.OutOrStdout(), render.Options{Porcelain: stable})
+				if mode == "yaml" {
+					return renderer.RenderYAML(view)
+				}
+				return renderer.RenderJSON(view)
 			}
 			return renderWrkcEnvelopesMode(cmd, view.Items, mode, stable, false)
 		},

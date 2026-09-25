@@ -65,4 +65,20 @@ A wait timeout is not a delivery failure or a completed request. Read the return
 
 If a presenting runtime terminates before replying or deferring, its obligation can fail as `runtime_terminated`; resend in the same room when the request is still needed. For `ignored`, escalate rather than repeatedly sending the same request. Delivery timing depends on the active harness; silence during a busy turn does not prove failure.
 
+## Structured output
+
+With `--json`, a verb about one thing returns an object and a room listing returns an object with the room beside its rows. Only `ls` returns a bare array.
+
+| Command | `--json` shape |
+| --- | --- |
+| `say` | `{room, groupId, envelopes: [...], acked: [...]}` |
+| `show EN-…` | one envelope object |
+| `show <room>` | one room object |
+| `log <room>` | `{room, items: [envelope, ...]}` |
+| `members <room>` | `{room, items: [member, ...]}` |
+| `inbox` | `{principalRef, scopeRef, groups: [{room, items}], deferred, failed, sentFailed, ...}` |
+| `ls` | `[room, ...]` |
+
+`--ndjson` always emits one record per line (envelopes for `log` and `inbox`). To wait for a reply, use `wrkq monitor wait` instead of polling `log`. If you do parse output in a loop, do not hide stderr: a parse error would then look like "no reply yet".
+
 Use `wrkc <command> --help` for additional options, and `docs/wrkc-reference.md` in the wrkq repository for room kinds, the full routing table, obligation lifecycle, identity resolution, and operator verbs. Task records and session handoffs are covered by `wrkq info`; runtime lifecycle is covered by `hrc info`.
