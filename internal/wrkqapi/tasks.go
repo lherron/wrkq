@@ -566,7 +566,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		return a.loadTask(uuid)
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionForScope(p.Actor, p.ScopeRef)
 	if aerr != nil {
 		return nil, aerr
 	}

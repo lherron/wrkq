@@ -70,8 +70,9 @@ import (
 // wire; what the hash change buys is the handshake refusal — a client built
 // without the `message` variant would silently drop every room message rather
 // than render a log it believes is complete. dtos 152 -> 153.
-// T-08925: timeline entries expose the writer's optional scopeRef.
-const pinnedProtocolSchemaHash = "sha256:3a67a4ab834496e12b39e7dc4a9541a407d832bebd8c9862c190dbdc5a860720"
+// T-08925: timeline entries expose the writer's optional scopeRef; scoped
+// task.update and comment.add request DTOs join the catalog. dtos 153 -> 155.
+const pinnedProtocolSchemaHash = "sha256:fc90caa24b3006ca65c408b45f5c166c090a3649db61c78e46a330b108c64f1f"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -92,7 +93,7 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 	}{
 		{"methods", len(MethodCatalog()), 184},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 153},
+		{"dtos", len(dtoCatalog), 155},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

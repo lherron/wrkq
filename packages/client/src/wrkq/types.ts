@@ -668,6 +668,10 @@ export interface WrkqTaskListParams {
 
 export interface WrkqTaskUpdateParams {
   task: string;
+  /** Normalized writer principal; scopeRef, when present, must name this agent. */
+  actor?: string;
+  /** Canonical full writer seat ScopeRef. */
+  scopeRef?: string;
   patch: {
     title?: string;
     description?: string;
@@ -935,6 +939,9 @@ export type WrkqCommentKind = "blocker" | "decision" | "postmortem" | "digest";
 export interface WrkqCommentAddParams {
   task?: string;
   container?: string;
+  actor?: string;
+  /** Canonical full writer seat ScopeRef. */
+  scopeRef?: string;
   kind?: WrkqCommentKind;
   body: string;
   meta?: Record<string, unknown>;

@@ -55,7 +55,7 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 		}
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionForScope(p.Actor, p.ScopeRef)
 	if aerr != nil {
 		return nil, aerr
 	}

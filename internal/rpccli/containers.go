@@ -508,6 +508,26 @@ func actorFlag(cmd *cobra.Command) (string, error) {
 	return attr.PrincipalRef, nil
 }
 
+// mutationScopeRef carries a matching runtime seat separately from the
+// principal-only actor. An explicit actor override for another agent remains
+// valid but must not be stamped with this seat's scope.
+func mutationScopeRef(cmd *cobra.Command, actor string) string {
+	raw := wrkcScopeRef(cmd)
+	if raw == "" {
+		if runtime := resolvedRuntimeScope(); runtime != nil {
+			raw = runtime.FullRef()
+		}
+	}
+	if raw == "" || actor == "" {
+		return ""
+	}
+	resolved, _, err := scope.Resolve(raw)
+	if err != nil || "agent:"+resolved.AgentID != actor {
+		return ""
+	}
+	return resolved.FullRef()
+}
+
 func optionalCommandAttribution(cmd *cobra.Command, principalEnvNames ...string) (attribution.Attribution, error) {
 	attr, err := attribution.ResolveWithPrincipalEnvs(attribution.ResolveOptions{
 		Command:       cmd,

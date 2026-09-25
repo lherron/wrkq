@@ -455,6 +455,9 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 		if actor != "" {
 			params["actor"] = actor
 		}
+		if scopeRef := mutationScopeRef(cmd, actor); scopeRef != "" {
+			params["scopeRef"] = scopeRef
+		}
 		if opts.ifMatch != 0 {
 			params["expectEtag"] = opts.ifMatch
 		}

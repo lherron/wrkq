@@ -12,6 +12,8 @@ import (
 var dtoSchemaTypes = map[string]reflect.Type{
 	"RPCInitializeResult":             dtoType[initializeResult](),
 	"WrkqTask":                        dtoType[wrkqapi.WrkqTask](),
+	"WrkqTaskUpdateParams":            dtoType[wrkqapi.TaskUpdateParams](),
+	"WrkqCommentAddParams":            dtoType[wrkqapi.CommentAddParams](),
 	"WrkqTaskCopyParams":              dtoType[wrkqapi.TaskCopyParams](),
 	"WrkqTaskCopyResult":              dtoType[wrkqapi.WrkqTaskCopyResult](),
 	"WrkqTaskCatView":                 dtoType[wrkqapi.WrkqTaskCatView](),

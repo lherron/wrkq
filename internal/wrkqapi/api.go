@@ -12,6 +12,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/rpcidem"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/wrkfapi"
 )
@@ -75,6 +76,19 @@ func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 			})
 	}
 	return attribution.Attribution{PrincipalRef: principal}, nil
+}
+
+func (a *API) attributionForScope(actor, scopeRef string) (attribution.Attribution, error) {
+	attr, err := a.attributionFor(actor)
+	if err != nil || strings.TrimSpace(scopeRef) == "" {
+		return attr, err
+	}
+	parsed, err := scope.ParseScopeRef(scopeRef)
+	if err != nil || parsed.ProjectID == "" || "agent:"+parsed.AgentID != attr.PrincipalRef {
+		return attribution.Attribution{}, NewValidationError("scopeRef must be a full agent scope matching actor", map[string]any{"field": "scopeRef"})
+	}
+	attr.ScopeRef = parsed.ScopeRef
+	return attr, nil
 }
 
 // canonicalRequestHash is the single canonicalizer used by every mutating wrkq

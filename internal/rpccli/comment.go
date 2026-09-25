@@ -538,6 +538,9 @@ func runCommentAdd(cmd *cobra.Command, args []string, message, kind, meta string
 	if actor != "" {
 		params["actor"] = actor
 	}
+	if scopeRef := mutationScopeRef(cmd, actor); scopeRef != "" {
+		params["scopeRef"] = scopeRef
+	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.comment.add", params)
 	parentKind := "task"
 	if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {

@@ -52,12 +52,17 @@ func (s TaskService) Update(task string, patch TaskPatch, options ...TaskUpdateO
 	if err != nil {
 		return nil, err
 	}
+	scopeRef, err := s.client.mutationScopeRef()
+	if err != nil {
+		return nil, err
+	}
 	opts := first(options)
 	params := struct {
 		Task            string    `json:"task"`
 		Patch           TaskPatch `json:"patch"`
 		ExpectETag      *int64    `json:"expectEtag,omitempty"`
 		Actor           string    `json:"actor,omitempty"`
+		ScopeRef        string    `json:"scopeRef,omitempty"`
 		ClaimScope      string    `json:"claimScope,omitempty"`
 		ClaimToken      string    `json:"claimToken,omitempty"`
 		ClaimGeneration int64     `json:"claimGeneration,omitempty"`
@@ -67,6 +72,7 @@ func (s TaskService) Update(task string, patch TaskPatch, options ...TaskUpdateO
 		Patch:           patch,
 		ExpectETag:      opts.ExpectETag,
 		Actor:           principal,
+		ScopeRef:        scopeRef,
 		ClaimScope:      opts.ClaimScope,
 		ClaimToken:      opts.ClaimToken,
 		ClaimGeneration: opts.ClaimGeneration,

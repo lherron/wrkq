@@ -16,10 +16,11 @@ import (
 // Client is the public typed wrkq/wrkc client. New binds helper calls to ctx;
 // callers that need a per-call context can use Call directly.
 type Client struct {
-	ctx          context.Context
-	transport    Transport
-	principalRef string
-	scopeRef     string
+	ctx           context.Context
+	transport     Transport
+	principalRef  string
+	scopeRef      string
+	scopeExplicit bool
 
 	Task      TaskService
 	Comment   CommentService
@@ -29,11 +30,12 @@ type Client struct {
 }
 
 type newOptions struct {
-	locator      string
-	token        string
-	principalRef string
-	scopeRef     string
-	transport    Transport
+	locator       string
+	token         string
+	principalRef  string
+	scopeRef      string
+	scopeExplicit bool
+	transport     Transport
 }
 
 // Option customizes New.
@@ -75,6 +77,7 @@ func WithPrincipalRef(ref string) Option {
 func WithScopeRef(ref string) Option {
 	return func(opts *newOptions) error {
 		opts.scopeRef = strings.TrimSpace(ref)
+		opts.scopeExplicit = true
 		return nil
 	}
 }
@@ -141,10 +144,11 @@ func New(ctx context.Context, options ...Option) (*Client, error) {
 	}
 
 	client := &Client{
-		ctx:          ctx,
-		transport:    transport,
-		principalRef: opts.principalRef,
-		scopeRef:     opts.scopeRef,
+		ctx:           ctx,
+		transport:     transport,
+		principalRef:  opts.principalRef,
+		scopeRef:      opts.scopeRef,
+		scopeExplicit: opts.scopeExplicit,
 	}
 	client.Task = TaskService{client: client}
 	client.Comment = CommentService{client: client}
@@ -208,4 +212,21 @@ func (c *Client) mutationPrincipal() (string, error) {
 		return "", errors.New("mutation requires a caller principal; use client.WithPrincipalRef(agent:<id>) or configure WRKQ_PRINCIPAL_REF/runtime scope")
 	}
 	return c.principalRef, nil
+}
+
+func (c *Client) mutationScopeRef() (string, error) {
+	if c.scopeRef == "" {
+		return "", nil
+	}
+	resolved, _, err := scope.Resolve(c.scopeRef)
+	if err != nil {
+		if c.scopeExplicit {
+			return "", fmt.Errorf("invalid caller scope: %w", err)
+		}
+		return "", nil
+	}
+	if "agent:"+resolved.AgentID != c.principalRef {
+		return "", nil
+	}
+	return resolved.FullRef(), nil
 }

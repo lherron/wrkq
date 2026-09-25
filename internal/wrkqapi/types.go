@@ -178,6 +178,7 @@ type TaskUpdateParams struct {
 	Patch           TaskPatch `json:"patch"`
 	ExpectEtag      *int64    `json:"expectEtag,omitempty"`
 	Actor           string    `json:"actor,omitempty"`
+	ScopeRef        string    `json:"scopeRef,omitempty"`
 	ClaimScope      string    `json:"claimScope,omitempty"`
 	ClaimToken      string    `json:"claimToken,omitempty"`
 	ClaimGeneration int64     `json:"claimGeneration,omitempty"`
@@ -264,6 +265,7 @@ type CommentAddParams struct {
 	Body           string         `json:"body"`
 	Meta           map[string]any `json:"meta,omitempty"`
 	Actor          string         `json:"actor,omitempty"`
+	ScopeRef       string         `json:"scopeRef,omitempty"`
 	IdempotencyKey string         `json:"idempotencyKey,omitempty"`
 }
 

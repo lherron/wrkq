@@ -241,6 +241,8 @@ var methodCatalog = []string{
 var dtoCatalog = []string{
 	"RPCInitializeResult", // rpc.initialize compatibility handshake, including server build provenance
 	"WrkqTask",
+	"WrkqTaskUpdateParams", // scoped writer attribution on task mutations
+	"WrkqCommentAddParams", // scoped writer attribution on comment mutations
 	"WrkqTaskCopyParams", // wrkq.task.copy request envelope (server-owned deep copy)
 	"WrkqTaskCopyResult", // wrkq.task.copy per-source outcome (legacy copyResult output shape)
 	"WrkqTaskClaim",
