@@ -424,7 +424,7 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 	// delivery filter that drops an unsupported event type. COALESCE guards a
 	// null group_id so an unstamped row reports itself rather than vanishing.
 	rows, err := tx.QueryContext(ctx, timelineOrdered(`
-		SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.resource_uuid, ''),
+		SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.scope_ref, ''), COALESCE(e.resource_uuid, ''),
 		       e.event_type, COALESCE(e.payload, ''),
 		       COALESCE(t.uuid, comment_task.uuid, env_task.uuid, ''),
 		       COALESCE(t.id, comment_task.id, env_task.id, ''),
@@ -461,7 +461,7 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 	for rows.Next() {
 		var raw timelineRawEvent
 		if err := rows.Scan(
-			&raw.entry.EventID, &raw.serverTime, &raw.entry.PrincipalRef, &raw.entry.ResourceUUID,
+			&raw.entry.EventID, &raw.serverTime, &raw.entry.PrincipalRef, &raw.entry.ScopeRef, &raw.entry.ResourceUUID,
 			&raw.eventType, &raw.payload, &raw.entry.TaskUUID, &raw.entry.TaskID, &raw.entry.TaskPath,
 			&raw.commentID, &raw.commentKind, &raw.commentBody, &raw.commentMeta,
 			&raw.envelope.id, &raw.envelope.groupID, &raw.envelope.roomID, &raw.envelope.roomKind,
@@ -509,6 +509,9 @@ func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int
 		raw.entry.Timestamp = toRFC3339(raw.serverTime)
 		if detail.PrincipalRef != nil {
 			raw.entry.PrincipalRef = *detail.PrincipalRef
+		}
+		if detail.ScopeRef != nil {
+			raw.entry.ScopeRef = *detail.ScopeRef
 		}
 		raw.entry.CampaignUUID = nullStringPtr(campaign)
 		if task.Valid {

@@ -1417,6 +1417,7 @@ interface WrkqTimelineEntryBase {
   eventId: number;
   timestamp: string;
   principalRef?: string;
+  scopeRef?: string;
   resourceUuid?: string;
   taskUuid?: string;
   taskId?: string;

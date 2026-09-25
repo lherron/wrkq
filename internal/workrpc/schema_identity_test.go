@@ -70,7 +70,8 @@ import (
 // wire; what the hash change buys is the handshake refusal — a client built
 // without the `message` variant would silently drop every room message rather
 // than render a log it believes is complete. dtos 152 -> 153.
-const pinnedProtocolSchemaHash = "sha256:caa2fd75000f60a4aa6b1350e996889264ddc209fe1089f8e56e54d542a47c47"
+// T-08925: timeline entries expose the writer's optional scopeRef.
+const pinnedProtocolSchemaHash = "sha256:3a67a4ab834496e12b39e7dc4a9541a407d832bebd8c9862c190dbdc5a860720"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

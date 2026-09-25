@@ -342,7 +342,7 @@ func timelineLabelsContain(raw, label string) bool {
 }
 
 const timelineEntriesQuery = `
-	SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), e.resource_uuid,
+	SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.scope_ref, ''), e.resource_uuid,
 	       e.event_type, COALESCE(e.payload, ''),
 	       COALESCE(t.uuid, comment_task.uuid, ''),
 	       COALESCE(t.id, comment_task.id, ''),
@@ -411,7 +411,7 @@ func loadTimelineEntriesTx(
 			commentKind, commentMeta sql.NullString
 		)
 		if err := rows.Scan(
-			&entry.EventID, &entry.Timestamp, &entry.PrincipalRef, &resourceUUID,
+			&entry.EventID, &entry.Timestamp, &entry.PrincipalRef, &entry.ScopeRef, &resourceUUID,
 			&eventType, &payload, &entry.TaskUUID, &entry.TaskID, &entry.TaskPath,
 			&commentID, &commentKind, &commentBody, &commentMeta,
 		); err != nil {

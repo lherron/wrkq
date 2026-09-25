@@ -28,6 +28,7 @@ type timelineEntry struct {
 	// one field every entry kind shares and the one a reader asks for first, so
 	// it is carried through rather than dropped in projection.
 	PrincipalRef string `json:"principalRef,omitempty"`
+	ScopeRef     string `json:"scopeRef,omitempty"`
 	TaskUUID     string `json:"taskUuid,omitempty"`
 	TaskID       string `json:"taskId,omitempty"`
 	TaskPath     string `json:"taskPath,omitempty"`

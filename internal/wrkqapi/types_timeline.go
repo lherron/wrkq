@@ -124,6 +124,7 @@ type WrkqTimelineEntry struct {
 	EventID        int64                       `json:"eventId"`
 	Timestamp      string                      `json:"timestamp"`
 	PrincipalRef   string                      `json:"principalRef,omitempty"`
+	ScopeRef       string                      `json:"scopeRef,omitempty"`
 	ResourceUUID   string                      `json:"resourceUuid,omitempty"`
 	TaskUUID       string                      `json:"taskUuid,omitempty"`
 	TaskID         string                      `json:"taskId,omitempty"`
