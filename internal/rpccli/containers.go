@@ -512,15 +512,17 @@ func actorFlag(cmd *cobra.Command) (string, error) {
 // principal-only actor. An explicit actor override for another agent remains
 // valid but must not be stamped with this seat's scope.
 func mutationScopeRef(cmd *cobra.Command, actor string) string {
-	raw := wrkcScopeRef(cmd)
+	raw := ""
+	if runtime := resolvedRuntimeScope(); runtime != nil {
+		raw = runtime.FullRef()
+	}
 	if raw == "" {
-		if runtime := resolvedRuntimeScope(); runtime != nil {
-			raw = runtime.FullRef()
-		}
+		raw = wrkcScopeRef(cmd)
 	}
 	if raw == "" || actor == "" {
 		return ""
 	}
+	raw, _, _ = strings.Cut(raw, "/lane:")
 	resolved, _, err := scope.Resolve(raw)
 	if err != nil || "agent:"+resolved.AgentID != actor {
 		return ""
