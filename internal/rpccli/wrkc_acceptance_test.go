@@ -407,6 +407,28 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 		t.Fatalf("show room = %s", room.Key)
 	}
 
+	// Noun-first spellings agents reach for resolve to the same show.
+	for _, argv := range [][]string{
+		{"envelope", "show", envelopeID, "--json"},
+		{"envelope", "get", envelopeID, "--json"},
+		{"room", "show", f.taskID, "--json"},
+	} {
+		out, err := runWrkc(t, f.dbPath, "agent:clod", argv...)
+		if err != nil {
+			t.Fatalf("wrkc %v: %v\n%s", argv, err, out)
+		}
+		var got struct {
+			ID  string `json:"id"`
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("decode wrkc %v: %v\n%s", argv, err, out)
+		}
+		if argv[0] == "envelope" && got.ID != envelopeID || argv[0] == "room" && got.Key != f.taskID {
+			t.Fatalf("wrkc %v = %+v", argv, got)
+		}
+	}
+
 	// ls
 	lsOut, err := runWrkc(t, f.dbPath, "agent:clod", "ls", "--json")
 	if err != nil {

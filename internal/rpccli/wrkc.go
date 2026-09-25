@@ -204,6 +204,8 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 	root.AddCommand(newWrkcSayCmd())
 	root.AddCommand(newWrkcLogCmd())
 	root.AddCommand(newWrkcShowCmd())
+	root.AddCommand(newWrkcNounShowCmd("envelope", "EN-xxxxx"))
+	root.AddCommand(newWrkcNounShowCmd("room", "room"))
 	root.AddCommand(newWrkcLsCmd())
 	root.AddCommand(newWrkcInboxCmd())
 	root.AddCommand(newWrkcDeferCmd())
@@ -779,6 +781,22 @@ EN- ids are internal: inbox, show, and log surface them so an agent can tell
 		},
 	}
 	addPromiseOutputFlags(cmd, &output, false)
+	return cmd
+}
+
+// newWrkcNounShowCmd accepts the noun-first spelling agents reach for
+// (`wrkc envelope show EN-…`, `wrkc room get R-…`) and routes it to show, which
+// already dispatches on the selector shape. Hidden: show is the documented verb.
+func newWrkcNounShowCmd(noun, selector string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    noun,
+		Short:  "Alias group: " + noun + " show <" + selector + "> is wrkc show",
+		Hidden: true,
+	}
+	show := newWrkcShowCmd()
+	show.Use = "show <" + selector + ">"
+	show.Aliases = []string{"get", "inspect"}
+	cmd.AddCommand(show)
 	return cmd
 }
 
