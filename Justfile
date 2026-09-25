@@ -224,12 +224,19 @@ install *flags:
   chmod +x ~/.local/bin/wrkp
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
+  # The just shim hands every `just` to `wrkp just`, which posts run.settled
+  # for justfiles carrying `# wrkp: run.settled` and otherwise execs the real
+  # just (T-08917). ~/.local/bin must precede the real just on PATH.
+  rm -f ~/.local/bin/just
+  cp tools/just/just ~/.local/bin/just
+  chmod +x ~/.local/bin/just
   echo "✓ Installed to ~/.local/bin/wrkq"
   echo "✓ Installed to ~/.local/bin/wrkf"
   echo "✓ Installed to ~/.local/bin/wrkc"
   echo "✓ Installed to ~/.local/bin/wrkp"
   echo "✓ Installed to ~/.local/bin/wrkqadm"
   echo "✓ Installed to ~/.local/bin/wrkqd"
+  echo "✓ Installed just shim to ~/.local/bin/just (real just: $(WRKP_JUST_BIN= ~/.local/bin/just --version 2>&1 | head -1))"
   echo ""
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "⚠️  Add ~/.local/bin to your PATH:"

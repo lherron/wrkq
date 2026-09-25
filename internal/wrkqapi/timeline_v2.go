@@ -717,8 +717,14 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 	if err := normalizeTimelineEntry(&entry, raw.eventType, raw.payload, root); err != nil {
 		return WrkqTimelineEntry{}, false, NewInternalError(err)
 	}
+	if timelineQuietTypes[entry.Type] && (len(filters) == 0 || !timelineTypeMatches(filters, entry.Type)) {
+		return WrkqTimelineEntry{}, false, nil
+	}
 	if raw.eventType == "envelope.created" {
 		applyTimelineEnvelope(&entry, raw.envelope, root)
+	}
+	if raw.eventType == "task.moved" {
+		applyTimelineMove(&entry, raw.payload, root, affiliation)
 	}
 	applyTimelineMembership(&entry, root, affiliation)
 	if entry.Membership == "" || !timelineTypeMatches(filters, entry.Type) ||
@@ -793,13 +799,35 @@ func timelineProjectListContains(raw, target string) bool {
 
 func timelineEventTypeSupported(eventType, payload string) bool {
 	switch eventType {
-	case "comment.created", "envelope.created", "task.outcome_set", "task.archived", "task.deleted", "task.restored", "task.purged", "container.campaign_state_changed":
+	case "comment.created", "envelope.created", "task.outcome_set", "task.archived", "task.deleted", "task.restored", "task.purged", "container.campaign_state_changed",
+		"task.created", "task.updated", "task.moved":
 		return true
-	case "task.updated":
-		var fields map[string]json.RawMessage
-		return json.Unmarshal([]byte(payload), &fields) == nil && fields["state"] != nil
 	default:
 		return false
+	}
+}
+
+// timelineQuietTypes are delivered only to a read whose type filter names them
+// (exactly or by a trailing glob). An unfiltered read -- the human timeline --
+// never sees them. They exist for a cursor-driven reader that mirrors tasks
+// and must learn of every change it has to re-read.
+var timelineQuietTypes = map[string]bool{"task.created": true, "task.edited": true, "task.moved": true}
+
+// applyTimelineMove affiliates a move by the container it LEFT as well as the
+// one it entered: a reader of the old project must learn the task went away.
+// Both are immutable stamps in the move payload. The destination wins when both
+// belong to this timeline.
+func applyTimelineMove(entry *WrkqTimelineEntry, payload, root string, affiliation map[string]bool) {
+	var move struct {
+		Old string `json:"oldContainerUuid"`
+		New string `json:"newContainerUuid"`
+	}
+	if json.Unmarshal([]byte(payload), &move) != nil {
+		return
+	}
+	entry.ContainerUUID = move.New
+	if move.New != root && !affiliation[move.New] && (move.Old == root || affiliation[move.Old]) {
+		entry.ContainerUUID = move.Old
 	}
 }
 

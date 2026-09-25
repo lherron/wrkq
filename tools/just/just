@@ -1,0 +1,35 @@
+#!/bin/sh
+# just shim — installed AHEAD of the real `just` on PATH by wrkq's `just install`.
+#
+# Hands every invocation to `wrkp just`, which posts one run.settled fact to the
+# project timeline when the justfile opts in with the line
+#
+#     # wrkp: run.settled
+#
+# and otherwise execs the real just untouched. The shim must never break just:
+# without wrkp it execs the real binary directly.
+
+self_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)
+if [ -z "${WRKP_JUST_BIN:-}" ] || [ ! -x "$WRKP_JUST_BIN" ]; then
+  WRKP_JUST_BIN=
+  saved_ifs=$IFS
+  IFS=:
+  for dir in $PATH; do
+    [ -n "$dir" ] && [ -f "$dir/just" ] && [ -x "$dir/just" ] || continue
+    real_dir=$(cd "$dir" 2>/dev/null && pwd -P) || continue
+    [ "$real_dir" = "$self_dir" ] && continue
+    WRKP_JUST_BIN="$dir/just"
+    break
+  done
+  IFS=$saved_ifs
+fi
+if [ -z "$WRKP_JUST_BIN" ]; then
+  echo "just (wrkp shim): no real just binary on PATH besides $self_dir/just" >&2
+  exit 127
+fi
+export WRKP_JUST_BIN
+
+if command -v wrkp >/dev/null 2>&1; then
+  exec wrkp just -- "$@"
+fi
+exec "$WRKP_JUST_BIN" "$@"

@@ -8,8 +8,10 @@ wrkp post [project] --type T -m SUMMARY|- --attr key=value [--attr key=value ...
           [--task T-x] [--key K] [--occurred-at TS]
 wrkp git commit
 wrkp git push <remote> <url>   # pre-push ref lines on stdin
+wrkp just [-- just-args...]    # via the `just` shim; see below
+wrkp cursor [project]          # forward cursor at the timeline head
 wrkp log [project] [--after CURSOR] [--since 4h|TS] [--type a,b,session.*]
-         [--task T-x] [--limit N] [--follow] [--json|--ndjson]
+         [--task T-x] [--limit N] [--follow] [--json|--ndjson] [--porcelain]
 wrkp show <uuid>
 wrkp types [project]
 wrkp info
@@ -58,3 +60,53 @@ resolve the current checkout through the registered project roots, attribute
 facts to the current principal when there is one, and always exit zero so
 observability can never block a commit or push. Diagnostics are one-line
 `wrkp git:` messages on stderr.
+
+## Reading forward from a cursor
+
+A plain `wrkp log` reads newest-first, and the `next_cursor` that
+`--porcelain` writes to stderr pages further back into history. To read what
+changed SINCE a point, start from a forward cursor:
+
+```bash
+C=$(wrkp cursor foundry)                         # capture first
+...list current state...                          # e.g. wrkq find, git log
+wrkp log foundry --after "$C" --ndjson --porcelain  # everything after C, then stop
+```
+
+A forward `--after` read delivers entries oldest-first up to now, stops, and
+with `--porcelain` always writes the next forward cursor. Capturing the cursor
+before listing gives a consistent cut: a change made during the listing is
+delivered again rather than lost. `--limit N` bounds one read; continue from
+the printed cursor.
+
+## Quiet task entries
+
+`task.created`, `task.edited` (a task update that sets no state: title,
+priority, labels, description, ...) and `task.moved` are delivered only to a
+read whose `--type` filter names them, exactly or by glob (`task.*`). An
+unfiltered read never shows them. `task.created` carries the initial state in
+`taskState`; `task.edited` and `task.moved` carry only the task identity, and a
+mirror re-reads the task. A move appears on the timeline of the container it
+left as well as the one it entered. Events written before the affiliation stamp
+existed are not placed on any timeline.
+
+## `just` runs: `run.settled`
+
+`just` keeps no history, so its runs reach the timeline as facts. wrkq's
+`just install` puts a `just` shim ahead of the real binary on PATH; the shim
+hands each invocation to `wrkp just`. A justfile opts in with one line:
+
+```just
+# wrkp: run.settled
+```
+
+Then each top-level recipe run posts `run.settled` to the project whose
+registered root holds the justfile, threaded under the caller's task when the
+seat's scope names a task in that project. Attributes, in order: `source`
+(`wrkp-just`), `node`, `recipe`, `repo`, `status` (just's exit code, 128+N for
+a signal), `duration_ms`, `signal` (when signalled), `argv`, `justfile`,
+`started_at`. Listings and other non-run modes (`--list`, `--summary`,
+`--dry-run`, ...), recipes that just runs from inside an observed run, and
+justfiles without the marker are passed straight to the real `just` with exec.
+The exit status is always just's; a failed post is one `wrkp just:` line on
+stderr.

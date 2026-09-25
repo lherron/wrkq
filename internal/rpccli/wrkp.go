@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,7 +68,7 @@ func NewWrkpRootCmd() *cobra.Command {
 	root.PersistentFlags().String("output", "", "Output mode: human, json, ndjson, porcelain, yaml, tsv")
 	root.PersistentFlags().Bool("json", false, "Output as JSON")
 	root.PersistentFlags().String("scope-ref", "", "Caller scope handle (defaults to $HRC_SESSION_REF)")
-	root.AddCommand(newWrkpPostCmd(), newWrkpGitCmd(), newWrkpLogCmd(), newWrkpShowCmd(), newWrkpTypesCmd(), newWrkpInfoCmd(), newVersionCmd())
+	root.AddCommand(newWrkpPostCmd(), newWrkpGitCmd(), newWrkpJustCmd(), newWrkpCursorCmd(), newWrkpLogCmd(), newWrkpShowCmd(), newWrkpTypesCmd(), newWrkpInfoCmd(), newVersionCmd())
 	applyWrkcHelpTemplates(root)
 	return root
 }
@@ -204,6 +205,62 @@ func encodeWrkpAttributes(pairs []wrkpAttribute) json.RawMessage {
 	return json.RawMessage(buf.Bytes())
 }
 
+// wrkpCursorAscending peeks at an opaque timeline cursor's direction. Version
+// 3 is the descending (newest-first) reader's; every earlier version is
+// ascending. An unreadable cursor is left to the server to refuse.
+func wrkpCursorAscending(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return false
+	}
+	var cur struct {
+		Version int `json:"v"`
+	}
+	return json.Unmarshal(decoded, &cur) == nil && cur.Version > 0 && cur.Version < 3
+}
+
+// newWrkpCursorCmd prints a forward cursor at the timeline's current head. A
+// reader that lists current state captures this FIRST, lists, then reads
+// `wrkp log --after CURSOR` from it: a consistent cut, since anything that
+// changed during the listing is re-delivered rather than lost.
+func newWrkpCursorCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "cursor [project]", Short: "Print a forward cursor at the timeline head", Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tr, sc, closeFn, err := openMirror(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			project := sc.selector("", true)
+			if len(args) == 1 {
+				project = args[0]
+			}
+			raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", map[string]any{
+				"container": project, "scope": "subtree", "entriesOnly": true, "tail": true, "limit": 1,
+			})
+			if err != nil {
+				return wrkpRPCError(err)
+			}
+			var view wrkpLogView
+			if err := json.Unmarshal(raw, &view); err != nil {
+				return err
+			}
+			if view.NextCursor == "" {
+				return fmt.Errorf("server returned no head cursor for %s", project)
+			}
+			if wrkpJSON(cmd) {
+				return encodeJSONIndent(cmd, map[string]string{"project": view.Container.Path, "cursor": view.NextCursor})
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), view.NextCursor)
+			return nil
+		},
+	}
+}
+
 func newWrkpLogCmd() *cobra.Command {
 	var after, since, task, typeList string
 	var limit int
@@ -223,6 +280,13 @@ func newWrkpLogCmd() *cobra.Command {
 			mode := resolveWrkpMode(cmd, pretty, ndjson)
 			var styled *style.TimelineWriter
 			cursor := after
+			// A FORWARD read: --after names an ascending cursor (from `wrkp
+			// cursor` or a previous forward page). It reads what changed since
+			// that position up to now, then stops -- a bounded --follow. The
+			// descending cursor a plain `wrkp log --porcelain` prints pages
+			// back into history instead.
+			forward := !follow && wrkpCursorAscending(after)
+			jsonEntries := []timelineEntry{}
 			containerSet := ""
 			// previousCursor and followIdleNoticed exist only for the
 			// empty-window notice below: one detects that a tail has caught up,
@@ -236,7 +300,8 @@ func newWrkpLogCmd() *cobra.Command {
 				deliveredLimit = wrkpDefaultLimit
 			}
 			for {
-				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow}
+				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow || forward}
+				sentCursor := cursor
 				if cursor != "" {
 					params["cursor"] = cursor
 				} else if !follow {
@@ -280,7 +345,11 @@ func newWrkpLogCmd() *cobra.Command {
 					styled = style.NewTimelineWriter(cmd.OutOrStdout(), view.Container.Path)
 				}
 				containerPath = view.Container.Path
-				if err := renderWrkpEntries(cmd, view.Entries, mode, styled); err != nil {
+				// A bounded --json read is ONE array however many pages it
+				// took; it is written when the read stops.
+				if mode == "json" && !follow {
+					jsonEntries = append(jsonEntries, view.Entries...)
+				} else if err := renderWrkpEntries(cmd, view.Entries, mode, styled); err != nil {
 					return err
 				}
 				delivered += len(view.Entries)
@@ -312,6 +381,18 @@ func newWrkpLogCmd() *cobra.Command {
 					followIdleNoticed = true
 				}
 				previousCursor = cursor
+				if forward {
+					// A tail cursor always comes back, so the read is caught up
+					// when a page leaves it where it was; a page of only
+					// excluded rows still moves it and the read continues.
+					if cursor != sentCursor && delivered < deliveredLimit {
+						continue
+					}
+					if porcelain && cursor != "" {
+						fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", cursor)
+					}
+					return renderWrkpEntries(cmd, jsonEntries, mode, styled)
+				}
 				if !follow {
 					// A raw-scan page may consume only excluded rows. Keep advancing
 					// sparse filtered reads until the delivered limit is full or the
@@ -326,6 +407,9 @@ func newWrkpLogCmd() *cobra.Command {
 						fmt.Fprintln(cmd.ErrOrStderr(),
 							wrkpEmptyWindowNotice(cmd.Context(), tr, project, containerPath, since, false))
 					}
+					if mode == "json" {
+						return renderWrkpEntries(cmd, jsonEntries, mode, styled)
+					}
 					return nil
 				}
 				select {
@@ -336,7 +420,7 @@ func newWrkpLogCmd() *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().StringVar(&after, "after", "", "Opaque cursor from a previous page")
+	cmd.Flags().StringVar(&after, "after", "", "Opaque cursor: a previous page's, or a forward cursor from `wrkp cursor`")
 	cmd.Flags().StringVar(&since, "since", "", "RFC3339 time or duration")
 	cmd.Flags().StringVar(&typeList, "type", "", "Comma-separated exact or trailing-glob types")
 	cmd.Flags().StringVar(&task, "task", "", "Task selector")
@@ -672,6 +756,9 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			styled.Label = "→ " + entry.TaskState.State
 			if entry.TaskState.From != nil && *entry.TaskState.From != "" {
 				styled.Label = *entry.TaskState.From + " → " + entry.TaskState.State
+			}
+			if entry.Type == "task.created" {
+				styled.Label = "created → " + entry.TaskState.State
 			}
 			styled.Accent = style.StateColor(entry.TaskState.State)
 			styled.TaskState = entry.TaskState.State

@@ -414,7 +414,18 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			payload["caused_by"] = causedByIDs
 		}
 
-		payloadJSON, err := json.Marshal(payload)
+		// The event carries the task's affiliation stamp so the project
+		// timeline can place the creation by production-time container, the
+		// same immutable stamp a state change carries. The webhook change set
+		// below is built from the unstamped fields.
+		eventPayload := make(map[string]interface{}, len(payload)+2)
+		for k, v := range payload {
+			eventPayload[k] = v
+		}
+		if err := StampTaskCampaignContext(tx, uuid, eventPayload); err != nil {
+			return err
+		}
+		payloadJSON, err := json.Marshal(eventPayload)
 		if err != nil {
 			return fmt.Errorf("failed to marshal event payload: %w", err)
 		}
@@ -687,24 +698,25 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		// Log event with structured payload. caused_by (a non-column field) is
 		// merged back into the payload as a friendly-ID array so `wrkq log --patch`
 		// shows it like any other field edit.
-		payloadFields := fields
+		payloadFields := make(map[string]interface{}, len(fields)+4)
+		for k, v := range fields {
+			payloadFields[k] = v
+		}
 		eventChanged := fieldNames
 		eventChanges := buildWebhookChanges(oldValues, fields)
 		if causedByUpdate != nil {
-			payloadFields = make(map[string]interface{}, len(fields)+1)
-			for k, v := range fields {
-				payloadFields[k] = v
-			}
 			newIDs := causedByUpdate.FriendlyIDs()
 			payloadFields[causedByFieldKey] = newIDs
 			eventChanged = append(append([]string{}, fieldNames...), causedByFieldKey)
 			sort.Strings(eventChanged)
 			eventChanges[causedByFieldKey] = webhooks.Change{From: causedByOldIDs, To: newIDs}
 		}
+		// Every update carries the affiliation stamp, not only a state change:
+		// the project timeline places field edits (task.edited) by it too.
+		if err := StampTaskCampaignContext(tx, taskUUID, payloadFields); err != nil {
+			return err
+		}
 		if hasStateChange && currentState != newState {
-			if err := StampTaskCampaignContext(tx, taskUUID, payloadFields); err != nil {
-				return err
-			}
 			payloadFields["state_from"] = currentState
 		}
 		changesJSON, err := json.Marshal(payloadFields)

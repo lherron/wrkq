@@ -488,11 +488,23 @@ func normalizeTimelineEntry(
 		entry.Type = "task.outcome"
 		outcome, _ := timelinePayloadString(payload, "outcome")
 		entry.Outcome = &WrkqTimelineOutcome{Text: outcome}
+	// The quiet entries (see timelineQuietTypes) carry no new detail object --
+	// the wire schema is pinned by the client handshake. task.created reuses
+	// the task-state detail for its initial state; task.edited and task.moved
+	// carry only the task identity, and a reader re-reads the task.
+	case "task.created":
+		entry.Type = "task.created"
+		if state, _ := timelinePayloadString(payload, "state"); state != nil {
+			entry.TaskState = &WrkqTimelineTaskState{State: *state, SourceEventType: eventType}
+		}
+	case "task.moved":
+		entry.Type = "task.moved"
 	case "task.updated":
 		state, _ := timelinePayloadString(payload, "state")
 		from, _ := timelinePayloadString(payload, "state_from")
 		if state == nil {
-			return fmt.Errorf("timeline task.updated event %d lacks state", entry.EventID)
+			entry.Type = "task.edited"
+			return nil
 		}
 		entry.Type = "task.state"
 		entry.TaskState = &WrkqTimelineTaskState{From: from, State: *state, SourceEventType: eventType}
