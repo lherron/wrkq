@@ -1,5 +1,9 @@
 set shell := ["bash", "-cu"]
 
+# Each top-level recipe run posts run.settled to the wrkq project timeline
+# through the `just` shim this repo installs (`wrkp info`).
+# wrkp: run.settled
+
 # Default task
 default:
   @just info
