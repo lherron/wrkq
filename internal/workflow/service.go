@@ -21,10 +21,13 @@ import (
 
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/rpcidem"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -1364,7 +1367,8 @@ func nextSeqID(tx *sql.Tx, table, prefix string) (string, error) {
 
 func updateTaskWorkflowMeta(tx *sql.Tx, taskUUID string, inst Instance, actor string) error {
 	var metaText sql.NullString
-	if err := tx.QueryRow(`SELECT meta FROM tasks WHERE uuid = ?`, taskUUID).Scan(&metaText); err != nil {
+	var taskETag int64
+	if err := tx.QueryRow(`SELECT meta, etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&metaText, &taskETag); err != nil {
 		return err
 	}
 	meta := map[string]interface{}{}
@@ -1372,6 +1376,10 @@ func updateTaskWorkflowMeta(tx *sql.Tx, taskUUID string, inst Instance, actor st
 		if err := json.Unmarshal([]byte(metaText.String), &meta); err != nil {
 			return fmt.Errorf("task meta is not valid JSON: %w", err)
 		}
+	}
+	before, err := json.Marshal(meta)
+	if err != nil {
+		return err
 	}
 	wf := map[string]interface{}{
 		"instanceId": inst.ID,
@@ -1395,10 +1403,34 @@ func updateTaskWorkflowMeta(tx *sql.Tx, taskUUID string, inst Instance, actor st
 		wf["state"].(map[string]interface{})["outcome"] = inst.Outcome
 	}
 	meta["workflow"] = wf
-	b, _ := json.Marshal(meta)
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(before, b) {
+		return nil
+	}
 
-	_, err := tx.Exec(`UPDATE tasks SET meta = ? WHERE uuid = ?`, string(b), taskUUID)
-	return err
+	if _, err := tx.Exec(`UPDATE tasks SET meta = ? WHERE uuid = ?`, string(b), taskUUID); err != nil {
+		return err
+	}
+	payload := map[string]any{"meta": string(b)}
+	if err := store.StampTaskCampaignContext(tx, taskUUID, payload); err != nil {
+		return err
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	payloadText := string(payloadJSON)
+	return events.NewWriter(nil).LogEvent(tx, &domain.Event{
+		PrincipalRef: actor,
+		ResourceType: "task",
+		ResourceUUID: &taskUUID,
+		EventType:    "task.updated",
+		ETag:         &taskETag,
+		Payload:      &payloadText,
+	})
 }
 
 func (s *Service) ActiveInstance(taskSelector string) (*Instance, error) {
