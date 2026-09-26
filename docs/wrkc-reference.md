@@ -16,7 +16,7 @@ a session. This page carries the detail that guide deliberately leaves out:
 room kinds and projections, the full routing table, obligation lifecycle,
 identity and bare-name resolution, and the operator verbs. It is descriptive —
 run `wrkc <command> --help` for the exhaustive current flag list, and see
-[docs/SPEC.md](SPEC.md) for the contract of record.
+[docs/SPEC.md](https://github.com/lherron/wrkq/blob/main/docs/SPEC.md) for the contract of record.
 
 ## Model
 
