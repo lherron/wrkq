@@ -1324,7 +1324,7 @@
           },
           {
             "name": "state",
-            "usage": "Filter by state (or 'all' for everything)",
+            "usage": "Filter by one state, or 'all' for every state (default: draft, open, in_progress, blocked; --ack-pending alone selects unacked completed/cancelled)",
             "type": "string",
             "hidden": false
           },

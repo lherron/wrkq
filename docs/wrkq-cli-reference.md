@@ -134,7 +134,9 @@ use the same rules. The singular repeatable `--label` read filter is unchanged.
 ## Discovery: find, search, stat, diff, log
 
 ```bash
-# find: defaults to active items, excludes archived/deleted/idea
+# find: with no --state, returns the actionable set draft/open/in_progress/blocked
+# (the same default as tree); --state <s> for one state, --state all for history.
+# --ack-pending alone still selects unacked completed/cancelled tasks.
 wrkq find myproject --state open --kind bug
 wrkq find --claimed-by agent:cody
 wrkq find --caused-by T-00012

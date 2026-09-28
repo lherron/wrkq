@@ -216,7 +216,7 @@ func newFindCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&typeFilter, "type", "", "Filter by type: t (task), p (project/container)")
 	cmd.Flags().StringVar(&slugGlob, "slug-glob", "", "Filter by slug glob pattern (e.g. 'login-*')")
-	cmd.Flags().StringVar(&state, "state", "", "Filter by state (or 'all' for everything)")
+	cmd.Flags().StringVar(&state, "state", "", "Filter by one state, or 'all' for every state (default: draft, open, in_progress, blocked; --ack-pending alone selects unacked completed/cancelled)")
 	cmd.Flags().StringVar(&dueBefore, "due-before", "", "Filter tasks due before date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&dueAfter, "due-after", "", "Filter tasks due after date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by task kind: task, subtask, spike, bug, chore")

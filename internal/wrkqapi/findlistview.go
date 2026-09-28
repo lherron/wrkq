@@ -13,6 +13,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cursor"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
@@ -223,7 +224,17 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 	switch opts.state {
 	case "all":
 	case "":
-		query += " AND t.state NOT IN ('archived', 'deleted', 'idea')"
+		// T-06964: no state means the producer-owned actionable set, the same
+		// one tree/ls default to. --ack-pending alone is the exception: its
+		// whole purpose is terminal tasks awaiting ack, and its own clause
+		// below already pins completed/cancelled.
+		if !opts.ackPending {
+			states := domain.DefaultViewStates()
+			query += " AND t.state IN (?" + strings.Repeat(", ?", len(states)-1) + ")"
+			for _, st := range states {
+				args = append(args, st)
+			}
+		}
 	default:
 		query += " AND t.state = ?"
 		args = append(args, opts.state)

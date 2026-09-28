@@ -48,7 +48,9 @@ entities:
   `cancelled`, `archived`, `deleted`. Common path is
   `idea -> draft -> open -> in_progress -> completed`; the validator otherwise
   accepts any valid state and does not enforce a strict transition graph.
-  `idea` tasks are hidden from default `find` and ignored as blockers.
+  Default `find` and `tree` show only `draft`, `open`, `in_progress` and
+  `blocked`; `idea` and terminal tasks need an explicit `--state` (or `all`).
+  `idea` tasks are ignored as blockers.
 - **Comments** — append-only notes on tasks, soft-deletable, included in
   `wrkq cat` output by default (`--exclude-comments` to omit).
 - **Attachments** — metadata in SQLite; bytes stored at

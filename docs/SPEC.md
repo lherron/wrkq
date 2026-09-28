@@ -197,7 +197,7 @@ Valid task states:
 
 | State | Meaning |
 | --- | --- |
-| `idea` | Pre-triage captured thought. Hidden from default `find`; ignored as a blocker. |
+| `idea` | Pre-triage captured thought. Hidden from default `find`/`tree` (their default is exactly `draft`, `open`, `in_progress`, `blocked`); ignored as a blocker. |
 | `draft` | Triage-ready but not yet committed to execution. |
 | `open` | Ready to be worked. Default state for `touch`. |
 | `in_progress` | Actively being worked. |

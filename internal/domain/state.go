@@ -43,3 +43,20 @@ func IsValidState(state string) bool {
 	_, err := ParseState(state)
 	return err == nil
 }
+
+// DefaultViewStates is the producer-owned actionable discovery set: the states
+// a view shows when the caller names none. tree/ls send it explicitly from the
+// CLI (their server refuses a request without `states`); find's producer
+// applies it when `state` is empty (T-06964). One list, so the views agree.
+//
+// Lance's ruling, 2026-09-07: exactly draft, open and in_progress. Narrower
+// than the full non-terminal set because these are working views.
+//
+// Amended by Lance, 2026-09-17: blocked joins the set. Blocked work is working
+// view work — it is waiting on something, not finished with something, and
+// hiding it by default made live members of an active campaign (T-08567,
+// T-08594) invisible in the view their owners read. idea stays out: it is the
+// only remaining non-terminal state that is genuinely not yet work.
+func DefaultViewStates() []string {
+	return []string{string(StateDraft), string(StateOpen), string(StateInProgress), string(StateBlocked)}
+}

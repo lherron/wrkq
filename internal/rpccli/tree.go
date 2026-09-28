@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -678,19 +679,11 @@ func formatTreeHumanTaskState(node *treeWireNode) string {
 }
 
 // defaultViewStates is the no-flags visibility set for `tree` and `ls`.
-// T-08216: this default is the CLI's, not the server's. The server has no
-// opinion about which states are interesting and refuses a request that omits
-// `states` outright, so this list is sent explicitly on every call.
-//
-// Lance's ruling, 2026-09-07: exactly draft, open and in_progress. Narrower
-// than the full non-terminal set because tree is a working view.
-//
-// Amended by Lance, 2026-09-17: blocked joins the set. Blocked work is working
-// view work — it is waiting on something, not finished with something, and
-// hiding it by default made live members of an active campaign (T-08567,
-// T-08594) invisible in the view their owners read. idea stays out: it is the
-// only remaining non-terminal state that is genuinely not yet work.
-var defaultViewStates = []string{"draft", "open", "in_progress", "blocked"}
+// T-08216: this default is sent by the CLI, not applied by the server. The
+// server refuses a request that omits `states` outright, so this list is sent
+// explicitly on every call. The set itself is domain.DefaultViewStates, shared
+// with find's empty-state default (T-06964).
+var defaultViewStates = domain.DefaultViewStates()
 
 // campaignMembersFlag opts a view into the campaign enrollment overlay: the
 // members that live in another container (usually another project) and are

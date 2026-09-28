@@ -875,6 +875,11 @@ export interface WrkqFindListViewParams {
   paths?: string[];
   type?: "t" | "p";
   slugGlob?: string;
+  /**
+   * One exact state, or "all". Omitted: the producer-owned actionable set
+   * (draft, open, in_progress, blocked), except that `ackPending` alone
+   * selects unacknowledged completed/cancelled tasks.
+   */
   state?: string;
   dueBefore?: string;
   dueAfter?: string;
