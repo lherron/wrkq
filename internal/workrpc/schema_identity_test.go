@@ -75,7 +75,8 @@ import (
 // T-09657: WrkqEnvelopeFailParams gains the optional, omitempty `detail` (why an
 // envelope failed, e.g. HRC's birth-refusal reason) carried onto the
 // envelope.failed event. Additive; cardinality unchanged.
-const pinnedProtocolSchemaHash = "sha256:6d8fb46844bfb6948ae9310cc3a0133fc9c0a942383bf43f3afd43058e002f17"
+// T-09634 adds the optional timeline before bound; old requests keep their shape.
+const pinnedProtocolSchemaHash = "sha256:a6d6774711d4eeee59b665ff665b423cb0a4c52c3bb2bb40453b34a44eb4a5ee"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

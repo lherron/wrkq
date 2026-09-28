@@ -119,6 +119,43 @@ func TestWrkpLogFollowSaysItIsWaitingOnAnEmptyWindow(t *testing.T) {
 	}
 }
 
+func TestWrkpLogBeforeMakesFollowFinite(t *testing.T) {
+	dbPath, taskID := migratedDBWithTask(t)
+	seedAgedTimeline(t, dbPath, taskID)
+	if out, err := runCampaignCLI(t, dbPath, "comment", "add", taskID, "-m", "second aged entry"); err != nil {
+		t.Fatalf("seed second comment: %v (%s)", err, out)
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE event_log SET timestamp = '2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	_ = database.Close()
+
+	cmd := NewWrkpRootCmd()
+	cmd.SetArgs([]string{"--db", dbPath, "--principal-ref", "agent:wrkp-test",
+		"log", "rpccli-test-proj", "--since", "2019-01-01T00:00:00Z",
+		"--before", "2021-01-01T00:00:00Z", "--follow", "--limit", "1", "--ndjson"})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	started := time.Now()
+	if err := cmd.ExecuteContext(ctx); err != nil {
+		t.Fatalf("wrkp log finite follow: %v (stderr=%q)", err, stderr.String())
+	}
+	if time.Since(started) >= 3*time.Second {
+		t.Fatal("finite follow waited for context deadline")
+	}
+	if got := stdout.String(); !strings.Contains(got, "an aged entry") || !strings.Contains(got, "second aged entry") {
+		t.Fatalf("finite follow did not drain bounded history: %q", got)
+	}
+}
+
 // lockedBuffer lets the test read the notice while the tail goroutine is still
 // writing to it.
 type lockedBuffer struct {

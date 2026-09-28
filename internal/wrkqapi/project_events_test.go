@@ -972,6 +972,141 @@ func TestTimelineTypeFilterSelectsMessages(t *testing.T) {
 	}
 }
 
+// A sparse foreign type must page only its matching rows even when the wrkq
+// source contains far more unrelated events than one raw scan page. The same
+// fixture checks an empty type and the exclusive server-time upper bound.
+func TestTimelineSparseTypeWindowPages(t *testing.T) {
+	if !timelineRequestUsesV2(ContainerTimelineViewParams{Before: "2026-01-04T00:00:00Z"}) {
+		t.Fatal("before-only request must select the bounded timeline reader")
+	}
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "sparsewindow", "project", nil)
+	for i := 0; i < monitorMaxPageLimit+17; i++ {
+		if _, err := api.db.Exec(`INSERT INTO event_log(resource_type,event_type,timestamp)
+			VALUES ('system','unrelated.raw','2026-01-01T00:00:00Z')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var facts []string
+	for _, stamp := range []string{
+		"2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z", "2026-01-04T00:00:00Z",
+	} {
+		fact := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "verify.upkeep"})
+		facts = append(facts, fact.UUID)
+		if _, err := api.db.Exec(`UPDATE project_events SET created_at = ? WHERE id = ?`, stamp, fact.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(order string) []string {
+		t.Helper()
+		cursor, got := "", []string{}
+		for page := 0; page < 6; page++ {
+			view, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+				Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+				Types: []string{"verify.upkeep"}, Since: "2026-01-02T00:00:00Z",
+				Before: "2026-01-04T00:00:00Z", Order: order, Limit: 1, Cursor: cursor,
+			})
+			if err != nil {
+				t.Fatalf("%s page %d: %v", order, page, err)
+			}
+			for _, entry := range view.Entries {
+				if entry.ProjectEvent == nil {
+					t.Fatalf("%s page %d included wrkq entry: %#v", order, page, entry)
+				}
+				got = append(got, entry.ProjectEvent.UUID)
+			}
+			if cursor = view.NextCursor; cursor == "" {
+				return got
+			}
+		}
+		t.Fatalf("%s sparse window did not drain", order)
+		return nil
+	}
+	for _, tc := range []struct {
+		order string
+		want  []string
+	}{
+		{"asc", []string{facts[0], facts[1]}},
+		{"desc", []string{facts[1], facts[0]}},
+	} {
+		got := read(tc.order)
+		if len(got) != len(tc.want) || got[0] != tc.want[0] || got[1] != tc.want[1] {
+			t.Fatalf("%s window = %v, want %v", tc.order, got, tc.want)
+		}
+	}
+	zero, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+		Types: []string{"schedule.fired"}, Since: "2026-01-02T00:00:00Z",
+		Before: "2026-01-04T00:00:00Z", Limit: 1,
+	})
+	if err != nil || len(zero.Entries) != 0 || zero.NextCursor != "" || zero.SnapshotEventID != 0 {
+		t.Fatalf("zero-match sparse window = %#v, %v", zero, err)
+	}
+	var plan string
+	if err := api.db.QueryRow(`EXPLAIN QUERY PLAN SELECT pe.id FROM project_events pe INDEXED BY project_events_type_time_idx
+		WHERE pe.id > ? AND pe.id <= ? AND pe.type = ? AND pe.created_at >= ? AND pe.created_at < ?
+		ORDER BY pe.id DESC LIMIT ?`, 0, 1000000, "verify.upkeep", "2026-01-02T00:00:00Z", "2026-01-04T00:00:00Z", 1000).Scan(new(int), new(int), new(int), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan, "project_events_type_time_idx") || !strings.Contains(plan, "type=?") {
+		t.Fatalf("sparse project query did not seek type-leading index: %s", plan)
+	}
+	for _, before := range []string{"invalid", "2026-01-02T00:00:00Z"} {
+		_, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+			Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+			Since: "2026-01-02T00:00:00Z", Before: before,
+		})
+		if err == nil {
+			t.Fatalf("invalid or empty window accepted: before=%q", before)
+		}
+	}
+}
+
+func TestTimelineMixedTypeCursorWindowBinding(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "mixedwindow", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "task", "open", "")
+	state := "completed"
+	if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{Task: task.ID, Patch: TaskPatch{State: &state}}); err != nil {
+		t.Fatal(err)
+	}
+	fact := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "hook.settled"})
+	first, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+		Types: []string{"task.state", "hook.*"}, Since: "2160h", Limit: 1,
+	})
+	if err != nil || len(first.Entries) != 1 || first.NextCursor == "" {
+		t.Fatalf("mixed first page = %#v, %v", first, err)
+	}
+	second, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
+		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+		Types: []string{"task.state", "hook.*"}, Since: "2160h", Limit: 1,
+		Cursor: first.NextCursor,
+	})
+	if err != nil || len(second.Entries) != 1 {
+		t.Fatalf("mixed second page = %#v, %v", second, err)
+	}
+	if first.Entries[0].Type != "task.state" || second.Entries[0].ProjectEvent == nil ||
+		second.Entries[0].ProjectEvent.Type != "hook.settled" || second.Entries[0].ProjectEvent.UUID != fact.UUID {
+		t.Fatalf("mixed normalized/project types were not paged exactly: %#v %#v", first.Entries, second.Entries)
+	}
+	for _, mutation := range []func(*ContainerTimelineViewParams){
+		func(p *ContainerTimelineViewParams) { p.Types = []string{"hook.*"} },
+		func(p *ContainerTimelineViewParams) { p.Before = "2026-01-01T00:00:00Z" },
+		func(p *ContainerTimelineViewParams) { p.Task = task.ID },
+	} {
+		params := ContainerTimelineViewParams{
+			Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+			Types: []string{"task.state", "hook.*"}, Since: "2160h", Limit: 1,
+			Cursor: first.NextCursor,
+		}
+		mutation(&params)
+		if _, err := api.ContainerTimelineView(context.Background(), params); err == nil {
+			t.Fatalf("changed cursor window/filter was accepted: %#v", params)
+		}
+	}
+}
+
 // TestTimelineExcludesUnstampedAdHocRooms pins the fail-closed legacy rule: an
 // ad-hoc room has no ownership affiliation, so an unstamped message remains
 // outside every project timeline rather than being guessed from current slugs.

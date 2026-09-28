@@ -13,6 +13,7 @@ type ContainerTimelineViewParams struct {
 	Types       []string `json:"types,omitempty"`
 	Task        string   `json:"task,omitempty"`
 	Since       string   `json:"since,omitempty"`
+	Before      string   `json:"before,omitempty"`
 	EntriesOnly bool     `json:"entriesOnly,omitempty"`
 	Tail        bool     `json:"tail,omitempty"`
 	// Order is the delivery direction: "asc" (default, oldest first) or "desc"
@@ -194,4 +195,11 @@ type timelineCursor struct {
 	// drained; the ascending After* fields are unused.
 	BeforeEventID        int64 `json:"beforeEventId,omitempty"`
 	BeforeProjectEventID int64 `json:"beforeProjectEventId,omitempty"`
+	// Selection fields are present only on new filtered or bounded cursors.
+	QueryBound      bool     `json:"queryBound,omitempty"`
+	QueryTypes      []string `json:"queryTypes,omitempty"`
+	QueryTask       string   `json:"queryTask,omitempty"`
+	QuerySinceInput string   `json:"querySinceInput,omitempty"`
+	QuerySinceFloor string   `json:"querySinceFloor,omitempty"`
+	QueryBefore     string   `json:"queryBefore,omitempty"`
 }

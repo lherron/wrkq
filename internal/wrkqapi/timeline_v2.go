@@ -59,7 +59,7 @@ type timelineRawProjectEvent struct {
 }
 
 func timelineRequestUsesV2(p ContainerTimelineViewParams) bool {
-	if p.Scope != "" || p.Types != nil || p.Task != "" || p.Since != "" || p.EntriesOnly || p.Tail || p.Order != "" {
+	if p.Scope != "" || p.Types != nil || p.Task != "" || p.Since != "" || p.Before != "" || p.EntriesOnly || p.Tail || p.Order != "" {
 		return true
 	}
 	version := timelineCursorVersion(p.Cursor)
@@ -116,14 +116,25 @@ func (a *API) containerTimelineViewV2(
 		}
 	}
 
-	since, err := parseTimelineSince(p.Since)
-	if err != nil {
-		return nil, err
-	}
 	for _, filter := range p.Types {
 		if strings.TrimSpace(filter) == "" || (strings.Contains(filter, "*") && !strings.HasSuffix(filter, ".*")) {
 			return nil, NewValidationError("type filters must be exact or trailing globs", map[string]any{"field": "types"})
 		}
+	}
+	filters := timelineCanonicalFilters(p.Types)
+	eventTypes := timelineStoredEventTypes(filters)
+	eventEligible := len(filters) == 0 || len(eventTypes) > 0
+	projectEligible := timelineProjectSourceEligible(filters)
+	var since *time.Time
+	var before *time.Time
+	var err error
+	if p.Before != "" {
+		value, parseErr := time.Parse(time.RFC3339Nano, p.Before)
+		if parseErr != nil {
+			return nil, NewValidationError("before must be RFC3339", map[string]any{"field": "before"})
+		}
+		value = value.UTC()
+		before = &value
 	}
 
 	requested, err := parseTimelineOrder(p.Order)
@@ -157,6 +168,38 @@ func (a *API) containerTimelineViewV2(
 			cur.SnapshotProjectEventID = 0
 			cur.AfterProjectEventID = 0
 		}
+		if cur.QueryBound {
+			if !timelineSameFilters(filters, cur.QueryTypes) || p.Task != cur.QueryTask ||
+				p.Since != cur.QuerySinceInput || timelineCanonicalBefore(before) != cur.QueryBefore {
+				return nil, NewValidationError("timeline cursor does not match the request", map[string]any{"field": "cursor"})
+			}
+			if cur.QuerySinceFloor != "" {
+				value, parseErr := time.Parse(time.RFC3339Nano, cur.QuerySinceFloor)
+				if parseErr != nil {
+					return nil, NewValidationError("invalid timeline cursor", map[string]any{"field": "cursor"})
+				}
+				since = &value
+			}
+		}
+	}
+	if since == nil && (!cur.QueryBound || p.Since == "") {
+		since, err = parseTimelineSince(p.Since)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if before != nil && since != nil && !before.After(*since) {
+		return nil, NewValidationError("before must be after since", map[string]any{"field": "before"})
+	}
+	if p.Cursor == "" && (len(filters) > 0 || p.Task != "" || p.Since != "" || before != nil) {
+		cur.QueryBound = true
+		cur.QueryTypes = filters
+		cur.QueryTask = p.Task
+		cur.QuerySinceInput = p.Since
+		if since != nil {
+			cur.QuerySinceFloor = since.Format(time.RFC3339Nano)
+		}
+		cur.QueryBefore = timelineCanonicalBefore(before)
 	}
 	// A tail follows APPENDS, which only ever arrive at the newest end, so it is
 	// ascending by construction.
@@ -166,17 +209,34 @@ func (a *API) containerTimelineViewV2(
 		})
 	}
 
-	currentEventID, currentProjectEventID, err := timelineSourceMaxima(ctx, tx)
+	currentEventID, currentProjectEventID, err := timelineSourceMaxima(ctx, tx, eventEligible, projectEligible)
 	if err != nil {
 		return nil, err
 	}
 	if p.Cursor == "" {
 		cur.SnapshotEventID = currentEventID
 		cur.SnapshotProjectEventID = currentProjectEventID
+		if before != nil {
+			ceiling := timelineDBCeil(*before)
+			if eventEligible {
+				cur.SnapshotEventID, err = timelineSeekCeiling(ctx, tx,
+					"SELECT (SELECT id FROM event_log INDEXED BY event_log_time_id_idx WHERE timestamp < ? ORDER BY timestamp DESC, id DESC LIMIT 1)", ceiling)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if projectEligible {
+				cur.SnapshotProjectEventID, err = timelineSeekCeiling(ctx, tx,
+					"SELECT (SELECT id FROM project_events INDEXED BY project_events_time_id_idx WHERE created_at < ? ORDER BY created_at DESC, id DESC LIMIT 1)", ceiling)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		// The descending reader starts AT the fence and walks down, so its
 		// exclusive upper bound opens one past the newest row.
-		cur.BeforeEventID = currentEventID + 1
-		cur.BeforeProjectEventID = currentProjectEventID + 1
+		cur.BeforeEventID = cur.SnapshotEventID + 1
+		cur.BeforeProjectEventID = cur.SnapshotProjectEventID + 1
 		if p.Tail && since == nil {
 			cur.AfterEventID = currentEventID
 			cur.AfterProjectEventID = currentProjectEventID
@@ -198,20 +258,22 @@ func (a *API) containerTimelineViewV2(
 		// NOT the caller-supplied occurred_at -- a backdated `wrkp post
 		// --occurred-at` never moves a project event's position in the scan.
 		// Only the opening page seeks; later pages carry an authoritative cursor.
-		if !desc && since != nil {
+		if !desc && since != nil && len(filters) == 0 {
 			floor := since.UTC().Format(time.RFC3339)
-			eventFloor, ferr := timelineSeekFloor(ctx, tx,
-				"SELECT MIN(id) FROM event_log WHERE timestamp >= ?", floor, currentEventID)
-			if ferr != nil {
-				return nil, ferr
+			if eventEligible {
+				eventFloor, ferr := timelineSeekFloor(ctx, tx,
+					"SELECT (SELECT id FROM event_log INDEXED BY event_log_time_id_idx WHERE timestamp >= ? ORDER BY timestamp, id LIMIT 1)", floor, currentEventID)
+				if ferr != nil {
+					return nil, ferr
+				}
+				if eventFloor > cur.AfterEventID {
+					cur.AfterEventID = eventFloor
+				}
 			}
 			projectFloor, ferr := timelineSeekFloor(ctx, tx,
-				"SELECT MIN(id) FROM project_events WHERE created_at >= ?", floor, currentProjectEventID)
+				"SELECT (SELECT id FROM project_events INDEXED BY project_events_time_id_idx WHERE created_at >= ? ORDER BY created_at, id LIMIT 1)", floor, currentProjectEventID)
 			if ferr != nil {
 				return nil, ferr
-			}
-			if eventFloor > cur.AfterEventID {
-				cur.AfterEventID = eventFloor
 			}
 			if projectFloor > cur.AfterProjectEventID {
 				cur.AfterProjectEventID = projectFloor
@@ -228,13 +290,20 @@ func (a *API) containerTimelineViewV2(
 
 	eventLow, eventHigh := timelineScanWindow(desc, cur.AfterEventID, cur.SnapshotEventID, cur.BeforeEventID)
 	projectLow, projectHigh := timelineScanWindow(desc, cur.AfterProjectEventID, cur.SnapshotProjectEventID, cur.BeforeProjectEventID)
-	eventRows, eventTruncated, err := loadTimelineRawEvents(ctx, tx, eventLow, eventHigh, desc)
-	if err != nil {
-		return nil, err
+	var eventRows []timelineRawEvent
+	var projectRows []timelineRawProjectEvent
+	var eventTruncated, projectTruncated bool
+	if eventEligible {
+		eventRows, eventTruncated, err = loadTimelineRawEvents(ctx, tx, eventLow, eventHigh, desc, eventTypes, since, before)
+		if err != nil {
+			return nil, err
+		}
 	}
-	projectRows, projectTruncated, err := loadTimelineRawProjectEvents(ctx, tx, projectLow, projectHigh, desc)
-	if err != nil {
-		return nil, err
+	if projectEligible {
+		projectRows, projectTruncated, err = loadTimelineRawProjectEvents(ctx, tx, projectLow, projectHigh, desc, filters, since, before)
+		if err != nil {
+			return nil, err
+		}
 	}
 	horizon := timelineMergeHorizon(desc,
 		timelineScanBound(eventTruncated, len(eventRows) > 0, lastEventTimestamp(eventRows)),
@@ -284,6 +353,15 @@ func (a *API) containerTimelineViewV2(
 	}
 
 	hasMore := cur.AfterEventID < cur.SnapshotEventID || cur.AfterProjectEventID < cur.SnapshotProjectEventID
+	if !desc {
+		if eventDrained && eventIndex == len(eventRows) {
+			cur.AfterEventID = cur.SnapshotEventID
+		}
+		if projectDrained && projectIndex == len(projectRows) {
+			cur.AfterProjectEventID = cur.SnapshotProjectEventID
+		}
+		hasMore = cur.AfterEventID < cur.SnapshotEventID || cur.AfterProjectEventID < cur.SnapshotProjectEventID
+	}
 	if desc {
 		// The descending reader has no cheap fence to compare against -- it
 		// walks toward id 0 -- so a source reports itself drained when its scan
@@ -301,7 +379,8 @@ func (a *API) containerTimelineViewV2(
 		hasMore = cur.BeforeEventID > 0 || cur.BeforeProjectEventID > 0
 	}
 	nextCursor := ""
-	if p.Tail || hasMore {
+	boundedTailClosed := before != nil && !time.Now().UTC().Before(*before) && !hasMore
+	if (p.Tail && !boundedTailClosed) || hasMore {
 		nextCursor, err = encodeTimelineCursor(cur)
 		if err != nil {
 			return nil, NewInternalError(err)
@@ -353,13 +432,28 @@ func timelineSeekFloor(ctx context.Context, tx *sql.Tx, query, floor string, max
 	return first.Int64 - 1, nil
 }
 
-func timelineSourceMaxima(ctx context.Context, tx *sql.Tx) (int64, int64, error) {
-	var eventID, projectEventID int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM event_log`).Scan(&eventID); err != nil {
-		return 0, 0, NewInternalError(err)
+func timelineSeekCeiling(ctx context.Context, tx *sql.Tx, query, ceiling string) (int64, error) {
+	var last sql.NullInt64
+	if err := tx.QueryRowContext(ctx, query, ceiling).Scan(&last); err != nil {
+		return 0, NewInternalError(err)
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM project_events`).Scan(&projectEventID); err != nil {
-		return 0, 0, NewInternalError(err)
+	if !last.Valid {
+		return 0, nil
+	}
+	return last.Int64, nil
+}
+
+func timelineSourceMaxima(ctx context.Context, tx *sql.Tx, eventEligible, projectEligible bool) (int64, int64, error) {
+	var eventID, projectEventID int64
+	if eventEligible {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM event_log`).Scan(&eventID); err != nil {
+			return 0, 0, NewInternalError(err)
+		}
+	}
+	if projectEligible {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM project_events`).Scan(&projectEventID); err != nil {
+			return 0, 0, NewInternalError(err)
+		}
 	}
 	return eventID, projectEventID, nil
 }
@@ -415,7 +509,7 @@ func hydrateTimelineAddressees(ctx context.Context, tx *sql.Tx, entries []WrkqTi
 	return nil
 }
 
-func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool) ([]timelineRawEvent, bool, error) {
+func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool, types []string, since, before *time.Time) ([]timelineRawEvent, bool, error) {
 	// The envelope joins are guarded on event_type, so a non-envelope row costs
 	// one NULL probe. The `env` join carries the fan-out collapse in its own ON
 	// clause: a say to N addressees writes N rows sharing one group_id whose
@@ -423,7 +517,8 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 	// id = group_id. The other N-1 join to nothing and are dropped by the same
 	// delivery filter that drops an unsupported event type. COALESCE guards a
 	// null group_id so an unstamped row reports itself rather than vanishing.
-	rows, err := tx.QueryContext(ctx, timelineOrdered(`
+	predicate, extra := timelineSourcePredicate("e.event_type", "e.timestamp", types, since, before)
+	query := timelineOrdered(`
 		SELECT e.id, e.timestamp, COALESCE(e.principal_ref, ''), COALESCE(e.scope_ref, ''), COALESCE(e.resource_uuid, ''),
 		       e.event_type, COALESCE(e.payload, ''),
 		       COALESCE(t.uuid, comment_task.uuid, env_task.uuid, ''),
@@ -452,7 +547,14 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 		  LEFT JOIN tasks env_task ON env_task.uuid = COALESCE(env.task_uuid, rm.task_uuid)
 		  LEFT JOIN v_task_paths env_tp ON env_tp.uuid = env_task.uuid
 		 WHERE e.id > ? AND e.id <= ?
-		 ORDER BY e.id %s LIMIT ?`, desc), low, high, monitorMaxPageLimit)
+		 ORDER BY e.id %s LIMIT ?`, desc)
+	if len(types) > 0 {
+		query = strings.Replace(query, "FROM event_log e", "FROM event_log e INDEXED BY event_log_type_time_idx", 1)
+	}
+	query = strings.Replace(query, " ORDER BY e.id", predicate+" ORDER BY e.id", 1)
+	args := append([]any{low, high}, extra...)
+	args = append(args, monitorMaxPageLimit)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, false, NewInternalError(err)
 	}
@@ -480,8 +582,16 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 	return result, len(result) == monitorMaxPageLimit, nil
 }
 
-func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool) ([]timelineRawProjectEvent, bool, error) {
-	rows, err := tx.QueryContext(ctx, timelineOrdered(timelineProjectEventsRawQuery, desc), low, high, monitorMaxPageLimit)
+func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool, filters []string, since, before *time.Time) ([]timelineRawProjectEvent, bool, error) {
+	predicate, extra := timelineProjectPredicate(filters, since, before)
+	query := timelineOrdered(timelineProjectEventsRawQuery, desc)
+	if len(filters) > 0 {
+		query = strings.Replace(query, "FROM project_events pe", "FROM project_events pe INDEXED BY project_events_type_time_idx", 1)
+	}
+	query = strings.Replace(query, " ORDER BY pe.id", predicate+" ORDER BY pe.id", 1)
+	args := append([]any{low, high}, extra...)
+	args = append(args, monitorMaxPageLimit)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, false, NewInternalError(err)
 	}
@@ -589,6 +699,151 @@ func timelineOrdered(query string, desc bool) string {
 		return fmt.Sprintf(query, "DESC")
 	}
 	return fmt.Sprintf(query, "ASC")
+}
+
+// The public vocabulary is smaller than the stored event vocabulary. Keep
+// task.updated for both state and edited: its payload decides the public type.
+var timelinePublicStoredTypes = map[string][]string{
+	"comment": {"comment.created"}, "message": {"envelope.created"},
+	"task.outcome": {"task.outcome_set"}, "task.created": {"task.created"},
+	"task.edited": {"task.updated"}, "task.moved": {"task.moved"},
+	"task.state":      {"task.updated", "task.archived", "task.deleted", "task.restored", "task.purged"},
+	"container.state": {"container.campaign_state_changed"},
+}
+
+func timelineCanonicalFilters(filters []string) []string {
+	if len(filters) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	result := []string{}
+	for _, filter := range filters {
+		filter = strings.TrimSpace(filter)
+		if !seen[filter] {
+			result = append(result, filter)
+			seen[filter] = true
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func timelineSameFilters(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func timelineStoredEventTypes(filters []string) []string {
+	if len(filters) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for public, stored := range timelinePublicStoredTypes {
+		if !timelineTypeMatches(filters, public) {
+			continue
+		}
+		for _, value := range stored {
+			seen[value] = true
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func timelineProjectSourceEligible(filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	for _, filter := range filters {
+		candidate := filter
+		if strings.HasSuffix(filter, ".*") {
+			candidate = strings.TrimSuffix(filter, "*") + "x"
+		}
+		if !projectEventTypePattern.MatchString(candidate) {
+			continue
+		}
+		namespace := strings.SplitN(candidate, ".", 2)[0]
+		if _, reserved := reservedProjectEventNamespaces[namespace]; !reserved {
+			return true
+		}
+	}
+	return false
+}
+
+func timelineCanonicalBefore(before *time.Time) string {
+	if before == nil {
+		return ""
+	}
+	return before.UTC().Format(time.RFC3339Nano)
+}
+
+// Stored server timestamps have second precision. Ceiling preserves inclusive
+// since and exclusive before when a caller supplies fractional seconds.
+func timelineDBCeil(value time.Time) string {
+	value = value.UTC()
+	if value.Nanosecond() != 0 {
+		value = value.Truncate(time.Second).Add(time.Second)
+	}
+	return value.Format(time.RFC3339)
+}
+
+func timelineSourcePredicate(typeColumn, timeColumn string, types []string, since, before *time.Time) (string, []any) {
+	parts := []string{}
+	args := []any{}
+	if len(types) > 0 {
+		if len(types) == 1 {
+			parts = append(parts, "AND "+typeColumn+" = ?")
+		} else {
+			parts = append(parts, "AND "+typeColumn+" IN ("+strings.TrimSuffix(strings.Repeat("?,", len(types)), ",")+")")
+		}
+		for _, value := range types {
+			args = append(args, value)
+		}
+	}
+	if since != nil {
+		parts = append(parts, "AND "+timeColumn+" >= ?")
+		args = append(args, timelineDBCeil(*since))
+	}
+	if before != nil {
+		parts = append(parts, "AND "+timeColumn+" < ?")
+		args = append(args, timelineDBCeil(*before))
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return " " + strings.Join(parts, " "), args
+}
+
+func timelineProjectPredicate(filters []string, since, before *time.Time) (string, []any) {
+	if len(filters) == 0 {
+		return timelineSourcePredicate("", "pe.created_at", nil, since, before)
+	}
+	parts := make([]string, 0, len(filters))
+	args := make([]any, 0, len(filters)+2)
+	for _, filter := range filters {
+		if strings.HasSuffix(filter, ".*") {
+			prefix := strings.TrimSuffix(filter, "*")
+			parts = append(parts, "(pe.type >= ? AND pe.type < ?)")
+			args = append(args, prefix, strings.TrimSuffix(prefix, ".")+"/")
+		} else {
+			parts = append(parts, "pe.type = ?")
+			args = append(args, filter)
+		}
+	}
+	clause := " AND (" + strings.Join(parts, " OR ") + ")"
+	timeClause, timeArgs := timelineSourcePredicate("", "pe.created_at", nil, since, before)
+	return clause + timeClause, append(args, timeArgs...)
 }
 
 // timelineScanWindow maps a cursor position to the source's id window. The two

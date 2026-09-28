@@ -1327,6 +1327,8 @@ export interface WrkqContainerTimelineViewParams {
   types?: string[];
   task?: string;
   since?: string;
+  /** Exclusive upper bound on the server timestamp (RFC3339). */
+  before?: string;
   entriesOnly?: boolean;
   tail?: boolean;
   /**

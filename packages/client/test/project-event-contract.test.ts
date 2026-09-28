@@ -57,6 +57,7 @@ describe("wrkq.projectEvent facade", () => {
       types: ["hrc.*"],
       task: "T-00001",
       since: "4h",
+      before: "2026-09-04T13:00:00Z",
       entriesOnly: true,
       tail: true,
     };

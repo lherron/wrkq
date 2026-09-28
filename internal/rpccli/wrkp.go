@@ -262,12 +262,20 @@ func newWrkpCursorCmd() *cobra.Command {
 }
 
 func newWrkpLogCmd() *cobra.Command {
-	var after, since, task, typeList string
+	var after, since, before, task, typeList string
 	var limit int
 	var follow, ndjson, porcelain, pretty bool
 	cmd := &cobra.Command{
 		Use: "log [project]", Short: "Read the merged project timeline", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var beforeTime time.Time
+			if before != "" {
+				var err error
+				beforeTime, err = time.Parse(time.RFC3339Nano, before)
+				if err != nil {
+					return fmt.Errorf("invalid --before value: expected RFC3339 timestamp: %w", err)
+				}
+			}
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
@@ -300,6 +308,7 @@ func newWrkpLogCmd() *cobra.Command {
 				deliveredLimit = wrkpDefaultLimit
 			}
 			for {
+				readStarted := time.Now()
 				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow || forward}
 				sentCursor := cursor
 				if cursor != "" {
@@ -315,6 +324,9 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				if since != "" {
 					params["since"] = since
+				}
+				if before != "" {
+					params["before"] = before
 				}
 				if task != "" {
 					params["task"] = sc.selector(task, false)
@@ -381,7 +393,18 @@ func newWrkpLogCmd() *cobra.Command {
 					followIdleNoticed = true
 				}
 				previousCursor = cursor
+				// Once the window closes, drain every held page before stopping.
+				// The bounded server tail drops its cursor only after exhaustion.
+				if follow && !beforeTime.IsZero() && !readStarted.Before(beforeTime) {
+					if cursor == "" {
+						return nil
+					}
+					continue
+				}
 				if forward {
+					if cursor == "" {
+						return renderWrkpEntries(cmd, jsonEntries, mode, styled)
+					}
 					// A tail cursor always comes back, so the read is caught up
 					// when a page leaves it where it was; a page of only
 					// excluded rows still moves it and the read continues.
@@ -415,13 +438,14 @@ func newWrkpLogCmd() *cobra.Command {
 				select {
 				case <-cmd.Context().Done():
 					return nil
-				case <-time.After(monitorPollInterval):
+				case <-time.After(wrkpFollowDelay(beforeTime)):
 				}
 			}
 		},
 	}
 	cmd.Flags().StringVar(&after, "after", "", "Opaque cursor: a previous page's, or a forward cursor from `wrkp cursor`")
 	cmd.Flags().StringVar(&since, "since", "", "RFC3339 time or duration")
+	cmd.Flags().StringVar(&before, "before", "", "Exclusive RFC3339 server-time upper bound")
 	cmd.Flags().StringVar(&typeList, "type", "", "Comma-separated exact or trailing-glob types")
 	cmd.Flags().StringVar(&task, "task", "", "Task selector")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum delivered entries")
@@ -430,6 +454,16 @@ func newWrkpLogCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Write the next cursor to stderr")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled timeline even when not a TTY")
 	return cmd
+}
+
+func wrkpFollowDelay(before time.Time) time.Duration {
+	if !before.IsZero() && time.Until(before) < monitorPollInterval {
+		if remaining := time.Until(before); remaining > 0 {
+			return remaining
+		}
+		return 0
+	}
+	return monitorPollInterval
 }
 
 // wrkpDefaultLimit matches the server's own default page size, and

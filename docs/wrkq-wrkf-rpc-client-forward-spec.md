@@ -1274,6 +1274,7 @@ client.wrkq.container.timelineView({
   types?: string[],
   task?: string,
   since?: string,
+  before?: string,
   entriesOnly?: boolean,
   tail?: boolean
 })
@@ -1294,13 +1295,15 @@ reclassify entries using current membership. Task-state history is restricted
 to state-bearing `task.updated`, `task.archived`, `task.deleted`,
 `task.restored`, and `task.purged`.
 
-The additive v2 path is selected by any new parameter or a v2 cursor. It scans
-both `event_log` and `project_events` in raw id order inside independent fences,
-applies affiliation and display filters after scanning, and advances each
-cursor position through excluded rows. The delivered limit is separate from
-the per-source raw cap. Cross-source delivery is a head-pop merge by server
-time, source rank (`event_log` first), then id; per-source id order is always
-preserved. `tail: true` re-fences at current maxima and always returns a cursor.
+The additive timeline path is selected by any new parameter or an additive
+cursor. Exact and trailing-glob `types` select candidates in SQL before
+hydration; ineligible sources are skipped. `since` is an inclusive server-time
+floor and `before` is an exclusive RFC3339 server-time ceiling, giving adjacent
+`[since,before)` windows. A duration `since` resolves against one request time
+and its resolved floor remains stable on cursor pages. The delivered limit is
+separate from the per-source scan cap. Cross-source delivery merges by server
+time, source rank (`event_log` first), then id. `tail: true` re-fences at current
+maxima and returns a cursor until an optional `before` window closes.
 The no-new-param v1 path remains unchanged apart from additive `from` on new
 `task.state` entries.
 

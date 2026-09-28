@@ -41,16 +41,26 @@ predicate: >
   affiliation inputs. Null legacy stamps fail closed; project rename, deletion,
   restoration, and slug reuse neither rewrite a stamp nor re-home its history.
 
-  The additive v2 path scans each source in ascending raw-id order inside its
-  fence with a server-side raw-row cap, applies affiliation and display filters
-  after scanning, and advances each source position to its last raw row consumed
-  whether or not that row was delivered. The delivered-entry limit is separate
-  from the raw scan cap, so an empty result may advance the cursor. Fixed pages
-  retain their source fences; tail pages re-fence at current source maxima and
-  always return a cursor. Per-source id order is preserved and cross-source
-  ordering is the declared head merge by server time, source rank, then id. The
-  legacy v1 path remains unchanged for requests carrying no additive parameter
-  and no v2 cursor.
+  The additive v2 path scans each eligible source in raw-id order inside its
+  fence with a server-side candidate-row cap. For type-filtered reads, SQL
+  selects conservative stored-type candidates before hydration or the cap;
+  sources with no possible public-type match are skipped. Exact and trailing
+  glob filters must retain all candidates for payload-dependent normalization,
+  and final public-type, affiliation, and task filtering still happens after
+  scanning. Inclusive `since` and exclusive `before` compare server-assigned
+  timestamps and constrain both SQL source scans before the cap; adjacent
+  [since,before) spans have neither gaps nor overlap. A duration `since` is
+  resolved once on the opening request. An upper bound makes a tail finite.
+  Each source position advances to its last candidate row consumed whether or
+  not delivered. The delivered-entry limit is separate from the candidate cap,
+  so an empty result may advance the cursor. A new filtered or bounded cursor
+  binds its canonical types, task, resolved since, and before; a continuation
+  with a conflicting selection is refused. Existing unfiltered cursors retain
+  their wire shape and behavior. Fixed pages retain source fences; unbounded
+  tail pages re-fence at current source maxima and return a cursor. Per-source
+  id order and cross-source server-time/source-rank/id ordering are preserved.
+  The legacy v1 path remains unchanged for requests carrying no additive
+  parameter and no v2 cursor.
 authority:
   repo: wrkq
   surface: project_events schema, wrkq.projectEvent.*, wrkq.container.timelineView v2, wrkp, and @wrkq/client
@@ -102,7 +112,7 @@ reopen_when:
   - a project-event write can succeed without exact caller attribution
   - project_uuid becomes an affiliation read key or any project-event column becomes a deletion owner
   - a subtree read is admitted for a directory or campaign-adorned container
-  - the v2 cursor advances only over delivered rows or filtering moves ahead of raw-row position advancement
+  - a filtered v2 cursor advances only over delivered rows, loses its query binding, or SQL candidate selection excludes a possible public type
   - a fixed page loses its source fences, tail stops re-fencing, or tail can return without a cursor
   - the legacy no-new-param timeline path changes behavior
 supersedes: []

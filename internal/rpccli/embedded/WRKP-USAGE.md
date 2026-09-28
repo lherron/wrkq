@@ -10,7 +10,7 @@ wrkp git commit
 wrkp git push <remote> <url>   # pre-push ref lines on stdin
 wrkp just [-- just-args...]    # via the `just` shim; see below
 wrkp cursor [project]          # forward cursor at the timeline head
-wrkp log [project] [--after CURSOR] [--since 4h|TS] [--type a,b,session.*]
+wrkp log [project] [--after CURSOR] [--since 4h|TS] [--before TS] [--type a,b,session.*]
          [--task T-x] [--limit N] [--follow] [--json|--ndjson] [--porcelain]
 wrkp show <uuid>
 wrkp types [project]
@@ -47,7 +47,13 @@ summary, then `key=value` pairs in the producer's order.
 
 `wrkp log --follow` starts at now unless `--since` is supplied. It polls the
 bounded timeline reader and owns its cursor locally; posting never wakes an
-agent or drives a turn.
+agent or drives a turn. `--before` is an exclusive RFC3339 upper bound on the
+server timestamp; `--since` is inclusive, so adjacent `[since,before)` spans
+partition history without overlap or gaps. For example, read
+`--since 2026-09-01T00:00:00Z --before 2026-09-02T00:00:00Z`, then use that
+first `--before` value as the next `--since`. A duration `--since` is resolved
+once when the read starts. With `--before`, `--follow` stops after its upper
+bound passes and the final page is read.
 
 The merged timeline also includes ad-hoc room messages when an endpoint was in
 this project at send time. Those entries are `message` records with
