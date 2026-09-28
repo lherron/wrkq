@@ -7,6 +7,16 @@ Use these recipes directly when the inputs are known. Consult `wrkq <command> --
 
 Commands use the current project; `--project <project>` selects another. Use the project's scope for its work. `wrkq projects --json` lists projects.
 
+Paths are relative to the current project. A leading `/` makes a path root-absolute, which is how you reach another project's containers or create a new project:
+
+```bash
+wrkq mkdir /newproj --kind project
+wrkq mv T-00001 /otherproj/inbox/
+wrkq ls /
+```
+
+IDs (`T-00001`, `P-00001`) are never scoped and work from anywhere.
+
 Mutation identity normally comes from the runtime. When supplying it explicitly, use `--as agent:<id>` or `WRKQ_PRINCIPAL_REF=agent:<id>`. Project/session scope is separate from caller identity; legacy `WRKQ_ACTOR` is not authority.
 
 Use `--json` for structured results, `--ndjson` for streams. `wrkq cat ID --json --one` returns one object; without `--one`, JSON `cat` returns an array. `--output raw` reads task Markdown. Follow returned pagination cursors when more results are needed.

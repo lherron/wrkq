@@ -4,9 +4,9 @@
 //
 // Project-root scoping is CLI caller semantics, not a server read-model concern:
 // the RPC methods receive already-scoped selectors/paths and never read
-// WRKQ_PROJECT_ROOT / ASP_PROJECT / --project. Keeping the transform here (rather
+// WRKQ_PROJECT_ROOT / ASP_PROJECT / --project. Keeping the transform here
 // rather than duplicated across commands keeps one implementation exercised by
-// one test suite.
+// one test suite. A path with a leading "/" is root-absolute and never scoped.
 package projectroot
 
 import (
@@ -112,7 +112,11 @@ func applyToken(root, token string) string {
 	}
 
 	normalized := strings.Trim(token, "/")
-	if normalized == "" {
+	// A leading "/" makes the path root-absolute: it names a top-level
+	// container (or something under one) and is never re-rooted under the
+	// caller's project. This is the only CLI way to address another project
+	// or create a new one while a project root is pinned (T-06982).
+	if normalized == "" || strings.HasPrefix(token, "/") {
 		return normalized
 	}
 	if normalized == root || strings.HasPrefix(normalized, root+"/") {

@@ -26,6 +26,9 @@ func TestTransform(t *testing.T) {
 			{"already-rooted", "demo/inbox", false, "demo/inbox"},
 			{"already-rooted-exact", "demo", false, "demo"},
 			{"trim-slashes", "/demo/inbox/", false, "demo/inbox"},
+			{"root-absolute", "/arris", false, "arris"},
+			{"root-absolute-nested", "/other/inbox/", false, "other/inbox"},
+			{"root-absolute-bare-slash", "/", true, ""},
 			{"nested-relative", "inbox/sub", false, "demo/inbox/sub"},
 		}
 		for _, tc := range cases {
@@ -62,6 +65,9 @@ func TestTransform(t *testing.T) {
 			{"typed-empty-no-default", "t:", false, "t:"},
 			{"path", "inbox/task", false, "demo/inbox/task"},
 			{"already-rooted", "demo/inbox/task", false, "demo/inbox/task"},
+			{"root-absolute", "/other/inbox/task", false, "other/inbox/task"},
+			{"typed-root-absolute", "t:/other/inbox/task", false, "t:other/inbox/task"},
+			{"typed-container-root-absolute", "c:/other", false, "c:other"},
 		}
 		for _, tc := range cases {
 			tc := tc
