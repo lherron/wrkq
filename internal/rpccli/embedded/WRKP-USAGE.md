@@ -62,7 +62,10 @@ project UUID stamp, so renaming a project or reusing an old slug cannot move
 history; messages written before stamps existed remain excluded.
 
 `wrkp git commit` and `wrkp git push` are best-effort Git-hook producers. They
-resolve the current checkout through the registered project roots, attribute
+resolve the current checkout through the registered project roots; a linked
+worktree (`git worktree add`) that is not itself registered resolves to the
+registered main checkout that owns it, via its Git common directory, while
+commit, branch, and push-ref details still come from the worktree. They attribute
 facts to the current principal when there is one, and always exit zero so
 observability can never block a commit or push. Diagnostics are one-line
 `wrkp git:` messages on stderr.

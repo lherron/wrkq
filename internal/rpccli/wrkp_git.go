@@ -200,11 +200,12 @@ func prepareWrkpGit(cmd *cobra.Command, deps wrkpGitDependencies) (string, Trans
 	if err != nil {
 		return "", nil, nil, wrkpGitProject{}, "", "", err
 	}
+	owner := wrkpGitOwningCheckout(cmd.Context(), deps, repo)
 	tr, closeFn, err := deps.open(cmd)
 	if err != nil {
 		return "", nil, nil, wrkpGitProject{}, "", "", err
 	}
-	project, err := resolveWrkpGitProject(cmd.Context(), tr, toplevel, wrkpProjectOverride(cmd))
+	project, err := resolveWrkpGitProject(cmd.Context(), tr, toplevel, owner, wrkpProjectOverride(cmd))
 	if err != nil {
 		closeFn()
 		return "", nil, nil, wrkpGitProject{}, "", "", err
@@ -223,7 +224,39 @@ func wrkpProjectOverride(cmd *cobra.Command) string {
 	return strings.TrimSpace(value)
 }
 
-func resolveWrkpGitProject(ctx context.Context, tr Transport, toplevel, override string) (wrkpGitProject, error) {
+// wrkpGitOwningCheckout returns the main checkout that owns a linked worktree,
+// derived from the Git common directory, or "" when there is no trustworthy
+// candidate. It only nominates a path: registration still decides whether facts
+// may post there. The candidate must be the parent of a ".git" common directory
+// and must itself report that path as its top level, so a bare, malformed, or
+// inaccessible common directory yields no candidate rather than a guess.
+func wrkpGitOwningCheckout(ctx context.Context, deps wrkpGitDependencies, repo string) string {
+	common, err := deps.git(ctx, repo, "rev-parse", "--git-common-dir")
+	if err != nil || common == "" {
+		return ""
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(repo, common)
+	}
+	common, err = canonicalWrkpGitRoot(common)
+	if err != nil || filepath.Base(common) != ".git" {
+		return ""
+	}
+	candidate := filepath.Dir(common)
+	top, err := deps.git(ctx, candidate, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	if top, err = canonicalWrkpGitRoot(top); err != nil || top != candidate {
+		return ""
+	}
+	return candidate
+}
+
+// resolveWrkpGitProject matches the active checkout against registered project
+// roots. Only when the checkout itself matches nothing does it fall back to the
+// owning main checkout of a linked worktree (owner, "" when not applicable).
+func resolveWrkpGitProject(ctx context.Context, tr Transport, toplevel, owner, override string) (wrkpGitProject, error) {
 	projects, err := listWrkpGitProjects(ctx, tr)
 	if err != nil {
 		return wrkpGitProject{}, err
@@ -240,23 +273,33 @@ func resolveWrkpGitProject(ctx context.Context, tr Transport, toplevel, override
 	if err != nil {
 		return wrkpGitProject{}, err
 	}
-	matches := make([]wrkpGitProject, 0, 1)
-	for _, project := range projects {
-		if project.Root == "" {
-			continue
-		}
-		root, rootErr := canonicalWrkpGitRoot(project.Root)
-		if rootErr == nil && root == canonicalTop {
-			matches = append(matches, project)
-		}
+	label := toplevel
+	matches := wrkpGitRootMatches(projects, canonicalTop)
+	if len(matches) == 0 && owner != "" && owner != canonicalTop {
+		label = fmt.Sprintf("%s (linked worktree of %s)", toplevel, owner)
+		matches = wrkpGitRootMatches(projects, owner)
 	}
 	if len(matches) == 1 {
 		return matches[0], nil
 	}
 	if len(matches) > 1 {
-		return wrkpGitProject{}, fmt.Errorf("%s matches multiple registered project roots; skipping", toplevel)
+		return wrkpGitProject{}, fmt.Errorf("%s matches multiple registered project roots; skipping", label)
 	}
-	return wrkpGitProject{}, fmt.Errorf("%s is not a registered project root; skipping", toplevel)
+	return wrkpGitProject{}, fmt.Errorf("%s is not a registered project root; skipping", label)
+}
+
+func wrkpGitRootMatches(projects []wrkpGitProject, canonical string) []wrkpGitProject {
+	matches := make([]wrkpGitProject, 0, 1)
+	for _, project := range projects {
+		if project.Root == "" {
+			continue
+		}
+		root, err := canonicalWrkpGitRoot(project.Root)
+		if err == nil && root == canonical {
+			matches = append(matches, project)
+		}
+	}
+	return matches
 }
 
 func listWrkpGitProjects(ctx context.Context, tr Transport) ([]wrkpGitProject, error) {

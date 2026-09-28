@@ -410,15 +410,15 @@ func TestWrkpGitG7ProjectResolution(t *testing.T) {
 	tildeRoot := "~/repos/repo"
 	tr := &wrkpGitFakeTransport{projects: []projectEntry{wrkpGitProjectFixture("repo", "P-00001", tildeRoot)}}
 	for _, top := range []string{realRoot, symlink} {
-		project, err := resolveWrkpGitProject(context.Background(), tr, top, "")
+		project, err := resolveWrkpGitProject(context.Background(), tr, top, "", "")
 		if err != nil || project.Slug != "repo" {
 			t.Fatalf("resolve %s = %+v, %v", top, project, err)
 		}
 	}
-	if _, err := resolveWrkpGitProject(context.Background(), tr, home, ""); err == nil || !strings.Contains(err.Error(), "not a registered project root") {
+	if _, err := resolveWrkpGitProject(context.Background(), tr, home, "", ""); err == nil || !strings.Contains(err.Error(), "not a registered project root") {
 		t.Fatalf("unregistered error = %v", err)
 	}
-	project, err := resolveWrkpGitProject(context.Background(), tr, home, "P-00001")
+	project, err := resolveWrkpGitProject(context.Background(), tr, home, "", "P-00001")
 	if err != nil || project.Slug != "repo" {
 		t.Fatalf("override = %+v, %v", project, err)
 	}
@@ -447,5 +447,111 @@ func TestWrkpGitG8WrkqHookPostsLastAndOnlyAfterGate(t *testing.T) {
 	}
 	if postCommit.Mode()&0o111 == 0 {
 		t.Fatal("tracked post-commit entrypoint is not executable")
+	}
+}
+
+// TestWrkpGitG9LinkedWorktreeResolvesOwningCheckout: a hook running in an
+// unregistered `git worktree add` checkout posts under the project registered
+// at the owning main checkout, while every git fact still comes from the
+// worktree. Registration stays the authority: unregistered and ambiguous owners
+// skip, and a registered worktree path still wins over its owner.
+func TestWrkpGitG9LinkedWorktreeResolvesOwningCheckout(t *testing.T) {
+	main := wrkpGitTestRepo(t)
+	base := wrkpGitTestCommit(t, main, "one.txt", "one")
+	parent := t.TempDir()
+	worktree := filepath.Join(parent, "repo-T-00001")
+	wrkpGitMust(t, main, "worktree", "add", "-q", "-b", "T-00001-fix", worktree)
+	head := wrkpGitTestCommit(t, worktree, "two.txt", "fix T-00001")
+	sub := filepath.Join(worktree, "nested")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Symlinked registration of the owner exercises canonicalization on both sides.
+	link := filepath.Join(parent, "main-link")
+	if err := os.Symlink(main, link); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := &wrkpGitFakeTransport{
+		projects: []projectEntry{wrkpGitProjectFixture("repo", "P-00001", link)},
+		tasks:    map[string]string{"T-00001": "repo/inbox/task"},
+	}
+	// The hook may run from a subdirectory of the worktree.
+	for _, dir := range []string{worktree, sub} {
+		tr.posts = nil
+		cmd, _, stderr := wrkpGitTestCommand("")
+		if err := runWrkpGitCommit(cmd, wrkpGitTestDeps(dir, tr)); err != nil || stderr.Len() != 0 || len(tr.posts) != 1 {
+			t.Fatalf("commit from %s: err=%v stderr=%q posts=%d", dir, err, stderr.String(), len(tr.posts))
+		}
+		post := tr.posts[0]
+		raw := string(post["attributes"].(json.RawMessage))
+		if post["project"] != "repo" || post["idempotencyKey"] != "git.commit:"+head ||
+			!strings.Contains(raw, `"branch":"T-00001-fix"`) || !strings.Contains(raw, `"sha":"`+head+`"`) {
+			t.Fatalf("commit post from %s = %v attrs=%s", dir, post, raw)
+		}
+	}
+
+	tr.posts = nil
+	stdin := fmt.Sprintf("refs/heads/T-00001-fix %s refs/heads/main %s\n", head, base)
+	cmd, _, stderr := wrkpGitTestCommand(stdin)
+	if err := runWrkpGitPush(cmd, wrkpGitTestDeps(worktree, tr), "origin", "example", nil); err != nil || stderr.Len() != 0 || len(tr.posts) != 1 {
+		t.Fatalf("push: err=%v stderr=%q posts=%d", err, stderr.String(), len(tr.posts))
+	}
+	raw := string(tr.posts[0]["attributes"].(json.RawMessage))
+	if tr.posts[0]["project"] != "repo" || !strings.Contains(raw, `"remote_ref":"refs/heads/main"`) ||
+		!strings.Contains(raw, `"local_sha":"`+head+`"`) || !strings.Contains(raw, `"remote_sha":"`+base+`"`) || !strings.Contains(raw, `"commits":"1"`) {
+		t.Fatalf("push post = %v attrs=%s", tr.posts[0], raw)
+	}
+
+	skip := func(name string, projects []projectEntry, want string) {
+		t.Helper()
+		tr := &wrkpGitFakeTransport{projects: projects}
+		cmd, _, _ := wrkpGitTestCommand("")
+		err := runWrkpGitCommit(cmd, wrkpGitTestDeps(worktree, tr))
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "linked worktree of") || len(tr.posts) != 0 {
+			t.Fatalf("%s: err=%v posts=%d", name, err, len(tr.posts))
+		}
+	}
+	skip("unregistered", []projectEntry{wrkpGitProjectFixture("other", "P-00002", parent)}, "not a registered project root")
+	skip("ambiguous", []projectEntry{
+		wrkpGitProjectFixture("repo", "P-00001", main),
+		wrkpGitProjectFixture("dupe", "P-00002", link),
+	}, "matches multiple registered project roots")
+
+	// A worktree registered in its own right keeps its own project.
+	tr = &wrkpGitFakeTransport{projects: []projectEntry{
+		wrkpGitProjectFixture("repo", "P-00001", main),
+		wrkpGitProjectFixture("wt", "P-00002", worktree),
+	}}
+	cmd, _, _ = wrkpGitTestCommand("")
+	if err := runWrkpGitCommit(cmd, wrkpGitTestDeps(worktree, tr)); err != nil || len(tr.posts) != 1 || tr.posts[0]["project"] != "wt" {
+		t.Fatalf("registered worktree: err=%v posts=%v", err, tr.posts)
+	}
+
+	// A relative common dir resolves against the workdir; one that is not the
+	// ".git" of a checkout (or does not exist) nominates nothing.
+	canonicalMain, err := canonicalWrkpGitRoot(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(sub, filepath.Join(main, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for common, want := range map[string]string{
+		relative:                           canonicalMain,
+		parent:                             "",
+		filepath.Join(parent, "gone/.git"): "",
+	} {
+		deps := wrkpGitTestDeps(sub, nil)
+		deps.git = func(ctx context.Context, dir string, args ...string) (string, error) {
+			if strings.Join(args, " ") == "rev-parse --git-common-dir" {
+				return common, nil
+			}
+			return runWrkpGitCommand(ctx, dir, args...)
+		}
+		if owner := wrkpGitOwningCheckout(context.Background(), deps, sub); owner != want {
+			t.Fatalf("common dir %q nominated %q, want %q", common, owner, want)
+		}
 	}
 }

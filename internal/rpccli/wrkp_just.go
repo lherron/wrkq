@@ -281,7 +281,7 @@ func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile st
 		return err
 	}
 	defer closeFn()
-	project, err := resolveWrkpGitProject(ctx, tr, repo, "")
+	project, err := resolveWrkpGitProject(ctx, tr, repo, "", "")
 	if err != nil {
 		return err
 	}
