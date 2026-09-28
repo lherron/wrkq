@@ -62,7 +62,7 @@ Subtasks are cascade-restored when their parent is restored.`,
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Update assignee on restore")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Conditional restore (etag)")
 	cmd.Flags().StringVar(&comment, "comment", "", "Add comment explaining restoration")
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 type restoreFlags struct {

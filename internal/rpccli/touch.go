@@ -72,7 +72,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll the new task in a draft or active campaign by ID or path (the task keeps its own project)")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Causal lineage: comma-separated task IDs whose work caused this defect/rework (e.g. T-00012,T-00034)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 type touchOpts struct {

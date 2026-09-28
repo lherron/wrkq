@@ -67,7 +67,7 @@ wrkq set T-00001 --state completed
 
 States: `idea`, `draft`, `open`, `in_progress`, `completed`, `blocked`, `cancelled`, `archived`, `deleted`. Priority: 1–4.
 
-`--labels` replaces labels; `--labels ''` clears them. Use a JSON array for labels containing commas. `needs_smoketest` requests Smokey through automation; it is not a state.
+`--labels` replaces labels; `--labels ''` clears them. Use a JSON array for labels containing commas. Pass all labels in one flag: a repeated `--labels` (or any repeated value flag on `set`/`touch`/`mkdir`/`restore`/`campaign`) is refused, not merged. `needs_smoketest` requests Smokey through automation; it is not a state.
 
 `--outcome` records a curated result; it is optional for completion. `--caused-by T-00002` records the delivered task that caused defect/rework. `wrkq rm <task>` soft-deletes a task.
 

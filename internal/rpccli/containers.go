@@ -28,7 +28,7 @@ func newMkdirCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&parents, "parents", "p", false, "Create parent containers as needed")
 	cmd.Flags().StringVar(&kind, "kind", "", "Container kind: project, directory, feature, area (default: directory)")
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 // newArchiveCmd exposes the existing non-destructive container archive

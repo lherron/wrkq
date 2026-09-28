@@ -215,7 +215,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = cmd.Flags().MarkHidden("batch-size") // Accepted for compatibility; it has no behavior.
 	_ = batchSize                            // Legacy accepts --batch-size but does not apply batching.
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatch int64, dryRun bool) error {

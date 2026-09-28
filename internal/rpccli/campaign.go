@@ -83,7 +83,7 @@ func newCampaignConvertCmd() *cobra.Command {
 	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().StringVar(&state, "state", "active", "Initial campaign state: draft or active")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only convert if the container etag matches")
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 func newCampaignActivateCmd() *cobra.Command {
@@ -134,7 +134,7 @@ edit. Use a kind=decision container comment for curated amendment rationale.`,
 	cmd.Flags().StringVar(&specification, "specification", "", "Campaign specification (literal, @file, or - for stdin; empty clears)")
 	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only edit if the container etag matches")
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 func newCampaignCloseCmd() *cobra.Command {
@@ -163,7 +163,7 @@ wholesale abandonment and leaves open members unchanged.`,
 	}
 	cmd.Flags().StringVar(&state, "state", "", "Terminal campaign state: completed or cancelled")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only close if the container etag matches")
-	return cmd
+	return refuseRepeatedFlags(cmd)
 }
 
 func runCampaignContentMutation(
