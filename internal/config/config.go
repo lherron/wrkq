@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const MissingDatabasePathMessage = "database path not specified (use --db flag or set WRKQ_DB_PATH)"
+const MissingDatabasePathMessage = "database path not specified (use --db flag or set WRKQ_DB)"
 
 func MissingDatabasePathError() error {
 	return errors.New(MissingDatabasePathMessage)
@@ -46,13 +46,61 @@ type SearchConfig struct {
 	CandidateLimit   int    `yaml:"candidate_limit"`
 }
 
+// DBEnvConflictError reports a path-only database env input (WRKQ_DB_PATH or
+// WRKQ_DB_PATH_FILE) that is set but not honoured because another locator
+// (WRKQ_DB, from the process env or .env.local, or config.yaml db_locator)
+// selects a different database. Silently targeting a database other than the
+// one the caller named is the failure this refuses (T-08302); WRKQ_DB is the
+// working isolation lever, and an explicit --db moots the conflict.
+type DBEnvConflictError struct {
+	Var     string // WRKQ_DB_PATH or WRKQ_DB_PATH_FILE
+	Value   string // the path the env input names
+	Locator string // the locator that won
+	Source  string // where the winning locator came from
+}
+
+func (e *DBEnvConflictError) Error() string {
+	return fmt.Sprintf("%s selects %s but is not honoured: the database locator is %s (from %s), which WRKQ_DB_PATH never overrides; "+
+		"to target %s use WRKQ_DB=%s or --db %s, otherwise unset %s",
+		e.Var, e.Value, e.Locator, e.Source, e.Value, e.Value, e.Value, e.Var)
+}
+
 // Load loads configuration from multiple sources with precedence:
 //  1. Environment variables
 //  2. ./.env.local (dotenv) - walks up parent directories to find it
 //  3. $PRAESIDIUM_HOME/.env.local (or ~/praesidium/.env.local) as a
 //     cwd-independent platform fallback
 //  4. ~/.config/wrkq/config.yaml (YAML)
+//
+// Load refuses with *DBEnvConflictError when WRKQ_DB_PATH is set but loses to
+// another locator. Callers that accept a --db override use LoadWithDBOverride
+// so the override applies before that check.
 func Load() (*Config, error) {
+	return LoadWithDBOverride("", false)
+}
+
+// LoadWithDBOverride loads configuration and applies an explicit database
+// locator override (typically --db). A non-empty override is the caller's
+// explicit choice, so it moots a WRKQ_DB_PATH conflict. pathOnly rejects
+// rpc:// overrides, as ApplyDBLocator does.
+func LoadWithDBOverride(override string, pathOnly bool) (*Config, error) {
+	cfg, conflict, err := load()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(override) != "" {
+		if err := ApplyDBLocator(cfg, override, pathOnly); err != nil {
+			return nil, err
+		}
+		return cfg, nil
+	}
+	if conflict != nil {
+		return nil, conflict
+	}
+	return cfg, nil
+}
+
+func load() (*Config, *DBEnvConflictError, error) {
 	cfg := &Config{
 		AttachmentsMaxMB: 50,
 		LogLevel:         "info",
@@ -76,6 +124,7 @@ func Load() (*Config, error) {
 	// shared global-default .env.local. See project-root precedence below.
 	explicitProjectRoot := os.Getenv("WRKQ_PROJECT_ROOT")
 	aspProject := os.Getenv("ASP_PROJECT")
+	processDBLocator := strings.TrimSpace(os.Getenv("WRKQ_DB"))
 
 	// A process-provided token file is an explicit credential source. Keep an
 	// absent inline token absent-from-dotenv by reserving the key with an empty
@@ -89,28 +138,40 @@ func Load() (*Config, error) {
 	}
 
 	// Load .env.local if it exists (walking up parent directories)
-	if envPath := findEnvLocal(); envPath != "" {
-		_ = godotenv.Load(envPath)
+	envLocalPath := findEnvLocal()
+	if envLocalPath != "" {
+		_ = godotenv.Load(envLocalPath)
 	}
 
 	// Load ~/.config/wrkq/config.yaml if it exists (optional, errors ignored)
 	_ = loadYAMLConfig(cfg)
+	locatorSource := ""
+	if strings.TrimSpace(cfg.DBLocator) != "" {
+		locatorSource = "config.yaml db_locator"
+	}
 
 	// Override with environment variables
 	explicitDBLocator := strings.TrimSpace(os.Getenv("WRKQ_DB"))
 	if explicitDBLocator != "" {
 		if err := ApplyDBLocator(cfg, explicitDBLocator, false); err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		locatorSource = "WRKQ_DB"
+		if processDBLocator == "" {
+			locatorSource = "WRKQ_DB in " + envLocalPath
 		}
 	}
-	if dbPath := strings.TrimSpace(getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); dbPath != "" && explicitDBLocator == "" {
-		if IsRemoteLocator(dbPath) {
-			return nil, fmt.Errorf("WRKQ_DB_PATH is path-only; use WRKQ_DB for rpc:// locators")
-		}
-		if cfg.DBLocator == "" {
+	var conflict *DBEnvConflictError
+	if dbPath, dbPathVar := getDBPathEnv(); dbPath != "" {
+		switch {
+		case IsRemoteLocator(dbPath) && explicitDBLocator == "":
+			return nil, nil, fmt.Errorf("WRKQ_DB_PATH is path-only; use WRKQ_DB for rpc:// locators")
+		case cfg.DBLocator == "":
 			cfg.DBLocator = dbPath
 			cfg.DBPath = dbPath
 			cfg.RemoteEndpoint = ""
+		case !sameLocalPath(cfg.DBLocator, dbPath):
+			conflict = &DBEnvConflictError{Var: dbPathVar, Value: dbPath, Locator: cfg.DBLocator, Source: locatorSource}
 		}
 	}
 	if attachDir := os.Getenv("WRKQ_ATTACH_DIR"); attachDir != "" {
@@ -201,7 +262,33 @@ func Load() (*Config, error) {
 		}
 	}
 
-	return cfg, nil
+	return cfg, conflict, nil
+}
+
+// getDBPathEnv returns the trimmed WRKQ_DB_PATH value (or WRKQ_DB_PATH_FILE
+// contents) and the name of the variable that supplied it.
+func getDBPathEnv() (string, string) {
+	if val := strings.TrimSpace(os.Getenv("WRKQ_DB_PATH")); val != "" {
+		return val, "WRKQ_DB_PATH"
+	}
+	if val := strings.TrimSpace(getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); val != "" {
+		return val, "WRKQ_DB_PATH_FILE"
+	}
+	return "", ""
+}
+
+// sameLocalPath reports whether a winning locator names the same local file
+// as path, so WRKQ_DB_PATH agreeing with WRKQ_DB is honoured, not refused.
+func sameLocalPath(locator, path string) bool {
+	if IsRemoteLocator(locator) {
+		return false
+	}
+	a, errA := filepath.Abs(strings.TrimSpace(locator))
+	b, errB := filepath.Abs(path)
+	if errA != nil || errB != nil {
+		return filepath.Clean(locator) == filepath.Clean(path)
+	}
+	return a == b
 }
 
 // IsRemoteLocator reports whether a database locator selects a remote workrpc

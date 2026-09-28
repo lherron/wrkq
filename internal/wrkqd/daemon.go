@@ -52,7 +52,7 @@ type DaemonOptions struct {
 
 // ServeDaemon starts the wrkqd daemon.
 func ServeDaemon(opts DaemonOptions) error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(opts.DBPath, true)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -62,11 +62,6 @@ func ServeDaemon(opts DaemonOptions) error {
 		return err
 	}
 
-	if opts.DBPath != "" {
-		if err := config.ApplyDBLocator(cfg, opts.DBPath, true); err != nil {
-			return err
-		}
-	}
 	if cfg.RemoteEndpoint != "" {
 		return fmt.Errorf("wrkqd requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
 	}

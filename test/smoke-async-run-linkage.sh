@@ -14,7 +14,8 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 
 # Test database path - explicit env vars to avoid loading from .env.local
-export WRKQ_DB_PATH="/tmp/wrkq-async-run-linkage-smoke-test.db"
+export WRKQ_DB="/tmp/wrkq-async-run-linkage-smoke-test.db"
+unset WRKQ_DB_PATH WRKQ_DB_PATH_FILE
 export WRKQ_PRINCIPAL_REF="agent:test-human"
 export WRKQ_PROJECT_ROOT=""  # Explicitly clear to prevent loading from .env.local
 
@@ -28,8 +29,8 @@ WRKQADM_BIN="./bin/wrkqadm"
 
 # Clean up and initialize
 echo -e "${YELLOW}Initializing test database...${NC}"
-rm -f "$WRKQ_DB_PATH"
-$WRKQADM_BIN init --db "$WRKQ_DB_PATH" --human-slug test-human --human-name "Test User" > /dev/null
+rm -f "$WRKQ_DB"
+$WRKQADM_BIN init --db "$WRKQ_DB" --human-slug test-human --human-name "Test User" > /dev/null
 
 # Helper function to run a test
 run_test() {
@@ -223,7 +224,7 @@ echo -e "  ${RED}Failed: $TESTS_FAILED${NC}"
 # Cleanup
 echo ""
 echo -e "${YELLOW}Cleaning up...${NC}"
-rm -f "$WRKQ_DB_PATH"
+rm -f "$WRKQ_DB"
 
 if [ $TESTS_FAILED -eq 0 ]; then
     echo -e "${GREEN}All tests passed!${NC}"

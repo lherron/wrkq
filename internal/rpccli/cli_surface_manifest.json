@@ -15,7 +15,7 @@
       },
       {
         "name": "db",
-        "usage": "Path to database file (overrides WRKQ_DB_PATH)",
+        "usage": "Database path or rpc:// locator (overrides WRKQ_DB and WRKQ_DB_PATH)",
         "type": "string",
         "hidden": false
       },

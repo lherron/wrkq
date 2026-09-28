@@ -100,21 +100,16 @@ func WithApp(opts Options, fn RunFunc) func(cmd *cobra.Command, args []string) e
 func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 	app := &App{}
 
-	// Load configuration
-	cfg, err := config.Load()
+	// Load configuration; --db overrides the configured locator.
+	var dbPath string
+	if dbFlag := cmd.Flag("db"); dbFlag != nil {
+		dbPath = dbFlag.Value.String()
+	}
+	cfg, err := config.LoadWithDBOverride(dbPath, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 	app.Config = cfg
-
-	// Override DB path from --db flag if provided
-	if dbFlag := cmd.Flag("db"); dbFlag != nil {
-		if dbPath := dbFlag.Value.String(); dbPath != "" {
-			if err := config.ApplyDBLocator(app.Config, dbPath, true); err != nil {
-				return nil, err
-			}
-		}
-	}
 
 	// Open database if needed
 	if opts.NeedsDB {

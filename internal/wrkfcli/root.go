@@ -50,7 +50,7 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&flagDB, "db", "", "Path to wrkq database file")
+	rootCmd.PersistentFlags().StringVar(&flagDB, "db", "", "Database path or rpc:// locator (overrides WRKQ_DB and WRKQ_DB_PATH)")
 	rootCmd.PersistentFlags().StringVar(&flagPrincipalRef, "principal-ref", "", "Workflow caller principal ref (agent:<id>)")
 	rootCmd.PersistentFlags().StringVar(&flagRole, "role", "", "Workflow role")
 	rootCmd.PersistentFlags().StringVar(&flagTask, "task", "", "Default task")

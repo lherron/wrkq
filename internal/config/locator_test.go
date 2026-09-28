@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,21 +41,94 @@ func TestApplyDBLocatorLocalPath(t *testing.T) {
 	}
 }
 
-func TestLoadExplicitWRKQDBRemoteWinsOverStaleRemoteDBPath(t *testing.T) {
+func TestLoadWRKQDBRemoteBeatingDBPathIsRefused(t *testing.T) {
+	isolateLoadConfig(t)
 	t.Setenv("WRKQ_DB", "rpc://max3:7171")
 	t.Setenv("WRKQ_DB_PATH", "rpc://stale:7171")
-	t.Setenv("WRKQ_DB_PATH_FILE", "")
 
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	_, err := Load()
+	var conflict *DBEnvConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("Load err=%v, want *DBEnvConflictError", err)
 	}
-	if cfg.RemoteEndpoint != "max3:7171" {
-		t.Fatalf("RemoteEndpoint=%q want max3:7171", cfg.RemoteEndpoint)
+}
+
+// TestLoadDBPathConflictRule pins what "WRKQ_DB_PATH loses" means (T-08302):
+// it is honoured when nothing else selects a database or the winner names the
+// same file; otherwise Load refuses, and an explicit --db override moots it.
+func TestLoadDBPathConflictRule(t *testing.T) {
+	tmp := isolateLoadConfig(t)
+	scratch := filepath.Join(tmp, "scratch.db")
+	other := filepath.Join(tmp, "other.db")
+
+	t.Run("honoured alone", func(t *testing.T) {
+		t.Setenv("WRKQ_DB_PATH", scratch)
+		cfg, err := Load()
+		if err != nil || cfg.DBPath != scratch || cfg.RemoteEndpoint != "" {
+			t.Fatalf("cfg=%#v err=%v, want DBPath=%s", cfg, err, scratch)
+		}
+	})
+	t.Run("same path as WRKQ_DB is honoured", func(t *testing.T) {
+		t.Setenv("WRKQ_DB", scratch)
+		t.Setenv("WRKQ_DB_PATH", filepath.Join(tmp, ".", "scratch.db"))
+		cfg, err := Load()
+		if err != nil || cfg.DBPath != scratch {
+			t.Fatalf("cfg=%#v err=%v, want DBPath=%s", cfg, err, scratch)
+		}
+	})
+	for name, winner := range map[string]string{"remote winner": "rpc://mini", "local winner": other} {
+		t.Run(name+" refuses naming WRKQ_DB", func(t *testing.T) {
+			t.Setenv("WRKQ_DB", winner)
+			t.Setenv("WRKQ_DB_PATH", scratch)
+			_, err := Load()
+			var conflict *DBEnvConflictError
+			if !errors.As(err, &conflict) {
+				t.Fatalf("Load err=%v, want *DBEnvConflictError", err)
+			}
+			if conflict.Value != scratch || conflict.Locator != winner || conflict.Source != "WRKQ_DB" {
+				t.Fatalf("conflict=%#v", conflict)
+			}
+			if !strings.Contains(err.Error(), "WRKQ_DB="+scratch) {
+				t.Fatalf("error %q does not name the WRKQ_DB lever", err)
+			}
+		})
+		t.Run(name+" mooted by --db", func(t *testing.T) {
+			t.Setenv("WRKQ_DB", winner)
+			t.Setenv("WRKQ_DB_PATH", scratch)
+			flag := filepath.Join(tmp, "flag.db")
+			cfg, err := LoadWithDBOverride(flag, false)
+			if err != nil || cfg.DBPath != flag || cfg.RemoteEndpoint != "" {
+				t.Fatalf("cfg=%#v err=%v, want DBPath=%s", cfg, err, flag)
+			}
+		})
 	}
-	if cfg.DBPath != "" {
-		t.Fatalf("DBPath=%q want empty for remote locator", cfg.DBPath)
-	}
+	t.Run("WRKQ_DB_PATH_FILE losing refuses", func(t *testing.T) {
+		pathFile := filepath.Join(tmp, "db-path")
+		if err := os.WriteFile(pathFile, []byte(scratch+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("WRKQ_DB", "rpc://mini")
+		t.Setenv("WRKQ_DB_PATH_FILE", pathFile)
+		_, err := Load()
+		var conflict *DBEnvConflictError
+		if !errors.As(err, &conflict) || conflict.Var != "WRKQ_DB_PATH_FILE" || conflict.Value != scratch {
+			t.Fatalf("Load err=%v conflict=%#v", err, conflict)
+		}
+	})
+	t.Run("WRKQ_DB from .env.local names its source", func(t *testing.T) {
+		envLocal := filepath.Join(tmp, ".env.local")
+		if err := os.WriteFile(envLocal, []byte("WRKQ_DB=rpc://mini\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(envLocal) })
+		unsetEnv(t, "WRKQ_DB")
+		t.Setenv("WRKQ_DB_PATH", scratch)
+		_, err := Load()
+		var conflict *DBEnvConflictError
+		if !errors.As(err, &conflict) || !strings.Contains(conflict.Source, ".env.local") {
+			t.Fatalf("Load err=%v conflict=%#v", err, conflict)
+		}
+	})
 }
 
 func TestLoadRemoteDBPathWithoutWRKQDBIsRejected(t *testing.T) {

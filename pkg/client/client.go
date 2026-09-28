@@ -111,14 +111,9 @@ func New(ctx context.Context, options ...Option) (*Client, error) {
 		}
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(opts.locator, false)
 	if err != nil {
 		return nil, err
-	}
-	if opts.locator != "" {
-		if err := config.ApplyDBLocator(cfg, opts.locator, false); err != nil {
-			return nil, err
-		}
 	}
 	if opts.principalRef == "" {
 		opts.principalRef, err = configuredPrincipalRef(cfg)

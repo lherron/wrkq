@@ -93,7 +93,7 @@ Key variables:
 | Variable | Meaning |
 | --- | --- |
 | `WRKQ_DB` | Primary database locator for production `wrkq`: local SQLite path or `rpc://host[:port]` workrpc endpoint. |
-| `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Local SQLite database path compatibility inputs; reject `rpc://` values. |
+| `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` | Local SQLite database path compatibility inputs; reject `rpc://` values. Honoured only when no other locator (`WRKQ_DB`, `.env.local`, `config.yaml` `db_locator`) is set or that locator names the same file; otherwise every command refuses with an error naming `WRKQ_DB` rather than silently using the other database. An explicit `--db` moots the conflict. |
 | `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` | Bearer token used by remote `WRKQ_DB=rpc://...` calls and wrkqd HTTP auth. |
 | `WRKQ_CLAIM_TOKEN` / `WRKQ_CLAIM_GENERATION` | Current task-claim authority injected into a claimed runtime; `wrkq set --state completed` forwards it with the active task scope. |
 | `WRKQ_ATTACH_DIR` | Attachment byte storage root. |
@@ -109,7 +109,10 @@ Key variables:
 Database defaults:
 - If `.wrkq/wrkq.db` exists in the current directory, it is used.
 - Otherwise there is no implicit database path; commands that need a database
-  fail with a message naming `WRKQ_DB_PATH` and `--db`.
+  fail with a message naming `WRKQ_DB` and `--db`.
+- `wrkqadm init` without `--db` initializes the configured local locator
+  (`WRKQ_DB` / `WRKQ_DB_PATH` / config) and falls back to `.wrkq/wrkq.db`
+  only when none is configured; a configured `rpc://` locator is refused.
 - `rpc://host` locators default to port `7171`.
 - Admin and daemon path-owning surfaces (`wrkqadm --db`, `wrkqd --db`,
   `wrkq server --db-path`) remain local-path-only.

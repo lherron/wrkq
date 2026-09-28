@@ -85,7 +85,11 @@ Key authority and transport inputs:
 - `WRKQ_DB` selects a local SQLite path or `rpc://host[:port]`; remote locators
   default to port `7171`.
 - `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` are local-path compatibility inputs and
-  reject `rpc://` values.
+  reject `rpc://` values. When `WRKQ_DB` or a config locator names a different
+  database they refuse (naming `WRKQ_DB`) rather than lose silently; isolate
+  smoke tests with `WRKQ_DB=<scratch.db>` or `--db`. When `WRKQ_DB` or a config locator names a different
+  database they refuse (naming `WRKQ_DB`) rather than lose silently; isolate
+  smoke tests with `WRKQ_DB=<scratch.db>` or `--db`.
 - `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` authenticate remote calls. An explicitly
   supplied token file wins over a dotenv-loaded token.
 - `WRKQ_CLAIM_TOKEN` / `WRKQ_CLAIM_GENERATION` carry the active task claim into

@@ -50,13 +50,9 @@ func init() {
 }
 
 func runDoctorAdm(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(cmd.Flag("db").Value.String(), true)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
 	}
 
 	report := &doctorReportAdm{

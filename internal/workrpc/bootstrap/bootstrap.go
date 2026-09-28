@@ -121,14 +121,9 @@ func OpenWithHookCatalog(dbLocatorOverride, hookCatalogOverride string) (*Handle
 }
 
 func open(dbLocatorOverride, hookPath string, explicitHookPath bool) (*Handle, error) {
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(dbLocatorOverride, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-	if dbLocatorOverride != "" {
-		if err := config.ApplyDBLocator(cfg, dbLocatorOverride, false); err != nil {
-			return nil, err
-		}
 	}
 	if cfg.RemoteEndpoint != "" {
 		return nil, fmt.Errorf("remote database locator %q cannot be opened as a local SQLite database", cfg.DBLocator)

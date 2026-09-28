@@ -17,14 +17,9 @@ func newWhoamiCmd() *cobra.Command {
 		Short: "Print the current principal",
 		Long:  `Displays the resolved external principal and runtime scope based on configuration and environment.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, cfgErr := config.Load()
+			cfg, cfgErr := config.LoadWithDBOverride(dbOverride(cmd), false)
 			if cfgErr != nil {
 				return cfgErr
-			}
-			if override := dbOverride(cmd); override != "" {
-				if err := config.ApplyDBLocator(cfg, override, false); err != nil {
-					return err
-				}
 			}
 			if cfg.RemoteEndpoint != "" {
 				tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())

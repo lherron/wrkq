@@ -24,14 +24,9 @@ func NewRemote(endpoint, token string) (Transport, error) {
 func remoteTokenFromEnv() string { return workrpcclient.TokenFromEnv() }
 
 func openConfiguredTransport(cmd *cobra.Command) (Transport, *config.Config, func(), error) {
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(dbOverride(cmd), false)
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	if override := dbOverride(cmd); override != "" {
-		if err := config.ApplyDBLocator(cfg, override, false); err != nil {
-			return nil, nil, nil, err
-		}
 	}
 	if cfg.RemoteEndpoint != "" {
 		tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())

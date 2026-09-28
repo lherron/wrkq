@@ -23,7 +23,8 @@ go build -tags sqlite_fts5 -o "$BIN/wrkf" "$ROOT/cmd/wrkf"
 go build -tags sqlite_fts5 -o "$BIN/wrkqd" "$ROOT/cmd/wrkqd"
 
 cd "$TMPDIR"
-export WRKQ_DB_PATH="$DB"
+export WRKQ_DB="$DB"
+unset WRKQ_DB_PATH WRKQ_DB_PATH_FILE
 export WRKF_PRINCIPAL_REF="agent:local-human"
 export WRKQ_PROJECT_ROOT=""
 unset ASP_PROJECT

@@ -89,16 +89,7 @@ func openConfiguredTransport(cmd *cobra.Command) (workrpcclient.Transport, *conf
 }
 
 func loadConfiguredConfig() (*config.Config, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, err
-	}
-	if flagDB != "" {
-		if err := config.ApplyDBLocator(cfg, flagDB, false); err != nil {
-			return nil, err
-		}
-	}
-	return cfg, nil
+	return config.LoadWithDBOverride(flagDB, false)
 }
 
 func openConfiguredTransportWithConfig(cmd *cobra.Command, cfg *config.Config, principalRef string) (workrpcclient.Transport, func(), error) {

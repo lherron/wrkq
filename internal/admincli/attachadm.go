@@ -55,14 +55,9 @@ func runAttachPath(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
 
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(cmd.Flag("db").Value.String(), true)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Override DB path from flag if provided
-	if dbPath := cmd.Flag("db").Value.String(); dbPath != "" {
-		cfg.DBPath = dbPath
 	}
 
 	// Open database

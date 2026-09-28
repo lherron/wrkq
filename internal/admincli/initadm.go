@@ -41,16 +41,20 @@ func init() {
 }
 
 func runInitAdm(cmd *cobra.Command, args []string) error {
-	// Load configuration
-	cfg, err := config.Load()
+	// Load configuration; --db overrides the configured locator.
+	cfg, err := config.LoadWithDBOverride(cmd.Flag("db").Value.String(), true)
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to load config: %w", err))
 	}
 
-	// Use database path from flag or default to .wrkq/wrkq.db
-	dbPathFlag := cmd.Flag("db").Value.String()
-	if dbPathFlag != "" {
-		cfg.DBPath = dbPathFlag
+	// Initialize the configured database (--db, WRKQ_DB, WRKQ_DB_PATH, or
+	// config) and default to .wrkq/wrkq.db only when none is configured. A
+	// configured remote locator is refused rather than silently swapped for
+	// the project-local database (T-08302).
+	if cfg.RemoteEndpoint != "" {
+		return exitError(1, fmt.Errorf("wrkqadm init creates a local database, but the configured database locator is %s; pass --db <path> or set WRKQ_DB=<path>", cfg.DBLocator))
+	}
+	if cfg.DBPath != "" {
 		if initAdmAttachDir == "" && cfg.AttachDir == "" {
 			cfg.AttachDir = filepath.Join(filepath.Dir(cfg.DBPath), "attachments")
 		}

@@ -20,7 +20,7 @@ descriptive, not the contract of record (`docs/SPEC.md` is).
 Every subcommand accepts:
 
 ```text
---db string              Path to database file (overrides WRKQ_DB_PATH)
+--db string              Database path or rpc:// locator (overrides WRKQ_DB and WRKQ_DB_PATH)
 --as string              Alias for --principal-ref: agent:<id> or full agent ScopeRef
 --principal-ref string   Caller principal for write attribution
 --project string         Project to operate under (overrides WRKQ_PROJECT_ROOT)

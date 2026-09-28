@@ -199,15 +199,9 @@ var (
 
 func runPatchApply(cmd *cobra.Command, args []string) error {
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(cmd.Flag("db").Value.String(), true)
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to load config: %w", err))
-	}
-
-	// Override DB path from flag if provided
-	dbPathFlag := cmd.Flag("db").Value.String()
-	if dbPathFlag != "" {
-		cfg.DBPath = dbPathFlag
 	}
 
 	// Open database

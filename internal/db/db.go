@@ -36,7 +36,7 @@ type DB struct {
 // wait and serialize rather than failing instantly. See docs/wrkq-wrkf-rpc.md.
 func Open(path string) (*DB, error) {
 	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("database path not specified (use --db flag or set WRKQ_DB_PATH)")
+		return nil, errors.New("database path not specified (use --db flag or set WRKQ_DB)")
 	}
 
 	// Ensure parent directory exists

@@ -85,7 +85,7 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	}
 	// Mirror the production persistent flags verbatim so the parity test and the
 	// transport DB override line up.
-	root.PersistentFlags().String("db", "", "Path to database file (overrides WRKQ_DB_PATH)")
+	root.PersistentFlags().String("db", "", "Database path or rpc:// locator (overrides WRKQ_DB and WRKQ_DB_PATH)")
 	root.PersistentFlags().String("principal-ref", "", "Caller principal for write attribution: agent:<id> or full agent ScopeRef")
 	root.PersistentFlags().String("as", "", "Alias for --principal-ref; accepts agent:<id> or a full agent ScopeRef")
 	root.PersistentFlags().String("project", "", "Project to operate under (overrides WRKQ_PROJECT_ROOT)")

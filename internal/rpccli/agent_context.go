@@ -141,16 +141,9 @@ func resolveAgentContextMode(cmd *cobra.Command, asJSON, human bool) (string, er
 }
 
 func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, resolveErr error) (*agentContextLookups, string, bool, string, string, string, string) {
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(dbOverride(cmd), false)
 	if err != nil {
 		return nil, "", false, fmt.Sprintf("config load failed: %v", err), "", "", ""
-	}
-	if dbFlag := cmd.Flag("db"); dbFlag != nil {
-		if v := dbFlag.Value.String(); v != "" {
-			if err := config.ApplyDBLocator(cfg, v, false); err != nil {
-				return nil, "", false, err.Error(), "", "", ""
-			}
-		}
 	}
 	if cfg.RemoteEndpoint != "" {
 		tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())

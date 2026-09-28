@@ -20,17 +20,24 @@ live configuration in this environment.
 Resolution order (`wrkqadm config doctor` reports the winning source):
 
 1. `--db` CLI flag.
-2. `WRKQ_DB` (production `wrkq` only) — a local path, or `rpc://host[:port]`
-   (default port `7171`) to use a remote canonical `wrkqd`.
+2. `WRKQ_DB` — a local path, or `rpc://host[:port]` (default port `7171`) to
+   use a remote canonical `wrkqd`. This is the isolation lever: point it at a
+   scratch file to keep a smoke test off the shared ledger.
 3. `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` — local-path-only compatibility
-   inputs; reject `rpc://`.
+   inputs; reject `rpc://`. They never override a locator from `WRKQ_DB`
+   (process env or `.env.local`) or `config.yaml` `db_locator`: when one of
+   those names a different database, commands refuse with an error naming
+   `WRKQ_DB` instead of silently using it. An explicit `--db` moots the
+   conflict; a matching path is honoured.
 4. Nearest `.env.local`, walking upward from the current directory.
 5. Platform `.env.local` at `$PRAESIDIUM_HOME/.env.local` (falls back to
    `~/praesidium/.env.local` when `PRAESIDIUM_HOME` is unset).
 6. `~/.config/wrkq/config.yaml`.
 7. Built-in default: if `.wrkq/wrkq.db` exists in the current directory it is
    used; otherwise there is no implicit path, and DB-needing commands fail
-   with a message naming `WRKQ_DB_PATH` and `--db`.
+   with a message naming `WRKQ_DB` and `--db`. `wrkqadm init` without
+   `--db` initializes the configured local locator and refuses an `rpc://`
+   one rather than silently creating `.wrkq/wrkq.db`.
 
 Admin/daemon path-owning surfaces are local-path-only by design and reject
 `rpc://`: `wrkqadm --db`, `wrkqd --db`, `wrkq server --db-path`.

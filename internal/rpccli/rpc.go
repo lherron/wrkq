@@ -31,14 +31,9 @@ func newRPCCmd() *cobra.Command {
 			if !stdio {
 				return fmt.Errorf("--stdio is required")
 			}
-			cfg, err := config.Load()
+			cfg, err := config.LoadWithDBOverride(dbOverride(cmd), false)
 			if err != nil {
 				return err
-			}
-			if override := dbOverride(cmd); override != "" {
-				if err := config.ApplyDBLocator(cfg, override, false); err != nil {
-					return err
-				}
 			}
 			if cfg.RemoteEndpoint != "" {
 				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv())

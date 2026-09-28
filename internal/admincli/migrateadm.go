@@ -56,18 +56,13 @@ func runMigrateAdm(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.LoadWithDBOverride(dbPathFlag, true)
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to load config: %w", err))
 	}
 
-	// Use database path from flag if provided
-	if dbPathFlag != "" {
-		cfg.DBPath = dbPathFlag
-	}
-
 	if cfg.DBPath == "" {
-		return exitError(2, fmt.Errorf("database path not specified (use --db flag or set WRKQ_DB_PATH)"))
+		return exitError(2, config.MissingDatabasePathError())
 	}
 
 	// Open database

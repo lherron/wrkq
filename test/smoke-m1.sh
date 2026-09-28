@@ -14,7 +14,8 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 
 # Test database path
-export WRKQ_DB_PATH="/tmp/wrkq-m1-smoke-test.db"
+export WRKQ_DB="/tmp/wrkq-m1-smoke-test.db"
+unset WRKQ_DB_PATH WRKQ_DB_PATH_FILE
 export WRKQ_PRINCIPAL_REF="agent:test-human"
 
 # Build the CLI
@@ -27,7 +28,7 @@ WRKQADM_BIN="./bin/wrkqadm"
 
 # Clean up and initialize
 echo -e "${YELLOW}Initializing test database...${NC}"
-rm -f "$WRKQ_DB_PATH"
+rm -f "$WRKQ_DB"
 $WRKQADM_BIN init --actor-slug test-human --actor-name "Test User" > /dev/null
 
 # Helper function to run a test
@@ -187,7 +188,7 @@ echo -e "  ${RED}Failed: $TESTS_FAILED${NC}"
 # Cleanup
 echo ""
 echo -e "${YELLOW}Cleaning up...${NC}"
-rm -f "$WRKQ_DB_PATH"
+rm -f "$WRKQ_DB"
 
 if [ $TESTS_FAILED -eq 0 ]; then
     echo -e "${GREEN}All tests passed!${NC}"

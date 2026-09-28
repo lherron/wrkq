@@ -50,7 +50,11 @@ func init() {
 
 func runConfigDoctor(cmd *cobra.Command, args []string) error {
 	// Load configuration
-	cfg, err := config.Load()
+	var dbFlagValue string
+	if dbFlag := cmd.Flag("db"); dbFlag != nil {
+		dbFlagValue = dbFlag.Value.String()
+	}
+	cfg, err := config.LoadWithDBOverride(dbFlagValue, true)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -67,6 +71,9 @@ func runConfigDoctor(cmd *cobra.Command, args []string) error {
 	}
 	if os.Getenv("WRKQ_DB_PATH_FILE") != "" {
 		dbSource = "environment variable WRKQ_DB_PATH_FILE"
+	}
+	if os.Getenv("WRKQ_DB") != "" {
+		dbSource = "environment variable WRKQ_DB"
 	}
 	if dbFlag := cmd.Flag("db"); dbFlag != nil && dbFlag.Changed {
 		dbSource = "command-line flag --db"

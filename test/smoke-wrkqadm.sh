@@ -24,7 +24,8 @@ TEST_ATTACH_DIR="/tmp/claude/test-wrkqadm-attach"
 rm -rf "$TEST_DB" "$TEST_ATTACH_DIR"
 mkdir -p "$(dirname "$TEST_DB")" "$TEST_ATTACH_DIR"
 
-export WRKQ_DB_PATH="$TEST_DB"
+export WRKQ_DB="$TEST_DB"
+unset WRKQ_DB_PATH WRKQ_DB_PATH_FILE
 export WRKQ_ATTACH_DIR="$TEST_ATTACH_DIR"
 export WRKQ_PRINCIPAL_REF="agent:local-human"
 
@@ -94,7 +95,7 @@ if [ ! -f "$TEST_SNAPSHOT" ]; then
 fi
 
 # Verify snapshot is usable
-WRKQ_DB_PATH="$TEST_SNAPSHOT" $WRKQ ls portal | grep -q "task-1"
+WRKQ_DB="$TEST_SNAPSHOT" $WRKQ ls portal | grep -q "task-1"
 echo "✓ Snapshot creation and verification works"
 rm -f "$TEST_SNAPSHOT"
 echo
