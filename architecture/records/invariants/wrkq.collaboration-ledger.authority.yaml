@@ -78,7 +78,6 @@ source:
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
   - architecture/records/invariants/wrkq.campaign.canonical-portfolio-authority.yaml
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
-  - architecture/records/risks/wrkq.collaboration-ledger.auto-reply-manual-race.yaml
   - internal/db/migrations/000059_envelope_admission.sql
   - internal/wrkqapi/rooms_admission_test.go
   - wrkq:T-07789

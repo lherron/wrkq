@@ -1,6 +1,6 @@
 id: wrkq.collaboration-ledger.auto-reply-manual-race
 kind: accepted_risk
-status: active
+status: retired
 owner_project: wrkq
 accepted_by: Lance
 date: 2026-08-31
@@ -33,5 +33,8 @@ reopen_when:
 source:
   - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
   - wrkq:T-07789
+  - hrc-runtime:T-08093
+  - hrc-runtime:T-08094
+  - wrkq:T-08095
 supersedes: []
 superseded_by: null
