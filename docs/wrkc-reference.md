@@ -98,9 +98,14 @@ First match wins:
 ## Obligations
 
 `--to X` → reply required: births X's seat if unborn, injects, gates X's turn end
-until X replies. `--to X --fyi` → no obligation: still INJECTED into X's seat if
-one is live (it drives a turn there), but never births an unborn seat and never
-gates. No `--to` → a log entry, nobody is presented.
+until X replies. `--to X --fyi` → no obligation, never gates: INJECTED into X's
+seat if one is live (it drives a turn there). A seat-absent fyi MAY birth, but it is
+never itself a wake: it waits for X's next attend. If X's session exists and X
+is driven for another reason (other mail, an open delivery, a reminder), that
+drive delivers the fyi through the seat door, which provisions a fresh runtime
+whose first turn carries it. A fyi never mints a session for a target that was
+never born.
+No `--to` → a log entry, nobody is presented.
 
 **Reply is the ack.** Saying `--to X` acks every pending or presented
 reply-required envelope in that room addressed to your own scope and sent from
