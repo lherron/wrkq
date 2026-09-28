@@ -983,3 +983,51 @@ func TestCampaignMembersFlagDefaultsAndRecursion(t *testing.T) {
 		}
 	})
 }
+
+func TestCampaignTreePrunesCampaignWithNoAdmittedMember(t *testing.T) {
+	f := newCampaignCLIFixture(t)
+	actor := "00000000-0000-4000-8000-0000000000a0"
+	// The campaign is kept through pruning so the overlay can attach its
+	// enrolled members — but only members the state selector admits count.
+	// One whose every member is completed is as empty as any other container.
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open fixture DB: %v", err)
+	}
+	s := store.New(database)
+	done, err := s.Containers.Create(actor, store.ContainerCreateParams{Slug: "wave-done", Kind: "directory", ParentUUID: &f.projectAUUID})
+	if err != nil {
+		t.Fatalf("create done campaign: %v", err)
+	}
+	if _, err := database.Exec("UPDATE containers SET campaign_state = 'active' WHERE uuid = ?", done.UUID); err != nil {
+		t.Fatalf("activate done campaign: %v", err)
+	}
+	finished, err := s.Tasks.Create(actor, store.CreateParams{
+		Slug: "finished-member", Title: "Finished member", ProjectUUID: f.campaignBUUID, State: "completed", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("create finished member: %v", err)
+	}
+	if _, err := database.Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", done.UUID, finished.UUID); err != nil {
+		t.Fatalf("enroll finished member: %v", err)
+	}
+	_ = database.Close()
+
+	out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "--pretty")
+	if err != nil {
+		t.Fatalf("project-rooted human tree failed: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "wave-done") {
+		t.Errorf("campaign with no admitted member still displayed: %q", out)
+	}
+	if !strings.Contains(out, "empty containers not displayed") {
+		t.Errorf("pruned campaign not counted as hidden: %q", out)
+	}
+	all, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "--pretty", "--all")
+	if err != nil {
+		t.Fatalf("--all human tree failed: %v\n%s", err, all)
+	}
+	if !strings.Contains(all, "wave-done") || !strings.Contains(all, "finished-member") {
+		t.Errorf("--all must still show the campaign and its member: %q", all)
+	}
+}

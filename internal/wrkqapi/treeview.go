@@ -199,6 +199,19 @@ func (a *API) attachEnrollmentsToNode(ctx context.Context, node *WrkqTreeNode, c
 			child.ExternalPath = "campaign:"
 		}
 	}
+	members, err := a.loadCampaignEnrollments(ctx, campaignUUID, campaignProject, filter)
+	if err != nil {
+		return err
+	}
+	node.Children = append(node.Children, members...)
+	return nil
+}
+
+// loadCampaignEnrollments returns the members enrolled in campaignUUID from
+// another container that the selector admits, labelled for the overlay. The
+// walk uses the same list to decide whether a campaign has anything to show,
+// so pruning and the overlay cannot disagree about a campaign's membership.
+func (a *API) loadCampaignEnrollments(ctx context.Context, campaignUUID, campaignProject string, filter treeFilter) ([]*WrkqTreeNode, error) {
 	rows, err := a.db.QueryContext(ctx, `
 		WITH RECURSIVE container_ancestors(task_uuid, uuid, parent_uuid, slug, kind) AS (
 		    SELECT t.uuid, c.uuid, c.parent_uuid, c.slug, c.kind
@@ -216,16 +229,17 @@ func (a *API) attachEnrollmentsToNode(ctx context.Context, node *WrkqTreeNode, c
 		 ORDER BY t.created_at, t.id
 	`, campaignUUID, campaignUUID)
 	if err != nil {
-		return NewInternalError(err)
+		return nil, NewInternalError(err)
 	}
 	defer func() { _ = rows.Close() }()
+	members := []*WrkqTreeNode{}
 	for rows.Next() {
 		var member WrkqTreeNode
 		var archivedAt, deletedAt, requestedBy, assigned, acknowledged, resolution *string
 		var residentProject string
 		if err := rows.Scan(&member.UUID, &member.ID, &member.Slug, &member.Title, &member.State, &member.WireCreatedAt,
 			&archivedAt, &deletedAt, &requestedBy, &assigned, &acknowledged, &resolution, &residentProject); err != nil {
-			return NewInternalError(err)
+			return nil, NewInternalError(err)
 		}
 		member.Type = "task"
 		member.RequestedByProjectID, member.AssignedProjectID = requestedBy, assigned
@@ -238,9 +252,12 @@ func (a *API) attachEnrollmentsToNode(ctx context.Context, node *WrkqTreeNode, c
 		if residentProject != campaignProject {
 			member.ExternalPath += residentProject
 		}
-		node.Children = append(node.Children, &member)
+		members = append(members, &member)
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, NewInternalError(err)
+	}
+	return members, nil
 }
 
 // treeTopLevelProjectID returns the friendly ID of the top-level project owning
@@ -344,9 +361,18 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 
 		// A campaign whose members are all enrolled holds no resident task, so
 		// empty-container pruning would drop it before the overlay could attach
-		// its members. Keep it whenever the overlay is going to run.
-		shouldShowContainer := !pruneEmptyContainers || node.hasVisibleContent || treeAlwaysShow(&node) ||
-			(keepCampaigns && node.isCampaign)
+		// its members. Keep it when the overlay will run AND will attach at least
+		// one member the selector admits; otherwise it is as empty as any other
+		// container.
+		if pruneEmptyContainers && keepCampaigns && node.isCampaign && !node.hasVisibleContent {
+			members, err := a.loadCampaignEnrollments(ctx, node.UUID, campaignProjectOf(childPath), filter)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			node.hasVisibleContent = len(members) > 0
+		}
+		shouldShowContainer := !pruneEmptyContainers || node.hasVisibleContent || treeAlwaysShow(&node)
 		if shouldShowContainer {
 			root.Children = append(root.Children, &node)
 			root.hasVisibleContent = true
