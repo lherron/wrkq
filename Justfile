@@ -359,33 +359,33 @@ sync-downstream:
 sync-downstream-test:
   bun test test/sync-downstream.test.ts
 
-# Validate the launchd job database resolver behind just install's restart probe (T-08927).
+# Validate the launchd job database resolver behind just install's restart probe (T-08927)
+# and the install-launchd overwrite guard (T-08044).
 install-probe-test:
-  bun test test/t08927_install_job_db.test.ts
+  bun test test/t08927_install_job_db.test.ts test/t08044_install_launchd_guard.test.ts
 
-# Install the wrkq launchd agent plist
-install-launchd:
+# Install the wrkq launchd agent plist. Refuses (T-08044) when an installed plist
+# differs at all — on mini that is the canonical tailnet wrkqd, which this repo's
+# loopback dev plist would downgrade. Pass --force to overwrite anyway.
+install-launchd *flags:
   #!/usr/bin/env bash
   set -euo pipefail
   src="launchd/com.praesidium.wrkq-server.plist"
   dst="$HOME/Library/LaunchAgents/com.praesidium.wrkq-server.plist"
-  mkdir -p "$HOME/Library/LaunchAgents"
-  cp "$src" "$dst"
-  echo "✓ Installed $dst"
-  echo "Bootstrap with:"
-  echo "  launchctl bootstrap gui/$(id -u) $dst"
-  echo "  launchctl kickstart -k gui/$(id -u)/com.praesidium.wrkq-server"
+  LAUNCHD_INSTALL_OVERRIDE="just install-launchd --force" bash scripts/launchd-install.sh "$src" "$dst" {{flags}}
+  # kickstart -k keeps the loaded job definition; a changed plist needs bootout + bootstrap.
+  echo "Load it with:"
+  echo "  launchctl bootout gui/$(id -u)/com.praesidium.wrkq-server 2>/dev/null; launchctl bootstrap gui/$(id -u) $dst"
 
-# Install the llama-server launchd plist (dense embeddings for search index)
-install-llama-launchd:
+# Install the llama-server launchd plist (dense embeddings for search index).
+# Same guard as install-launchd: a differing installed plist needs --force.
+install-llama-launchd *flags:
   #!/usr/bin/env bash
   set -euo pipefail
   src="launchd/com.praesidium.llama-server.plist"
   dst="$HOME/Library/LaunchAgents/com.praesidium.llama-server.plist"
-  mkdir -p "$HOME/Library/LaunchAgents"
   mkdir -p "$HOME/praesidium/var/logs/llama-cpp"
-  cp "$src" "$dst"
-  echo "✓ Installed $dst"
+  LAUNCHD_INSTALL_OVERRIDE="just install-llama-launchd --force" bash scripts/launchd-install.sh "$src" "$dst" {{flags}}
   echo "Bootstrap with:"
   echo "  launchctl bootstrap gui/$(id -u) $dst"
   echo "  launchctl kickstart -k gui/$(id -u)/com.praesidium.llama-server"

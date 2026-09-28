@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Fabricated (T-08044) from mini's live job as captured in
+     test/fixtures/launchctl-print/mini-wrkq-server-db-arg.txt. Not a copy of the file. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.praesidium.wrkq-server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/lherron/.local/bin/wrkqd</string>
+    <string>--addr</string>
+    <string>100.117.215.92:7171</string>
+    <string>--db</string>
+    <string>/Users/lherron/.praesidium-data/wrkq/wrkq.db</string>
+    <string>--node-tokens-file</string>
+    <string>/Users/lherron/.config/wrkq/node-tokens</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/lherron</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/Users/lherron/.bun/bin:/Users/lherron/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>WRKQ_ATTACH_DIR</key>
+    <string>/Users/lherron/.praesidium-data/wrkq/attachments</string>
+    <key>WRKF_HOOK_CATALOG</key>
+    <string>/Users/lherron/praesidium/var/wrkf/bundles/agent-tasker-s7/hook-catalog.json</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>/Users/lherron/praesidium</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/lherron/praesidium/var/logs/wrkqd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/lherron/praesidium/var/logs/wrkqd.log</string>
+</dict>
+</plist>
