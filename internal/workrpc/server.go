@@ -124,7 +124,7 @@ func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool
 		}
 		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: protocolError(codeMethodNotFound, "method not found", nil)}, true
 	}
-	result, err := callStdoutPure(ctx, req.Method, handler, req.Params)
+	result, err := callStdoutPure(withMethod(ctx, req.Method), req.Method, handler, req.Params)
 	if err != nil {
 		if req.isNotification() {
 			return Response{}, true

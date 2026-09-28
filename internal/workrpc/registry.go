@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 
@@ -724,33 +725,43 @@ func obligationStatusHandler(fn func(context.Context, wrkfapi.ObligationStatusPa
 	})
 }
 
+type methodContextKey struct{}
+
+// withMethod records the dispatched JSON-RPC method so a params refusal can
+// name it.
+func withMethod(ctx context.Context, method string) context.Context {
+	return context.WithValue(ctx, methodContextKey{}, method)
+}
+
 func decodeParams(ctx context.Context, raw json.RawMessage, out any) error {
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
 	}
 	// T-07647: an unknown key is usually a misspelled selector, and a misspelled
-	// selector silently answers a DIFFERENT question. Refusing outright (be9e8ca)
-	// took the HRC kicker down fleet-wide within minutes — its ledger tail sends
-	// a key no server struct declares — so unknown keys are now NAMED in the
-	// server log and then accepted leniently. Refusal returns once every
-	// consumer's params have been audited against the Go structs.
+	// selector silently answers a DIFFERENT question, so it is refused by name.
+	// The first refusal (be9e8ca) took the HRC kicker down fleet-wide; refusal
+	// returned only after every consumer was audited under a warn-only soak.
+	// The attributed log line stays so a caller broken by the refusal is
+	// diagnosable from wrkqd.log in one grep.
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
-		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			caller := "local"
-			if node, ok := nodeauth.FromContext(ctx); ok {
-				caller = "node=" + node
-			}
-			log.Printf("workrpc: params for %T from %s carry %s (accepted; T-07647 audit)", out, caller, strings.TrimPrefix(err.Error(), "json: "))
-		} else {
+		if !strings.HasPrefix(err.Error(), "json: unknown field ") {
 			return NewValidationError("invalid params", nil)
 		}
-	} else {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return NewValidationError("invalid params", nil)
+		field := strings.TrimPrefix(err.Error(), "json: ")
+		method, _ := ctx.Value(methodContextKey{}).(string)
+		caller := "local"
+		if node, ok := nodeauth.FromContext(ctx); ok {
+			caller = "node=" + node
+		}
+		params := strings.TrimPrefix(fmt.Sprintf("%T", out), "*")
+		log.Printf("workrpc: params for %s %s from %s carry %s (refused; T-07647 audit)", method, params, caller, field)
+		return NewValidationError(fmt.Sprintf("invalid params: %s for %s (%s)", field, method, params), map[string]any{
+			"method": method,
+			"params": params,
+			"field":  strings.Trim(strings.TrimPrefix(field, "unknown field "), `"`),
+		})
 	}
 	return nil
 }
