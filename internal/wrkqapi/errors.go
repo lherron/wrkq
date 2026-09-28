@@ -95,8 +95,10 @@ func NewConflictError(msg string, data any) *DomainError {
 	return newError(CodeConflict, msg, true, data, nil)
 }
 
-// NewForbiddenError reports an authenticated caller crossing a resource
-// ownership boundary (WRKQ_FORBIDDEN).
+// NewForbiddenError reports a caller crossing a resource ownership boundary
+// (WRKQ_FORBIDDEN). The caller's principal is asserted, not authenticated, so
+// this is a coordination guard, not a security boundary
+// (wrkq.attribution.caller-asserted).
 func NewForbiddenError(msg string, data any) *DomainError {
 	if msg == "" {
 		msg = "forbidden"
