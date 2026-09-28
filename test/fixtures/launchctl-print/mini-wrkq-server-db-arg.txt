@@ -8,20 +8,19 @@ gui/501/com.praesidium.wrkq-server = {
 	arguments = {
 		/Users/lherron/.local/bin/wrkqd
 		--addr
-		0.0.0.0:7171
+		100.117.215.92:7171
 		--db
 		/Users/lherron/.praesidium-data/wrkq/wrkq.db
 		--node-tokens-file
-		/Users/lherron/.config/wrkq/node-tokens.json
+		/Users/lherron/.config/wrkq/node-tokens
 	}
 
-	working directory = /Users/lherron/praesidium/wrkq
+	working directory = /Users/lherron/praesidium
 
-	stdout path = /Users/lherron/praesidium/var/logs/wrkq-server.log
-	stderr path = /Users/lherron/praesidium/var/logs/wrkq-server.err.log
+	stdout path = /Users/lherron/praesidium/var/logs/wrkqd.log
+	stderr path = /Users/lherron/praesidium/var/logs/wrkqd.log
 	inherited environment = {
-		SSH_AUTH_SOCK => /var/run/com.apple.launchd.abc/Listeners
-		WRKQ_DB_PATH => /Users/lherron/praesidium/var/db/wrkq.db
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.2Ife6OazrP/Listeners
 	}
 
 	default environment = {
@@ -29,13 +28,55 @@ gui/501/com.praesidium.wrkq-server = {
 	}
 
 	environment = {
-		PATH => /Users/lherron/.local/bin:/opt/homebrew/bin:/usr/bin:/bin
+		OSLogRateLimit => 64
+		WRKQ_ATTACH_DIR => /Users/lherron/.praesidium-data/wrkq/attachments
+		WRKF_HOOK_CATALOG => /Users/lherron/praesidium/var/wrkf/bundles/agent-tasker-s7/hook-catalog.json
+		PATH => /opt/homebrew/bin:/Users/lherron/.bun/bin:/Users/lherron/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 		HOME => /Users/lherron
 		XPC_SERVICE_NAME => com.praesidium.wrkq-server
 	}
 
-	domain = gui/501 [100026]
-	runs = 3
-	pid = 4242
+	domain = gui/501 [100024]
+	asid = 100024
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 9797
 	immediate reason = speculative
+	forks = 0
+	execs = 1
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = (never exited)
+
+	resource coalition = {
+		ID = 134353
+		type = resource
+		state = active
+		active count = 1
+		name = com.praesidium.wrkq-server
+	}
+
+	jetsam coalition = {
+		ID = 134354
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.praesidium.wrkq-server
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = keepalive | runatload | inferred program
 }
