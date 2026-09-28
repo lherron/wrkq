@@ -261,17 +261,25 @@ func runWrkpJustObserved(cmd *cobra.Command, justBin string, args []string, inv 
 	return code
 }
 
+// resolveWrkpJustProject resolves the project a just run posts under from the
+// justfile's checkout (the directory itself outside git), through the same
+// resolver the git hooks use, so a run in a linked worktree posts to its owner.
+func resolveWrkpJustProject(ctx context.Context, tr Transport, git wrkpGitRunner, justfile string) (wrkpGitProject, string, error) {
+	dir := filepath.Dir(justfile)
+	repo, err := git(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		repo = dir
+	}
+	project, err := resolveWrkpGitProject(ctx, tr, git, dir, repo, "")
+	return project, repo, err
+}
+
 func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile string, args []string, code int, signalName string, started time.Time, duration time.Duration) error {
 	// A fresh context: the command's own is cancelled by the ^C that may have
 	// ended the run, and the fact of that run is still worth posting.
 	ctx, cancel := context.WithTimeout(context.Background(), wrkpJustTimeout)
 	defer cancel()
 
-	dir := filepath.Dir(justfile)
-	repo, err := runWrkpGitCommand(ctx, dir, "rev-parse", "--show-toplevel")
-	if err != nil {
-		repo = dir
-	}
 	principal, err := actorFlag(cmd)
 	if err != nil {
 		return err
@@ -281,7 +289,7 @@ func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile st
 		return err
 	}
 	defer closeFn()
-	project, err := resolveWrkpGitProject(ctx, tr, repo, "", "")
+	project, repo, err := resolveWrkpJustProject(ctx, tr, runWrkpGitCommand, justfile)
 	if err != nil {
 		return err
 	}

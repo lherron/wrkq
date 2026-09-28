@@ -410,15 +410,15 @@ func TestWrkpGitG7ProjectResolution(t *testing.T) {
 	tildeRoot := "~/repos/repo"
 	tr := &wrkpGitFakeTransport{projects: []projectEntry{wrkpGitProjectFixture("repo", "P-00001", tildeRoot)}}
 	for _, top := range []string{realRoot, symlink} {
-		project, err := resolveWrkpGitProject(context.Background(), tr, top, "", "")
+		project, err := resolveWrkpGitProject(context.Background(), tr, runWrkpGitCommand, top, top, "")
 		if err != nil || project.Slug != "repo" {
 			t.Fatalf("resolve %s = %+v, %v", top, project, err)
 		}
 	}
-	if _, err := resolveWrkpGitProject(context.Background(), tr, home, "", ""); err == nil || !strings.Contains(err.Error(), "not a registered project root") {
+	if _, err := resolveWrkpGitProject(context.Background(), tr, runWrkpGitCommand, home, home, ""); err == nil || !strings.Contains(err.Error(), "not a registered project root") {
 		t.Fatalf("unregistered error = %v", err)
 	}
-	project, err := resolveWrkpGitProject(context.Background(), tr, home, "", "P-00001")
+	project, err := resolveWrkpGitProject(context.Background(), tr, runWrkpGitCommand, home, home, "P-00001")
 	if err != nil || project.Slug != "repo" {
 		t.Fatalf("override = %+v, %v", project, err)
 	}
@@ -528,6 +528,17 @@ func TestWrkpGitG9LinkedWorktreeResolvesOwningCheckout(t *testing.T) {
 		t.Fatalf("registered worktree: err=%v posts=%v", err, tr.posts)
 	}
 
+	// `wrkp just` resolves through the same lookup: a justfile in the
+	// worktree posts to the owning project.
+	tr = &wrkpGitFakeTransport{projects: []projectEntry{wrkpGitProjectFixture("repo", "P-00001", link)}}
+	justfile := filepath.Join(sub, "justfile")
+	if err := os.WriteFile(justfile, []byte("default:\n\ttrue\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if project, repo, err := resolveWrkpJustProject(context.Background(), tr, runWrkpGitCommand, justfile); err != nil || project.Slug != "repo" || filepath.Base(repo) != filepath.Base(worktree) {
+		t.Fatalf("wrkp just from worktree = %+v repo=%s err=%v", project, repo, err)
+	}
+
 	// A relative common dir resolves against the workdir; one that is not the
 	// ".git" of a checkout (or does not exist) nominates nothing.
 	canonicalMain, err := canonicalWrkpGitRoot(main)
@@ -550,7 +561,7 @@ func TestWrkpGitG9LinkedWorktreeResolvesOwningCheckout(t *testing.T) {
 			}
 			return runWrkpGitCommand(ctx, dir, args...)
 		}
-		if owner := wrkpGitOwningCheckout(context.Background(), deps, sub); owner != want {
+		if owner := wrkpGitOwningCheckout(context.Background(), deps.git, sub); owner != want {
 			t.Fatalf("common dir %q nominated %q, want %q", common, owner, want)
 		}
 	}

@@ -34,13 +34,16 @@ type wrkpGitRef struct {
 	RemoteSHA string
 }
 
+// wrkpGitRunner runs one git command in a directory and returns trimmed stdout.
+type wrkpGitRunner func(context.Context, string, ...string) (string, error)
+
 type wrkpGitDependencies struct {
 	principal func(*cobra.Command) (string, error)
 	open      func(*cobra.Command) (Transport, func(), error)
 	workdir   func() (string, error)
 	hostname  func() (string, error)
 	now       func() time.Time
-	git       func(context.Context, string, ...string) (string, error)
+	git       wrkpGitRunner
 }
 
 func defaultWrkpGitDependencies() wrkpGitDependencies {
@@ -200,12 +203,11 @@ func prepareWrkpGit(cmd *cobra.Command, deps wrkpGitDependencies) (string, Trans
 	if err != nil {
 		return "", nil, nil, wrkpGitProject{}, "", "", err
 	}
-	owner := wrkpGitOwningCheckout(cmd.Context(), deps, repo)
 	tr, closeFn, err := deps.open(cmd)
 	if err != nil {
 		return "", nil, nil, wrkpGitProject{}, "", "", err
 	}
-	project, err := resolveWrkpGitProject(cmd.Context(), tr, toplevel, owner, wrkpProjectOverride(cmd))
+	project, err := resolveWrkpGitProject(cmd.Context(), tr, deps.git, repo, toplevel, wrkpProjectOverride(cmd))
 	if err != nil {
 		closeFn()
 		return "", nil, nil, wrkpGitProject{}, "", "", err
@@ -230,20 +232,20 @@ func wrkpProjectOverride(cmd *cobra.Command) string {
 // may post there. The candidate must be the parent of a ".git" common directory
 // and must itself report that path as its top level, so a bare, malformed, or
 // inaccessible common directory yields no candidate rather than a guess.
-func wrkpGitOwningCheckout(ctx context.Context, deps wrkpGitDependencies, repo string) string {
-	common, err := deps.git(ctx, repo, "rev-parse", "--git-common-dir")
+func wrkpGitOwningCheckout(ctx context.Context, git wrkpGitRunner, workdir string) string {
+	common, err := git(ctx, workdir, "rev-parse", "--git-common-dir")
 	if err != nil || common == "" {
 		return ""
 	}
 	if !filepath.IsAbs(common) {
-		common = filepath.Join(repo, common)
+		common = filepath.Join(workdir, common)
 	}
 	common, err = canonicalWrkpGitRoot(common)
 	if err != nil || filepath.Base(common) != ".git" {
 		return ""
 	}
 	candidate := filepath.Dir(common)
-	top, err := deps.git(ctx, candidate, "rev-parse", "--show-toplevel")
+	top, err := git(ctx, candidate, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return ""
 	}
@@ -253,10 +255,12 @@ func wrkpGitOwningCheckout(ctx context.Context, deps wrkpGitDependencies, repo s
 	return candidate
 }
 
-// resolveWrkpGitProject matches the active checkout against registered project
-// roots. Only when the checkout itself matches nothing does it fall back to the
-// owning main checkout of a linked worktree (owner, "" when not applicable).
-func resolveWrkpGitProject(ctx context.Context, tr Transport, toplevel, owner, override string) (wrkpGitProject, error) {
+// resolveWrkpGitProject is the one project lookup for every wrkp producer that
+// runs in a checkout (git hooks, just runs). It matches the active checkout's
+// top level against registered project roots; only when that matches nothing
+// does it ask git, from workdir, for the owning main checkout of a linked
+// worktree and match that instead.
+func resolveWrkpGitProject(ctx context.Context, tr Transport, git wrkpGitRunner, workdir, toplevel, override string) (wrkpGitProject, error) {
 	projects, err := listWrkpGitProjects(ctx, tr)
 	if err != nil {
 		return wrkpGitProject{}, err
@@ -275,9 +279,11 @@ func resolveWrkpGitProject(ctx context.Context, tr Transport, toplevel, owner, o
 	}
 	label := toplevel
 	matches := wrkpGitRootMatches(projects, canonicalTop)
-	if len(matches) == 0 && owner != "" && owner != canonicalTop {
-		label = fmt.Sprintf("%s (linked worktree of %s)", toplevel, owner)
-		matches = wrkpGitRootMatches(projects, owner)
+	if len(matches) == 0 {
+		if owner := wrkpGitOwningCheckout(ctx, git, workdir); owner != "" && owner != canonicalTop {
+			label = fmt.Sprintf("%s (linked worktree of %s)", toplevel, owner)
+			matches = wrkpGitRootMatches(projects, owner)
+		}
 	}
 	if len(matches) == 1 {
 		return matches[0], nil

@@ -110,7 +110,8 @@ hands each invocation to `wrkp just`. A justfile opts in with one line:
 ```
 
 Then each top-level recipe run posts `run.settled` to the project whose
-registered root holds the justfile, threaded under the caller's task when the
+registered root holds the justfile (a linked worktree resolves to its owning
+main checkout, as for the Git hooks), threaded under the caller's task when the
 seat's scope names a task in that project. Attributes, in order: `source`
 (`wrkp-just`), `node`, `recipe`, `repo`, `status` (just's exit code, 128+N for
 a signal), `duration_ms`, `signal` (when signalled), `argv`, `justfile`,
