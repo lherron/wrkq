@@ -1,5 +1,50 @@
 package workflow
 
+import "strings"
+
+const (
+	WatchTargetTask     = "task"
+	WatchTargetInstance = "instance"
+	WatchTargetRun      = "run"
+
+	WatchUntilTerminal  = "terminal"
+	WatchUntilClosed    = "closed"
+	WatchUntilWaiting   = "waiting"
+	WatchUntilSuspended = "suspended"
+
+	WatchClassPending   = "pending"
+	WatchClassSuccess   = "success"
+	WatchClassWaiting   = "waiting"
+	WatchClassSuspended = "suspended"
+	WatchClassFailure   = "failure"
+	WatchClassCancelled = "cancelled"
+)
+
+func NormalizeWatchUntil(until string) (string, error) {
+	until = strings.ToLower(strings.TrimSpace(until))
+	if until == "" {
+		return WatchUntilTerminal, nil
+	}
+	switch until {
+	case WatchUntilTerminal, WatchUntilClosed, WatchUntilWaiting, WatchUntilSuspended:
+		return until, nil
+	default:
+		return "", validationError("until", "invalid watch predicate", "closed|suspended|terminal|waiting", []string{WatchUntilClosed, WatchUntilSuspended, WatchUntilTerminal, WatchUntilWaiting}, "set --until to closed, suspended, terminal, or waiting")
+	}
+}
+
+func InferWatchTargetKind(selector string) string {
+	selector = strings.TrimSpace(selector)
+	switch {
+	case strings.HasPrefix(selector, "run_"):
+		return WatchTargetRun
+	case strings.HasPrefix(selector, "wfi_"):
+		return WatchTargetInstance
+	default:
+		return WatchTargetTask
+	}
+}
+
 type WatchTarget struct {
 	Kind       string `json:"kind"`
 	Selector   string `json:"selector"`

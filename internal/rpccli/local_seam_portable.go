@@ -3,9 +3,8 @@
 package rpccli
 
 import (
-	"fmt"
-
 	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/localseam"
 	"github.com/spf13/cobra"
 )
 
@@ -14,23 +13,10 @@ import (
 // bootstrap or DB work — rather than surfacing later as a driver-level failure.
 // Remote (`rpc://`) operation is unaffected.
 
-// ErrLocalLocatorUnsupported names the refusal so callers and tests can match it
-// without string-matching a message.
-type ErrLocalLocatorUnsupported struct{ Locator string }
+// ErrLocalLocatorUnsupported is the shared portable refusal (see localseam).
+type ErrLocalLocatorUnsupported = localseam.ErrLocalLocatorUnsupported
 
-func (e *ErrLocalLocatorUnsupported) Error() string {
-	locator := e.Locator
-	if locator == "" {
-		locator = "(none configured)"
-	}
-	return fmt.Sprintf(
-		"this wrkq build is remote-only and cannot open the local database %q; "+
-			"set WRKQ_DB to an rpc:// endpoint (for example rpc://host:7171), "+
-			"or use a wrkq built with -tags wrkq_local for local-file operation",
-		locator)
-}
-
-func refuseLocal(locator string) error { return &ErrLocalLocatorUnsupported{Locator: locator} }
+func refuseLocal(locator string) error { return localseam.Refuse("wrkq", locator) }
 
 func openLocalTransport(locator string) (Transport, *config.Config, func(), error) {
 	return nil, nil, nil, refuseLocal(locator)

@@ -112,20 +112,5 @@ func openConfiguredTransportWithConfig(cmd *cobra.Command, cfg *config.Config, p
 		}
 		return tr, func() { _ = tr.Close() }, nil
 	}
-	tr, err := workrpcclient.NewConfiguredInProcess(
-		cfg.DBLocator,
-		flagHookCatalog,
-		workrpcclient.LocalServerOptions{
-			Entrypoint:              "wrkf",
-			DefaultPrincipalRef:     principalRef,
-			WrkqDefaultPrincipalRef: principalRef,
-			UseWrkqDefault:          true,
-			DefaultRole:             roleDefault(),
-		},
-		workrpcclient.WrkfProfile,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	return tr, func() { _ = tr.Close() }, nil
+	return openLocalTransport(cfg, principalRef)
 }

@@ -1248,14 +1248,7 @@ func rpcCmd() *cobra.Command {
 				}
 				return workrpcclient.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, workrpcclient.TokenFromEnv())
 			}
-			return workrpcclient.ServeConfiguredLocalStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.DBLocator, flagHookCatalog, workrpcclient.LocalServerOptions{
-				Entrypoint:              "wrkf",
-				ServerVersion:           Version,
-				DefaultPrincipalRef:     principalRef,
-				WrkqDefaultPrincipalRef: principalRef,
-				UseWrkqDefault:          true,
-				DefaultRole:             roleDefault(),
-			})
+			return serveLocalStdio(cmd.Context(), cfg, principalRef)
 		},
 	}
 	cmd.Flags().BoolVar(&stdio, "stdio", false, "Use stdin/stdout JSON-RPC transport")
