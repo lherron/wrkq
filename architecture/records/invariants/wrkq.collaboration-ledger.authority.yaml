@@ -80,6 +80,7 @@ source:
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
   - internal/db/migrations/000059_envelope_admission.sql
   - internal/wrkqapi/rooms_admission_test.go
+  - internal/wrkqapi/rooms_undelivered_expiry_test.go
   - wrkq:T-07789
   - hrc-runtime:T-08401
 required_tests:
@@ -87,7 +88,12 @@ required_tests:
   - T-07612 consumer and cutover bundle
   - TestEnvelopeTTLExpiryMaterializesFromPendingAndDeferredWithExactObserver
   - TestManifestScopedReplyDischargesExactSetAtomically
-  - T-08401 implicit expiry boundary, explicit-deadline precedence, receipt exemption, transaction-race, and idempotent terminal-event gates
+  - TestUndeliveredEnvelopeFailsAtServerTwentyFourHours
+  - TestUndeliveredFYIWithoutCandidateFailsOnEventObservationBeyondCursor
+  - TestReceiptBeforeExpiryWinsAndExpiryBeforeReceiptRefuses
+  - TestReceiptedDeferredEnvelopeIsPermanentlyExempt
+  - TestExplicitAndImplicitDeadlinePrecedence
+  - TestConcurrentObservationsWriteExactlyOneFailure
   - T-08401 virgin and ongoing event-cursor gates prove expiry failures remain beyond the returned high-water and reach sender-notice and cleanup consumers exactly once
 last_verified:
   date: 2026-09-02

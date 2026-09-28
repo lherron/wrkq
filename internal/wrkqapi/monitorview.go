@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -104,8 +105,23 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 	if err := rows.Err(); err != nil {
 		return nil, NewInternalError(fmt.Errorf("iterate monitor events: %w", err))
 	}
+	if err := rows.Close(); err != nil {
+		return nil, NewInternalError(fmt.Errorf("close monitor events: %w", err))
+	}
+	// The page and its high-water are fixed; only now does the observation
+	// materialize envelope expiry, so every event it appends lands strictly
+	// beyond the returned cursor for the next ordinary poll. The LastN
+	// resolution above performs none. eventsView carries no caller principal,
+	// so the server's own identity attributes the maintenance.
+	if _, err := a.store.Rooms.ExpireDueEnvelopes(monitorMaintenanceAttribution); err != nil {
+		return nil, NewInternalError(err)
+	}
 	return view, nil
 }
+
+// monitorMaintenanceAttribution attributes expiry materialized by an
+// anonymous event observation, as agent:wrkf-system does for workflow writes.
+var monitorMaintenanceAttribution = attribution.Attribution{PrincipalRef: "agent:wrkq-system"}
 
 // MonitorStateView evaluates the --until condition ONCE against current task state
 // and returns whether it is met plus the still-unmet task friendly IDs. It never

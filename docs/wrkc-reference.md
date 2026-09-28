@@ -135,7 +135,12 @@ continues to report the envelope's stored `deferred` state together with its
 
 `say --ttl 30s` gives addressed mail a server-normalized expiry. If it has no
 presentation receipt by then, the next authoritative read materializes terminal
-`expired`; a deferral does not extend the TTL. Ordinary addressed mail is
+`expired`; a deferral does not extend the TTL. Independently, addressed mail
+(reply-required or fyi) that no presentation receipt has reached within 24
+hours of its server `createdAt` fails `undeliverable` on the next authoritative
+read or event-tail poll, and its sender gets the usual failure notice. A `--ttl`
+later than 24h does not extend that bound, and any receipt exempts the envelope
+for good. Ordinary addressed mail is
 steered into the addressee's live turn when its harness accepts steering,
 otherwise presented at the next turn boundary; an idle seat starts a turn.
 `say --preempt` asks HRC to interrupt the addressee's active turn; it is honored

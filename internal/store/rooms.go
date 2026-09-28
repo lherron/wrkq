@@ -1116,31 +1116,97 @@ func (rs *RoomStore) BirthEnvelope(scopeRef string) (*domain.Envelope, error) {
 	return &rows[0], nil
 }
 
+// envelopeExpiryDueSQL selects, over alias e, the addressed live envelopes
+// that no presentation receipt has ever reached: the only rows either deadline
+// can end. A committed receipt permanently exempts an envelope from both.
+const envelopeExpiryDueSQL = `e.state IN ('pending','deferred') AND e.to_principal_ref IS NOT NULL
+	AND NOT EXISTS (SELECT 1 FROM envelope_presentations p WHERE p.envelope_uuid = e.uuid)`
+
+// envelopeExpiryKindSQL classifies a candidate by server time. An explicit
+// expires_at strictly earlier than the implicit undelivered horizon
+// (created_at + 24h) materializes expired/ttl; otherwise the horizon
+// materializes failed/undeliverable, so a later explicit deadline never extends
+// it and an equal one yields to it. An unparseable created_at has no horizon.
+const envelopeExpiryKindSQL = `CASE
+	WHEN e.expires_at IS NOT NULL AND e.expires_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
+	  AND (strftime('%Y-%m-%dT%H:%M:%SZ', e.created_at, '+24 hours') IS NULL
+	    OR e.expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', e.created_at, '+24 hours'))
+	  THEN 'expired'
+	WHEN strftime('%Y-%m-%dT%H:%M:%SZ', e.created_at, '+24 hours') <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
+	  THEN 'undeliverable'
+	END`
+
+// EnvelopeTTLExpiredDetail is the envelope.failed detail that marks a failure
+// written by the implicit undelivered horizon rather than by a reader.
+const EnvelopeTTLExpiredDetail = "envelope_ttl_expired"
+
+// envelopeExpiryDueTx re-reads, inside the caller's transaction, whether one
+// envelope is due and which terminal it takes ("" when not due).
+func envelopeExpiryDueTx(tx *sql.Tx, envelopeUUID string) (string, error) {
+	var kind sql.NullString
+	err := tx.QueryRow(`SELECT `+envelopeExpiryKindSQL+` FROM envelopes e
+		WHERE e.uuid = ? AND `+envelopeExpiryDueSQL, envelopeUUID).Scan(&kind)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to check envelope expiry: %w", err)
+	}
+	return kind.String, nil
+}
+
+// materializeEnvelopeExpiryTx writes the terminal a due envelope takes. It is
+// the single terminal-write path for both deadlines, shared by the global
+// sweep and presentation recording.
+func materializeEnvelopeExpiryTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, current *domain.Envelope, kind string) (*domain.Envelope, error) {
+	switch kind {
+	case "expired":
+		return disposeEnvelopeTx(tx, ew, attr, current, EnvelopeDisposition{State: domain.EnvelopeStateExpired, Reason: "ttl"}, 0)
+	case "undeliverable":
+		return failEnvelopeTx(tx, ew, attr, current, domain.EnvelopeFailureUndeliverable, "wrkq", "", EnvelopeTTLExpiredDetail)
+	}
+	return nil, fmt.Errorf("unknown envelope expiry kind %q", kind)
+}
+
 // ExpireDueEnvelopes materializes server-clock expiry exactly once on the
-// authoritative observation paths. Presentation receipts permanently exclude
-// an envelope from TTL expiry.
+// authoritative observation paths: an earlier explicit expires_at as
+// expired/ttl, and the implicit created_at + 24h undelivered horizon as
+// failed/undeliverable. Presentation receipts permanently exclude an envelope
+// from both. A read-only probe runs first so an observation with nothing due
+// never takes the writer lock; the transaction re-evaluates every row.
 func (rs *RoomStore) ExpireDueEnvelopes(attr attribution.Attribution) (int, error) {
 	if err := requireAttribution(attr); err != nil {
 		return 0, err
 	}
+	var anyDue int
+	if err := rs.store.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM envelopes e WHERE ` +
+		envelopeExpiryDueSQL + ` AND (` + envelopeExpiryKindSQL + `) IS NOT NULL)`).Scan(&anyDue); err != nil {
+		return 0, fmt.Errorf("failed to probe expired envelopes: %w", err)
+	}
+	if anyDue == 0 {
+		return 0, nil
+	}
 	expired := 0
 	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		rows, err := tx.Query(`SELECT ` + envelopeColumns + ` FROM envelopes e
-			WHERE e.state IN ('pending','deferred') AND e.expires_at IS NOT NULL
-			  AND e.expires_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
-			  AND NOT EXISTS (SELECT 1 FROM envelope_presentations p WHERE p.envelope_uuid = e.uuid)
+		rows, err := tx.Query(`SELECT ` + envelopeColumns + `, ` + envelopeExpiryKindSQL + ` FROM envelopes e
+			WHERE ` + envelopeExpiryDueSQL + ` AND (` + envelopeExpiryKindSQL + `) IS NOT NULL
 			ORDER BY e.id`)
 		if err != nil {
 			return fmt.Errorf("failed to find expired envelopes: %w", err)
 		}
-		var due []*domain.Envelope
+		type dueEnvelope struct {
+			envelope *domain.Envelope
+			kind     string
+		}
+		var due []dueEnvelope
 		for rows.Next() {
-			envelope, serr := scanEnvelope(rows)
+			var kind string
+			envelope, serr := scanEnvelope(appendScan{rows, &kind})
 			if serr != nil {
 				_ = rows.Close()
 				return serr
 			}
-			due = append(due, envelope)
+			due = append(due, dueEnvelope{envelope, kind})
 		}
 		if err := rows.Close(); err != nil {
 			return err
@@ -1148,8 +1214,8 @@ func (rs *RoomStore) ExpireDueEnvelopes(attr attribution.Attribution) (int, erro
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		for _, envelope := range due {
-			if _, err := disposeEnvelopeTx(tx, ew, attr, envelope, EnvelopeDisposition{State: domain.EnvelopeStateExpired, Reason: "ttl"}, 0); err != nil {
+		for _, d := range due {
+			if _, err := materializeEnvelopeExpiryTx(tx, ew, attr, d.envelope, d.kind); err != nil {
 				return err
 			}
 			expired++
@@ -1551,19 +1617,18 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 		if domain.IsEnvelopeTerminal(current.State) {
 			return &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: "present"}
 		}
-		var due int
-		if err := tx.QueryRow(`SELECT CASE WHEN expires_at IS NOT NULL
-			AND expires_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
-			AND NOT EXISTS (SELECT 1 FROM envelope_presentations WHERE envelope_uuid = ?)
-			THEN 1 ELSE 0 END FROM envelopes WHERE uuid = ?`, current.UUID, current.UUID).Scan(&due); err != nil {
-			return fmt.Errorf("failed to check envelope expiry: %w", err)
+		// Expiry that is due now commits first and refuses this receipt; a
+		// receipt that committed earlier already exempts the envelope here.
+		kind, err := envelopeExpiryDueTx(tx, current.UUID)
+		if err != nil {
+			return err
 		}
-		if due == 1 && (current.State == domain.EnvelopeStatePending || current.State == domain.EnvelopeStateDeferred) {
-			updated, err = disposeEnvelopeTx(tx, ew, attr, current, EnvelopeDisposition{State: domain.EnvelopeStateExpired, Reason: "ttl"}, 0)
+		if kind != "" {
+			updated, err = materializeEnvelopeExpiryTx(tx, ew, attr, current, kind)
 			if err != nil {
 				return err
 			}
-			afterCommit = &EnvelopeWrongStateError{Envelope: current.ID, State: domain.EnvelopeStateExpired, Verb: "present"}
+			afterCommit = &EnvelopeWrongStateError{Envelope: current.ID, State: updated.State, Verb: "present"}
 			return nil
 		}
 		if _, err := tx.Exec(`INSERT INTO envelope_presentations (
@@ -1688,35 +1753,41 @@ func (rs *RoomStore) FailEnvelopeWithAttribution(attr attribution.Attribution, e
 		if current.State != domain.EnvelopeStatePending && current.State != domain.EnvelopeStatePresented {
 			return &EnvelopeWrongStateError{Envelope: current.ID, State: current.State, Verb: "fail"}
 		}
-		now, err := serverNowTx(tx)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE envelopes
-			SET state = 'failed', failure_reason = ?, terminal_actor = ?, terminal_at = ?,
-			    etag = etag + 1,
-			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-			    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-			WHERE uuid = ?`, reason, attr.PrincipalRef, now,
-			attr.PrincipalRef, scopeSQL(attr), envelopeUUID); err != nil {
-			return fmt.Errorf("failed to fail envelope: %w", err)
-		}
-		payload := map[string]interface{}{
-			"state": "failed", "reason": string(reason), "room_uuid": current.RoomUUID,
-		}
-		if runtime != "" {
-			payload["runtime_id"] = runtime
-		}
-		if detail = truncateUTF8(strings.TrimSpace(detail), MaxEnvelopeFailureDetailBytes); detail != "" {
-			payload["detail"] = detail
-		}
-		if _, err := logEnvelopeEvent(tx, ew, attr, envelopeUUID, "envelope.failed", current.ETag+1, payload); err != nil {
-			return err
-		}
-		updated, err = getEnvelopeTx(tx, envelopeUUID)
+		updated, err = failEnvelopeTx(tx, ew, attr, current, reason, attr.PrincipalRef, runtime, detail)
 		return err
 	})
 	return updated, err
+}
+
+// failEnvelopeTx writes failed with its reason and terminal metadata and emits
+// exactly one envelope.failed. Callers own the state guard.
+func failEnvelopeTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, current *domain.Envelope, reason domain.EnvelopeFailureReason, terminalActor, runtime, detail string) (*domain.Envelope, error) {
+	now, err := serverNowTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`UPDATE envelopes
+		SET state = 'failed', failure_reason = ?, terminal_actor = ?, terminal_at = ?,
+		    etag = etag + 1,
+		    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+		    updated_by_principal_ref = ?, updated_by_scope_ref = ?
+		WHERE uuid = ?`, reason, terminalActor, now,
+		attr.PrincipalRef, scopeSQL(attr), current.UUID); err != nil {
+		return nil, fmt.Errorf("failed to fail envelope: %w", err)
+	}
+	payload := map[string]interface{}{
+		"state": "failed", "reason": string(reason), "room_uuid": current.RoomUUID,
+	}
+	if runtime != "" {
+		payload["runtime_id"] = runtime
+	}
+	if detail = truncateUTF8(strings.TrimSpace(detail), MaxEnvelopeFailureDetailBytes); detail != "" {
+		payload["detail"] = detail
+	}
+	if _, err := logEnvelopeEvent(tx, ew, attr, current.UUID, "envelope.failed", current.ETag+1, payload); err != nil {
+		return nil, err
+	}
+	return getEnvelopeTx(tx, current.UUID)
 }
 
 // TouchRoomActivity records that a room saw activity, keeping ad-hoc idle
@@ -1870,6 +1941,17 @@ func (rs *RoomStore) queryEnvelopes(query string, args ...interface{}) ([]domain
 }
 
 type collabScanner interface{ Scan(...interface{}) error }
+
+// appendScan scans a row's leading columns through an existing scanner and
+// its trailing extra columns into extra.
+type appendScan struct {
+	collabScanner
+	extra interface{}
+}
+
+func (a appendScan) Scan(dest ...interface{}) error {
+	return a.collabScanner.Scan(append(dest, a.extra)...)
+}
 
 func scanRoom(scanner collabScanner) (*domain.Room, error) {
 	room := &domain.Room{}
