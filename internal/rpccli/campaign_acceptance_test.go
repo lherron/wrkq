@@ -1031,3 +1031,50 @@ func TestCampaignTreePrunesCampaignWithNoAdmittedMember(t *testing.T) {
 		t.Errorf("--all must still show the campaign and its member: %q", all)
 	}
 }
+
+func TestCampaignTreeRollupCountsEnrolledMembers(t *testing.T) {
+	// "(All done)" is a claim about everything the campaign holds. An open
+	// member enrolled from another project is shown right under the campaign,
+	// so a rollup that counts residents only contradicts its own children —
+	// and the claim must not leak upward into the container above it either.
+	f := newCampaignCLIFixture(t)
+	actor := "00000000-0000-4000-8000-0000000000a0"
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open fixture DB: %v", err)
+	}
+	s := store.New(database)
+	group, err := s.Containers.Create(actor, store.ContainerCreateParams{Slug: "group", Kind: "directory", ParentUUID: &f.projectAUUID})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	campaign, err := s.Containers.Create(actor, store.ContainerCreateParams{Slug: "wave-open", Kind: "directory", ParentUUID: &group.UUID})
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	if _, err := database.Exec("UPDATE containers SET campaign_state = 'active' WHERE uuid = ?", campaign.UUID); err != nil {
+		t.Fatalf("activate campaign: %v", err)
+	}
+	if _, err := s.Tasks.Create(actor, store.CreateParams{
+		Slug: "resident-done", Title: "Resident done", ProjectUUID: campaign.UUID, State: "completed", Priority: 2,
+	}); err != nil {
+		t.Fatalf("create resident: %v", err)
+	}
+	if _, err := database.Exec("UPDATE tasks SET campaign_uuid = ? WHERE uuid = ?", campaign.UUID, f.enrolledUUID); err != nil {
+		t.Fatalf("enroll open member: %v", err)
+	}
+	_ = database.Close()
+
+	out, err := runCampaignCLI(t, f.dbPath, "--project", "campaign-cli-a", "tree", "--pretty")
+	if err != nil {
+		t.Fatalf("project-rooted human tree failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "enrolled-member") {
+		t.Fatalf("open enrolled member missing from tree: %q", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if (strings.Contains(line, "wave-open/") || strings.Contains(line, "group/")) && strings.Contains(line, "(All done)") {
+			t.Errorf("container holding an open enrolled member rendered as done: %q\nfull tree: %q", line, out)
+		}
+	}
+}

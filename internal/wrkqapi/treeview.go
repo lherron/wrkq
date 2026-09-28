@@ -260,6 +260,23 @@ func (a *API) loadCampaignEnrollments(ctx context.Context, campaignUUID, campaig
 	return members, nil
 }
 
+// campaignHasUnclosedEnrollment reports whether any member enrolled in the
+// campaign from another container is still unclosed, with "closed" meaning
+// exactly what it means for a resident task in buildTreeNode: archived,
+// deleted, or completed. Like the resident rollup, it ignores the selector.
+func (a *API) campaignHasUnclosedEnrollment(ctx context.Context, campaignUUID string) (bool, error) {
+	var exists bool
+	err := a.db.QueryRowContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM tasks
+		 WHERE campaign_uuid = ? AND project_uuid != ?
+		   AND archived_at IS NULL AND deleted_at IS NULL AND state != 'completed')
+	`, campaignUUID, campaignUUID).Scan(&exists)
+	if err != nil {
+		return false, NewInternalError(err)
+	}
+	return exists, nil
+}
+
 // treeTopLevelProjectID returns the friendly ID of the top-level project owning
 // path (legacy resolveTopLevelProjectID). "" for the multi-project root view.
 func (a *API) treeTopLevelProjectID(rootPath string) string {
@@ -343,6 +360,16 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 
 		node.Children = child.Children
 		node.AllTasksCompleted = child.AllTasksCompleted
+		// The overlay lists enrolled members under the campaign, so the rollup
+		// must count them too, or "(All done)" sits above an open member.
+		if keepCampaigns && node.isCampaign && node.AllTasksCompleted {
+			open, err := a.campaignHasUnclosedEnrollment(ctx, node.UUID)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			node.AllTasksCompleted = !open
+		}
 		// T-08216 §8: count EVERY built child, appended or pruned. This line is
 		// the whole fix; the value was already computed and then discarded when
 		// the child failed shouldShowContainer below.
