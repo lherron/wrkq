@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
@@ -1641,6 +1642,49 @@ func TestEnvelopeFailUndeliverableAdmitsPresented(t *testing.T) {
 		Envelope: ackedID, Reason: "undeliverable", Runtime: "rt-1", PrincipalRef: "agent:hrc",
 	}); err == nil {
 		t.Fatal("undeliverable on an acked envelope succeeded")
+	}
+}
+
+// envelope.fail's optional detail rides the envelope.failed event, bounded by
+// truncation; omitting it leaves the payload as before (T-09657).
+func TestEnvelopeFailCarriesOptionalBoundedDetail(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	failedPayload := func(detail string) string {
+		t.Helper()
+		ask := f.say(t, RoomSayParams{
+			Ref: f.loneTaskID, Body: "never born", To: []string{"cody"}, PrincipalRef: "agent:clod",
+		})
+		failed, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+			Envelope: ask.Envelopes[0].ID, Reason: "undeliverable", Detail: detail, PrincipalRef: "agent:hrc",
+		})
+		if err != nil {
+			t.Fatalf("fail: %v", err)
+		}
+		var payload string
+		if err := f.s.DB().QueryRow(`SELECT payload FROM event_log
+			WHERE resource_uuid = ? AND event_type = 'envelope.failed'`, failed.UUID).Scan(&payload); err != nil {
+			t.Fatalf("read failure event: %v", err)
+		}
+		return payload
+	}
+
+	if p := failedPayload(""); strings.Contains(p, `"detail"`) {
+		t.Fatalf("detail-less fail wrote detail: %s", p)
+	}
+	if p := failedPayload("HRC refused: worktree branch does not carry T-1"); !strings.Contains(p, `"detail":"HRC refused: worktree branch does not carry T-1"`) {
+		t.Fatalf("detail missing from payload: %s", p)
+	}
+	long := failedPayload(strings.Repeat("é", 3000))
+	var decoded struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(long), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Detail) == 0 || len(decoded.Detail) > 2048 || !utf8.ValidString(decoded.Detail) {
+		t.Fatalf("long detail not truncated safely: %d bytes valid=%v", len(decoded.Detail), utf8.ValidString(decoded.Detail))
 	}
 }
 

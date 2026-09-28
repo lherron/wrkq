@@ -1934,7 +1934,7 @@ func (a *API) EnvelopeFail(ctx context.Context, p EnvelopeFailParams) (*WrkqEnve
 	if reason != domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
 		return nil, NewWrongStateError(map[string]any{"envelope": envelope.ID, "state": string(envelope.State), "verb": "fail"})
 	}
-	updated, err := a.store.Rooms.FailEnvelopeWithAttribution(attr, envelope.UUID, reason, p.Runtime)
+	updated, err := a.store.Rooms.FailEnvelopeWithAttribution(attr, envelope.UUID, reason, p.Runtime, p.Detail)
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Envelope)
 	}

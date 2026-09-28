@@ -425,9 +425,13 @@ type EnvelopePendingViewParams struct {
 }
 
 // EnvelopeFailParams is the HRC-facing unsuccessful terminal transition.
+// Detail is optional human-readable context for the sender (e.g. why HRC
+// refused a birth); it rides the envelope.failed event, bounded, never
+// rejected for length (T-09657).
 type EnvelopeFailParams struct {
 	Envelope     string `json:"envelope"`
 	Reason       string `json:"reason"`
+	Detail       string `json:"detail,omitempty"`
 	Runtime      string `json:"runtime,omitempty"`
 	PrincipalRef string `json:"principalRef,omitempty"`
 	ScopeRef     string `json:"scopeRef,omitempty"`

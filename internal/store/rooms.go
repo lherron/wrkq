@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
@@ -1640,10 +1641,15 @@ func (rs *RoomStore) RecordPresentationWithAttribution(attr attribution.Attribut
 	return updated, recorded, err
 }
 
+// MaxEnvelopeFailureDetailBytes bounds the optional failure detail carried on
+// the envelope.failed event. Longer detail is truncated, never rejected.
+const MaxEnvelopeFailureDetailBytes = 2048
+
 // FailEnvelopeWithAttribution ends one obligation unsuccessfully. When runtime
 // is supplied it must own the newest presentation receipt; repeating the same
-// (envelope, runtime) failure is an idempotent read of the terminal row.
-func (rs *RoomStore) FailEnvelopeWithAttribution(attr attribution.Attribution, envelopeUUID string, reason domain.EnvelopeFailureReason, runtime string) (*domain.Envelope, error) {
+// (envelope, runtime) failure is an idempotent read of the terminal row. A
+// non-empty detail rides the envelope.failed event payload as `detail`.
+func (rs *RoomStore) FailEnvelopeWithAttribution(attr attribution.Attribution, envelopeUUID string, reason domain.EnvelopeFailureReason, runtime string, detail string) (*domain.Envelope, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
@@ -1700,6 +1706,9 @@ func (rs *RoomStore) FailEnvelopeWithAttribution(attr attribution.Attribution, e
 		}
 		if runtime != "" {
 			payload["runtime_id"] = runtime
+		}
+		if detail = truncateUTF8(strings.TrimSpace(detail), MaxEnvelopeFailureDetailBytes); detail != "" {
+			payload["detail"] = detail
 		}
 		if _, err := logEnvelopeEvent(tx, ew, attr, envelopeUUID, "envelope.failed", current.ETag+1, payload); err != nil {
 			return err
@@ -2015,4 +2024,16 @@ func logCollaborationEvent(tx *sql.Tx, ew *events.Writer, attr attribution.Attri
 		return events.EventMetadata{}, fmt.Errorf("failed to log %s event: %w", eventType, err)
 	}
 	return metadata, nil
+}
+
+// truncateUTF8 cuts s to at most max bytes without splitting a rune.
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

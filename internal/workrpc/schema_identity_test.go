@@ -72,7 +72,10 @@ import (
 // than render a log it believes is complete. dtos 152 -> 153.
 // T-08925: timeline entries expose the writer's optional scopeRef; scoped
 // task.update and comment.add request DTOs join the catalog. dtos 153 -> 155.
-const pinnedProtocolSchemaHash = "sha256:fc90caa24b3006ca65c408b45f5c166c090a3649db61c78e46a330b108c64f1f"
+// T-09657: WrkqEnvelopeFailParams gains the optional, omitempty `detail` (why an
+// envelope failed, e.g. HRC's birth-refusal reason) carried onto the
+// envelope.failed event. Additive; cardinality unchanged.
+const pinnedProtocolSchemaHash = "sha256:6d8fb46844bfb6948ae9310cc3a0133fc9c0a942383bf43f3afd43058e002f17"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

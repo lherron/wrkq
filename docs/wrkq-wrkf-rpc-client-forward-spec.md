@@ -1032,6 +1032,7 @@ interface WrkqEnvelopePendingView {
 interface WrkqEnvelopeFailParams {
   envelope: string;
   reason: Exclude<WrkqEnvelopeFailureReason, "legacy">;
+  detail?: string; // optional, ≤2 KiB (truncated); rides the envelope.failed event
   runtime?: string; principalRef?: string; scopeRef?: string;
 }
 ```

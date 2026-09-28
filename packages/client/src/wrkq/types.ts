@@ -614,6 +614,8 @@ export interface WrkqEnvelopePendingView {
 export interface WrkqEnvelopeFailParams {
   envelope: string;
   reason: Exclude<WrkqEnvelopeFailureReason, "legacy">;
+  /** Optional sender-facing reason, carried on the envelope.failed event (≤2 KiB, truncated). */
+  detail?: string;
   runtime?: string;
   principalRef?: string;
   scopeRef?: string;
