@@ -282,10 +282,16 @@ writing nothing to the log. Only a bootout/bootstrap cycle re-derives it.
 
 That also means an install without a restart leaves a healthy-looking daemon
 armed to die on its next respawn — keepalive, a crash, a reboot, or anyone's
-restart, unbounded time later. `just install` warns when it replaces a `wrkqd`
-that a running job still holds, `wrkq server status` reports `binaryStale`, and
-`wrkq server health` fails on it. On the canonical node, install and restart
-together.
+restart, unbounded time later. When `just install` replaces a `wrkqd` that a
+running job still holds, it restarts the job itself if the job's database has no
+pending migrations. It reads that database from the job, not the caller's shell:
+the job's `--db` program argument, else `WRKQ_DB` / `WRKQ_DB_PATH` in the job's
+own launchd environment (`scripts/resolve-job-db.sh`). If the database cannot be
+resolved, is missing, fails the dry-run probe, or has pending migrations, it
+does not restart. It prints the remediation (`wrkqadm --db <path> migrate &&
+wrkq server restart`) and exits non-zero after the rest of the install has run.
+`wrkq server status` reports `binaryStale`, and `wrkq server health` fails on
+it. On the canonical node, install and restart together.
 
 `wrkq server health` resolves the daemon's token the way the CLI transport does
 (`WRKQD_TOKEN`, else `WRKQD_TOKEN_FILE`). On a node running per-node tokens an

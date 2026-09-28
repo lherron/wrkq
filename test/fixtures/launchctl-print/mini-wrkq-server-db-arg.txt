@@ -1,0 +1,41 @@
+gui/501/com.praesidium.wrkq-server = {
+	active count = 1
+	path = /Users/lherron/Library/LaunchAgents/com.praesidium.wrkq-server.plist
+	type = LaunchAgent
+	state = running
+
+	program = /Users/lherron/.local/bin/wrkqd
+	arguments = {
+		/Users/lherron/.local/bin/wrkqd
+		--addr
+		0.0.0.0:7171
+		--db
+		/Users/lherron/.praesidium-data/wrkq/wrkq.db
+		--node-tokens-file
+		/Users/lherron/.config/wrkq/node-tokens.json
+	}
+
+	working directory = /Users/lherron/praesidium/wrkq
+
+	stdout path = /Users/lherron/praesidium/var/logs/wrkq-server.log
+	stderr path = /Users/lherron/praesidium/var/logs/wrkq-server.err.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.abc/Listeners
+		WRKQ_DB_PATH => /Users/lherron/praesidium/var/db/wrkq.db
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		PATH => /Users/lherron/.local/bin:/opt/homebrew/bin:/usr/bin:/bin
+		HOME => /Users/lherron
+		XPC_SERVICE_NAME => com.praesidium.wrkq-server
+	}
+
+	domain = gui/501 [100026]
+	runs = 3
+	pid = 4242
+	immediate reason = speculative
+}

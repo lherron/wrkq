@@ -1,0 +1,93 @@
+gui/501/com.praesidium.llama-server = {
+	active count = 1
+	path = /Users/lherron/Library/LaunchAgents/com.praesidium.llama-server.plist
+	type = LaunchAgent
+	state = running
+
+	program = /Users/lherron/.local/bin/praesidium-launch
+	arguments = {
+		/Users/lherron/.local/bin/praesidium-launch
+		/opt/homebrew/bin/llama-server
+		--hf-repo
+		Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M
+		--host
+		127.0.0.1
+		--port
+		18480
+		--embedding
+		--pooling
+		mean
+		--ctx-size
+		4096
+		--batch-size
+		4096
+		--ubatch-size
+		4096
+		--parallel
+		1
+		--cache-ram
+		0
+	}
+
+	stdout path = /Users/lherron/praesidium/var/logs/llama-cpp/server.log
+	stderr path = /Users/lherron/praesidium/var/logs/llama-cpp/server.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.0mfwlnw4JF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		PATH => /opt/homebrew/bin:/usr/bin:/bin
+		HOME => /Users/lherron
+		XPC_SERVICE_NAME => com.praesidium.llama-server
+	}
+
+	domain = gui/501 [100026]
+	asid = 100026
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 1026
+	immediate reason = speculative
+	forks = 0
+	execs = 2
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = (never exited)
+
+	resource coalition = {
+		ID = 1078
+		type = resource
+		state = active
+		active count = 1
+		name = com.praesidium.llama-server
+	}
+
+	jetsam coalition = {
+		ID = 1079
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.praesidium.llama-server
+	}
+
+	spawn type = interactive (4)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	job state = running
+
+	properties = keepalive | runatload | inferred program | managed LWCR | has LWCR
+}

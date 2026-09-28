@@ -171,6 +171,7 @@ install *flags:
   set -euo pipefail
   allow_dirty=""
   no_sync=""
+  install_armed=""
   for flag in {{flags}} ""; do
     [ -n "$flag" ] || continue
     case "$flag" in
@@ -279,23 +280,50 @@ install *flags:
         # refuse to start (exit 1: requires migration) and launchd would respawn
         # into the same failure. Then the order is install → migrate → restart,
         # and a human takes the middle step with a database backup in hand.
-        job_db="$(printf '%s\n' "$job_print" | awk -F'=> ' '/WRKQ_DB_PATH => /{print $2}' | head -1)"
-        job_db="${job_db:-${WRKQ_DB_PATH:-}}"
-        pending=""
-        if [ -n "$job_db" ] && [ -f "$job_db" ]; then
-          pending="$(~/.local/bin/wrkqadm --db "$job_db" migrate --dry-run 2>/dev/null | awk '/^Total: [1-9]/{print}')"
-        fi
-        if [ -n "$pending" ]; then
-          echo "    The new wrkqd carries a migration the live database has not applied ($pending)."
-          echo "    NOT restarting: an unmigrated daemon exits 1 on start and launchd respawns into the same failure."
+        #
+        # The database is the JOB's (T-08927): its --db argument or its own
+        # environment, resolved by scripts/resolve-job-db.sh. Never the caller's
+        # shell WRKQ_DB_PATH, which on mini names a stub. Every outcome that is
+        # not a clean restart leaves the daemon armed, so it sets install_armed and
+        # the recipe exits non-zero once the rest of the install has run.
+        armed_msg="    The daemon stays ARMED: its next respawn will be SIGKILLed until it is restarted on the new image."
+        if ! job_db="$(printf '%s\n' "$job_print" | bash scripts/resolve-job-db.sh 2>&1)"; then
+          echo "    ✗ NOT restarting: could not resolve the job's database ($job_db)."
+          echo "$armed_msg"
+          echo "    Resolve the DB by hand from:  launchctl print gui/$(id -u)/$label"
+          echo "    then:  wrkqadm --db <path> migrate --dry-run  (migrate if pending)  &&  wrkq server restart"
+          echo ""
+          install_armed="unresolved job database"
+        elif [ ! -f "$job_db" ]; then
+          echo "    ✗ NOT restarting: the job's database $job_db does not exist."
+          echo "$armed_msg"
+          echo "    Check the job with:  launchctl print gui/$(id -u)/$label"
+          echo "    then:  wrkqadm --db <path> migrate  &&  wrkq server restart"
+          echo ""
+          install_armed="job database $job_db missing"
+        elif ! dry_run="$(~/.local/bin/wrkqadm --db "$job_db" migrate --dry-run 2>&1)"; then
+          echo "    ✗ NOT restarting: the pending-migration probe failed on $job_db:"
+          printf '%s\n' "$dry_run" | sed 's/^/      /'
+          echo "$armed_msg"
+          echo "    Fix that, then:  wrkqadm --db $job_db migrate  &&  wrkq server restart"
+          echo ""
+          install_armed="migration probe failed on $job_db"
+        elif pending="$(printf '%s\n' "$dry_run" | awk '/^Total: [1-9]/{print}')" && [ -n "$pending" ]; then
+          echo "    ✗ NOT restarting: the new wrkqd carries a migration $job_db has not applied ($pending)."
+          echo "    An unmigrated daemon exits 1 on start and launchd respawns into the same failure."
+          echo "$armed_msg"
           echo "    Back up $job_db, then:  wrkqadm --db $job_db migrate  &&  wrkq server restart"
           echo ""
-        elif [ -z "$job_db" ]; then
-          echo "    Could not resolve the job's WRKQ_DB_PATH to check for pending migrations."
-          echo "    Restart it now:  wrkq server restart   (after 'wrkqadm migrate' if this commit carries one)"
+          install_armed="pending migrations on $job_db"
+        elif ! printf '%s\n' "$dry_run" | grep -q '^No pending migrations'; then
+          echo "    ✗ NOT restarting: unrecognized migration probe output for $job_db:"
+          printf '%s\n' "$dry_run" | sed 's/^/      /'
+          echo "$armed_msg"
+          echo "    Check by hand:  wrkqadm --db $job_db migrate --dry-run  then  wrkq server restart"
           echo ""
+          install_armed="unrecognized migration probe output for $job_db"
         else
-          echo "    No pending migrations — restarting the job now so the install lands live."
+          echo "    No pending migrations on $job_db — restarting the job now so the install lands live."
           if ~/.local/bin/wrkq server restart; then
             echo "✓ wrkqd restarted on the installed image"
           else
@@ -318,6 +346,10 @@ install *flags:
   else
     echo "[install] consumer node role; skipping client publish and downstream sync"
   fi
+  if [ -n "$install_armed" ]; then
+    echo "✗ install finished but wrkqd was NOT restarted ($install_armed); see the remediation above." >&2
+    exit 1
+  fi
 
 # Sync downstream repos that consume @wrkq/client from local Verdaccio.
 sync-downstream:
@@ -326,6 +358,10 @@ sync-downstream:
 # Validate the downstream consumer inventory and fail-closed sync driver.
 sync-downstream-test:
   bun test test/sync-downstream.test.ts
+
+# Validate the launchd job database resolver behind just install's restart probe (T-08927).
+install-probe-test:
+  bun test test/t08927_install_job_db.test.ts
 
 # Install the wrkq launchd agent plist
 install-launchd:
@@ -530,8 +566,8 @@ test:
 test-verbose:
   go test -v -tags "{{go_tags}}" ./...
 
-# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + downstream sync + @wrkq/client unit+integration RPC)
-verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records sync-downstream-test verify-rpc
+# Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + downstream sync + install probe + @wrkq/client unit+integration RPC)
+verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records sync-downstream-test install-probe-test verify-rpc
   @just verify-evidence-summary "{{summary}}"
   @echo "✓ All checks passed"
 
