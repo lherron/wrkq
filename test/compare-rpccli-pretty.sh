@@ -12,10 +12,11 @@
 #   - search/pretty
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO_TAGS="$("$ROOT/scripts/go-tags.sh")"
 cd "$ROOT"
 
 echo "Running RPC-backed mirror base-command --pretty byte parity checks..."
-go test -tags sqlite_fts5 ./internal/rpccli/ \
+go test -tags "$GO_TAGS" ./internal/rpccli/ \
   -run '^TestParity$/(^cat$|^ls$|^find$|^tree$|^search$)/^pretty$' \
   -count=1 \
   -v

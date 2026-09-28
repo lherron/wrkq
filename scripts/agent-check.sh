@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO_TAGS="$("$ROOT/scripts/go-tags.sh")"
 cd "$ROOT"
 
 export GOPROXY=off
@@ -55,14 +56,14 @@ echo "== compile packages =="
 while IFS= read -r pkg; do
   test -n "$pkg" || continue
   echo "compile $pkg"
-  run_with_heartbeat "compile $pkg" go test -tags sqlite_fts5,wrkq_local -run '^$' "$pkg"
+  run_with_heartbeat "compile $pkg" go test -tags "$GO_TAGS" -run '^$' "$pkg"
 done <"$PACKAGE_LIST"
 
 echo "== build binaries =="
-run_with_heartbeat "build wrkq" go build -tags sqlite_fts5,wrkq_local -o bin/wrkq ./cmd/wrkq
-run_with_heartbeat "build wrkf" go build -tags sqlite_fts5,wrkq_local -o bin/wrkf ./cmd/wrkf
-run_with_heartbeat "build wrkqadm" go build -tags sqlite_fts5,wrkq_local -o bin/wrkqadm ./cmd/wrkqadm
-run_with_heartbeat "build wrkqd" go build -tags sqlite_fts5,wrkq_local -o bin/wrkqd ./cmd/wrkqd
+run_with_heartbeat "build wrkq" go build -tags "$GO_TAGS" -o bin/wrkq ./cmd/wrkq
+run_with_heartbeat "build wrkf" go build -tags "$GO_TAGS" -o bin/wrkf ./cmd/wrkf
+run_with_heartbeat "build wrkqadm" go build -tags "$GO_TAGS" -o bin/wrkqadm ./cmd/wrkqadm
+run_with_heartbeat "build wrkqd" go build -tags "$GO_TAGS" -o bin/wrkqd ./cmd/wrkqd
 
 echo "== smoke wrkf =="
 run_with_heartbeat "smoke wrkf" test/smoke-wrkf.sh

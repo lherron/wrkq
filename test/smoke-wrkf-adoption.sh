@@ -20,6 +20,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO_TAGS="$("$ROOT/scripts/go-tags.sh")"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
@@ -27,9 +28,9 @@ DB="$TMPDIR/wrkq.db"
 BIN="$TMPDIR/bin"
 mkdir -p "$BIN"
 
-go build -tags sqlite_fts5 -o "$BIN/wrkq"    "$ROOT/cmd/wrkq"
-go build -tags sqlite_fts5 -o "$BIN/wrkqadm" "$ROOT/cmd/wrkqadm"
-go build -tags sqlite_fts5 -o "$BIN/wrkf"    "$ROOT/cmd/wrkf"
+go build -tags "$GO_TAGS" -o "$BIN/wrkq"    "$ROOT/cmd/wrkq"
+go build -tags "$GO_TAGS" -o "$BIN/wrkqadm" "$ROOT/cmd/wrkqadm"
+go build -tags "$GO_TAGS" -o "$BIN/wrkf"    "$ROOT/cmd/wrkf"
 
 cd "$TMPDIR"
 export WRKQ_DB="$DB"

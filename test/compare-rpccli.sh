@@ -9,9 +9,10 @@
 # Seam-smoke (cat) + guard tests live alongside in the same package.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO_TAGS="$("$ROOT/scripts/go-tags.sh")"
 cd "$ROOT"
 
 echo "Running RPC-backed mirror parity + transport + guard tests..."
-go test -tags sqlite_fts5 ./internal/rpccli/ \
+go test -tags "$GO_TAGS" ./internal/rpccli/ \
   -run 'TestParity|TestCoreRuleImportGuard|TestInProcessTransport|TestTransportEquivalence' \
   -v
