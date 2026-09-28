@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	dbsync "github.com/lherron/wrkq/internal/db"
 )
 
 // Export reads the database and produces a canonical snapshot.
@@ -155,6 +157,14 @@ func buildSnapshot(db *sql.DB, opts ExportOptions) (*Snapshot, error) {
 		return nil, fmt.Errorf("failed to export comments: %w", err)
 	}
 
+	if err := exportLinks(db, snap); err != nil {
+		return nil, fmt.Errorf("failed to export links: %w", err)
+	}
+
+	if err := exportSequences(db, snap); err != nil {
+		return nil, fmt.Errorf("failed to export sequences: %w", err)
+	}
+
 	// Export events if requested
 	if opts.IncludeEvents {
 		if err := exportEvents(db, snap); err != nil {
@@ -264,13 +274,19 @@ func exportPromises(db *sql.DB, snap *Snapshot) error {
 	return rows.Err()
 }
 
+// Every exporter below reads every row of its table: archived containers and
+// tasks, deleted-state tasks and soft-deleted comments are part of the ledger
+// and are referenced by rows that are not (T-07498). Legacy *_actor_uuid
+// columns are deliberately not carried; wrkq attribution is principal-only.
+
 func exportContainers(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, slug, title, parent_uuid, etag,
-		       created_at, updated_at, archived_at,
-		       created_by_principal_ref, updated_by_principal_ref
+		SELECT uuid, id, slug, title, kind, description, parent_uuid, sort_index,
+		       section_uuid, webhook_urls, root, specification, labels, campaign_state,
+		       etag, created_at, updated_at, archived_at,
+		       created_by_principal_ref, created_by_scope_ref,
+		       updated_by_principal_ref, updated_by_scope_ref
 		FROM containers
-		WHERE archived_at IS NULL
 		ORDER BY uuid
 	`)
 	if err != nil {
@@ -279,38 +295,32 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var uuid, id, slug, title, createdAt, updatedAt string
-		var parentUUID, archivedAt sql.NullString
-		var createdByPrincipal, updatedByPrincipal sql.NullString
-		var etag int64
+		var uuid string
+		var entry ContainerEntry
+		var parentUUID, archivedAt, createdByPrincipal, updatedByPrincipal sql.NullString
+		var sectionUUID, webhookURLs, root, specification, labels, campaignState sql.NullString
+		var createdByScope, updatedByScope sql.NullString
 
-		if err := rows.Scan(&uuid, &id, &slug, &title, &parentUUID, &etag,
-			&createdAt, &updatedAt, &archivedAt,
-			&createdByPrincipal, &updatedByPrincipal); err != nil {
+		if err := rows.Scan(&uuid, &entry.ID, &entry.Slug, &entry.Title, &entry.Kind,
+			&entry.Description, &parentUUID, &entry.SortIndex,
+			&sectionUUID, &webhookURLs, &root, &specification, &labels, &campaignState,
+			&entry.ETag, &entry.CreatedAt, &entry.UpdatedAt, &archivedAt,
+			&createdByPrincipal, &createdByScope, &updatedByPrincipal, &updatedByScope); err != nil {
 			return err
 		}
 
-		entry := ContainerEntry{
-			ID:        id,
-			Slug:      slug,
-			Title:     title,
-			ETag:      etag,
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
-		}
-
-		if parentUUID.Valid {
-			entry.ParentUUID = parentUUID.String
-		}
-		if archivedAt.Valid {
-			entry.ArchivedAt = archivedAt.String
-		}
-		if createdByPrincipal.Valid {
-			entry.CreatedByPrincipalRef = createdByPrincipal.String
-		}
-		if updatedByPrincipal.Valid {
-			entry.UpdatedByPrincipalRef = updatedByPrincipal.String
-		}
+		entry.ParentUUID = parentUUID.String
+		entry.ArchivedAt = archivedAt.String
+		entry.CreatedByPrincipalRef = createdByPrincipal.String
+		entry.UpdatedByPrincipalRef = updatedByPrincipal.String
+		entry.SectionUUID = snapshotNullString(sectionUUID)
+		entry.WebhookURLs = snapshotNullString(webhookURLs)
+		entry.Root = snapshotNullString(root)
+		entry.Specification = snapshotNullString(specification)
+		entry.Labels = snapshotNullString(labels)
+		entry.CampaignState = snapshotNullString(campaignState)
+		entry.CreatedByScopeRef = snapshotNullString(createdByScope)
+		entry.UpdatedByScopeRef = snapshotNullString(updatedByScope)
 
 		snap.Containers[uuid] = entry
 	}
@@ -320,15 +330,20 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 
 func exportTasks(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, slug, title, project_uuid, campaign_uuid, requested_by_project_id,
-		       assigned_project_id, acknowledged_at, resolution,
+		SELECT uuid, id, slug, title, kind, project_uuid, campaign_uuid, parent_task_uuid,
+		       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 		       workflow_preset, preset_version, phase, risk_class,
-		       state, priority,
-		       start_at, due_at, labels, description, specification, etag,
+		       state, priority, assignee_principal_ref,
+		       start_at, due_at, labels, meta, outcome, description, specification, etag,
 		       created_at, updated_at, completed_at, archived_at,
-		       created_by_principal_ref, updated_by_principal_ref
+		       deleted_at, deleted_by_principal_ref, deleted_by_scope_ref,
+		       created_by_principal_ref, created_by_scope_ref,
+		       updated_by_principal_ref, updated_by_scope_ref,
+		       cp_project_id, cp_run_id, cp_session_id, cp_work_item_id,
+		       sdk_session_id, run_status,
+		       claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at,
+		       claim_token_hash, claim_generation
 		FROM tasks
-		WHERE archived_at IS NULL
 		ORDER BY uuid
 	`)
 	if err != nil {
@@ -337,100 +352,84 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var uuid, id, slug, title, projectUUID, state, createdAt, updatedAt string
-		var description string
-		var specification string
+		var uuid string
+		var entry TaskEntry
 		var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
-		var campaignUUID sql.NullString
+		var campaignUUID, parentTaskUUID sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var workflowPreset, phase, riskClass sql.NullString
 		var presetVersion sql.NullInt64
-		var createdByPrincipal, updatedByPrincipal sql.NullString
-		var priority int
-		var etag int64
+		var assignee, meta, outcome sql.NullString
+		var deletedAt, deletedByPrincipal, deletedByScope sql.NullString
+		var createdByPrincipal, createdByScope, updatedByPrincipal, updatedByScope sql.NullString
+		var cpProject, cpRun, cpSession, cpWorkItem, sdkSession, runStatus sql.NullString
+		var claimedBy, claimedScope, claimedNode, claimedAt, claimTokenHash sql.NullString
 
-		if err := rows.Scan(&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &requestedBy,
-			&assignedProject, &acknowledgedAt, &resolution,
+		if err := rows.Scan(&uuid, &entry.ID, &entry.Slug, &entry.Title, &entry.Kind,
+			&entry.ProjectUUID, &campaignUUID, &parentTaskUUID,
+			&requestedBy, &assignedProject, &acknowledgedAt, &resolution,
 			&workflowPreset, &presetVersion, &phase, &riskClass,
-			&state, &priority,
-			&startAt, &dueAt, &labels, &description, &specification, &etag,
-			&createdAt, &updatedAt, &completedAt, &archivedAt,
-			&createdByPrincipal, &updatedByPrincipal); err != nil {
+			&entry.State, &entry.Priority, &assignee,
+			&startAt, &dueAt, &labels, &meta, &outcome, &entry.Description, &entry.Specification, &entry.ETag,
+			&entry.CreatedAt, &entry.UpdatedAt, &completedAt, &archivedAt,
+			&deletedAt, &deletedByPrincipal, &deletedByScope,
+			&createdByPrincipal, &createdByScope, &updatedByPrincipal, &updatedByScope,
+			&cpProject, &cpRun, &cpSession, &cpWorkItem, &sdkSession, &runStatus,
+			&claimedBy, &claimedScope, &claimedNode, &claimedAt,
+			&claimTokenHash, &entry.ClaimGeneration); err != nil {
 			return err
 		}
 
-		entry := TaskEntry{
-			ID:          id,
-			Slug:        slug,
-			Title:       title,
-			ProjectUUID: projectUUID,
-			State:       state,
-			Priority:    priority,
-			ETag:        etag,
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
-		}
-		if createdByPrincipal.Valid {
-			entry.CreatedByPrincipalRef = createdByPrincipal.String
-		}
-		if updatedByPrincipal.Valid {
-			entry.UpdatedByPrincipalRef = updatedByPrincipal.String
-		}
-
-		if campaignUUID.Valid {
-			entry.CampaignUUID = campaignUUID.String
-		}
-		if requestedBy.Valid {
-			entry.RequestedByProjectID = requestedBy.String
-		}
-		if assignedProject.Valid {
-			entry.AssignedProjectID = assignedProject.String
-		}
-		if acknowledgedAt.Valid {
-			entry.AcknowledgedAt = acknowledgedAt.String
-		}
-		if resolution.Valid {
-			entry.Resolution = resolution.String
-		}
-		if workflowPreset.Valid {
-			entry.WorkflowPreset = workflowPreset.String
-		}
+		// Existing string fields collapse NULL and '' (no date / no value):
+		// start_at, due_at and labels ('' / '[]') restore as NULL.
+		entry.CampaignUUID = campaignUUID.String
+		entry.RequestedByProjectID = requestedBy.String
+		entry.AssignedProjectID = assignedProject.String
+		entry.AcknowledgedAt = acknowledgedAt.String
+		entry.Resolution = resolution.String
+		entry.WorkflowPreset = workflowPreset.String
 		if presetVersion.Valid {
 			entry.PresetVersion = int(presetVersion.Int64)
 		}
-		if phase.Valid {
-			entry.Phase = phase.String
-		}
-		if riskClass.Valid {
-			entry.RiskClass = riskClass.String
-		}
-		if description != "" {
-			entry.Description = description
-		}
-		if specification != "" {
-			entry.Specification = specification
-		}
-		if startAt.Valid {
-			entry.StartAt = startAt.String
-		}
-		if dueAt.Valid {
-			entry.DueAt = dueAt.String
-		}
+		entry.Phase = phase.String
+		entry.RiskClass = riskClass.String
+		entry.StartAt = startAt.String
+		entry.DueAt = dueAt.String
+		entry.CompletedAt = completedAt.String
+		entry.ArchivedAt = archivedAt.String
+		entry.CreatedByPrincipalRef = createdByPrincipal.String
+		entry.UpdatedByPrincipalRef = updatedByPrincipal.String
 		if labels.Valid && labels.String != "" && labels.String != "[]" {
-			// Parse JSON array of labels
 			var labelSlice []string
-			if err := json.Unmarshal([]byte(labels.String), &labelSlice); err == nil && len(labelSlice) > 0 {
-				// Sort labels for determinism
+			if err := json.Unmarshal([]byte(labels.String), &labelSlice); err != nil {
+				return fmt.Errorf("task %s has unparseable labels %q: %w", uuid, labels.String, err)
+			}
+			if len(labelSlice) > 0 {
 				sort.Strings(labelSlice)
 				entry.Labels = labelSlice
 			}
 		}
-		if completedAt.Valid {
-			entry.CompletedAt = completedAt.String
-		}
-		if archivedAt.Valid {
-			entry.ArchivedAt = archivedAt.String
-		}
+
+		entry.ParentTaskUUID = snapshotNullString(parentTaskUUID)
+		entry.AssigneePrincipalRef = snapshotNullString(assignee)
+		entry.Meta = snapshotNullString(meta)
+		entry.Outcome = snapshotNullString(outcome)
+		entry.DeletedAt = snapshotNullString(deletedAt)
+		entry.DeletedByPrincipalRef = snapshotNullString(deletedByPrincipal)
+		entry.DeletedByScopeRef = snapshotNullString(deletedByScope)
+		entry.CreatedByScopeRef = snapshotNullString(createdByScope)
+		entry.UpdatedByScopeRef = snapshotNullString(updatedByScope)
+		entry.CPProjectID = snapshotNullString(cpProject)
+		entry.CPRunID = snapshotNullString(cpRun)
+		entry.CPSessionID = snapshotNullString(cpSession)
+		entry.CPWorkItemID = snapshotNullString(cpWorkItem)
+		entry.SDKSessionID = snapshotNullString(sdkSession)
+		entry.RunStatus = snapshotNullString(runStatus)
+		entry.ClaimedByPrincipalRef = snapshotNullString(claimedBy)
+		entry.ClaimedScopeRef = snapshotNullString(claimedScope)
+		entry.ClaimedNode = snapshotNullString(claimedNode)
+		entry.ClaimedAt = snapshotNullString(claimedAt)
+		entry.ClaimTokenHash = snapshotNullString(claimTokenHash)
 
 		snap.Tasks[uuid] = entry
 	}
@@ -440,10 +439,11 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 
 func exportComments(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, task_uuid, container_uuid, created_by_principal_ref, body, meta, etag,
-		       created_at, updated_at, deleted_at, deleted_by_principal_ref
+		SELECT uuid, id, task_uuid, container_uuid, kind,
+		       created_by_principal_ref, created_by_scope_ref, body, meta, etag,
+		       created_at, updated_at, deleted_at,
+		       deleted_by_principal_ref, deleted_by_scope_ref
 		FROM comments
-		WHERE deleted_at IS NULL
 		ORDER BY uuid
 	`)
 	if err != nil {
@@ -452,49 +452,113 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var uuid, id, body, createdAt string
-		var taskUUID, containerUUID sql.NullString
-		var createdByPrincipal, meta, updatedAt, deletedAt, deletedByPrincipal sql.NullString
-		var etag int64
+		var uuid string
+		var entry CommentEntry
+		var taskUUID, containerUUID, kind sql.NullString
+		var createdByPrincipal, createdByScope, meta, updatedAt, deletedAt sql.NullString
+		var deletedByPrincipal, deletedByScope sql.NullString
 
-		if err := rows.Scan(&uuid, &id, &taskUUID, &containerUUID, &createdByPrincipal, &body, &meta, &etag,
-			&createdAt, &updatedAt, &deletedAt, &deletedByPrincipal); err != nil {
+		if err := rows.Scan(&uuid, &entry.ID, &taskUUID, &containerUUID, &kind,
+			&createdByPrincipal, &createdByScope, &entry.Body, &meta, &entry.ETag,
+			&entry.CreatedAt, &updatedAt, &deletedAt,
+			&deletedByPrincipal, &deletedByScope); err != nil {
 			return err
 		}
 
-		entry := CommentEntry{
-			ID:        id,
-			Body:      body,
-			ETag:      etag,
-			CreatedAt: createdAt,
-		}
-
-		if taskUUID.Valid {
-			entry.TaskUUID = taskUUID.String
-		}
-		if containerUUID.Valid {
-			entry.ContainerUUID = containerUUID.String
-		}
-		if createdByPrincipal.Valid {
-			entry.CreatedByPrincipalRef = createdByPrincipal.String
-		}
-		if meta.Valid {
-			entry.Meta = meta.String
-		}
-		if updatedAt.Valid {
-			entry.UpdatedAt = updatedAt.String
-		}
-		if deletedAt.Valid {
-			entry.DeletedAt = deletedAt.String
-		}
-		if deletedByPrincipal.Valid {
-			entry.DeletedByPrincipalRef = deletedByPrincipal.String
-		}
+		entry.TaskUUID = taskUUID.String
+		entry.ContainerUUID = containerUUID.String
+		entry.CreatedByPrincipalRef = createdByPrincipal.String
+		entry.Meta = meta.String
+		entry.UpdatedAt = updatedAt.String
+		entry.DeletedAt = deletedAt.String
+		entry.DeletedByPrincipalRef = deletedByPrincipal.String
+		entry.Kind = snapshotNullString(kind)
+		entry.CreatedByScopeRef = snapshotNullString(createdByScope)
+		entry.DeletedByScopeRef = snapshotNullString(deletedByScope)
 
 		snap.Comments[uuid] = entry
 	}
 
 	return rows.Err()
+}
+
+func exportLinks(db *sql.DB, snap *Snapshot) error {
+	rows, err := db.Query(`
+		SELECT from_task_uuid, to_task_uuid, kind, meta, created_at,
+		       created_by_principal_ref, created_by_scope_ref
+		FROM task_relations
+		ORDER BY from_task_uuid, to_task_uuid, kind
+	`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var entry LinkEntry
+		var meta, createdByPrincipal, createdByScope sql.NullString
+		if err := rows.Scan(&entry.SourceUUID, &entry.TargetUUID, &entry.LinkType, &meta,
+			&entry.CreatedAt, &createdByPrincipal, &createdByScope); err != nil {
+			return err
+		}
+		entry.Meta = snapshotNullString(meta)
+		entry.CreatedByPrincipalRef = createdByPrincipal.String
+		entry.CreatedByScopeRef = snapshotNullString(createdByScope)
+		snap.Links[LinkKey(entry.SourceUUID, entry.TargetUUID, entry.LinkType)] = entry
+	}
+	return rows.Err()
+}
+
+// exportSequences records the friendly-id high-water marks of the modelled
+// entities. sqlite_sequence may exceed MAX(id) when the newest rows were
+// purged; carrying it keeps a restore from reissuing those ids.
+func exportSequences(db *sql.DB, snap *Snapshot) error {
+	sequences := make(map[string]int64)
+	for _, spec := range dbsync.DefaultSequenceSpecs() {
+		name, ok := snapshotSequenceNames[spec.SeqTable]
+		if !ok {
+			continue
+		}
+		hw, err := dbsync.HighWater(db, spec)
+		if err != nil {
+			return err
+		}
+		if hw > 0 {
+			sequences[name] = int64(hw)
+		}
+	}
+	comment, err := commentHighWater(db)
+	if err != nil {
+		return err
+	}
+	if comment > 0 {
+		sequences["comment"] = comment
+	}
+	if len(sequences) > 0 {
+		snap.Meta.Sequences = sequences
+	}
+	return nil
+}
+
+// commentHighWater is the larger of comment_sequences and the largest
+// canonical comment id (comments keep their own counter table).
+func commentHighWater(db interface {
+	QueryRow(query string, args ...any) *sql.Row
+}) (int64, error) {
+	var hw int64
+	err := db.QueryRow(`SELECT MAX(
+		COALESCE((SELECT value FROM comment_sequences WHERE name = 'next_comment'), 0),
+		COALESCE((SELECT MAX(CAST(SUBSTR(id, 3) AS INTEGER)) FROM comments
+		           WHERE id LIKE 'C-%' AND SUBSTR(id, 3) <> '' AND SUBSTR(id, 3) NOT GLOB '*[^0-9]*'), 0))`).Scan(&hw)
+	return hw, err
+}
+
+// snapshotSequenceNames maps the modelled entities' sqlite_sequence rows to
+// their Meta.Sequences keys; "comment" is carried from comment_sequences.
+var snapshotSequenceNames = map[string]string{
+	"container_seq": "container",
+	"task_seq":      "task",
+	"promise_seq":   "promise",
 }
 
 func exportEvents(db *sql.DB, snap *Snapshot) error {

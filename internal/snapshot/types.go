@@ -1,8 +1,12 @@
 // Package snapshot provides canonical JSON state snapshots for wrkq.
 //
-// Snapshots are deterministic JSON representations of the entire wrkq database
-// state, designed for use in patch-first Git workflows. They follow the
-// PATCH-MODE.md specification with JCS-like canonicalization.
+// A snapshot is the complete task-ledger domain: every container, task,
+// comment, promise and task relation — archived, deleted-state and
+// soft-deleted rows included — with every domain column, plus the friendly-id
+// high-water marks. It is NOT the whole database and NOT a disaster-recovery
+// artifact: rooms, envelopes, handoffs, wrkf runtime, attachments and event
+// history are outside the model (T-07498). Snapshots are deterministic JSON
+// designed for patch-first Git workflows, canonicalized JCS-style.
 package snapshot
 
 import (
@@ -56,21 +60,35 @@ type Meta struct {
 	SnapshotRev             string `json:"snapshot_rev,omitempty"`
 	GeneratedAt             string `json:"generated_at,omitempty"`
 	MachineInterfaceVersion int    `json:"machine_interface_version"`
+	// Sequences carries friendly-id high-water marks (container, task,
+	// promise, comment) so a restore never reissues the id of a purged row.
+	Sequences map[string]int64 `json:"sequences,omitempty"`
 }
 
 // ContainerEntry represents a container (project/subproject) in the snapshot.
 // Keys under "containers" are UUIDs.
 type ContainerEntry struct {
-	ID                    string `json:"id"`
-	Slug                  string `json:"slug"`
-	Title                 string `json:"title,omitempty"`
-	ParentUUID            string `json:"parent_uuid,omitempty"`
-	ETag                  int64  `json:"etag"`
-	CreatedAt             string `json:"created_at"`
-	UpdatedAt             string `json:"updated_at"`
-	ArchivedAt            string `json:"archived_at,omitempty"`
-	CreatedByPrincipalRef string `json:"created_by_principal_ref,omitempty"`
-	UpdatedByPrincipalRef string `json:"updated_by_principal_ref,omitempty"`
+	ID                    string  `json:"id"`
+	Slug                  string  `json:"slug"`
+	Title                 string  `json:"title,omitempty"`
+	Kind                  string  `json:"kind"`
+	Description           string  `json:"description,omitempty"`
+	ParentUUID            string  `json:"parent_uuid,omitempty"`
+	SortIndex             int64   `json:"sort_index,omitempty"`
+	SectionUUID           *string `json:"section_uuid,omitempty"`
+	WebhookURLs           *string `json:"webhook_urls,omitempty"`
+	Root                  *string `json:"root,omitempty"`
+	Specification         *string `json:"specification,omitempty"`
+	Labels                *string `json:"labels,omitempty"`
+	CampaignState         *string `json:"campaign_state,omitempty"`
+	ETag                  int64   `json:"etag"`
+	CreatedAt             string  `json:"created_at"`
+	UpdatedAt             string  `json:"updated_at"`
+	ArchivedAt            string  `json:"archived_at,omitempty"`
+	CreatedByPrincipalRef string  `json:"created_by_principal_ref,omitempty"`
+	CreatedByScopeRef     *string `json:"created_by_scope_ref,omitempty"`
+	UpdatedByPrincipalRef string  `json:"updated_by_principal_ref,omitempty"`
+	UpdatedByScopeRef     *string `json:"updated_by_scope_ref,omitempty"`
 }
 
 // TaskEntry represents a task in the snapshot.
@@ -103,6 +121,29 @@ type TaskEntry struct {
 	ArchivedAt            string   `json:"archived_at,omitempty"`
 	CreatedByPrincipalRef string   `json:"created_by_principal_ref,omitempty"`
 	UpdatedByPrincipalRef string   `json:"updated_by_principal_ref,omitempty"`
+
+	Kind                  string  `json:"kind"`
+	ParentTaskUUID        *string `json:"parent_task_uuid,omitempty"`
+	AssigneePrincipalRef  *string `json:"assignee_principal_ref,omitempty"`
+	Meta                  *string `json:"meta,omitempty"`
+	Outcome               *string `json:"outcome,omitempty"`
+	CPProjectID           *string `json:"cp_project_id,omitempty"`
+	CPRunID               *string `json:"cp_run_id,omitempty"`
+	CPSessionID           *string `json:"cp_session_id,omitempty"`
+	CPWorkItemID          *string `json:"cp_work_item_id,omitempty"`
+	SDKSessionID          *string `json:"sdk_session_id,omitempty"`
+	RunStatus             *string `json:"run_status,omitempty"`
+	DeletedAt             *string `json:"deleted_at,omitempty"`
+	DeletedByPrincipalRef *string `json:"deleted_by_principal_ref,omitempty"`
+	CreatedByScopeRef     *string `json:"created_by_scope_ref,omitempty"`
+	UpdatedByScopeRef     *string `json:"updated_by_scope_ref,omitempty"`
+	DeletedByScopeRef     *string `json:"deleted_by_scope_ref,omitempty"`
+	ClaimedByPrincipalRef *string `json:"claimed_by_principal_ref,omitempty"`
+	ClaimedScopeRef       *string `json:"claimed_scope_ref,omitempty"`
+	ClaimedNode           *string `json:"claimed_node,omitempty"`
+	ClaimedAt             *string `json:"claimed_at,omitempty"`
+	ClaimTokenHash        *string `json:"claim_token_hash,omitempty"`
+	ClaimGeneration       int64   `json:"claim_generation,omitempty"`
 }
 
 // CommentEntry represents a comment in the snapshot.
@@ -119,17 +160,27 @@ type CommentEntry struct {
 	UpdatedAt             string `json:"updated_at,omitempty"`
 	DeletedAt             string `json:"deleted_at,omitempty"`
 	DeletedByPrincipalRef string `json:"deleted_by_principal_ref,omitempty"`
+
+	Kind              *string `json:"kind,omitempty"`
+	CreatedByScopeRef *string `json:"created_by_scope_ref,omitempty"`
+	DeletedByScopeRef *string `json:"deleted_by_scope_ref,omitempty"`
 }
 
-// LinkEntry represents a link/dependency in the snapshot.
-// Keys under "links" are UUIDs.
+// LinkEntry represents one task_relations row. Keys under "links" are
+// LinkKey(source, target, type), the table's natural primary key.
 type LinkEntry struct {
-	ID                    string `json:"id,omitempty"`
-	SourceUUID            string `json:"source_uuid"`
-	TargetUUID            string `json:"target_uuid"`
-	LinkType              string `json:"link_type"`
-	CreatedAt             string `json:"created_at"`
-	CreatedByPrincipalRef string `json:"created_by_principal_ref,omitempty"`
+	SourceUUID            string  `json:"source_uuid"`
+	TargetUUID            string  `json:"target_uuid"`
+	LinkType              string  `json:"link_type"`
+	Meta                  *string `json:"meta,omitempty"`
+	CreatedAt             string  `json:"created_at"`
+	CreatedByPrincipalRef string  `json:"created_by_principal_ref,omitempty"`
+	CreatedByScopeRef     *string `json:"created_by_scope_ref,omitempty"`
+}
+
+// LinkKey is the snapshot map key of a task relation.
+func LinkKey(source, target, linkType string) string {
+	return source + "|" + target + "|" + linkType
 }
 
 // EventEntry represents minimal event metadata in the snapshot.
@@ -185,6 +236,10 @@ type ImportOptions struct {
 	IfEmpty bool
 	// Force allows importing into non-empty DB by truncating
 	Force bool
+	// AllowCascade lets Force proceed although rows outside the snapshot
+	// model (rooms, envelopes, workflow instances, ...) reference the
+	// modelled rows it is about to delete; they are cascade-deleted or nulled.
+	AllowCascade bool
 }
 
 // ExportResult contains the result of an export operation.
@@ -208,6 +263,7 @@ type ImportResult struct {
 	TaskCount      int    `json:"tasks"`
 	PromiseCount   int    `json:"promises,omitempty"`
 	CommentCount   int    `json:"comments"`
+	LinkCount      int    `json:"links,omitempty"`
 	DryRun         bool   `json:"dry_run,omitempty"`
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	dbsync "github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 )
 
 // Import loads a snapshot file and hydrates the database.
@@ -40,17 +41,6 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		return nil, fmt.Errorf("invalid snapshot: %w", err)
 	}
 
-	// Check if database is empty (if --if-empty)
-	if opts.IfEmpty {
-		empty, err := isDatabaseEmpty(db)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check database: %w", err)
-		}
-		if !empty {
-			return nil, fmt.Errorf("database is not empty (use --force to override)")
-		}
-	}
-
 	// If dry run, just validate and return
 	if opts.DryRun {
 		return &ImportResult{
@@ -60,51 +50,25 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 			TaskCount:      len(snap.Tasks),
 			PromiseCount:   len(snap.Promises),
 			CommentCount:   len(snap.Comments),
+			LinkCount:      len(snap.Links),
 			DryRun:         true,
 		}, nil
 	}
 
-	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// If force, truncate tables
-	if opts.Force {
-		if err := truncateTables(tx); err != nil {
-			return nil, fmt.Errorf("failed to truncate tables: %w", err)
-		}
+	if err := checkImportTarget(tx, opts); err != nil {
+		return nil, err
 	}
 
-	// Import in dependency order: containers -> tasks -> promises -> comments
-	if err := importContainers(tx, &snap); err != nil {
-		return nil, fmt.Errorf("failed to import containers: %w", err)
+	if err := restoreSnapshot(tx, &snap); err != nil {
+		return nil, err
 	}
 
-	if err := importTasks(tx, &snap); err != nil {
-		return nil, fmt.Errorf("failed to import tasks: %w", err)
-	}
-
-	if err := importPromises(tx, &snap); err != nil {
-		return nil, fmt.Errorf("failed to import promises: %w", err)
-	}
-
-	if err := importComments(tx, &snap); err != nil {
-		return nil, fmt.Errorf("failed to import comments: %w", err)
-	}
-
-	// Ensure sqlite_sequence matches max friendly IDs after import.
-	sequenceSpecs, err := snapshotSequenceSpecs(tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect snapshot sequences: %w", err)
-	}
-	if _, err := dbsync.FixSequenceDrifts(tx, sequenceSpecs); err != nil {
-		return nil, fmt.Errorf("failed to sync sqlite_sequence: %w", err)
-	}
-
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -116,8 +80,42 @@ func Import(db *sql.DB, opts ImportOptions) (*ImportResult, error) {
 		TaskCount:      len(snap.Tasks),
 		PromiseCount:   len(snap.Promises),
 		CommentCount:   len(snap.Comments),
+		LinkCount:      len(snap.Links),
 		DryRun:         false,
 	}, nil
+}
+
+// restoreSnapshot replaces the modelled tables with the snapshot's rows inside
+// tx. Rows are written verbatim: foreign keys are deferred to commit so
+// insertion order never matters, and comments go in before the tasks and
+// containers they touch, so the comment touch triggers match no row and
+// cannot bump a restored task's etag/updated_at.
+func restoreSnapshot(tx *sql.Tx, snap *Snapshot) error {
+	if _, err := tx.Exec("PRAGMA defer_foreign_keys = ON"); err != nil {
+		return fmt.Errorf("failed to defer foreign keys: %w", err)
+	}
+	if err := clearModelledTables(tx); err != nil {
+		return fmt.Errorf("failed to clear modelled tables: %w", err)
+	}
+	if err := importComments(tx, snap); err != nil {
+		return fmt.Errorf("failed to import comments: %w", err)
+	}
+	if err := importContainers(tx, snap); err != nil {
+		return fmt.Errorf("failed to import containers: %w", err)
+	}
+	if err := importTasks(tx, snap); err != nil {
+		return fmt.Errorf("failed to import tasks: %w", err)
+	}
+	if err := importPromises(tx, snap); err != nil {
+		return fmt.Errorf("failed to import promises: %w", err)
+	}
+	if err := importLinks(tx, snap); err != nil {
+		return fmt.Errorf("failed to import links: %w", err)
+	}
+	if err := restoreSequences(tx, snap); err != nil {
+		return fmt.Errorf("failed to restore sequences: %w", err)
+	}
+	return nil
 }
 
 func snapshotSequenceSpecs(tx *sql.Tx) ([]dbsync.SequenceSpec, error) {
@@ -218,11 +216,43 @@ func validateSnapshot(snap *Snapshot) error {
 		return fmt.Errorf("invalid machine_interface_version: %d", snap.Meta.MachineInterfaceVersion)
 	}
 
-	// Validate FK references
-	// Tasks must reference valid containers
+	// The singleton root is part of every ledger; import restores it in place.
+	root, ok := snap.Containers[domain.RootContainerUUID]
+	if !ok {
+		return fmt.Errorf("snapshot has no root container %s", domain.RootContainerUUID)
+	}
+	if root.Kind != "root" {
+		return fmt.Errorf("container %s must have kind root, has %q", domain.RootContainerUUID, root.Kind)
+	}
+
+	// Every cross-entity reference must resolve inside the snapshot.
+	for uuid, container := range snap.Containers {
+		if container.Kind == "" {
+			return fmt.Errorf("container %s has no kind", uuid)
+		}
+		if container.Kind == "root" && uuid != domain.RootContainerUUID {
+			return fmt.Errorf("container %s has kind root but is not the root container", uuid)
+		}
+		if container.ParentUUID != "" {
+			if _, ok := snap.Containers[container.ParentUUID]; !ok {
+				return fmt.Errorf("container %s references unknown parent %s", uuid, container.ParentUUID)
+			}
+		}
+	}
+
 	for uuid, task := range snap.Tasks {
 		if _, ok := snap.Containers[task.ProjectUUID]; !ok {
 			return fmt.Errorf("task %s references unknown container %s", uuid, task.ProjectUUID)
+		}
+		if task.CampaignUUID != "" {
+			if _, ok := snap.Containers[task.CampaignUUID]; !ok {
+				return fmt.Errorf("task %s references unknown campaign container %s", uuid, task.CampaignUUID)
+			}
+		}
+		if task.ParentTaskUUID != nil {
+			if _, ok := snap.Tasks[*task.ParentTaskUUID]; !ok {
+				return fmt.Errorf("task %s references unknown parent task %s", uuid, *task.ParentTaskUUID)
+			}
 		}
 	}
 
@@ -262,160 +292,255 @@ func validateSnapshot(snap *Snapshot) error {
 		}
 	}
 
-	// Containers with parent_uuid must reference valid containers
-	for uuid, container := range snap.Containers {
-		if container.ParentUUID != "" {
-			if _, ok := snap.Containers[container.ParentUUID]; !ok {
-				return fmt.Errorf("container %s references unknown parent %s", uuid, container.ParentUUID)
-			}
+	for key, link := range snap.Links {
+		if key != LinkKey(link.SourceUUID, link.TargetUUID, link.LinkType) {
+			return fmt.Errorf("link %s does not match its source|target|link_type", key)
+		}
+		if _, ok := snap.Tasks[link.SourceUUID]; !ok {
+			return fmt.Errorf("link %s references unknown task %s", key, link.SourceUUID)
+		}
+		if _, ok := snap.Tasks[link.TargetUUID]; !ok {
+			return fmt.Errorf("link %s references unknown task %s", key, link.TargetUUID)
 		}
 	}
 
 	return nil
 }
 
-func isDatabaseEmpty(db *sql.DB) (bool, error) {
-	var count int
-
-	// Check containers
-	if err := db.QueryRow("SELECT COUNT(*) FROM containers").Scan(&count); err != nil {
-		return false, err
-	}
-	if count > 1 { // Allow inbox
-		return false, nil
-	}
-
-	// Check tasks
-	if err := db.QueryRow("SELECT COUNT(*) FROM tasks").Scan(&count); err != nil {
-		return false, err
-	}
-	if count > 0 {
-		return false, nil
-	}
-
-	// Standalone promises make an otherwise root-only database non-empty.
-	if err := db.QueryRow("SELECT COUNT(*) FROM promises").Scan(&count); err != nil {
-		return false, err
-	}
-	if count > 0 {
-		return false, nil
-	}
-
-	return true, nil
+// modelledTables are the tables a snapshot represents in full.
+var modelledTables = map[string]bool{
+	"containers": true, "tasks": true, "comments": true, "promises": true, "task_relations": true,
 }
 
-func truncateTables(tx *sql.Tx) error {
-	// Delete in reverse dependency order
-	tables := []string{"comments", "attachments", "promises", "tasks", "containers"}
-
-	for _, table := range tables {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", table)); err != nil {
-			return fmt.Errorf("failed to truncate %s: %w", table, err)
+// checkImportTarget refuses to import over existing ledger data unless Force
+// is set, and refuses Force when rows outside the snapshot model reference
+// the modelled rows it would delete, unless AllowCascade is also set.
+func checkImportTarget(tx *sql.Tx, opts ImportOptions) error {
+	if !opts.Force {
+		occupied, err := ledgerOccupancy(tx)
+		if err != nil {
+			return fmt.Errorf("failed to check database: %w", err)
+		}
+		if occupied != "" {
+			return fmt.Errorf("database is not empty (%s); use --force to replace the task ledger", occupied)
 		}
 	}
+	if opts.AllowCascade {
+		return nil
+	}
+	dependents, err := outOfModelDependents(tx)
+	if err != nil {
+		return fmt.Errorf("failed to check out-of-model rows: %w", err)
+	}
+	if len(dependents) > 0 {
+		return fmt.Errorf("refusing to replace the task ledger: rows outside the snapshot model reference it and would be cascade-deleted or nulled (%s); pass --allow-cascade to proceed, never against a live ledger", strings.Join(dependents, ", "))
+	}
+	return nil
+}
 
-	// Reset sequences
-	seqTables := []string{"container_seq", "task_seq", "promise_seq", "attachment_seq"}
-	for _, seq := range seqTables {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s", seq)); err != nil {
-			return fmt.Errorf("failed to reset %s: %w", seq, err)
+// ledgerOccupancy returns a description of the first ledger data found, or ""
+// when the database holds only seeded defaults: the root plus at most one
+// other container (the inbox `wrkqadm init` seeds).
+func ledgerOccupancy(tx *sql.Tx) (string, error) {
+	for _, table := range []string{"tasks", "comments", "promises", "task_relations"} {
+		var count int
+		if err := tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).Scan(&count); err != nil {
+			return "", err
+		}
+		if count > 0 {
+			return fmt.Sprintf("%d %s", count, table), nil
 		}
 	}
+	var containers int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM containers WHERE kind != 'root'").Scan(&containers); err != nil {
+		return "", err
+	}
+	if containers > 1 {
+		return fmt.Sprintf("%d non-root containers", containers), nil
+	}
+	return "", nil
+}
 
-	// Reset comment sequence
-	if _, err := tx.Exec("UPDATE comment_sequences SET value = 0 WHERE name = 'next_comment'"); err != nil {
-		return fmt.Errorf("failed to reset comment sequence: %w", err)
+// outOfModelDependents lists "table.column (n)" for every non-null foreign
+// key from a table outside the snapshot model into a modelled table. The
+// schema is read at run time, so a new referencing table is never missed.
+func outOfModelDependents(tx *sql.Tx) ([]string, error) {
+	rows, err := tx.Query(`
+		SELECT m.name, fk."from", fk."table"
+		  FROM sqlite_master m, pragma_foreign_key_list(m.name) fk
+		 WHERE m.type = 'table'
+		 ORDER BY m.name, fk."from"`)
+	if err != nil {
+		return nil, err
+	}
+	type ref struct{ table, column string }
+	var refs []ref
+	for rows.Next() {
+		var table, column, target string
+		if err := rows.Scan(&table, &column, &target); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if !modelledTables[table] && modelledTables[target] {
+			refs = append(refs, ref{table, column})
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 
+	var dependents []string
+	for _, r := range refs {
+		var count int
+		query := fmt.Sprintf(`SELECT COUNT(*) FROM "%s" WHERE "%s" IS NOT NULL`, r.table, r.column)
+		if err := tx.QueryRow(query).Scan(&count); err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			dependents = append(dependents, fmt.Sprintf("%s.%s (%d)", r.table, r.column, count))
+		}
+	}
+	return dependents, nil
+}
+
+// clearModelledTables deletes every modelled row except the singleton root,
+// which cannot be deleted and is restored in place.
+func clearModelledTables(tx *sql.Tx) error {
+	for _, stmt := range []string{
+		"DELETE FROM task_relations",
+		"DELETE FROM comments",
+		"DELETE FROM promises",
+		"DELETE FROM tasks",
+		"DELETE FROM containers WHERE kind != 'root'",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("%s: %w", stmt, err)
+		}
+	}
+	return nil
+}
+
+// restoreSequences raises each friendly-id sequence to the larger of the
+// snapshot's high-water mark and the largest restored canonical id; it never
+// lowers a sequence.
+func restoreSequences(tx *sql.Tx, snap *Snapshot) error {
+	specs, err := snapshotSequenceSpecs(tx)
+	if err != nil {
+		return err
+	}
+	if _, err := dbsync.FixSequenceDrifts(tx, specs); err != nil {
+		return err
+	}
+	for seqTable, name := range snapshotSequenceNames {
+		hw := snap.Meta.Sequences[name]
+		if hw <= 0 {
+			continue
+		}
+		res, err := tx.Exec("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?", hw, seqTable)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			if _, err := tx.Exec("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", seqTable, hw); err != nil {
+				return err
+			}
+		}
+	}
+	comment, err := commentHighWater(tx)
+	if err != nil {
+		return err
+	}
+	if hw := snap.Meta.Sequences["comment"]; hw > comment {
+		comment = hw
+	}
+	if _, err := tx.Exec(`UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'`, comment); err != nil {
+		return err
+	}
 	return nil
 }
 
 func importContainers(tx *sql.Tx, snap *Snapshot) error {
-	// Build dependency graph and import in topological order
-	// (parents before children)
-	ordered := topologicalSortContainers(snap.Containers)
+	uuids := make([]string, 0, len(snap.Containers))
+	for uuid := range snap.Containers {
+		if uuid != domain.RootContainerUUID {
+			uuids = append(uuids, uuid)
+		}
+	}
+	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO containers (uuid, id, slug, title, parent_uuid, etag,
-		                        created_at, updated_at, archived_at,
-		                        created_by_principal_ref, updated_by_principal_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(uuid) DO UPDATE SET
-			id = excluded.id,
-			slug = excluded.slug,
-			title = excluded.title,
-			parent_uuid = excluded.parent_uuid,
-			etag = excluded.etag,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at,
-			archived_at = excluded.archived_at,
-			created_by_principal_ref = excluded.created_by_principal_ref,
-			updated_by_principal_ref = excluded.updated_by_principal_ref
+		INSERT INTO containers (uuid, id, slug, title, kind, description, parent_uuid, sort_index,
+		                        section_uuid, webhook_urls, root, specification, labels, campaign_state,
+		                        etag, created_at, updated_at, archived_at,
+		                        created_by_principal_ref, created_by_scope_ref,
+		                        updated_by_principal_ref, updated_by_scope_ref)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = stmt.Close() }()
 
-	for _, uuid := range ordered {
-		container := snap.Containers[uuid]
-
-		var parentUUID, archivedAt, createdByPrincipal, updatedByPrincipal interface{}
-		if container.ParentUUID != "" {
-			parentUUID = container.ParentUUID
-		}
-		if container.ArchivedAt != "" {
-			archivedAt = container.ArchivedAt
-		}
-		if container.CreatedByPrincipalRef != "" {
-			createdByPrincipal = container.CreatedByPrincipalRef
-		}
-		if container.UpdatedByPrincipalRef != "" {
-			updatedByPrincipal = container.UpdatedByPrincipalRef
-		}
-
-		if _, err := stmt.Exec(uuid, container.ID, container.Slug, container.Title,
-			parentUUID, container.ETag, container.CreatedAt, container.UpdatedAt,
-			archivedAt, createdByPrincipal, updatedByPrincipal); err != nil {
+	for _, uuid := range uuids {
+		c := snap.Containers[uuid]
+		if _, err := stmt.Exec(uuid, c.ID, c.Slug, c.Title, c.Kind, c.Description,
+			nullableSnapshotString(c.ParentUUID), c.SortIndex,
+			nullableSnapshotPointer(c.SectionUUID), nullableSnapshotPointer(c.WebhookURLs),
+			nullableSnapshotPointer(c.Root), nullableSnapshotPointer(c.Specification),
+			nullableSnapshotPointer(c.Labels), nullableSnapshotPointer(c.CampaignState),
+			c.ETag, c.CreatedAt, c.UpdatedAt, nullableSnapshotString(c.ArchivedAt),
+			nullableSnapshotString(c.CreatedByPrincipalRef), nullableSnapshotPointer(c.CreatedByScopeRef),
+			nullableSnapshotString(c.UpdatedByPrincipalRef), nullableSnapshotPointer(c.UpdatedByScopeRef)); err != nil {
 			return fmt.Errorf("failed to import container %s: %w", uuid, err)
 		}
 	}
 
-	return nil
+	return restoreRootContainer(tx, snap.Containers[domain.RootContainerUUID])
 }
 
-func topologicalSortContainers(containers map[string]ContainerEntry) []string {
-	// Build adjacency list
-	children := make(map[string][]string)
-	roots := make([]string, 0)
-
-	for uuid, container := range containers {
-		if container.ParentUUID == "" {
-			roots = append(roots, uuid)
-		} else {
-			children[container.ParentUUID] = append(children[container.ParentUUID], uuid)
+// restoreRootContainer overwrites the mutable columns of the migration-seeded
+// root in place. Its identity columns (parent, slug, kind, archived_at) are
+// immutable by trigger and fixed by migration. containers_au_touch would
+// stamp updated_at with the import time, so it is suspended for this one
+// UPDATE; the DROP and CREATE both live in tx and roll back with it.
+func restoreRootContainer(tx *sql.Tx, root ContainerEntry) error {
+	const touchTrigger = "containers_au_touch"
+	var triggerSQL string
+	err := tx.QueryRow("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?", touchTrigger).Scan(&triggerSQL)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if triggerSQL != "" {
+		if _, err := tx.Exec("DROP TRIGGER " + touchTrigger); err != nil {
+			return err
 		}
 	}
-
-	// Sort roots for determinism
-	sort.Strings(roots)
-
-	// BFS to get topological order
-	result := make([]string, 0, len(containers))
-	queue := roots
-
-	for len(queue) > 0 {
-		uuid := queue[0]
-		queue = queue[1:]
-		result = append(result, uuid)
-
-		// Sort children for determinism
-		childList := children[uuid]
-		sort.Strings(childList)
-		queue = append(queue, childList...)
+	if _, err := tx.Exec(`
+		UPDATE containers
+		   SET id = ?, title = ?, description = ?, sort_index = ?, section_uuid = ?,
+		       webhook_urls = ?, root = ?, specification = ?, labels = ?, campaign_state = ?,
+		       etag = ?, created_at = ?, updated_at = ?,
+		       created_by_principal_ref = ?, created_by_scope_ref = ?,
+		       updated_by_principal_ref = ?, updated_by_scope_ref = ?
+		 WHERE uuid = ?`,
+		root.ID, root.Title, root.Description, root.SortIndex, nullableSnapshotPointer(root.SectionUUID),
+		nullableSnapshotPointer(root.WebhookURLs), nullableSnapshotPointer(root.Root),
+		nullableSnapshotPointer(root.Specification), nullableSnapshotPointer(root.Labels),
+		nullableSnapshotPointer(root.CampaignState),
+		root.ETag, root.CreatedAt, root.UpdatedAt,
+		nullableSnapshotString(root.CreatedByPrincipalRef), nullableSnapshotPointer(root.CreatedByScopeRef),
+		nullableSnapshotString(root.UpdatedByPrincipalRef), nullableSnapshotPointer(root.UpdatedByScopeRef),
+		domain.RootContainerUUID); err != nil {
+		return fmt.Errorf("failed to restore root container: %w", err)
 	}
-
-	return result
+	if triggerSQL != "" {
+		if _, err := tx.Exec(triggerSQL); err != nil {
+			return fmt.Errorf("failed to recreate %s: %w", touchTrigger, err)
+		}
+	}
+	return nil
 }
 
 func importTasks(tx *sql.Tx, snap *Snapshot) error {
@@ -426,42 +551,21 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO tasks (uuid, id, slug, title, project_uuid, campaign_uuid, requested_by_project_id,
-		                   assigned_project_id, acknowledged_at, resolution,
+		INSERT INTO tasks (uuid, id, slug, title, kind, project_uuid, campaign_uuid, parent_task_uuid,
+		                   requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 		                   workflow_preset, preset_version, phase, risk_class,
-		                   state, priority,
-		                   start_at, due_at, labels, description, specification, etag,
+		                   state, priority, assignee_principal_ref,
+		                   start_at, due_at, labels, meta, outcome, description, specification, etag,
 		                   created_at, updated_at, completed_at, archived_at,
-		                   created_by_principal_ref, updated_by_principal_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(uuid) DO UPDATE SET
-			id = excluded.id,
-			slug = excluded.slug,
-			title = excluded.title,
-			project_uuid = excluded.project_uuid,
-			campaign_uuid = excluded.campaign_uuid,
-			requested_by_project_id = excluded.requested_by_project_id,
-			assigned_project_id = excluded.assigned_project_id,
-			acknowledged_at = excluded.acknowledged_at,
-			resolution = excluded.resolution,
-			workflow_preset = excluded.workflow_preset,
-			preset_version = excluded.preset_version,
-			phase = excluded.phase,
-			risk_class = excluded.risk_class,
-			state = excluded.state,
-			priority = excluded.priority,
-			start_at = excluded.start_at,
-			due_at = excluded.due_at,
-			labels = excluded.labels,
-			description = excluded.description,
-			specification = excluded.specification,
-			etag = excluded.etag,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at,
-			completed_at = excluded.completed_at,
-			archived_at = excluded.archived_at,
-			created_by_principal_ref = excluded.created_by_principal_ref,
-			updated_by_principal_ref = excluded.updated_by_principal_ref
+		                   deleted_at, deleted_by_principal_ref, deleted_by_scope_ref,
+		                   created_by_principal_ref, created_by_scope_ref,
+		                   updated_by_principal_ref, updated_by_scope_ref,
+		                   cp_project_id, cp_run_id, cp_session_id, cp_work_item_id,
+		                   sdk_session_id, run_status,
+		                   claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at,
+		                   claim_token_hash, claim_generation)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -469,87 +573,72 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	defer func() { _ = stmt.Close() }()
 
 	for _, uuid := range uuids {
-		task := snap.Tasks[uuid]
+		t := snap.Tasks[uuid]
 
-		var startAt, dueAt, labels, completedAt, archivedAt interface{}
-		var campaignUUID interface{}
-		var requestedBy, assignedProject, acknowledgedAt, resolution interface{}
-		var workflowPreset, presetVersion, phase, riskClass interface{}
-		var createdByPrincipal, updatedByPrincipal interface{}
-		if task.CreatedByPrincipalRef != "" {
-			createdByPrincipal = task.CreatedByPrincipalRef
+		var presetVersion, labels interface{}
+		if t.PresetVersion > 0 {
+			presetVersion = t.PresetVersion
 		}
-		if task.UpdatedByPrincipalRef != "" {
-			updatedByPrincipal = task.UpdatedByPrincipalRef
-		}
-		if task.CampaignUUID != "" {
-			campaignUUID = task.CampaignUUID
-		}
-		if task.RequestedByProjectID != "" {
-			requestedBy = task.RequestedByProjectID
-		}
-		if task.AssignedProjectID != "" {
-			assignedProject = task.AssignedProjectID
-		}
-		if task.AcknowledgedAt != "" {
-			acknowledgedAt = task.AcknowledgedAt
-		}
-		if task.Resolution != "" {
-			resolution = task.Resolution
-		}
-		if task.WorkflowPreset != "" {
-			workflowPreset = task.WorkflowPreset
-		}
-		if task.PresetVersion > 0 {
-			presetVersion = task.PresetVersion
-		}
-		if task.Phase != "" {
-			phase = task.Phase
-		}
-		if task.RiskClass != "" {
-			riskClass = task.RiskClass
-		}
-		if task.StartAt != "" {
-			startAt = task.StartAt
-		}
-		if task.DueAt != "" {
-			dueAt = task.DueAt
-		}
-		if len(task.Labels) > 0 {
-			// Sort labels for determinism
-			sortedLabels := make([]string, len(task.Labels))
-			copy(sortedLabels, task.Labels)
+		if len(t.Labels) > 0 {
+			sortedLabels := append([]string(nil), t.Labels...)
 			sort.Strings(sortedLabels)
 			labelsJSON, _ := json.Marshal(sortedLabels)
 			labels = string(labelsJSON)
 		}
-		if task.CompletedAt != "" {
-			completedAt = task.CompletedAt
-		}
-		if task.ArchivedAt != "" {
-			archivedAt = task.ArchivedAt
-		}
 
-		description := task.Description
-		if description == "" {
-			description = "" // Ensure empty string, not NULL
-		}
-		specification := task.Specification
-		if specification == "" {
-			specification = "" // Ensure empty string, not NULL
-		}
-
-		if _, err := stmt.Exec(uuid, task.ID, task.Slug, task.Title, task.ProjectUUID,
-			campaignUUID, requestedBy, assignedProject, acknowledgedAt, resolution,
-			workflowPreset, presetVersion, phase, riskClass,
-			task.State, task.Priority,
-			startAt, dueAt, labels, description, specification, task.ETag,
-			task.CreatedAt, task.UpdatedAt, completedAt, archivedAt,
-			createdByPrincipal, updatedByPrincipal); err != nil {
+		if _, err := stmt.Exec(uuid, t.ID, t.Slug, t.Title, t.Kind, t.ProjectUUID,
+			nullableSnapshotString(t.CampaignUUID), nullableSnapshotPointer(t.ParentTaskUUID),
+			nullableSnapshotString(t.RequestedByProjectID), nullableSnapshotString(t.AssignedProjectID),
+			nullableSnapshotString(t.AcknowledgedAt), nullableSnapshotString(t.Resolution),
+			nullableSnapshotString(t.WorkflowPreset), presetVersion,
+			nullableSnapshotString(t.Phase), nullableSnapshotString(t.RiskClass),
+			t.State, t.Priority, nullableSnapshotPointer(t.AssigneePrincipalRef),
+			nullableSnapshotString(t.StartAt), nullableSnapshotString(t.DueAt), labels,
+			nullableSnapshotPointer(t.Meta), nullableSnapshotPointer(t.Outcome),
+			t.Description, t.Specification, t.ETag,
+			t.CreatedAt, t.UpdatedAt, nullableSnapshotString(t.CompletedAt), nullableSnapshotString(t.ArchivedAt),
+			nullableSnapshotPointer(t.DeletedAt), nullableSnapshotPointer(t.DeletedByPrincipalRef),
+			nullableSnapshotPointer(t.DeletedByScopeRef),
+			nullableSnapshotString(t.CreatedByPrincipalRef), nullableSnapshotPointer(t.CreatedByScopeRef),
+			nullableSnapshotString(t.UpdatedByPrincipalRef), nullableSnapshotPointer(t.UpdatedByScopeRef),
+			nullableSnapshotPointer(t.CPProjectID), nullableSnapshotPointer(t.CPRunID),
+			nullableSnapshotPointer(t.CPSessionID), nullableSnapshotPointer(t.CPWorkItemID),
+			nullableSnapshotPointer(t.SDKSessionID), nullableSnapshotPointer(t.RunStatus),
+			nullableSnapshotPointer(t.ClaimedByPrincipalRef), nullableSnapshotPointer(t.ClaimedScopeRef),
+			nullableSnapshotPointer(t.ClaimedNode), nullableSnapshotPointer(t.ClaimedAt),
+			nullableSnapshotPointer(t.ClaimTokenHash), t.ClaimGeneration); err != nil {
 			return fmt.Errorf("failed to import task %s: %w", uuid, err)
 		}
 	}
 
+	return nil
+}
+
+func importLinks(tx *sql.Tx, snap *Snapshot) error {
+	keys := make([]string, 0, len(snap.Links))
+	for key := range snap.Links {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, meta, created_at,
+		                            created_by_principal_ref, created_by_scope_ref)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, key := range keys {
+		l := snap.Links[key]
+		if _, err := stmt.Exec(l.SourceUUID, l.TargetUUID, l.LinkType, nullableSnapshotPointer(l.Meta),
+			l.CreatedAt, nullableSnapshotString(l.CreatedByPrincipalRef),
+			nullableSnapshotPointer(l.CreatedByScopeRef)); err != nil {
+			return fmt.Errorf("failed to import link %s: %w", key, err)
+		}
+	}
 	return nil
 }
 
@@ -629,21 +718,11 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	sort.Strings(uuids)
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO comments (uuid, id, task_uuid, container_uuid, created_by_principal_ref, body, meta, etag,
-		                      created_at, updated_at, deleted_at, deleted_by_principal_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(uuid) DO UPDATE SET
-			id = excluded.id,
-			task_uuid = excluded.task_uuid,
-			container_uuid = excluded.container_uuid,
-			created_by_principal_ref = excluded.created_by_principal_ref,
-			body = excluded.body,
-			meta = excluded.meta,
-			etag = excluded.etag,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at,
-			deleted_at = excluded.deleted_at,
-			deleted_by_principal_ref = excluded.deleted_by_principal_ref
+		INSERT INTO comments (uuid, id, task_uuid, container_uuid, kind,
+		                      created_by_principal_ref, created_by_scope_ref, body, meta, etag,
+		                      created_at, updated_at, deleted_at,
+		                      deleted_by_principal_ref, deleted_by_scope_ref)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -651,45 +730,16 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 	defer func() { _ = stmt.Close() }()
 
 	for _, uuid := range uuids {
-		comment := snap.Comments[uuid]
-
-		var createdByPrincipal, meta, updatedAt, deletedAt, deletedByPrincipal interface{}
-		if comment.CreatedByPrincipalRef != "" {
-			createdByPrincipal = comment.CreatedByPrincipalRef
-		}
-		if comment.Meta != "" {
-			meta = comment.Meta
-		}
-		if comment.UpdatedAt != "" {
-			updatedAt = comment.UpdatedAt
-		}
-		if comment.DeletedAt != "" {
-			deletedAt = comment.DeletedAt
-		}
-		if comment.DeletedByPrincipalRef != "" {
-			deletedByPrincipal = comment.DeletedByPrincipalRef
-		}
-
-		if _, err := stmt.Exec(uuid, comment.ID, nullableSnapshotString(comment.TaskUUID),
-			nullableSnapshotString(comment.ContainerUUID), createdByPrincipal,
-			comment.Body, meta, comment.ETag, comment.CreatedAt, updatedAt,
-			deletedAt, deletedByPrincipal); err != nil {
+		c := snap.Comments[uuid]
+		if _, err := stmt.Exec(uuid, c.ID, nullableSnapshotString(c.TaskUUID),
+			nullableSnapshotString(c.ContainerUUID), nullableSnapshotPointer(c.Kind),
+			nullableSnapshotString(c.CreatedByPrincipalRef), nullableSnapshotPointer(c.CreatedByScopeRef),
+			c.Body, nullableSnapshotString(c.Meta), c.ETag, c.CreatedAt,
+			nullableSnapshotString(c.UpdatedAt), nullableSnapshotString(c.DeletedAt),
+			nullableSnapshotString(c.DeletedByPrincipalRef), nullableSnapshotPointer(c.DeletedByScopeRef)); err != nil {
 			return fmt.Errorf("failed to import comment %s: %w", uuid, err)
 		}
 	}
-
-	// Update comment_sequences to stay in sync with MAX(id)
-	// This prevents UNIQUE constraint violations on subsequent comment add operations
-	var maxSeq int
-	err = tx.QueryRow("SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) FROM comments").Scan(&maxSeq)
-	if err != nil {
-		return fmt.Errorf("failed to get max comment ID: %w", err)
-	}
-	_, err = tx.Exec("UPDATE comment_sequences SET value = ? WHERE name = 'next_comment'", maxSeq)
-	if err != nil {
-		return fmt.Errorf("failed to update comment sequence: %w", err)
-	}
-
 	return nil
 }
 

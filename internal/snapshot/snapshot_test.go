@@ -15,167 +15,42 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// createTestDB creates an in-memory SQLite database with the wrkq schema
+// createTestDB opens a freshly migrated wrkq database: fixtures run against
+// the production schema and its triggers, never a hand-written double.
 func createTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-
-	db, err := sql.Open("sqlite3", ":memory:")
+	database, err := wrkqdb.Open(filepath.Join(t.TempDir(), "wrkq.db"))
 	if err != nil {
-		t.Fatalf("failed to create test db: %v", err)
+		t.Fatalf("failed to open test db: %v", err)
 	}
-
-	// Enable foreign keys
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		t.Fatalf("failed to enable foreign keys: %v", err)
+	if err := database.Migrate(); err != nil {
+		t.Fatalf("failed to migrate test db: %v", err)
 	}
-
-	// Create minimal principal-only schema for testing. There is no actors
-	// table: write attribution is carried solely by *_principal_ref columns.
-	schema := `
-		CREATE TABLE containers (
-			uuid TEXT PRIMARY KEY,
-			id TEXT UNIQUE,
-			slug TEXT NOT NULL,
-			title TEXT NOT NULL,
-			parent_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
-			etag INTEGER NOT NULL DEFAULT 1,
-			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			archived_at TEXT,
-			created_by_principal_ref TEXT,
-			updated_by_principal_ref TEXT
-		);
-
-		CREATE TABLE tasks (
-			uuid TEXT PRIMARY KEY,
-			id TEXT UNIQUE,
-			slug TEXT NOT NULL,
-			title TEXT NOT NULL,
-			project_uuid TEXT NOT NULL REFERENCES containers(uuid),
-			campaign_uuid TEXT REFERENCES containers(uuid),
-			requested_by_project_id TEXT,
-			assigned_project_id TEXT,
-			acknowledged_at TEXT,
-			resolution TEXT,
-			workflow_preset TEXT,
-			preset_version INTEGER,
-			phase TEXT,
-			risk_class TEXT,
-			state TEXT NOT NULL CHECK (state IN ('idea','draft','open','in_progress','completed','archived','blocked','cancelled','deleted')),
-			priority INTEGER NOT NULL DEFAULT 3,
-			start_at TEXT,
-			due_at TEXT,
-			labels TEXT,
-			description TEXT NOT NULL DEFAULT '',
-			specification TEXT NOT NULL DEFAULT '',
-			etag INTEGER NOT NULL DEFAULT 1,
-			created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			completed_at TEXT,
-			archived_at TEXT,
-			created_by_principal_ref TEXT,
-			updated_by_principal_ref TEXT
-		);
-
-		CREATE TABLE comments (
-			uuid TEXT PRIMARY KEY,
-			id TEXT NOT NULL UNIQUE,
-			task_uuid TEXT REFERENCES tasks(uuid) ON DELETE CASCADE,
-			container_uuid TEXT REFERENCES containers(uuid) ON DELETE CASCADE,
-			created_by_principal_ref TEXT,
-			body TEXT NOT NULL,
-			meta TEXT,
-			etag INTEGER NOT NULL DEFAULT 1,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			updated_at TEXT,
-			deleted_at TEXT,
-			deleted_by_principal_ref TEXT,
-			CHECK (
-				(task_uuid IS NOT NULL AND container_uuid IS NULL) OR
-				(task_uuid IS NULL AND container_uuid IS NOT NULL)
-			)
-		);
-
-		CREATE TABLE promises (
-			uuid TEXT PRIMARY KEY,
-			id TEXT NOT NULL UNIQUE,
-			owner_principal_ref TEXT NOT NULL,
-			subject TEXT NOT NULL,
-			review_question TEXT,
-			subject_task_uuid TEXT REFERENCES tasks(uuid) ON DELETE SET NULL,
-			subject_container_uuid TEXT REFERENCES containers(uuid) ON DELETE SET NULL,
-			review_at TEXT NOT NULL,
-			state TEXT NOT NULL,
-			closed_at TEXT,
-			last_reviewed_at TEXT,
-			last_review_note TEXT,
-			meta TEXT,
-			etag INTEGER NOT NULL,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
-			created_by_principal_ref TEXT NOT NULL,
-			created_by_scope_ref TEXT,
-			updated_by_principal_ref TEXT NOT NULL,
-			updated_by_scope_ref TEXT
-		);
-
-		CREATE TABLE event_log (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-			principal_ref TEXT,
-			resource_type TEXT,
-			resource_uuid TEXT,
-			event_type TEXT NOT NULL,
-			etag INTEGER,
-			payload TEXT
-		);
-
-		CREATE TABLE actors (id TEXT);
-		CREATE TABLE attachments (id TEXT);
-		CREATE TABLE evidence_items (id TEXT);
-		CREATE TABLE rooms (id TEXT);
-		CREATE TABLE envelopes (id TEXT);
-		CREATE TABLE task_transitions (id TEXT);
-		CREATE TABLE comment_sequences (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
-		INSERT INTO comment_sequences (name, value) VALUES ('next_comment', 0);
-	`
-
-	if _, err := db.Exec(schema); err != nil {
-		t.Fatalf("failed to create schema: %v", err)
-	}
-
-	return db
+	t.Cleanup(func() { _ = database.Close() })
+	return database.DB
 }
 
-// seedTestData inserts test data into the database
+// seedTestData inserts one project under the root, one task and one comment.
 func seedTestData(t *testing.T, db *sql.DB) {
 	t.Helper()
-
-	// Insert container
-	_, err := db.Exec(`
-		INSERT INTO containers (uuid, id, slug, title, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
-		VALUES ('container-uuid-1', 'P-00001', 'test-project', 'Test Project', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'agent:test-actor', 'agent:test-actor')
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert container: %v", err)
-	}
-
-	// Insert task
-	_, err = db.Exec(`
+	mustExec(t, db, `
+		INSERT INTO containers (uuid, id, slug, title, kind, parent_uuid, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
+		VALUES ('container-uuid-1', 'P-00001', 'test-project', 'Test Project', 'project', ?, 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'agent:test-actor', 'agent:test-actor')
+	`, domain.RootContainerUUID)
+	mustExec(t, db, `
 		INSERT INTO tasks (uuid, id, slug, title, project_uuid, workflow_preset, preset_version, phase, risk_class, state, priority, labels, description, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
 		VALUES ('task-uuid-1', 'T-00001', 'test-task', 'Test Task', 'container-uuid-1', 'code_defect_fastlane', 1, 'open', 'medium', 'open', 2, '["label-b","label-a"]', 'Test description', 1, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'agent:test-actor', 'agent:test-actor')
 	`)
-	if err != nil {
-		t.Fatalf("failed to insert task: %v", err)
-	}
-
-	// Insert comment
-	_, err = db.Exec(`
+	mustExec(t, db, `
 		INSERT INTO comments (uuid, id, task_uuid, created_by_principal_ref, body, etag, created_at)
 		VALUES ('comment-uuid-1', 'C-00001', 'task-uuid-1', 'agent:test-actor', 'Test comment', 1, '2025-01-01T00:00:00Z')
 	`)
-	if err != nil {
-		t.Fatalf("failed to insert comment: %v", err)
+}
+
+func mustExec(t *testing.T, db *sql.DB, query string, args ...interface{}) {
+	t.Helper()
+	if _, err := db.Exec(query, args...); err != nil {
+		t.Fatalf("exec %q: %v", query, err)
 	}
 }
 
@@ -271,8 +146,8 @@ func TestExport(t *testing.T) {
 	if result.OutputPath != outputPath {
 		t.Errorf("wrong output path: %s", result.OutputPath)
 	}
-	if result.ContainerCount != 1 {
-		t.Errorf("expected 1 container, got %d", result.ContainerCount)
+	if result.ContainerCount != 2 { // root + project
+		t.Errorf("expected 2 containers, got %d", result.ContainerCount)
 	}
 	if result.TaskCount != 1 {
 		t.Errorf("expected 1 task, got %d", result.TaskCount)
@@ -296,8 +171,8 @@ func TestExport(t *testing.T) {
 	}
 
 	// Verify content
-	if len(snap.Containers) != 1 {
-		t.Errorf("expected 1 container in snapshot, got %d", len(snap.Containers))
+	if len(snap.Containers) != 2 {
+		t.Errorf("expected 2 containers in snapshot, got %d", len(snap.Containers))
 	}
 	if len(snap.Tasks) != 1 {
 		t.Errorf("expected 1 task in snapshot, got %d", len(snap.Tasks))
@@ -556,8 +431,8 @@ func TestImportDryRun(t *testing.T) {
 	if !result.DryRun {
 		t.Error("dry run flag not set in result")
 	}
-	if result.ContainerCount != 1 {
-		t.Errorf("expected 1 container, got %d", result.ContainerCount)
+	if result.ContainerCount != 2 {
+		t.Errorf("expected 2 containers, got %d", result.ContainerCount)
 	}
 }
 
@@ -604,7 +479,8 @@ func TestValidateSnapshot(t *testing.T) {
 			snap: &Snapshot{
 				Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
 				Containers: map[string]ContainerEntry{
-					"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+					domain.RootContainerUUID: {ID: "P-00000", Slug: "wrkq-system-root", Kind: "root"},
+					"container-1":            {ID: "P-00001", Slug: "proj", Title: "Project", Kind: "project", ParentUUID: domain.RootContainerUUID, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
 				},
 				Tasks: map[string]TaskEntry{
 					"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
@@ -650,7 +526,8 @@ func TestValidateSnapshot(t *testing.T) {
 			snap: &Snapshot{
 				Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
 				Containers: map[string]ContainerEntry{
-					"container-1": {ID: "P-00001", ParentUUID: "unknown-parent"},
+					domain.RootContainerUUID: {ID: "P-00000", Slug: "wrkq-system-root", Kind: "root"},
+					"container-1":            {ID: "P-00001", Kind: "directory", ParentUUID: "unknown-parent"},
 				},
 			},
 			wantErr: true,
@@ -742,8 +619,6 @@ func TestSnapshotPreservesCampaignEnrollment(t *testing.T) {
 		t.Fatalf("exported snapshot does not carry campaign_uuid %s: %s", campaign.UUID, data)
 	}
 
-	// Import into the plain-schema fixture DB: the migrated-target path cannot
-	// round-trip containers at all (T-07498), so this proves the task tuple.
 	target := createTestDB(t)
 	defer func() { _ = target.Close() }()
 	if _, err := Import(target, ImportOptions{InputPath: outputPath}); err != nil {

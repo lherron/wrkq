@@ -55,6 +55,9 @@ type ApplyOptions struct {
 	DryRun bool
 	// Strict enables strict validation
 	Strict bool
+	// AllowCascade lets the forced re-import delete out-of-model rows that
+	// reference the ledger (see snapshot.ImportOptions.AllowCascade).
+	AllowCascade bool
 }
 
 // CreateResult contains the result of a patch create operation.

@@ -661,7 +661,11 @@ timestamp, and JSON payload. The event log is an audit trail, not a hash-chain
 ledger.
 
 `state export`, `state import`, and `state verify` provide canonical snapshot
-operations. The former Git-ops bundle workflow is not part of the production
+operations over the task-ledger domain (containers, tasks, comments, promises,
+task relations — every row and domain column, archived and deleted included).
+A snapshot is not a disaster-recovery artifact: rooms, envelopes, handoffs,
+wrkf runtime, attachments and event history are outside it; DR is a
+file-level database copy (see docs/wrkq-operations.md). The former Git-ops bundle workflow is not part of the production
 CLI, admin, daemon, or workrpc contract.
 
 ## 11. wrkf Integration

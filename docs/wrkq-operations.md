@@ -117,18 +117,50 @@ wrkqadm db snapshot --out ./snap.db --json    # emit a JSON manifest
 
 ### 2. Canonical JSON state export (`wrkqadm state`)
 
-Produces a deterministic, canonicalized JSON representation of the whole
-database (actors, containers, tasks, comments — optionally the full event
-log) — sorted keys, no insignificant whitespace, sorted arrays, byte-for-byte
-identical output for identical DB state. Designed for diffing and
+**A state snapshot is NOT a disaster-recovery artifact.** For DR use a
+file-level copy: `wrkqadm db snapshot` (above) or a copy of the database file
+taken with the daemon stopped.
+
+A snapshot is the complete *task-ledger domain* (T-07498):
+
+- every container, task, comment, promise and task relation (`links`) —
+  archived containers and tasks, deleted-state tasks and soft-deleted comments
+  included, because live rows reference them;
+- every domain column of those rows, written back verbatim on import (ids,
+  etags, timestamps, attribution, claims);
+- friendly-id high-water marks (`meta.sequences`), so a restore never reissues
+  the id of a purged row.
+
+Outside the snapshot model, and therefore NOT restored by import: rooms,
+room members, envelopes and presentations, handoffs, wrkf workflow runtime
+(`workflow_*`), attachments and their blobs, task causes / role assignments /
+transitions / evidence items, the event log and project events
+(`--include-events` adds those two for reading; import does not replay them),
+legacy actors and `*_actor_uuid` columns (attribution is principal-only), and
+idempotency caches. Normalised on the way through: `tasks.start_at`/`due_at`
+`''` restore as NULL; label sets (`''`, `[]`, element order) restore as a
+sorted JSON array or NULL.
+
+Output is deterministic JSON — top-level sections in a fixed order, every
+object key below them sorted, no insignificant whitespace — byte-for-byte
+identical for identical ledger state, designed for diffing and
 version-controlled/patch-first workflows.
 
 ```bash
 wrkqadm state export --out .wrkq/state.json
 wrkqadm state export --out full.json --include-events
-wrkqadm state verify .wrkq/state.json     # round-trip determinism check
-wrkqadm state import .wrkq/state.json
+wrkqadm state verify .wrkq/state.json     # canonical-bytes determinism check
+wrkqadm --db /path/fresh.db init          # root + seeded inbox counts as empty
+wrkqadm --db /path/fresh.db state import --from .wrkq/state.json
 ```
+
+Import requires an essentially empty database (root plus at most the inbox
+`init` seeds). `--force` truncates the modelled tables first; deleting those
+rows cascade-deletes or nulls the out-of-model rows that reference them
+(rooms, envelopes, workflow instances, attachments, ...), so `--force` refuses
+when any exist unless `--allow-cascade` is also given. `wrkqadm patch apply`
+writes through the same forced import and takes the same flag. Never run
+either against a live ledger.
 
 RFC 6902 JSON patches can be layered on top of state snapshots for
 patch-first Git workflows:

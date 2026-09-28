@@ -87,6 +87,23 @@ func FixSequenceDrifts(exec sqlExecutor, specs []SequenceSpec) ([]SequenceDrift,
 	return drifts, nil
 }
 
+// HighWater returns the larger of a sequence's sqlite_sequence value and the
+// largest canonical id in its entity table: the next id is HighWater + 1.
+func HighWater(exec sqlExecutor, spec SequenceSpec) (int, error) {
+	maxID, err := maxExistingID(exec, spec)
+	if err != nil {
+		return 0, err
+	}
+	seq, err := currentSequence(exec, spec.SeqTable)
+	if err != nil {
+		return 0, err
+	}
+	if seq > maxID {
+		return seq, nil
+	}
+	return maxID, nil
+}
+
 func maxExistingID(exec sqlExecutor, spec SequenceSpec) (int, error) {
 	if spec.Prefix == "" {
 		query := fmt.Sprintf("SELECT COALESCE(MAX(%s), 0) FROM %s", spec.IDColumn, spec.EntityTable)
@@ -97,13 +114,16 @@ func maxExistingID(exec sqlExecutor, spec SequenceSpec) (int, error) {
 		return maxID, nil
 	}
 
+	// Only canonical ids (<prefix><digits>) count: CAST reads the leading
+	// digits of a legacy id like T-2417717B as 2417717, which would jump the
+	// sequence by millions (T-07498).
 	startPos := len(spec.Prefix) + 1
 	query := fmt.Sprintf(
-		"SELECT COALESCE(MAX(CAST(SUBSTR(%s, ?) AS INTEGER)), 0) FROM %s WHERE %s LIKE ?",
-		spec.IDColumn, spec.EntityTable, spec.IDColumn,
+		"SELECT COALESCE(MAX(CAST(SUBSTR(%s, ?) AS INTEGER)), 0) FROM %s WHERE %s LIKE ? AND SUBSTR(%s, ?) <> '' AND SUBSTR(%s, ?) NOT GLOB '*[^0-9]*'",
+		spec.IDColumn, spec.EntityTable, spec.IDColumn, spec.IDColumn, spec.IDColumn,
 	)
 	var maxID int
-	if err := exec.QueryRow(query, startPos, spec.Prefix+"%").Scan(&maxID); err != nil {
+	if err := exec.QueryRow(query, startPos, spec.Prefix+"%", startPos, startPos).Scan(&maxID); err != nil {
 		return 0, err
 	}
 	return maxID, nil

@@ -73,6 +73,7 @@ func init() {
 	patchApplyCmd.Flags().StringVar(&patchApplyIfMatch, "if-match", "", "Require snapshot_rev to match")
 	patchApplyCmd.Flags().BoolVar(&patchApplyDryRun, "dry-run", false, "Validate without writing")
 	patchApplyCmd.Flags().BoolVar(&patchApplyStrict, "strict", false, "Enable strict validation")
+	patchApplyCmd.Flags().BoolVar(&patchApplyAllowCascade, "allow-cascade", false, "Proceed although out-of-model rows (rooms, envelopes, workflow instances, ...) reference the ledger and will be cascade-deleted")
 	patchApplyCmd.Flags().BoolVar(&patchApplyJSON, "json", false, "Output result as JSON")
 	_ = patchApplyCmd.MarkFlagRequired("patch")
 
@@ -185,7 +186,14 @@ var patchApplyCmd = &cobra.Command{
 validates the result, and commits the changes.
 
 Use --if-match to require the current snapshot_rev to match before applying.
-Use --dry-run to validate without writing changes.`,
+Use --dry-run to validate without writing changes.
+
+WARNING: apply writes by re-importing the whole patched snapshot with
+` + "`state import --force`" + ` semantics: it truncates the modelled tables
+(containers, tasks, comments, promises, task relations), which cascade-deletes
+or nulls rooms, envelopes, workflow instances and other rows outside the
+snapshot model that reference them. It refuses when such rows exist unless
+--allow-cascade is given. Never run it against a live ledger.`,
 	RunE: runPatchApply,
 }
 
@@ -195,6 +203,8 @@ var (
 	patchApplyDryRun  bool
 	patchApplyStrict  bool
 	patchApplyJSON    bool
+
+	patchApplyAllowCascade bool
 )
 
 func runPatchApply(cmd *cobra.Command, args []string) error {
@@ -216,6 +226,8 @@ func runPatchApply(cmd *cobra.Command, args []string) error {
 		IfMatch:   patchApplyIfMatch,
 		DryRun:    patchApplyDryRun,
 		Strict:    patchApplyStrict,
+
+		AllowCascade: patchApplyAllowCascade,
 	}
 
 	result, err := patch.Apply(database.DB, opts)

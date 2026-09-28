@@ -10,30 +10,88 @@ import (
 )
 
 // CanonicalJSON produces a deterministic JSON encoding following JCS-like rules:
-// - Keys sorted lexicographically
-// - No insignificant whitespace
-// - UTF-8 encoding
-// - Consistent null/empty handling (omitted via omitempty tags)
+// - Top-level sections in a fixed order (meta first), omitted when empty
+// - Every object key below the top level sorted lexicographically
+// - No insignificant whitespace, no HTML escaping, UTF-8
+// - Absent values omitted via the entry structs' omitempty tags
+//
+// Entries are encoded generically from their tagged structs, so a column
+// added to an entry struct can never be silently left out of the canonical
+// bytes (T-07498: hand-listed per-field builders dropped containers.kind).
 func CanonicalJSON(s *Snapshot) ([]byte, error) {
-	// Build a map with explicit key ordering
-	ordered := buildOrderedSnapshot(s)
+	tasks := s.Tasks
+	if len(tasks) > 0 {
+		tasks = make(map[string]TaskEntry, len(s.Tasks))
+		for uuid, task := range s.Tasks {
+			if len(task.Labels) > 0 {
+				sorted := append([]string(nil), task.Labels...)
+				sort.Strings(sorted)
+				task.Labels = sorted
+			}
+			tasks[uuid] = task
+		}
+	}
 
-	// Use a custom encoder that doesn't escape HTML and uses no indentation
+	sections := []struct {
+		key     string
+		value   interface{}
+		present bool
+	}{
+		{"meta", s.Meta, true},
+		{"containers", s.Containers, len(s.Containers) > 0},
+		{"tasks", tasks, len(tasks) > 0},
+		{"promises", s.Promises, len(s.Promises) > 0},
+		{"comments", s.Comments, len(s.Comments) > 0},
+		{"links", s.Links, len(s.Links) > 0},
+		{"events", s.Events, len(s.Events) > 0},
+		{"project_events", s.ProjectEvents, len(s.ProjectEvents) > 0},
+	}
+
 	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
+	buf.WriteByte('{')
+	first := true
+	for _, section := range sections {
+		if !section.present {
+			continue
+		}
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+		value, err := canonicalValue(section.value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode snapshot %s: %w", section.key, err)
+		}
+		buf.WriteByte('"')
+		buf.WriteString(section.key)
+		buf.WriteString(`":`)
+		buf.Write(value)
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
+// canonicalValue encodes v with every object key sorted: struct fields are
+// marshalled through their tags, decoded to generic maps (numbers kept
+// verbatim) and re-encoded, which sorts map keys.
+func canonicalValue(v interface{}) ([]byte, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var generic interface{}
+	if err := decoder.Decode(&generic); err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
-
-	if err := encoder.Encode(ordered); err != nil {
-		return nil, fmt.Errorf("failed to encode snapshot: %w", err)
+	if err := encoder.Encode(generic); err != nil {
+		return nil, err
 	}
-
-	// Remove trailing newline added by Encode
-	result := buf.Bytes()
-	if len(result) > 0 && result[len(result)-1] == '\n' {
-		result = result[:len(result)-1]
-	}
-
-	return result, nil
+	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), nil
 }
 
 // ComputeSnapshotRev computes the sha256 hash of canonical JSON bytes.
@@ -41,446 +99,6 @@ func CanonicalJSON(s *Snapshot) ([]byte, error) {
 func ComputeSnapshotRev(data []byte) string {
 	hash := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(hash[:])
-}
-
-// buildOrderedSnapshot creates an ordered map structure for canonical JSON.
-// Order: meta, containers, tasks, promises, comments, links, events, project_events
-func buildOrderedSnapshot(s *Snapshot) orderedMap {
-	result := make(orderedMap, 0, 7)
-
-	// meta (always present)
-	result = append(result, keyValue{"meta", buildOrderedMeta(&s.Meta)})
-
-	// containers (if non-empty)
-	if len(s.Containers) > 0 {
-		result = append(result, keyValue{"containers", buildOrderedContainers(s.Containers)})
-	}
-
-	// tasks (if non-empty)
-	if len(s.Tasks) > 0 {
-		result = append(result, keyValue{"tasks", buildOrderedTasks(s.Tasks)})
-	}
-
-	// promises (if non-empty)
-	if len(s.Promises) > 0 {
-		result = append(result, keyValue{"promises", buildOrderedPromises(s.Promises)})
-	}
-
-	// comments (if non-empty)
-	if len(s.Comments) > 0 {
-		result = append(result, keyValue{"comments", buildOrderedComments(s.Comments)})
-	}
-
-	// links (if non-empty)
-	if len(s.Links) > 0 {
-		result = append(result, keyValue{"links", buildOrderedLinks(s.Links)})
-	}
-
-	// events (if non-empty)
-	if len(s.Events) > 0 {
-		result = append(result, keyValue{"events", buildOrderedEvents(s.Events)})
-	}
-	if len(s.ProjectEvents) > 0 {
-		result = append(result, keyValue{"project_events", buildOrderedProjectEvents(s.ProjectEvents)})
-	}
-
-	return result
-}
-
-func buildOrderedProjectEvents(events map[string]ProjectEventEntry) orderedMap {
-	ids := make([]string, 0, len(events))
-	for id := range events {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	result := make(orderedMap, 0, len(events))
-	for _, id := range ids {
-		event := events[id]
-		result = append(result, keyValue{id, buildOrderedProjectEvent(&event)})
-	}
-	return result
-}
-
-func buildOrderedProjectEvent(e *ProjectEventEntry) orderedMap {
-	result := make(orderedMap, 0, 16)
-	if e.CampaignUUID != nil {
-		result = append(result, keyValue{"campaign_uuid", *e.CampaignUUID})
-	}
-	result = append(result, keyValue{"container_uuid", e.ContainerUUID})
-	result = append(result, keyValue{"created_at", e.CreatedAt})
-	result = append(result, keyValue{"uuid", e.UUID})
-	result = append(result, keyValue{"id", e.ID})
-	if e.IdempotencyKey != nil {
-		result = append(result, keyValue{"idempotency_key", *e.IdempotencyKey})
-	}
-	result = append(result, keyValue{"occurred_at", e.OccurredAt})
-	result = append(result, keyValue{"attributes", e.Attributes})
-	if e.PrincipalRef != nil {
-		result = append(result, keyValue{"principal_ref", *e.PrincipalRef})
-	}
-	result = append(result, keyValue{"project_uuid", e.ProjectUUID})
-	if e.ScopeRef != nil {
-		result = append(result, keyValue{"scope_ref", *e.ScopeRef})
-	}
-	result = append(result, keyValue{"summary", e.Summary})
-	if e.TaskUUID != nil {
-		result = append(result, keyValue{"task_uuid", *e.TaskUUID})
-	}
-	result = append(result, keyValue{"type", e.Type})
-	return result
-}
-
-// orderedMap is a slice of key-value pairs that marshals as a JSON object
-// with keys in the order they appear in the slice.
-type orderedMap []keyValue
-
-type keyValue struct {
-	Key   string
-	Value interface{}
-}
-
-func (om orderedMap) MarshalJSON() ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-
-	for i, kv := range om {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-
-		// Write key
-		keyJSON, err := json.Marshal(kv.Key)
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(keyJSON)
-		buf.WriteByte(':')
-
-		// Write value
-		valJSON, err := json.Marshal(kv.Value)
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(valJSON)
-	}
-
-	buf.WriteByte('}')
-	return buf.Bytes(), nil
-}
-
-func buildOrderedMeta(m *Meta) orderedMap {
-	result := make(orderedMap, 0, 4)
-
-	// Fields in lexicographic order per spec
-	if m.GeneratedAt != "" {
-		result = append(result, keyValue{"generated_at", m.GeneratedAt})
-	}
-	result = append(result, keyValue{"machine_interface_version", m.MachineInterfaceVersion})
-	result = append(result, keyValue{"schema_version", m.SchemaVersion})
-	if m.SnapshotRev != "" {
-		result = append(result, keyValue{"snapshot_rev", m.SnapshotRev})
-	}
-
-	return result
-}
-
-func buildOrderedContainers(containers map[string]ContainerEntry) orderedMap {
-	uuids := make([]string, 0, len(containers))
-	for uuid := range containers {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	result := make(orderedMap, 0, len(containers))
-	for _, uuid := range uuids {
-		container := containers[uuid]
-		result = append(result, keyValue{uuid, buildOrderedContainer(&container)})
-	}
-	return result
-}
-
-func buildOrderedContainer(c *ContainerEntry) orderedMap {
-	result := make(orderedMap, 0, 10)
-
-	// Fields in lexicographic order
-	if c.ArchivedAt != "" {
-		result = append(result, keyValue{"archived_at", c.ArchivedAt})
-	}
-	result = append(result, keyValue{"created_at", c.CreatedAt})
-	if c.CreatedByPrincipalRef != "" {
-		result = append(result, keyValue{"created_by_principal_ref", c.CreatedByPrincipalRef})
-	}
-	result = append(result, keyValue{"etag", c.ETag})
-	result = append(result, keyValue{"id", c.ID})
-	if c.ParentUUID != "" {
-		result = append(result, keyValue{"parent_uuid", c.ParentUUID})
-	}
-	result = append(result, keyValue{"slug", c.Slug})
-	if c.Title != "" {
-		result = append(result, keyValue{"title", c.Title})
-	}
-	result = append(result, keyValue{"updated_at", c.UpdatedAt})
-	if c.UpdatedByPrincipalRef != "" {
-		result = append(result, keyValue{"updated_by_principal_ref", c.UpdatedByPrincipalRef})
-	}
-
-	return result
-}
-
-func buildOrderedTasks(tasks map[string]TaskEntry) orderedMap {
-	uuids := make([]string, 0, len(tasks))
-	for uuid := range tasks {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	result := make(orderedMap, 0, len(tasks))
-	for _, uuid := range uuids {
-		task := tasks[uuid]
-		result = append(result, keyValue{uuid, buildOrderedTask(&task)})
-	}
-	return result
-}
-
-func buildOrderedTask(t *TaskEntry) orderedMap {
-	result := make(orderedMap, 0, 16)
-
-	// Fields in lexicographic order
-	if t.AcknowledgedAt != "" {
-		result = append(result, keyValue{"acknowledged_at", t.AcknowledgedAt})
-	}
-	if t.ArchivedAt != "" {
-		result = append(result, keyValue{"archived_at", t.ArchivedAt})
-	}
-	if t.AssignedProjectID != "" {
-		result = append(result, keyValue{"assigned_project_id", t.AssignedProjectID})
-	}
-	if t.CompletedAt != "" {
-		result = append(result, keyValue{"completed_at", t.CompletedAt})
-	}
-	result = append(result, keyValue{"created_at", t.CreatedAt})
-	if t.CreatedByPrincipalRef != "" {
-		result = append(result, keyValue{"created_by_principal_ref", t.CreatedByPrincipalRef})
-	}
-	if t.Description != "" {
-		result = append(result, keyValue{"description", t.Description})
-	}
-	if t.DueAt != "" {
-		result = append(result, keyValue{"due_at", t.DueAt})
-	}
-	if t.CampaignUUID != "" {
-		result = append(result, keyValue{"campaign_uuid", t.CampaignUUID})
-	}
-	result = append(result, keyValue{"etag", t.ETag})
-	result = append(result, keyValue{"id", t.ID})
-	if len(t.Labels) > 0 {
-		// Sort labels for determinism
-		sortedLabels := make([]string, len(t.Labels))
-		copy(sortedLabels, t.Labels)
-		sort.Strings(sortedLabels)
-		result = append(result, keyValue{"labels", sortedLabels})
-	}
-	result = append(result, keyValue{"priority", t.Priority})
-	result = append(result, keyValue{"project_uuid", t.ProjectUUID})
-	if t.RequestedByProjectID != "" {
-		result = append(result, keyValue{"requested_by_project_id", t.RequestedByProjectID})
-	}
-	if t.Resolution != "" {
-		result = append(result, keyValue{"resolution", t.Resolution})
-	}
-	result = append(result, keyValue{"slug", t.Slug})
-	if t.Specification != "" {
-		result = append(result, keyValue{"specification", t.Specification})
-	}
-	if t.StartAt != "" {
-		result = append(result, keyValue{"start_at", t.StartAt})
-	}
-	result = append(result, keyValue{"state", t.State})
-	result = append(result, keyValue{"title", t.Title})
-	result = append(result, keyValue{"updated_at", t.UpdatedAt})
-	if t.UpdatedByPrincipalRef != "" {
-		result = append(result, keyValue{"updated_by_principal_ref", t.UpdatedByPrincipalRef})
-	}
-
-	return result
-}
-
-func buildOrderedPromises(promises map[string]PromiseEntry) orderedMap {
-	uuids := make([]string, 0, len(promises))
-	for uuid := range promises {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	result := make(orderedMap, 0, len(promises))
-	for _, uuid := range uuids {
-		promise := promises[uuid]
-		result = append(result, keyValue{uuid, buildOrderedPromise(&promise)})
-	}
-	return result
-}
-
-func buildOrderedPromise(p *PromiseEntry) orderedMap {
-	result := make(orderedMap, 0, 20)
-	if p.ClosedAt != nil {
-		result = append(result, keyValue{"closed_at", *p.ClosedAt})
-	}
-	result = append(result, keyValue{"created_at", p.CreatedAt})
-	result = append(result, keyValue{"created_by_principal_ref", p.CreatedByPrincipalRef})
-	if p.CreatedByScopeRef != nil {
-		result = append(result, keyValue{"created_by_scope_ref", *p.CreatedByScopeRef})
-	}
-	result = append(result, keyValue{"etag", p.ETag})
-	result = append(result, keyValue{"id", p.ID})
-	if p.LastReviewNote != nil {
-		result = append(result, keyValue{"last_review_note", *p.LastReviewNote})
-	}
-	if p.LastReviewedAt != nil {
-		result = append(result, keyValue{"last_reviewed_at", *p.LastReviewedAt})
-	}
-	if p.Meta != nil {
-		result = append(result, keyValue{"meta", *p.Meta})
-	}
-	result = append(result, keyValue{"owner_principal_ref", p.OwnerPrincipalRef})
-	result = append(result, keyValue{"review_at", p.ReviewAt})
-	if p.ReviewQuestion != nil {
-		result = append(result, keyValue{"review_question", *p.ReviewQuestion})
-	}
-	result = append(result, keyValue{"state", p.State})
-	result = append(result, keyValue{"subject", p.Subject})
-	if p.SubjectContainerUUID != nil {
-		result = append(result, keyValue{"subject_container_uuid", *p.SubjectContainerUUID})
-	}
-	if p.SubjectTaskUUID != nil {
-		result = append(result, keyValue{"subject_task_uuid", *p.SubjectTaskUUID})
-	}
-	result = append(result, keyValue{"updated_at", p.UpdatedAt})
-	result = append(result, keyValue{"updated_by_principal_ref", p.UpdatedByPrincipalRef})
-	if p.UpdatedByScopeRef != nil {
-		result = append(result, keyValue{"updated_by_scope_ref", *p.UpdatedByScopeRef})
-	}
-	return result
-}
-
-func buildOrderedComments(comments map[string]CommentEntry) orderedMap {
-	uuids := make([]string, 0, len(comments))
-	for uuid := range comments {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	result := make(orderedMap, 0, len(comments))
-	for _, uuid := range uuids {
-		comment := comments[uuid]
-		result = append(result, keyValue{uuid, buildOrderedComment(&comment)})
-	}
-	return result
-}
-
-func buildOrderedComment(c *CommentEntry) orderedMap {
-	result := make(orderedMap, 0, 10)
-
-	// Fields in lexicographic order
-	result = append(result, keyValue{"body", c.Body})
-	if c.ContainerUUID != "" {
-		result = append(result, keyValue{"container_uuid", c.ContainerUUID})
-	}
-	result = append(result, keyValue{"created_at", c.CreatedAt})
-	if c.CreatedByPrincipalRef != "" {
-		result = append(result, keyValue{"created_by_principal_ref", c.CreatedByPrincipalRef})
-	}
-	if c.DeletedAt != "" {
-		result = append(result, keyValue{"deleted_at", c.DeletedAt})
-	}
-	if c.DeletedByPrincipalRef != "" {
-		result = append(result, keyValue{"deleted_by_principal_ref", c.DeletedByPrincipalRef})
-	}
-	result = append(result, keyValue{"etag", c.ETag})
-	result = append(result, keyValue{"id", c.ID})
-	if c.Meta != "" {
-		result = append(result, keyValue{"meta", c.Meta})
-	}
-	if c.TaskUUID != "" {
-		result = append(result, keyValue{"task_uuid", c.TaskUUID})
-	}
-	if c.UpdatedAt != "" {
-		result = append(result, keyValue{"updated_at", c.UpdatedAt})
-	}
-
-	return result
-}
-
-func buildOrderedLinks(links map[string]LinkEntry) orderedMap {
-	uuids := make([]string, 0, len(links))
-	for uuid := range links {
-		uuids = append(uuids, uuid)
-	}
-	sort.Strings(uuids)
-
-	result := make(orderedMap, 0, len(links))
-	for _, uuid := range uuids {
-		link := links[uuid]
-		result = append(result, keyValue{uuid, buildOrderedLink(&link)})
-	}
-	return result
-}
-
-func buildOrderedLink(l *LinkEntry) orderedMap {
-	result := make(orderedMap, 0, 5)
-
-	// Fields in lexicographic order
-	result = append(result, keyValue{"created_at", l.CreatedAt})
-	if l.CreatedByPrincipalRef != "" {
-		result = append(result, keyValue{"created_by_principal_ref", l.CreatedByPrincipalRef})
-	}
-	if l.ID != "" {
-		result = append(result, keyValue{"id", l.ID})
-	}
-	result = append(result, keyValue{"link_type", l.LinkType})
-	result = append(result, keyValue{"source_uuid", l.SourceUUID})
-	result = append(result, keyValue{"target_uuid", l.TargetUUID})
-
-	return result
-}
-
-func buildOrderedEvents(events map[string]EventEntry) orderedMap {
-	// Sort by event ID (as string for consistency)
-	ids := make([]string, 0, len(events))
-	for id := range events {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
-	result := make(orderedMap, 0, len(events))
-	for _, id := range ids {
-		event := events[id]
-		result = append(result, keyValue{id, buildOrderedEvent(&event)})
-	}
-	return result
-}
-
-func buildOrderedEvent(e *EventEntry) orderedMap {
-	result := make(orderedMap, 0, 8)
-
-	// Fields in lexicographic order
-	if e.ETag != 0 {
-		result = append(result, keyValue{"etag", e.ETag})
-	}
-	result = append(result, keyValue{"event_type", e.EventType})
-	result = append(result, keyValue{"id", e.ID})
-	if e.Payload != "" {
-		result = append(result, keyValue{"payload", e.Payload})
-	}
-	if e.PrincipalRef != "" {
-		result = append(result, keyValue{"principal_ref", e.PrincipalRef})
-	}
-	result = append(result, keyValue{"resource_type", e.ResourceType})
-	if e.ResourceUUID != "" {
-		result = append(result, keyValue{"resource_uuid", e.ResourceUUID})
-	}
-	result = append(result, keyValue{"timestamp", e.Timestamp})
-
-	return result
 }
 
 // PrettyJSON produces human-readable indented JSON (non-canonical).

@@ -14,10 +14,17 @@ var stateAdmCmd = &cobra.Command{
 	Use:   "state",
 	Short: "Manage canonical state snapshots",
 	Long: `Commands for exporting, importing, and verifying canonical JSON
-state snapshots of the wrkq database.
+state snapshots of the wrkq task ledger.
 
-Snapshots are deterministic JSON representations of the entire database,
-designed for use in patch-first Git workflows.`,
+A snapshot is the complete task-ledger domain: every container, task,
+comment, promise and task relation (archived, deleted and soft-deleted rows
+included) with every domain column, plus friendly-id high-water marks.
+Snapshots are deterministic JSON designed for patch-first Git workflows.
+
+A snapshot is NOT a disaster-recovery artifact. Rooms, envelopes, handoffs,
+wrkf workflow runtime, attachments and event history are outside it. For DR,
+take a file-level copy: ` + "`wrkqadm db snapshot`" + ` (SQLite online backup) or
+a copy of the database file with the daemon stopped.`,
 }
 
 // Export command
@@ -26,8 +33,12 @@ var stateExportCmd = &cobra.Command{
 	Short: "Export the database to a canonical JSON snapshot",
 	Long: `Export reads the current database and produces a canonical JSON snapshot.
 
-The snapshot includes all actors, containers, tasks, and comments in a
-deterministic format suitable for diffing and version control.
+The snapshot includes every container, task, comment, promise and task
+relation — archived, deleted and soft-deleted rows included — in a
+deterministic format suitable for diffing and version control. It is not a
+disaster-recovery artifact: rooms, envelopes, handoffs, wrkf runtime,
+attachments and event history are not in it (--include-events adds the event
+log and project events for reading; import does not replay them).
 
 Canonicalization ensures byte-for-byte identical output for the same
 database state (sorted keys, no insignificant whitespace, sorted arrays).`,
@@ -56,8 +67,9 @@ func init() {
 	// Import flags
 	stateImportCmd.Flags().StringVar(&stateImportFrom, "from", snapshot.DefaultOutputPath, "Input file path")
 	stateImportCmd.Flags().BoolVar(&stateImportDryRun, "dry-run", false, "Validate only, don't write to database")
-	stateImportCmd.Flags().BoolVar(&stateImportIfEmpty, "if-empty", false, "Require database to be empty")
-	stateImportCmd.Flags().BoolVar(&stateImportForce, "force", false, "Truncate existing data before import")
+	stateImportCmd.Flags().BoolVar(&stateImportIfEmpty, "if-empty", false, "Require database to be empty (the default without --force; exit 4 on refusal)")
+	stateImportCmd.Flags().BoolVar(&stateImportForce, "force", false, "Truncate the task ledger before import (never against a live ledger)")
+	stateImportCmd.Flags().BoolVar(&stateImportAllowCascade, "allow-cascade", false, "With --force: proceed although out-of-model rows (rooms, envelopes, workflow instances, ...) reference the ledger and will be cascade-deleted")
 	stateImportCmd.Flags().BoolVar(&stateImportJSON, "json", false, "Output result as JSON")
 
 	// Verify flags
@@ -89,8 +101,8 @@ func runStateExport(app *appctx.App, cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("✓ Exported snapshot to %s\n", result.OutputPath)
 		fmt.Printf("  snapshot_rev: %s\n", result.SnapshotRev)
-		fmt.Printf("  containers: %d, tasks: %d, comments: %d\n",
-			result.ContainerCount, result.TaskCount, result.CommentCount)
+		fmt.Printf("  containers: %d, tasks: %d, comments: %d, promises: %d, links: %d\n",
+			result.ContainerCount, result.TaskCount, result.CommentCount, result.PromiseCount, result.LinkCount)
 		if result.EventCount > 0 {
 			fmt.Printf("  events: %d\n", result.EventCount)
 		}
@@ -103,10 +115,18 @@ func runStateExport(app *appctx.App, cmd *cobra.Command, args []string) error {
 var stateImportCmd = &cobra.Command{
 	Use:   "import",
 	Short: "Import a snapshot into the database",
-	Long: `Import reads a canonical JSON snapshot and hydrates the database.
+	Long: `Import reads a canonical JSON snapshot and replaces the task ledger with it.
 
-By default, import requires the database to be essentially empty (only
-seeded defaults). Use --force to truncate existing data before import.
+By default, import requires the database to be essentially empty (only the
+root and the inbox that init seeds). Rows are restored verbatim: ids, etags,
+timestamps and attribution are the snapshot's.
+
+--force truncates the modelled tables (containers, tasks, comments, promises,
+task relations) before import. WARNING: deleting those rows cascade-deletes
+or nulls the rows outside the snapshot model that reference them — rooms,
+envelopes, workflow instances, attachments, task causes, project events.
+--force therefore refuses when such rows exist unless --allow-cascade is
+also given. Never run --force against a live ledger.
 
 Use --dry-run to validate the snapshot without writing to the database.`,
 	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateImport),
@@ -118,6 +138,8 @@ var (
 	stateImportIfEmpty bool
 	stateImportForce   bool
 	stateImportJSON    bool
+
+	stateImportAllowCascade bool
 )
 
 func runStateImport(app *appctx.App, cmd *cobra.Command, args []string) error {
@@ -129,6 +151,8 @@ func runStateImport(app *appctx.App, cmd *cobra.Command, args []string) error {
 		DryRun:    stateImportDryRun,
 		IfEmpty:   stateImportIfEmpty,
 		Force:     stateImportForce,
+
+		AllowCascade: stateImportAllowCascade,
 	}
 
 	result, err := snapshot.Import(database.DB, opts)
@@ -154,8 +178,8 @@ func runStateImport(app *appctx.App, cmd *cobra.Command, args []string) error {
 			fmt.Printf("✓ Imported snapshot from %s\n", result.InputPath)
 		}
 		fmt.Printf("  snapshot_rev: %s\n", result.SnapshotRev)
-		fmt.Printf("  containers: %d, tasks: %d, comments: %d\n",
-			result.ContainerCount, result.TaskCount, result.CommentCount)
+		fmt.Printf("  containers: %d, tasks: %d, comments: %d, promises: %d, links: %d\n",
+			result.ContainerCount, result.TaskCount, result.CommentCount, result.PromiseCount, result.LinkCount)
 	}
 
 	return nil

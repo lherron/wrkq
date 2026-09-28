@@ -323,7 +323,8 @@ func Apply(db *sql.DB, opts ApplyOptions) (*ApplyResult, error) {
 
 	// Import the new snapshot
 	importOpts := snapshot.ImportOptions{
-		Force: true, // We're replacing the DB state
+		Force:        true, // We're replacing the DB state
+		AllowCascade: opts.AllowCascade,
 	}
 
 	// Write snapshot to temp file
