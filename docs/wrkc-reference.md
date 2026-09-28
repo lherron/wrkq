@@ -135,9 +135,12 @@ continues to report the envelope's stored `deferred` state together with its
 
 `say --ttl 30s` gives addressed mail a server-normalized expiry. If it has no
 presentation receipt by then, the next authoritative read materializes terminal
-`expired`; a deferral does not extend the TTL. `say --preempt` asks HRC to
-interrupt the addressee's active turn and inject the message now; it is honored
-only under operator authority and otherwise queued with a refusal receipt. wrkq
+`expired`; a deferral does not extend the TTL. Ordinary addressed mail is
+steered into the addressee's live turn when its harness accepts steering,
+otherwise presented at the next turn boundary; an idle seat starts a turn.
+`say --preempt` asks HRC to interrupt the addressee's active turn; it is honored
+only under operator authority and otherwise delivered like an ordinary say with
+receipt outcome `hold_refused_authority`. wrkq
 stores it as immutable delivery intent `hold` and never routes or authorizes
 preemption itself.
 

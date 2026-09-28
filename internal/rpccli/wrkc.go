@@ -291,6 +291,12 @@ Only --to fires. Without it this is a log entry and nobody is presented.
 --to a,b fans out to one envelope per addressee sharing a group id, so one
 recipient's reply, defer, or failure never disposes another's obligation.
 
+Delivery is HRC-side: an addressed say is steered into the addressee's live turn
+when its harness accepts steering, otherwise presented at the next turn
+boundary; an idle seat starts a turn. --preempt interrupts the turn (operator
+authority). A turn ending is never a reply; --wait returns only when every
+envelope is terminal.
+
 Saying with --to also ACKS your own standing obligations in this room from the
 same counterparty: for an agent, the reply IS the ack. To hold one back, defer
 it first.
@@ -422,7 +428,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 		},
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, "Addressees (repeatable or comma-separated); fans out one envelope each")
-	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation, never gates, never itself a wake; injected into a seated addressee (drives a turn there), may re-seat an existing session when that target is driven for another reason, never births a target that was never born")
+	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation, never gates, never itself a wake; delivered like any say into a seated addressee (drives a turn there), may re-seat an existing session when that target is driven for another reason, never births a target that was never born")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Body (literal, @file, or - for stdin); alias for the positional body")
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until every envelope in the group is terminal, then print each reply")
@@ -431,7 +437,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 	cmd.Flags().BoolVar(&record, "record", false, "Also write the body as a wrkq comment on the room's task")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key for this say; carried by every envelope of the fan-out")
 	cmd.Flags().StringVar(&ttl, "ttl", "", "Expire if never presented within this duration (for example 30s)")
-	cmd.Flags().BoolVar(&preempt, "preempt", false, "Ask HRC to interrupt the addressee's active turn and inject this now (operator authority; otherwise queued with a refusal receipt). Stored as delivery intent \"hold\"; wrkq never routes it")
+	cmd.Flags().BoolVar(&preempt, "preempt", false, "Ask HRC to interrupt the addressee's active turn (operator authority; without it, delivered like an ordinary say with receipt outcome hold_refused_authority). Stored as delivery intent \"hold\"; wrkq never routes it")
 	cmd.Flags().StringSliceVar(&discharges, "discharges", nil, "Pending or presented envelope ids this reply discharges, exactly")
 	addPromiseOutputFlags(cmd, &output, false)
 	return cmd
