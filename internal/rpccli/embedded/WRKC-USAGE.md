@@ -61,7 +61,7 @@ wrkc show EN-00001
 wrkc inbox --failed
 ```
 
-A wait timeout is not a delivery failure or a completed request. Read the returned state. Sender-side failures appear in `inbox`; `--failed` also includes failed mail addressed to you. Failed waits exit non-zero. A fan-out group wait covers every recipient.
+A wait timeout is not a delivery failure or a completed request. Read the returned state. Sender-side failed, expired and withdrawn mail appears in `inbox` while it still asks something of you, judged at read time: never a `fyi`; a reply_required with a task while that task is open; one without a task while it is under 24h old and its room is not stale. `wrkc show`/`log` still read the rest. `--failed` also includes failed mail addressed to you. Failed waits exit non-zero. A fan-out group wait covers every recipient.
 
 If a presenting runtime terminates before replying or deferring, its obligation can fail as `runtime_terminated`; resend in the same room when the request is still needed. For `ignored`, escalate rather than repeatedly sending the same request. Addressed mail is steered into the addressee's live turn when its harness accepts steering; otherwise it is presented at the next turn boundary, and an idle seat starts a turn. `say --preempt` interrupts the turn under operator authority. Silence during a busy turn does not prove failure.
 
@@ -76,9 +76,9 @@ With `--json`, a verb about one thing returns an object and a room listing retur
 | `show <room>` | one room object |
 | `log <room>` | `{room, items: [envelope, ...]}` |
 | `members <room>` | `{room, items: [member, ...]}` |
-| `inbox` | `{principalRef, scopeRef, groups: [{room, items}], deferred, failed, sentFailed, ...}` |
+| `inbox` | `{principalRef, scopeRef, groups: [{room, items}], deferred, failed, sentFailed, sentExpired, sentWithdrawn}` |
 | `ls` | `[room, ...]` |
 
-`--ndjson` always emits one record per line (envelopes for `log` and `inbox`). To wait for a reply, use `wrkq monitor wait` instead of polling `log`. If you do parse output in a loop, do not hide stderr: a parse error would then look like "no reply yet".
+The inbox JSON carries what the interactive view carries: obligations (`groups`, `deferred`, `failed`) are full envelopes, bodies included; `sentFailed`, `sentExpired` and `sentWithdrawn` are summary rows `{id, room, to, obligation, state, failureReason, taskId, createdAt}` with no body. `--ndjson` always emits one record per line: envelopes for `log`; for `inbox`, obligation envelopes then one summary row per sent line, each with a `section` field. To wait for a reply, use `wrkq monitor wait` instead of polling `log`. If you do parse output in a loop, do not hide stderr: a parse error would then look like "no reply yet".
 
 Use `wrkc <command> --help` for additional options, and `docs/wrkc-reference.md` in the wrkq repository for room kinds, the full routing table, obligation lifecycle, identity resolution, and operator verbs. Task records and session handoffs are covered by `wrkq info`; runtime lifecycle is covered by `hrc info`.

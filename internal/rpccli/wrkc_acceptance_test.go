@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -894,5 +895,96 @@ func completeWrkcTask(t *testing.T, f wrkcFixture) {
 		"UPDATE tasks SET state = 'completed', completed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE uuid = ?",
 		f.taskUUID); err != nil {
 		t.Fatalf("complete task: %v", err)
+	}
+}
+
+// TestWrkcInboxSentRowsAreSummaries is T-09880's shape rule: the inbox JSON
+// carries what the interactive view carries. Obligations keep full envelopes;
+// the sent-* sections are one-line summary rows — no body, no nested party or
+// room DTO — in --json and in the non-TTY --ndjson stream alike.
+func TestWrkcInboxSentRowsAreSummaries(t *testing.T) {
+	f := newWrkcFixture(t)
+	clodSeat := "clod@wrkc-proj:primary"
+	codySeat := "cody@wrkc-proj:" + f.taskID
+
+	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "a long body the summary must not carry",
+		"--to", codySeat, "--scope-ref", clodSeat, "--json")
+	if err != nil {
+		t.Fatalf("wrkc say: %v\n%s", err, sayOut)
+	}
+	var said roomSayResultWire
+	if err := json.Unmarshal([]byte(sayOut), &said); err != nil || len(said.Envelopes) != 1 {
+		t.Fatalf("decode say: %v\n%s", err, sayOut)
+	}
+	failedID := said.Envelopes[0].ID
+	database, err := db.Open(f.dbPath)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE envelopes SET state = 'failed', failure_reason = 'runtime_terminated' WHERE id = ?`, failedID); err != nil {
+		t.Fatalf("fail envelope: %v", err)
+	}
+	_ = database.Close()
+
+	summaryKeys := "createdAt,failureReason,id,obligation,room,state,taskId,to"
+	checkRow := func(row map[string]any, extra string) {
+		t.Helper()
+		keys := []string{}
+		for key := range row {
+			if key != extra {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		if got := strings.Join(keys, ","); got != summaryKeys {
+			t.Fatalf("summary row keys = %s, want %s: %v", got, summaryKeys, row)
+		}
+		if row["id"] != failedID || row["room"] != f.taskID || row["to"] != codySeat ||
+			row["state"] != "failed" || row["failureReason"] != "runtime_terminated" || row["obligation"] != "reply_required" {
+			t.Fatalf("summary row = %v", row)
+		}
+	}
+
+	jsonOut, err := runWrkc(t, f.dbPath, "agent:clod", "inbox", "--scope-ref", clodSeat, "--json")
+	if err != nil {
+		t.Fatalf("wrkc inbox --json: %v\n%s", err, jsonOut)
+	}
+	var view struct {
+		Groups     []any            `json:"groups"`
+		SentFailed []map[string]any `json:"sentFailed"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &view); err != nil {
+		t.Fatalf("decode inbox: %v\n%s", err, jsonOut)
+	}
+	if len(view.SentFailed) != 1 {
+		t.Fatalf("sentFailed = %v", view.SentFailed)
+	}
+	checkRow(view.SentFailed[0], "")
+	if strings.Contains(jsonOut, "a long body") {
+		t.Fatalf("the JSON inbox carried a sent body:\n%s", jsonOut)
+	}
+
+	ndOut, err := runWrkc(t, f.dbPath, "agent:clod", "inbox", "--scope-ref", clodSeat, "--ndjson")
+	if err != nil {
+		t.Fatalf("wrkc inbox --ndjson: %v\n%s", err, ndOut)
+	}
+	lines := strings.Split(strings.TrimSpace(ndOut), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ndjson = %d lines, want 1:\n%s", len(lines), ndOut)
+	}
+	var row map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
+		t.Fatalf("decode ndjson: %v\n%s", err, ndOut)
+	}
+	if row["section"] != "sentFailed" {
+		t.Fatalf("ndjson summary row section = %v, want sentFailed", row["section"])
+	}
+	checkRow(row, "section")
+
+	// The addressee still gets the full obligation envelope, body included —
+	// here the failed one, via --failed.
+	codyOut, err := runWrkc(t, f.dbPath, "agent:cody", "inbox", "--scope-ref", codySeat, "--failed", "--ndjson")
+	if err != nil || !strings.Contains(codyOut, "a long body the summary must not carry") {
+		t.Fatalf("the addressee lost the full envelope: %v\n%s", err, codyOut)
 	}
 }

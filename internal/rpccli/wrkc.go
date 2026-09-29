@@ -835,7 +835,8 @@ stale (terminal work, quiet more than 4h) and rooms carrying the hidden label;
 it by key and it writes — and its obligations still gate and wake.
 
 --failed lists failed envelopes addressed to you instead of rooms. A failure is
-terminal and carries its reason; an operator ack can clear it.`,
+terminal and carries its reason. Nothing clears it: ack refuses a failed
+envelope, and the record stays readable through show and log.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tr, _, closeFn, err := openMirror(cmd)
@@ -936,7 +937,14 @@ reason to hold the obligation across rotation.
 Every obligation here gates your turn and wakes you, whatever its room looks
 like: there is no room state that excuses one. A group whose work has gone
 terminal is marked as such for context — the seat that asked may have moved on —
-and answering it is a normal say.`,
+and answering it is a normal say.
+
+Your own failed, expired and withdrawn sends are listed while they still ask
+something of you, judged at read time: never a fyi; a reply_required with a
+task while that task is open; one without a task while it is under 24h old and
+its room is not stale. show and log still read the rest.
+The JSON forms carry obligations as full envelopes and every sent line as a
+summary row {id, room, to, obligation, state, failureReason, taskId, createdAt}.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			tr, _, closeFn, err := openMirror(cmd)
@@ -967,7 +975,7 @@ and answering it is a normal say.`,
 				return renderWrkcInbox(cmd, view)
 			}
 			if mode == "json" || mode == "yaml" {
-				return render.NewRenderer(cmd.OutOrStdout(), render.Options{Porcelain: stable}).RenderJSON(view)
+				return render.NewRenderer(cmd.OutOrStdout(), render.Options{Porcelain: stable}).RenderJSON(wrkcInboxJSON(view))
 			}
 			flat := []envelopeWire{}
 			for _, group := range view.Groups {
@@ -975,6 +983,9 @@ and answering it is a normal say.`,
 			}
 			flat = append(flat, view.Deferred...)
 			flat = append(flat, view.Failed...)
+			if mode == "ndjson" {
+				return renderWrkcInboxNDJSON(cmd, flat, view, stable)
+			}
 			flat = append(flat, view.SentFailed...)
 			return renderWrkcEnvelopesMode(cmd, flat, mode, stable, false)
 		},
@@ -1219,7 +1230,8 @@ func newWrkcAckCmd() *cobra.Command {
 		Use:   "ack <EN-xxxxx>...",
 		Short: "Operator-only: clear envelopes without replying",
 		Long: `Clear envelopes without replying. This is an OPERATOR verb, intended for a human
-principal (wrkc ack EN-00042 --as agent:lance) clearing failed mail.
+principal (wrkc ack EN-00042 --as agent:lance) discharging an obligation by hand.
+A failed envelope is terminal and ack refuses it.
 
 Agents do not ack: for an agent the reply IS the ack. If you are an agent and you
 want to put something down, defer it with a reason.`,

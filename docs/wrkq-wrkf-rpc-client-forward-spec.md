@@ -1112,7 +1112,12 @@ Contract points a consumer must not have to rediscover:
   preserves `presentedTo`, survives rotation, and is delivered as a pointer.
 - **`inboxView.sentFailed` is the sender-side failure queue.** It is returned
   without an opt-in; `includeFailed` additionally returns failed obligations
-  addressed to the caller in `failed`.
+  addressed to the caller in `failed`. It, `sentExpired` and `sentWithdrawn`
+  list only mail that still asks something of the sender, evaluated at read
+  time inside the store query (T-09880): never a `fyi`; a `reply_required`
+  with a task while the task is non-terminal; one without a task while its
+  `updatedAt` is under 24h old and its room is not `stale`. The rows stay in
+  the ledger for `show`/`logView`.
 - **`present` takes an optional `deliveryOutcome`** — HRC's own class for how
   the delivery landed (`admitted_into_active_turn`, `presented_to_live_harness`,
   `started_fresh_turn`, `kicker` today). It is stored on the `presented_to`

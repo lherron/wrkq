@@ -3391,3 +3391,104 @@ func TestJoinMaterializesADerivedRoomButLeaveDoesNot(t *testing.T) {
 		t.Fatalf("join did not record the member: %+v", view.Items)
 	}
 }
+
+// TestInboxSentFailedListsOnlyLiveFailures is T-09880's visibility rule for the
+// sender's failure queue. A failed fyi is never listed: it carries no
+// obligation, and undeliverable-to-an-ended-seat is its designed outcome. A
+// failed reply_required stays listed while its task is live and drops out once
+// the task is terminal, even when the room it was said in (a campaign room)
+// is still open. Records stay in the ledger; only the listing changes.
+func TestInboxSentFailedListsOnlyLiveFailures(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+
+	fail := func(envelopeID string) {
+		t.Helper()
+		if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+			Envelope: envelopeID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+		}); err != nil {
+			t.Fatalf("present %s: %v", envelopeID, err)
+		}
+		if _, err := f.api.EnvelopeFail(ctx, EnvelopeFailParams{
+			Envelope: envelopeID, Reason: "runtime_terminated", Runtime: "rt-1", PrincipalRef: "agent:hrc",
+		}); err != nil {
+			t.Fatalf("fail %s: %v", envelopeID, err)
+		}
+	}
+	sentFailed := func() []string {
+		t.Helper()
+		view, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{PrincipalRef: "agent:clod"})
+		if err != nil {
+			t.Fatalf("sender inbox: %v", err)
+		}
+		ids := []string{}
+		for _, envelope := range view.SentFailed {
+			ids = append(ids, envelope.ID)
+		}
+		return ids
+	}
+
+	// A reply_required on the enrolled member task, said into the campaign room.
+	ask := f.say(t, RoomSayParams{
+		Ref: f.memberTaskID, Body: "answer me", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	askID := ask.Envelopes[0].ID
+	fail(askID)
+
+	// A fyi that failed the same way.
+	note := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "heads up", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod",
+	})
+	noteID := note.Envelopes[0].ID
+	if _, err := f.s.DB().Exec(`UPDATE envelopes SET state = 'failed', failure_reason = 'undeliverable' WHERE id = ?`, noteID); err != nil {
+		t.Fatalf("fail fyi: %v", err)
+	}
+
+	if got := sentFailed(); len(got) != 1 || got[0] != askID {
+		t.Fatalf("sentFailed = %v, want only the live reply_required %s (never the fyi %s)", got, askID, noteID)
+	}
+
+	if _, err := f.api.TaskUpdate(ctx, TaskUpdateParams{
+		Task: f.memberTaskID, Patch: TaskPatch{State: strp("completed")},
+	}); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	if got := roomActivity(t, f, f.campaignPath); got.Work == "terminal" {
+		t.Fatalf("fixture: completing one member made the campaign room terminal")
+	}
+	if got := sentFailed(); len(got) != 0 {
+		t.Fatalf("sentFailed = %v after its task completed, want none", got)
+	}
+
+	// A taskless reply_required (a pair room) is listed inside the window and
+	// drops out once it failed longer ago than the window.
+	dm := f.say(t, RoomSayParams{
+		Ref: "cody@proj:primary", Body: "dm ask", PrincipalRef: "agent:clod",
+	})
+	dmID := dm.Envelopes[0].ID
+	if dm.Envelopes[0].TaskID != nil {
+		t.Fatalf("fixture: the pair-room envelope carries task %s", *dm.Envelopes[0].TaskID)
+	}
+	fail(dmID)
+	if got := sentFailed(); len(got) != 1 || got[0] != dmID {
+		t.Fatalf("sentFailed = %v, want the fresh taskless failure %s", got, dmID)
+	}
+	saved := sentFailureWindow
+	sentFailureWindow = time.Hour
+	t.Cleanup(func() { sentFailureWindow = saved })
+	stamp := time.Now().UTC().Add(-2 * time.Hour).Format("2006-01-02T15:04:05Z")
+	if _, err := f.s.DB().Exec(`UPDATE envelopes SET updated_at = ? WHERE id = ?`, stamp, dmID); err != nil {
+		t.Fatalf("age failure: %v", err)
+	}
+	if got := sentFailed(); len(got) != 0 {
+		t.Fatalf("sentFailed = %v after the window, want none", got)
+	}
+
+	// Still in the ledger: show reads every one.
+	for _, id := range []string{askID, noteID, dmID} {
+		shown, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: id, PrincipalRef: "agent:clod"})
+		if err != nil || shown.State != "failed" {
+			t.Fatalf("show %s after the listing dropped it: %+v %v", id, shown, err)
+		}
+	}
+}

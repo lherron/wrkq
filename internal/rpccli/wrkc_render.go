@@ -519,6 +519,79 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 	return render.NewRenderer(cmd.OutOrStdout(), render.Options{}).RenderList(lines)
 }
 
+// sentEnvelopeRow is one sent-* line of the interactive inbox as data
+// (T-09880): enough to recognise and follow up the envelope, never its body.
+// `wrkc show` reads the full record.
+type sentEnvelopeRow struct {
+	Section       string  `json:"section,omitempty"`
+	ID            string  `json:"id"`
+	Room          string  `json:"room"`
+	To            *string `json:"to"`
+	Obligation    string  `json:"obligation"`
+	State         string  `json:"state"`
+	FailureReason *string `json:"failureReason"`
+	TaskID        *string `json:"taskId"`
+	CreatedAt     string  `json:"createdAt"`
+}
+
+// inboxJSONView is the --json inbox: obligations (groups, deferred, failed)
+// keep full envelopes, the sent-* sections are summary rows.
+type inboxJSONView struct {
+	ScopeRef      *string                  `json:"scopeRef,omitempty"`
+	PrincipalRef  string                   `json:"principalRef"`
+	Groups        []envelopeInboxGroupWire `json:"groups"`
+	Deferred      []envelopeWire           `json:"deferred"`
+	Failed        []envelopeWire           `json:"failed"`
+	SentFailed    []sentEnvelopeRow        `json:"sentFailed"`
+	SentExpired   []sentEnvelopeRow        `json:"sentExpired"`
+	SentWithdrawn []sentEnvelopeRow        `json:"sentWithdrawn"`
+}
+
+func sentEnvelopeRows(envelopes []envelopeWire, section string) []sentEnvelopeRow {
+	rows := make([]sentEnvelopeRow, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		row := sentEnvelopeRow{
+			Section: section, ID: envelope.ID, Room: envelope.RoomKey, Obligation: envelope.Obligation,
+			State: envelope.State, FailureReason: envelope.FailureReason, TaskID: envelope.TaskID, CreatedAt: envelope.CreatedAt,
+		}
+		if envelope.To != nil {
+			to := envelopePartyLabel(*envelope.To)
+			row.To = &to
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func wrkcInboxJSON(view envelopeInboxViewWire) inboxJSONView {
+	return inboxJSONView{
+		ScopeRef: view.ScopeRef, PrincipalRef: view.PrincipalRef,
+		Groups: view.Groups, Deferred: view.Deferred, Failed: view.Failed,
+		SentFailed:    sentEnvelopeRows(view.SentFailed, ""),
+		SentExpired:   sentEnvelopeRows(view.SentExpired, ""),
+		SentWithdrawn: sentEnvelopeRows(view.SentWithdrawn, ""),
+	}
+}
+
+// renderWrkcInboxNDJSON streams the obligations as full envelopes, then one
+// summary row per sent-* line, each naming its section.
+func renderWrkcInboxNDJSON(cmd *cobra.Command, obligations []envelopeWire, view envelopeInboxViewWire, stable bool) error {
+	items := make([]interface{}, 0, len(obligations)+len(view.SentFailed)+len(view.SentExpired)+len(view.SentWithdrawn))
+	for index := range obligations {
+		items = append(items, obligations[index])
+	}
+	for _, rows := range [][]sentEnvelopeRow{
+		sentEnvelopeRows(view.SentFailed, "sentFailed"),
+		sentEnvelopeRows(view.SentExpired, "sentExpired"),
+		sentEnvelopeRows(view.SentWithdrawn, "sentWithdrawn"),
+	} {
+		for index := range rows {
+			items = append(items, rows[index])
+		}
+	}
+	return render.NewRenderer(cmd.OutOrStdout(), render.Options{Porcelain: stable}).RenderNDJSON(items)
+}
+
 func envelopeStateLabel(envelope envelopeWire) string {
 	if envelope.State == "failed" && envelope.FailureReason != nil {
 		return "failed (" + *envelope.FailureReason + ")"

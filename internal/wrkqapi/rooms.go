@@ -1534,17 +1534,17 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	} else {
 		sent.FromPrincipalRef = attr.PrincipalRef
 	}
-	view.SentFailed, err = a.envelopeListDTO(ctx, sent)
+	view.SentFailed, err = a.sentStillOwedDTO(ctx, sent)
 	if err != nil {
 		return nil, err
 	}
 	sent.States = []domain.EnvelopeState{domain.EnvelopeStateExpired}
-	view.SentExpired, err = a.envelopeListDTO(ctx, sent)
+	view.SentExpired, err = a.sentStillOwedDTO(ctx, sent)
 	if err != nil {
 		return nil, err
 	}
 	sent.States = []domain.EnvelopeState{domain.EnvelopeStateWithdrawn}
-	view.SentWithdrawn, err = a.envelopeListDTO(ctx, sent)
+	view.SentWithdrawn, err = a.sentStillOwedDTO(ctx, sent)
 	if err != nil {
 		return nil, err
 	}
@@ -2405,6 +2405,43 @@ func (a *API) envelopeListDTO(ctx context.Context, params store.EnvelopeListPara
 		state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
 		if serr != nil {
 			return nil, serr
+		}
+		dto, eerr := a.envelopeDTO(ctx, &rows[index], state)
+		if eerr != nil {
+			return nil, eerr
+		}
+		result = append(result, *dto)
+	}
+	return result, nil
+}
+
+// sentFailureWindow bounds how long a taskless sent failure stays listed. Set
+// from the live ledger on 2026-09-29 (T-09880): of 204 failed reply_required
+// envelopes, 126 were re-sent, p90 0.22h and max 8.66h after the failure, and
+// none more than 24h after. A var so tests can shorten it.
+var sentFailureWindow = 24 * time.Hour
+
+// sentStillOwedDTO lists the sender's envelopes in one terminal state that
+// still ask something of the sender (T-09880), evaluated at read time with
+// nothing written. A fyi is never listed: it carries no obligation. A
+// reply_required with a task is listed while the task is non-terminal. One
+// without a task is listed while it is younger than sentFailureWindow and its
+// room is not stale by the rule `wrkc ls` hides rooms by. The records stay in
+// the ledger; show and log still read them.
+func (a *API) sentStillOwedDTO(ctx context.Context, params store.EnvelopeListParams) ([]WrkqEnvelope, error) {
+	params.StillOwedSince = time.Now().UTC().Add(-sentFailureWindow).Format("2006-01-02T15:04:05Z")
+	rows, err := a.store.Rooms.ListEnvelopes(params)
+	if err != nil {
+		return nil, mapRoomStoreError(err, "")
+	}
+	result := make([]WrkqEnvelope, 0, len(rows))
+	for index := range rows {
+		state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
+		if serr != nil {
+			return nil, serr
+		}
+		if rows[index].TaskUUID == nil && state.activity == domain.RoomActivityStale {
+			continue
 		}
 		dto, eerr := a.envelopeDTO(ctx, &rows[index], state)
 		if eerr != nil {

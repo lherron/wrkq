@@ -846,7 +846,22 @@ type EnvelopeListParams struct {
 	Limit            int
 	NewestFirst      bool
 	ExcludeObligNone bool
+	// StillOwedSince narrows a sender-side listing to the envelopes that still
+	// ask something of the sender (T-09880): reply_required only; one with a
+	// task while that task is non-terminal; a taskless one while it reached
+	// its current state (updated_at) at or after this cutoff. The room-stale
+	// half of the taskless rule is a read-time projection the API applies to
+	// the rows this bound already limits.
+	StillOwedSince string
 }
+
+// stillOwedSQL is StillOwedSince's predicate over the unaliased envelopes
+// table. The terminal set matches the API's isTerminalTaskState; a task row
+// that no longer exists counts as terminal.
+const stillOwedSQL = `obligation = 'reply_required' AND (
+	(task_uuid IS NOT NULL AND EXISTS (SELECT 1 FROM tasks t WHERE t.uuid = envelopes.task_uuid
+	  AND t.state NOT IN ('completed','cancelled','archived','deleted')))
+	OR (task_uuid IS NULL AND updated_at >= ?))`
 
 // ListEnvelopes returns envelopes ordered by insertion (id) unless the caller
 // asked for the newest first.
@@ -913,6 +928,10 @@ func (rs *RoomStore) ListEnvelopes(params EnvelopeListParams) ([]domain.Envelope
 	}
 	if params.ExcludeObligNone {
 		clauses = append(clauses, "obligation <> 'none'")
+	}
+	if params.StillOwedSince != "" {
+		clauses = append(clauses, stillOwedSQL)
+		args = append(args, params.StillOwedSince)
 	}
 
 	order := "ORDER BY id"

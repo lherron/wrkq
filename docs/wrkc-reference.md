@@ -162,8 +162,10 @@ A reply returned by `say --wait` is acked as `consumed_by_wait`; nothing is owed
 on it. The ack requires the waiter's exact principal and scope, so another
 same-principal seat and every other fan-out sibling remain untouched.
 
-`ack` is operator-only, for a human clearing failed mail
-(`wrkc ack EN-00042 --as agent:lance`). Agents do not ack; they reply or defer.
+`ack` is operator-only, for a human discharging a standing obligation by hand
+(`wrkc ack EN-00042 --as agent:lance`). It refuses a failed envelope
+(`WRKQ_WRONG_STATE`); a failure stays in the ledger and leaves the inbox by the
+visibility rule below. Agents do not ack; they reply or defer.
 The verb is doctrine, not a mechanical refusal: `wrkc ack --help` states the
 rule, and the command does not itself reject an agent principal.
 
@@ -248,7 +250,39 @@ is exactly what `wrkc say --wait` blocks on. A failed member prints
 delivery failure nor a completed request. `--state-only` still emits only task
 lifecycle changes.
 
-`wrkc inbox` always includes sender-side failures under `sent, failed`.
+`wrkc inbox` lists your sent mail that failed, expired or was withdrawn
+(`sent, failed` and `sent, expired or withdrawn`) by one visibility rule,
+applied in every output mode and evaluated when the inbox is read — no
+sweeper, no new state, nothing written (T-09880):
+
+- a `fyi` is never listed — it carries no obligation, and undeliverable to an
+  ended seat is its designed outcome;
+- a `reply_required` **with a task** is listed while that task is open and
+  drops out once it is terminal;
+- a `reply_required` **with no task** (ad-hoc room, pair room) is listed while
+  it reached that state less than 24h ago AND its room is not stale by the rule
+  `wrkc ls` uses (terminal work, quiet more than 4h).
+
+The 24h window comes from the live ledger (2026-09-29): of 204 failed
+reply_required envelopes, 126 were re-sent — p50 ~0h, p90 0.22h, max 8.66h
+after the failure — and none more than 24h after. The records stay in the
+ledger; `wrkc show` and `wrkc log` still read them.
 `--failed` additionally includes failed obligations addressed to you, with the
-failure reason. The ordinary `wrkc ls` human/table view prints the sender-side
+failure reason.
+
+The inbox JSON carries what the interactive view carries. Obligations
+(`groups[].items`, `deferred`, `failed`) are full envelopes, bodies included.
+`sentFailed`, `sentExpired` and `sentWithdrawn` are summary rows, one per
+interactive line:
+
+```json
+{"id": "EN-00042", "room": "T-00001", "to": "cody@proj:T-00001",
+ "obligation": "reply_required", "state": "failed",
+ "failureReason": "runtime_terminated", "taskId": "T-00001",
+ "createdAt": "2026-09-29T11:37:25Z"}
+```
+
+`--ndjson` (the non-TTY default) streams the obligation envelopes, then the
+summary rows, each carrying `section` (`sentFailed`, `sentExpired`,
+`sentWithdrawn`). The ordinary `wrkc ls` human/table view prints the sender-side
 failure count before the room table.
