@@ -100,6 +100,10 @@ See [docs/SPEC.md](docs/SPEC.md) for the canonical product, domain, CLI, and
 daemon contract. The wrkf JSON-RPC stdio contract lives in
 [docs/wrkf-rpc.md](docs/wrkf-rpc.md).
 
+## Proposals
+
+- [Named subtasks](docs/named-subtasks-proposal.md): parent-local work addresses, shared rooms and explicit subtask scopes. Proposal only; not installed behavior.
+
 ## Core Concepts
 
 | Concept | Description |
