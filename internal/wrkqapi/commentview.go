@@ -59,6 +59,7 @@ const commentCatViewSelect = `
 		SELECT c.uuid, c.id, c.task_uuid, c.kind, c.body, c.meta, c.etag,
 	       c.created_at, c.updated_at, c.deleted_at,
 	       c.created_by_principal_ref, c.created_by_scope_ref,
+	       c.created_by_host_session_id, c.created_by_generation,
 	       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
 	       t.id
 	FROM comments c
@@ -70,13 +71,14 @@ func scanCommentCatView(s commentRowScanner) (*WrkqCommentCatView, error) {
 		commentUUID, commentID, taskUUID, body, createdAt, taskID string
 		etag                                                      int64
 		kind, meta, updatedAt, deletedAt                          sql.NullString
-		createdByPrincipalRef, createdByScopeRef                  sql.NullString
+		createdByPrincipalRef, createdByScopeRef, hostSessionID   sql.NullString
+		generation                                                sql.NullInt64
 		deletedByPrincipalRef, deletedByScopeRef                  sql.NullString
 	)
 	if err := s.Scan(
 		&commentUUID, &commentID, &taskUUID, &kind, &body, &meta, &etag,
 		&createdAt, &updatedAt, &deletedAt,
-		&createdByPrincipalRef, &createdByScopeRef,
+		&createdByPrincipalRef, &createdByScopeRef, &hostSessionID, &generation,
 		&deletedByPrincipalRef, &deletedByScopeRef,
 		&taskID,
 	); err != nil {
@@ -86,13 +88,17 @@ func scanCommentCatView(s commentRowScanner) (*WrkqCommentCatView, error) {
 		UUID: commentUUID, ID: commentID, TaskUUID: taskUUID, TaskID: taskID,
 		Body: body, Etag: etag, CreatedAt: createdAt,
 		CreatedByPrincipalRef: nsPtr(createdByPrincipalRef), CreatedByScopeRef: nsPtr(createdByScopeRef),
-		UpdatedAt: nsPtr(updatedAt), DeletedAt: nsPtr(deletedAt),
+		CreatedByHostSessionID: nsPtr(hostSessionID),
+		UpdatedAt:              nsPtr(updatedAt), DeletedAt: nsPtr(deletedAt),
 		DeletedByPrincipalRef: nsPtr(deletedByPrincipalRef),
 		DeletedByScopeRef:     nsPtr(deletedByScopeRef),
 	}
 	if meta.Valid && meta.String != "" {
 		m := meta.String
 		v.Meta = &m
+	}
+	if generation.Valid {
+		v.CreatedByGeneration = &generation.Int64
 	}
 	v.kind = nsPtr(kind)
 	return v, nil

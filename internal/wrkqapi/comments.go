@@ -59,6 +59,9 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 	if aerr != nil {
 		return nil, aerr
 	}
+	if p.Session != nil && (attr.ScopeRef == "" || !p.Session.Valid()) {
+		return nil, NewValidationError("session requires a stored scope and valid host session id and generation", map[string]any{"field": "session"})
+	}
 
 	var metaStr *string
 	if p.Meta != nil {
@@ -70,6 +73,8 @@ func (a *API) CommentAdd(ctx context.Context, p CommentAddParams) (*WrkqComment,
 		Kind:          p.Kind,
 		Body:          p.Body,
 		Meta:          metaStr,
+		HostSessionID: sessionHostID(p.Session),
+		Generation:    sessionGeneration(p.Session),
 	})
 	if err != nil {
 		return nil, mapStoreError(err, parent.selector)
@@ -134,7 +139,7 @@ func (a *API) CommentList(ctx context.Context, p CommentListParams) (*WrkqCommen
 		args = append(args, page.Params...)
 	}
 
-	query := "SELECT uuid, id, task_uuid, container_uuid, kind, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref FROM comments"
+	query := "SELECT uuid, id, task_uuid, container_uuid, kind, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref, created_by_host_session_id, created_by_generation FROM comments"
 	query += " WHERE " + strings.Join(where, " AND ")
 	query += " " + page.OrderByClause
 	if page.LimitClause != "" {
@@ -372,7 +377,7 @@ func (a *API) resolveComment(ref string) (commentUUID, taskUUID string, err erro
 
 func (a *API) loadComment(commentUUID, taskID, containerID string) (*WrkqComment, error) {
 	row := a.db.QueryRow(
-		"SELECT uuid, id, task_uuid, container_uuid, kind, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref FROM comments WHERE uuid = ?",
+		"SELECT uuid, id, task_uuid, container_uuid, kind, body, meta, etag, created_at, updated_at, deleted_at, created_by_principal_ref, created_by_host_session_id, created_by_generation FROM comments WHERE uuid = ?",
 		commentUUID,
 	)
 	c, _, err := scanCommentRow(row, taskID, containerID)
@@ -388,32 +393,50 @@ func (a *API) loadComment(commentUUID, taskID, containerID string) (*WrkqComment
 // scanCommentRow scans a comment row (column order matches the queries above).
 func scanCommentRow(s rowScanner, taskID, containerID string) (*WrkqComment, string, error) {
 	var (
-		commentUUID, commentID, body        string
-		taskUUID, containerUUID, kind, meta sql.NullString
-		etag                                int64
-		createdAt                           string
-		updatedAt, deletedAt, createdByPrin sql.NullString
+		commentUUID, commentID, body                       string
+		taskUUID, containerUUID, kind, meta                sql.NullString
+		etag                                               int64
+		createdAt                                          string
+		updatedAt, deletedAt, createdByPrin, hostSessionID sql.NullString
+		generation                                         sql.NullInt64
 	)
 	if err := s.Scan(
 		&commentUUID, &commentID, &taskUUID, &containerUUID, &kind, &body, &meta, &etag,
-		&createdAt, &updatedAt, &deletedAt, &createdByPrin,
+		&createdAt, &updatedAt, &deletedAt, &createdByPrin, &hostSessionID, &generation,
 	); err != nil {
 		return nil, "", err
 	}
 	c := &WrkqComment{
-		UUID:                  commentUUID,
-		ID:                    commentID,
-		Task:                  taskID,
-		Container:             containerID,
-		Kind:                  kind.String,
-		Body:                  body,
-		Meta:                  parseMeta(meta.String),
-		ETag:                  etag,
-		CreatedAt:             toRFC3339(createdAt),
-		UpdatedAt:             toRFC3339(updatedAt.String),
-		DeletedAt:             toRFC3339(deletedAt.String),
-		CreatedByPrincipalRef: createdByPrin.String,
-		createdAtRaw:          createdAt,
+		UUID:                   commentUUID,
+		ID:                     commentID,
+		Task:                   taskID,
+		Container:              containerID,
+		Kind:                   kind.String,
+		Body:                   body,
+		Meta:                   parseMeta(meta.String),
+		ETag:                   etag,
+		CreatedAt:              toRFC3339(createdAt),
+		UpdatedAt:              toRFC3339(updatedAt.String),
+		DeletedAt:              toRFC3339(deletedAt.String),
+		CreatedByPrincipalRef:  createdByPrin.String,
+		CreatedByHostSessionID: hostSessionID.String,
+		createdAtRaw:           createdAt,
+	}
+	if generation.Valid {
+		c.CreatedByGeneration = &generation.Int64
 	}
 	return c, createdAt, nil
+}
+
+func sessionHostID(session *SessionRef) *string {
+	if session == nil {
+		return nil
+	}
+	return &session.HostSessionID
+}
+func sessionGeneration(session *SessionRef) *int64 {
+	if session == nil {
+		return nil
+	}
+	return &session.Generation
 }

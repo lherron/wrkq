@@ -719,10 +719,10 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO comments (uuid, id, task_uuid, container_uuid, kind,
-		                      created_by_principal_ref, created_by_scope_ref, body, meta, etag,
+		                      created_by_principal_ref, created_by_scope_ref, created_by_host_session_id, created_by_generation, body, meta, etag,
 		                      created_at, updated_at, deleted_at,
 		                      deleted_by_principal_ref, deleted_by_scope_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -734,6 +734,7 @@ func importComments(tx *sql.Tx, snap *Snapshot) error {
 		if _, err := stmt.Exec(uuid, c.ID, nullableSnapshotString(c.TaskUUID),
 			nullableSnapshotString(c.ContainerUUID), nullableSnapshotPointer(c.Kind),
 			nullableSnapshotString(c.CreatedByPrincipalRef), nullableSnapshotPointer(c.CreatedByScopeRef),
+			nullableSnapshotPointer(c.CreatedByHostSessionID), nullableSnapshotPointerInt64(c.CreatedByGeneration),
 			c.Body, nullableSnapshotString(c.Meta), c.ETag, c.CreatedAt,
 			nullableSnapshotString(c.UpdatedAt), nullableSnapshotString(c.DeletedAt),
 			nullableSnapshotString(c.DeletedByPrincipalRef), nullableSnapshotPointer(c.DeletedByScopeRef)); err != nil {
@@ -836,4 +837,11 @@ func findFirstDiff(a, b string) string {
 	}
 
 	return "unknown difference"
+}
+
+func nullableSnapshotPointerInt64(value *int64) interface{} {
+	if value == nil {
+		return nil
+	}
+	return *value
 }

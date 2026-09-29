@@ -161,9 +161,11 @@ type CommentEntry struct {
 	DeletedAt             string `json:"deleted_at,omitempty"`
 	DeletedByPrincipalRef string `json:"deleted_by_principal_ref,omitempty"`
 
-	Kind              *string `json:"kind,omitempty"`
-	CreatedByScopeRef *string `json:"created_by_scope_ref,omitempty"`
-	DeletedByScopeRef *string `json:"deleted_by_scope_ref,omitempty"`
+	Kind                   *string `json:"kind,omitempty"`
+	CreatedByScopeRef      *string `json:"created_by_scope_ref,omitempty"`
+	CreatedByHostSessionID *string `json:"created_by_host_session_id,omitempty"`
+	CreatedByGeneration    *int64  `json:"created_by_generation,omitempty"`
+	DeletedByScopeRef      *string `json:"deleted_by_scope_ref,omitempty"`
 }
 
 // LinkEntry represents one task_relations row. Keys under "links" are

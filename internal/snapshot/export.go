@@ -440,7 +440,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 func exportComments(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
 		SELECT uuid, id, task_uuid, container_uuid, kind,
-		       created_by_principal_ref, created_by_scope_ref, body, meta, etag,
+		       created_by_principal_ref, created_by_scope_ref, created_by_host_session_id, created_by_generation, body, meta, etag,
 		       created_at, updated_at, deleted_at,
 		       deleted_by_principal_ref, deleted_by_scope_ref
 		FROM comments
@@ -455,11 +455,12 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 		var uuid string
 		var entry CommentEntry
 		var taskUUID, containerUUID, kind sql.NullString
-		var createdByPrincipal, createdByScope, meta, updatedAt, deletedAt sql.NullString
+		var createdByPrincipal, createdByScope, hostSessionID, meta, updatedAt, deletedAt sql.NullString
+		var generation sql.NullInt64
 		var deletedByPrincipal, deletedByScope sql.NullString
 
 		if err := rows.Scan(&uuid, &entry.ID, &taskUUID, &containerUUID, &kind,
-			&createdByPrincipal, &createdByScope, &entry.Body, &meta, &entry.ETag,
+			&createdByPrincipal, &createdByScope, &hostSessionID, &generation, &entry.Body, &meta, &entry.ETag,
 			&entry.CreatedAt, &updatedAt, &deletedAt,
 			&deletedByPrincipal, &deletedByScope); err != nil {
 			return err
@@ -474,6 +475,10 @@ func exportComments(db *sql.DB, snap *Snapshot) error {
 		entry.DeletedByPrincipalRef = deletedByPrincipal.String
 		entry.Kind = snapshotNullString(kind)
 		entry.CreatedByScopeRef = snapshotNullString(createdByScope)
+		entry.CreatedByHostSessionID = snapshotNullString(hostSessionID)
+		if generation.Valid {
+			entry.CreatedByGeneration = &generation.Int64
+		}
 		entry.DeletedByScopeRef = snapshotNullString(deletedByScope)
 
 		snap.Comments[uuid] = entry

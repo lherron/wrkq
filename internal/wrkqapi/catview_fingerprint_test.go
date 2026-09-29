@@ -108,7 +108,7 @@ func TestContainerTaskCountsDTOFingerprint(t *testing.T) {
 // TestCommentCatViewDTOFingerprint guards the comment compat projection shape.
 func TestCommentCatViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqCommentCatView{}))
-	const want = "WrkqCommentCatView{body,created_at,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,deleted_at,omitempty,deleted_by_principal_ref,omitempty,deleted_by_scope_ref,omitempty,etag,id,meta,omitempty,task_id,task_uuid,updated_at,omitempty,uuid}"
+	const want = "WrkqCommentCatView{body,created_at,created_by_generation,omitempty,created_by_host_session_id,omitempty,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,deleted_at,omitempty,deleted_by_principal_ref,omitempty,deleted_by_scope_ref,omitempty,etag,id,meta,omitempty,task_id,task_uuid,updated_at,omitempty,uuid}"
 	if got != want {
 		t.Errorf("WrkqCommentCatView DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}

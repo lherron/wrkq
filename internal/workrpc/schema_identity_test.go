@@ -76,7 +76,8 @@ import (
 // envelope failed, e.g. HRC's birth-refusal reason) carried onto the
 // envelope.failed event. Additive; cardinality unchanged.
 // T-09634 adds the optional timeline before bound; old requests keep their shape.
-const pinnedProtocolSchemaHash = "sha256:a6d6774711d4eeee59b665ff665b423cb0a4c52c3bb2bb40453b34a44eb4a5ee"
+// T-09886 adds optional session attribution to comment.add and comment read DTOs.
+const pinnedProtocolSchemaHash = "sha256:129936e0fecaa34f8bcbf9d7c2a2647cbba64eff8f779cb64e5beacb9c128d74"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

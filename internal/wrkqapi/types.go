@@ -60,18 +60,20 @@ type WrkqTaskListResult struct {
 
 // WrkqComment is the stable comment resource DTO (§6.2).
 type WrkqComment struct {
-	UUID                  string         `json:"uuid"`
-	ID                    string         `json:"id"`
-	Task                  string         `json:"task,omitempty"`
-	Container             string         `json:"container,omitempty"`
-	Kind                  string         `json:"kind,omitempty"`
-	Body                  string         `json:"body"`
-	Meta                  map[string]any `json:"meta"`
-	ETag                  int64          `json:"etag"`
-	CreatedAt             string         `json:"createdAt"`
-	UpdatedAt             string         `json:"updatedAt,omitempty"`
-	DeletedAt             string         `json:"deletedAt,omitempty"`
-	CreatedByPrincipalRef string         `json:"createdByPrincipalRef,omitempty"`
+	UUID                   string         `json:"uuid"`
+	ID                     string         `json:"id"`
+	Task                   string         `json:"task,omitempty"`
+	Container              string         `json:"container,omitempty"`
+	Kind                   string         `json:"kind,omitempty"`
+	Body                   string         `json:"body"`
+	Meta                   map[string]any `json:"meta"`
+	ETag                   int64          `json:"etag"`
+	CreatedAt              string         `json:"createdAt"`
+	UpdatedAt              string         `json:"updatedAt,omitempty"`
+	DeletedAt              string         `json:"deletedAt,omitempty"`
+	CreatedByPrincipalRef  string         `json:"createdByPrincipalRef,omitempty"`
+	CreatedByHostSessionID string         `json:"created_by_host_session_id,omitempty"`
+	CreatedByGeneration    *int64         `json:"created_by_generation,omitempty"`
 
 	// createdAtRaw holds the un-normalized created_at for cursor anchoring; it is
 	// unexported and never serialized.
@@ -266,6 +268,7 @@ type CommentAddParams struct {
 	Meta           map[string]any `json:"meta,omitempty"`
 	Actor          string         `json:"actor,omitempty"`
 	ScopeRef       string         `json:"scopeRef,omitempty"`
+	Session        *SessionRef    `json:"session,omitempty"`
 	IdempotencyKey string         `json:"idempotencyKey,omitempty"`
 }
 

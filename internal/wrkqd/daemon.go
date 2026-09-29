@@ -1085,6 +1085,7 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 		SELECT c.uuid, c.id, c.task_uuid, c.body, c.meta, c.etag,
 		       c.created_at, c.updated_at, c.deleted_at,
 		       c.created_by_principal_ref, c.created_by_scope_ref,
+		       c.created_by_host_session_id, c.created_by_generation,
 		       c.deleted_by_principal_ref, c.deleted_by_scope_ref,
 		       t.id as task_id
 		FROM comments c
@@ -1109,13 +1110,14 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 		var uuid, id, taskUUID, body, createdAt string
 		var taskIDStr string
 		var meta, updatedAt, deletedAt sql.NullString
-		var createdByPrincipalRef, createdByScopeRef sql.NullString
+		var createdByPrincipalRef, createdByScopeRef, hostSessionID sql.NullString
+		var generation sql.NullInt64
 		var deletedByPrincipalRef, deletedByScopeRef sql.NullString
 		var etag int64
 
 		if err := rows.Scan(&uuid, &id, &taskUUID, &body, &meta, &etag,
 			&createdAt, &updatedAt, &deletedAt,
-			&createdByPrincipalRef, &createdByScopeRef,
+			&createdByPrincipalRef, &createdByScopeRef, &hostSessionID, &generation,
 			&deletedByPrincipalRef, &deletedByScopeRef,
 			&taskIDStr); err != nil {
 			s.writeError(w, http.StatusBadRequest, err)
@@ -1136,6 +1138,12 @@ func (s *daemonServer) handleCommentsList(w http.ResponseWriter, r *http.Request
 		}
 		if createdByScopeRef.Valid {
 			comment["created_by_scope_ref"] = createdByScopeRef.String
+		}
+		if hostSessionID.Valid {
+			comment["created_by_host_session_id"] = hostSessionID.String
+		}
+		if generation.Valid {
+			comment["created_by_generation"] = generation.Int64
 		}
 
 		if meta.Valid && meta.String != "" {

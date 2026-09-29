@@ -24,6 +24,8 @@ type CommentCreateParams struct {
 	Kind          *string
 	Body          string
 	Meta          *string
+	HostSessionID *string
+	Generation    *int64
 }
 
 // CommentCreateResult contains the durable comment and event identities.
@@ -84,14 +86,21 @@ func (cs *CommentStore) CreateTxWithAttribution(tx *sql.Tx, ew *events.Writer, a
 	commentUUID := uuid.New().String()
 	commentID := id.FormatComment(nextSeq)
 	const etag int64 = 1
+	var hostSessionID, generation any
+	if params.HostSessionID != nil {
+		hostSessionID = *params.HostSessionID
+	}
+	if params.Generation != nil {
+		generation = *params.Generation
+	}
 	if _, err := tx.Exec(`
 		INSERT INTO comments (
 			uuid, id, task_uuid, container_uuid, kind,
-			created_by_principal_ref, created_by_scope_ref, body, meta, etag
+			created_by_principal_ref, created_by_scope_ref, created_by_host_session_id, created_by_generation, body, meta, etag
 		)
-		VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)
 	`, commentUUID, commentID, params.TaskUUID, params.ContainerUUID, params.Kind,
-		attr.PrincipalRef, scopeSQL(attr), params.Body, params.Meta, etag); err != nil {
+		attr.PrincipalRef, scopeSQL(attr), hostSessionID, generation, params.Body, params.Meta, etag); err != nil {
 		return nil, fmt.Errorf("failed to create comment: %w", err)
 	}
 

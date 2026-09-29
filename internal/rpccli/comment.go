@@ -9,6 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/render"
+	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -149,17 +150,19 @@ func newCommentLsCmd() *cobra.Command {
 func containerCommentListItems(raw json.RawMessage) ([]json.RawMessage, string, error) {
 	var response struct {
 		Items []struct {
-			UUID                  string         `json:"uuid"`
-			ID                    string         `json:"id"`
-			Container             string         `json:"container"`
-			Kind                  string         `json:"kind"`
-			Body                  string         `json:"body"`
-			Meta                  map[string]any `json:"meta"`
-			ETag                  int64          `json:"etag"`
-			CreatedAt             string         `json:"createdAt"`
-			UpdatedAt             string         `json:"updatedAt"`
-			DeletedAt             string         `json:"deletedAt"`
-			CreatedByPrincipalRef string         `json:"createdByPrincipalRef"`
+			UUID                   string         `json:"uuid"`
+			ID                     string         `json:"id"`
+			Container              string         `json:"container"`
+			Kind                   string         `json:"kind"`
+			Body                   string         `json:"body"`
+			Meta                   map[string]any `json:"meta"`
+			ETag                   int64          `json:"etag"`
+			CreatedAt              string         `json:"createdAt"`
+			UpdatedAt              string         `json:"updatedAt"`
+			DeletedAt              string         `json:"deletedAt"`
+			CreatedByPrincipalRef  string         `json:"createdByPrincipalRef"`
+			CreatedByHostSessionID string         `json:"created_by_host_session_id"`
+			CreatedByGeneration    *int64         `json:"created_by_generation"`
 		} `json:"items"`
 		NextCursor string `json:"nextCursor"`
 	}
@@ -184,6 +187,12 @@ func containerCommentListItems(raw json.RawMessage) ([]json.RawMessage, string, 
 		}
 		if item.CreatedByPrincipalRef != "" {
 			projection["created_by_principal_ref"] = item.CreatedByPrincipalRef
+		}
+		if item.CreatedByHostSessionID != "" {
+			projection["created_by_host_session_id"] = item.CreatedByHostSessionID
+		}
+		if item.CreatedByGeneration != nil {
+			projection["created_by_generation"] = *item.CreatedByGeneration
 		}
 		encoded, err := json.Marshal(projection)
 		if err != nil {
@@ -540,6 +549,9 @@ func runCommentAdd(cmd *cobra.Command, args []string, message, kind, meta string
 	}
 	if scopeRef := mutationScopeRef(cmd, actor); scopeRef != "" {
 		params["scopeRef"] = scopeRef
+		if session := scope.SessionRefFromEnv(scopeRef); session != nil {
+			params["session"] = session
+		}
 	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.comment.add", params)
 	parentKind := "task"

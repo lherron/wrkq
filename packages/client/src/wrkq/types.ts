@@ -943,12 +943,18 @@ export interface WrkqFindListView {
 
 export type WrkqCommentKind = "blocker" | "decision" | "postmortem" | "digest";
 
+export interface WrkqSessionRef {
+  hostSessionId: string;
+  generation: number;
+}
+
 export interface WrkqCommentAddParams {
   task?: string;
   container?: string;
   actor?: string;
   /** Canonical full writer seat ScopeRef. */
   scopeRef?: string;
+  session?: WrkqSessionRef;
   kind?: WrkqCommentKind;
   body: string;
   meta?: Record<string, unknown>;
@@ -984,6 +990,8 @@ export interface WrkqComment {
   updatedAt?: string;
   deletedAt?: string;
   createdByPrincipalRef?: string;
+  created_by_host_session_id?: string;
+  created_by_generation?: number;
 }
 
 export interface WrkqCommentListResult {
