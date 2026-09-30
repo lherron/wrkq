@@ -17,6 +17,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/webhooks"
@@ -571,16 +572,7 @@ func taskStateTerminal(state string) bool {
 }
 
 func extractTaskIDsFromText(text string) []string {
-	fields := strings.FieldsFunc(text, func(r rune) bool {
-		return r != '-' && r != '_' && r != ':' && r != '.' && (r < '0' || r > '9') && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z')
-	})
-	var out []string
-	for _, f := range fields {
-		if strings.HasPrefix(f, "T-") {
-			out = append(out, f)
-		}
-	}
-	return out
+	return id.FindTaskIDs(text)
 }
 
 func firstTaskIDFromObligation(o Obligation) string {

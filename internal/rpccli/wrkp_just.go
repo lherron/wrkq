@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +52,7 @@ const (
 
 var (
 	wrkpJustMarker      = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*wrkp:[ \t]*run\.settled\b`)
-	wrkpJustScopeTask   = regexp.MustCompile(`:task:(T-\d{5})(?:/|$)`)
+	wrkpJustScopeTask   = regexp.MustCompile(`:task:([^/]+)(?:/|$)`)
 	wrkpJustAssignment  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*=`)
 	wrkpJustValueOption = map[string]int{
 		"--alias-style": 1, "--ceiling": 1, "--chooser": 1, "--color": 1, "--command-color": 1,
@@ -343,8 +344,8 @@ func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile st
 	}
 	// A run inside a task seat threads under that task when the task belongs
 	// to the run's project; otherwise it sits at the project's top level.
-	if match := wrkpJustScopeTask.FindStringSubmatch(scopeRef); match != nil {
-		if task := wrkpGitLinkableTask(ctx, tr, project.Slug, []string{match[1]}); task != "" {
+	if taskID := wrkpJustTaskID(scopeRef); taskID != "" {
+		if task := wrkpGitLinkableTask(ctx, tr, project.Slug, []string{taskID}); task != "" {
 			params["task"] = task
 			delete(params, "project")
 		}
@@ -361,4 +362,17 @@ func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile st
 
 func clampWrkpJust(value string) string {
 	return truncateWrkpGitSummary(value, 1024)
+}
+
+// wrkpJustTaskID applies the shared prose grammar to the scope's task token.
+func wrkpJustTaskID(scopeRef string) string {
+	match := wrkpJustScopeTask.FindStringSubmatch(scopeRef)
+	if match == nil {
+		return ""
+	}
+	tasks := id.FindTaskIDs(match[1])
+	if len(tasks) == 1 && strings.HasPrefix(match[1], tasks[0]) {
+		return tasks[0]
+	}
+	return ""
 }

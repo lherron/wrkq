@@ -10,7 +10,7 @@ import (
 var (
 	actorIDPattern      = regexp.MustCompile(`^A-\d{5}$`)
 	containerIDPattern  = regexp.MustCompile(`^P-\d{5}$`)
-	taskIDPattern       = regexp.MustCompile(`^T-\d{5}$`)
+	taskIDPattern       = regexp.MustCompile(`^` + OrdinaryTaskPattern + `$`)
 	commentIDPattern    = regexp.MustCompile(`^C-\d{5}$`)
 	handoffIDPattern    = regexp.MustCompile(`^H-\d{5}$`)
 	attachmentIDPattern = regexp.MustCompile(`^ATT-\d{5}$`)
@@ -20,6 +20,53 @@ var (
 	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	bareSeqPattern      = regexp.MustCompile(`^\d{1,5}$`)
 )
+
+// OrdinaryTaskPattern is the sequence-bearing task ID grammar. Architecture
+// exception markers remain ordinary-only and retain their own digit-width rules.
+const OrdinaryTaskPattern = `T-\d{5}`
+
+// TaskPattern is the shared task grammar, including named subtasks. Length is
+// enforced by ParseTask rather than by truncating a prose match.
+const TaskPattern = OrdinaryTaskPattern + `(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)?`
+
+var (
+	completeTaskPattern = regexp.MustCompile(`^` + TaskPattern + `$`)
+	taskProsePattern    = regexp.MustCompile(`\b` + TaskPattern + `\b`)
+)
+
+// ParseTask returns the ordinary owner ID and local slug (empty for an ordinary
+// task). It accepts only exact task IDs of at most 64 ASCII characters.
+func ParseTask(taskID string) (owner, slug string, err error) {
+	if len(taskID) > 64 || !completeTaskPattern.MatchString(taskID) {
+		return "", "", fmt.Errorf("invalid task ID format: %s", taskID)
+	}
+	owner, slug, _ = strings.Cut(taskID, ".")
+	return owner, slug, nil
+}
+
+// IsTask recognizes both ordinary task and named subtask IDs.
+func IsTask(taskID string) bool {
+	_, _, err := ParseTask(taskID)
+	return err == nil
+}
+
+// IsOrdinaryTask recognizes only sequence-bearing task IDs.
+func IsOrdinaryTask(taskID string) bool {
+	return taskIDPattern.MatchString(taskID)
+}
+
+// FindTaskIDs extracts task mentions in order, retaining duplicates. A sentence
+// ending dot or uppercase suffix refers to the owner. Overlength composite
+// matches are discarded whole, never truncated to their owner or a shorter slug.
+func FindTaskIDs(prose string) []string {
+	result := []string{}
+	for _, taskID := range taskProsePattern.FindAllString(prose, -1) {
+		if IsTask(taskID) {
+			result = append(result, taskID)
+		}
+	}
+	return result
+}
 
 // Type represents the type of resource
 type Type string
@@ -85,7 +132,8 @@ func FormatEnvelope(seq int) string {
 	return fmt.Sprintf("EN-%05d", seq)
 }
 
-// Parse parses an ID string and returns the type and sequence number
+// Parse parses a sequence-bearing ID and returns its type and sequence number.
+// Use ParseTask for task identities that may include a named subtask.
 func Parse(id string) (Type, int, error) {
 	id = strings.TrimSpace(id)
 

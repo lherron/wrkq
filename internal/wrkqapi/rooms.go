@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -272,8 +271,6 @@ func (a *API) scopeProjectUUID(ctx context.Context, scopeHandle string) (*string
 	return &uuid, nil
 }
 
-var taskMentionPattern = regexp.MustCompile(`\bT-\d{5}\b`)
-
 // pairRoomSayNotices delivers doctrine at the point where a pair room can
 // silently cross-discharge two topics. The result is advice only: these reads
 // do not introduce a content validation path, an override, or persisted state.
@@ -285,7 +282,7 @@ func (a *API) pairRoomSayNotices(room *roomState, body string, addressees []stor
 	notices := []string{}
 	mentioned := make([]string, 0)
 	seen := map[string]bool{}
-	for _, taskID := range taskMentionPattern.FindAllString(body, -1) {
+	for _, taskID := range id.FindTaskIDs(body) {
 		if seen[taskID] {
 			continue
 		}

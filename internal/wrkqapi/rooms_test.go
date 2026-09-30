@@ -537,6 +537,14 @@ func TestPairRoomSayNotices(t *testing.T) {
 			},
 		},
 		{
+			name: "unresolvable subtask mention never falls back to existing owner",
+			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
+				return observed{result: f.say(t, RoomSayParams{Ref: roomID, Body: "see " + f.loneTaskID + ".render-preview",
+					To: []string{targetSeat}, PrincipalRef: "agent:clod", ScopeRef: senderSeat})}
+			},
+			want: func(_ *roomFixture, _, _ string) []string { return nil },
+		},
+		{
 			name: "unresolvable task mention is silent",
 			run: func(t *testing.T, f *roomFixture, roomID, senderSeat, targetSeat string) observed {
 				return observed{result: f.say(t, RoomSayParams{Ref: roomID, Body: "see T-99999",

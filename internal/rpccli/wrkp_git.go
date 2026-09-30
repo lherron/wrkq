@@ -10,16 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
 )
-
-var wrkpGitTaskPattern = regexp.MustCompile(`\bT-\d{5}\b`)
 
 type wrkpGitProject struct {
 	ID   string
@@ -489,7 +487,7 @@ func readWrkpGitRefs(r io.Reader) ([]wrkpGitRef, error) {
 }
 
 func wrkpGitTaskIDs(message string) []string {
-	found := wrkpGitTaskPattern.FindAllString(message, -1)
+	found := id.FindTaskIDs(message)
 	seen := map[string]bool{}
 	result := make([]string, 0, len(found))
 	for _, task := range found {
