@@ -295,7 +295,9 @@ row: a refusal guard cannot require two rows to change together.
 Because subtasks carry their owner's `project_uuid`, every existing query that
 selects tasks by container would include them by default: `ls`, `find`, `tree`,
 counts and rollups, `search`, container purge/archive cascades, snapshot export,
-webhook fan-out, the task-view projections and taskboard's list RPCs.
+the task-view projections and taskboard's list RPCs. The predicate governs
+**membership reads only**; event reads and subscriptions follow *Events* below and
+never apply it.
 
 - The store exposes one predicate (`taskMemberFilter`, spelling open) that
   excludes subtasks, and one explicit opt-in that includes them. Every
@@ -433,6 +435,40 @@ ID:
 - Dispatch is an addressed `wrkc say` to the subtask handle. Creating a record
   does not start an agent. Named subtasks do not get a wrkf instance; attaching
   one directly is refused in v1.
+
+## Events: a task selector covers its subtasks
+
+Lance ruling, 2026-09-30: all event infrastructure tied to a task includes its
+subtasks' work. Monitoring a task shows its subtasks' events.
+
+- **Rule.** In every event read or subscription, an ordinary task selector
+  (`T-12345`) matches events for that task **and every one of its subtasks**. A
+  subtask selector (`T-12345.slug`) matches only that subtask. Each event keeps
+  its own task ID, so a consumer can always tell owner from subtask.
+- **State predicates stay exact.** Conditions about a task's state (`wrkq monitor`
+  state views and `--until` style waits, `stateOnly` filters, `hrc monitor` waits)
+  evaluate only the selected task. A subtask completing never satisfies "owner
+  completed".
+- **Surfaces.** wrkq `monitor.eventsView` and `monitor.stateView` event side
+  (`wrkq monitor`), `history.listView`/`history.tailView` (`wrkq log`,
+  `wrkq watch`), `room.logView` task filter (`wrkc log <room> --task T-12345`
+  includes subtask-subject messages), the container/project timeline and
+  project-event task filter (`wrkp log --task`), webhook fan-out (subtask events
+  are delivered to the owner's container subscriptions), and HRC `hrc monitor`
+  task selectors (a seat on `T-12345.slug` matches `T-12345`), and ACP webhook
+  job triggers. Taskboard's task detail live updates follow the same rule.
+- **Webhook payload.** wrkq webhook v2 payloads for a subtask event carry
+  `ticket_id`/`ticket_uuid` = the subtask, plus additive `subtask_owner_id` and
+  `subtask_owner_uuid`. ACP parses both. Any ACP trigger or payload predicate that
+  selects a task by ordinary ID or UUID also matches events whose
+  `subtask_owner_*` equals it; the job's resolved target is the event's own task
+  (the subtask). Label, kind and container filters apply to the event's own task
+  row, unchanged.
+- **Implementation.** Each surface resolves an ordinary selector to the owner UUID
+  plus its subtask UUIDs (wrkq) or matches `:task:T-12345` and `:task:T-12345.*`
+  scope segments (HRC). None of them applies the listing predicate.
+- Command, workflow and wrkf instance surfaces are unaffected: subtasks have no
+  wrkf instance in v1.
 
 ## Wrkc rooms
 
@@ -601,6 +637,13 @@ readback and session references in the task artifact directory.
 15. **Decomposition resume.** Interrupted after two child creations, resumed from
     `caused_by` lineage (`find --caused-by <subtask>`) with no duplicates.
 16. **HRC down.** Subtask CRUD and shared-room messages work through wrkq/wrkc.
+18. **Events cover subtasks.** With an owner and two subtasks: `wrkq monitor
+    T-owner`, `wrkq log T-owner`, `wrkq watch`, `wrkp log --task T-owner`,
+    `wrkc log <room> --task T-owner`, a container webhook, an ACP job trigger
+    selecting T-owner and `hrc monitor T-owner` each show subtask create/update/comment events (and, for HRC, subtask
+    seat lifecycle) tagged with the subtask ID; a subtask selector shows only that
+    subtask; an owner `--until completed` wait is not satisfied by a subtask
+    completing.
 17. **Campaigns.** For a campaign-resident owner and an enrolled owner: subtasks
     are absent from portfolio and timeline member counts, subtask updates advance
     the member's activity, subtask events carry the owner's effective campaign,
