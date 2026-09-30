@@ -299,8 +299,10 @@ the counts here are a floor.
 **Loud: refuses a composite ID (widen).** wrkq `internal/id/id.go`
 (`^T-\d{5}$`), `internal/causedby/causedby.go`, hrc-runtime
 `hrc-cli/src/monitor/selector-shape.ts` (`^T-\d+$`),
-`hrc-server/src/wrkq/session-project-events.ts` (`^T-\d{5}$`), and similar
-anchored validators.
+`hrc-server/src/wrkq/session-project-events.ts` (`^T-\d{5}$`),
+`hrc-core/src/placement-policy.ts:259` (`refineTaskWorktree`, `^T-\d+$`: a
+subtask token passed through unstripped gets no worktree), and similar anchored
+validators.
 
 **Out of scope.** `ARCH-EXCEPTION(T-…)` lint markers (surfaceguard,
 suppressionlint, layerguard, rotguard) keep requiring ordinary task IDs.
@@ -308,7 +310,8 @@ suppressionlint, layerguard, rotguard) keep requiring ordinary task IDs.
 ### Workspace placement and prune
 
 - **Placement** takes the owner ID from a subtask token (the part before `.`) and
-  applies today's worktree matching to it. A subtask seat therefore works in its
+  applies today's worktree matching to it, including the anchored check in
+  `refineTaskWorktree`, which receives the owner ID, never the composite token. A subtask seat therefore works in its
   owner's worktree, or the canonical checkout when the owner has none. Subtasks
   never get their own worktree in v1. Separate sessions still do not imply
   permission to edit the same files concurrently.
