@@ -1,10 +1,12 @@
 # Named subtasks in wrkq
 
-September 29, 2026 · Proposal, revision 4 · Not approved for implementation
+September 30, 2026 · Proposal, revision 5 · Not approved for implementation
 
 Authors: Astra (revision 1, **T-09873**); Mable (revisions 2–3, from Lance's
 review); Clod (revision 4: `.` separator, role removal dropped, HRC consumer
-audit, listing and residency invariants).
+audit, listing and residency invariants); Mable (revision 5: cascade-enforced
+residency, cross-project moves as for ordinary tasks, campaign treatment, record
+amendments in slice 2).
 Design context: `architecture-assessment/graph-session-handoff.md` (Latent Work
 Graph). Where this document and the handoff differ on subtask mechanics, this
 document is the concrete proposal; the handoff remains the conceptual direction.
@@ -46,6 +48,8 @@ from a task, plus consumers that assume an ID shape:
    membership, slug uniqueness, listings and path resolution unless a query asks
    for them.
 4. **Parent completion** reports open subtasks as a notice; it never refuses.
+   Subtasks are never campaign members; they carry the owner's campaign as
+   context.
 5. **Purge** is refused for a subtask or any task that owns one.
 
 The proposal needs no graph interface, reconciler, executor catalog, attempt
@@ -153,10 +157,11 @@ Active architecture records this work must preserve or deliberately revise:
 
 | Record | Treatment |
 | --- | --- |
-| `wrkq.task-hierarchy.cross-project-parents` | Child-task residency, depth and cross-project deletion unchanged; ownership is a separate relation. |
-| `wrkq.collaboration-ledger.authority` | Wrkq ownership, campaign coalescing, per-scope obligations, post-completion replies preserved. |
+| `wrkq.task-hierarchy.cross-project-parents` | Amended in slice 2: ordinary residency stays authoritative; subtask residency is derived from the owner and cascade-enforced; container archive/purge selection uses the listing predicate. Child-task residency, depth and cross-project deletion unchanged. |
+| `wrkq.collaboration-ledger.authority` | Amended in slice 2: a subtask routes to its owner's effective room; exact subject (the subtask ID) and scopes are preserved. Campaign coalescing, per-scope obligations, post-completion replies unchanged. |
 | `wrkq.task-claim.authority` | Unchanged: the subtask's composite ID is the claimed task ID. |
-| `wrkq.task-view.caller-state-selection` | Subtask inclusion and completion display specified without changing task rollups. |
+| `wrkq.task-view.caller-state-selection` | Amended in slice 2: subtasks are excluded from resident rollups and counts; opt-in inclusion and the "complete; N subtasks open" display are specified. |
+| `wrkq.campaign.canonical-portfolio-authority` | Amended in slice 2: subtasks are never campaign members; they carry the owner's effective campaign as context (see *Campaigns*). |
 | `wrkq.attribution.caller-principal-exact` | Unchanged: the full scope, including the composite task token, is attributed. |
 | `wrkq.rpc.remote-transport-locator` | Resolution and storage stay on the canonical server; contracts and consumers update together. |
 
@@ -211,9 +216,14 @@ wrkq cat <subtask-uuid>
    never break a path already written in mail.
 6. Moving or renaming the owner changes the displayed full path and leaves the
    ID, and so every scope, unchanged.
-7. Moving the owner across projects is refused while any task or subtask claim is
-   held. After release, new dispatch uses the new project. Old-scope mail remains
-   visible and is resolved explicitly, never rebound to a new seat.
+7. Moving to another project, whether the owner directly or any container above
+   it, behaves exactly as it does for an ordinary task today: claims are not
+   consulted and moves are not refused because of them. Subtasks move with their
+   owner (a container move carries both, since they share a resident container;
+   an owner move carries them by the cascade). The subtask ID, and so the task
+   token of every scope, is unchanged; a scope naming the old project goes stale
+   exactly as an ordinary task's does. New dispatch uses the new project.
+   Old-scope mail remains visible and is resolved explicitly, never rebound.
 8. Promotion to a task, reparenting and slug renaming are deferred. Each would
    change the ID; if added they preserve UUID and history and handle the scope
    change explicitly.
@@ -229,7 +239,7 @@ A subtask is a row in `tasks`. Every existing column keeps its meaning.
 | `parent_task_uuid` | Optional child-task edge | NULL |
 | `slug` | Unique in resident container | Unique under owner |
 | resident container (`project_uuid`) | Authoritative | Materialized from owner |
-| `campaign_uuid` | Existing enrollment | NULL; membership follows owner |
+| `campaign_uuid` | Existing enrollment | NULL; never a member; campaign context follows owner |
 
 - `subtask_owner_uuid IS NOT NULL` identifies a subtask. `kind=subtask` is never
   authoritative. Existing rows keep NULL, including legacy `kind=subtask` child
@@ -243,21 +253,42 @@ A subtask is a row in `tasks`. Every existing column keeps its meaning.
   `parent_task_uuid` and `campaign_uuid` are NULL on a subtask.
 - API and CLI responses add `subtaskOwner` beside the existing `parentTask`, so
   the two relationships are never confused.
+- **Create RPC.** `wrkq.task.create` gains `subtaskOwner` (owner selector: ID,
+  path or UUID) and `slug` (the subtask slug, required with `subtaskOwner` and
+  refused without it). With `subtaskOwner`, `path`, `project`, `parentTask`
+  and `campaign` are refused. The CLI form
+  `wrkq touch T-12345.slug --subtask` sends `subtaskOwner: "T-12345"`,
+  `slug: "slug"`. The fields enter the schema catalog and the Go/TS clients in the
+  same change; unknown keys stay refused.
 
 ### Invariant: materialized residency never drifts
 
 A subtask's `project_uuid` always equals its owner's. Materializing it lets
-workspace routing and existing project-scoped reads work unchanged, at the cost of
-a copy that every writer must maintain.
+existing single-task reads that join `project_uuid` to containers (path display,
+campaign stamping, project events, webhooks) work unchanged. The copy is
+maintained by the database, not by writers, because SQLite evaluates triggers per
+row: a refusal guard cannot require two rows to change together.
 
-- One store function writes residency for an owner and its subtasks in the same
-  transaction. Every path that changes a task's `project_uuid` calls it: move,
-  the move cascade, generic RPC update, restore, snapshot import and bulk apply.
-  No API writes a subtask's residency directly.
-- A SQL trigger refuses any update that leaves a subtask's `project_uuid`
-  different from its owner's, so a missed writer fails loudly instead of drifting.
-- A test enumerates every `UPDATE tasks ... project_uuid` site in the store and
-  asserts each goes through the shared function.
+- **Writers change only the owner.** No writer sets a subtask's `project_uuid`,
+  and no single statement updates an owner and its subtasks together.
+- **Cascade.** `AFTER UPDATE OF project_uuid ON tasks WHEN NEW.subtask_owner_uuid
+  IS NULL` sets every subtask of `NEW.uuid` to `NEW.project_uuid`. Every path that
+  changes an owner's residency (move, the child-task move loop in
+  `store/tasks.go`, generic RPC update, restore, bulk apply) is covered without
+  knowing subtasks exist, so a missed writer cannot cause drift.
+- **Guards.** `BEFORE INSERT` and `BEFORE UPDATE OF project_uuid` on a subtask row
+  abort unless `NEW.project_uuid` equals the owner's current `project_uuid`. The
+  cascade's own update passes because the owner row is already updated.
+- Cascaded rows bump `etag` and `updated_at` through the existing
+  `tasks_au_etag`/`tasks_au_touch` triggers, which is correct: their path changed.
+  The owner's move event is the record of the move; subtasks emit none.
+- Snapshot import inserts owners before their subtasks, with the owner's
+  residency, so the insert guard holds.
+- `subtask_owner_uuid REFERENCES tasks(uuid) ON DELETE RESTRICT`, so an owner row
+  cannot be physically removed while it has subtasks.
+- Verified mechanism: an isolated SQLite 3.53.4 probe showed an owner-only update
+  carrying the subtask, and both a diverging subtask update and a diverging insert
+  refused. Slice 2 acceptance repeats this against the real migration.
 
 ### Invariant: one listing predicate
 
@@ -327,7 +358,9 @@ Subtasks use existing task states, transitions, claims and optimistic concurrenc
 - Completing an owner does not complete, cancel, hide or release its subtasks.
   **The completion response and CLI output list the owner's open subtasks** as a
   notice. They never refuse the transition.
-- Open subtasks under a terminal owner stay claimable, replyable and findable.
+- Open subtasks under a completed or cancelled owner stay claimable, replyable
+  and findable (under a deleted or archived owner they stay replyable and
+  findable but not claimable; see below).
   `wrkq find --subtasks --owner-state terminal` lists them (the subtasks' own
   state follows find's default actionable set; `terminal` means completed,
   cancelled, archived or deleted). Room discovery shows a count of unfinished
@@ -432,6 +465,24 @@ wrkc log T-12345 --task T-12345.architecture-diagram
   the same agent, a full handle is required.
 - Say never hard-fails because of subtask state.
 
+## Campaigns
+
+Rule: **a subtask is never a campaign member in its own right; it carries its
+owner's effective campaign (resident, else enrolled) as context.** This is the
+rooms and listing rule applied to campaigns, and it removes the asymmetry where a
+campaign-resident owner's subtasks would match `project_uuid = campaign` and an
+enrolled owner's would not.
+
+| Surface | Today | With subtasks |
+| --- | --- | --- |
+| Membership, counts, rollups | `member_tasks` selects `project_uuid = ? OR campaign_uuid = ?` (`wrkqapi/campaign_portfolio.go`, `wrkqapi/timeline.go`) | Both queries apply the listing predicate; subtasks are never members and never counted |
+| Activity | Member `updated_at` | A member's activity is the latest `updated_at` of the owner and its subtasks, so a campaign whose only movement is in subtasks does not read as idle |
+| Production-time context | `StampTaskCampaignContext` (`store/campaign_membership.go`) reads the task's own residency and enrollment | For a subtask it reads the owner's, so every subtask event carries the owner's effective campaign regardless of residency or enrollment |
+| Admission | Terminal campaigns refuse new resident members (`validateEffectiveMembershipTx`) | Not applied to subtasks, which are not members. Subtask creation is governed only by the owner: refused under a deleted or archived owner |
+
+The campaign timeline shows subtask events through their stamped context; it does
+not list subtasks as member rows.
+
 ## Deletion and movement
 
 Subtasks are contained; child tasks keep residency rules, including cross-project
@@ -444,8 +495,9 @@ detachment.
   instead.
 - Subtask deletion keeps the ID reserved, so a stale scope never addresses
   unrelated replacement work.
-- Same-project owner moves carry residency atomically (residency invariant); a
-  held claim refuses cross-project moves.
+- Owner and container moves carry subtask residency by the cascade (residency
+  invariant). Cross-project moves follow Addresses item 7: no claim check, as for
+  ordinary tasks.
 
 ## Decomposition example
 
@@ -476,8 +528,11 @@ detachment.
 
 Each slice lands, installs and passes installed acceptance before the next.
 Producer before consumers: the canonical wrkqd on mini migrates first (install,
-`wrkqadm migrate`, restart), then clients install. Protocol-hash pins mean an
-older client refuses a newer server, so client publication is coordinated.
+`wrkqadm migrate`, restart), then clients install. This order is doctrine, not
+enforced everywhere: the Go CLI pins the protocol hash, but the TS client
+(`packages/client`) does not compare it, so an older TS client would talk to a
+newer server without refusing. Slice 2's new fields are additive, so an older
+client simply cannot create subtasks.
 
 1. **ID-shape consumers** (hrc-runtime, agent-control-plane, taskboard, and the
    wrkq matchers that do not need the schema): shared grammar helper and
@@ -486,13 +541,15 @@ older client refuses a newer server, so client publication is coordinated.
    it must be live on every node before slice 2 can create a subtask, because the
    prune hazard is data loss.
 2. **Wrkq subtasks**: slug-collision audit and fixes, migration
-   (`subtask_owner_uuid`, partial indexes, residency trigger), creation with
-   composite IDs, ID-first and path selection, the listing predicate and its
-   enumeration tests, owner-room routing, completion notice and terminal-owner
-   find, delete/purge rules, RPC schema and Go/TS clients.
-3. **Docs and records**: SPEC, CLI guides, the identity contract (noting the
-   composite task token), and the active records above, updated to delivered
-   behavior.
+   (`subtask_owner_uuid`, partial indexes, residency cascade and guards),
+   creation with composite IDs, ID-first and path selection, the listing
+   predicate and its enumeration tests, owner-room routing, campaign treatment,
+   completion notice and terminal-owner find, delete/purge rules, RPC schema and
+   Go/TS clients. **The four record amendments in the treatments table land in
+   the same change**, so no installed build runs behavior its active records
+   contradict.
+3. **Docs**: SPEC, CLI guides and the identity contract (noting the composite
+   task token), updated to delivered behavior.
 
 ## Acceptance scenarios
 
@@ -515,9 +572,10 @@ readback and session references in the task artifact directory.
 6. **Listing exclusion.** A fixture with a subtask shows it in no default
    container-scoped view (`ls`, `find`, `tree` counts, `search`, export listing,
    taskboard list) and in each explicit opt-in.
-7. **Residency.** Owner move, generic RPC update, restore and snapshot import each
-   leave subtask residency equal to the owner's; a direct update that would
-   diverge is refused by the trigger.
+7. **Residency.** Owner move, container move (same project and cross-project),
+   generic RPC update, restore and snapshot import each leave subtask residency
+   equal to the owner's; a direct subtask update or insert that would diverge is
+   refused by the guard.
 8. **No silent owner match.** A subtask ID in a wrkc message body, a git commit
    message and a just-recipe scope resolves to the subtask, not the owner.
 9. **Child tasks unchanged.** Existing child tasks, including cross-project ones,
@@ -535,16 +593,23 @@ readback and session references in the task artifact directory.
     `find --subtasks --owner-state terminal`. In a subtask session
     `wrkq set $AGENT_TASK --state completed` completes the subtask only.
 14. **Movement and deletion.** Same-project owner move keeps IDs, scopes and room
-    history. Owner delete leaves subtask states untouched and refuses new claims;
-    purge of an owner or subtask is refused.
+    history. A cross-project container move with a claimed subtask succeeds
+    exactly as it would for a claimed ordinary task, keeps the subtask ID and
+    claim, and carries residency. Owner delete leaves subtask states untouched and
+    refuses new claims; purge of an owner or subtask is refused.
 15. **Decomposition resume.** Interrupted after two child creations, resumed from
     recorded `created` relations with no duplicates.
 16. **HRC down.** Subtask CRUD and shared-room messages work through wrkq/wrkc.
+17. **Campaigns.** For a campaign-resident owner and an enrolled owner: subtasks
+    are absent from portfolio and timeline member counts, subtask updates advance
+    the member's activity, subtask events carry the owner's effective campaign,
+    and a subtask can be created under an open owner in a terminal campaign.
 
 ## Open items for Daedalus review
 
-- Spellings of the listing predicate, the create RPC fields and `--owner-state`.
-- Whether any active record needs revision beyond the treatments listed above.
+None. Revision 4's items are answered: `taskMemberFilter` and `--owner-state`
+stand; create-RPC fields are specified under *Storage*; record amendments are in
+the treatments table and land in slice 2.
 
 ## Source map
 
