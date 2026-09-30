@@ -121,7 +121,7 @@ cross-project ones. The distinction follows how work is managed, not its size.
 For the first release a subtask cannot own subtasks or child tasks, so an ID has
 at most one `.`. An ordinary child task can own named subtasks
 (`T-12400.render-preview`). A decomposition subtask creates child tasks whose
-parent is the owning task and records `created` relations to them.
+parent is the owning task and whose `caused_by` lineage names the subtask.
 
 ## Current baseline
 
@@ -505,9 +505,10 @@ detachment.
    criteria. Dispatch it to its own scope.
 2. The agent reads the owner brief and room, then creates child tasks
    (persistence, synchronization, conflict resolution), each with a global ID.
-3. Each creation is recorded as a `created` relation from the subtask as it
-   happens. On resume the agent reads those relations before creating more. Crash
-   safety beyond that belongs to the future attempt foundation.
+3. Each child task is created with `--caused-by T-12345.decompose` (existing
+   causal lineage; no new relation kind). On resume the agent runs
+   `wrkq find --caused-by T-12345.decompose --state all` before creating more.
+   Crash safety beyond that belongs to the future attempt foundation.
 4. A reviewer checks coverage; `decompose` completes when accepted.
 5. The child tasks stay open; their dispatch and completion are separate acts.
 
@@ -598,7 +599,7 @@ readback and session references in the task artifact directory.
     claim, and carries residency. Owner delete leaves subtask states untouched and
     refuses new claims; purge of an owner or subtask is refused.
 15. **Decomposition resume.** Interrupted after two child creations, resumed from
-    recorded `created` relations with no duplicates.
+    `caused_by` lineage (`find --caused-by <subtask>`) with no duplicates.
 16. **HRC down.** Subtask CRUD and shared-room messages work through wrkq/wrkc.
 17. **Campaigns.** For a campaign-resident owner and an enrolled owner: subtasks
     are absent from portfolio and timeline member counts, subtask updates advance
