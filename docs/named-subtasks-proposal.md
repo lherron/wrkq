@@ -1,6 +1,6 @@
 # Named subtasks in wrkq
 
-September 30, 2026 · Proposal, revision 5 · Not approved for implementation
+September 30, 2026 · Proposal, revision 5 · **Approved** by Daedalus (R-00240, record `wrkq.named-subtasks.v1`) · Campaign P-00696
 
 Authors: Astra (revision 1, **T-09873**); Mable (revisions 2–3, from Lance's
 review); Clod (revision 4: `.` separator, role removal dropped, HRC consumer
